@@ -251,6 +251,21 @@ jobs:
             exit 1
           fi
 
+          admob_app_publisher="${ADMOB_APP_ID%%~*}"
+          admob_unit_publisher="${ADMOB_NATIVE_AD_UNIT_ID%%/*}"
+          if [ "${admob_app_publisher}" != "${admob_unit_publisher}" ]; then
+            echo "The AdMob app and Native unit must belong to the same publisher." >&2
+            exit 1
+          fi
+
+          admob_publisher_digits="${admob_app_publisher#ca-app-pub-}"
+          if ! grep -Fxq \
+            "google.com, pub-${admob_publisher_digits}, DIRECT, f08c47fec0942fa0" \
+            docs/app-ads.txt; then
+            echo "docs/app-ads.txt must match the publisher used by the Release AdMob identifiers." >&2
+            exit 1
+          fi
+
       - name: Install Firebase iOS configuration
         run: |
           set -euo pipefail

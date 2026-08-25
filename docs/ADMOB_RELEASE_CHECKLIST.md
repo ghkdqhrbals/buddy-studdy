@@ -1,14 +1,15 @@
 # BuddyStudy AdMob release checklist
 
-The repository deliberately does not publish a placeholder `app-ads.txt` or a production sample App ID. Complete the external steps below with values issued for BuddyStudy. Until then, the Release archive workflow must fail closed.
+BuddyStudy's production AdMob app and Native unit were created on 2026-08-25. The repository publishes the verified publisher line in `docs/app-ads.txt`; the same line must remain available at the App Store developer-website host root. Release archives still fail closed if the issued app or unit IDs are absent or replaced with sample IDs.
 
 ## 1. AdMob and UMP
 
 1. Register the iOS app in AdMob with BuddyStudy's App Store bundle identity.
 2. Create one Native ad unit for `COMMUNITY_FEED`; do not add mediation partner SDKs in this release.
-3. Configure the EEA/UK GDPR message and applicable U.S. state privacy messages in Privacy & messaging. Include a privacy-options entry point so UMP can expose it from Settings when required.
-4. Confirm that requests are non-personalized, teen-rated, publisher first-party ID is disabled, SDK crash reporting is disabled, and no ATT/IDFA flow exists.
-5. Register simulator and physical QA devices as test devices. Use only Google's sample IDs in Debug and only AdMob's test-device mode with issued IDs before production.
+3. Configure and publish the EEA/UK GDPR message and applicable U.S. state privacy messages in Privacy & messaging. Include a privacy-options entry point so UMP can expose it from Settings when required.
+4. Confirm the BuddyStudy EEA/UK message writes `IABTCF_gdprApplies` and IAB TCF Purpose 1 choices, and the US-state message writes the UMP GPP keys. The app requires Purpose 1 only when the TCF applicability signal says European regulations apply, respects the US GPP decision with `canRequestAds`, and fails closed for missing regional evidence or UMP errors without changing the account-wide Consent Mode setting used by other apps.
+5. Confirm that requests are non-personalized, teen-rated, publisher first-party ID is disabled, SDK crash reporting is disabled, and no ATT/IDFA flow exists. BuddyStudy's app gate does not request Limited Ads after a Purpose 1 denial.
+6. Register simulator and physical QA devices as test devices. Use only Google's sample IDs in Debug and only AdMob's test-device mode with issued IDs before production.
 
 ## 2. Repository and CI values
 
@@ -21,10 +22,9 @@ The iOS release workflow rejects empty, malformed, or Google sample values and c
 
 ## 3. app-ads.txt
 
-1. Copy the single inventory line from `docs/app-ads.txt.template` into `docs/app-ads.txt`.
-2. Replace `pub-REPLACE_WITH_ADMOB_PUBLISHER_ID` with the exact issued AdMob publisher ID. Do not commit or deploy the placeholder.
-3. Publish GitHub Pages and verify that `https://ghkdqhrbals.github.io/app-ads.txt` (the App Store developer-website root domain) returns plain text without redirects to HTML or authentication.
-4. Set the same developer website in App Store Connect, then wait for AdMob to report the app-ads.txt status as authorized.
+1. Keep the exact issued publisher line in `docs/app-ads.txt`; never publish the placeholder from `docs/app-ads.txt.template`.
+2. Mirror that line to the root Pages repository and verify that `https://ghkdqhrbals.github.io/app-ads.txt` (the App Store developer-website root domain) returns plain text without redirects to HTML or authentication.
+3. Set the same developer website in App Store Connect, then wait for AdMob to report the app-ads.txt status as authorized.
 
 The repository's current project site is under `/buddy-studdy`; AdMob requires the file at the developer website's domain root. If GitHub Pages cannot serve that root from this repository, publish the exact file through the repository that owns the root site before enabling ads.
 

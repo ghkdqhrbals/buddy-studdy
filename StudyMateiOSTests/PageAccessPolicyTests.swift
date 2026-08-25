@@ -691,6 +691,63 @@ final class NativeAdvertisementPolicyTests: XCTestCase {
         XCTAssertEqual(fallbackLoadCount, 1)
     }
 
+    func testNativeAdFallbackCoordinatorDeduplicatesConcurrentAndEmptyResults() async {
+        let coordinator = NativeAdvertisementFallbackRequestCoordinator()
+        let fallback = CommunityNativeAdvertisement(
+            selectionID: "selection-1",
+            campaignID: "campaign-1",
+            providerName: nil,
+            disclosureLabel: "Ad",
+            title: "Fallback",
+            body: nil,
+            imageURL: nil,
+            affiliateDisclosure: nil,
+            deepLink: "https://example.com"
+        )
+        var fallbackLoadCount = 0
+        var mayFinishFallbackLoad = false
+
+        let first = Task { @MainActor in
+            await coordinator.resolve(slotID: "slot-shared") {
+                fallbackLoadCount += 1
+                while !mayFinishFallbackLoad {
+                    await Task.yield()
+                }
+                return fallback
+            }
+        }
+        while fallbackLoadCount == 0 {
+            await Task.yield()
+        }
+        let second = Task { @MainActor in
+            await coordinator.resolve(slotID: "slot-shared") {
+                fallbackLoadCount += 1
+                return nil
+            }
+        }
+        await Task.yield()
+        mayFinishFallbackLoad = true
+
+        let firstResult = await first.value
+        let secondResult = await second.value
+        XCTAssertEqual(firstResult, fallback)
+        XCTAssertEqual(secondResult, fallback)
+        XCTAssertEqual(fallbackLoadCount, 1)
+
+        var emptyLoadCount = 0
+        let firstEmpty = await coordinator.resolve(slotID: "slot-empty") {
+            emptyLoadCount += 1
+            return nil
+        }
+        let secondEmpty = await coordinator.resolve(slotID: "slot-empty") {
+            emptyLoadCount += 1
+            return fallback
+        }
+        XCTAssertNil(firstEmpty)
+        XCTAssertNil(secondEmpty)
+        XCTAssertEqual(emptyLoadCount, 1)
+    }
+
     func testNativeAdRequestPolicyEnforcesThrottleTimeoutAndExpiry() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
 
@@ -760,19 +817,108 @@ final class NativeAdvertisementPolicyTests: XCTestCase {
         )
     }
 
-    func testPrivacyPreparationAlwaysUsesLiveAvailabilityAfterChoicesChange() {
-        XCTAssertFalse(
-            AdMobPrivacyPreparationPolicy.resolvedCanRequestAds(
-                cached: true,
-                live: false
+    func testPrivacyPreparationRequiresCurrentSuccessfulConsentAndPurposeOneConsent() {
+        func permits(
+            refreshed: Bool = true,
+            gathered: Bool = true,
+            canRequestAds: Bool = true,
+            status: AdMobPrivacyConsentStatus = .obtained,
+            gdprApplies: Int? = 1,
+            purposeConsents: String? = "1111111111",
+            gppString: String? = nil
+        ) -> Bool {
+            AdMobPrivacyPreparationPolicy.permitsAdMobRequest(
+                didRefreshConsentInformation: refreshed,
+                didCompleteConsentGathering: gathered,
+                canRequestAds: canRequestAds,
+                consentStatus: status,
+                gdprApplies: gdprApplies,
+                purposeConsents: purposeConsents,
+                gppString: gppString
             )
-        )
+        }
+
+        XCTAssertTrue(permits(status: .notRequired, gdprApplies: nil, purposeConsents: nil))
+        XCTAssertTrue(permits(status: .obtained, gdprApplies: 1, purposeConsents: "1111111111"))
+        XCTAssertTrue(permits(status: .obtained, gdprApplies: 0, purposeConsents: nil))
         XCTAssertTrue(
-            AdMobPrivacyPreparationPolicy.resolvedCanRequestAds(
-                cached: false,
-                live: true
+            permits(
+                status: .obtained,
+                gdprApplies: nil,
+                purposeConsents: nil,
+                gppString: "DBABLA~BUoAAAWA.QA"
             )
         )
+        XCTAssertFalse(permits(refreshed: false))
+        XCTAssertFalse(permits(gathered: false))
+        XCTAssertFalse(permits(canRequestAds: false))
+        XCTAssertFalse(permits(status: .unavailable))
+        XCTAssertFalse(permits(status: .obtained, gdprApplies: 1, purposeConsents: "0111111111"))
+        XCTAssertFalse(permits(status: .obtained, gdprApplies: 1, purposeConsents: nil))
+        XCTAssertFalse(permits(status: .obtained, gdprApplies: 1, purposeConsents: ""))
+        XCTAssertFalse(
+            permits(
+                status: .obtained,
+                gdprApplies: nil,
+                purposeConsents: nil,
+                gppString: nil
+            )
+        )
+        XCTAssertFalse(permits(status: .obtained, gdprApplies: 2))
+    }
+
+    func testPrivacyGenerationRejectsCachedAndLateAdsAfterChoicesChange() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let allowed = AdMobPrivacyAuthorization(permitsRequest: true, generation: 7)
+        let denied = AdMobPrivacyAuthorization(permitsRequest: false, generation: 8)
+
+        XCTAssertTrue(allowed.permitsResult(from: 7))
+        XCTAssertFalse(allowed.permitsResult(from: 6))
+        XCTAssertFalse(denied.permitsResult(from: 8))
+        XCTAssertTrue(
+            NativeAdvertisementRequestPolicy.canUseLoadedAdvertisement(
+                loadedAt: now.addingTimeInterval(-30),
+                now: now,
+                loadedAuthorizationGeneration: 7,
+                currentAuthorization: allowed
+            )
+        )
+        XCTAssertFalse(
+            NativeAdvertisementRequestPolicy.canUseLoadedAdvertisement(
+                loadedAt: now.addingTimeInterval(-30),
+                now: now,
+                loadedAuthorizationGeneration: 7,
+                currentAuthorization: denied
+            )
+        )
+    }
+
+    func testNativeAdvertisementReportPayloadIsReviewableAndSanitized() {
+        let advertisement = CommunityNativeAdvertisement(
+            selectionID: "selection-1\nspoofed=true",
+            campaignID: "campaign-1",
+            providerName: String(repeating: "Coupang", count: 100),
+            disclosureLabel: "Ad",
+            title: "Fallback",
+            body: nil,
+            imageURL: nil,
+            affiliateDisclosure: nil,
+            deepLink: "https://example.com"
+        )
+
+        let content = NativeAdvertisementReportPayload.content(
+            reason: .ageInappropriate,
+            advertisement: advertisement,
+            slotID: "slot-1"
+        )
+
+        XCTAssertTrue(content.hasPrefix("[AD_REPORT_V1]\n"))
+        XCTAssertTrue(content.contains("reason=AGE_INAPPROPRIATE"))
+        XCTAssertTrue(content.contains("selectionId=selection-1 spoofed=true"))
+        XCTAssertTrue(content.contains("campaignId=campaign-1"))
+        XCTAssertTrue(content.contains("slotId=slot-1"))
+        XCTAssertTrue(content.contains("provider=Coupang"))
+        XCTAssertLessThanOrEqual(content.count, 1_000)
     }
 
     func testAdFreeBenefitAndPrivacyChoicesAreLocalized() {
@@ -783,6 +929,16 @@ final class NativeAdvertisementPolicyTests: XCTestCase {
         XCTAssertFalse(AppStrings(language: .korean).advertisingPrivacyChoices.isEmpty)
         XCTAssertFalse(AppStrings(language: .english).advertisingPrivacyChoices.isEmpty)
         XCTAssertFalse(AppStrings(language: .japanese).advertisingPrivacyChoices.isEmpty)
+
+        for language in AppLanguage.allCases {
+            let strings = AppStrings(language: language)
+            XCTAssertFalse(strings.advertisementWhyShown.isEmpty)
+            XCTAssertFalse(strings.advertisementWhyShownExplanation.isEmpty)
+            XCTAssertFalse(strings.advertisementReport.isEmpty)
+            XCTAssertFalse(strings.advertisementReportInappropriate.isEmpty)
+            XCTAssertFalse(strings.advertisementReportAgeInappropriate.isEmpty)
+            XCTAssertFalse(strings.advertisementReportSubmitted.isEmpty)
+        }
     }
 }
 

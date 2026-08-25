@@ -1211,6 +1211,8 @@ private struct MobileHomeView: View {
     @State private var pendingCommunityQuestionDeletion: CommunityQuestion?
     @State private var pendingCommunityQuestionReport: CommunityQuestion?
     @State private var pendingCommunityUserBlock: CommunityUserProfile?
+    @State private var isShowingAdvertisementSelectionExplanation = false
+    @State private var advertisementReportTarget: CommunityNativeAdvertisement?
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
     @State private var submittedHomeStudySearchText = ""
@@ -1681,6 +1683,14 @@ private struct MobileHomeView: View {
             }
         }
         .modifier(
+            MobileNativeAdvertisementReviewModifier(
+                isShowingSelectionExplanation: $isShowingAdvertisementSelectionExplanation,
+                advertisementReportTarget: $advertisementReportTarget,
+                slotID: nil,
+                strings: strings
+            )
+        )
+        .modifier(
             MobileCommunityUserBlockAlertModifier(
                 appState: appState,
                 user: $pendingCommunityUserBlock,
@@ -2137,6 +2147,18 @@ private struct MobileHomeView: View {
 
                 Menu {
                     Button {
+                        isShowingAdvertisementSelectionExplanation = true
+                    } label: {
+                        Label(strings.advertisementWhyShown, systemImage: "info.circle")
+                    }
+
+                    Button(role: .destructive) {
+                        advertisementReportTarget = advertisement
+                    } label: {
+                        Label(strings.advertisementReport, systemImage: "exclamationmark.bubble")
+                    }
+
+                    Button {
                         Task {
                             await appState.suppressNativeAdvertisement(
                                 selectionID: advertisement.selectionID,
@@ -2166,6 +2188,18 @@ private struct MobileHomeView: View {
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 10))
             .listRowBackground(Color.clear)
             .contextMenu {
+                Button {
+                    isShowingAdvertisementSelectionExplanation = true
+                } label: {
+                    Label(strings.advertisementWhyShown, systemImage: "info.circle")
+                }
+
+                Button(role: .destructive) {
+                    advertisementReportTarget = advertisement
+                } label: {
+                    Label(strings.advertisementReport, systemImage: "exclamationmark.bubble")
+                }
+
                 Button {
                     Task {
                         await appState.suppressNativeAdvertisement(

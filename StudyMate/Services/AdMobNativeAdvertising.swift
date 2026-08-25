@@ -19,6 +19,17 @@ struct NativeAdvertisementRequestPolicy {
         let age = now.timeIntervalSince(loadedAt)
         return age >= 0 && age < cacheLifetime
     }
+
+    static func canUseLoadedAdvertisement(
+        loadedAt: Date,
+        now: Date,
+        loadedAuthorizationGeneration: UInt64,
+        currentAuthorization: AdMobPrivacyAuthorization
+    ) -> Bool {
+        currentAuthorization.permitsRequest &&
+            loadedAuthorizationGeneration == currentAuthorization.generation &&
+            isFresh(loadedAt: loadedAt, now: now)
+    }
 }
 
 enum NativeAdvertisementSlotResolution: Equatable {
@@ -82,10 +93,58 @@ enum AdMobIdentifierPolicy {
     }
 }
 
+struct AdMobPrivacyAuthorization: Equatable {
+    var permitsRequest: Bool
+    var generation: UInt64
+
+    func permitsResult(from generation: UInt64) -> Bool {
+        permitsRequest && self.generation == generation
+    }
+}
+
+enum AdMobPrivacyConsentStatus: Equatable {
+    case notRequired
+    case obtained
+    case unavailable
+}
+
 enum AdMobPrivacyPreparationPolicy {
-    static func resolvedCanRequestAds(cached: Bool, live: Bool) -> Bool {
-        _ = cached
-        return live
+    static let purposeConsentsKey = "IABTCF_PurposeConsents"
+    static let gdprAppliesKey = "IABTCF_gdprApplies"
+    static let gppStringKey = "IABGPP_HDR_GppString"
+
+    static func permitsAdMobRequest(
+        didRefreshConsentInformation: Bool,
+        didCompleteConsentGathering: Bool,
+        canRequestAds: Bool,
+        consentStatus: AdMobPrivacyConsentStatus,
+        gdprApplies: Int?,
+        purposeConsents: String?,
+        gppString: String?
+    ) -> Bool {
+        guard didRefreshConsentInformation,
+              didCompleteConsentGathering,
+              canRequestAds else {
+            return false
+        }
+
+        switch consentStatus {
+        case .notRequired:
+            return true
+        case .obtained:
+            switch gdprApplies {
+            case 1:
+                return purposeConsents?.first == "1"
+            case 0:
+                return true
+            case nil:
+                return gppString?.isEmpty == false
+            default:
+                return false
+            }
+        case .unavailable:
+            return false
+        }
     }
 }
 
@@ -113,31 +172,32 @@ final class AdMobPrivacyCoordinator: ObservableObject {
     private enum PreparationState {
         case idle
         case preparing
-        case prepared(Bool)
+        case prepared(AdMobPrivacyAuthorization)
     }
 
     private var preparationState: PreparationState = .idle
-    private var waitingCompletions: [(Bool) -> Void] = []
+    private var waitingCompletions: [(AdMobPrivacyAuthorization) -> Void] = []
     private var didConfigureMobileAds = false
     private var didStartMobileAds = false
+    private var nextAuthorizationGeneration: UInt64 = 1
+
+    @Published private(set) var currentAuthorization = AdMobPrivacyAuthorization(
+        permitsRequest: false,
+        generation: 0
+    )
 
     private init() {
         isPrivacyOptionsRequired =
             ConsentInformation.shared.privacyOptionsRequirementStatus == .required
     }
 
-    func prepare(completion: @escaping (Bool) -> Void) {
+    func prepare(completion: @escaping (AdMobPrivacyAuthorization) -> Void) {
         switch preparationState {
-        case .prepared(let cachedCanRequestAds):
-            let liveCanRequestAds = AdMobPrivacyPreparationPolicy.resolvedCanRequestAds(
-                cached: cachedCanRequestAds,
-                live: ConsentInformation.shared.canRequestAds
-            )
-            preparationState = .prepared(liveCanRequestAds)
-            if liveCanRequestAds {
+        case .prepared(let authorization):
+            if authorization.permitsRequest {
                 configureAndStartMobileAdsIfNeeded()
             }
-            completion(liveCanRequestAds)
+            completion(authorization)
             return
         case .preparing:
             waitingCompletions.append(completion)
@@ -153,20 +213,35 @@ final class AdMobPrivacyCoordinator: ObservableObject {
     }
 
     func presentPrivacyOptions() async {
+        var didCompleteConsentGathering = false
         do {
             try await ConsentForm.presentPrivacyOptionsForm(from: nil)
             lastErrorDescription = nil
+            didCompleteConsentGathering = true
         } catch {
             lastErrorDescription = error.localizedDescription
         }
         updatePrivacyOptionsRequirement()
-        if case .prepared(let cachedCanRequestAds) = preparationState {
-            let liveCanRequestAds = AdMobPrivacyPreparationPolicy.resolvedCanRequestAds(
-                cached: cachedCanRequestAds,
-                live: ConsentInformation.shared.canRequestAds
+        if case .prepared = preparationState {
+            let permitsRequest = AdMobPrivacyPreparationPolicy.permitsAdMobRequest(
+                didRefreshConsentInformation: true,
+                didCompleteConsentGathering: didCompleteConsentGathering,
+                canRequestAds: ConsentInformation.shared.canRequestAds,
+                consentStatus: currentConsentStatus,
+                gdprApplies: currentGDPRApplicability,
+                purposeConsents: UserDefaults.standard.string(
+                    forKey: AdMobPrivacyPreparationPolicy.purposeConsentsKey
+                ),
+                gppString: UserDefaults.standard.string(
+                    forKey: AdMobPrivacyPreparationPolicy.gppStringKey
+                )
             )
-            preparationState = .prepared(liveCanRequestAds)
-            if liveCanRequestAds {
+            let authorization = updateAuthorization(
+                permitsRequest: permitsRequest,
+                forceNewGeneration: true
+            )
+            preparationState = .prepared(authorization)
+            if authorization.permitsRequest {
                 configureAndStartMobileAdsIfNeeded()
             }
         }
@@ -175,6 +250,7 @@ final class AdMobPrivacyCoordinator: ObservableObject {
     private func performPreparation() async {
         let parameters = RequestParameters()
         var didUpdateConsentInformation = false
+        var didCompleteConsentGathering = false
 
         do {
             try await ConsentInformation.shared.requestConsentInfoUpdate(with: parameters)
@@ -190,26 +266,91 @@ final class AdMobPrivacyCoordinator: ObservableObject {
             do {
                 try await ConsentForm.loadAndPresentIfRequired(from: nil)
                 lastErrorDescription = nil
+                didCompleteConsentGathering = true
             } catch {
                 lastErrorDescription = error.localizedDescription
             }
             updatePrivacyOptionsRequirement()
         }
 
-        let canRequestAds = ConsentInformation.shared.canRequestAds
-        if canRequestAds {
+        let permitsRequest = AdMobPrivacyPreparationPolicy.permitsAdMobRequest(
+            didRefreshConsentInformation: didUpdateConsentInformation,
+            didCompleteConsentGathering: didCompleteConsentGathering,
+            canRequestAds: ConsentInformation.shared.canRequestAds,
+            consentStatus: currentConsentStatus,
+            gdprApplies: currentGDPRApplicability,
+            purposeConsents: UserDefaults.standard.string(
+                forKey: AdMobPrivacyPreparationPolicy.purposeConsentsKey
+            ),
+            gppString: UserDefaults.standard.string(
+                forKey: AdMobPrivacyPreparationPolicy.gppStringKey
+            )
+        )
+        let authorization = updateAuthorization(
+            permitsRequest: permitsRequest,
+            forceNewGeneration: true
+        )
+        if authorization.permitsRequest {
             configureAndStartMobileAdsIfNeeded()
         }
 
-        preparationState = .prepared(canRequestAds)
+        preparationState = .prepared(authorization)
         let completions = waitingCompletions
         waitingCompletions.removeAll()
-        completions.forEach { $0(canRequestAds) }
+        completions.forEach { $0(authorization) }
+    }
+
+    private func updateAuthorization(
+        permitsRequest: Bool,
+        forceNewGeneration: Bool
+    ) -> AdMobPrivacyAuthorization {
+        if forceNewGeneration {
+            currentAuthorization = AdMobPrivacyAuthorization(
+                permitsRequest: permitsRequest,
+                generation: nextAuthorizationGeneration
+            )
+            nextAuthorizationGeneration &+= 1
+            AdMobNativeAdCoordinator.shared.privacyAuthorizationDidChange(
+                to: currentAuthorization
+            )
+        } else {
+            currentAuthorization.permitsRequest = permitsRequest
+        }
+        return currentAuthorization
     }
 
     private func updatePrivacyOptionsRequirement() {
         isPrivacyOptionsRequired =
             ConsentInformation.shared.privacyOptionsRequirementStatus == .required
+    }
+
+    private var currentConsentStatus: AdMobPrivacyConsentStatus {
+        switch ConsentInformation.shared.consentStatus {
+        case .notRequired:
+            return .notRequired
+        case .obtained:
+            return .obtained
+        case .unknown, .required:
+            return .unavailable
+        @unknown default:
+            return .unavailable
+        }
+    }
+
+    private var currentGDPRApplicability: Int? {
+        let storedValue = UserDefaults.standard.object(
+            forKey: AdMobPrivacyPreparationPolicy.gdprAppliesKey
+        )
+        let value: Int?
+        if let number = storedValue as? NSNumber {
+            value = number.intValue
+        } else if let string = storedValue as? String {
+            value = Int(string)
+        } else {
+            value = nil
+        }
+        guard value == 0 || value == 1 else { return nil }
+        return value
     }
 
     private func configureAndStartMobileAdsIfNeeded() {
@@ -281,6 +422,10 @@ private final class AdMobNativeAdLoadAttempt: NSObject, NativeAdLoaderDelegate {
         finish(with: nil)
     }
 
+    func cancel() {
+        finish(with: nil)
+    }
+
     private func finish(with nativeAd: NativeAd?) {
         guard !didFinish else { return }
         didFinish = true
@@ -300,6 +445,7 @@ final class AdMobNativeAdCoordinator: NSObject, NativeAdDelegate {
     private struct CachedAd {
         var nativeAd: NativeAd
         var loadedAt: Date
+        var authorizationGeneration: UInt64
     }
 
     private struct EventHandlers {
@@ -322,20 +468,10 @@ final class AdMobNativeAdCoordinator: NSObject, NativeAdDelegate {
         onClick: @escaping () -> Void,
         completion: @escaping (NativeAd?) -> Void
     ) {
-        let now = Date()
         eventHandlersBySlotID[slotID] = EventHandlers(
             onImpression: onImpression,
             onClick: onClick
         )
-
-        if let cached = cache[slotID] {
-            if NativeAdvertisementRequestPolicy.isFresh(loadedAt: cached.loadedAt, now: now) {
-                completion(cached.nativeAd)
-                return
-            }
-            cache.removeValue(forKey: slotID)
-            slotByNativeAdIdentity.removeValue(forKey: ObjectIdentifier(cached.nativeAd))
-        }
 
         if pendingCompletions[slotID] != nil {
             pendingCompletions[slotID, default: []].append(completion)
@@ -343,9 +479,30 @@ final class AdMobNativeAdCoordinator: NSObject, NativeAdDelegate {
         }
         pendingCompletions[slotID] = [completion]
 
-        AdMobPrivacyCoordinator.shared.prepare { [weak self] canRequestAds in
+        AdMobPrivacyCoordinator.shared.prepare { [weak self] authorization in
             guard let self else { return }
-            guard canRequestAds,
+            let now = Date()
+
+            if let cached = cache[slotID] {
+                if NativeAdvertisementRequestPolicy.canUseLoadedAdvertisement(
+                    loadedAt: cached.loadedAt,
+                    now: now,
+                    loadedAuthorizationGeneration: cached.authorizationGeneration,
+                    currentAuthorization: authorization
+                ) {
+                    finish(
+                        slotID: slotID,
+                        nativeAd: cached.nativeAd,
+                        authorizationGeneration: authorization.generation,
+                        shouldCache: false
+                    )
+                    return
+                }
+                cache.removeValue(forKey: slotID)
+                slotByNativeAdIdentity.removeValue(forKey: ObjectIdentifier(cached.nativeAd))
+            }
+
+            guard authorization.permitsRequest,
                   activeAttempt == nil,
                   NativeAdvertisementRequestPolicy.canStartRequest(
                     lastRequestAt: lastRequestAt,
@@ -353,13 +510,22 @@ final class AdMobNativeAdCoordinator: NSObject, NativeAdDelegate {
                   ),
                   let adUnitID = AdMobAppConfiguration.nativeAdUnitID,
                   let rootViewController = AdMobPresentationContext.rootViewController else {
-                finish(slotID: slotID, nativeAd: nil)
+                finish(
+                    slotID: slotID,
+                    nativeAd: nil,
+                    authorizationGeneration: authorization.generation
+                )
                 return
             }
 
             lastRequestAt = Date()
+            let authorizationGeneration = authorization.generation
             let attempt = AdMobNativeAdLoadAttempt(slotID: slotID) { [weak self] nativeAd in
-                self?.finish(slotID: slotID, nativeAd: nativeAd)
+                self?.finish(
+                    slotID: slotID,
+                    nativeAd: nativeAd,
+                    authorizationGeneration: authorizationGeneration
+                )
             }
             activeAttempt = attempt
             attempt.start(
@@ -379,19 +545,43 @@ final class AdMobNativeAdCoordinator: NSObject, NativeAdDelegate {
         eventHandlersBySlotID[slotID]?.onClick()
     }
 
-    private func finish(slotID: String, nativeAd: NativeAd?) {
+    func privacyAuthorizationDidChange(to _: AdMobPrivacyAuthorization) {
+        for cached in cache.values {
+            slotByNativeAdIdentity.removeValue(forKey: ObjectIdentifier(cached.nativeAd))
+        }
+        cache.removeAll()
+
+        guard activeAttempt != nil else { return }
+        activeAttempt?.cancel()
+    }
+
+    private func finish(
+        slotID: String,
+        nativeAd: NativeAd?,
+        authorizationGeneration: UInt64,
+        shouldCache: Bool = true
+    ) {
         if activeAttempt?.slotID == slotID {
             activeAttempt = nil
         }
 
-        if let nativeAd {
-            nativeAd.delegate = self
-            cache[slotID] = CachedAd(nativeAd: nativeAd, loadedAt: Date())
-            slotByNativeAdIdentity[ObjectIdentifier(nativeAd)] = slotID
+        let currentAuthorization = AdMobPrivacyCoordinator.shared.currentAuthorization
+        let acceptedNativeAd = currentAuthorization.permitsResult(
+            from: authorizationGeneration
+        ) ? nativeAd : nil
+
+        if let acceptedNativeAd, shouldCache {
+            acceptedNativeAd.delegate = self
+            cache[slotID] = CachedAd(
+                nativeAd: acceptedNativeAd,
+                loadedAt: Date(),
+                authorizationGeneration: authorizationGeneration
+            )
+            slotByNativeAdIdentity[ObjectIdentifier(acceptedNativeAd)] = slotID
         }
 
         let completions = pendingCompletions.removeValue(forKey: slotID) ?? []
-        completions.forEach { $0(nativeAd) }
+        completions.forEach { $0(acceptedNativeAd) }
     }
 }
 
@@ -474,6 +664,21 @@ final class MobileNativeAdvertisementSlotViewModel: ObservableObject {
         fallbackBeforeHiding = nil
     }
 
+    func invalidateAdMob(
+        using fallbackLoader: @escaping @MainActor () async -> CommunityNativeAdvertisement?
+    ) {
+        guard let startedSlotID else { return }
+        switch phase {
+        case .loadingAdMob, .displayingAdMob:
+            stateMachine = NativeAdvertisementSlotStateMachine()
+            guard stateMachine.resolveAdMob(available: false) else { return }
+            phase = .loadingFallback
+            loadFallback(using: fallbackLoader, slotID: startedSlotID)
+        case .loadingFallback, .displayingFallback, .unavailable:
+            return
+        }
+    }
+
     private func loadFallback(
         using loader: @escaping @MainActor () async -> CommunityNativeAdvertisement?,
         slotID: String
@@ -495,6 +700,9 @@ struct MobileNativeAdvertisementSlotRow: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.openURL) private var openURL
     @StateObject private var viewModel = MobileNativeAdvertisementSlotViewModel()
+    @ObservedObject private var privacyCoordinator = AdMobPrivacyCoordinator.shared
+    @State private var isShowingSelectionExplanation = false
+    @State private var advertisementReportTarget: CommunityNativeAdvertisement?
 
     var slot: CommunityNativeAdvertisementSlot
     var strings: AppStrings
@@ -547,6 +755,23 @@ struct MobileNativeAdvertisementSlotRow: View {
                 }
             )
         }
+        .modifier(
+            MobileNativeAdvertisementReviewModifier(
+                isShowingSelectionExplanation: $isShowingSelectionExplanation,
+                advertisementReportTarget: $advertisementReportTarget,
+                slotID: slot.slotID,
+                strings: strings
+            )
+        )
+        .onChange(of: privacyCoordinator.currentAuthorization) { previous, current in
+            guard previous.generation > 0,
+                  previous.generation != current.generation else {
+                return
+            }
+            viewModel.invalidateAdMob {
+                await appState.fetchNativeAdvertisementFallback(slotID: slot.slotID)
+            }
+        }
     }
 
     private var loadingPlaceholder: some View {
@@ -572,6 +797,8 @@ struct MobileNativeAdvertisementSlotRow: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
             Menu {
+                selectionExplanationButton
+                reportButton(advertisement)
                 notInterestedButton(advertisement)
             } label: {
                 Image(systemName: "ellipsis")
@@ -582,6 +809,8 @@ struct MobileNativeAdvertisementSlotRow: View {
             }
         }
         .contextMenu {
+            selectionExplanationButton
+            reportButton(advertisement)
             notInterestedButton(advertisement)
         }
         .background {
@@ -590,6 +819,22 @@ struct MobileNativeAdvertisementSlotRow: View {
                     selectionID: advertisement.selectionID
                 )
             }
+        }
+    }
+
+    private var selectionExplanationButton: some View {
+        Button {
+            isShowingSelectionExplanation = true
+        } label: {
+            Label(strings.advertisementWhyShown, systemImage: "info.circle")
+        }
+    }
+
+    private func reportButton(_ advertisement: CommunityNativeAdvertisement) -> some View {
+        Button(role: .destructive) {
+            advertisementReportTarget = advertisement
+        } label: {
+            Label(strings.advertisementReport, systemImage: "exclamationmark.bubble")
         }
     }
 
@@ -621,6 +866,70 @@ struct MobileNativeAdvertisementSlotRow: View {
             _ = appState.openRoute(route)
         } else if url.scheme?.caseInsensitiveCompare("https") == .orderedSame {
             openURL(url)
+        }
+    }
+
+}
+
+struct MobileNativeAdvertisementReviewModifier: ViewModifier {
+    @EnvironmentObject private var appState: AppState
+    @Binding var isShowingSelectionExplanation: Bool
+    @Binding var advertisementReportTarget: CommunityNativeAdvertisement?
+
+    var slotID: String?
+    var strings: AppStrings
+
+    func body(content: Content) -> some View {
+        content
+            .alert(
+                strings.advertisementWhyShown,
+                isPresented: $isShowingSelectionExplanation
+            ) {
+                Button(strings.done, role: .cancel) {}
+            } message: {
+                Text(strings.advertisementWhyShownExplanation)
+            }
+            .confirmationDialog(
+                strings.advertisementReport,
+                isPresented: reportDialogBinding,
+                titleVisibility: .visible
+            ) {
+                if let advertisementReportTarget {
+                    Button(strings.advertisementReportInappropriate, role: .destructive) {
+                        report(advertisementReportTarget, reason: .inappropriate)
+                    }
+                    Button(strings.advertisementReportAgeInappropriate, role: .destructive) {
+                        report(advertisementReportTarget, reason: .ageInappropriate)
+                    }
+                }
+                Button(strings.cancel, role: .cancel) {}
+            } message: {
+                Text(strings.advertisementReportPrompt)
+            }
+    }
+
+    private var reportDialogBinding: Binding<Bool> {
+        Binding(
+            get: { advertisementReportTarget != nil },
+            set: { isPresented in
+                if !isPresented {
+                    advertisementReportTarget = nil
+                }
+            }
+        )
+    }
+
+    private func report(
+        _ advertisement: CommunityNativeAdvertisement,
+        reason: NativeAdvertisementReportReason
+    ) {
+        advertisementReportTarget = nil
+        Task {
+            _ = await appState.reportNativeAdvertisement(
+                advertisement,
+                slotID: slotID,
+                reason: reason
+            )
         }
     }
 }
@@ -715,18 +1024,24 @@ private final class BuddyStudyNativeAdView: NativeAdView {
 
         headlineLabel.font = .preferredFont(forTextStyle: .headline)
         headlineLabel.adjustsFontForContentSizeCategory = true
-        headlineLabel.numberOfLines = 2
+        headlineLabel.numberOfLines = 0
+        headlineLabel.lineBreakMode = .byWordWrapping
         headlineLabel.textColor = .label
+        headlineLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         bodyLabel.font = .preferredFont(forTextStyle: .subheadline)
         bodyLabel.adjustsFontForContentSizeCategory = true
-        bodyLabel.numberOfLines = 2
+        bodyLabel.numberOfLines = 0
+        bodyLabel.lineBreakMode = .byWordWrapping
         bodyLabel.textColor = .secondaryLabel
+        bodyLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         advertiserLabel.font = .preferredFont(forTextStyle: .caption1)
         advertiserLabel.adjustsFontForContentSizeCategory = true
-        advertiserLabel.numberOfLines = 1
+        advertiserLabel.numberOfLines = 0
+        advertiserLabel.lineBreakMode = .byWordWrapping
         advertiserLabel.textColor = .secondaryLabel
+        advertiserLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         badgeLabel.font = .preferredFont(forTextStyle: .caption2)
         badgeLabel.adjustsFontForContentSizeCategory = true
@@ -750,12 +1065,27 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         callToActionButton.configuration = callToActionConfiguration
         callToActionButton.titleLabel?.font = .preferredFont(forTextStyle: .callout)
         callToActionButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        callToActionButton.titleLabel?.numberOfLines = 1
+        callToActionButton.titleLabel?.numberOfLines = 0
+        callToActionButton.titleLabel?.lineBreakMode = .byWordWrapping
+        callToActionButton.titleLabel?.textAlignment = .center
+        callToActionButton.setContentCompressionResistancePriority(.required, for: .vertical)
 
         choicesView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(choicesView)
+        choicesView.setContentHuggingPriority(.required, for: .horizontal)
+        choicesView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let metadataRow = UIStackView(arrangedSubviews: [iconImageView, badgeLabel, advertiserLabel])
+        let metadataSpacer = UIView()
+        metadataSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        metadataSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let metadataRow = UIStackView(
+            arrangedSubviews: [
+                iconImageView,
+                badgeLabel,
+                advertiserLabel,
+                metadataSpacer,
+                choicesView,
+            ]
+        )
         metadataRow.axis = .horizontal
         metadataRow.alignment = .center
         metadataRow.spacing = 7
@@ -763,7 +1093,7 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         let textStack = UIStackView(arrangedSubviews: [metadataRow, headlineLabel, bodyLabel, callToActionButton])
         textStack.translatesAutoresizingMaskIntoConstraints = false
         textStack.axis = .vertical
-        textStack.alignment = .leading
+        textStack.alignment = .fill
         textStack.spacing = 7
 
         addSubview(media)
@@ -790,8 +1120,6 @@ private final class BuddyStudyNativeAdView: NativeAdView {
             iconImageView.heightAnchor.constraint(equalTo: iconImageView.widthAnchor),
             callToActionButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 34),
 
-            choicesView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            choicesView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             choicesView.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
             choicesView.heightAnchor.constraint(greaterThanOrEqualToConstant: 20),
         ])

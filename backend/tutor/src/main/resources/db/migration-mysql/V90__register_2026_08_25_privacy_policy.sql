@@ -6,7 +6,7 @@ insert into terms (
     'ko',
     '개인정보 처리방침',
     'https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-25.html',
-    '13f2e4925ad4a28f39304570e68309a960c2460b3bdf87466898718648228a21',
+    '4902b5ef4d6937830ffcb30666d4b0d90e375c10ea1492725956805ec913ed3a',
     '9999-12-31 00:00:00.000000',
     null,
     true,

@@ -36,6 +36,7 @@ Regions and status
 - Features are consistent across regions and localized in Korean, English, and Japanese; storefront price, currency, and tax vary.
 - Not regulated and no protected third-party material: this is a general educational aid, not a medical, financial, gambling, legal, or other regulated service. It has no licensed media catalog. Questions/comments are UGC; Terms prohibit infringement, and reporting/blocking are available.
 - Advertising: the free account may receive one server-positioned native ad on Home > All Studies after two questions. AdMob is tried first; a BuddyStudy/Coupang campaign is fallback only. TIER2/3 are ad-free. Ads are non-personalized and teen-treated, without ATT or IDFA. The placement switch stays off until the approved build is public, so Review may see no ad.
+- Ad controls: Home > All Studies > BuddyStudy/Coupang ad > ... exposes Why this ad is shown, Report advertisement (inappropriate or age-inappropriate), and Not interested. Google ads expose Why this ad? and Report ad through the unobstructed AdChoices control.
 - Privacy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-25.html
 - Terms: https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-30.html
 - Apple EULA: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/

@@ -95,7 +95,7 @@ def list_localizations(token, app_info_id)
     "/v1/appInfos/#{app_info_id}/appInfoLocalizations",
     token,
     query: {
-      "fields[appInfoLocalizations]" => "locale,name,subtitle,privacyPolicyUrl",
+      "fields[appInfoLocalizations]" => "locale,name,subtitle,privacyPolicyUrl,privacyChoicesUrl",
       "limit" => "200"
     }
   ).fetch("data")
@@ -141,11 +141,13 @@ def validate_localizations(localizations)
     name = metadata.fetch("name")
     subtitle = metadata.fetch("subtitle")
     privacy_url = metadata.fetch("privacyPolicyUrl")
+    privacy_choices_url = metadata.fetch("privacyChoicesUrl")
     abort "#{locale} name is empty" if name.strip.empty?
     abort "#{locale} name exceeds 30 characters" if name.length > 30
     abort "#{locale} subtitle is empty" if subtitle.strip.empty?
     abort "#{locale} subtitle exceeds 30 characters" if subtitle.length > 30
     abort "#{locale} privacy policy URL must use HTTPS" unless privacy_url.start_with?("https://")
+    abort "#{locale} privacy choices URL must use HTTPS" unless privacy_choices_url.start_with?("https://")
   end
 end
 

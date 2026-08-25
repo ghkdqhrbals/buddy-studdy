@@ -648,6 +648,8 @@ final class AppState: ObservableObject {
     private var recordedAdvertisementImpressionSelectionIDs: Set<String> = []
     private var recordedAdMobImpressionSlotIDs: Set<String> = []
     private var recordedAdMobClickSlotIDs: Set<String> = []
+    private let nativeAdvertisementFallbackCoordinator =
+        NativeAdvertisementFallbackRequestCoordinator()
     private var appControlBoundaryTask: Task<Void, Never>?
     private var appControlPolicy: AppControlRemotePolicy?
     #if os(iOS)
@@ -5293,8 +5295,38 @@ final class AppState: ObservableObject {
     }
 
     func submitAppFeedback(content: String) async -> Bool {
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "app-feedback") else {
-            clearCommunityErrorForMissingRegistration(reason: "app-feedback")
+        await submitFeedback(
+            content: content,
+            successMessage: strings.feedbackSubmitted,
+            registrationReason: "app-feedback"
+        )
+    }
+
+    func reportNativeAdvertisement(
+        _ advertisement: CommunityNativeAdvertisement,
+        slotID: String?,
+        reason: NativeAdvertisementReportReason
+    ) async -> Bool {
+        await submitFeedback(
+            content: NativeAdvertisementReportPayload.content(
+                reason: reason,
+                advertisement: advertisement,
+                slotID: slotID
+            ),
+            successMessage: strings.advertisementReportSubmitted,
+            registrationReason: "native-ad-report"
+        )
+    }
+
+    private func submitFeedback(
+        content: String,
+        successMessage: String,
+        registrationReason: String
+    ) async -> Bool {
+        guard let registration = await backendRegistrationForOpenAIRequests(
+            reason: registrationReason
+        ) else {
+            clearCommunityErrorForMissingRegistration(reason: registrationReason)
             return false
         }
 
@@ -5308,11 +5340,11 @@ final class AppState: ObservableObject {
             },
             onSuccess: {
                 submitted = true
-                statusMessage = strings.feedbackSubmitted
+                statusMessage = successMessage
             },
             onFailure: { error in
                 handleCommunityError(error)
-                log(.warning, "앱 피드백 제출 실패: \(error.localizedDescription)")
+                log(.warning, "피드백 제출 실패: \(error.localizedDescription)")
             }
         )
         return submitted
@@ -5336,6 +5368,13 @@ final class AppState: ObservableObject {
     }
 
     func fetchNativeAdvertisementFallback(slotID: String) async -> CommunityNativeAdvertisement? {
+        await nativeAdvertisementFallbackCoordinator.resolve(slotID: slotID) { [weak self] in
+            guard let self else { return nil }
+            return await self.loadNativeAdvertisementFallback(slotID: slotID)
+        }
+    }
+
+    private func loadNativeAdvertisementFallback(slotID: String) async -> CommunityNativeAdvertisement? {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "native-ad-fallback") else {
             return nil
         }

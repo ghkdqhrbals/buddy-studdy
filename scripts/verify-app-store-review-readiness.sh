@@ -35,8 +35,11 @@ ruby -rjson -e '
     abort "Missing subtitle: #{locale}" if app_info.dig(locale, "subtitle").to_s.strip.empty?
     url = app_info.dig(locale, "privacyPolicyUrl").to_s
     abort "Stale privacy URL: #{locale}" unless url == privacy_urls.fetch(locale)
+    choices_url = app_info.dig(locale, "privacyChoicesUrl").to_s
+    abort "Stale privacy choices URL: #{locale}" unless choices_url == "#{url}#ads"
     abort "Version description has stale privacy URL: #{locale}" unless version.dig(locale, "description").to_s.include?(url)
   end
+  abort "Advertising age-rating flag must be true" unless age_rating["advertising"] == true
   abort "UGC age-rating flag must be true" unless age_rating["userGeneratedContent"] == true
   abort "Unrestricted web access must be false" unless age_rating["unrestrictedWebAccess"] == false
 ' "$version_metadata" "$app_info_metadata" "$age_rating_metadata"
@@ -93,6 +96,9 @@ if test -e "$project_root/docs/app-ads.txt" && rg -q 'REPLACE_WITH_ADMOB_PUBLISH
   echo "docs/app-ads.txt must never publish the placeholder publisher ID." >&2
   exit 1
 fi
+if test -e "$project_root/docs/app-ads.txt"; then
+  rg -q '^google\.com, pub-[0-9]{16}, DIRECT, f08c47fec0942fa0$' "$project_root/docs/app-ads.txt"
+fi
 
 rg -q "PrivacyInfo.xcprivacy" "$project_root/StudyMate.xcodeproj/project.pbxproj"
 rg -q 'version = 13\.8\.0;' "$project_root/StudyMate.xcodeproj/project.pbxproj"
@@ -126,6 +132,9 @@ rg -q 'ADMOB_APP_ID: \$\{\{ vars\.ADMOB_APP_ID \}\}' "$project_root/.github/work
 rg -q 'ADMOB_NATIVE_AD_UNIT_ID: \$\{\{ vars\.ADMOB_NATIVE_AD_UNIT_ID \}\}' "$project_root/.github/workflows/release.yml"
 rg -Fq 'ca-app-pub-3940256099942544~*' "$project_root/.github/workflows/release.yml"
 rg -Fq 'ca-app-pub-3940256099942544/*' "$project_root/.github/workflows/release.yml"
+rg -q 'admob_app_publisher=.*ADMOB_APP_ID' "$project_root/.github/workflows/release.yml"
+rg -q 'admob_unit_publisher=.*ADMOB_NATIVE_AD_UNIT_ID' "$project_root/.github/workflows/release.yml"
+rg -q 'docs/app-ads\.txt must match the publisher' "$project_root/.github/workflows/release.yml"
 rg -q 'Gem::Version\.new\("26\.2"\)' "$project_root/.github/workflows/release.yml"
 rg -q '/api/v1/admin/native-ad-placement-policies/COMMUNITY_FEED' "$project_root/admin-frontend/src/api.ts"
 rg -q 'Policy state is UNKNOWN' "$project_root/admin-frontend/src/AdvertisingPanel.tsx"
@@ -160,7 +169,7 @@ rg -q "8\. IN-APP PURCHASES AND PURCHASE LOCATION" "$resolution_reply"
 
 echo "App Store review source checks passed."
 echo "Manual gate: verify the production RevenueCat webhook delivers both Production and Sandbox events without a duplicate development integration."
-echo "Manual gate: issue the AdMob IDs/publisher ID, publish the real root app-ads.txt, and verify AdMob authorization before Release archive."
+echo "Manual gate: verify the published root app-ads.txt, AdMob account review, and app readiness authorization before enabling production ads."
 
 if [ "$testflight_notes_status" -ne 0 ]; then
   exit "$testflight_notes_status"

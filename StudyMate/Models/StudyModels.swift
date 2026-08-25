@@ -4181,6 +4181,31 @@ struct AppStrings {
     }
     var advertisementNotInterested: String { text("관심 없음", "Not interested", "興味なし") }
     var advertisementHidden: String { text("이 광고를 더 이상 보여주지 않습니다.", "You won't see this advertisement again.", "この広告は今後表示されません。") }
+    var advertisementWhyShown: String {
+        text("이 광고가 표시된 이유", "Why this ad is shown", "この広告が表示された理由")
+    }
+    var advertisementWhyShownExplanation: String {
+        text(
+            "이 광고는 광고 없는 구독 여부, 공개 피드 위치와 문항 수, 로그인 여부, 캠페인 대상·일정·우선순위·관련도, 최근 광고 전달·열기·관심 없음 및 빈도 이력, 캠페인 전체 선택·열기·관심 없음 성과, 제한된 무작위 탐색을 기준으로 선택되었습니다. 학습 주제·질문·답변·검색어는 사용하지 않았습니다.",
+            "This ad was selected using ad-free subscription eligibility, public-feed position and question count, sign-in state, campaign audience, schedule, priority and relevance, recent delivery, open, not-interested and frequency history, aggregate campaign selection, open and not-interested performance, and limited random exploration. Study topics, questions, answers, and search terms were not used.",
+            "この広告は、広告なし購読の対象、公開フィードの位置と問題数、ログイン状態、キャンペーンの対象・期間・優先度・関連性、最近の配信・オープン・興味なし・頻度履歴、キャンペーン全体の選択・オープン・興味なし実績、限定的なランダム探索を基準に選ばれました。学習トピック、質問、回答、検索語は使用していません。"
+        )
+    }
+    var advertisementReport: String {
+        text("광고 신고", "Report advertisement", "広告を報告")
+    }
+    var advertisementReportPrompt: String {
+        text("신고 이유를 선택해 주세요.", "Choose a reason for the report.", "報告理由を選択してください。")
+    }
+    var advertisementReportInappropriate: String {
+        text("부적절한 광고", "Inappropriate advertisement", "不適切な広告")
+    }
+    var advertisementReportAgeInappropriate: String {
+        text("연령에 부적절한 광고", "Age-inappropriate advertisement", "年齢に不適切な広告")
+    }
+    var advertisementReportSubmitted: String {
+        text("광고 신고를 접수했습니다.", "Advertisement report submitted.", "広告の報告を受け付けました。")
+    }
     var advertisementAffiliateDisclosure: String {
         text(
             "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",

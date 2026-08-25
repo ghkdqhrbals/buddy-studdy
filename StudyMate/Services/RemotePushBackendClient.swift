@@ -3965,6 +3965,58 @@ struct CommunityNativeAdvertisement: Decodable, Equatable, Identifiable {
     }
 }
 
+enum NativeAdvertisementReportReason: String, Equatable {
+    case inappropriate = "INAPPROPRIATE"
+    case ageInappropriate = "AGE_INAPPROPRIATE"
+}
+
+enum NativeAdvertisementReportPayload {
+    static func content(
+        reason: NativeAdvertisementReportReason,
+        advertisement: CommunityNativeAdvertisement,
+        slotID: String?
+    ) -> String {
+        [
+            "[AD_REPORT_V1]",
+            "reason=\(reason.rawValue)",
+            "selectionId=\(safeField(advertisement.selectionID))",
+            "campaignId=\(safeField(advertisement.campaignID))",
+            "slotId=\(safeField(slotID ?? "LEGACY_V1"))",
+            "provider=\(safeField(advertisement.providerName ?? "BUDDYSTUDY"))",
+        ].joined(separator: "\n")
+    }
+
+    private static func safeField(_ value: String) -> String {
+        let normalized = value
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(normalized.prefix(180))
+    }
+}
+
+@MainActor
+final class NativeAdvertisementFallbackRequestCoordinator {
+    private var tasksBySlotID: [
+        String: Task<CommunityNativeAdvertisement?, Never>
+    ] = [:]
+
+    func resolve(
+        slotID: String,
+        loader: @escaping @MainActor () async -> CommunityNativeAdvertisement?
+    ) async -> CommunityNativeAdvertisement? {
+        if let task = tasksBySlotID[slotID] {
+            return await task.value
+        }
+
+        let task = Task { @MainActor in
+            await loader()
+        }
+        tasksBySlotID[slotID] = task
+        return await task.value
+    }
+}
+
 struct CommunityCommentsResponse: Decodable, Equatable {
     var comments: [CommunityQuestionComment]
     var totalCount: Int
