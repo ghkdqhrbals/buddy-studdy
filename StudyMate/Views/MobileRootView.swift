@@ -2149,10 +2149,12 @@ private struct MobileHomeView: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, height: 36)
+                        .foregroundStyle(Color.secondary)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(strings.more)
             }
             .background {
                 MobileNativeAdvertisementImpressionReporter {
@@ -9665,92 +9667,126 @@ struct MobileNativeAdvertisementRow: View {
     var strings: AppStrings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .top, spacing: 12) {
-                advertisementImage
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 7) {
-                        Text(providerName)
-                            .fontWeight(.semibold)
-                        Text(advertisement.disclosureLabel)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.12), in: Capsule())
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                    Text(advertisement.title)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-
-                    if let body = advertisement.body,
-                       !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(body)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .truncationMode(.tail)
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            advertisementTopMeta
 
             if let disclosure = affiliateDisclosure {
                 Text(disclosure)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineSpacing(2)
+                    .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        Color(.secondarySystemBackground),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
             }
+
+            advertisementMainContent
         }
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .foregroundStyle(Color.primary)
         .contentShape(Rectangle())
     }
 
+    private var advertisementTopMeta: some View {
+        HStack(spacing: 7) {
+            Text(topicLabel)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Text(advertisement.disclosureLabel)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(Color.secondary)
+        .lineLimit(1)
+    }
+
     @ViewBuilder
-    private var advertisementImage: some View {
-        if let value = advertisement.imageURL,
-           let url = URL(string: value) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .empty:
-                    ProgressView().controlSize(.small)
-                case .failure:
-                    advertisementImagePlaceholder
-                @unknown default:
-                    advertisementImagePlaceholder
+    private var advertisementMainContent: some View {
+        if let imageURL = advertisementImageURL {
+            AsyncImage(url: imageURL) { phase in
+                if case .success(let image) = phase {
+                    advertisementMainContent(thumbnail: image)
+                } else {
+                    advertisementMainContent(thumbnail: nil)
                 }
             }
-            .frame(width: 92, height: 92)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         } else {
-            advertisementImagePlaceholder
-                .frame(width: 92, height: 92)
+            advertisementMainContent(thumbnail: nil)
         }
     }
 
-    private var advertisementImagePlaceholder: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color(.secondarySystemBackground))
-            .overlay {
-                Image(systemName: "cart")
-                    .font(.title3)
-                    .foregroundStyle(.tertiary)
+    private func advertisementMainContent(thumbnail: Image?) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            advertisementCopy
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let thumbnail {
+                thumbnail
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 92, height: 92)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityHidden(true)
             }
+        }
+    }
+
+    private var advertisementCopy: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(advertisement.title)
+                .font(.body.weight(.medium))
+                .foregroundStyle(Color.primary)
+                .lineLimit(2)
+                .truncationMode(.tail)
+
+            if let body = advertisement.body,
+               !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(body)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+            }
+        }
+    }
+
+    private var advertisementImageURL: URL? {
+        guard let value = advertisement.imageURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              let url = URL(string: value),
+              url.scheme?.caseInsensitiveCompare("https") == .orderedSame,
+              url.host != nil else {
+            return nil
+        }
+        return url
     }
 
     private var affiliateDisclosure: String? {
         if let value = advertisement.affiliateDisclosure?.trimmingCharacters(in: .whitespacesAndNewlines),
            !value.isEmpty {
-            return value
+            return normalizedDisclosure(value)
         }
-        return isCoupangAdvertisement ? strings.advertisementAffiliateDisclosure : nil
+        return isCoupangAdvertisement
+            ? normalizedDisclosure(strings.advertisementAffiliateDisclosure)
+            : nil
+    }
+
+    private func normalizedDisclosure(_ value: String) -> String {
+        value
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
     }
 
     private var providerName: String {
@@ -9759,6 +9795,10 @@ struct MobileNativeAdvertisementRow: View {
             return value
         }
         return isCoupangAdvertisement ? strings.advertisementProviderCoupang : "BuddyStudy"
+    }
+
+    private var topicLabel: String {
+        isCoupangAdvertisement ? strings.advertisementProviderCoupang : providerName
     }
 
     private var isCoupangAdvertisement: Bool {
