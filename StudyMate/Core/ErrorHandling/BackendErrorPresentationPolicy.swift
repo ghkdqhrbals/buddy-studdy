@@ -257,6 +257,18 @@ enum BackendErrorPresentationPolicy {
         }
     }
 
+    static func requiredTerms(for error: Error) -> [BackendTerms] {
+        guard let backendError = error as? RemotePushBackendError else {
+            return []
+        }
+        switch backendError {
+        case .httpStatus(_, _, let apiError):
+            return apiError?.requiredTerms ?? []
+        case .invalidResponse:
+            return []
+        }
+    }
+
     static func shouldShowPopup(for error: RemotePushBackendError) -> Bool {
         switch error {
         case .httpStatus(let statusCode, _, let apiError):

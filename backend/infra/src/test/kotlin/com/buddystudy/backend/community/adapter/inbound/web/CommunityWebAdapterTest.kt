@@ -6,6 +6,8 @@ import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.community.application.model.CommunityQuestionsResponse
+import com.buddystudy.backend.community.application.model.CommunityFeedItemResponse
+import com.buddystudy.backend.community.application.model.NativeAdSlotResponse
 import com.buddystudy.backend.community.application.port.inbound.CommunityUseCase
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -28,6 +30,39 @@ class CommunityWebAdapterTest {
         anonymous = false,
     )
     private val authentication = UsernamePasswordAuthenticationToken(principal, null)
+
+    @Test
+    fun `public feed v2 serializes the native ad slot contract at the server ordered position`(): Unit = runBlocking {
+        val web = mock(CommunityWebPort::class.java)
+        val expected = CommunityQuestionsResponse(
+            questions = emptyList(),
+            items = listOf(
+                CommunityFeedItemResponse.nativeAdSlot(NativeAdSlotResponse("slot-1", "COMMUNITY_FEED")),
+            ),
+            totalCount = 0,
+            limit = 20,
+            offset = 0,
+        )
+        `when`(web.getPublicQuestionFeedV2("ko", "localized", 20, 0, authentication)).thenReturn(expected)
+        val client = WebTestClient.bindToController(CommunitySearchV2Controller(web))
+            .webFilter<WebTestClient.ControllerSpec>(
+                WebFilter { exchange, chain ->
+                    chain.filter(exchange.mutate().principal(Mono.just(authentication)).build())
+                },
+            ).build()
+
+        client.get()
+            .uri("/api/v2/public/questions?tl=ko")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items[0].type").isEqualTo("NATIVE_AD_SLOT")
+            .jsonPath("$.items[0].nativeAdSlot.slotId").isEqualTo("slot-1")
+            .jsonPath("$.items[0].nativeAdSlot.placement").isEqualTo("COMMUNITY_FEED")
+            .jsonPath("$.items[0].advertisement").doesNotExist()
+
+        verify(web).getPublicQuestionFeedV2("ko", "localized", 20, 0, authentication)
+    }
 
     @Test
     fun `liked questions adapter requires the principal and clamps pagination`(): Unit = runBlocking {

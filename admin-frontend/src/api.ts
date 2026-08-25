@@ -15,6 +15,8 @@ import type {
   NativeAdvertisementCampaignSummary,
   NativeAdvertisementUserPage,
   NativeAdvertisementUserStatusFilter,
+  NativeAdPlacementPolicy,
+  NativeAdPlacementPolicyInput,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_ADMIN_API_BASE_URL ?? "";
@@ -207,6 +209,31 @@ export function fetchNativeAdvertisementCampaigns(
   if (filters.status) params.set("status", filters.status);
   if (filters.audience) params.set("audience", filters.audience);
   return request(`/api/v1/admin/native-ad-campaigns?${params}`, { method: "GET" }, onUnauthorized);
+}
+
+export function fetchNativeAdPlacementPolicy(
+  onUnauthorized: UnauthorizedHandler,
+): Promise<NativeAdPlacementPolicy> {
+  return request(
+    "/api/v1/admin/native-ad-placement-policies/COMMUNITY_FEED",
+    { method: "GET" },
+    onUnauthorized,
+  );
+}
+
+export function updateNativeAdPlacementPolicy(
+  input: NativeAdPlacementPolicyInput,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<NativeAdPlacementPolicy> {
+  return request(
+    "/api/v1/admin/native-ad-placement-policies/COMMUNITY_FEED",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+    onUnauthorized,
+  );
 }
 
 export function createNativeAdvertisementCampaign(

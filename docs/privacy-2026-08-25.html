@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="BuddyStudy 개인정보 처리방침"><meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-25.html">
+  <link rel="icon" href="assets/buddystudy-icon.png"><link rel="stylesheet" href="assets/legal.css">
+  <title>개인정보 처리방침 - BuddyStudy</title>
+</head><body><main>
+  <nav><a href="./">BuddyStudy</a><span class="languages"><strong>한국어</strong><a href="en/privacy-2026-08-25.html" lang="en">English</a><a href="ja/privacy-2026-08-25.html" lang="ja">日本語</a></span></nav>
+  <header><div class="brand">BuddyStudy</div><h1>개인정보 처리방침</h1>
+    <p class="updated">공고일 및 시행일: 2026년 8월 25일</p>
+    <p class="summary">BuddyStudy는 서비스 제공에 필요한 데이터만 처리하고 개인정보를 판매하지 않습니다. 무료 이용자의 공개 피드에는 맞춤화하지 않은 네이티브 광고가 표시될 수 있으며, 유료 멤버십의 공개 피드는 광고 없이 제공됩니다.</p>
+  </header>
+  <div class="toc"><a href="#controller">1. 적용 범위</a><a href="#purpose">2. 처리 목적</a><a href="#items">3. 처리 항목</a><a href="#public">4. 공개 콘텐츠</a><a href="#ads">5. 광고와 개인정보 선택</a><a href="#retention">6. 보유 기간</a><a href="#processors">7. 처리위탁 및 국외 이전</a><a href="#analytics">8. 분석과 진단</a><a href="#automated">9. AI 처리</a><a href="#rights">10. 이용자 권리</a><a href="#destruction">11. 파기</a><a href="#security">12. 안전조치</a><a href="#children">13. 아동</a><a href="#contact">14. 문의 및 변경</a></div>
+  <section id="controller"><h2>1. 처리자와 적용 범위</h2><p>BuddyStudy 운영자(이하 “운영자”)는 BuddyStudy iOS 앱, API, 알림, 공개 질문 및 관련 웹페이지에서 처리되는 개인정보의 처리자입니다. 공개 질문은 로그인 없이 읽을 수 있지만, 개인 학습 기록·통계·댓글·좋아요·프로필·알림 동기화에는 계정 또는 기기 등록이 필요할 수 있습니다.</p></section>
+  <section id="purpose"><h2>2. 처리 목적</h2><ul>
+    <li>이메일·Google·Apple 로그인, 기기 등록, 세션과 계정 보안</li><li>학습 트리, 질문 생성, 답변 초안, AI 채점·피드백·해설, 번역, 기록과 통계</li><li>질문·댓글·마케팅 알림, 공개 질문·댓글·좋아요·신고·차단·피드백·프로필 기능</li><li>사용량 한도, 약관 동의, 알림 선호, App Store 구독과 멤버십 권한 관리</li><li>무료 공개 피드의 광고 전달·빈도 제한·부정 클릭 방지·성과 집계</li><li>장애 대응, 보안, 부정 이용 방지, 품질과 성능 개선</li>
+  </ul></section>
+  <section id="items"><h2>3. 처리 항목과 수집 방법</h2><div class="table-wrap"><table><thead><tr><th>구분</th><th>처리 항목</th><th>수집 시점·위치</th></tr></thead><tbody>
+    <tr><td>계정·인증</td><td>사용자 ID, 이메일, 비밀번호 해시, 로그인 제공자 식별자, 계정 상태, 인증 코드, 세션 만료</td><td>계정 기능 이용 시 · MySQL/Redis</td></tr>
+    <tr><td>기기·알림</td><td>기기 ID, 클라이언트 자격 증명 해시, APNs 토큰·환경, 플랫폼, 앱 버전, 언어, 시간대, 알림 선호</td><td>기기 등록·알림 이용 시 · MySQL</td></tr>
+    <tr><td>프로필·학습</td><td>표시 이름, 소개, 픽셀 캐릭터, 공개 설정, 학습·하위 주제, 난이도, 일정, 질문·힌트, 답변 초안·제출 답변, 점수, 피드백, 번역, 기록, 통계, 월간 사용량</td><td>해당 기능 이용 시 · MySQL 및 기기 초안·캐시</td></tr>
+    <tr><td>커뮤니티</td><td>공개 여부, 댓글, 좋아요, 조회 수, 신고, 차단 관계와 시각, 피드백</td><td>해당 기능 이용 시 · MySQL</td></tr>
+    <tr><td>약관·구독</td><td>문서·버전·동의/철회·시각·IP·앱 버전, 멤버십·상품 ID, App Account Token, 거래 ID, 구매 환경, 갱신·만료·취소·환불 상태, 금액·통화, RevenueCat 사용자·이벤트 ID</td><td>동의·구매·복원 시 · MySQL, Apple, RevenueCat</td></tr>
+    <tr><td>광고 전달</td><td>임의 슬롯 ID, 공개 피드 placement, 계정이 있으면 내부 사용자 ID, 슬롯 전달·마지막 전달 시각, UTC 일일 횟수, 광고 공급자, AdMob 노출·클릭 시각, 자체 광고 선택·노출·오픈·관심 없음 기록</td><td>광고 대상 무료 공개 피드 이용 시 · MySQL</td></tr>
+    <tr><td>운영·분석·진단</td><td>요청 ID, 사용자 ID, IP, 경로·상태·시간·오류, 앱 인스턴스와 기기/OS/앱 메타데이터, 화면·기능 이벤트, 오류·스택·마스킹된 오류 세션 리플레이</td><td>서비스 이용 또는 오류 발생 시 · Loki, Firebase, Sentry</td></tr>
+  </tbody></table></div><p>정부 식별번호, 건강·생체정보 등 민감정보를 의도적으로 수집하지 않습니다. 결제 카드·은행 정보와 Apple ID 결제 자격 증명은 Apple이 처리하며 BuddyStudy와 RevenueCat은 이를 직접 저장하지 않습니다. 앱 입력, 로그인 제공자, API, APNs 및 SDK 자동 수집을 통해 수집하며 비밀번호·토큰·비밀키는 로그에서 마스킹합니다.</p></section>
+  <section id="public"><h2>4. 공개 콘텐츠</h2><p>공개를 켜면 질문, 주제, 난이도, 생성·답변 시각, 점수, 조회·좋아요·댓글 수와 공개 프로필이 다른 사람에게 보일 수 있습니다. 댓글과 작성자의 공개 프로필도 공개됩니다. 차단한 사용자의 질문·댓글은 차단자에게 숨겨지며 차단 관계 자체는 공개되지 않습니다. 초안, 비공개 답변, 이메일, 자격 증명, APNs 토큰, 기기 ID와 내부 로그는 공개되지 않습니다.</p></section>
+  <section id="ads"><h2>5. 네이티브 광고와 개인정보 선택</h2>
+    <p>로그아웃 상태 또는 TIER1 무료 이용자가 Home의 비검색 첫 공개 피드를 열면 서버 정책에 따라 최대 한 개의 네이티브 광고 슬롯이 전달될 수 있습니다. 검색·좋아요·다음 페이지와 TIER2·TIER3의 유효한 유료 권한에는 광고 슬롯을 전달하지 않습니다. 권한을 확정할 수 없는 경우에도 광고를 생략합니다.</p>
+    <p>앱은 매 실행 Google User Messaging Platform(UMP) 동의 정보를 갱신하고 필요한 양식을 표시합니다. UMP가 광고 요청을 허용할 때만 Google Mobile Ads를 시작합니다. 개인정보 선택을 다시 열 수 있는 경우 Settings에 해당 메뉴가 표시됩니다. 동의가 없거나 광고 오류·재고 없음·시간 초과가 발생하면 Google에 광고 요청을 보내지 않거나 기존 자체 광고를 한 번 조회할 수 있습니다.</p>
+    <p>Google AdMob은 광고 제공 과정에서 IP 주소로 추정한 대략적 위치, 앱 또는 개발자 범위의 기기 식별자, 광고 데이터와 노출·클릭 같은 상호작용, 충돌·성능·기타 진단 데이터를 처리할 수 있습니다. 운영자는 모든 요청을 청소년 등급 및 맞춤 광고 비활성 상태로 설정하고 게시자 퍼스트 파티 ID와 SDK 충돌 보고를 끕니다. ATT 권한을 요청하지 않고 IDFA를 사용하지 않으며 맞춤 광고나 앱 간 추적을 하지 않습니다. BuddyStudy 사용자 ID, 자체 기기 ID, 이메일, 검색어, 학습 주제·질문·답변, 콘텐츠 URL·키워드는 광고 요청에 넣지 않으며 초기 버전에는 미디에이션 파트너 SDK가 없습니다.</p>
+    <p>AdMob SDK가 확인한 노출과 클릭은 임의 슬롯 ID와 함께 BuddyStudy 서버에도 중복 없이 기록됩니다. 이 기록은 사용자별 일일 상한과 최소 간격 적용, 성과 집계, 부정 이용 대응에 사용됩니다. 앱은 수동으로 화면 노출을 추정하지 않으며 자동 새로고침하지 않습니다.</p>
+  </section>
+  <section id="retention"><h2>6. 보유 기간</h2><div class="table-wrap"><table><thead><tr><th>데이터</th><th>보유 기간</th></tr></thead><tbody>
+    <tr><td>계정·프로필·학습·커뮤니티</td><td>항목 삭제 또는 회원탈퇴까지</td></tr><tr><td>차단 관계</td><td>차단 해제 또는 어느 한 계정 삭제까지</td></tr><tr><td>광고 슬롯·전달 상태·이벤트 이력</td><td>계정 삭제 시 함께 삭제; 익명 기록은 운영상 필요한 기간만 보유하며 최근 30일 집계에 사용</td></tr><tr><td>인증 코드</td><td>발급 후 3분 또는 인증 완료까지</td></tr><tr><td>기기·APNs</td><td>등록 해제, 회원탈퇴 또는 무효화까지</td></tr><tr><td>약관·거래</td><td>회원탈퇴까지. 분쟁·환불·법적 의무에 필요한 기록은 해당 기간 동안 분리 보관</td></tr><tr><td>운영 로그 / 백업</td><td>7일 / 최대 14일</td></tr><tr><td>Google·Sentry 처리 데이터</td><td>운영자 설정 및 각 제공자의 정책에 따름</td></tr>
+  </tbody></table></div></section>
+  <section id="processors"><h2>7. 처리위탁 및 국외 이전</h2><p>운영자는 개인정보를 판매하지 않습니다. AWS(서울 리전: API·DB·백업), Cloudflare(글로벌 네트워크: DNS·TLS·보안), OpenAI(미국 등: 질문·채점·번역), Apple 및 APNs(미국 등: 로그인·결제·푸시), RevenueCat(미국 등: 구독), Google(미국 등: 로그인·이메일·Firebase·Remote Config·UMP·AdMob), Sentry/Functional Software(미국 등: 오류 진단)를 사용합니다. 관련 기능 이용 시 필요한 데이터가 암호화되어 전송되며, 각 제공자의 정책과 계약상 보호조치가 적용됩니다. 외부 처리를 거부하면 관련 로그인, AI, 푸시, 구독, 분석, 진단 또는 광고 선택 기능이 제한될 수 있습니다.</p></section>
+  <section id="analytics"><h2>8. 분석 및 오류 진단</h2><p>Firebase Analytics에는 대략적인 화면·기능 이벤트만 보내며 사용자 ID, 이메일, 학습 내용, 댓글, 토큰, 요청 ID를 넣지 않습니다. Firebase Remote Config는 업데이트·점검 정책을 받습니다. Sentry는 오류·치명적 충돌에만 사용하며 일반 세션 리플레이 업로드율은 0%이고 오류 세션의 텍스트와 이미지는 마스킹됩니다. Google Mobile Ads 자체 충돌 보고는 비활성화합니다.</p></section>
+  <section id="automated"><h2>9. AI와 자동화된 처리</h2><p>질문, 번역, 점수와 피드백은 자동 생성되며 학습 보조 수단입니다. 이용자에게 법적 또는 이와 유사하게 중대한 결정을 내리지 않습니다. 광고 슬롯 위치와 빈도는 운영 정책으로 자동 결정되지만, 민감한 학습 내용에 기반한 광고 프로파일링은 하지 않습니다.</p></section>
+  <section id="rights"><h2>10. 이용자 권리</h2><p>앱에서 프로필, 공개 설정, 알림 선호, 선택 동의, 학습 기록과 계정을 조회·정정·삭제할 수 있고 다른 사용자를 차단할 수 있습니다. Settings에 표시되는 광고 개인정보 선택 메뉴에서 UMP 선택을 다시 검토할 수 있습니다. 접근·정정·삭제·처리 제한·동의 철회·차단 해제는 아래 이메일로도 요청할 수 있으며 본인 확인이 필요할 수 있습니다. 구독 변경·취소·환불·복원은 Membership and Billing에서 Apple 또는 RevenueCat 제공 화면으로 진행합니다.</p></section>
+  <section id="destruction"><h2>11. 파기</h2><p>회원탈퇴 시 접근과 세션을 즉시 중지하고 복구 가능한 비동기 절차로 프로필, 학습, 커뮤니티, 차단 관계, 알림, 동의, 기기 연결 및 사용자 소유 광고 슬롯·전달 상태·이벤트 이력을 활성 DB에서 삭제합니다. 법적 보존이 필요한 거래 기록은 분리 후 기간 만료 시 삭제하며, 백업은 일반 용도로 복원하지 않고 14일 안에 만료됩니다.</p></section>
+  <section id="security"><h2>12. 안전성 확보 조치</h2><ul><li>TLS, 비밀번호 해시, 비밀정보 관리와 최소권한 접근</li><li>관리자 인증, 네트워크 보호, 자격 증명 마스킹, 감사 로그</li><li>DB 무결성 제약, 트랜잭션 잠금, 멱등 이벤트 처리, 백업</li><li>오류 세션 텍스트·이미지 마스킹 및 광고 요청 데이터 최소화</li></ul></section>
+  <section id="children"><h2>13. 아동의 개인정보</h2><p>BuddyStudy는 만 14세 미만 아동을 대상으로 하지 않습니다. 모든 광고 요청에는 청소년 처리를 적용하지만 별도 연령 게이트는 만들지 않고 UMP의 “법적 동의 연령 미만” 플래그를 임의로 설정하지 않습니다. 아동 데이터가 처리되었다고 판단되면 삭제를 요청해 주세요.</p></section>
+  <section id="contact"><h2>14. 문의, 구제 및 방침 변경</h2><p>개인정보 문의: BuddyStudy 운영자 · <a href="mailto:ghkdqhrbals@gmail.com">ghkdqhrbals@gmail.com</a></p><p>개인정보침해 신고센터: <a href="https://privacy.kisa.or.kr">privacy.kisa.or.kr</a> / 118 · 개인정보 분쟁조정위원회: <a href="https://www.kopico.go.kr">www.kopico.go.kr</a> / 1833-6972</p><p>업데이트 시 공고일과 시행일을 표시하고 중대한 변경은 별도로 알리며 필요한 경우 다시 동의를 받습니다. 이번 버전은 무료 공개 피드 네이티브 광고, Google UMP·AdMob 데이터 처리, 광고 선택과 유료 광고 제거 혜택을 추가합니다.</p></section>
+  <footer>이 문서는 2026년 8월 25일 버전의 고정 사본입니다. <a href="privacy.html">현재 개인정보 처리방침</a> · <a href="terms.html">서비스 이용약관</a></footer>
+</main></body></html>

@@ -138,3 +138,38 @@ data class AdminNativeAdvertisementUserPage(
     override val limit: Int,
     override val offset: Int,
 ) : PageResponse
+
+data class AdminNativeAdPlacementPolicyCommand(
+    val placement: String,
+    val enabled: Boolean,
+    val dailyDeliveryCap: Int,
+    val minimumSecondsBetweenDeliveries: Int,
+    val minimumFeedItemCount: Int,
+    val earliestPosition: Int,
+    val latestPosition: Int,
+    val startsAt: Instant?,
+    val endsAt: Instant?,
+)
+
+data class AdminNativeAdPlacementMetrics(
+    val slotDeliveries: Long = 0,
+    val adMobImpressions: Long = 0,
+    val adMobClicks: Long = 0,
+    val fallbackSelections: Long = 0,
+    val fallbackImpressions: Long = 0,
+    val fallbackOpens: Long = 0,
+)
+
+data class AdminNativeAdPlacementPolicyResponse(
+    val placement: String,
+    val enabled: Boolean,
+    val dailyDeliveryCap: Int,
+    val minimumSecondsBetweenDeliveries: Int,
+    val minimumFeedItemCount: Int,
+    val earliestPosition: Int,
+    val latestPosition: Int,
+    val startsAt: Instant?,
+    val endsAt: Instant?,
+    val updatedAt: Instant,
+    val metrics: AdminNativeAdPlacementMetrics,
+)

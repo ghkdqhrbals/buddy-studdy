@@ -106,7 +106,7 @@ class BillingLedgerPersistenceAdapter(
     override suspend fun enabledTierProducts(): List<BillingTierProduct> =
         database.sql(
             """
-            select p.tier_code, t.description, t.monthly_question_limit, p.product_id,
+            select p.tier_code, t.description, t.monthly_question_limit, t.ad_free, p.product_id,
                    p.product_type, p.billing_period, p.sort_order
             from membership_tier_products p
             join user_membership_tiers t on t.tier_code = p.tier_code
@@ -127,7 +127,7 @@ class BillingLedgerPersistenceAdapter(
     private suspend fun tierProduct(productId: String, enabledOnly: Boolean): BillingTierProduct? =
         database.sql(
             """
-            select p.tier_code, t.description, t.monthly_question_limit, p.product_id,
+            select p.tier_code, t.description, t.monthly_question_limit, t.ad_free, p.product_id,
                    p.product_type, p.billing_period, p.sort_order
             from membership_tier_products p
             join user_membership_tiers t on t.tier_code = p.tier_code
@@ -139,6 +139,13 @@ class BillingLedgerPersistenceAdapter(
             """.trimIndent(),
         ).bind("productId", productId).bind("enabledOnly", enabledOnly)
             .map { row, _ -> row.tierProduct() }
+            .one().awaitSingleOrNull()
+
+    override suspend fun adFreeForTier(tierCode: String): Boolean? =
+        database.sql(
+            "select ad_free from user_membership_tiers where tier_code = :tierCode",
+        ).bind("tierCode", tierCode)
+            .map { row, _ -> row.boolean("ad_free") }
             .one().awaitSingleOrNull()
 
     override suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection? =
@@ -3473,6 +3480,7 @@ class BillingLedgerPersistenceAdapter(
         productType = BillingProductType.valueOf(string("product_type")),
         billingPeriod = nullableString("billing_period"),
         sortOrder = int("sort_order"),
+        adFree = boolean("ad_free"),
     )
 
     private fun Row.invoiceSummary() = BillingInvoiceSummary(

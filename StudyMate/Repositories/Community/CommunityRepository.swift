@@ -11,6 +11,21 @@ protocol CommunityRepository {
         language: AppLanguage
     ) async throws -> CommunityQuestionsResponse
 
+    func fetchNativeAdvertisementFallback(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws -> CommunityNativeAdvertisement?
+
+    func recordAdMobNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws
+
+    func recordAdMobNativeAdvertisementClick(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws
+
     func fetchLikedPublicQuestions(
         registration: RemotePushRegistration,
         query: String?,

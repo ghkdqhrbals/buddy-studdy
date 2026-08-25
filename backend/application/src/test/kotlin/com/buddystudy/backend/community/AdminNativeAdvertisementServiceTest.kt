@@ -6,11 +6,14 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignStatus
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserSummary
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementPolicyCommand
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementMetrics
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementCampaignPerformance
 import com.buddystudy.backend.community.application.service.AdminNativeAdvertisementService
 import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
+import com.buddystudy.community.domain.entity.NativeAdPlacementPolicyEntity
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -19,6 +22,41 @@ import java.math.BigDecimal
 import java.time.Instant
 
 class AdminNativeAdvertisementServiceTest {
+    @Test
+    fun `placement policy update enforces safe feed bounds and returns thirty day metrics`(): Unit = runBlocking {
+        val port = FakeAdminNativeAdvertisementPort().apply {
+            placementPolicy = NativeAdPlacementPolicyEntity()
+            placementMetrics = AdminNativeAdPlacementMetrics(slotDeliveries = 12, adMobImpressions = 8, fallbackSelections = 2)
+        }
+        val service = AdminNativeAdvertisementService(port)
+        val command = AdminNativeAdPlacementPolicyCommand(
+            placement = "COMMUNITY_FEED",
+            enabled = true,
+            dailyDeliveryCap = 2,
+            minimumSecondsBetweenDeliveries = 60,
+            minimumFeedItemCount = 4,
+            earliestPosition = 2,
+            latestPosition = 7,
+            startsAt = null,
+            endsAt = null,
+        )
+
+        val updated = service.updatePlacementPolicy("community_feed", command)
+
+        assertThat(updated.enabled).isTrue()
+        assertThat(updated.metrics.slotDeliveries).isEqualTo(12)
+        assertThat(updated.metrics.adMobImpressions).isEqualTo(8)
+        assertThat(updated.metrics.fallbackSelections).isEqualTo(2)
+        assertThatThrownBy {
+            runBlocking {
+                service.updatePlacementPolicy(
+                    "COMMUNITY_FEED",
+                    command.copy(minimumSecondsBetweenDeliveries = 59),
+                )
+            }
+        }.isInstanceOf(ApiException::class.java)
+    }
+
     @Test
     fun `administrator creates active Coupang campaign with normalized key`(): Unit = runBlocking {
         val port = FakeAdminNativeAdvertisementPort()
@@ -221,6 +259,8 @@ class AdminNativeAdvertisementServiceTest {
         var lastUserRequest: UserRequest? = null
         var countFilter: AdminNativeAdvertisementCampaignFilter? = null
         var listFilter: AdminNativeAdvertisementCampaignFilter? = null
+        var placementPolicy: NativeAdPlacementPolicyEntity? = null
+        var placementMetrics: AdminNativeAdPlacementMetrics = AdminNativeAdPlacementMetrics()
 
         override suspend fun countCampaigns(filter: AdminNativeAdvertisementCampaignFilter): Long {
             countFilter = filter
@@ -264,6 +304,12 @@ class AdminNativeAdvertisementServiceTest {
             lastUserRequest = UserRequest(campaignId, query, status, limit, offset)
             return AdminNativeAdvertisementUserPage(userRows, userRows.size.toLong(), limit, offset)
         }
+        override suspend fun findPlacementPolicy(placement: String) = placementPolicy?.takeIf { it.placement == placement }
+        override suspend fun savePlacementPolicy(entity: NativeAdPlacementPolicyEntity): NativeAdPlacementPolicyEntity {
+            placementPolicy = entity
+            return entity
+        }
+        override suspend fun placementMetrics(placement: String, since: Instant) = placementMetrics
     }
 
     private data class UserRequest(

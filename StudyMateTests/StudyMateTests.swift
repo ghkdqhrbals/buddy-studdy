@@ -831,7 +831,7 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
-    func testPublicQuestionListKeepsV1EndpointWhenQueryIsBlank() async throws {
+    func testPublicQuestionListUsesV2EndpointWhenQueryIsBlank() async throws {
         let recorder = HTTPRequestRecorder()
         let client = makeBackendClient(recorder: recorder)
         let registration = RemotePushRegistration(deviceID: "device-1", clientSecret: "secret-1", apnsToken: "")
@@ -845,7 +845,7 @@ final class StudyMateTests: XCTestCase {
         )
 
         let request = try XCTUnwrap(recorder.requests.single)
-        XCTAssertEqual(request.url?.path, "/api/v1/public/questions")
+        XCTAssertEqual(request.url?.path, "/api/v2/public/questions")
         let components = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
         XCTAssertNil(components.queryItemValue("query"))
         XCTAssertEqual(components.queryItemValue("limit"), "15")
@@ -5030,7 +5030,12 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var validateCallCount = 0
     var fetchSettingsCallCount = 0
     var fetchOpenAIModelOptionsCallCount = 0
-    var savedTermsAgreements: [(code: String, action: BackendTermsAgreementAction)] = []
+    var savedTermsAgreements: [(
+        code: String,
+        version: String?,
+        contentHash: String?,
+        action: BackendTermsAgreementAction
+    )] = []
     var savedNotificationPreferences: [(key: String, enabled: Bool)] = []
     var fetchNotificationsRequests: [(limit: Int, offset: Int)] = []
     var fetchNotificationUnreadCountCallCount = 0
@@ -5133,11 +5138,15 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     func saveTermsAgreement(
         registration: RemotePushRegistration,
         type: BackendTermsType,
+        version: String?,
+        contentHash: String?,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource
     ) async throws -> BackendPermissionEvaluations {
         let code = type.rawValue
-        savedTermsAgreements.append((code: code, action: action))
+        savedTermsAgreements.append(
+            (code: code, version: version, contentHash: contentHash, action: action)
+        )
         return BackendPermissionEvaluations(permissions: [])
     }
 

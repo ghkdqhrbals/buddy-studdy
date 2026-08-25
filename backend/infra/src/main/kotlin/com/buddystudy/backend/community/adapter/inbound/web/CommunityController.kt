@@ -19,6 +19,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import jakarta.validation.constraints.NotBlank
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -33,6 +34,7 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import kotlin.math.max
 import kotlin.math.min
 
@@ -225,6 +227,20 @@ class CommunitySearchV2Controller(
     private val community: CommunityWebPort,
 ) {
     @Operation(
+        summary = "List public completed questions with native-ad slots",
+        description = "Returns the unfiltered public feed with at most one server-governed native-ad slot.",
+    )
+    @GetMapping("/public/questions")
+    suspend fun getPublicQuestionFeedV2(
+        @RequestParam(defaultValue = "20") limit: Int,
+        @RequestParam(defaultValue = "0") offset: Int,
+        @RequestParam(required = false) tl: String?,
+        @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
+        authentication: Authentication?,
+    ) = community.getPublicQuestionFeedV2(targetLanguage(tl, language), view, limit, offset, authentication)
+
+    @Operation(
         summary = "Search public completed questions v2",
         description = "Searches public completed questions directly from the canonical questions table.",
     )
@@ -244,7 +260,37 @@ class CommunitySearchV2Controller(
         @RequestParam(defaultValue = "localized") view: String,
         authentication: Authentication?,
     ) = community.getPublicQuestionsV2(query, targetLanguage(tl, language), view, limit, offset, authentication)
+
+    @Operation(summary = "Resolve a native-ad slot fallback")
+    @PostMapping("/native-ad-slots/{slotId}/fallback")
+    suspend fun nativeAdSlotFallback(
+        @PathVariable slotId: String,
+        authentication: Authentication,
+    ): ResponseEntity<Any> = community.nativeAdSlotFallback(slotId, authentication)?.let { ResponseEntity.ok(it) }
+        ?: ResponseEntity.noContent().build()
+
+    @Operation(summary = "Record an AdMob native-ad impression")
+    @PostMapping("/native-ad-slots/{slotId}/impression")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    suspend fun recordNativeAdSlotImpression(
+        @PathVariable slotId: String,
+        @Valid @RequestBody body: NativeAdSlotProviderRequest,
+        authentication: Authentication,
+    ) = community.recordNativeAdSlotImpression(slotId, body.provider, authentication)
+
+    @Operation(summary = "Record an AdMob native-ad click")
+    @PostMapping("/native-ad-slots/{slotId}/click")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    suspend fun recordNativeAdSlotClick(
+        @PathVariable slotId: String,
+        @Valid @RequestBody body: NativeAdSlotProviderRequest,
+        authentication: Authentication,
+    ) = community.recordNativeAdSlotClick(slotId, body.provider, authentication)
 }
+
+data class NativeAdSlotProviderRequest(
+    @field:NotBlank var provider: String = "",
+)
 
 internal fun targetLanguage(tl: String?, legacyLanguage: String?): String =
     tl?.trim()?.takeIf(String::isNotEmpty)
@@ -254,6 +300,7 @@ internal fun targetLanguage(tl: String?, legacyLanguage: String?): String =
 interface CommunityWebPort {
     suspend fun getPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?): Any
     suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?): Any
+    suspend fun getPublicQuestionFeedV2(language: String, view: String, limit: Int, offset: Int, authentication: Authentication?): Any
     suspend fun getLikedPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication): Any
     suspend fun getPublicQuestion(id: Long, language: String, view: String, authentication: Authentication?): Any
     suspend fun likePublicQuestion(id: Long, authentication: Authentication): Any
@@ -283,6 +330,9 @@ interface CommunityWebPort {
         selectionId: String,
         authentication: Authentication,
     )
+    suspend fun nativeAdSlotFallback(slotId: String, authentication: Authentication): Any?
+    suspend fun recordNativeAdSlotImpression(slotId: String, provider: String, authentication: Authentication)
+    suspend fun recordNativeAdSlotClick(slotId: String, provider: String, authentication: Authentication)
 }
 
 @Component
@@ -294,6 +344,9 @@ class CommunityWebAdapter(
 
     override suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?) =
         community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset))
+
+    override suspend fun getPublicQuestionFeedV2(language: String, view: String, limit: Int, offset: Int, authentication: Authentication?) =
+        community.getPublicQuestionFeedV2(authentication.optionalPrincipal(), language, view, safeLimit(limit, 100), max(0, offset))
 
     override suspend fun getLikedPublicQuestions(
         query: String?,
@@ -386,6 +439,15 @@ class CommunityWebAdapter(
         authentication.principalOrThrow(),
         selectionId,
     )
+
+    override suspend fun nativeAdSlotFallback(slotId: String, authentication: Authentication) =
+        community.nativeAdSlotFallback(authentication.principalOrThrow(), slotId)
+
+    override suspend fun recordNativeAdSlotImpression(slotId: String, provider: String, authentication: Authentication) =
+        community.recordNativeAdSlotImpression(authentication.principalOrThrow(), slotId, provider)
+
+    override suspend fun recordNativeAdSlotClick(slotId: String, provider: String, authentication: Authentication) =
+        community.recordNativeAdSlotClick(authentication.principalOrThrow(), slotId, provider)
 
     private fun safeLimit(value: Int, max: Int) = min(max(1, value), max)
 }

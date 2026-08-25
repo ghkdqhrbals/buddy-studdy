@@ -222,6 +222,32 @@ export type NativeAdvertisementCampaignPage = {
   rankingPolicy: NativeAdvertisementRankingPolicy;
 };
 
+export type NativeAdPlacementMetrics = {
+  slotDeliveries: number;
+  adMobImpressions: number;
+  adMobClicks: number;
+  fallbackSelections: number;
+  fallbackImpressions: number;
+  fallbackOpens: number;
+};
+
+export type NativeAdPlacementPolicyInput = {
+  placement: "COMMUNITY_FEED";
+  enabled: boolean;
+  dailyDeliveryCap: number;
+  minimumSecondsBetweenDeliveries: number;
+  minimumFeedItemCount: number;
+  earliestPosition: number;
+  latestPosition: number;
+  startsAt: string | null;
+  endsAt: string | null;
+};
+
+export type NativeAdPlacementPolicy = NativeAdPlacementPolicyInput & {
+  updatedAt: string;
+  metrics: NativeAdPlacementMetrics;
+};
+
 export type NativeAdvertisementUserStatusFilter = "" | "OPENED" | "NOT_OPENED";
 
 export type NativeAdvertisementUserSummary = {

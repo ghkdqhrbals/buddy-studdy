@@ -48,18 +48,19 @@ follows the same rules.
 product mappings remain disabled so historical renewals, refunds, and invoices
 can still be reconciled without exposing those products for a new checkout.
 
-| Tier | Monthly allowance | Product | Period | Korea price |
-| --- | ---: | --- | --- | ---: |
-| TIER1 | 30 | Free | — | Free |
-| TIER2 | 300 | `io.github.ghkdqhrbals.StudyMate.tier2.monthly` | P1M | ₩7,900 |
-| TIER3 | 1,000 | `io.github.ghkdqhrbals.StudyMate.tier3.monthly` | P1M | ₩17,900 |
+| Tier | Monthly allowance | Public-feed ads | Product | Period | Korea price |
+| --- | ---: | --- | --- | --- | ---: |
+| TIER1 | 30 | Eligible | Free | — | Free |
+| TIER2 | 300 | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier2.monthly` | P1M | ₩7,900 |
+| TIER3 | 1,000 | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier3.monthly` | P1M | ₩17,900 |
 
 The mapping is server-owned. A client-supplied product that is absent, disabled,
 or has a different product type is rejected before an invoice is written.
 
 Before the iOS app offers the purchase action, the membership screen shows the
 selected tier name, StoreKit-localized monthly price, one-month duration, exact
-monthly question allowance, automatic-renewal disclosure, and localized links
+monthly question allowance, the ad-free public-feed benefit for paid tiers,
+automatic-renewal disclosure, and localized links
 to the Terms of Use and Privacy Policy. Purchase, restore, and management remain
 separate user actions on the same screen.
 

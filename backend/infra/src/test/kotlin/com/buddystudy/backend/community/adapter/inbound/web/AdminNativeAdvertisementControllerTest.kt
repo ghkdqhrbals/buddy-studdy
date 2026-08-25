@@ -4,12 +4,38 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignSummary
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementRankingPolicySummary
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementMetrics
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementPolicyResponse
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.test.web.reactive.server.WebTestClient
+import java.time.Instant
 
 class AdminNativeAdvertisementControllerTest {
+    @Test
+    fun `placement policy endpoint exposes controls and thirty day provider metrics`(): Unit = runBlocking {
+        val policies = FakeAdminNativeAdPlacementPolicyWebPort()
+        val client = WebTestClient.bindToController(AdminNativeAdPlacementPolicyController(policies)).build()
+
+        client.get()
+            .uri("/api/v1/admin/native-ad-placement-policies/COMMUNITY_FEED")
+            .header("Authorization", "Bearer operator-token")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.placement").isEqualTo("COMMUNITY_FEED")
+            .jsonPath("$.enabled").isEqualTo(false)
+            .jsonPath("$.dailyDeliveryCap").isEqualTo(2)
+            .jsonPath("$.minimumSecondsBetweenDeliveries").isEqualTo(21600)
+            .jsonPath("$.metrics.slotDeliveries").isEqualTo(9)
+            .jsonPath("$.metrics.adMobImpressions").isEqualTo(5)
+            .jsonPath("$.metrics.fallbackSelections").isEqualTo(2)
+
+        assertThat(policies.adminToken).isEqualTo("operator-token")
+        assertThat(policies.placement).isEqualTo("COMMUNITY_FEED")
+    }
+
     @Test
     fun `campaign endpoint binds and forwards every list filter`(): Unit = runBlocking {
         val advertisements = FakeAdminNativeAdvertisementWebPort()
@@ -100,6 +126,41 @@ class AdminNativeAdvertisementControllerTest {
             limit: Int,
             offset: Int,
         ): AdminNativeAdvertisementUserPage = error("Not used in this test.")
+    }
+
+    private class FakeAdminNativeAdPlacementPolicyWebPort : AdminNativeAdPlacementPolicyWebPort {
+        var adminToken: String? = null
+        var placement: String? = null
+
+        override suspend fun policy(adminToken: String, placement: String): AdminNativeAdPlacementPolicyResponse {
+            this.adminToken = adminToken
+            this.placement = placement
+            return response()
+        }
+
+        override suspend fun updatePolicy(
+            adminToken: String,
+            placement: String,
+            request: AdminNativeAdPlacementPolicyRequest,
+        ): AdminNativeAdPlacementPolicyResponse = response()
+
+        private fun response() = AdminNativeAdPlacementPolicyResponse(
+            placement = "COMMUNITY_FEED",
+            enabled = false,
+            dailyDeliveryCap = 2,
+            minimumSecondsBetweenDeliveries = 21_600,
+            minimumFeedItemCount = 4,
+            earliestPosition = 2,
+            latestPosition = 7,
+            startsAt = null,
+            endsAt = null,
+            updatedAt = Instant.parse("2026-08-25T00:00:00Z"),
+            metrics = AdminNativeAdPlacementMetrics(
+                slotDeliveries = 9,
+                adMobImpressions = 5,
+                fallbackSelections = 2,
+            ),
+        )
     }
 
     private data class CampaignRequest(

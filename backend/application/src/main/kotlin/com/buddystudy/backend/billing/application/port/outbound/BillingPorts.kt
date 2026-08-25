@@ -57,6 +57,8 @@ interface BillingLedgerPort {
     suspend fun enabledTierProduct(productId: String): BillingTierProduct?
     /** Resolves disabled legacy products so renewals and refunds remain processable. */
     suspend fun tierProduct(productId: String): BillingTierProduct?
+    /** Resolves the effective tier's advertising entitlement; missing policy must fail closed. */
+    suspend fun adFreeForTier(tierCode: String): Boolean?
     suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection?
 
     /** Creates the event-sourced NORMAL/WAITING invoice before StoreKit is opened. */

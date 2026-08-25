@@ -217,6 +217,8 @@ class SecurityIntegrationTest : MySqlIntegrationTestSupport() {
         termsRequest.code = "TERMS_OF_SERVICE"
         termsRequest.action = "AGREED"
         termsRequest.source = "PROFILE"
+        termsRequest.version = "2026-08-25"
+        termsRequest.contentHash = "sha256:privacy"
 
         assertThat(preferenceRequest.resolvedType()).isEqualTo("QUESTION_NOTIFICATION")
         assertThat(preferenceRequest.key).isEqualTo("question_notification")
@@ -225,6 +227,8 @@ class SecurityIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(termsRequest.code).isEqualTo("TERMS_OF_SERVICE")
         assertThat(termsRequest.action).isEqualTo("AGREED")
         assertThat(termsRequest.source).isEqualTo("PROFILE")
+        assertThat(termsRequest.version).isEqualTo("2026-08-25")
+        assertThat(termsRequest.contentHash).isEqualTo("sha256:privacy")
     }
 
     private fun get(path: String, bearerToken: String? = null): HttpResponse<String> {

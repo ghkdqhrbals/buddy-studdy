@@ -10,9 +10,13 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementRankingPolicySummary
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserSummary
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementPolicyCommand
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementPolicyResponse
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementMetrics
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementDeepLinkPolicy
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementImagePolicy
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementRankingPolicy
+import com.buddystudy.backend.community.application.policy.NativeAdPlacementPolicy
 import com.buddystudy.backend.community.application.port.inbound.AdminNativeAdvertisementUseCase
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementCampaignPerformance
@@ -23,6 +27,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.Duration
 import java.util.Locale
 
 @Service
@@ -130,6 +135,69 @@ class AdminNativeAdvertisementService(
         return page.copy(users = page.users.map { it.redactedIdentity() })
     }
 
+    @Transactional(readOnly = true)
+    override suspend fun placementPolicy(placement: String): AdminNativeAdPlacementPolicyResponse {
+        val normalizedPlacement = normalizePlacement(placement)
+        val policy = advertisements.findPlacementPolicy(normalizedPlacement)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Native advertisement placement policy not found.")
+        return policy.toResponse(
+            advertisements.placementMetrics(
+                placement = normalizedPlacement,
+                since = Instant.now().minus(Duration.ofDays(NativeAdPlacementPolicy.metricsWindowDays)),
+            )
+        )
+    }
+
+    @Transactional
+    override suspend fun updatePlacementPolicy(
+        placement: String,
+        command: AdminNativeAdPlacementPolicyCommand,
+    ): AdminNativeAdPlacementPolicyResponse {
+        val normalizedPlacement = normalizePlacement(placement)
+        val normalizedCommandPlacement = normalizePlacement(command.placement)
+        val validWindow = command.endsAt?.let { end -> command.startsAt?.let(end::isAfter) ?: true } != false
+        val valid = normalizedCommandPlacement == normalizedPlacement &&
+            command.dailyDeliveryCap in 0..100 &&
+            command.minimumSecondsBetweenDeliveries in NativeAdPlacementPolicy.minimumSecondsBetweenDeliveries..2_592_000 &&
+            command.minimumFeedItemCount in NativeAdPlacementPolicy.minimumFeedItemCount..100 &&
+            command.earliestPosition in NativeAdPlacementPolicy.earliestPosition..99 &&
+            command.latestPosition in command.earliestPosition..99 &&
+            validWindow
+        if (!valid) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Native advertisement placement policy is invalid.",
+            )
+        }
+        val policy = advertisements.findPlacementPolicy(normalizedPlacement)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Native advertisement placement policy not found.")
+        policy.enabled = command.enabled
+        policy.dailyDeliveryCap = command.dailyDeliveryCap
+        policy.minimumSecondsBetweenDeliveries = command.minimumSecondsBetweenDeliveries
+        policy.minimumFeedItemCount = command.minimumFeedItemCount
+        policy.earliestPosition = command.earliestPosition
+        policy.latestPosition = command.latestPosition
+        policy.startsAt = command.startsAt
+        policy.endsAt = command.endsAt
+        policy.updatedAt = Instant.now()
+        val saved = advertisements.savePlacementPolicy(policy)
+        return saved.toResponse(
+            advertisements.placementMetrics(
+                placement = normalizedPlacement,
+                since = Instant.now().minus(Duration.ofDays(NativeAdPlacementPolicy.metricsWindowDays)),
+            )
+        )
+    }
+
+    private fun normalizePlacement(placement: String): String {
+        val normalized = placement.trim().uppercase(Locale.ROOT)
+        if (normalized != NativeAdPlacementPolicy.communityFeed) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Native advertisement placement policy not found.")
+        }
+        return normalized
+    }
+
     private fun validateAndNormalize(command: AdminNativeAdvertisementCampaignCommand): AdminNativeAdvertisementCampaignCommand {
         val normalized = command.copy(
             campaignKey = command.campaignKey.trim().lowercase(),
@@ -228,6 +296,22 @@ class AdminNativeAdvertisementService(
         val ADMIN_USER_STATUSES = setOf("OPENED", "NOT_OPENED")
     }
 }
+
+private fun com.buddystudy.community.domain.entity.NativeAdPlacementPolicyEntity.toResponse(
+    metrics: AdminNativeAdPlacementMetrics,
+) = AdminNativeAdPlacementPolicyResponse(
+    placement = placement,
+    enabled = enabled,
+    dailyDeliveryCap = dailyDeliveryCap,
+    minimumSecondsBetweenDeliveries = minimumSecondsBetweenDeliveries,
+    minimumFeedItemCount = minimumFeedItemCount,
+    earliestPosition = earliestPosition,
+    latestPosition = latestPosition,
+    startsAt = startsAt,
+    endsAt = endsAt,
+    updatedAt = updatedAt,
+    metrics = metrics,
+)
 
 private fun String?.toCampaignStatus(): AdminNativeAdvertisementCampaignStatus? {
     val normalized = this?.trim()?.uppercase(Locale.ROOT)?.takeIf(String::isNotEmpty) ?: return null

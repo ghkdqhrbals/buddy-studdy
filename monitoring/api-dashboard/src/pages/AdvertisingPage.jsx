@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
 import {
@@ -20,6 +20,18 @@ import { InlineNotice } from "../components/InlineNotice.jsx";
 import { formatDateTime } from "../lib/format.js";
 
 const PAGE_SIZE = 20;
+const COMMUNITY_FEED_PLACEMENT = "COMMUNITY_FEED";
+const DEFAULT_PLACEMENT_POLICY = {
+  placement: COMMUNITY_FEED_PLACEMENT,
+  enabled: false,
+  dailyDeliveryCap: 2,
+  minimumSecondsBetweenDeliveries: 21_600,
+  minimumFeedItemCount: 4,
+  earliestPosition: 2,
+  latestPosition: 7,
+  startsAt: null,
+  endsAt: null,
+};
 const DEFAULT_FORM = {
   campaignKey: "",
   audience: "ALL",
@@ -90,6 +102,23 @@ function campaignSchedule(campaign) {
   return `Ends ${formatDateTime(campaign.endsAt)}`;
 }
 
+function placementSchedule(policy) {
+  if (!policy?.startsAt && !policy?.endsAt) return "Always eligible when enabled";
+  if (policy.startsAt && policy.endsAt) {
+    return `${formatDateTime(policy.startsAt)} – ${formatDateTime(policy.endsAt)}`;
+  }
+  if (policy.startsAt) return `Starts ${formatDateTime(policy.startsAt)}`;
+  return `Ends ${formatDateTime(policy.endsAt)}`;
+}
+
+function placementStatus(policy) {
+  if (!policy?.enabled || Number(policy.dailyDeliveryCap) === 0) return "OFF";
+  const now = Date.now();
+  if (policy.startsAt && new Date(policy.startsAt).getTime() > now) return "SCHEDULED";
+  if (policy.endsAt && new Date(policy.endsAt).getTime() <= now) return "ENDED";
+  return "ACTIVE";
+}
+
 function inputFromCampaign(campaign) {
   return Object.fromEntries(Object.keys(DEFAULT_FORM).map((key) => [key, campaign[key] ?? DEFAULT_FORM[key]]));
 }
@@ -153,6 +182,29 @@ function validate(form) {
   return errors;
 }
 
+function validatePlacementPolicy(form) {
+  const errors = [];
+  if (!Number.isInteger(form.dailyDeliveryCap) || form.dailyDeliveryCap < 0 || form.dailyDeliveryCap > 100) {
+    errors.push("Daily delivery cap must be between 0 and 100.");
+  }
+  if (!Number.isInteger(form.minimumSecondsBetweenDeliveries) || form.minimumSecondsBetweenDeliveries < 60 || form.minimumSecondsBetweenDeliveries > 2_592_000) {
+    errors.push("Minimum repeat gap must be between 60 seconds and 30 days.");
+  }
+  if (!Number.isInteger(form.minimumFeedItemCount) || form.minimumFeedItemCount < 4 || form.minimumFeedItemCount > 100) {
+    errors.push("At least four public questions are required.");
+  }
+  if (!Number.isInteger(form.earliestPosition) || form.earliestPosition < 2 || form.earliestPosition > 99) {
+    errors.push("Earliest position must be between 2 and 99.");
+  }
+  if (!Number.isInteger(form.latestPosition) || form.latestPosition < form.earliestPosition || form.latestPosition > 99) {
+    errors.push("Latest position must be between the earliest position and 99.");
+  }
+  if (form.startsAt && form.endsAt && new Date(form.endsAt) <= new Date(form.startsAt)) {
+    errors.push("Policy end time must be later than its start time.");
+  }
+  return errors;
+}
+
 function NumberField({ label, hint, value, onChange, min = 0, max, step = 1 }) {
   return (
     <label className="field">
@@ -167,6 +219,141 @@ function NumberField({ label, hint, value, onChange, min = 0, max, step = 1 }) {
       />
       {hint ? <small>{hint}</small> : null}
     </label>
+  );
+}
+
+function PlacementPolicyEditor({ policy, onClose, onSaved }) {
+  const [form, setForm] = useState(() => ({
+    ...DEFAULT_PLACEMENT_POLICY,
+    ...policy,
+    metrics: undefined,
+    updatedAt: undefined,
+  }));
+  const [attempted, setAttempted] = useState(false);
+  const errors = validatePlacementPolicy(form);
+  const mutation = useMutation({
+    mutationFn: () => adminFetch(`/native-ad-placement-policies/${COMMUNITY_FEED_PLACEMENT}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        placement: COMMUNITY_FEED_PLACEMENT,
+        enabled: form.enabled,
+        dailyDeliveryCap: form.dailyDeliveryCap,
+        minimumSecondsBetweenDeliveries: form.minimumSecondsBetweenDeliveries,
+        minimumFeedItemCount: form.minimumFeedItemCount,
+        earliestPosition: form.earliestPosition,
+        latestPosition: form.latestPosition,
+        startsAt: form.startsAt,
+        endsAt: form.endsAt,
+      }),
+    }),
+    onSuccess: onSaved,
+  });
+
+  function update(key, value) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function submit(event) {
+    event.preventDefault();
+    setAttempted(true);
+    if (errors.length === 0) mutation.mutate();
+  }
+
+  return (
+    <DetailDrawer
+      open
+      title="Edit AdMob feed policy"
+      subtitle="Server-owned delivery limits for the free community feed"
+      onClose={onClose}
+    >
+      <form className="advertising-editor" onSubmit={submit} noValidate>
+        <section className="drawer-section">
+          <h3>Availability</h3>
+          <div className="form-grid">
+            <label className="advertising-toggle">
+              <input type="checkbox" checked={form.enabled} onChange={(event) => update("enabled", event.target.checked)} />
+              <span>
+                <strong>AdMob slot enabled</strong>
+                <small>Keep this off until the approved iOS build is publicly available.</small>
+              </span>
+            </label>
+            <label className="field">
+              <span>Starts at</span>
+              <input type="datetime-local" value={localDateTime(form.startsAt)} onChange={(event) => update("startsAt", instant(event.target.value))} />
+            </label>
+            <label className="field">
+              <span>Ends at</span>
+              <input type="datetime-local" value={localDateTime(form.endsAt)} onChange={(event) => update("endsAt", instant(event.target.value))} />
+            </label>
+          </div>
+        </section>
+
+        <section className="drawer-section">
+          <h3>Frequency and placement</h3>
+          <div className="form-grid advertising-ranking-grid">
+            <NumberField label="Daily delivery cap" hint="Per user, reset at UTC midnight · 0 disables" value={form.dailyDeliveryCap} max={100} onChange={(value) => update("dailyDeliveryCap", value)} />
+            <NumberField label="Minimum repeat gap" hint="Hours per user · minimum 1 minute" value={form.minimumSecondsBetweenDeliveries / 3600} min={1 / 60} max={720} step={1 / 60} onChange={(value) => update("minimumSecondsBetweenDeliveries", Math.round(value * 3600))} />
+            <NumberField label="Minimum public items" hint="At least two questions before and one after" value={form.minimumFeedItemCount} min={4} max={100} onChange={(value) => update("minimumFeedItemCount", value)} />
+            <div className="advertising-position-fields">
+              <NumberField label="Earliest position" hint="0-based · minimum 2" value={form.earliestPosition} min={2} max={99} onChange={(value) => update("earliestPosition", value)} />
+              <NumberField label="Latest position" hint="0-based · server still protects the final row" value={form.latestPosition} min={2} max={99} onChange={(value) => update("latestPosition", value)} />
+            </div>
+          </div>
+        </section>
+
+        <InlineNotice tone="info">
+          AdMob is always attempted first. A compatible house campaign is selected only after consent, no-fill, request failure, or timeout prevents an AdMob render. TIER2 and TIER3 never receive a slot.
+        </InlineNotice>
+        {attempted && errors.length ? (
+          <InlineNotice tone="danger">
+            <span><strong>Review the placement policy before saving.</strong><br />{errors.join(" ")}</span>
+          </InlineNotice>
+        ) : null}
+        {mutation.error ? <InlineNotice tone="danger">{mutation.error.message}</InlineNotice> : null}
+        <div className="drawer-form-actions advertising-editor-actions">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" busy={mutation.isPending}>Save policy</Button>
+        </div>
+      </form>
+    </DetailDrawer>
+  );
+}
+
+function PlacementPolicyPanel({ policy, loading, error, onEdit }) {
+  const status = loading ? "LOADING" : error || !policy ? "UNKNOWN" : placementStatus(policy);
+  const metrics = policy?.metrics || {};
+  return (
+    <section className="workspace-section advertising-placement-policy">
+      <div className="section-heading">
+        <div>
+          <h2>AdMob community-feed slot</h2>
+          <p>One server-positioned slot on the first unfiltered page for anonymous and TIER1 users.</p>
+        </div>
+        <div className="advertising-placement-actions">
+          <StatusBadge tone={statusTone(status)}>{status}</StatusBadge>
+          <Button variant="secondary" icon={SlidersHorizontal} onClick={onEdit} disabled={!policy || loading || Boolean(error)}>Edit policy</Button>
+        </div>
+      </div>
+      {error ? <InlineNotice tone="danger">{error.message}</InlineNotice> : null}
+      {!error && policy ? (
+        <>
+          <div className="advertising-placement-facts">
+            <div><span>Daily cap</span><strong>{Number(policy.dailyDeliveryCap || 0).toLocaleString()}</strong><small>per user · UTC</small></div>
+            <div><span>Repeat gap</span><strong>{`${Number(policy.minimumSecondsBetweenDeliveries || 0) / 3600}h`}</strong><small>minimum 60 seconds</small></div>
+            <div><span>Feed rule</span><strong>{`${policy.minimumFeedItemCount}+ · ${policy.earliestPosition}–${policy.latestPosition}`}</strong><small>items · 0-based position</small></div>
+            <div><span>Schedule</span><strong>{placementSchedule(policy)}</strong><small>{policy.updatedAt ? `Updated ${formatDateTime(policy.updatedAt)}` : "Default OFF"}</small></div>
+          </div>
+          <div className="metric-strip advertising-provider-metrics">
+            <div><span>30d slot deliveries</span><strong>{Number(metrics.slotDeliveries || 0).toLocaleString()}</strong></div>
+            <div><span>AdMob seen</span><strong>{Number(metrics.adMobImpressions || 0).toLocaleString()}</strong></div>
+            <div><span>AdMob clicks</span><strong>{Number(metrics.adMobClicks || 0).toLocaleString()}</strong></div>
+            <div><span>Fallback selected</span><strong>{Number(metrics.fallbackSelections || 0).toLocaleString()}</strong></div>
+            <div><span>Fallback seen</span><strong>{Number(metrics.fallbackImpressions || 0).toLocaleString()}</strong></div>
+            <div><span>Fallback opens</span><strong>{Number(metrics.fallbackOpens || 0).toLocaleString()}</strong></div>
+          </div>
+        </>
+      ) : null}
+    </section>
   );
 }
 
@@ -464,6 +651,12 @@ function AdvertisingWorkspace() {
   const [status, setStatus] = useState("");
   const [audience, setAudience] = useState("");
   const [editor, setEditor] = useState(undefined);
+  const [isPlacementEditorOpen, setPlacementEditorOpen] = useState(false);
+
+  const placementQuery = useQuery({
+    queryKey: ["admin", "native-ad-placement-policy", COMMUNITY_FEED_PLACEMENT],
+    queryFn: () => adminFetch(`/native-ad-placement-policies/${COMMUNITY_FEED_PLACEMENT}`),
+  });
 
   const campaignsQuery = useQuery({
     queryKey: ["admin", "native-ad-campaigns", query, status, audience, offset],
@@ -515,6 +708,7 @@ function AdvertisingWorkspace() {
 
   function refresh() {
     queryClient.invalidateQueries({ queryKey: ["admin", "native-ad-campaigns"] });
+    queryClient.invalidateQueries({ queryKey: ["admin", "native-ad-placement-policy", COMMUNITY_FEED_PLACEMENT] });
   }
 
   return (
@@ -529,6 +723,13 @@ function AdvertisingWorkspace() {
             <Button icon={Plus} onClick={() => setEditor(null)}>New campaign</Button>
           </>
         )}
+      />
+
+      <PlacementPolicyPanel
+        policy={placementQuery.data}
+        loading={placementQuery.isLoading}
+        error={placementQuery.error}
+        onEdit={() => setPlacementEditorOpen(true)}
       />
 
       <div className="metric-strip advertising-metric-strip">
@@ -602,6 +803,17 @@ function AdvertisingWorkspace() {
             setEditor(undefined);
             setOffset(0);
             refresh();
+          }}
+        />
+      ) : null}
+
+      {isPlacementEditorOpen && placementQuery.data && !placementQuery.error ? (
+        <PlacementPolicyEditor
+          policy={placementQuery.data}
+          onClose={() => setPlacementEditorOpen(false)}
+          onSaved={() => {
+            setPlacementEditorOpen(false);
+            queryClient.invalidateQueries({ queryKey: ["admin", "native-ad-placement-policy", COMMUNITY_FEED_PLACEMENT] });
           }}
         />
       ) : null}

@@ -22,6 +22,8 @@ class NativeAdvertisementPersistenceAdapterTest {
     private val adapter = NativeAdvertisementPersistenceAdapter(
         campaigns = mock(NativeAdvertisementCampaignRepository::class.java),
         selections = mock(NativeAdvertisementSelectionRepository::class.java),
+        placementPolicies = mock(NativeAdPlacementPolicyRepository::class.java),
+        nativeAdSlots = mock(NativeAdSlotRepository::class.java),
         database = database,
     )
 
@@ -30,7 +32,10 @@ class NativeAdvertisementPersistenceAdapterTest {
         runBlocking {
             execute("drop table if exists native_ad_campaign_suppressions")
             execute("drop table if exists native_ad_selection_history")
+            execute("drop table if exists native_ad_slots")
             execute("drop table if exists native_ad_campaigns")
+            execute("drop table if exists user_entitlement_projection")
+            execute("drop table if exists user_membership_tiers")
             execute("drop table if exists users")
             execute(
                 """
@@ -39,6 +44,23 @@ class NativeAdvertisementPersistenceAdapterTest {
                     status varchar(24) not null,
                     email varchar(320) not null,
                     display_name varchar(120) not null
+                )
+                """.trimIndent(),
+            )
+            execute(
+                """
+                create table user_membership_tiers (
+                    tier_code varchar(64) primary key,
+                    ad_free boolean not null
+                )
+                """.trimIndent(),
+            )
+            execute(
+                """
+                create table user_entitlement_projection (
+                    user_id bigint primary key,
+                    tier_code varchar(64) not null,
+                    access_status varchar(32) not null
                 )
                 """.trimIndent(),
             )
@@ -93,14 +115,34 @@ class NativeAdvertisementPersistenceAdapterTest {
             )
             execute(
                 """
+                create table native_ad_slots (
+                    id bigint auto_increment primary key,
+                    slot_id varchar(36) not null unique,
+                    user_id bigint not null,
+                    device_id varchar(255) not null,
+                    placement varchar(48) not null,
+                    language varchar(8) not null,
+                    position int not null,
+                    feed_item_count int not null,
+                    delivered_at timestamp not null,
+                    ad_mob_impression_at timestamp null,
+                    ad_mob_click_at timestamp null
+                )
+                """.trimIndent(),
+            )
+            execute(
+                """
                 create table native_ad_selection_history (
                     id bigint auto_increment primary key,
+                    selection_id varchar(36) null,
                     campaign_id bigint not null,
                     user_id bigint not null,
                     device_id varchar(255) not null,
+                    placement varchar(48) not null default 'COMMUNITY_FEED',
                     selected_at timestamp not null,
                     impression_at timestamp null,
-                    viewed_at timestamp null
+                    viewed_at timestamp null,
+                    native_ad_slot_id varchar(36) null
                 )
                 """.trimIndent(),
             )
@@ -134,6 +176,14 @@ class NativeAdvertisementPersistenceAdapterTest {
                     (12, 'ACTIVE', 'other@example.com', 'Other')
                 """.trimIndent(),
             )
+            execute("insert into user_membership_tiers (tier_code, ad_free) values ('TIER1', false), ('TIER2', true)")
+            execute(
+                """
+                insert into user_entitlement_projection (user_id, tier_code, access_status) values
+                    (10, 'TIER2', 'ACTIVE'),
+                    (12, 'TIER1', 'UNKNOWN')
+                """.trimIndent(),
+            )
             execute(
                 """
                 insert into native_ad_selection_history
@@ -147,6 +197,54 @@ class NativeAdvertisementPersistenceAdapterTest {
                 """.trimIndent(),
             )
         }
+    }
+
+    @Test
+    fun `ad eligibility includes anonymous users and fails closed for unresolved active accounts`(): Unit = runBlocking {
+        assertThat(adapter.isAdFree(11)).isFalse()
+        assertThat(adapter.isAdFree(10)).isTrue()
+        assertThat(adapter.isAdFree(12)).isNull()
+        assertThat(adapter.isAdFree(999)).isNull()
+    }
+
+    @Test
+    fun `placement metrics use each delivery selection and event timestamp for the thirty day window`(): Unit = runBlocking {
+        val since = Instant.parse("2026-07-26T00:00:00Z")
+        execute(
+            """
+            insert into native_ad_slots (
+                slot_id, user_id, device_id, placement, language, position, feed_item_count,
+                delivered_at, ad_mob_impression_at, ad_mob_click_at
+            ) values
+                ('slot-old-delivery', 10, 'device-a', 'COMMUNITY_FEED', 'ko', 2, 4,
+                 timestamp '2026-07-25 00:00:00', timestamp '2026-07-27 00:00:00', timestamp '2026-07-27 01:00:00'),
+                ('slot-recent-delivery', 10, 'device-a', 'COMMUNITY_FEED', 'ko', 2, 4,
+                 timestamp '2026-07-27 00:00:00', timestamp '2026-07-25 00:00:00', timestamp '2026-07-25 01:00:00')
+            """.trimIndent(),
+        )
+        execute(
+            """
+            insert into native_ad_selection_history (
+                selection_id, campaign_id, user_id, device_id, placement, selected_at,
+                impression_at, viewed_at, native_ad_slot_id
+            ) values
+                ('fallback-old-selection', 7, 10, 'device-a', 'COMMUNITY_FEED',
+                 timestamp '2026-07-25 00:00:00', timestamp '2026-07-27 00:00:00',
+                 timestamp '2026-07-27 01:00:00', 'slot-old-delivery'),
+                ('fallback-recent-selection', 7, 10, 'device-a', 'COMMUNITY_FEED',
+                 timestamp '2026-07-27 00:00:00', timestamp '2026-07-25 00:00:00',
+                 timestamp '2026-07-25 01:00:00', 'slot-recent-delivery')
+            """.trimIndent(),
+        )
+
+        val metrics = adapter.placementMetrics("COMMUNITY_FEED", since)
+
+        assertThat(metrics.slotDeliveries).isEqualTo(1)
+        assertThat(metrics.adMobImpressions).isEqualTo(1)
+        assertThat(metrics.adMobClicks).isEqualTo(1)
+        assertThat(metrics.fallbackSelections).isEqualTo(1)
+        assertThat(metrics.fallbackImpressions).isEqualTo(1)
+        assertThat(metrics.fallbackOpens).isEqualTo(1)
     }
 
     @Test

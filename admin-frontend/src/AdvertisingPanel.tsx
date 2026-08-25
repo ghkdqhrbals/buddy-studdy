@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   createNativeAdvertisementCampaign,
+  fetchNativeAdPlacementPolicy,
   fetchNativeAdvertisementCampaigns,
   fetchNativeAdvertisementCampaignUsers,
+  updateNativeAdPlacementPolicy,
   updateNativeAdvertisementCampaign,
   type UnauthorizedHandler,
 } from "./api";
 import type {
+  NativeAdPlacementPolicy,
+  NativeAdPlacementPolicyInput,
   NativeAdvertisementCampaignAudienceFilter,
   NativeAdvertisementCampaignFilters,
   NativeAdvertisementCampaignInput,
@@ -268,6 +272,8 @@ export function AdvertisingPanel({
         <button className="primary-button ad-primary-action" onClick={beginCreating}>New campaign</button>
       </section>
 
+      <PlacementPolicyPanel onUnauthorized={onUnauthorized} refreshKey={refreshKey} />
+
       <div className="ad-summary-grid" aria-label="Advertising summary">
         <SummaryCard label="Campaigns" value={totalCount.toLocaleString()} detail={`${campaigns.filter((item) => campaignStatus(item) === "ACTIVE").length} active on this page`} />
         <SummaryCard label="30d feed deliveries" value={pagePerformance.selections.toLocaleString()} detail="Server-added placements on this page" />
@@ -478,6 +484,231 @@ export function AdvertisingPanel({
   function update<Key extends keyof NativeAdvertisementCampaignInput>(key: Key, value: NativeAdvertisementCampaignInput[Key]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
+}
+
+type PlacementPolicyLoadState = "LOADING" | "READY" | "ERROR";
+
+function PlacementPolicyPanel({
+  onUnauthorized,
+  refreshKey,
+}: {
+  onUnauthorized: UnauthorizedHandler;
+  refreshKey: number;
+}) {
+  const [policy, setPolicy] = useState<NativeAdPlacementPolicy | null>(null);
+  const [form, setForm] = useState<NativeAdPlacementPolicyInput | null>(null);
+  const [loadState, setLoadState] = useState<PlacementPolicyLoadState>("LOADING");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [resultAnnouncement, setResultAnnouncement] = useState("");
+  const requestIdRef = useRef(0);
+  const validationRef = useRef<HTMLDivElement | null>(null);
+  const validationErrors = form ? validatePlacementPolicy(form) : [];
+
+  useEffect(() => {
+    void loadPolicy();
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, [refreshKey]);
+
+  async function loadPolicy() {
+    const requestId = ++requestIdRef.current;
+    setLoadState("LOADING");
+    setLoadError(null);
+    setPolicy(null);
+    setForm(null);
+    setAttemptedSubmit(false);
+    setSaving(false);
+    setResultAnnouncement("");
+    try {
+      const loaded = await fetchNativeAdPlacementPolicy(onUnauthorized);
+      if (requestId !== requestIdRef.current) return;
+      setPolicy(loaded);
+      setForm(toPlacementPolicyInput(loaded));
+      setLoadState("READY");
+      setResultAnnouncement("Community feed placement policy loaded.");
+    } catch (cause) {
+      if (requestId !== requestIdRef.current) return;
+      setLoadState("ERROR");
+      setLoadError(message(cause));
+    }
+  }
+
+  async function savePolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form || loadState !== "READY") return;
+    setAttemptedSubmit(true);
+    if (validationErrors.length > 0) {
+      window.requestAnimationFrame(() => {
+        validationRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        validationRef.current?.focus({ preventScroll: true });
+      });
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+    setSaving(true);
+    setLoadError(null);
+    setResultAnnouncement("");
+    try {
+      const saved = await updateNativeAdPlacementPolicy(form, onUnauthorized);
+      if (requestId !== requestIdRef.current) return;
+      setPolicy(saved);
+      setForm(toPlacementPolicyInput(saved));
+      setAttemptedSubmit(false);
+      setResultAnnouncement("Community feed placement policy saved.");
+    } catch (cause) {
+      if (requestId !== requestIdRef.current) return;
+      setPolicy(null);
+      setForm(null);
+      setLoadState("ERROR");
+      setLoadError(`The policy update could not be confirmed. ${message(cause)}`);
+    } finally {
+      if (requestId === requestIdRef.current) setSaving(false);
+    }
+  }
+
+  function resetForm() {
+    if (!policy || saving) return;
+    setForm(toPlacementPolicyInput(policy));
+    setAttemptedSubmit(false);
+  }
+
+  function update<Key extends keyof NativeAdPlacementPolicyInput>(
+    key: Key,
+    value: NativeAdPlacementPolicyInput[Key],
+  ) {
+    setForm((current) => current ? { ...current, [key]: value } : current);
+  }
+
+  const statusLabel = loadState !== "READY" ? "UNKNOWN" : saving ? "SAVING" : policy?.enabled ? "ON" : "OFF";
+
+  return (
+    <section className="app-update-panel ad-placement-panel" aria-labelledby="ad-placement-title" aria-busy={loadState === "LOADING" || saving}>
+      <div className="panel-header app-update-heading ad-placement-heading">
+        <div>
+          <p className="eyebrow">Native placement policy</p>
+          <h2 id="ad-placement-title">Community feed · COMMUNITY_FEED</h2>
+          <p>Controls the shared AdMob-first slot before any fallback campaign is selected.</p>
+        </div>
+        <span className={`status-pill ${statusLabel === "ON" ? "success" : ""}`}>{statusLabel}</span>
+      </div>
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{resultAnnouncement}</p>
+
+      {loadState === "LOADING" ? (
+        <div className="ad-policy-state" role="status">
+          <strong>Checking policy state…</strong>
+          <span>Editing stays locked until the server confirms the current values.</span>
+        </div>
+      ) : null}
+
+      {loadState === "ERROR" ? (
+        <div className="ad-policy-state error" role="alert">
+          <div>
+            <strong>Policy state is UNKNOWN.</strong>
+            <span>{loadError ?? "The placement policy could not be loaded."} Controls remain locked so stale values cannot be saved.</span>
+          </div>
+          <button className="secondary-button" type="button" onClick={() => void loadPolicy()}>Retry</button>
+        </div>
+      ) : null}
+
+      {loadState === "READY" && policy && form ? (
+        <>
+          <div className="ad-provider-metrics" aria-label="Community feed advertising metrics for the last 30 days">
+            <ProviderMetricGroup
+              title="Slot delivery"
+              metrics={[["Slots delivered", policy.metrics.slotDeliveries]]}
+            />
+            <ProviderMetricGroup
+              title="AdMob"
+              metrics={[
+                ["Impressions", policy.metrics.adMobImpressions],
+                ["Clicks", policy.metrics.adMobClicks],
+              ]}
+            />
+            <ProviderMetricGroup
+              title="Fallback campaigns"
+              metrics={[
+                ["Selections", policy.metrics.fallbackSelections],
+                ["Impressions", policy.metrics.fallbackImpressions],
+                ["Destination opens", policy.metrics.fallbackOpens],
+              ]}
+            />
+          </div>
+
+          <form className="ad-placement-form" noValidate onSubmit={(event) => void savePolicy(event)}>
+            {attemptedSubmit && validationErrors.length > 0 ? (
+              <div ref={validationRef} className="ad-validation-summary" role="alert" tabIndex={-1}>
+                <strong>Review {validationErrors.length} policy field{validationErrors.length === 1 ? "" : "s"} before saving.</strong>
+                <ul>{validationErrors.map((item) => <li key={item}>{item}</li>)}</ul>
+              </div>
+            ) : null}
+
+            <fieldset className="ad-form-section" disabled={saving}>
+              <legend>Delivery state and period</legend>
+              <p>The initial rollout stays OFF. Optional times use your local timezone and are stored as UTC.</p>
+              <div className="ad-policy-state-grid">
+                <div className="app-update-field">
+                  <span id="ad-placement-enabled-label">Shared slot delivery</span>
+                  <label className="ad-checkbox">
+                    <input
+                      type="checkbox"
+                      aria-labelledby="ad-placement-enabled-label ad-placement-enabled-option"
+                      checked={form.enabled}
+                      onChange={(event) => update("enabled", event.target.checked)}
+                    />
+                    <span id="ad-placement-enabled-option">Enable COMMUNITY_FEED slots</span>
+                  </label>
+                  <small>Paid ad-free users and uncertain entitlements remain ineligible on the server.</small>
+                </div>
+                <Field label="Starts at" hint="Optional · local time">
+                  <input type="datetime-local" value={toLocalDateTime(form.startsAt)} onChange={(event) => update("startsAt", toInstant(event.target.value))} />
+                </Field>
+                <Field label="Ends at" hint="Optional · local time">
+                  <input type="datetime-local" value={toLocalDateTime(form.endsAt)} onChange={(event) => update("endsAt", toInstant(event.target.value))} />
+                </Field>
+              </div>
+            </fieldset>
+
+            <fieldset className="ad-form-section" disabled={saving}>
+              <legend>Frequency, feed size, and position</legend>
+              <p>All positions are 0-based unified-feed indexes. The server still forces every slot after two questions and before the final question.</p>
+              <div className="ad-policy-rules-grid">
+                <Field label="Daily delivery cap" hint="Per user, per UTC day · 0 disables delivery">
+                  <NumberInput value={form.dailyDeliveryCap} max={100} onChange={(value) => update("dailyDeliveryCap", value)} />
+                </Field>
+                <Field label="Minimum repeat gap" hint="Seconds per user · minimum 60">
+                  <NumberInput value={form.minimumSecondsBetweenDeliveries} min={60} max={2_592_000} onChange={(value) => update("minimumSecondsBetweenDeliveries", value)} />
+                </Field>
+                <Field label="Minimum public questions" hint="At least 4 questions">
+                  <NumberInput value={form.minimumFeedItemCount} min={4} max={100} onChange={(value) => update("minimumFeedItemCount", value)} />
+                </Field>
+                <div className="app-update-field" role="group" aria-labelledby="ad-policy-position-range-label">
+                  <span id="ad-policy-position-range-label">Allowed position range</span>
+                  <div className="ad-position-range">
+                    <NumberInput ariaLabel="Earliest slot position" value={form.earliestPosition} min={2} max={99} onChange={(value) => update("earliestPosition", value)} />
+                    <span>to</span>
+                    <NumberInput ariaLabel="Latest slot position" value={form.latestPosition} min={2} max={99} onChange={(value) => update("latestPosition", value)} />
+                  </div>
+                  <small>Earliest 2 · latest must be within 2–99 and not precede earliest</small>
+                </div>
+              </div>
+            </fieldset>
+
+            <div className="ad-placement-footer">
+              <small>Last confirmed update: <time dateTime={policy.updatedAt}>{formatDate(policy.updatedAt)}</time></small>
+              <div className="app-update-actions">
+                <button className="secondary-button" type="button" disabled={saving} onClick={resetForm}>Reset</button>
+                <button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving…" : "Save placement policy"}</button>
+              </div>
+            </div>
+          </form>
+        </>
+      ) : null}
+    </section>
+  );
 }
 
 function AudienceActivity({
@@ -691,6 +922,28 @@ function SummaryCard({ label, value, detail }: { label: string; value: string; d
   return <article className="ad-summary-card"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
+function ProviderMetricGroup({
+  title,
+  metrics,
+}: {
+  title: string;
+  metrics: ReadonlyArray<readonly [label: string, value: number]>;
+}) {
+  return (
+    <section className="ad-provider-metric-group">
+      <h3>{title}</h3>
+      <dl>
+        {metrics.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value.toLocaleString()}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 function LocaleCard({ language, code, children }: { language: string; code: string; children: ReactNode }) {
   return <section className="ad-locale-card"><header><strong>{language}</strong><span>{code}</span></header>{children}</section>;
 }
@@ -741,6 +994,23 @@ function validateForm(form: NativeAdvertisementCampaignInput): string[] {
   return errors;
 }
 
+function validatePlacementPolicy(form: NativeAdPlacementPolicyInput): string[] {
+  const errors: string[] = [];
+  if (form.placement !== "COMMUNITY_FEED") errors.push("Placement must remain COMMUNITY_FEED.");
+  if (!integerInRange(form.dailyDeliveryCap, 0, 100)) errors.push("Daily delivery cap must be a whole number between 0 and 100.");
+  if (!integerInRange(form.minimumSecondsBetweenDeliveries, 60, 2_592_000)) errors.push("Minimum repeat gap must be a whole number between 60 and 2,592,000 seconds.");
+  if (!integerInRange(form.minimumFeedItemCount, 4, 100)) errors.push("Minimum public questions must be a whole number between 4 and 100.");
+  if (!integerInRange(form.earliestPosition, 2, 99) || !integerInRange(form.latestPosition, 2, 99)) {
+    errors.push("Allowed positions must be whole numbers between 2 and 99.");
+  } else if (form.latestPosition < form.earliestPosition) {
+    errors.push("Latest slot position must be equal to or later than earliest slot position.");
+  }
+  if (form.startsAt && form.endsAt && new Date(form.endsAt) <= new Date(form.startsAt)) {
+    errors.push("Policy end time must be later than its start time.");
+  }
+  return errors;
+}
+
 function integerInRange(value: number, min: number, max: number) {
   return Number.isInteger(value) && value >= min && value <= max;
 }
@@ -766,6 +1036,11 @@ const SUPPORTED_COUPANG_HOSTS = new Set(["coupang.com", "www.coupang.com", "link
 
 function toInput(campaign: NativeAdvertisementCampaignSummary): NativeAdvertisementCampaignInput {
   const { id: _id, placement: _placement, performanceSelections: _selections, performanceViews: _views, performanceViewRate: _rate, createdAt: _created, updatedAt: _updated, ...input } = campaign;
+  return input;
+}
+
+function toPlacementPolicyInput(policy: NativeAdPlacementPolicy): NativeAdPlacementPolicyInput {
+  const { updatedAt: _updatedAt, metrics: _metrics, ...input } = policy;
   return input;
 }
 

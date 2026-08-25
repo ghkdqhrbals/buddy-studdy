@@ -856,6 +856,112 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
     }
 
+    func testTermsAgreementRequestSendsExactDocumentIdentity() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/terms/agreements")
+            let body = try Self.bodyData(from: request)
+            let payload = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: body) as? [String: Any]
+            )
+            XCTAssertEqual(payload["type"] as? String, "PRIVACY_POLICY")
+            XCTAssertEqual(payload["version"] as? String, "2026-08-25")
+            XCTAssertEqual(payload["contentHash"] as? String, "privacy-hash")
+            XCTAssertEqual(payload["action"] as? String, "AGREED")
+            XCTAssertEqual(payload["source"] as? String, "REQUIRED_GATE")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"permissions":[]}"#
+            )
+        }
+
+        _ = try await client.saveTermsAgreement(
+            registration: Self.signedInRegistration,
+            type: .privacyPolicy,
+            version: "2026-08-25",
+            contentHash: "privacy-hash",
+            action: .agreed,
+            source: .requiredGate
+        )
+    }
+
+    func testSignedInTier1ResolvesAdEntitlementBeforeFirstPublicFeedAndKeepsSlot() async throws {
+        let suiteName = "Tier1NativeAdEntitlementTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let requestedPaths = LockedValue<[String]>([])
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            let path = request.url?.path ?? ""
+            requestedPaths.set(requestedPaths.value + [path])
+            switch (request.httpMethod, path) {
+            case ("GET", "/api/v1/billing/status"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.tier1BillingStatusResponse
+                )
+            case ("GET", "/api/v2/public/questions"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nativeAdSlotFeedResponse
+                )
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        await appState.loadCommunityQuestions(reset: true, userInitiated: true)
+
+        XCTAssertEqual(
+            Array(requestedPaths.value.prefix(2)),
+            ["/api/v1/billing/status", "/api/v2/public/questions"]
+        )
+        XCTAssertEqual(appState.billingStatus?.adFree, false)
+        guard case .nativeAdSlot(let slot) = try XCTUnwrap(appState.communityFeedItems.first) else {
+            return XCTFail("TIER1 should retain the server-delivered native ad slot.")
+        }
+        XCTAssertEqual(slot.slotID, "slot-tier1")
+    }
+
+    func testSignedInUnknownAdEntitlementDropsFirstPublicFeedSlot() async throws {
+        let suiteName = "UnknownNativeAdEntitlementTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/billing/status"):
+                return Self.response(for: request, statusCode: 503, body: #"{"message":"unavailable"}"#)
+            case ("GET", "/api/v2/public/questions"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nativeAdSlotFeedResponse
+                )
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        await appState.loadCommunityQuestions(reset: true, userInitiated: true)
+
+        XCTAssertNil(appState.billingStatus)
+        XCTAssertTrue(appState.communityFeedItems.isEmpty)
+    }
+
     func testLikedQuestionsAppStateLoadsPagesSearchesAndPreservesRowsOnRefreshFailure() async throws {
         let suiteName = "LikedQuestionsAppStateTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -931,7 +1037,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
         let client = makeClient { request in
             switch (request.httpMethod, request.url?.path) {
-            case ("GET", "/api/v1/public/questions"):
+            case ("GET", "/api/v2/public/questions"):
                 return Self.response(
                     for: request,
                     statusCode: 200,
@@ -2937,6 +3043,47 @@ final class QuestionGenerationFlowTests: XCTestCase {
           "bonusLimit": 0,
           "anchorType": "ACCOUNT_CREATED",
           "policyVersion": 2
+        }
+        """
+
+    private static let tier1BillingStatusResponse = """
+        {
+          "tierCode": "TIER1",
+          "adFree": false,
+          "source": "FREE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "NONE",
+          "willRenew": false,
+          "synchronizedAt": "2026-08-25T00:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-25T00:00:00Z",
+            "resetAt": "2026-09-25T00:00:00Z",
+            "anchorType": "ACCOUNT_CREATED",
+            "baseLimit": 30,
+            "bonusLimit": 0,
+            "usedCount": 0,
+            "reservedCount": 0,
+            "remainingCount": 30,
+            "policyVersion": 2
+          }
+        }
+        """
+
+    private static let nativeAdSlotFeedResponse = """
+        {
+          "questions": [],
+          "items": [
+            {
+              "type": "NATIVE_AD_SLOT",
+              "nativeAdSlot": {
+                "slotId": "slot-tier1",
+                "placement": "COMMUNITY_FEED"
+              }
+            }
+          ],
+          "totalCount": 0,
+          "limit": 20,
+          "offset": 0
         }
         """
 

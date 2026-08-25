@@ -289,6 +289,8 @@ protocol RemotePushBackendClientProtocol {
     func saveTermsAgreement(
         registration: RemotePushRegistration,
         type: BackendTermsType,
+        version: String?,
+        contentHash: String?,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource
     ) async throws -> BackendPermissionEvaluations
@@ -499,6 +501,21 @@ protocol RemotePushBackendClientProtocol {
         language: AppLanguage
     ) async throws -> CommunityQuestionsResponse
 
+    func fetchNativeAdvertisementFallback(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws -> CommunityNativeAdvertisement?
+
+    func recordAdMobNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws
+
+    func recordAdMobNativeAdvertisementClick(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws
+
     func fetchLikedPublicQuestions(
         registration: RemotePushRegistration,
         query: String?,
@@ -683,6 +700,27 @@ extension RemotePushBackendClientProtocol {
     func suppressNativeAdvertisement(
         registration: RemotePushRegistration,
         selectionID: String
+    ) async throws {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchNativeAdvertisementFallback(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws -> CommunityNativeAdvertisement? {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func recordAdMobNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func recordAdMobNativeAdvertisementClick(
+        registration: RemotePushRegistration,
+        slotID: String
     ) async throws {
         throw RemotePushBackendError.invalidResponse
     }
@@ -980,6 +1018,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func saveTermsAgreement(
         registration: RemotePushRegistration,
         type: BackendTermsType,
+        version: String?,
+        contentHash: String?,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource
     ) async throws -> BackendPermissionEvaluations {
@@ -992,6 +1032,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpBody = try encoder.encode(
             TermsAgreementRequest(
                 type: type.rawValue,
+                version: version,
+                contentHash: contentHash,
                 action: action.rawValue,
                 source: source.rawValue
             )
@@ -1723,7 +1765,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         language: AppLanguage = .korean
     ) async throws -> CommunityQuestionsResponse {
         let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let apiVersion = normalizedQuery.isEmpty ? "v1" : "v2"
+        let apiVersion = "v2"
         let path = normalizedQuery.isEmpty ? ["api", apiVersion, "public", "questions"] : ["api", apiVersion, "public", "questions", "search"]
         var components = URLComponents(
             url: endpoint(path),
@@ -2047,6 +2089,59 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             url: endpoint("api", "v1", "native-ad-selections", selectionID, "view")
         )
         request.httpMethod = "POST"
+        _ = try await perform(request)
+    }
+
+    func fetchNativeAdvertisementFallback(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws -> CommunityNativeAdvertisement? {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v2", "native-ad-slots", slotID, "fallback")
+        )
+        request.httpMethod = "POST"
+        let data = try await perform(request)
+        guard !data.isEmpty else {
+            return nil
+        }
+        return try decoder.decode(CommunityNativeAdvertisement.self, from: data)
+    }
+
+    func recordAdMobNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws {
+        try await recordAdMobNativeAdvertisementEvent(
+            registration: registration,
+            slotID: slotID,
+            action: "impression"
+        )
+    }
+
+    func recordAdMobNativeAdvertisementClick(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws {
+        try await recordAdMobNativeAdvertisementEvent(
+            registration: registration,
+            slotID: slotID,
+            action: "click"
+        )
+    }
+
+    private func recordAdMobNativeAdvertisementEvent(
+        registration: RemotePushRegistration,
+        slotID: String,
+        action: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v2", "native-ad-slots", slotID, action)
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(NativeAdvertisementSlotEventRequest(provider: "ADMOB"))
         _ = try await perform(request)
     }
 
@@ -2593,6 +2688,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private struct TermsAgreementRequest: Encodable {
         var type: String
+        var version: String?
+        var contentHash: String?
         var action: String
         var source: String
     }
@@ -2754,6 +2851,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private struct SubmitFeedbackRequest: Encodable {
         var content: String
+    }
+
+    private struct NativeAdvertisementSlotEventRequest: Encodable {
+        var provider: String
     }
 
     private struct AppleTransactionSyncRequest: Encodable {
@@ -3008,6 +3109,7 @@ struct BackendQuestionQuota: Decodable, Equatable {
 
 struct BackendBillingStatus: Decodable, Equatable {
     var tierCode: String
+    var adFree: Bool
     var source: String
     var accessStatus: String
     var renewalStatus: String
@@ -3022,6 +3124,40 @@ struct BackendBillingStatus: Decodable, Equatable {
 
     var isEntitlementActive: Bool {
         accessStatus == "ACTIVE" || accessStatus == "GRACE_PERIOD"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case tierCode
+        case adFree
+        case source
+        case accessStatus
+        case renewalStatus
+        case productId
+        case startedAt
+        case expiresAt
+        case willRenew
+        case pendingChange
+        case planTransition
+        case synchronizedAt
+        case quota
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        tierCode = try values.decode(String.self, forKey: .tierCode)
+        // Missing entitlement data cannot prove that an authenticated account is ad eligible.
+        adFree = try values.decodeIfPresent(Bool.self, forKey: .adFree) ?? true
+        source = try values.decode(String.self, forKey: .source)
+        accessStatus = try values.decode(String.self, forKey: .accessStatus)
+        renewalStatus = try values.decode(String.self, forKey: .renewalStatus)
+        productId = try values.decodeIfPresent(String.self, forKey: .productId)
+        startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
+        expiresAt = try values.decodeIfPresent(Date.self, forKey: .expiresAt)
+        willRenew = try values.decode(Bool.self, forKey: .willRenew)
+        pendingChange = try values.decodeIfPresent(String.self, forKey: .pendingChange)
+        planTransition = try values.decodeIfPresent(BackendBillingPlanTransition.self, forKey: .planTransition)
+        synchronizedAt = try values.decode(Date.self, forKey: .synchronizedAt)
+        quota = try values.decode(BackendBillingQuotaStatus.self, forKey: .quota)
     }
 }
 
@@ -3044,7 +3180,6 @@ struct BackendBillingQuotaStatus: Decodable, Equatable {
     var reservedCount: Int
     var remainingCount: Int
     var policyVersion: Int
-
 }
 
 struct BackendBillingCatalog: Decodable, Equatable {
@@ -3054,6 +3189,7 @@ struct BackendBillingCatalog: Decodable, Equatable {
 
 struct BackendBillingTierProduct: Decodable, Equatable, Identifiable {
     var tierCode: String
+    var adFree: Bool
     var description: String
     var monthlyQuestionLimit: Int
     var productId: String
@@ -3062,6 +3198,52 @@ struct BackendBillingTierProduct: Decodable, Equatable, Identifiable {
     var sortOrder: Int
 
     var id: String { productId }
+
+    init(
+        tierCode: String,
+        adFree: Bool? = nil,
+        description: String,
+        monthlyQuestionLimit: Int,
+        productId: String,
+        productType: String,
+        billingPeriod: String?,
+        sortOrder: Int
+    ) {
+        self.tierCode = tierCode
+        self.adFree = adFree ?? (tierCode.caseInsensitiveCompare("TIER1") != .orderedSame)
+        self.description = description
+        self.monthlyQuestionLimit = monthlyQuestionLimit
+        self.productId = productId
+        self.productType = productType
+        self.billingPeriod = billingPeriod
+        self.sortOrder = sortOrder
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case tierCode
+        case adFree
+        case description
+        case monthlyQuestionLimit
+        case productId
+        case productType
+        case billingPeriod
+        case sortOrder
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let tierCode = try values.decode(String.self, forKey: .tierCode)
+        self.init(
+            tierCode: tierCode,
+            adFree: try values.decodeIfPresent(Bool.self, forKey: .adFree),
+            description: try values.decode(String.self, forKey: .description),
+            monthlyQuestionLimit: try values.decode(Int.self, forKey: .monthlyQuestionLimit),
+            productId: try values.decode(String.self, forKey: .productId),
+            productType: try values.decode(String.self, forKey: .productType),
+            billingPeriod: try values.decodeIfPresent(String.self, forKey: .billingPeriod),
+            sortOrder: try values.decode(Int.self, forKey: .sortOrder)
+        )
+    }
 }
 
 struct BackendBillingInvoice: Decodable, Equatable, Identifiable {
@@ -3702,6 +3884,7 @@ struct CommunityQuestionsResponse: Decodable, Equatable {
 enum CommunityFeedItem: Decodable, Equatable, Identifiable {
     case publicQuestion(CommunityQuestion)
     case advertisement(CommunityNativeAdvertisement)
+    case nativeAdSlot(CommunityNativeAdvertisementSlot)
 
     var id: String {
         switch self {
@@ -3709,6 +3892,8 @@ enum CommunityFeedItem: Decodable, Equatable, Identifiable {
             return "question-\(question.id)"
         case .advertisement(let advertisement):
             return "advertisement-\(advertisement.selectionID)"
+        case .nativeAdSlot(let slot):
+            return "native-ad-slot-\(slot.slotID)"
         }
     }
 
@@ -3716,11 +3901,13 @@ enum CommunityFeedItem: Decodable, Equatable, Identifiable {
         case type
         case question
         case advertisement
+        case nativeAdSlot
     }
 
     private enum ItemType: String, Decodable {
         case publicQuestion = "PUBLIC_QUESTION"
         case advertisement = "ADVERTISEMENT"
+        case nativeAdSlot = "NATIVE_AD_SLOT"
     }
 
     init(from decoder: Decoder) throws {
@@ -3732,7 +3919,23 @@ enum CommunityFeedItem: Decodable, Equatable, Identifiable {
             self = .advertisement(
                 try container.decode(CommunityNativeAdvertisement.self, forKey: .advertisement)
             )
+        case .nativeAdSlot:
+            self = .nativeAdSlot(
+                try container.decode(CommunityNativeAdvertisementSlot.self, forKey: .nativeAdSlot)
+            )
         }
+    }
+}
+
+struct CommunityNativeAdvertisementSlot: Decodable, Equatable, Identifiable {
+    var slotID: String
+    var placement: String
+
+    var id: String { slotID }
+
+    enum CodingKeys: String, CodingKey {
+        case slotID = "slotId"
+        case placement
     }
 }
 
@@ -4332,6 +4535,21 @@ struct BackendTerms: Codable, Equatable, Identifiable {
             mutable: try container.decodeIfPresent(Bool.self, forKey: .mutable) ?? false,
             agreed: try container.decodeIfPresent(Bool.self, forKey: .agreed) ?? false
         )
+    }
+}
+
+enum BackendTermsPresentationPolicy {
+    static let localizedPrivacyPolicyVersion = "2026-08-25"
+    static let localizedPrivacyPolicyContentHash =
+        "13f2e4925ad4a28f39304570e68309a960c2460b3bdf87466898718648228a21"
+
+    static func documentURL(for term: BackendTerms, language: AppLanguage) -> URL {
+        guard term.type == .privacyPolicy,
+              term.version == localizedPrivacyPolicyVersion,
+              term.contentHash == localizedPrivacyPolicyContentHash else {
+            return term.url
+        }
+        return AppLegalLinks.privacyPolicyURL(language: language)
     }
 }
 

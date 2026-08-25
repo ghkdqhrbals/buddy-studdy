@@ -4,13 +4,19 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignStatus
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserSummary
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementMetrics
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementCampaignPerformance
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementUserRankingSignals
+import com.buddystudy.backend.community.application.port.outbound.NativeAdEligibilityPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotReservation
 import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
 import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
+import com.buddystudy.community.domain.entity.NativeAdPlacementPolicyEntity
+import com.buddystudy.community.domain.entity.NativeAdSlotEntity
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.toList
@@ -21,8 +27,11 @@ import org.springframework.data.r2dbc.repository.Query
 import org.springframework.data.repository.kotlin.CoroutineCrudRepository
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Component
+import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.Duration
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.util.Locale
@@ -46,6 +55,7 @@ interface NativeAdvertisementCampaignRepository : CoroutineCrudRepository<Native
 
 interface NativeAdvertisementSelectionRepository : CoroutineCrudRepository<NativeAdvertisementSelectionEntity, Long> {
     suspend fun findBySelectionId(selectionId: String): NativeAdvertisementSelectionEntity?
+    suspend fun findByNativeAdSlotId(nativeAdSlotId: String): NativeAdvertisementSelectionEntity?
 
     @Query(
         """
@@ -104,12 +114,20 @@ interface NativeAdvertisementSelectionRepository : CoroutineCrudRepository<Nativ
     suspend fun markView(selectionId: String, userId: Long, deviceId: String, at: Instant): Long
 }
 
+interface NativeAdPlacementPolicyRepository : CoroutineCrudRepository<NativeAdPlacementPolicyEntity, String>
+
+interface NativeAdSlotRepository : CoroutineCrudRepository<NativeAdSlotEntity, Long> {
+    suspend fun findBySlotIdAndUserIdAndDeviceId(slotId: String, userId: Long, deviceId: String): NativeAdSlotEntity?
+}
+
 @Component
 class NativeAdvertisementPersistenceAdapter(
     private val campaigns: NativeAdvertisementCampaignRepository,
     private val selections: NativeAdvertisementSelectionRepository,
+    private val placementPolicies: NativeAdPlacementPolicyRepository,
+    private val nativeAdSlots: NativeAdSlotRepository,
     private val database: DatabaseClient,
-) : NativeAdvertisementPort, AdminNativeAdvertisementPort {
+) : NativeAdvertisementPort, NativeAdEligibilityPort, NativeAdSlotPort, AdminNativeAdvertisementPort {
     override suspend fun findEligibleCampaigns(placement: String, now: Instant) =
         campaigns.findEligible(placement, now).toList()
 
@@ -206,6 +224,72 @@ class NativeAdvertisementPersistenceAdapter(
 
     override suspend fun saveSelection(entity: NativeAdvertisementSelectionEntity) = selections.save(entity)
 
+    @Transactional
+    override suspend fun saveFallbackSelectionIfAbsent(
+        slotId: String,
+        entity: NativeAdvertisementSelectionEntity,
+    ): NativeAdvertisementSelectionEntity {
+        val ownedSlot = database.sql(
+            """
+            select slot_id
+            from native_ad_slots
+            where slot_id = :slotId
+              and user_id = :userId
+              and device_id = :deviceId
+            for update
+            """.trimIndent(),
+        ).bind("slotId", slotId)
+            .bind("userId", entity.userId)
+            .bind("deviceId", entity.deviceId)
+            .map { _, _ -> true }
+            .one()
+            .awaitSingleOrNull()
+        check(ownedSlot == true) { "Native advertisement slot is not owned by the fallback selection principal." }
+        findFallbackSelectionForUpdate(slotId)?.let { return it }
+
+        database.sql(
+            """
+            insert ignore into native_ad_selection_history (
+                selection_id, campaign_id, user_id, device_id, placement, language, position,
+                rank_score, selected_at, impression_at, viewed_at, native_ad_slot_id
+            ) values (
+                :selectionId, :campaignId, :userId, :deviceId, :placement, :language, :position,
+                :rankScore, :selectedAt, null, null, :slotId
+            )
+            """.trimIndent(),
+        ).bind("selectionId", entity.selectionId)
+            .bind("campaignId", entity.campaignId)
+            .bind("userId", entity.userId)
+            .bind("deviceId", entity.deviceId)
+            .bind("placement", entity.placement)
+            .bind("language", entity.language)
+            .bind("position", entity.position)
+            .bind("rankScore", entity.rankScore)
+            .bind("selectedAt", entity.selectedAt)
+            .bind("slotId", slotId)
+            .fetch()
+            .rowsUpdated()
+            .awaitSingle()
+        return findFallbackSelectionForUpdate(slotId)
+            ?: error("Native advertisement fallback selection was not persisted.")
+    }
+
+    private suspend fun findFallbackSelectionForUpdate(slotId: String): NativeAdvertisementSelectionEntity? =
+        database.sql(
+            """
+            select id, selection_id, campaign_id, user_id, device_id, placement, language, position,
+                   rank_score, selected_at, impression_at, viewed_at, native_ad_slot_id
+            from native_ad_selection_history
+            where native_ad_slot_id = :slotId
+            for update
+            """.trimIndent(),
+        ).bind("slotId", slotId)
+            .map { row, _ -> row.toNativeAdvertisementSelection() }
+            .one()
+            .awaitSingleOrNull()
+
+    override suspend fun findSelectionByNativeAdSlotId(slotId: String) = selections.findByNativeAdSlotId(slotId)
+
     override suspend fun findSelection(selectionId: String) = selections.findBySelectionId(selectionId)
 
     override suspend fun markImpression(selectionId: String, userId: Long, deviceId: String, at: Instant) {
@@ -243,6 +327,155 @@ class NativeAdvertisementPersistenceAdapter(
             .rowsUpdated()
             .awaitSingle()
     }
+
+    override suspend fun isAdFree(userId: Long): Boolean? = database.sql(
+        """
+        select case when u.status = 'ANONYMOUS' then false else t.ad_free end as ad_free
+        from users u
+        left join user_entitlement_projection e on e.user_id = u.id
+        left join user_membership_tiers t on t.tier_code = e.tier_code
+        where u.id = :userId
+          and (
+              u.status = 'ANONYMOUS'
+              or (
+                  u.status = 'ACTIVE'
+                  and e.access_status in ('ACTIVE', 'GRACE_PERIOD')
+                  and t.tier_code is not null
+              )
+          )
+        """.trimIndent(),
+    ).bind("userId", userId)
+        .map { row, _ -> row.get("ad_free", java.lang.Boolean::class.java)?.booleanValue() ?: true }
+        .one()
+        .awaitSingleOrNull()
+
+    override suspend fun findPlacementPolicy(placement: String) = placementPolicies.findById(placement)
+
+    override suspend fun savePlacementPolicy(entity: NativeAdPlacementPolicyEntity) = placementPolicies.save(entity)
+
+    @Transactional
+    override suspend fun reserveSlot(
+        reservation: NativeAdSlotReservation,
+        dailyDeliveryCap: Int,
+        minimumSecondsBetweenDeliveries: Int,
+    ): NativeAdSlotEntity? {
+        if (dailyDeliveryCap <= 0) return null
+        val deliveryDay = reservation.deliveredAt.atZone(ZoneOffset.UTC).toLocalDate()
+        database.sql(
+            """
+            insert ignore into native_ad_delivery_state (
+                user_id, placement, delivery_day, daily_count, last_delivered_at, updated_at
+            ) values (:userId, :placement, :deliveryDay, 0, null, :updatedAt)
+            """.trimIndent(),
+        ).bind("userId", reservation.userId)
+            .bind("placement", reservation.placement)
+            .bind("deliveryDay", deliveryDay)
+            .bind("updatedAt", reservation.deliveredAt)
+            .fetch()
+            .rowsUpdated()
+            .awaitSingle()
+        val state = database.sql(
+            """
+            select delivery_day, daily_count, last_delivered_at
+            from native_ad_delivery_state
+            where user_id = :userId and placement = :placement
+            for update
+            """.trimIndent(),
+        ).bind("userId", reservation.userId)
+            .bind("placement", reservation.placement)
+            .map { row, _ ->
+                NativeAdDeliveryState(
+                    deliveryDay = row.get("delivery_day", LocalDate::class.java) ?: deliveryDay,
+                    dailyCount = row.int("daily_count"),
+                    lastDeliveredAt = row.nullableInstant("last_delivered_at"),
+                )
+            }
+            .one()
+            .awaitSingle()
+        val countToday = if (state.deliveryDay == deliveryDay) state.dailyCount else 0
+        if (countToday >= dailyDeliveryCap) return null
+        if (state.lastDeliveredAt?.let { Duration.between(it, reservation.deliveredAt).seconds < minimumSecondsBetweenDeliveries } == true) {
+            return null
+        }
+        database.sql(
+            """
+            update native_ad_delivery_state
+            set delivery_day = :deliveryDay,
+                daily_count = :dailyCount,
+                last_delivered_at = :deliveredAt,
+                updated_at = :deliveredAt
+            where user_id = :userId and placement = :placement
+            """.trimIndent(),
+        ).bind("deliveryDay", deliveryDay)
+            .bind("dailyCount", countToday + 1)
+            .bind("deliveredAt", reservation.deliveredAt)
+            .bind("userId", reservation.userId)
+            .bind("placement", reservation.placement)
+            .fetch()
+            .rowsUpdated()
+            .awaitSingle()
+        return nativeAdSlots.save(
+            NativeAdSlotEntity(
+                slotId = reservation.slotId,
+                userId = reservation.userId,
+                deviceId = reservation.deviceId,
+                placement = reservation.placement,
+                language = reservation.language,
+                position = reservation.position,
+                feedItemCount = reservation.feedItemCount,
+                deliveredAt = reservation.deliveredAt,
+            )
+        )
+    }
+
+    override suspend fun findOwnedSlot(slotId: String, userId: Long, deviceId: String) =
+        nativeAdSlots.findBySlotIdAndUserIdAndDeviceId(slotId, userId, deviceId)
+
+    override suspend fun markAdMobImpression(slotId: String, userId: Long, deviceId: String, at: Instant) {
+        database.sql(
+            """
+            update native_ad_slots
+            set ad_mob_impression_at = coalesce(ad_mob_impression_at, :at)
+            where slot_id = :slotId and user_id = :userId and device_id = :deviceId
+            """.trimIndent(),
+        ).bind("at", at).bind("slotId", slotId).bind("userId", userId).bind("deviceId", deviceId)
+            .fetch().rowsUpdated().awaitSingle()
+    }
+
+    override suspend fun markAdMobClick(slotId: String, userId: Long, deviceId: String, at: Instant) {
+        database.sql(
+            """
+            update native_ad_slots
+            set ad_mob_click_at = coalesce(ad_mob_click_at, :at)
+            where slot_id = :slotId and user_id = :userId and device_id = :deviceId
+            """.trimIndent(),
+        ).bind("at", at).bind("slotId", slotId).bind("userId", userId).bind("deviceId", deviceId)
+            .fetch().rowsUpdated().awaitSingle()
+    }
+
+    override suspend fun placementMetrics(placement: String, since: Instant): AdminNativeAdPlacementMetrics =
+        database.sql(
+            """
+            select
+                (select count(*) from native_ad_slots s where s.placement = :placement and s.delivered_at >= :since) slot_deliveries,
+                (select count(*) from native_ad_slots s where s.placement = :placement and s.ad_mob_impression_at >= :since) admob_impressions,
+                (select count(*) from native_ad_slots s where s.placement = :placement and s.ad_mob_click_at >= :since) admob_clicks,
+                (select count(*) from native_ad_selection_history h where h.placement = :placement and h.selected_at >= :since and h.native_ad_slot_id is not null) fallback_selections,
+                (select count(*) from native_ad_selection_history h where h.placement = :placement and h.impression_at >= :since and h.native_ad_slot_id is not null) fallback_impressions,
+                (select count(*) from native_ad_selection_history h where h.placement = :placement and h.viewed_at >= :since and h.native_ad_slot_id is not null) fallback_opens
+            """.trimIndent(),
+        ).bind("placement", placement)
+            .bind("since", since)
+            .map { row, _ ->
+                AdminNativeAdPlacementMetrics(
+                    slotDeliveries = row.long("slot_deliveries"),
+                    adMobImpressions = row.long("admob_impressions"),
+                    adMobClicks = row.long("admob_clicks"),
+                    fallbackSelections = row.long("fallback_selections"),
+                    fallbackImpressions = row.long("fallback_impressions"),
+                    fallbackOpens = row.long("fallback_opens"),
+                )
+            }.one().awaitSingle()
 
     override suspend fun countCampaigns(filter: AdminNativeAdvertisementCampaignFilter): Long {
         val where = campaignFilterWhere(filter)
@@ -350,6 +583,12 @@ class NativeAdvertisementPersistenceAdapter(
         return AdminNativeAdvertisementUserPage(users, total, limit, offset)
     }
 }
+
+private data class NativeAdDeliveryState(
+    val deliveryDay: LocalDate,
+    val dailyCount: Int,
+    val lastDeliveredAt: Instant?,
+)
 
 private data class CampaignHistoryCounts(
     val selections: Long = 0,
@@ -470,6 +709,22 @@ private fun Row.toNativeAdvertisementCampaign() = NativeAdvertisementCampaignEnt
     endsAt = nullableInstant("ends_at"),
     createdAt = instant("created_at"),
     updatedAt = instant("updated_at"),
+)
+
+private fun Row.toNativeAdvertisementSelection() = NativeAdvertisementSelectionEntity(
+    id = long("id"),
+    selectionId = string("selection_id"),
+    campaignId = long("campaign_id"),
+    userId = long("user_id"),
+    deviceId = string("device_id"),
+    placement = string("placement"),
+    language = string("language"),
+    position = int("position"),
+    rankScore = decimal("rank_score"),
+    selectedAt = instant("selected_at"),
+    impressionAt = nullableInstant("impression_at"),
+    viewedAt = nullableInstant("viewed_at"),
+    nativeAdSlotId = get("native_ad_slot_id", String::class.java),
 )
 
 private fun Row.string(name: String): String = get(name, String::class.java).orEmpty()

@@ -853,20 +853,29 @@ private struct MobileRequiredTermsGateSheet: View {
                     requiredGateRow(
                         title: termsTitle(strings.termsOfService, required: true),
                         isChecked: true,
-                        url: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
+                        url: requiredTermsURL(
+                            for: termsOfService,
+                            fallback: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
+                        )
                     )
                     Divider().padding(.leading, 34)
                     requiredGateRow(
                         title: termsTitle(strings.privacyPolicy, required: true),
                         isChecked: true,
-                        url: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
+                        url: requiredTermsURL(
+                            for: privacyPolicy,
+                            fallback: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
+                        )
                     )
                     if marketingTerms != nil {
                         Divider().padding(.leading, 34)
                         requiredGateRow(
                             title: termsTitle(strings.marketingNotifications, required: false),
                             isChecked: marketingAgreed,
-                            url: AppLegalLinks.marketingNotificationURL(language: appState.settings.appLanguage),
+                            url: requiredTermsURL(
+                                for: marketingTerms,
+                                fallback: AppLegalLinks.marketingNotificationURL(language: appState.settings.appLanguage)
+                            ),
                             togglesSelection: true
                         )
                     }
@@ -898,7 +907,7 @@ private struct MobileRequiredTermsGateSheet: View {
                     .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(isSavingAgreements)
+                .disabled(isSavingAgreements || termsOfService == nil || privacyPolicy == nil)
 
                 Button {
                     Task {
@@ -911,7 +920,7 @@ private struct MobileRequiredTermsGateSheet: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.plain)
-                .disabled(isSavingAgreements)
+                .disabled(isSavingAgreements || termsOfService == nil || privacyPolicy == nil)
             }
             .padding(24)
             .navigationTitle(strings.operatingTerms)
@@ -972,6 +981,16 @@ private struct MobileRequiredTermsGateSheet: View {
         return "\(title) [\(suffix)]"
     }
 
+    private func requiredTermsURL(for term: BackendTerms?, fallback: URL) -> URL {
+        guard let term else {
+            return fallback
+        }
+        return BackendTermsPresentationPolicy.documentURL(
+            for: term,
+            language: appState.settings.appLanguage
+        )
+    }
+
     @MainActor
     private func agreeTerms(includeMarketing: Bool) async {
         guard !isSavingAgreements else {
@@ -982,16 +1001,26 @@ private struct MobileRequiredTermsGateSheet: View {
             isSavingAgreements = false
         }
 
-        let requiredTypes: [BackendTermsType] = [.termsOfService, .privacyPolicy]
-        for type in requiredTypes {
-            guard await appState.saveTermsAgreement(type: type, isAgreed: true, source: .requiredGate) else {
+        guard let termsOfService, let privacyPolicy else {
+            return
+        }
+        for term in [termsOfService, privacyPolicy] {
+            guard await appState.saveTermsAgreement(
+                type: term.type,
+                isAgreed: true,
+                version: term.version,
+                contentHash: term.contentHash,
+                source: .requiredGate
+            ) else {
                 return
             }
         }
-        if includeMarketing, marketingTerms != nil {
+        if includeMarketing, let marketingTerms {
             guard await appState.saveTermsAgreement(
                 type: .marketingNotification,
                 isAgreed: true,
+                version: marketingTerms.version,
+                contentHash: marketingTerms.contentHash,
                 source: .requiredGate
             ) else {
                 return
@@ -2146,6 +2175,11 @@ private struct MobileHomeView: View {
                     Label(strings.advertisementNotInterested, systemImage: "eye.slash")
                 }
             }
+        case .nativeAdSlot(let slot):
+            MobileNativeAdvertisementSlotRow(slot: slot, strings: strings)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 10))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
     }
 
@@ -6785,9 +6819,14 @@ private struct MobileMembershipManagementView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(strings.membershipTierName(activeTierCode))
                                 .font(.headline)
-                            Text(strings.monthlyQuestionAllowanceText(quota.monthlyLimit))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(strings.monthlyQuestionAllowanceText(quota.monthlyLimit))
+                                if appState.billingStatus?.adFree == true {
+                                    Text(strings.adFreePublicFeedBenefit)
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         }
 
                         Spacer(minLength: 12)
@@ -6901,9 +6940,14 @@ private struct MobileMembershipManagementView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                Text(strings.monthlyQuestionAllowanceText(group.monthlyQuestionLimit))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(strings.monthlyQuestionAllowanceText(group.monthlyQuestionLimit))
+                    if group.adFree {
+                        Text(strings.adFreePublicFeedBenefit)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 10)
@@ -6929,6 +6973,7 @@ private struct MobileMembershipManagementView: View {
             .map { tierCode, products in
                 MembershipProductGroup(
                     tierCode: tierCode,
+                    adFree: products.first?.tier.adFree ?? false,
                     monthlyQuestionLimit: products.first?.tier.monthlyQuestionLimit ?? 0,
                     products: products.sorted { $0.tier.sortOrder < $1.tier.sortOrder }
                 )
@@ -7113,6 +7158,7 @@ private struct MobileMembershipManagementView: View {
 
 private struct MembershipProductGroup: Identifiable {
     var tierCode: String
+    var adFree: Bool
     var monthlyQuestionLimit: Int
     var products: [AppleBillingStore.TierProduct]
 
@@ -9614,7 +9660,7 @@ private struct MobileHomeCategoryRow: View {
 
 }
 
-private struct MobileNativeAdvertisementRow: View {
+struct MobileNativeAdvertisementRow: View {
     var advertisement: CommunityNativeAdvertisement
     var strings: AppStrings
 
@@ -9725,7 +9771,7 @@ private struct MobileNativeAdvertisementRow: View {
     }
 }
 
-private struct MobileNativeAdvertisementImpressionReporter: View {
+struct MobileNativeAdvertisementImpressionReporter: View {
     var onImpression: @MainActor () async -> Void
 
     @State private var pendingReport: Task<Void, Never>?
@@ -10667,6 +10713,7 @@ private extension View {
 
 private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
+    @ObservedObject private var adMobPrivacyCoordinator = AdMobPrivacyCoordinator.shared
 
     private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
 
@@ -10812,6 +10859,27 @@ private struct MobileSettingsView: View {
                                 systemImage: "speaker.wave.2.fill",
                                 title: strings.notificationSound,
                                 value: appState.draftSettings.notificationSound.displayName(language: appState.draftSettings.appLanguage)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if adMobPrivacyCoordinator.isPrivacyOptionsRequired {
+                    MobileSettingsCard(
+                        title: strings.advertisingPrivacyChoices,
+                        systemImage: "hand.raised"
+                    ) {
+                        Button {
+                            Task {
+                                await adMobPrivacyCoordinator.presentPrivacyOptions()
+                            }
+                        } label: {
+                            MobileSettingsRow(
+                                systemImage: "hand.raised",
+                                title: strings.advertisingPrivacyChoices,
+                                value: strings.advertisingPrivacyChoicesHelp,
+                                showsChevron: true
                             )
                         }
                         .buttonStyle(.plain)

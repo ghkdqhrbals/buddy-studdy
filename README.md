@@ -24,7 +24,7 @@ BuddyStudy was built to help keep that knowledge fresh through small, repeated q
 ## Requirements
 
 - iOS 17 or later
-- Xcode 16 or later
+- Xcode 26.2 or later (required by the pinned Google Mobile Ads 13.8.0 SDK)
 - OpenAI API key
 
 ## Run

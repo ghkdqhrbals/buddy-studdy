@@ -51,6 +51,8 @@ class PermissionPolicyController(
                 type = TermsType.parse(body.resolvedType()),
                 action = body.action,
                 source = body.source,
+                version = body.version,
+                contentHash = body.contentHash,
                 ipAddress = ClientIpResolver.resolve(request),
                 userAgent = userAgent,
                 appVersion = appVersion,
@@ -103,6 +105,8 @@ class TermsAgreementRequest {
     var code: String = ""
     var action: String = "AGREED"
     var source: String = "SETTINGS"
+    var version: String? = null
+    var contentHash: String? = null
 
     suspend fun resolvedType(): String = type.ifBlank { code }
 }

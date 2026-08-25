@@ -2578,11 +2578,11 @@ enum AppLegalLinks {
     static func privacyPolicyURL(language: AppLanguage) -> URL {
         switch language {
         case .korean:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-14.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-25.html")!
         case .english:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-14.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-25.html")!
         case .japanese:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-14.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-25.html")!
         }
     }
 
@@ -2827,6 +2827,13 @@ struct AppStrings {
     var membershipPlans: String { text("멤버십", "Membership", "メンバーシップ") }
     var currentMembership: String { text("현재 멤버십", "Current membership", "現在のメンバーシップ") }
     var activeMembership: String { text("이용 중", "Active", "利用中") }
+    var adFreePublicFeedBenefit: String {
+        text(
+            "광고 없는 공개 피드",
+            "Ad-free public feed",
+            "広告なしの公開フィード"
+        )
+    }
     func startMembership(_ tierCode: String) -> String {
         let tierName = membershipTierName(tierCode)
         return text("\(tierName) 시작하기", "Get \(tierName)", "\(tierName)を始める")
@@ -4168,6 +4175,10 @@ struct AppStrings {
     var feedbackSubmit: String { text("보내기", "Send") }
     var feedbackSubmitted: String { text("피드백을 보냈습니다.", "Feedback sent.") }
     var advertisementProviderCoupang: String { text("쿠팡", "Coupang", "Coupang") }
+    var advertisementLabel: String { text("광고", "Ad", "広告") }
+    var advertisementLoading: String {
+        text("광고 불러오는 중", "Loading advertisement", "広告を読み込み中")
+    }
     var advertisementNotInterested: String { text("관심 없음", "Not interested", "興味なし") }
     var advertisementHidden: String { text("이 광고를 더 이상 보여주지 않습니다.", "You won't see this advertisement again.", "この広告は今後表示されません。") }
     var advertisementAffiliateDisclosure: String {
@@ -4175,6 +4186,16 @@ struct AppStrings {
             "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
             "This content contains Coupang Partners affiliate links, and we may receive a commission from qualifying purchases.",
             "このコンテンツはCoupang Partnersの活動の一環として、購入により一定額の手数料を受け取る場合があります。"
+        )
+    }
+    var advertisingPrivacyChoices: String {
+        text("광고 개인정보 선택", "Advertising privacy choices", "広告のプライバシー設定")
+    }
+    var advertisingPrivacyChoicesHelp: String {
+        text(
+            "Google 광고의 개인정보 선택을 검토하거나 변경합니다.",
+            "Review or change your privacy choices for Google ads.",
+            "Google広告のプライバシー設定を確認または変更します。"
         )
     }
     var tipMe: String { text("응원하기", "Tip Me") }

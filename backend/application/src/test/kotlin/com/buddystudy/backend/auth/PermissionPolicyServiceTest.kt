@@ -19,7 +19,10 @@ import com.buddystudy.backend.auth.application.port.outbound.TermsAgreementQuery
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPermissionProjection
 import com.buddystudy.backend.auth.application.service.PermissionPolicyService
+import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.Optional
@@ -86,6 +89,93 @@ class PermissionPolicyServiceTest {
     }
 
     @Test
+    fun `privacy policy 2026 08 25 requires the exact active version and content hash`(): Unit = runBlocking {
+        terms.active += privacyPolicy(
+            id = 84,
+            version = "2026-08-25",
+            contentHash = "sha256:2026-08-25",
+        )
+        val principal = activePrincipal()
+
+        assertThatThrownBy {
+            runBlocking {
+                service.saveAgreement(
+                    principal,
+                    TermsAgreementCommand(TermsType.PRIVACY_POLICY, "AGREED", "REQUIRED_GATE"),
+                )
+            }
+        }.isInstanceOf(ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        assertThatThrownBy {
+            runBlocking {
+                service.saveAgreement(
+                    principal,
+                    TermsAgreementCommand(
+                        type = TermsType.PRIVACY_POLICY,
+                        action = "AGREED",
+                        source = "REQUIRED_GATE",
+                        version = "2026-08-14",
+                        contentHash = "sha256:2026-08-25",
+                    ),
+                )
+            }
+        }.isInstanceOf(ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        assertThatThrownBy {
+            runBlocking {
+                service.saveAgreement(
+                    principal,
+                    TermsAgreementCommand(
+                        type = TermsType.PRIVACY_POLICY,
+                        action = "AGREED",
+                        source = "REQUIRED_GATE",
+                        version = "2026-08-25",
+                        contentHash = "sha256:wrong",
+                    ),
+                )
+            }
+        }.isInstanceOf(ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+
+        service.saveAgreement(
+            principal,
+            TermsAgreementCommand(
+                type = TermsType.PRIVACY_POLICY,
+                action = "AGREED",
+                source = "REQUIRED_GATE",
+                version = "2026-08-25",
+                contentHash = "sha256:2026-08-25",
+            ),
+        )
+
+        assertThat(agreements.saved).containsExactly(
+            SavedAgreement(principal.userId, principal.deviceId, 84, "AGREED", "REQUIRED_GATE"),
+        )
+    }
+
+    @Test
+    fun `privacy policy before the exact identity cutover keeps legacy type only agreement compatibility`(): Unit = runBlocking {
+        terms.active += privacyPolicy(
+            id = 77,
+            version = "2026-08-14",
+            contentHash = "sha256:2026-08-14",
+        )
+        val principal = activePrincipal()
+
+        service.saveAgreement(
+            principal,
+            TermsAgreementCommand(TermsType.PRIVACY_POLICY, "AGREED", "SETTINGS"),
+        )
+
+        assertThat(agreements.saved).containsExactly(
+            SavedAgreement(principal.userId, principal.deviceId, 77, "AGREED", "SETTINGS"),
+        )
+    }
+
+    @Test
     fun `question notification preference can be saved`(): Unit = runBlocking {
         val principal = Principal(
             userId = 7,
@@ -129,6 +219,25 @@ class PermissionPolicyServiceTest {
         val deviceId: String,
         val key: String,
         val enabled: Boolean,
+    )
+
+    private fun activePrincipal() = Principal(
+        userId = 7,
+        deviceId = "dev-1",
+        sessionId = 11,
+        anonymous = false,
+        status = "ACTIVE",
+    )
+
+    private fun privacyPolicy(id: Long, version: String, contentHash: String) = ActiveTermsProjection(
+        id = id,
+        code = TermsType.PRIVACY_POLICY.code,
+        version = version,
+        title = "개인정보 처리방침",
+        url = "https://example.com/privacy-$version",
+        contentHash = contentHash,
+        required = true,
+        mutable = false,
     )
 
     private class FakeTermsAgreementQueryPort : TermsAgreementQueryPort {

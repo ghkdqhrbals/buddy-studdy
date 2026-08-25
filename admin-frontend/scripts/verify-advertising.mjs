@@ -17,8 +17,76 @@ const audienceActivitySource = panelSource.slice(
   panelSource.indexOf("function AudienceActivity"),
   panelSource.indexOf("function UserIdentity"),
 );
+const placementPolicyPanelSource = panelSource.slice(
+  panelSource.indexOf("function PlacementPolicyPanel"),
+  panelSource.indexOf("function AudienceActivity"),
+);
+const placementPolicyApiSource = apiSource.slice(
+  apiSource.indexOf("export function fetchNativeAdPlacementPolicy"),
+  apiSource.indexOf("export function createNativeAdvertisementCampaign"),
+);
 
 const checks = [
+  {
+    ok: placementPolicyApiSource.includes('"/api/v1/admin/native-ad-placement-policies/COMMUNITY_FEED"')
+      && placementPolicyApiSource.includes('{ method: "GET" }')
+      && placementPolicyApiSource.includes('method: "PUT"')
+      && placementPolicyApiSource.includes("JSON.stringify(input)"),
+    message: "Community-feed placement policy must use the deployable admin GET and PUT endpoints.",
+  },
+  {
+    ok: typeSource.includes('placement: "COMMUNITY_FEED"')
+      && typeSource.includes("minimumSecondsBetweenDeliveries: number")
+      && typeSource.includes("slotDeliveries: number")
+      && typeSource.includes("adMobImpressions: number")
+      && typeSource.includes("adMobClicks: number")
+      && typeSource.includes("fallbackSelections: number")
+      && typeSource.includes("fallbackImpressions: number")
+      && typeSource.includes("fallbackOpens: number"),
+    message: "Placement-policy and 30-day provider metrics types must mirror the backend contract.",
+  },
+  {
+    ok: panelSource.includes('type PlacementPolicyLoadState = "LOADING" | "READY" | "ERROR"')
+      && placementPolicyPanelSource.includes('setLoadState("LOADING")')
+      && placementPolicyPanelSource.includes("setPolicy(null)")
+      && placementPolicyPanelSource.includes("setForm(null)")
+      && placementPolicyPanelSource.includes('setLoadState("ERROR")')
+      && placementPolicyPanelSource.includes('loadState === "READY" && policy && form')
+      && placementPolicyPanelSource.includes("Controls remain locked so stale values cannot be saved"),
+    message: "Unknown or failed policy reads and unconfirmed writes must clear stale values and lock editing.",
+  },
+  {
+    ok: placementPolicyPanelSource.includes("requestId !== requestIdRef.current")
+      && placementPolicyPanelSource.includes("}, [refreshKey])")
+      && placementPolicyPanelSource.includes("Community feed placement policy loaded.")
+      && placementPolicyPanelSource.includes("Community feed placement policy saved."),
+    message: "Placement-policy requests must reject stale responses, refresh with the workspace, and announce completion.",
+  },
+  {
+    ok: panelSource.includes("integerInRange(form.minimumSecondsBetweenDeliveries, 60, 2_592_000)")
+      && panelSource.includes("integerInRange(form.minimumFeedItemCount, 4, 100)")
+      && panelSource.includes("integerInRange(form.earliestPosition, 2, 99)")
+      && panelSource.includes("form.latestPosition < form.earliestPosition")
+      && panelSource.includes("Policy end time must be later than its start time"),
+    message: "Placement-policy validation must enforce the 60-second, feed-size, position, bounds, and period rules.",
+  },
+  {
+    ok: placementPolicyPanelSource.includes("Slots delivered")
+      && placementPolicyPanelSource.includes("policy.metrics.adMobImpressions")
+      && placementPolicyPanelSource.includes("policy.metrics.adMobClicks")
+      && placementPolicyPanelSource.includes("policy.metrics.fallbackSelections")
+      && placementPolicyPanelSource.includes("policy.metrics.fallbackImpressions")
+      && placementPolicyPanelSource.includes("policy.metrics.fallbackOpens")
+      && placementPolicyPanelSource.includes("last 30 days"),
+    message: "Placement policy must display 30-day slot, AdMob, and fallback metrics.",
+  },
+  {
+    ok: styleSource.includes(".ad-provider-metrics")
+      && styleSource.includes(".ad-policy-state.error")
+      && styleSource.includes(".ad-policy-rules-grid")
+      && /@media \(max-width: 760px\)[\s\S]*?\.ad-policy-state-grid,[\s\S]*?grid-template-columns: 1fr;/.test(styleSource),
+    message: "Placement policy states, metrics, and form controls must remain responsive.",
+  },
   {
     ok: campaignListApiSource.includes('params.set("query", filters.query.trim())')
       && campaignListApiSource.includes('params.set("status", filters.status)')
@@ -153,4 +221,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("Advertising campaign usability and user-activity contracts verified.");
+console.log("Advertising placement-policy, campaign usability, and user-activity contracts verified.");

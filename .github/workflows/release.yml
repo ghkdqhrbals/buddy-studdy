@@ -156,6 +156,8 @@ jobs:
       IOS_APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROVISIONING_PROFILE_BASE64 }}
       GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
       REVENUECAT_PUBLIC_SDK_KEY: ${{ secrets.REVENUECAT_PUBLIC_SDK_KEY }}
+      ADMOB_APP_ID: ${{ vars.ADMOB_APP_ID }}
+      ADMOB_NATIVE_AD_UNIT_ID: ${{ vars.ADMOB_NATIVE_AD_UNIT_ID }}
       RELEASE_VERSION: ${{ needs.plan_ios_release.outputs.release_version }}
       RELEASE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
       APP_REVIEW_CANDIDATE: ${{ needs.plan_ios_release.outputs.review_candidate }}
@@ -165,6 +167,45 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Require AdMob-compatible Xcode
+        run: |
+          set -euo pipefail
+
+          xcode_version="$(xcodebuild -version | awk '/^Xcode / { print $2 }')"
+          ruby -e '
+            require "rubygems"
+            actual = Gem::Version.new(ARGV.fetch(0))
+            required = Gem::Version.new("26.2")
+            abort "Xcode #{required} or newer is required for Google Mobile Ads 13.8.0; found #{actual}." if actual < required
+          ' "${xcode_version}"
+
+      - name: Validate pinned AdMob source configuration
+        run: |
+          set -euo pipefail
+
+          grep -Fq 'version = 13.8.0;' StudyMate.xcodeproj/project.pbxproj
+          ruby -rjson -e '
+            pins = JSON.parse(File.read(ARGV.fetch(0))).fetch("pins")
+            mobile_ads = pins.find { |pin| pin.fetch("identity") == "swift-package-manager-google-mobile-ads" }
+            abort "Google Mobile Ads package must be pinned exactly to 13.8.0." unless mobile_ads&.dig("state", "version") == "13.8.0"
+          ' StudyMate.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+          /usr/libexec/PlistBuddy -c 'Print :GADApplicationIdentifier' StudyMate/iOSInfo.plist >/dev/null
+          /usr/libexec/PlistBuddy -c 'Print :BuddyStudyAdMobNativeAdUnitID' StudyMate/iOSInfo.plist >/dev/null
+          skad_count="$(/usr/libexec/PlistBuddy -c 'Print :SKAdNetworkItems' StudyMate/iOSInfo.plist | grep -c 'SKAdNetworkIdentifier')"
+          if [ "${skad_count}" -lt 50 ]; then
+            echo "The complete Google SKAdNetworkItems list is required; found ${skad_count}." >&2
+            exit 1
+          fi
+          if grep -R -E -q 'NSUserTrackingUsageDescription|ATTrackingManager|AppTrackingTransparency' StudyMate StudyMate.xcodeproj/project.pbxproj; then
+            echo "ATT framework, prompt, and NSUserTrackingUsageDescription are forbidden." >&2
+            exit 1
+          fi
+          if [ "$(/usr/libexec/PlistBuddy -c 'Print :NSPrivacyTracking' StudyMate/Resources/PrivacyInfo.xcprivacy)" != "false" ]; then
+            echo "NSPrivacyTracking must remain false." >&2
+            exit 1
+          fi
 
       - name: Validate release secrets
         run: |
@@ -193,6 +234,20 @@ jobs:
 
           if [[ "${REVENUECAT_PUBLIC_SDK_KEY}" != appl_* ]]; then
             echo "REVENUECAT_PUBLIC_SDK_KEY must be the iOS App Store public key (appl_), not a Test Store key." >&2
+            exit 1
+          fi
+
+          if ! [[ "${ADMOB_APP_ID}" =~ ^ca-app-pub-[0-9]{16}~[0-9]{10}$ ]]; then
+            echo "Repository variable ADMOB_APP_ID must contain a production AdMob iOS app ID." >&2
+            exit 1
+          fi
+          if ! [[ "${ADMOB_NATIVE_AD_UNIT_ID}" =~ ^ca-app-pub-[0-9]{16}/[0-9]{10}$ ]]; then
+            echo "Repository variable ADMOB_NATIVE_AD_UNIT_ID must contain a production native ad unit ID." >&2
+            exit 1
+          fi
+          if [[ "${ADMOB_APP_ID}" == ca-app-pub-3940256099942544~* ]] \
+            || [[ "${ADMOB_NATIVE_AD_UNIT_ID}" == ca-app-pub-3940256099942544/* ]]; then
+            echo "All identifiers from Google's demo AdMob publisher are forbidden in Release archives." >&2
             exit 1
           fi
 
@@ -310,6 +365,8 @@ jobs:
             IOS_PROVISIONING_PROFILE_NAME="${IOS_PROVISIONING_PROFILE_NAME}" \
             DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
             REVENUECAT_PUBLIC_SDK_KEY="${REVENUECAT_PUBLIC_SDK_KEY}" \
+            ADMOB_APP_ID="${ADMOB_APP_ID}" \
+            ADMOB_NATIVE_AD_UNIT_ID="${ADMOB_NATIVE_AD_UNIT_ID}" \
             BUDDYSTUDY_BACKEND_BASE_URL="${PRODUCTION_BACKEND_BASE_URL}" \
             MARKETING_VERSION="${RELEASE_VERSION}" \
             CURRENT_PROJECT_VERSION="${RELEASE_BUILD_NUMBER}"
@@ -324,6 +381,13 @@ jobs:
           backend_base_url="$(/usr/libexec/PlistBuddy -c 'Print :BuddyStudyBackendBaseURL' "${app_path}/Info.plist")"
           if [ "${backend_base_url}" != "${PRODUCTION_BACKEND_BASE_URL}" ]; then
             echo "Archive backend URL must be ${PRODUCTION_BACKEND_BASE_URL}; found ${backend_base_url:-<missing>}." >&2
+            exit 1
+          fi
+
+          admob_app_id="$(/usr/libexec/PlistBuddy -c 'Print :GADApplicationIdentifier' "${app_path}/Info.plist")"
+          admob_native_ad_unit_id="$(/usr/libexec/PlistBuddy -c 'Print :BuddyStudyAdMobNativeAdUnitID' "${app_path}/Info.plist")"
+          if [ "${admob_app_id}" != "${ADMOB_APP_ID}" ] || [ "${admob_native_ad_unit_id}" != "${ADMOB_NATIVE_AD_UNIT_ID}" ]; then
+            echo "Archive AdMob identifiers do not match the release variables." >&2
             exit 1
           fi
 
@@ -399,6 +463,13 @@ jobs:
           backend_base_url="$(/usr/libexec/PlistBuddy -c 'Print :BuddyStudyBackendBaseURL' "${app_path}/Info.plist")"
           if [ "${backend_base_url}" != "${PRODUCTION_BACKEND_BASE_URL}" ]; then
             echo "Exported IPA backend URL must be ${PRODUCTION_BACKEND_BASE_URL}; found ${backend_base_url:-<missing>}." >&2
+            exit 1
+          fi
+
+          admob_app_id="$(/usr/libexec/PlistBuddy -c 'Print :GADApplicationIdentifier' "${app_path}/Info.plist")"
+          admob_native_ad_unit_id="$(/usr/libexec/PlistBuddy -c 'Print :BuddyStudyAdMobNativeAdUnitID' "${app_path}/Info.plist")"
+          if [ "${admob_app_id}" != "${ADMOB_APP_ID}" ] || [ "${admob_native_ad_unit_id}" != "${ADMOB_NATIVE_AD_UNIT_ID}" ]; then
+            echo "Exported IPA AdMob identifiers do not match the release variables." >&2
             exit 1
           fi
 

@@ -358,6 +358,8 @@ final class AppState: ObservableObject {
                     return questionsByID[question.id].map(CommunityFeedItem.publicQuestion)
                 case .advertisement:
                     return item
+                case .nativeAdSlot:
+                    return item
                 }
             }
             if nextState.items.isEmpty, !newValue.isEmpty {
@@ -644,6 +646,8 @@ final class AppState: ObservableObject {
     private var answerGradingOwnerID: String?
     private var answerSubmissionRecordIDs: Set<String> = []
     private var recordedAdvertisementImpressionSelectionIDs: Set<String> = []
+    private var recordedAdMobImpressionSlotIDs: Set<String> = []
+    private var recordedAdMobClickSlotIDs: Set<String> = []
     private var appControlBoundaryTask: Task<Void, Never>?
     private var appControlPolicy: AppControlRemotePolicy?
     #if os(iOS)
@@ -656,6 +660,10 @@ final class AppState: ObservableObject {
     private var backendClientGeneration = 0
     private var configuredBackendBaseURLDescription = ""
     private var billingRefreshTask: Task<Void, Never>?
+    private var nativeAdvertisingEntitlementRefresh: (
+        id: String,
+        task: Task<Bool?, Never>
+    )?
     private var billingRefreshRequestID = 0
     private var billingRefreshInFlightCount = 0
     private var appControlResolution = AppControlResolution.normal
@@ -1088,6 +1096,7 @@ final class AppState: ObservableObject {
         if resolution.requiresTermsAgreement {
             clearErrorMessage(target)
             pageAccessPrompt = nil
+            mergeRequiredTerms(appErrorHandlingUseCase.requiredTerms(for: error))
             pendingTermsRequirementRetry = termsRetry
             presentRequiredTermsGate()
             Task { [weak self] in
@@ -1112,6 +1121,21 @@ final class AppState: ObservableObject {
         }
 
         return false
+    }
+
+    private func mergeRequiredTerms(_ requiredTerms: [BackendTerms]) {
+        guard !requiredTerms.isEmpty else {
+            return
+        }
+        var mergedTerms = activeTerms
+        for requiredTerm in requiredTerms {
+            if let index = mergedTerms.firstIndex(where: { $0.type == requiredTerm.type }) {
+                mergedTerms[index] = requiredTerm
+            } else {
+                mergedTerms.append(requiredTerm)
+            }
+        }
+        activeTerms = mergedTerms
     }
 
     private func presentRequiredTermsGate() {
@@ -1245,6 +1269,8 @@ final class AppState: ObservableObject {
         membershipRefreshOrder.invalidatePendingRequests()
         billingRefreshTask?.cancel()
         billingRefreshTask = nil
+        nativeAdvertisingEntitlementRefresh?.task.cancel()
+        nativeAdvertisingEntitlementRefresh = nil
         billingRefreshRequestID += 1
         if didChangeBackend {
             billingCatalog = nil
@@ -3402,10 +3428,16 @@ final class AppState: ObservableObject {
     private func applyCommunityFeedPage(
         _ response: CommunityQuestionsResponse,
         offset: Int,
-        reset: Bool
+        reset: Bool,
+        allowsNativeAdSlots: Bool
     ) {
         var nextState = communityFeedState
-        nextState.applyPage(response, offset: offset, reset: reset)
+        nextState.applyPage(
+            response,
+            offset: offset,
+            reset: reset,
+            allowsNativeAdSlots: allowsNativeAdSlots
+        )
         communityFeedState = nextState
     }
 
@@ -3793,6 +3825,14 @@ final class AppState: ObservableObject {
         }
 
         let requestID = beginCommunityFeedLoad()
+        let resolvedAdFreeEntitlement: Bool?
+        if isCommunitySessionActive,
+           trimmedTopic.isEmpty,
+           normalizedOffset == 0 {
+            resolvedAdFreeEntitlement = await resolveNativeAdvertisingAdFreeEntitlement()
+        } else {
+            resolvedAdFreeEntitlement = billingStatus?.adFree
+        }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-feed") else {
             if userInitiated {
@@ -3818,7 +3858,17 @@ final class AppState: ObservableObject {
                     return
                 }
 
-                applyCommunityFeedPage(response, offset: normalizedOffset, reset: reset)
+                applyCommunityFeedPage(
+                    response,
+                    offset: normalizedOffset,
+                    reset: reset,
+                    allowsNativeAdSlots: CommunityNativeAdvertisementEligibilityPolicy.allowsServerSlot(
+                        isSignedIn: isCommunitySessionActive,
+                        adFree: resolvedAdFreeEntitlement,
+                        query: trimmedTopic,
+                        offset: normalizedOffset
+                    )
+                )
                 log(.info, "공개 질문 목록을 로드했습니다. count=\(response.questions.count), total=\(response.totalCount), offset=\(communityOffset)")
             },
             onFailure: { error in
@@ -4644,6 +4694,8 @@ final class AppState: ObservableObject {
         let revenueCatAppAccountToken = billingCatalog?.appAccountToken
         billingCatalog = nil
         billingStatus = nil
+        nativeAdvertisingEntitlementRefresh?.task.cancel()
+        nativeAdvertisingEntitlementRefresh = nil
         billingInvoices = []
         billingErrorMessage = nil
         isLoadingBilling = false
@@ -5283,6 +5335,68 @@ final class AppState: ObservableObject {
         }
     }
 
+    func fetchNativeAdvertisementFallback(slotID: String) async -> CommunityNativeAdvertisement? {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "native-ad-fallback") else {
+            return nil
+        }
+        do {
+            return try await communityUseCase.fetchNativeAdvertisementFallback(
+                registration: registration,
+                slotID: slotID
+            )
+        } catch {
+            log(
+                .warning,
+                "대체 광고 조회 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
+            )
+            return nil
+        }
+    }
+
+    func recordAdMobNativeAdvertisementImpression(slotID: String) async {
+        guard recordedAdMobImpressionSlotIDs.insert(slotID).inserted else {
+            return
+        }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "admob-native-impression") else {
+            recordedAdMobImpressionSlotIDs.remove(slotID)
+            return
+        }
+        do {
+            try await communityUseCase.recordAdMobNativeAdvertisementImpression(
+                registration: registration,
+                slotID: slotID
+            )
+        } catch {
+            recordedAdMobImpressionSlotIDs.remove(slotID)
+            log(
+                .warning,
+                "AdMob 노출 이벤트 전송 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
+            )
+        }
+    }
+
+    func recordAdMobNativeAdvertisementClick(slotID: String) async {
+        guard recordedAdMobClickSlotIDs.insert(slotID).inserted else {
+            return
+        }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "admob-native-click") else {
+            recordedAdMobClickSlotIDs.remove(slotID)
+            return
+        }
+        do {
+            try await communityUseCase.recordAdMobNativeAdvertisementClick(
+                registration: registration,
+                slotID: slotID
+            )
+        } catch {
+            recordedAdMobClickSlotIDs.remove(slotID)
+            log(
+                .warning,
+                "AdMob 클릭 이벤트 전송 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
+            )
+        }
+    }
+
     func recordNativeAdvertisementImpression(selectionID: String) async {
         guard recordedAdvertisementImpressionSelectionIDs.insert(selectionID).inserted else {
             return
@@ -5305,11 +5419,12 @@ final class AppState: ObservableObject {
         }
     }
 
-    func suppressNativeAdvertisement(selectionID: String, campaignID: String) async {
+    @discardableResult
+    func suppressNativeAdvertisement(selectionID: String, campaignID: String) async -> Bool {
         communityFeedState.hideAdvertisement(campaignID: campaignID)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "native-ad-not-interested") else {
             communityFeedState.restoreAdvertisement(campaignID: campaignID)
-            return
+            return false
         }
         do {
             try await communityUseCase.suppressNativeAdvertisement(
@@ -5318,12 +5433,14 @@ final class AppState: ObservableObject {
             )
             communityFeedState.confirmHiddenAdvertisement(campaignID: campaignID)
             statusMessage = strings.advertisementHidden
+            return true
         } catch {
             communityFeedState.restoreAdvertisement(campaignID: campaignID)
             log(
                 .warning,
                 "광고 관심 없음 저장 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
             )
+            return false
         }
     }
 
@@ -6598,6 +6715,80 @@ final class AppState: ObservableObject {
         billingRefreshTask = task
         await task.value
         billingRefreshTask = nil
+    }
+
+    private func resolveNativeAdvertisingAdFreeEntitlement() async -> Bool? {
+        guard isCommunitySessionActive else {
+            return false
+        }
+        if let adFree = billingStatus?.adFree {
+            return adFree
+        }
+        if let billingRefreshTask {
+            await billingRefreshTask.value
+            return billingStatus?.adFree
+        }
+        if let nativeAdvertisingEntitlementRefresh {
+            return await nativeAdvertisingEntitlementRefresh.task.value
+        }
+
+        let refreshID = appIdentifierProvider.makeIdentifier()
+        let task = Task { @MainActor [weak self] () -> Bool? in
+            guard let self else {
+                return nil
+            }
+            return await self.performNativeAdvertisingEntitlementRefresh()
+        }
+        nativeAdvertisingEntitlementRefresh = (refreshID, task)
+        let resolvedAdFree = await task.value
+        if nativeAdvertisingEntitlementRefresh?.id == refreshID {
+            nativeAdvertisingEntitlementRefresh = nil
+        }
+        return resolvedAdFree
+    }
+
+    private func performNativeAdvertisingEntitlementRefresh() async -> Bool? {
+        let clientGeneration = backendClientGeneration
+        let currentBillingUseCase = billingUseCase
+        guard isCommunitySessionActive,
+              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "native-advertising-entitlement"
+              ) else {
+            return nil
+        }
+
+        do {
+            let resolvedStatus = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "native-advertising-entitlement",
+                operation: { recoveredRegistration in
+                    try await currentBillingUseCase.status(registration: recoveredRegistration)
+                }
+            )
+            guard clientGeneration == backendClientGeneration,
+                  isCommunitySessionActive else {
+                return nil
+            }
+            applyBillingStatus(resolvedStatus)
+            billingErrorMessage = nil
+            log(
+                .info,
+                "광고 권한을 동기화했습니다. tier=\(resolvedStatus.tierCode), adFree=\(resolvedStatus.adFree)"
+            )
+            return resolvedStatus.adFree
+        } catch where !Self.isCancellationLikeError(error) {
+            guard clientGeneration == backendClientGeneration,
+                  isCommunitySessionActive else {
+                return nil
+            }
+            // An uncertain entitlement must never make an authenticated user ad eligible.
+            log(.warning, "광고 권한을 동기화하지 못했습니다: \(error.localizedDescription)")
+            return nil
+        } catch {
+            return nil
+        }
     }
 
     @discardableResult
@@ -9966,11 +10157,23 @@ final class AppState: ObservableObject {
     func saveTermsAgreement(
         type: BackendTermsType,
         isAgreed: Bool,
+        version: String? = nil,
+        contentHash: String? = nil,
         source: BackendTermsAgreementSource = .settings
     ) async -> Bool {
+        let activeTerm = activeTerms.first { $0.type == type }
+        let resolvedVersion = version ?? activeTerm?.version
+        let resolvedContentHash = contentHash ?? activeTerm?.contentHash
         updateLocalTermsAgreement(type: type, isAgreed: isAgreed)
 
-        guard await persistTermsAgreement(type: type, isAgreed: isAgreed, source: source, shouldShowError: true) else {
+        guard await persistTermsAgreement(
+            type: type,
+            version: resolvedVersion,
+            contentHash: resolvedContentHash,
+            isAgreed: isAgreed,
+            source: source,
+            shouldShowError: true
+        ) else {
             return false
         }
 
@@ -9992,15 +10195,27 @@ final class AppState: ObservableObject {
     func saveTermsAgreementInBackground(
         type: BackendTermsType,
         isAgreed: Bool,
+        version: String? = nil,
+        contentHash: String? = nil,
         source: BackendTermsAgreementSource = .settings
     ) {
+        let activeTerm = activeTerms.first { $0.type == type }
+        let resolvedVersion = version ?? activeTerm?.version
+        let resolvedContentHash = contentHash ?? activeTerm?.contentHash
         updateLocalTermsAgreement(type: type, isAgreed: isAgreed)
 
         Task { [weak self] in
             guard let self else {
                 return
             }
-            guard await self.persistTermsAgreement(type: type, isAgreed: isAgreed, source: source, shouldShowError: false) else {
+            guard await self.persistTermsAgreement(
+                type: type,
+                version: resolvedVersion,
+                contentHash: resolvedContentHash,
+                isAgreed: isAgreed,
+                source: source,
+                shouldShowError: false
+            ) else {
                 await self.refreshTermsAndNotificationPreferences(reason: "terms-agreement-background-reconcile")
                 return
             }
@@ -10020,6 +10235,8 @@ final class AppState: ObservableObject {
 
     private func persistTermsAgreement(
         type: BackendTermsType,
+        version: String?,
+        contentHash: String?,
         isAgreed: Bool,
         source: BackendTermsAgreementSource,
         shouldShowError: Bool
@@ -10042,6 +10259,8 @@ final class AppState: ObservableObject {
                     try await self.termsUseCase.saveAgreement(
                         registration: recoveredRegistration,
                         type: type,
+                        version: version,
+                        contentHash: contentHash,
                         action: isAgreed ? .agreed : .withdrawn,
                         source: source
                     )

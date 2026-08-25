@@ -65,6 +65,13 @@ test("advertising administration manages Coupang campaigns and explains server r
   assert.match(app, /advertising\.html/);
   assert.match(page, /\/native-ad-campaigns\?/);
   assert.match(page, /\/native-ad-campaigns\/\$\{campaign\.id\}\/users\?/);
+  assert.match(page, /\/native-ad-placement-policies\/\$\{COMMUNITY_FEED_PLACEMENT\}/);
+  assert.match(page, /minimumSecondsBetweenDeliveries/);
+  assert.match(page, /30d slot deliveries/);
+  assert.match(page, /AdMob is always attempted first/);
+  assert.match(page, /TIER2 and TIER3 never receive a slot/);
+  assert.match(page, /error \|\| !policy \? "UNKNOWN"/);
+  assert.match(page, /disabled=\{!policy \|\| loading \|\| Boolean\(error\)\}/);
   assert.match(page, /method:\s*campaign \? "PUT" : "POST"/);
   assert.match(page, /Coupang destination URL/);
   assert.match(page, /Coupang product image URL/);

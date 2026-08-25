@@ -96,6 +96,8 @@ protocol TermsRepository {
     func saveAgreement(
         registration: RemotePushRegistration,
         type: BackendTermsType,
+        version: String?,
+        contentHash: String?,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource
     ) async throws -> BackendPermissionEvaluations
@@ -124,12 +126,16 @@ struct RemoteTermsRepository: TermsRepository {
     func saveAgreement(
         registration: RemotePushRegistration,
         type: BackendTermsType,
+        version: String?,
+        contentHash: String?,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource
     ) async throws -> BackendPermissionEvaluations {
         try await backendClient.saveTermsAgreement(
             registration: registration,
             type: type,
+            version: version,
+            contentHash: contentHash,
             action: action,
             source: source
         )
@@ -171,12 +177,16 @@ struct TermsUseCase {
     func saveAgreement(
         registration: RemotePushRegistration,
         type: BackendTermsType,
+        version: String?,
+        contentHash: String?,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource = .settings
     ) async throws -> BackendPermissionEvaluations {
         try await repository.saveAgreement(
             registration: registration,
             type: type,
+            version: version,
+            contentHash: contentHash,
             action: action,
             source: source
         )

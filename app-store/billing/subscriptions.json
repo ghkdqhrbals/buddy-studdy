@@ -20,6 +20,7 @@
       "billingPeriod": "P1M",
       "groupLevel": 2,
       "monthlyQuestionLimit": 300,
+      "adFree": true,
       "baseTerritory": "KOR",
       "customerPrice": "7900"
     },
@@ -31,6 +32,7 @@
       "billingPeriod": "P1M",
       "groupLevel": 1,
       "monthlyQuestionLimit": 1000,
+      "adFree": true,
       "baseTerritory": "KOR",
       "customerPrice": "17900"
     }

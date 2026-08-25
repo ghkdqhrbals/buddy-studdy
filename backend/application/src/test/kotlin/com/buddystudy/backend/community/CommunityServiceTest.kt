@@ -21,6 +21,9 @@ import com.buddystudy.backend.community.application.port.outbound.NativeAdvertis
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementCampaignPerformance
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementUserRankingSignals
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementViewPublishPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdEligibilityPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotReservation
 import com.buddystudy.backend.community.application.model.NativeAdvertisementViewedEvent
 import com.buddystudy.backend.community.application.service.CommunityService
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
@@ -36,6 +39,8 @@ import com.buddystudy.community.domain.entity.ReportEntity
 import com.buddystudy.community.domain.entity.UserBlockEntity
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
 import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
+import com.buddystudy.community.domain.entity.NativeAdPlacementPolicyEntity
+import com.buddystudy.community.domain.entity.NativeAdSlotEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -66,6 +71,8 @@ class CommunityServiceTest {
     private val comments = FakeQuestionCommentPort(userBlocks)
     private val nativeAdvertisements = FakeNativeAdvertisementPort()
     private val nativeAdvertisementViews = FakeNativeAdvertisementViewPublisher()
+    private val nativeAdEligibility = FakeNativeAdEligibilityPort()
+    private val nativeAdSlots = FakeNativeAdSlotPort()
     private val notificationPublisher = FakeNotificationPublisher()
     private val reactionPublisher = FakeReactionPublisher()
     private val translationEvents = RecordingContentTranslationEventPort()
@@ -81,6 +88,8 @@ class CommunityServiceTest {
         feedbacks = FakeFeedbackPort(),
         nativeAdvertisements = nativeAdvertisements,
         nativeAdvertisementViews = nativeAdvertisementViews,
+        nativeAdEligibility = nativeAdEligibility,
+        nativeAdSlots = nativeAdSlots,
         reactions = reactionPublisher,
         notifications = notificationPublisher,
         languageDetector = PassthroughLanguageDetector(),
@@ -302,6 +311,87 @@ class CommunityServiceTest {
     }
 
     @Test
+    fun `public feed v2 inserts one safe native ad slot only for ad eligible first page`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
+        (100L..103L).forEach { questions.rows += publicQuestion(it, 10, "Topic $it") }
+        nativeAdEligibility.adFree = false
+        nativeAdSlots.policy = NativeAdPlacementPolicyEntity(enabled = true)
+
+        val response = service.getPublicQuestionFeedV2(principal, language = "ko", limit = 20, offset = 0)
+
+        assertThat(response.questions).hasSize(4)
+        assertThat(response.items.count { it.type.name == "NATIVE_AD_SLOT" }).isEqualTo(1)
+        val slotIndex = response.items.indexOfFirst { it.nativeAdSlot != null }
+        assertThat(slotIndex).isBetween(2, 3)
+        assertThat(response.items.last().nativeAdSlot).isNull()
+        assertThat(response.items[slotIndex].nativeAdSlot?.placement).isEqualTo("COMMUNITY_FEED")
+
+        val laterPage = service.getPublicQuestionFeedV2(principal, language = "ko", limit = 1, offset = 1)
+        val search = service.getPublicQuestionsV2(principal, query = "Topic", language = "ko", limit = 20, offset = 0)
+        assertThat(laterPage.items).allMatch { it.nativeAdSlot == null }
+        assertThat(search.items).allMatch { it.nativeAdSlot == null }
+    }
+
+    @Test
+    fun `public feed v2 fails closed when ad entitlement is paid or unresolved`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
+        (100L..103L).forEach { questions.rows += publicQuestion(it, 10, "Topic $it") }
+        nativeAdSlots.policy = NativeAdPlacementPolicyEntity(enabled = true)
+
+        nativeAdEligibility.adFree = true
+        val paid = service.getPublicQuestionFeedV2(principal, language = "ko", limit = 20, offset = 0)
+        nativeAdEligibility.adFree = null
+        val unresolved = service.getPublicQuestionFeedV2(principal, language = "ko", limit = 20, offset = 0)
+
+        assertThat(paid.items).allMatch { it.nativeAdSlot == null }
+        assertThat(unresolved.items).allMatch { it.nativeAdSlot == null }
+        assertThat(nativeAdSlots.slots).isEmpty()
+    }
+
+    @Test
+    fun `native ad slot fallback and AdMob events are idempotent and owner scoped`(): Unit = runBlocking {
+        nativeAdEligibility.adFree = false
+        nativeAdvertisements.campaigns += NativeAdvertisementCampaignEntity(
+            id = 91,
+            campaignKey = "fallback-campaign",
+            titleKo = "Fallback",
+            titleEn = "Fallback",
+            titleJa = "Fallback",
+            deepLink = "buddystudy://feedback",
+        )
+        nativeAdSlots.slots += NativeAdSlotEntity(
+            id = 1,
+            slotId = "slot-1",
+            userId = principal.userId,
+            deviceId = principal.deviceId,
+            language = "ko",
+            position = 2,
+            feedItemCount = 4,
+        )
+
+        val first = service.nativeAdSlotFallback(principal, "slot-1")
+        val second = service.nativeAdSlotFallback(principal, "slot-1")
+        service.recordNativeAdSlotImpression(principal, "slot-1", "ADMOB")
+        val impressionAt = nativeAdSlots.slots.single().adMobImpressionAt
+        service.recordNativeAdSlotImpression(principal, "slot-1", "admob")
+        service.recordNativeAdSlotClick(principal, "slot-1", "ADMOB")
+
+        assertThat(first?.selectionId).isEqualTo(second?.selectionId)
+        assertThat(nativeAdvertisements.selections).hasSize(1)
+        assertThat(nativeAdvertisements.selections.single().nativeAdSlotId).isEqualTo("slot-1")
+        assertThat(nativeAdSlots.slots.single().adMobImpressionAt).isEqualTo(impressionAt)
+        assertThat(nativeAdSlots.slots.single().adMobClickAt).isNotNull()
+
+        nativeAdEligibility.adFree = true
+        assertThat(service.nativeAdSlotFallback(principal, "slot-1")).isNull()
+        assertThatThrownBy {
+            runBlocking {
+                service.nativeAdSlotFallback(principal.copy(deviceId = "other-device"), "slot-1")
+            }
+        }.isInstanceOf(ApiException::class.java)
+    }
+
+    @Test
     fun `public question returns translated answer to its author`(): Unit = runBlocking {
         users.rows += UserEntity(id = principal.userId, providerId = "author", displayName = "Author")
         val question = publicQuestion(id = 103, userId = principal.userId, topic = "Redis").apply {
@@ -322,6 +412,8 @@ class CommunityServiceTest {
             feedbacks = FakeFeedbackPort(),
             nativeAdvertisements = FakeNativeAdvertisementPort(),
             nativeAdvertisementViews = FakeNativeAdvertisementViewPublisher(),
+            nativeAdEligibility = FakeNativeAdEligibilityPort(),
+            nativeAdSlots = FakeNativeAdSlotPort(),
             reactions = reactionPublisher,
             notifications = notificationPublisher,
             languageDetector = PassthroughLanguageDetector(),
@@ -768,6 +860,7 @@ class CommunityServiceTest {
 
         override suspend fun findEligibleCampaigns(placement: String, now: Instant) =
             campaigns.filter { it.placement == placement && it.active }
+        override suspend fun findCampaign(id: Long) = campaigns.firstOrNull { it.id == id }
         override suspend fun findUserRankingSignals(
             campaignIds: Collection<Long>,
             userId: Long,
@@ -781,6 +874,13 @@ class CommunityServiceTest {
             selections += entity
             return entity
         }
+        override suspend fun saveFallbackSelectionIfAbsent(
+            slotId: String,
+            entity: NativeAdvertisementSelectionEntity,
+        ): NativeAdvertisementSelectionEntity = selections.firstOrNull { it.nativeAdSlotId == slotId }
+            ?: entity.also(selections::add)
+        override suspend fun findSelectionByNativeAdSlotId(slotId: String) =
+            selections.firstOrNull { it.nativeAdSlotId == slotId }
         override suspend fun findSelection(selectionId: String) = selections.firstOrNull { it.selectionId == selectionId }
         override suspend fun markImpression(selectionId: String, userId: Long, deviceId: String, at: Instant) {
             selections.firstOrNull { it.selectionId == selectionId && it.userId == userId && it.deviceId == deviceId }
@@ -798,6 +898,49 @@ class CommunityServiceTest {
             .filter { it.first == userId }
             .map { it.second }
             .toSet()
+    }
+
+    private class FakeNativeAdEligibilityPort(
+        var adFree: Boolean? = true,
+    ) : NativeAdEligibilityPort {
+        override suspend fun isAdFree(userId: Long): Boolean? = adFree
+    }
+
+    private class FakeNativeAdSlotPort : NativeAdSlotPort {
+        var policy: NativeAdPlacementPolicyEntity? = null
+        val slots = mutableListOf<NativeAdSlotEntity>()
+
+        override suspend fun findPlacementPolicy(placement: String) = policy?.takeIf { it.placement == placement }
+        override suspend fun savePlacementPolicy(entity: NativeAdPlacementPolicyEntity): NativeAdPlacementPolicyEntity {
+            policy = entity
+            return entity
+        }
+        override suspend fun reserveSlot(
+            reservation: NativeAdSlotReservation,
+            dailyDeliveryCap: Int,
+            minimumSecondsBetweenDeliveries: Int,
+        ): NativeAdSlotEntity? {
+            if (dailyDeliveryCap <= 0) return null
+            return NativeAdSlotEntity(
+                id = (slots.size + 1).toLong(),
+                slotId = reservation.slotId,
+                userId = reservation.userId,
+                deviceId = reservation.deviceId,
+                placement = reservation.placement,
+                language = reservation.language,
+                position = reservation.position,
+                feedItemCount = reservation.feedItemCount,
+                deliveredAt = reservation.deliveredAt,
+            ).also(slots::add)
+        }
+        override suspend fun findOwnedSlot(slotId: String, userId: Long, deviceId: String) =
+            slots.firstOrNull { it.slotId == slotId && it.userId == userId && it.deviceId == deviceId }
+        override suspend fun markAdMobImpression(slotId: String, userId: Long, deviceId: String, at: Instant) {
+            findOwnedSlot(slotId, userId, deviceId)?.let { if (it.adMobImpressionAt == null) it.adMobImpressionAt = at }
+        }
+        override suspend fun markAdMobClick(slotId: String, userId: Long, deviceId: String, at: Instant) {
+            findOwnedSlot(slotId, userId, deviceId)?.let { if (it.adMobClickAt == null) it.adMobClickAt = at }
+        }
     }
 
     private class FakeNativeAdvertisementViewPublisher : NativeAdvertisementViewPublishPort {

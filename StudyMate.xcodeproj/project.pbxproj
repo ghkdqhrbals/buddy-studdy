@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000002 /* GoogleMobileAds */; };
+		A10000000000000000000003 /* AdMobNativeAdvertising.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* AdMobNativeAdvertising.swift */; };
 		D40000000000000000000001 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000002 /* MarkdownUI */; };
 		E50000000000000000000001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E50000000000000000000002 /* Sentry */; };
 		C80000000000000000000001 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = C80000000000000000000002 /* RevenueCat */; };
@@ -283,6 +285,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A10000000000000000000004 /* AdMobNativeAdvertising.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdMobNativeAdvertising.swift; sourceTree = "<group>"; };
 		E50000000000000000000004 /* SentryMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryMonitoring.swift; sourceTree = "<group>"; };
 		110000000000000000000001 /* StudyMateApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyMateApp.swift; sourceTree = "<group>"; };
 		110000000000000000000002 /* StudyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyModels.swift; sourceTree = "<group>"; };
@@ -448,6 +451,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000001 /* GoogleMobileAds in Frameworks */,
 				F60000000000000000000006 /* FirebaseAnalyticsCore in Frameworks */,
 				F70000000000000000000006 /* FirebaseRemoteConfig in Frameworks */,
 				C80000000000000000000001 /* RevenueCat in Frameworks */,
@@ -835,6 +839,7 @@
 		110000000000000000000064 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A10000000000000000000004 /* AdMobNativeAdvertising.swift */,
 				110000000000000000000004 /* SettingsStore.swift */,
 				110000000000000000000005 /* OpenAIClient.swift */,
 				110000000000000000000006 /* NotificationService.swift */,
@@ -1009,6 +1014,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 120000000000000000000090 /* Build configuration list for PBXNativeTarget "StudyMateiOS" */;
 			buildPhases = (
+				A10000000000000000000005 /* Validate AdMob configuration */,
 				120000000000000000000070 /* Sources */,
 				120000000000000000000050 /* Frameworks */,
 				120000000000000000000071 /* Resources */,
@@ -1020,6 +1026,7 @@
 			);
 			name = StudyMateiOS;
 			packageProductDependencies = (
+				A10000000000000000000002 /* GoogleMobileAds */,
 				C80000000000000000000002 /* RevenueCat */,
 				D40000000000000000000002 /* MarkdownUI */,
 				E50000000000000000000002 /* Sentry */,
@@ -1082,6 +1089,7 @@
 			mainGroup = 110000000000000000000060;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				A10000000000000000000006 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
 				C80000000000000000000003 /* XCRemoteSwiftPackageReference "purchases-ios" */,
 				D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				E50000000000000000000005 /* XCLocalSwiftPackageReference "Packages/SentrySDK" */,
@@ -1147,6 +1155,26 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		A10000000000000000000005 /* Validate AdMob configuration */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Validate AdMob configuration";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\n\nif [ \"${CONFIGURATION:-}\" != \"Release\" ]; then\n  exit 0\nfi\n\napp_id=\"${ADMOB_APP_ID:-}\"\nnative_unit_id=\"${ADMOB_NATIVE_AD_UNIT_ID:-}\"\ndemo_publisher_prefix=\"ca-app-pub-3940256099942544\"\n\nif ! /usr/bin/printf '%s' \"${app_id}\" | /usr/bin/grep -Eq '^ca-app-pub-[0-9]{16}~[0-9]{10}$' \\\n  || /usr/bin/printf '%s' \"${app_id}\" | /usr/bin/grep -Eq \"^${demo_publisher_prefix}~\"; then\n  echo \"Release requires a real ADMOB_APP_ID build setting.\" >&2\n  exit 1\nfi\n\nif ! /usr/bin/printf '%s' \"${native_unit_id}\" | /usr/bin/grep -Eq '^ca-app-pub-[0-9]{16}/[0-9]{10}$' \\\n  || /usr/bin/printf '%s' \"${native_unit_id}\" | /usr/bin/grep -Eq \"^${demo_publisher_prefix}/\"; then\n  echo \"Release requires a real ADMOB_NATIVE_AD_UNIT_ID build setting.\" >&2\n  exit 1\nfi\n";
+			showEnvVarsInLog = 0;
+		};
 		F80000000000000000000001 /* Install local Firebase configuration */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -1310,6 +1338,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000003 /* AdMobNativeAdvertising.swift in Sources */,
 				120000000000000000000101 /* StudyMateiOSApp.swift in Sources */,
 				F60000000000000000000001 /* AppAnalytics.swift in Sources */,
 				F70000000000000000000001 /* AppControl.swift in Sources */,
@@ -1697,6 +1726,8 @@
 		1200000000000000000000A2 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ADMOB_APP_ID = "ca-app-pub-3940256099942544~1458002511";
+				ADMOB_NATIVE_AD_UNIT_ID = "ca-app-pub-3940256099942544/3986624511";
 				APNS_ENVIRONMENT = development;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				BUDDYSTUDY_BACKEND_BASE_URL = "https://lowfidev.cloud";
@@ -1827,6 +1858,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		A10000000000000000000006 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {
+				kind = exactVersion;
+				version = 13.8.0;
+			};
+		};
 		C80000000000000000000003 /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/RevenueCat/purchases-ios.git";
@@ -1854,6 +1893,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000002 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000006 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
 		C80000000000000000000002 /* RevenueCat */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C80000000000000000000003 /* XCRemoteSwiftPackageReference "purchases-ios" */;

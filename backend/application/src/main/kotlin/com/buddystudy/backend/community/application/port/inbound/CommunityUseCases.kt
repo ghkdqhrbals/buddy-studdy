@@ -8,6 +8,7 @@ import com.buddystudy.backend.community.application.model.CommunityLikeResponse
 import com.buddystudy.backend.community.application.model.CommunityQuestionResponse
 import com.buddystudy.backend.community.application.model.CommunityQuestionsResponse
 import com.buddystudy.backend.community.application.model.FeedbackResponse
+import com.buddystudy.backend.community.application.model.NativeAdvertisementResponse
 import com.buddystudy.backend.community.application.model.UserBlockResponse
 
 interface CommunityUseCase {
@@ -22,6 +23,13 @@ interface CommunityUseCase {
     suspend fun getPublicQuestionsV2(
         principal: Principal?,
         query: String?,
+        language: String,
+        view: String = "localized",
+        limit: Int,
+        offset: Int,
+    ): CommunityQuestionsResponse
+    suspend fun getPublicQuestionFeedV2(
+        principal: Principal?,
         language: String,
         view: String = "localized",
         limit: Int,
@@ -72,4 +80,7 @@ interface CommunityUseCase {
         principal: Principal,
         selectionId: String,
     )
+    suspend fun nativeAdSlotFallback(principal: Principal, slotId: String): NativeAdvertisementResponse?
+    suspend fun recordNativeAdSlotImpression(principal: Principal, slotId: String, provider: String)
+    suspend fun recordNativeAdSlotClick(principal: Principal, slotId: String, provider: String)
 }

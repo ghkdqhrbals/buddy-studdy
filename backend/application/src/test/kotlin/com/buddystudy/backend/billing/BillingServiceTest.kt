@@ -89,6 +89,7 @@ class BillingServiceTest {
         productType = transaction.productType,
         billingPeriod = "P1M",
         sortOrder = 20,
+        adFree = true,
     )
 
     @Test
@@ -115,6 +116,8 @@ class BillingServiceTest {
         assertEquals("TIER2", status.planTransition?.nextTierCode)
         assertEquals(changesAt, status.planTransition?.currentPlanEndsAt)
         assertEquals(changesAt, status.planTransition?.nextPlanStartsAt)
+        assertEquals(true, status.adFree)
+        assertEquals(listOf("TIER3"), ledger.adFreeTierReads)
     }
 
     @Test
@@ -225,6 +228,7 @@ class BillingServiceTest {
         assertEquals(SubscriptionAccessStatus.ACTIVE, status.accessStatus)
         assertEquals(null, status.productId)
         assertEquals(30, status.quota.baseLimit)
+        assertEquals(false, status.adFree)
     }
 
     @Test
@@ -252,6 +256,24 @@ class BillingServiceTest {
 
         assertEquals(ApiErrorCode.BILLING_ACCOUNT_REQUIRED, error.errorCode)
         assertEquals(0, ledger.tokenReads)
+    }
+
+    @Test
+    fun `billing catalog exposes the tier ad-free benefit`() = runBlocking {
+        val catalog = service(FakeLedger(token, product)).catalog(principal())
+
+        assertEquals(true, catalog.products.single().adFree)
+    }
+
+    @Test
+    fun `missing tier advertising policy fails closed`() = runBlocking {
+        val ledger = FakeLedger(token, product).apply {
+            adFreeByTier.remove("TIER2")
+        }
+
+        val status = service(ledger).status(principal())
+
+        assertEquals(true, status.adFree)
     }
 
     @Test
@@ -786,6 +808,8 @@ class BillingServiceTest {
             synchronizedAt = Instant.parse("2026-08-03T00:00:00Z"),
         )
         val additionalProducts = mutableListOf<BillingTierProduct>()
+        val adFreeByTier = mutableMapOf("TIER1" to false, "TIER2" to true, "TIER3" to true)
+        val adFreeTierReads = mutableListOf<String>()
         override suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection? = projectedEntitlement
         var tokenReads = 0
         var fulfillmentError: Exception? = null
@@ -817,6 +841,10 @@ class BillingServiceTest {
             product?.takeIf { productEnabled && it.productId == productId }
         override suspend fun tierProduct(productId: String): BillingTierProduct? =
             product?.takeIf { it.productId == productId } ?: additionalProducts.firstOrNull { it.productId == productId }
+        override suspend fun adFreeForTier(tierCode: String): Boolean? {
+            adFreeTierReads += tierCode
+            return adFreeByTier[tierCode]
+        }
         override suspend fun createPendingInvoice(
             userId: Long,
             appAccountToken: UUID,

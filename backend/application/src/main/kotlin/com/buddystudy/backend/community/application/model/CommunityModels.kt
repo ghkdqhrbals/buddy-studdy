@@ -45,12 +45,14 @@ data class CommunityQuestionsResponse(
 enum class CommunityFeedItemType {
     PUBLIC_QUESTION,
     ADVERTISEMENT,
+    NATIVE_AD_SLOT,
 }
 
 data class CommunityFeedItemResponse(
     val type: CommunityFeedItemType,
     val question: CommunityQuestionResponse? = null,
     val advertisement: NativeAdvertisementResponse? = null,
+    val nativeAdSlot: NativeAdSlotResponse? = null,
 ) {
     companion object {
         fun publicQuestion(question: CommunityQuestionResponse) = CommunityFeedItemResponse(
@@ -62,8 +64,18 @@ data class CommunityFeedItemResponse(
             type = CommunityFeedItemType.ADVERTISEMENT,
             advertisement = advertisement,
         )
+
+        fun nativeAdSlot(slot: NativeAdSlotResponse) = CommunityFeedItemResponse(
+            type = CommunityFeedItemType.NATIVE_AD_SLOT,
+            nativeAdSlot = slot,
+        )
     }
 }
+
+data class NativeAdSlotResponse(
+    val slotId: String,
+    val placement: String,
+)
 
 data class NativeAdvertisementResponse(
     val selectionId: String,

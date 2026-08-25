@@ -23,6 +23,7 @@ data class BillingTierProduct(
     val productType: BillingProductType,
     val billingPeriod: String?,
     val sortOrder: Int,
+    val adFree: Boolean = false,
 )
 
 data class BillingCatalog(
@@ -57,6 +58,7 @@ data class BillingQuotaStatus(
 
 data class BillingStatusResponse(
     val tierCode: String,
+    val adFree: Boolean,
     val source: EntitlementSource,
     val accessStatus: SubscriptionAccessStatus,
     val renewalStatus: SubscriptionRenewalStatus,

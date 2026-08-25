@@ -53,6 +53,7 @@ runtime comparison or rollback does not fork application behavior.
   - Transient infrastructure failures (`408`, `429`, and `5xx`) and invalid backend responses keep their status, request ID, and diagnostic body in internal logs but resolve to localized, feature-specific retry guidance in user-facing UI. Structured non-transient business errors continue to use their server-provided messages.
   - Client-side decoding and cancellation errors are normalized by the same error policy so raw system messages such as missing-key decoding failures do not appear as repeated popups.
   - Protected tab UI must not pre-fetch page access. The app opens the tab and lets the requested backend API return auth, permission, or terms errors through the common error policy.
+  - Required-term UI opens the document represented by the backend term identity and submits that exact `version` and `contentHash`; the backend rejects a mismatch before writing agreement history. New immutable policies are first registered with a future sentinel effective time, then activated by a separate post-approval Flyway migration after the capable iOS build is public and older builds are force-updated.
 
 - `UseCases/`
   - Thin application action boundaries around backend capabilities.
@@ -282,6 +283,7 @@ Profile > Usage appears or a quota-related request fails
 ```text
 Public community feed
 -> GET /api/v1/public/questions?tl=ko|en|ja&view=localized|original
+-> GET /api/v2/public/questions?tl=ko|en|ja&view=localized|original is the current iOS feed contract and returns an ordered items[] list of PUBLIC_QUESTION and, at most once, NATIVE_AD_SLOT
 -> GET /api/v2/public/questions/search?query=...&tl=ko|en|ja&view=localized|original
 -> authenticated GET /api/v1/public/questions/liked?query=...&tl=ko|en|ja&view=localized|original returns only the viewer's still-public liked questions in bounded pages and never inserts native advertisements
 -> tl (`ko|en|ja`) takes precedence over the deprecated language alias
@@ -291,12 +293,20 @@ Public community feed
 -> READY question/answer/AI snapshots are projected into question_search by language
 -> comment translations remain isolated in question_comment_localizations
 -> only READY translation snapshots are exposed for the requested language
--> on the first unfiltered page, the backend reads active native_ad_campaigns, removes campaigns found in the current user's native_ad_campaign_suppressions, and applies audience, schedule, daily-cap, minimum-gap, and post-view cooldown gates
+-> v2 considers a COMMUNITY_FEED slot only on the first unfiltered page and only for anonymous or effective TIER1 access; active TIER2/TIER3 access remains ad-free through the end of a scheduled downgrade, and an unresolved entitlement suppresses advertising
+-> the common placement policy begins OFF and controls enabled/schedule, per-user UTC daily cap, minimum delivery gap, minimum question count, and insertion bounds; the server always enforces at least two preceding questions, one following question, and a minimum 60-second gap
+-> slot eligibility and per-user/placement delivery state are reserved under a transactional lock, so simultaneous requests cannot exceed the cap; slot and delivery history cascade when the owning user is deleted
+-> v2 search, liked-question pages, and offset pages after the first never receive a slot
+-> after UMP permits ads, iOS makes one non-personalized, teen-rated AdMob load without ATT/IDFA or BuddyStudy user ID, device ID, query, topic, content URL, or keywords; it neither refreshes automatically nor retries immediately
+-> a successful AdMob response inside five seconds owns the slot; consent denial, error, no-fill, or timeout makes one POST /api/v2/native-ad-slots/{slotId}/fallback request, and a late AdMob callback cannot replace the decided slot
+-> POST /api/v2/native-ad-slots/{slotId}/impression and /click idempotently record AdMob delegate callbacks with provider ADMOB; first-party fallback ads continue using the legacy selection impression, view, and not-interested endpoints
+-> GET/PUT /api/v1/admin/native-ad-placement-policies/COMMUNITY_FEED owns the shared slot policy and 30-day slot, AdMob, and fallback metrics used by the deployable Advertising admin
+-> the v1 compatibility feed still reads active native_ad_campaigns, removes campaigns found in the current user's native_ad_campaign_suppressions, and applies audience, schedule, daily-cap, minimum-gap, and post-view cooldown gates
 -> the adapter loads per-user frequency/activity signals and 30-day campaign delivery/open/not-interested signals with bounded batch queries rather than campaign-count-dependent queries
 -> eligible campaigns are ranked by priority, authenticated/anonymous relevance, Bayesian-smoothed 30-day destination-open rate, freshness, exploration bonus, and Bayesian-smoothed not-interested penalty
 -> 85% of selections use the top-ranked campaign; 15% explore one of the remaining top-three candidates
 -> the backend chooses a bounded position after the first two question rows and before the page tail, then persists native_ad_selection_history
--> the response contains one final ordered items[] list with type PUBLIC_QUESTION or ADVERTISEMENT; questions[] remains a compatibility field for older clients
+-> the v1 response contains one final ordered items[] list with type PUBLIC_QUESTION or ADVERTISEMENT; questions[] remains a compatibility field for older clients
 -> ADVERTISEMENT carries selectionId, campaignId, provider name, localized advertising label/title/body/full affiliate disclosure, optional Coupang CDN image, and a validated BuddyStudy deep link or HTTPS Coupang destination
 -> iOS renders items[] unchanged, routes buddystudy:// through AppRoute, and opens validated HTTPS destinations externally; it performs no ranking or placement
 -> tapping an advertisement calls POST /api/v1/native-ad-selections/{selectionId}/view immediately before destination routing

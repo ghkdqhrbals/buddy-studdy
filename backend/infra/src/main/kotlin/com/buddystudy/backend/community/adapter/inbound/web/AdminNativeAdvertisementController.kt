@@ -5,6 +5,8 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignPage
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignSummary
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementPolicyCommand
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementPolicyResponse
 import com.buddystudy.backend.community.application.port.inbound.AdminNativeAdvertisementUseCase
 import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
 import jakarta.validation.Valid
@@ -82,6 +84,78 @@ class AdminNativeAdvertisementController(
     ): AdminNativeAdvertisementCampaignSummary =
         advertisements.update(authorization.adminBearerToken(), campaignId, request)
 }
+
+@RestController
+@RequestMapping("/api/v1/admin/native-ad-placement-policies")
+class AdminNativeAdPlacementPolicyController(
+    private val policies: AdminNativeAdPlacementPolicyWebPort,
+) {
+    @GetMapping("/{placement}")
+    suspend fun policy(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable placement: String,
+    ): AdminNativeAdPlacementPolicyResponse = policies.policy(authorization.adminBearerToken(), placement)
+
+    @PutMapping("/{placement}")
+    suspend fun updatePolicy(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable placement: String,
+        @Valid @RequestBody request: AdminNativeAdPlacementPolicyRequest,
+    ): AdminNativeAdPlacementPolicyResponse = policies.updatePolicy(authorization.adminBearerToken(), placement, request)
+}
+
+data class AdminNativeAdPlacementPolicyRequest(
+    @field:NotBlank var placement: String = "COMMUNITY_FEED",
+    var enabled: Boolean = false,
+    @field:Min(0) @field:Max(100) var dailyDeliveryCap: Int = 2,
+    @field:Min(60) @field:Max(2_592_000) var minimumSecondsBetweenDeliveries: Int = 21_600,
+    @field:Min(4) @field:Max(100) var minimumFeedItemCount: Int = 4,
+    @field:Min(2) @field:Max(99) var earliestPosition: Int = 2,
+    @field:Min(2) @field:Max(99) var latestPosition: Int = 7,
+    var startsAt: Instant? = null,
+    var endsAt: Instant? = null,
+)
+
+interface AdminNativeAdPlacementPolicyWebPort {
+    suspend fun policy(adminToken: String, placement: String): AdminNativeAdPlacementPolicyResponse
+    suspend fun updatePolicy(
+        adminToken: String,
+        placement: String,
+        request: AdminNativeAdPlacementPolicyRequest,
+    ): AdminNativeAdPlacementPolicyResponse
+}
+
+@Component
+class AdminNativeAdPlacementPolicyWebAdapter(
+    private val authentication: AdminAnalyticsUseCase,
+    private val policies: AdminNativeAdvertisementUseCase,
+) : AdminNativeAdPlacementPolicyWebPort {
+    override suspend fun policy(adminToken: String, placement: String): AdminNativeAdPlacementPolicyResponse {
+        authentication.validate(adminToken)
+        return policies.placementPolicy(placement)
+    }
+
+    override suspend fun updatePolicy(
+        adminToken: String,
+        placement: String,
+        request: AdminNativeAdPlacementPolicyRequest,
+    ): AdminNativeAdPlacementPolicyResponse {
+        authentication.validate(adminToken)
+        return policies.updatePlacementPolicy(placement, request.toCommand())
+    }
+}
+
+private fun AdminNativeAdPlacementPolicyRequest.toCommand() = AdminNativeAdPlacementPolicyCommand(
+    placement = placement,
+    enabled = enabled,
+    dailyDeliveryCap = dailyDeliveryCap,
+    minimumSecondsBetweenDeliveries = minimumSecondsBetweenDeliveries,
+    minimumFeedItemCount = minimumFeedItemCount,
+    earliestPosition = earliestPosition,
+    latestPosition = latestPosition,
+    startsAt = startsAt,
+    endsAt = endsAt,
+)
 
 data class AdminNativeAdvertisementCampaignRequest(
     @field:NotBlank var campaignKey: String = "",

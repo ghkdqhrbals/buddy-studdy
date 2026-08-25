@@ -4,6 +4,8 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignPage
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignSummary
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementPolicyCommand
+import com.buddystudy.backend.community.application.model.AdminNativeAdPlacementPolicyResponse
 
 interface AdminNativeAdvertisementUseCase {
     suspend fun campaigns(
@@ -22,4 +24,9 @@ interface AdminNativeAdvertisementUseCase {
         limit: Int,
         offset: Int,
     ): AdminNativeAdvertisementUserPage
+    suspend fun placementPolicy(placement: String): AdminNativeAdPlacementPolicyResponse
+    suspend fun updatePlacementPolicy(
+        placement: String,
+        command: AdminNativeAdPlacementPolicyCommand,
+    ): AdminNativeAdPlacementPolicyResponse
 }

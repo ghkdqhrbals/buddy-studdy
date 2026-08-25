@@ -1,5 +1,24 @@
 import Foundation
 
+struct CommunityNativeAdvertisementEligibilityPolicy {
+    static func allowsServerSlot(
+        isSignedIn: Bool,
+        adFree: Bool?,
+        query: String,
+        offset: Int
+    ) -> Bool {
+        guard query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              offset == 0 else {
+            return false
+        }
+
+        if !isSignedIn {
+            return true
+        }
+        return adFree == false
+    }
+}
+
 @MainActor
 struct CommunityFeedStateStore {
     var questions: [CommunityQuestion] = []
@@ -48,7 +67,12 @@ struct CommunityFeedStateStore {
         isLoading = false
     }
 
-    mutating func applyPage(_ response: CommunityQuestionsResponse, offset normalizedOffset: Int, reset: Bool) {
+    mutating func applyPage(
+        _ response: CommunityQuestionsResponse,
+        offset normalizedOffset: Int,
+        reset: Bool,
+        allowsNativeAdSlots: Bool = true
+    ) {
         if response.limit > 0 {
             pageSize = response.limit
         }
@@ -65,6 +89,8 @@ struct CommunityFeedStateStore {
                 return visibleQuestionIDs.contains(question.id)
             case .advertisement(let advertisement):
                 return !hiddenAdvertisementCampaignIDs.contains(advertisement.campaignID)
+            case .nativeAdSlot:
+                return allowsNativeAdSlots && normalizedOffset == 0
             }
         }
         if reset {

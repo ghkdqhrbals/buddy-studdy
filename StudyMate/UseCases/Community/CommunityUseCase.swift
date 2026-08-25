@@ -26,6 +26,36 @@ struct CommunityUseCase {
         )
     }
 
+    func fetchNativeAdvertisementFallback(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws -> CommunityNativeAdvertisement? {
+        try await repository.fetchNativeAdvertisementFallback(
+            registration: registration,
+            slotID: slotID
+        )
+    }
+
+    func recordAdMobNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws {
+        try await repository.recordAdMobNativeAdvertisementImpression(
+            registration: registration,
+            slotID: slotID
+        )
+    }
+
+    func recordAdMobNativeAdvertisementClick(
+        registration: RemotePushRegistration,
+        slotID: String
+    ) async throws {
+        try await repository.recordAdMobNativeAdvertisementClick(
+            registration: registration,
+            slotID: slotID
+        )
+    }
+
     func fetchLikedPublicQuestions(
         registration: RemotePushRegistration,
         query: String?,

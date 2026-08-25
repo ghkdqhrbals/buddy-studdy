@@ -63,4 +63,36 @@ class NativeAdvertisementSelectionEntity(
     var selectedAt: Instant = Instant.now(),
     var impressionAt: Instant? = null,
     var viewedAt: Instant? = null,
+    var nativeAdSlotId: String? = null,
+)
+
+@Table("native_ad_placement_policies")
+class NativeAdPlacementPolicyEntity(
+    @Id
+    var placement: String = "COMMUNITY_FEED",
+    var enabled: Boolean = false,
+    var dailyDeliveryCap: Int = 2,
+    var minimumSecondsBetweenDeliveries: Int = 21_600,
+    var minimumFeedItemCount: Int = 4,
+    var earliestPosition: Int = 2,
+    var latestPosition: Int = 7,
+    var startsAt: Instant? = null,
+    var endsAt: Instant? = null,
+    var updatedAt: Instant = Instant.now(),
+)
+
+@Table("native_ad_slots")
+class NativeAdSlotEntity(
+    @Id
+    var id: Long = 0,
+    var slotId: String = "",
+    var userId: Long = 0,
+    var deviceId: String = "",
+    var placement: String = "COMMUNITY_FEED",
+    var language: String = "ko",
+    var position: Int = 0,
+    var feedItemCount: Int = 0,
+    var deliveredAt: Instant = Instant.now(),
+    var adMobImpressionAt: Instant? = null,
+    var adMobClickAt: Instant? = null,
 )

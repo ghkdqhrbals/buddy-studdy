@@ -40,4 +40,8 @@ struct AppErrorHandlingUseCase {
     func diagnosticDescription(for error: Error) -> String {
         BackendErrorPresentationPolicy.diagnosticDescription(for: error)
     }
+
+    func requiredTerms(for error: Error) -> [BackendTerms] {
+        BackendErrorPresentationPolicy.requiredTerms(for: error)
+    }
 }

@@ -46,6 +46,8 @@ data class TermsAgreementCommand(
     val type: TermsType,
     val action: String,
     val source: String,
+    val version: String? = null,
+    val contentHash: String? = null,
     val ipAddress: String? = null,
     val userAgent: String? = null,
     val appVersion: String? = null,

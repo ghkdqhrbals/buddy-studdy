@@ -33,6 +33,8 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.TestPropertySource
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 
 @SpringBootTest
 @TestPropertySource(
@@ -525,11 +527,12 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             val productId: String,
             val billingPeriod: String,
             val monthlyLimit: Int,
+            val adFree: Boolean,
         )
 
         val tierProducts = databaseClient.sql(
             """
-            select p.tier_code, p.product_id, p.billing_period, t.monthly_question_limit
+            select p.tier_code, p.product_id, p.billing_period, t.monthly_question_limit, t.ad_free
             from membership_tier_products p
             join user_membership_tiers t on t.tier_code = p.tier_code
             where p.provider = 'APPLE' and p.enabled = true
@@ -541,13 +544,20 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
                 productId = row.get("product_id", String::class.java)!!,
                 billingPeriod = row.get("billing_period", String::class.java)!!,
                 monthlyLimit = row.get("monthly_question_limit", java.lang.Integer::class.java)!!.toInt(),
+                adFree = row.get("ad_free", java.lang.Boolean::class.java)!!.booleanValue(),
             )
         }.all().collectList().awaitSingle()
 
         assertThat(tierProducts).containsExactly(
-            TierProduct("TIER2", "io.github.ghkdqhrbals.StudyMate.tier2.monthly", "P1M", 300),
-            TierProduct("TIER3", "io.github.ghkdqhrbals.StudyMate.tier3.monthly", "P1M", 1000),
+            TierProduct("TIER2", "io.github.ghkdqhrbals.StudyMate.tier2.monthly", "P1M", 300, true),
+            TierProduct("TIER3", "io.github.ghkdqhrbals.StudyMate.tier3.monthly", "P1M", 1000, true),
         )
+
+        val freeTierAdFree = databaseClient.sql(
+            "select ad_free from user_membership_tiers where tier_code = 'TIER1'",
+        ).map { row, _ -> row.get("ad_free", java.lang.Boolean::class.java)!!.booleanValue() }
+            .one().awaitSingle()
+        assertThat(freeTierAdFree).isFalse()
 
         val retiredAnnualProducts = databaseClient.sql(
             """
@@ -817,24 +827,24 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
-    fun `latest privacy policy matches the published 2026 08 14 fixed copy`(): Unit = runBlocking {
+    fun `2026 08 25 privacy policy is staged while 2026 08 14 remains active`(): Unit = runBlocking {
         data class PrivacyDocument(
             val version: String,
             val locale: String,
             val url: String,
             val contentHash: String,
+            val effectiveAt: Instant,
             val required: Boolean,
             val mutable: Boolean,
         )
 
         val document = databaseClient.sql(
             """
-            select version, locale, url, content_hash, required, mutable
+            select version, locale, url, content_hash, effective_at, required, mutable
             from terms
             where code = 'PRIVACY_POLICY'
+              and version = '2026-08-25'
               and retired_at is null
-            order by effective_at desc, id desc
-            limit 1
             """.trimIndent(),
         )
             .map { row, _ ->
@@ -843,6 +853,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
                     locale = row.get("locale", String::class.java)!!,
                     url = row.get("url", String::class.java)!!,
                     contentHash = row.get("content_hash", String::class.java)!!,
+                    effectiveAt = row.get("effective_at", LocalDateTime::class.java)!!.toInstant(ZoneOffset.UTC),
                     required = row.get("required", java.lang.Boolean::class.java)!!.booleanValue(),
                     mutable = row.get("mutable", java.lang.Boolean::class.java)!!.booleanValue(),
                 )
@@ -852,14 +863,32 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
 
         assertThat(document).isEqualTo(
             PrivacyDocument(
-                version = "2026-08-14",
+                version = "2026-08-25",
                 locale = "ko",
-                url = "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-14.html",
-                contentHash = "f9df55f63edb0e2e439f7cb6ab05ce57efbfecfcbbbdd809beb1168191c56dfa",
+                url = "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-25.html",
+                contentHash = "13f2e4925ad4a28f39304570e68309a960c2460b3bdf87466898718648228a21",
+                effectiveAt = Instant.parse("9999-12-31T00:00:00Z"),
                 required = true,
                 mutable = false,
             ),
         )
+
+        val activeVersion = databaseClient.sql(
+            """
+            select version
+            from terms
+            where code = 'PRIVACY_POLICY'
+              and effective_at <= :now
+              and (retired_at is null or retired_at > :now)
+            order by effective_at desc, id desc
+            limit 1
+            """.trimIndent(),
+        ).bind("now", Instant.parse("2026-08-25T12:00:00Z"))
+            .map { row, _ -> row.get("version", String::class.java)!! }
+            .one()
+            .awaitSingle()
+
+        assertThat(activeVersion).isEqualTo("2026-08-14")
     }
 
     @Test
@@ -911,6 +940,83 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             "question_comment_localizations",
             "question_search",
         )
+    }
+
+    @Test
+    fun `native ad slot schema defaults off and enforces idempotency plus account deletion cascades`(): Unit = runBlocking {
+        val tables = databaseClient.sql(
+            """
+            select table_name
+            from information_schema.tables
+            where table_schema = database()
+              and table_name in ('native_ad_placement_policies', 'native_ad_slots', 'native_ad_delivery_state')
+            """.trimIndent(),
+        ).map { row, _ -> row.get("table_name", String::class.java)!! }
+            .all().collectList().awaitSingle()
+        assertThat(tables).containsExactlyInAnyOrder(
+            "native_ad_placement_policies",
+            "native_ad_slots",
+            "native_ad_delivery_state",
+        )
+
+        data class PlacementDefaults(
+            val enabled: Boolean,
+            val dailyCap: Int,
+            val interval: Int,
+            val minimumItems: Int,
+            val earliest: Int,
+            val latest: Int,
+        )
+        val defaults = databaseClient.sql(
+            """
+            select enabled, daily_delivery_cap, minimum_seconds_between_deliveries,
+                   minimum_feed_item_count, earliest_position, latest_position
+            from native_ad_placement_policies
+            where placement = 'COMMUNITY_FEED'
+            """.trimIndent(),
+        ).map { row, _ ->
+            PlacementDefaults(
+                enabled = row.get("enabled", java.lang.Boolean::class.java)!!.booleanValue(),
+                dailyCap = row.get("daily_delivery_cap", java.lang.Integer::class.java)!!.toInt(),
+                interval = row.get("minimum_seconds_between_deliveries", java.lang.Integer::class.java)!!.toInt(),
+                minimumItems = row.get("minimum_feed_item_count", java.lang.Integer::class.java)!!.toInt(),
+                earliest = row.get("earliest_position", java.lang.Integer::class.java)!!.toInt(),
+                latest = row.get("latest_position", java.lang.Integer::class.java)!!.toInt(),
+            )
+        }.one().awaitSingle()
+        assertThat(defaults).isEqualTo(PlacementDefaults(false, 2, 21_600, 4, 2, 7))
+
+        val slotIndexes = databaseClient.sql(
+            """
+            select index_name, non_unique
+            from information_schema.statistics
+            where table_schema = database()
+              and table_name = 'native_ad_selection_history'
+              and index_name = 'uk_native_ad_selection_history_slot'
+            """.trimIndent(),
+        ).map { row, _ ->
+            row.get("index_name", String::class.java)!! to
+                row.get("non_unique", java.lang.Long::class.java)!!.toLong()
+        }.all().collectList().awaitSingle()
+        assertThat(slotIndexes).containsExactly("uk_native_ad_selection_history_slot" to 0L)
+
+        val cascades = databaseClient.sql(
+            """
+            select constraint_name, delete_rule
+            from information_schema.referential_constraints
+            where constraint_schema = database()
+              and constraint_name in (
+                'fk_native_ad_slots_user',
+                'fk_native_ad_delivery_state_user',
+                'fk_native_ad_selection_history_slot'
+              )
+            """.trimIndent(),
+        ).map { row, _ ->
+            row.get("constraint_name", String::class.java)!! to row.get("delete_rule", String::class.java)!!
+        }.all().collectList().awaitSingle().toMap()
+        assertThat(cascades).containsEntry("fk_native_ad_slots_user", "CASCADE")
+        assertThat(cascades).containsEntry("fk_native_ad_delivery_state_user", "CASCADE")
+        assertThat(cascades).containsEntry("fk_native_ad_selection_history_slot", "CASCADE")
     }
 
     @Test

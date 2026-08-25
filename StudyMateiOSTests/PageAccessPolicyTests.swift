@@ -227,6 +227,7 @@ final class BillingLocalizationTests: XCTestCase {
         let payload = """
         {
           "tierCode": "TIER2",
+          "adFree": true,
           "source": "APP_STORE",
           "accessStatus": "ACTIVE",
           "renewalStatus": "CANCELED",
@@ -253,6 +254,7 @@ final class BillingLocalizationTests: XCTestCase {
         let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
 
         XCTAssertEqual(status.tierCode, "TIER2")
+        XCTAssertTrue(status.adFree)
         XCTAssertTrue(status.isEntitlementActive)
         XCTAssertFalse(status.willRenew)
         XCTAssertEqual(status.renewalStatus, "CANCELED")
@@ -511,6 +513,342 @@ final class BillingLocalizationTests: XCTestCase {
         let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-09T08:20:00Z"))
 
         XCTAssertNil(MembershipPlanTimelinePolicy.resolve(status: status, catalogProducts: [], at: now))
+    }
+}
+
+@MainActor
+final class NativeAdvertisementPolicyTests: XCTestCase {
+    func testV2FeedDecodesServerOrderedNativeAdSlot() throws {
+        let data = Data(
+            """
+            {
+              "questions": [],
+              "items": [{
+                "type": "NATIVE_AD_SLOT",
+                "nativeAdSlot": {
+                  "slotId": "slot-123",
+                  "placement": "COMMUNITY_FEED"
+                }
+              }],
+              "totalCount": 0,
+              "limit": 20,
+              "offset": 0
+            }
+            """.utf8
+        )
+
+        let response = try RemotePushBackendClient.makeDecoder().decode(
+            CommunityQuestionsResponse.self,
+            from: data
+        )
+        guard case .nativeAdSlot(let slot) = try XCTUnwrap(response.items.first) else {
+            return XCTFail("Expected a native AdMob slot.")
+        }
+
+        XCTAssertEqual(slot.slotID, "slot-123")
+        XCTAssertEqual(slot.placement, "COMMUNITY_FEED")
+        XCTAssertEqual(response.items.first?.id, "native-ad-slot-slot-123")
+    }
+
+    func testNativeAdSlotsAreLimitedToUnfilteredFirstPageWithKnownEligibility() {
+        XCTAssertTrue(
+            CommunityNativeAdvertisementEligibilityPolicy.allowsServerSlot(
+                isSignedIn: false,
+                adFree: nil,
+                query: "",
+                offset: 0
+            )
+        )
+        XCTAssertTrue(
+            CommunityNativeAdvertisementEligibilityPolicy.allowsServerSlot(
+                isSignedIn: true,
+                adFree: false,
+                query: "   ",
+                offset: 0
+            )
+        )
+        XCTAssertFalse(
+            CommunityNativeAdvertisementEligibilityPolicy.allowsServerSlot(
+                isSignedIn: true,
+                adFree: true,
+                query: "",
+                offset: 0
+            )
+        )
+        XCTAssertFalse(
+            CommunityNativeAdvertisementEligibilityPolicy.allowsServerSlot(
+                isSignedIn: true,
+                adFree: nil,
+                query: "",
+                offset: 0
+            )
+        )
+        XCTAssertFalse(
+            CommunityNativeAdvertisementEligibilityPolicy.allowsServerSlot(
+                isSignedIn: false,
+                adFree: nil,
+                query: "Swift",
+                offset: 0
+            )
+        )
+        XCTAssertFalse(
+            CommunityNativeAdvertisementEligibilityPolicy.allowsServerSlot(
+                isSignedIn: false,
+                adFree: nil,
+                query: "",
+                offset: 20
+            )
+        )
+    }
+
+    func testFeedStateDropsNativeAdSlotsWhenPageDoesNotAllowThem() {
+        let slot = CommunityNativeAdvertisementSlot(
+            slotID: "slot-first-page",
+            placement: "COMMUNITY_FEED"
+        )
+        let response = CommunityQuestionsResponse(
+            items: [.nativeAdSlot(slot)],
+            totalCount: 0,
+            limit: 20,
+            offset: 0
+        )
+        var state = CommunityFeedStateStore()
+
+        state.applyPage(
+            response,
+            offset: 0,
+            reset: true,
+            allowsNativeAdSlots: true
+        )
+        XCTAssertEqual(state.items, [.nativeAdSlot(slot)])
+
+        state.applyPage(
+            response,
+            offset: 0,
+            reset: true,
+            allowsNativeAdSlots: false
+        )
+        XCTAssertTrue(state.items.isEmpty)
+
+        state.applyPage(
+            response,
+            offset: 20,
+            reset: false,
+            allowsNativeAdSlots: true
+        )
+        XCTAssertTrue(state.items.isEmpty)
+    }
+
+    func testNativeAdStateMachineUsesFallbackOnceAndRejectsLateResolution() async {
+        let slot = CommunityNativeAdvertisementSlot(
+            slotID: "slot-timeout",
+            placement: "COMMUNITY_FEED"
+        )
+        let fallback = CommunityNativeAdvertisement(
+            selectionID: "selection-1",
+            campaignID: "campaign-1",
+            providerName: nil,
+            disclosureLabel: "Ad",
+            title: "Fallback",
+            body: nil,
+            imageURL: nil,
+            affiliateDisclosure: nil,
+            deepLink: "https://example.com"
+        )
+        let viewModel = MobileNativeAdvertisementSlotViewModel()
+        var fallbackLoadCount = 0
+
+        viewModel.start(
+            slot: slot,
+            adMobLoader: { _, _, _, completion in
+                completion(nil)
+                completion(nil)
+            },
+            fallbackLoader: {
+                fallbackLoadCount += 1
+                return fallback
+            },
+            onAdMobImpression: {},
+            onAdMobClick: {}
+        )
+
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(fallbackLoadCount, 1)
+        XCTAssertEqual(viewModel.resolution, .displayingFallback)
+
+        viewModel.start(
+            slot: slot,
+            adMobLoader: { _, _, _, completion in completion(nil) },
+            fallbackLoader: {
+                fallbackLoadCount += 1
+                return nil
+            },
+            onAdMobImpression: {},
+            onAdMobClick: {}
+        )
+        XCTAssertEqual(fallbackLoadCount, 1)
+    }
+
+    func testNativeAdRequestPolicyEnforcesThrottleTimeoutAndExpiry() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+
+        XCTAssertEqual(NativeAdvertisementRequestPolicy.loadTimeout, .seconds(5))
+        XCTAssertFalse(
+            NativeAdvertisementRequestPolicy.canStartRequest(
+                lastRequestAt: now.addingTimeInterval(-59),
+                now: now
+            )
+        )
+        XCTAssertTrue(
+            NativeAdvertisementRequestPolicy.canStartRequest(
+                lastRequestAt: now.addingTimeInterval(-60),
+                now: now
+            )
+        )
+        XCTAssertTrue(
+            NativeAdvertisementRequestPolicy.isFresh(
+                loadedAt: now.addingTimeInterval(-(55 * 60 - 1)),
+                now: now
+            )
+        )
+        XCTAssertFalse(
+            NativeAdvertisementRequestPolicy.isFresh(
+                loadedAt: now.addingTimeInterval(-(55 * 60)),
+                now: now
+            )
+        )
+    }
+
+    func testAdMobIdentifiersAllowSamplesOnlyOutsideReleaseValidation() {
+        XCTAssertTrue(
+            AdMobIdentifierPolicy.isValidAppID(
+                AdMobIdentifierPolicy.sampleAppID,
+                allowsSample: true
+            )
+        )
+        XCTAssertFalse(
+            AdMobIdentifierPolicy.isValidAppID(
+                AdMobIdentifierPolicy.sampleAppID,
+                allowsSample: false
+            )
+        )
+        XCTAssertFalse(
+            AdMobIdentifierPolicy.isValidAppID(
+                "ca-app-pub-3940256099942544~0123456789",
+                allowsSample: false
+            )
+        )
+        XCTAssertTrue(
+            AdMobIdentifierPolicy.isValidNativeAdUnitID(
+                "ca-app-pub-1234567890123456/1234567890",
+                allowsSample: false
+            )
+        )
+        XCTAssertFalse(
+            AdMobIdentifierPolicy.isValidNativeAdUnitID(
+                "ca-app-pub-3940256099942544/2521693316",
+                allowsSample: false
+            )
+        )
+        XCTAssertFalse(
+            AdMobIdentifierPolicy.isValidNativeAdUnitID(
+                "ca-app-pub-invalid/123",
+                allowsSample: false
+            )
+        )
+    }
+
+    func testPrivacyPreparationAlwaysUsesLiveAvailabilityAfterChoicesChange() {
+        XCTAssertFalse(
+            AdMobPrivacyPreparationPolicy.resolvedCanRequestAds(
+                cached: true,
+                live: false
+            )
+        )
+        XCTAssertTrue(
+            AdMobPrivacyPreparationPolicy.resolvedCanRequestAds(
+                cached: false,
+                live: true
+            )
+        )
+    }
+
+    func testAdFreeBenefitAndPrivacyChoicesAreLocalized() {
+        XCTAssertEqual(AppStrings(language: .korean).adFreePublicFeedBenefit, "광고 없는 공개 피드")
+        XCTAssertEqual(AppStrings(language: .english).adFreePublicFeedBenefit, "Ad-free public feed")
+        XCTAssertEqual(AppStrings(language: .japanese).adFreePublicFeedBenefit, "広告なしの公開フィード")
+
+        XCTAssertFalse(AppStrings(language: .korean).advertisingPrivacyChoices.isEmpty)
+        XCTAssertFalse(AppStrings(language: .english).advertisingPrivacyChoices.isEmpty)
+        XCTAssertFalse(AppStrings(language: .japanese).advertisingPrivacyChoices.isEmpty)
+    }
+}
+
+final class TermsDocumentIdentityPolicyTests: XCTestCase {
+    func testKnownPrivacyIdentityUsesLocalizedImmutableDocument() {
+        let serverURL = URL(string: "https://example.test/server-privacy")!
+        let term = BackendTerms(
+            code: BackendTermsType.privacyPolicy.rawValue,
+            version: BackendTermsPresentationPolicy.localizedPrivacyPolicyVersion,
+            title: "Privacy",
+            url: serverURL,
+            contentHash: BackendTermsPresentationPolicy.localizedPrivacyPolicyContentHash
+        )
+
+        XCTAssertEqual(
+            BackendTermsPresentationPolicy.documentURL(for: term, language: .japanese),
+            AppLegalLinks.privacyPolicyURL(language: .japanese)
+        )
+    }
+
+    func testUnknownOrMismatchedIdentityUsesServerDocumentURL() {
+        let serverURL = URL(string: "https://example.test/server-required-term")!
+        let mismatchedPrivacy = BackendTerms(
+            code: BackendTermsType.privacyPolicy.rawValue,
+            version: BackendTermsPresentationPolicy.localizedPrivacyPolicyVersion,
+            title: "Privacy",
+            url: serverURL,
+            contentHash: "different-content"
+        )
+        let terms = BackendTerms(
+            code: BackendTermsType.termsOfService.rawValue,
+            version: "future-version",
+            title: "Terms",
+            url: serverURL,
+            contentHash: "future-hash"
+        )
+
+        XCTAssertEqual(
+            BackendTermsPresentationPolicy.documentURL(for: mismatchedPrivacy, language: .english),
+            serverURL
+        )
+        XCTAssertEqual(
+            BackendTermsPresentationPolicy.documentURL(for: terms, language: .english),
+            serverURL
+        )
+    }
+
+    func testRequiredTermsIdentityCrossesErrorHandlingBoundary() {
+        let requiredTerm = BackendTerms(
+            code: BackendTermsType.privacyPolicy.rawValue,
+            version: "2026-08-25",
+            title: "Privacy",
+            url: URL(string: "https://example.test/privacy")!,
+            contentHash: "exact-server-hash"
+        )
+        let apiError = BackendAPIError(
+            code: "TERMS_REAGREEMENT_REQUIRED",
+            message: "Required",
+            requiredTerms: [requiredTerm]
+        )
+        let error = RemotePushBackendError.httpStatus(403, "{}", apiError)
+
+        XCTAssertEqual(
+            AppErrorHandlingUseCase().requiredTerms(for: error),
+            [requiredTerm]
+        )
     }
 }
 

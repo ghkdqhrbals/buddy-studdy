@@ -63,6 +63,9 @@ class BillingService(
             ?.takeUnless { it.isExpiredAt(now) }
         val quota = memberships.quotaStatusForUser(principal.userId, now)
             ?: throw billingError(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Question quota was not found.")
+        val effectiveTierCode = entitlement?.tierCode ?: quota.tierCode
+        // A missing tier policy must never accidentally make a user eligible for advertising.
+        val adFree = ledger.adFreeForTier(effectiveTierCode) ?: true
         val periodStartedAt = quota.periodStartedAt ?: now
         val resetAt = quota.resetAt ?: now
         val planTransition = entitlement?.let { current ->
@@ -92,7 +95,8 @@ class BillingService(
             }
         }
         return BillingStatusResponse(
-            tierCode = entitlement?.tierCode ?: quota.tierCode,
+            tierCode = effectiveTierCode,
+            adFree = adFree,
             source = entitlement?.source ?: EntitlementSource.FREE,
             accessStatus = entitlement?.accessStatus ?: SubscriptionAccessStatus.ACTIVE,
             renewalStatus = entitlement?.renewalStatus ?: SubscriptionRenewalStatus.NOT_APPLICABLE,

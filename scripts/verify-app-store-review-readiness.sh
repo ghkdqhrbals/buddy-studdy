@@ -10,9 +10,11 @@ review_notes="$project_root/app-store/metadata/review-notes.txt"
 resolution_reply="$project_root/app-store/metadata/resolution-center-reply.txt"
 resubmission_guide="$project_root/docs/APP_STORE_REVIEW_RESUBMISSION_1.1.0.md"
 testflight_notes="$project_root/app-store/metadata/testflight-build-localizations.json"
-privacy_ko="$project_root/docs/privacy-2026-08-14.html"
-privacy_en="$project_root/docs/en/privacy-2026-08-14.html"
-privacy_ja="$project_root/docs/ja/privacy-2026-08-14.html"
+privacy_ko="$project_root/docs/privacy-2026-08-25.html"
+privacy_en="$project_root/docs/en/privacy-2026-08-25.html"
+privacy_ja="$project_root/docs/ja/privacy-2026-08-25.html"
+admob_release_checklist="$project_root/docs/ADMOB_RELEASE_CHECKLIST.md"
+app_ads_template="$project_root/docs/app-ads.txt.template"
 
 plutil -lint "$privacy_manifest"
 plutil -lint "$project_root/StudyMate.xcodeproj/project.pbxproj"
@@ -23,9 +25,9 @@ ruby -rjson -e '
   age_rating = JSON.parse(File.read(ARGV.fetch(2)))
   required = %w[ko en-US ja]
   privacy_urls = {
-    "ko" => "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-14.html",
-    "en-US" => "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-14.html",
-    "ja" => "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-14.html"
+    "ko" => "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-25.html",
+    "en-US" => "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-25.html",
+    "ja" => "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-25.html"
   }
   abort "Missing version localization" unless (required - version.keys).empty?
   abort "Missing App Info localization" unless (required - app_info.keys).empty?
@@ -66,8 +68,11 @@ ruby -I "$project_root/scripts/lib" -r app_store_review_notes -e '
   end
 ' "$review_notes" "$resolution_reply" "$resubmission_guide"
 
+set +e
 TESTFLIGHT_BUILD_NOTES_VALIDATE_ONLY=1 \
   ruby "$project_root/scripts/update-testflight-build-notes.rb"
+testflight_notes_status=$?
+set -e
 
 for policy in "$privacy_ko" "$privacy_en" "$privacy_ja"; do
   test -s "$policy"
@@ -75,10 +80,56 @@ for policy in "$privacy_ko" "$privacy_en" "$privacy_ja"; do
 done
 
 privacy_policy_hash="$(ruby -rdigest -e 'print Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$privacy_ko")"
-rg -q "$privacy_policy_hash" "$project_root/backend/tutor/src/main/resources/db/migration/V62__register_2026_08_14_privacy_policy.sql"
-rg -q "$privacy_policy_hash" "$project_root/backend/tutor/src/main/resources/db/migration-mysql/V77__register_2026_08_14_privacy_policy.sql"
+rg -q "$privacy_policy_hash" "$project_root/backend/tutor/src/main/resources/db/migration"
+rg -q "$privacy_policy_hash" "$project_root/backend/tutor/src/main/resources/db/migration-mysql"
+rg -q "9999-12-31" "$project_root/backend/tutor/src/main/resources/db/migration/V67__register_2026_08_25_privacy_policy.sql"
+rg -q "9999-12-31" "$project_root/backend/tutor/src/main/resources/db/migration-mysql/V90__register_2026_08_25_privacy_policy.sql"
+
+test -s "$admob_release_checklist"
+rg -q "separate post-approval change" "$admob_release_checklist"
+test -s "$app_ads_template"
+rg -q '^google\.com, pub-REPLACE_WITH_ADMOB_PUBLISHER_ID, DIRECT, f08c47fec0942fa0$' "$app_ads_template"
+if test -e "$project_root/docs/app-ads.txt" && rg -q 'REPLACE_WITH_ADMOB_PUBLISHER_ID' "$project_root/docs/app-ads.txt"; then
+  echo "docs/app-ads.txt must never publish the placeholder publisher ID." >&2
+  exit 1
+fi
 
 rg -q "PrivacyInfo.xcprivacy" "$project_root/StudyMate.xcodeproj/project.pbxproj"
+rg -q 'version = 13\.8\.0;' "$project_root/StudyMate.xcodeproj/project.pbxproj"
+rg -q '"version" : "13\.8\.0"' "$project_root/StudyMate.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+rg -q '<key>GADApplicationIdentifier</key>' "$project_root/StudyMate/iOSInfo.plist"
+rg -q '<string>\$\(ADMOB_APP_ID\)</string>' "$project_root/StudyMate/iOSInfo.plist"
+rg -q '<key>BuddyStudyAdMobNativeAdUnitID</key>' "$project_root/StudyMate/iOSInfo.plist"
+rg -q '<string>\$\(ADMOB_NATIVE_AD_UNIT_ID\)</string>' "$project_root/StudyMate/iOSInfo.plist"
+rg -q '<key>SKAdNetworkItems</key>' "$project_root/StudyMate/iOSInfo.plist"
+test "$(rg -c '<key>SKAdNetworkIdentifier</key>' "$project_root/StudyMate/iOSInfo.plist")" -ge 50
+rg -q 'Validate AdMob configuration' "$project_root/StudyMate.xcodeproj/project.pbxproj"
+rg -q 'ca-app-pub-3940256099942544~1458002511' "$project_root/StudyMate.xcodeproj/project.pbxproj"
+rg -q 'ca-app-pub-3940256099942544/3986624511' "$project_root/StudyMate.xcodeproj/project.pbxproj"
+rg -q 'demo_publisher_prefix=.*ca-app-pub-3940256099942544' "$project_root/StudyMate.xcodeproj/project.pbxproj"
+if rg -q 'NSUserTrackingUsageDescription|ATTrackingManager|AppTrackingTransparency' "$project_root/StudyMate" "$project_root/StudyMate.xcodeproj/project.pbxproj"; then
+  echo "ATT framework, prompt, and NSUserTrackingUsageDescription are forbidden for this release." >&2
+  exit 1
+fi
+test "$(/usr/libexec/PlistBuddy -c 'Print :NSPrivacyTracking' "$privacy_manifest")" = "false"
+for collected_type in \
+  NSPrivacyCollectedDataTypeCoarseLocation \
+  NSPrivacyCollectedDataTypeDeviceID \
+  NSPrivacyCollectedDataTypeProductInteraction \
+  NSPrivacyCollectedDataTypeAdvertisingData \
+  NSPrivacyCollectedDataTypeCrashData \
+  NSPrivacyCollectedDataTypePerformanceData \
+  NSPrivacyCollectedDataTypeOtherDiagnosticData; do
+  rg -q "$collected_type" "$privacy_manifest"
+done
+rg -q 'ADMOB_APP_ID: \$\{\{ vars\.ADMOB_APP_ID \}\}' "$project_root/.github/workflows/release.yml"
+rg -q 'ADMOB_NATIVE_AD_UNIT_ID: \$\{\{ vars\.ADMOB_NATIVE_AD_UNIT_ID \}\}' "$project_root/.github/workflows/release.yml"
+rg -Fq 'ca-app-pub-3940256099942544~*' "$project_root/.github/workflows/release.yml"
+rg -Fq 'ca-app-pub-3940256099942544/*' "$project_root/.github/workflows/release.yml"
+rg -q 'Gem::Version\.new\("26\.2"\)' "$project_root/.github/workflows/release.yml"
+rg -q '/api/v1/admin/native-ad-placement-policies/COMMUNITY_FEED' "$project_root/admin-frontend/src/api.ts"
+rg -q 'Policy state is UNKNOWN' "$project_root/admin-frontend/src/AdvertisingPanel.tsx"
+rg -q 'contentHash: contentHash' "$project_root/StudyMate/Services/RemotePushBackendClient.swift"
 rg -q "com.apple.developer.applesignin" "$project_root/StudyMate/StudyMateiOS.entitlements"
 rg -q "Delete Account|회원탈퇴|アカウント" "$project_root/StudyMate/Views" "$project_root/StudyMate/Models"
 rg -q "Report|신고|報告" "$project_root/StudyMate"
@@ -88,9 +139,9 @@ rg -q "membershipAutoRenewalDisclosure" "$project_root/StudyMate/Models/StudyMod
 rg -q "subscriptionDisclosure" "$project_root/StudyMate/Views/MobileRootView.swift"
 rg -q "AppLegalLinks.termsOfServiceURL" "$project_root/StudyMate/Views/MobileRootView.swift"
 rg -q "AppLegalLinks.privacyPolicyURL" "$project_root/StudyMate/Views/MobileRootView.swift"
-rg -q 'buddy-studdy/privacy-2026-08-14\.html' "$project_root/StudyMate/Models/StudyModels.swift"
-rg -q 'buddy-studdy/en/privacy-2026-08-14\.html' "$project_root/StudyMate/Models/StudyModels.swift"
-rg -q 'buddy-studdy/ja/privacy-2026-08-14\.html' "$project_root/StudyMate/Models/StudyModels.swift"
+rg -q 'buddy-studdy/privacy-2026-08-25\.html' "$project_root/StudyMate/Models/StudyModels.swift"
+rg -q 'buddy-studdy/en/privacy-2026-08-25\.html' "$project_root/StudyMate/Models/StudyModels.swift"
+rg -q 'buddy-studdy/ja/privacy-2026-08-25\.html' "$project_root/StudyMate/Models/StudyModels.swift"
 rg -q '<key>BuddyStudyBackendBaseURL</key>' "$project_root/StudyMate/iOSInfo.plist"
 rg -q 'BUDDYSTUDY_BACKEND_BASE_URL = "https://lowfidev\.cloud";' "$project_root/StudyMate.xcodeproj/project.pbxproj"
 rg -q 'BUDDYSTUDY_BACKEND_BASE_URL = "https://api\.ghkdqhrbals\.org";' "$project_root/StudyMate.xcodeproj/project.pbxproj"
@@ -100,7 +151,7 @@ rg -q 'App Store 심사용 후보 빌드' "$testflight_notes"
 rg -q 'App Store審査用の候補ビルド' "$testflight_notes"
 rg -q 'production BuddyStudy API at https://api\.ghkdqhrbals\.org' "$review_notes"
 rg -qi "block" "$review_notes"
-rg -q "privacy-2026-08-14\.html" "$review_notes"
+rg -q "privacy-2026-08-25\.html" "$review_notes"
 rg -q "terms-2026-07-30\.html" "$review_notes"
 rg -q "300" "$review_notes"
 rg -q "1,000" "$review_notes"
@@ -109,3 +160,8 @@ rg -q "8\. IN-APP PURCHASES AND PURCHASE LOCATION" "$resolution_reply"
 
 echo "App Store review source checks passed."
 echo "Manual gate: verify the production RevenueCat webhook delivers both Production and Sandbox events without a duplicate development integration."
+echo "Manual gate: issue the AdMob IDs/publisher ID, publish the real root app-ads.txt, and verify AdMob authorization before Release archive."
+
+if [ "$testflight_notes_status" -ne 0 ]; then
+  exit "$testflight_notes_status"
+fi

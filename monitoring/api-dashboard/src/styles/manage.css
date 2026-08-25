@@ -971,6 +971,19 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .maintenance-window-row span { color: var(--muted); font-size: 11px; }
 
 .advertising-metric-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.advertising-placement-policy { overflow: hidden; }
+.advertising-placement-actions { display: flex; align-items: center; gap: 8px; }
+.advertising-placement-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--border);
+}
+.advertising-placement-facts > div { display: grid; gap: 4px; min-width: 0; border-right: 1px solid var(--border); padding: 14px 16px; }
+.advertising-placement-facts > div:last-child { border-right: 0; }
+.advertising-placement-facts span,
+.advertising-placement-facts small { color: var(--muted); font-size: 10px; }
+.advertising-placement-facts strong { overflow: hidden; color: #1e293b; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.advertising-provider-metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); border-top: 1px solid var(--border); }
 .advertising-toolbar { align-items: flex-end; }
 .advertising-toolbar .search-field { width: min(520px, 48vw); }
 .advertising-filter-fields { display: flex; align-items: flex-end; gap: 8px; }
@@ -1143,6 +1156,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .app-update-form-actions, .app-update-user-filters { align-items: stretch; flex-direction: column; }
   .app-update-form-actions .button, .app-update-user-filters .compact-field { width: 100%; }
   .advertising-metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .advertising-placement-actions { align-items: flex-end; flex-direction: column; }
+  .advertising-placement-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .advertising-placement-facts > div:nth-child(2) { border-right: 0; }
+  .advertising-placement-facts > div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+  .advertising-provider-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .advertising-filter-fields { align-items: stretch; flex-direction: column; }
   .advertising-filter-fields .field { width: 100%; }
   .advertising-ranking-grid { grid-template-columns: 1fr; }

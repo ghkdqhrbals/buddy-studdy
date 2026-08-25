@@ -92,6 +92,11 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(ledger.enabledTierProducts())
             .isNotEmpty
             .allMatch { it.billingPeriod == "P1M" }
+            .allMatch { it.adFree }
+        assertThat(ledger.adFreeForTier("TIER1")).isFalse()
+        assertThat(ledger.adFreeForTier("TIER2")).isTrue()
+        assertThat(ledger.adFreeForTier("TIER3")).isTrue()
+        assertThat(ledger.adFreeForTier("UNKNOWN")).isNull()
         assertThat(ledger.enabledTierProduct(annualProductId)).isNull()
         val historicalProduct = ledger.tierProduct(annualProductId)
         assertThat(historicalProduct?.billingPeriod).isEqualTo("P1Y")

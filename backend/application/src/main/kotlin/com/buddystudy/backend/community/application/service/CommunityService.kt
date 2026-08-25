@@ -57,11 +57,16 @@ import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackC
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementCandidate
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementRankingPolicy
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementDeepLinkPolicy
+import com.buddystudy.backend.community.application.policy.NativeAdPlacementPolicy
 import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.profile.application.model.toProfile
 import com.buddystudy.backend.community.application.model.toResponse
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdEligibilityPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotReservation
+import com.buddystudy.backend.community.application.model.NativeAdSlotResponse
 import com.buddystudy.account.domain.entity.UserEntity
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
@@ -93,6 +98,8 @@ class CommunityService(
     private val feedbacks: FeedbackPort,
     private val nativeAdvertisements: NativeAdvertisementPort,
     private val nativeAdvertisementViews: NativeAdvertisementViewPublishPort,
+    private val nativeAdEligibility: NativeAdEligibilityPort,
+    private val nativeAdSlots: NativeAdSlotPort,
     private val reactions: PublicQuestionReactionPublishPort,
     private val notifications: PublishNotificationUseCase,
     private val languageDetector: ContentLanguageDetectionPort,
@@ -144,6 +151,24 @@ class CommunityService(
         )
     }
 
+    @Transactional
+    override suspend fun getPublicQuestionFeedV2(
+        principal: Principal?,
+        language: String,
+        view: String,
+        limit: Int,
+        offset: Int,
+    ): CommunityQuestionsResponse = publicQuestionsFromOrigin(
+        principal = principal,
+        query = null,
+        language = QuestionLanguage.normalize(language),
+        view = view,
+        limit = limit,
+        offset = offset,
+        includeNativeAdvertisement = false,
+        includeNativeAdSlot = offset == 0,
+    )
+
     @Transactional(readOnly = true)
     override suspend fun getLikedPublicQuestions(
         principal: Principal,
@@ -180,6 +205,7 @@ class CommunityService(
         limit: Int,
         offset: Int,
         includeNativeAdvertisement: Boolean,
+        includeNativeAdSlot: Boolean = false,
     ): CommunityQuestionsResponse {
         val pageable = PageRequest.of(offset / limit, limit)
         val page = if (query == null) {
@@ -205,6 +231,15 @@ class CommunityService(
                 items.add(position, CommunityFeedItemResponse.advertisement(advertisement))
             }
         }
+        if (includeNativeAdSlot && principal != null && nativeAdEligibility.isAdFree(principal.userId) == false) {
+            reserveNativeAdSlot(
+                principal = principal,
+                language = language,
+                questionCount = rows.size,
+            )?.let { (position, slot) ->
+                items.add(position, CommunityFeedItemResponse.nativeAdSlot(slot))
+            }
+        }
         return CommunityQuestionsResponse(
             questions = rows,
             items = items,
@@ -214,16 +249,61 @@ class CommunityService(
         )
     }
 
+    private suspend fun reserveNativeAdSlot(
+        principal: Principal,
+        language: String,
+        questionCount: Int,
+    ): Pair<Int, NativeAdSlotResponse>? {
+        val policy = nativeAdSlots.findPlacementPolicy(NativeAdPlacementPolicy.communityFeed) ?: return null
+        val now = Instant.now()
+        val entropy = ThreadLocalRandom.current().nextLong()
+        val position = NativeAdPlacementPolicy.position(policy, questionCount, now, entropy) ?: return null
+        val slotId = UUID.randomUUID().toString()
+        val slot = nativeAdSlots.reserveSlot(
+            reservation = NativeAdSlotReservation(
+                slotId = slotId,
+                userId = principal.userId,
+                deviceId = principal.deviceId,
+                placement = policy.placement,
+                language = language,
+                position = position,
+                feedItemCount = questionCount,
+                deliveredAt = now,
+            ),
+            dailyDeliveryCap = policy.dailyDeliveryCap,
+            minimumSecondsBetweenDeliveries = maxOf(
+                NativeAdPlacementPolicy.minimumSecondsBetweenDeliveries,
+                policy.minimumSecondsBetweenDeliveries,
+            ),
+        ) ?: return null
+        return slot.position to NativeAdSlotResponse(slot.slotId, slot.placement)
+    }
+
     private suspend fun selectNativeAdvertisement(
         principal: Principal,
         language: String,
         questionCount: Int,
+        forcedPosition: Int? = null,
+        nativeAdSlotId: String? = null,
     ): Pair<Int, NativeAdvertisementResponse>? {
+        if (nativeAdSlotId != null) {
+            nativeAdvertisements.findSelectionByNativeAdSlotId(nativeAdSlotId)?.let { existing ->
+                val campaign = nativeAdvertisements.findCampaign(existing.campaignId) ?: return null
+                return existing.position to localizedNativeAdvertisement(campaign, existing.selectionId, language)
+            }
+        }
         val now = Instant.now()
         val suppressedCampaignIds = nativeAdvertisements.findSuppressedCampaignIds(principal.userId)
         val campaigns = nativeAdvertisements
             .findEligibleCampaigns(NativeAdvertisementRankingPolicy.placement, now)
             .filterNot { it.id in suppressedCampaignIds }
+            .filter { campaign ->
+                forcedPosition == null || (
+                    questionCount >= campaign.minimumFeedItemCount &&
+                        forcedPosition >= campaign.earliestPosition &&
+                        forcedPosition <= minOf(campaign.latestPosition, questionCount - 1)
+                    )
+            }
         if (campaigns.isEmpty()) {
             return null
         }
@@ -271,26 +351,72 @@ class CommunityService(
             entropy,
         ) ?: return null
         val campaign = selected.candidate.campaign
-        val position = NativeAdvertisementRankingPolicy.position(
+        val position = forcedPosition ?: NativeAdvertisementRankingPolicy.position(
             campaign,
             questionCount,
             entropy xor 0x5DEECE66DL,
         ) ?: return null
         val selectionId = UUID.randomUUID().toString()
-        nativeAdvertisements.saveSelection(
-            NativeAdvertisementSelectionEntity(
-                selectionId = selectionId,
-                campaignId = campaign.id,
-                userId = principal.userId,
-                deviceId = principal.deviceId,
-                placement = campaign.placement,
-                language = language,
-                position = position,
-                rankScore = BigDecimal.valueOf(selected.score),
-                selectedAt = now,
-            )
+        val selection = NativeAdvertisementSelectionEntity(
+            selectionId = selectionId,
+            campaignId = campaign.id,
+            userId = principal.userId,
+            deviceId = principal.deviceId,
+            placement = campaign.placement,
+            language = language,
+            position = position,
+            rankScore = BigDecimal.valueOf(selected.score),
+            selectedAt = now,
+            nativeAdSlotId = nativeAdSlotId,
         )
-        return position to localizedNativeAdvertisement(campaign, selectionId, language)
+        val saved = if (nativeAdSlotId == null) {
+            nativeAdvertisements.saveSelection(selection)
+        } else {
+            nativeAdvertisements.saveFallbackSelectionIfAbsent(nativeAdSlotId, selection)
+        }
+        val savedCampaign = if (saved.campaignId == campaign.id) campaign else nativeAdvertisements.findCampaign(saved.campaignId)
+            ?: return null
+        return saved.position to localizedNativeAdvertisement(savedCampaign, saved.selectionId, language)
+    }
+
+    @Transactional
+    override suspend fun nativeAdSlotFallback(
+        principal: Principal,
+        slotId: String,
+    ): NativeAdvertisementResponse? {
+        val slot = ownedNativeAdSlot(principal, slotId)
+        if (nativeAdEligibility.isAdFree(principal.userId) != false) return null
+        return selectNativeAdvertisement(
+            principal = principal,
+            language = slot.language,
+            questionCount = slot.feedItemCount,
+            forcedPosition = slot.position,
+            nativeAdSlotId = slot.slotId,
+        )?.second
+    }
+
+    @Transactional
+    override suspend fun recordNativeAdSlotImpression(principal: Principal, slotId: String, provider: String) {
+        requireAdMobProvider(provider)
+        ownedNativeAdSlot(principal, slotId)
+        nativeAdSlots.markAdMobImpression(slotId, principal.userId, principal.deviceId, Instant.now())
+    }
+
+    @Transactional
+    override suspend fun recordNativeAdSlotClick(principal: Principal, slotId: String, provider: String) {
+        requireAdMobProvider(provider)
+        ownedNativeAdSlot(principal, slotId)
+        nativeAdSlots.markAdMobClick(slotId, principal.userId, principal.deviceId, Instant.now())
+    }
+
+    private suspend fun ownedNativeAdSlot(principal: Principal, slotId: String) =
+        nativeAdSlots.findOwnedSlot(slotId, principal.userId, principal.deviceId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Native advertisement slot not found.")
+
+    private fun requireAdMobProvider(provider: String) {
+        if (provider.trim().uppercase() != "ADMOB") {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Unsupported native advertisement provider.")
+        }
     }
 
     private fun localizedNativeAdvertisement(

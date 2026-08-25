@@ -18,6 +18,7 @@ import com.buddystudy.backend.auth.application.port.inbound.TermsUseCase
 import com.buddystudy.backend.auth.application.port.outbound.NotificationPreferenceCommandPort
 import com.buddystudy.backend.auth.application.port.outbound.NotificationPreferenceQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.PermissionQueryPort
+import com.buddystudy.backend.auth.application.port.outbound.ActiveTermsProjection
 import com.buddystudy.backend.auth.application.port.outbound.TermsAgreementCommandPort
 import com.buddystudy.backend.auth.application.port.outbound.TermsAgreementQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
@@ -62,6 +63,7 @@ class PermissionPolicyService(
         }
         val activeTerms = terms.activeTerms(command.type.code, Instant.now())
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Active terms were not found.")
+        validateAgreementIdentity(command, activeTerms)
 
         termAgreements.saveAgreement(
             userId = principal.userId.takeUnless { principal.anonymous },
@@ -86,6 +88,21 @@ class PermissionPolicyService(
                 anonymous = principal.anonymous,
             ),
         )
+    }
+
+    private fun validateAgreementIdentity(command: TermsAgreementCommand, activeTerms: ActiveTermsProjection) {
+        val requiresExactIdentity = activeTerms.code == TermsType.PRIVACY_POLICY.code &&
+            activeTerms.version == EXACT_IDENTITY_PRIVACY_VERSION
+        val identityMissing = command.version == null || command.contentHash == null
+        val identityMismatch = command.version?.let { it != activeTerms.version } == true ||
+            command.contentHash?.let { it != activeTerms.contentHash } == true
+        if ((requiresExactIdentity && identityMissing) || identityMismatch) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Terms agreement identity does not match the active terms.",
+            )
+        }
     }
 
     @Transactional(readOnly = true)
@@ -197,6 +214,7 @@ class PermissionPolicyService(
     }
 
     private companion object {
+        private const val EXACT_IDENTITY_PRIVACY_VERSION = "2026-08-25"
         private val AGREEMENT_ACTIONS = setOf("AGREED", "WITHDRAWN")
         private val AGREEMENT_SOURCES = setOf("SIGNUP", "SETTINGS", "PROFILE", "REQUIRED_GATE", "MIGRATION")
     }
