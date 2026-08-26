@@ -51,7 +51,7 @@ class NativeAdvertisementPersistenceAdapterTest {
                 """
                 create table user_membership_tiers (
                     tier_code varchar(64) primary key,
-                    ad_free boolean not null
+                    ad_free bigint not null
                 )
                 """.trimIndent(),
             )
@@ -176,7 +176,7 @@ class NativeAdvertisementPersistenceAdapterTest {
                     (12, 'ACTIVE', 'other@example.com', 'Other')
                 """.trimIndent(),
             )
-            execute("insert into user_membership_tiers (tier_code, ad_free) values ('TIER1', false), ('TIER2', true)")
+            execute("insert into user_membership_tiers (tier_code, ad_free) values ('TIER1', 0), ('TIER2', 1)")
             execute(
                 """
                 insert into user_entitlement_projection (user_id, tier_code, access_status) values

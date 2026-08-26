@@ -345,7 +345,14 @@ class NativeAdvertisementPersistenceAdapter(
           )
         """.trimIndent(),
     ).bind("userId", userId)
-        .map { row, _ -> row.get("ad_free", java.lang.Boolean::class.java)?.booleanValue() ?: true }
+        .map { row, _ ->
+            when (val value = row.get("ad_free")) {
+                null -> true
+                is Boolean -> value
+                is Number -> value.toInt() != 0
+                else -> throw IllegalStateException("Column ad_free is not boolean")
+            }
+        }
         .one()
         .awaitSingleOrNull()
 
