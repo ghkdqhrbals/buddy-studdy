@@ -17,7 +17,7 @@ module AppStoreReviewAssets
     __dir__
   )
   DEFAULT_SCREENSHOT_PATH = File.expand_path(
-    "../app-store/review-assets/membership-review-2026-08-14-1242x2688.png",
+    "../app-store/review-assets/membership-review-2026-08-26-1242x2688.png",
     __dir__
   )
   EXPECTED_APP_ID = "6774108938"

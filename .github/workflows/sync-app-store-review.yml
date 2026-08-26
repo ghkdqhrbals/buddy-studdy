@@ -39,7 +39,7 @@ jobs:
       APP_STORE_RESOLUTION_REPLY_PATH: "review-source/app-store/metadata/resolution-center-reply.txt"
       APP_STORE_RESUBMISSION_GUIDE_PATH: "review-source/docs/APP_STORE_REVIEW_RESUBMISSION_1.1.0.md"
       APP_STORE_SUBSCRIPTIONS_PATH: "review-source/app-store/billing/subscriptions.json"
-      APP_STORE_REVIEW_SCREENSHOT_PATH: "review-source/app-store/review-assets/membership-review-2026-08-14-1242x2688.png"
+      APP_STORE_REVIEW_SCREENSHOT_PATH: "review-source/app-store/review-assets/membership-review-2026-08-26-1242x2688.png"
 
     steps:
       - name: Checkout trusted automation
@@ -102,7 +102,7 @@ jobs:
             review-source/app-store/metadata/resolution-center-reply.txt
             review-source/docs/APP_STORE_REVIEW_RESUBMISSION_1.1.0.md
             review-source/app-store/billing/subscriptions.json
-            review-source/app-store/review-assets/membership-review-2026-08-14-1242x2688.png
+            review-source/app-store/review-assets/membership-review-2026-08-26-1242x2688.png
             review-source/screenshots/appstore-ipad-13-en/01-study-tree-ipad13-en.png
             review-source/screenshots/appstore-ipad-13-en/02-study-list-ipad13-en.png
             review-source/screenshots/appstore-ipad-13-en/03-public-questions-ipad13-en.png
