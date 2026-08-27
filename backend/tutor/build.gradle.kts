@@ -101,6 +101,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework:spring-aop")
     implementation("org.aspectj:aspectjweaver")
+    implementation("io.modelcontextprotocol.sdk:mcp-core")
     implementation("org.springframework.ai:mcp-spring-webflux")
     implementation("io.modelcontextprotocol.sdk:mcp-json-jackson2")
     implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:3.0.3")

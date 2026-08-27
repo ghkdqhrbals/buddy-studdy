@@ -22,6 +22,7 @@ java {
 
 dependencies {
     api(project(":application"))
+    api("io.modelcontextprotocol.sdk:mcp-core")
 
     implementation(kotlin("reflect"))
     implementation("org.springframework.boot:spring-boot-starter-webflux")
