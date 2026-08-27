@@ -95,9 +95,10 @@ class AdminAnalyticsController(
         @RequestParam(required = false) jobName: String?,
         @RequestParam(required = false) runId: Long?,
         @RequestParam(defaultValue = "10") limit: Int,
-        @RequestParam(defaultValue = "0") offset: Int,
+        @RequestParam(required = false) cursor: Long?,
+        @RequestParam(required = false) offset: Int?,
     ): ScheduledJobRunPageResponse =
-        admin.jobRuns(authorization.bearerToken(), jobName?.takeIf { it.isNotBlank() }, runId, limit, offset)
+        admin.jobRuns(authorization.bearerToken(), jobName?.takeIf { it.isNotBlank() }, runId, limit, cursor, offset)
 
     @PostMapping("/jobs/{jobName}/retry")
     suspend fun retryJob(
@@ -150,7 +151,14 @@ interface AdminAnalyticsWebPort {
     ): AdminOperatorSummary
     suspend fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse
     suspend fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse
-    suspend fun jobRuns(adminToken: String, jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse
+    suspend fun jobRuns(
+        adminToken: String,
+        jobName: String?,
+        runId: Long?,
+        limit: Int,
+        cursor: Long?,
+        offset: Int?,
+    ): ScheduledJobRunPageResponse
     suspend fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun
     suspend fun jobStatuses(adminToken: String, limit: Int?, offset: Int): ScheduledJobStatusResponse
 }
@@ -203,9 +211,26 @@ class AdminAnalyticsWebAdapter(
     override suspend fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse =
         admin.metrics(adminToken, startDate, endDate, metricKeys)
 
-    override suspend fun jobRuns(adminToken: String, jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
+    override suspend fun jobRuns(
+        adminToken: String,
+        jobName: String?,
+        runId: Long?,
+        limit: Int,
+        cursor: Long?,
+        offset: Int?,
+    ): ScheduledJobRunPageResponse {
         admin.validate(adminToken)
-        return jobExecutions.findRuns(jobName, runId, limit, offset)
+        if (offset != null && offset != 0) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Offset pagination is no longer supported. Use cursor.",
+            )
+        }
+        if (cursor != null && cursor <= 0) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Cursor must be positive.")
+        }
+        return jobExecutions.findRuns(jobName, runId, limit, cursor)
     }
 
     override suspend fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun {

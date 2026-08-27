@@ -13,7 +13,6 @@ one workflow run just because they share a host.
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
 | Flyway V32 recovery | `Repair BuddyStudy Backend Flyway V32` | manual, one-time | EC2 self-hosted | Guarded removal of only the failed V32 history row and V32 partial check constraints |
 | Backend administrator recovery | `Reset BuddyStudy Backend Administrator` | manual, one-time | EC2 self-hosted | Activate only the fixed `admin` monitoring operator and replace its BCrypt password hash |
-| Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Private `buddystudy-admin-frontend` container image submission only |
 | iOS TestFlight | `Release iOS App` | `v*`, manual | GitHub-hosted macOS | Release planning, signed IPA build, artifact retention, and TestFlight upload as separate jobs |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, deployment history, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, and the backend/FRC maintenance operator UI |
 | Redis Stream operations | `Deploy RedisStreamScope on MacBook Air` | manual | MacBook Air self-hosted | RedisStreamScope runtime, persisted SQLite/config volume, production Redis connection, and attachment to the existing monitoring gateway |
@@ -51,8 +50,8 @@ deployment.
   not disconnect the backend service.
   The translation workflow pins a multi-architecture image and never publishes
   the service port on the host.
-- A job must have a module-specific name such as `deploy_backend`,
-  `deploy_admin_frontend`, or `deploy_monitoring`.
+- A job must have a module-specific name such as `deploy_backend` or
+  `deploy_monitoring`.
 - The iOS release workflow remains an iOS-only module. It separates release
   planning, the signed IPA build, TestFlight upload, App Review build mapping,
   and completion reporting into dependent jobs so each failure boundary is
@@ -455,11 +454,6 @@ deployment.
 - The backend deploy temporarily retains the `buddystudy-profile-photos`
   volume for legacy-file cleanup. New profile-photo uploads are disabled;
   saving a pixel avatar or deleting an account removes the user's legacy file.
-- Admin frontend UI changes: build the immutable admin frontend image, then run
-  the EC2 admin frontend deploy. The deploy replaces only the private
-  `buddystudy-admin-frontend` container attached to `buddystudy-swarm-net` and
-  verifies its configured image; Grafana, rather than GitHub Actions, observes
-  runtime readiness.
 - Grafana/Loki/API Logs/TestZone UI changes: run the monitoring deploy.
   The app repository dispatches this module through
   `monitoring-source-published` when an explicit `deploy/monitoring-*` tag is
@@ -620,6 +614,6 @@ deployment.
   `portfolio-site/scripts/setup-routingflare.sh` on the owning Mac. The
   production process is supervised by `launchd`, and Routingflare maps
   `buddystudy.lowfidev.cloud` to the local origin. This operation must not
-  deploy the backend, monitoring stack, or admin frontend.
+  deploy the backend or monitoring stack.
 - Nginx public routing changes: update the owning module workflow template and
   state which module is responsible for reloading nginx.

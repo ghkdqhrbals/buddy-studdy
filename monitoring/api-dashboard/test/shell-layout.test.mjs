@@ -185,6 +185,10 @@ test("batch jobs show operator metadata, timing, results, paginated history, and
   assert.match(page, /offset:\s*String\(statusOffset\)/);
   assert.match(page, /queryKey:\s*\["admin",\s*"jobs",\s*"statuses",\s*statusOffset\]/);
   assert.match(page, /\/jobs\/runs/);
+  assert.match(page, /queryKey:\s*\["admin",\s*"jobs",\s*"runs",\s*jobName,\s*runCursor\]/);
+  assert.match(page, /params\.set\("cursor",\s*String\(runCursor\)\)/);
+  assert.match(page, /setRunCursors\(\(current\) => \[\.\.\.current,\s*nextCursor\]\)/);
+  assert.doesNotMatch(page, /runOffset/);
   assert.match(page, /displayName/);
   assert.match(page, /description/);
   assert.match(page, /Last started/);

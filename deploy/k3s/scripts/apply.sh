@@ -15,4 +15,3 @@ KUBECTL="${KUBECTL:-kubectl}"
 "$KUBECTL" -n buddystudy rollout status statefulset/buddystudy-mysql --timeout=180s
 "$KUBECTL" -n buddystudy rollout status statefulset/buddystudy-redis --timeout=240s
 "$KUBECTL" -n buddystudy rollout status deploy/buddystudy-backend --timeout=240s
-"$KUBECTL" -n buddystudy rollout status deploy/buddystudy-admin-frontend --timeout=180s

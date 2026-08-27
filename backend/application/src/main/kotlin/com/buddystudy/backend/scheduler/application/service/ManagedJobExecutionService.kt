@@ -75,9 +75,9 @@ class ManagedJobExecutionService(
         jobName: String?,
         runId: Long?,
         limit: Int,
-        offset: Int,
+        cursor: Long?,
     ): ScheduledJobRunPageResponse {
-        val page = runs.findRuns(jobName, runId, limit.coerceIn(1, 200), offset.coerceAtLeast(0))
+        val page = runs.findRuns(jobName, runId, limit.coerceIn(1, 200), cursor)
         return page.copy(
             runs = page.runs.map { run ->
                 val displayName = jobsByName[run.jobName]?.displayName ?: run.displayName

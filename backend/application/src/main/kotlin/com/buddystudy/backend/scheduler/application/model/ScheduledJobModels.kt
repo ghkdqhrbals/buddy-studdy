@@ -33,10 +33,10 @@ data class ScheduledJobRun(
 
 data class ScheduledJobRunPageResponse(
     val runs: List<ScheduledJobRun>,
-    override val totalCount: Long,
-    override val limit: Int,
-    override val offset: Int,
-) : PageResponse
+    val limit: Int,
+    val nextCursor: Long?,
+    val hasNext: Boolean,
+)
 
 data class ScheduledJobSnapshot(
     val jobName: String,

@@ -57,6 +57,12 @@ class ScheduledJobRunPersistenceAdapterTest {
             on scheduled_job_runs (started_at desc, id desc)
             """.trimIndent(),
         )
+        execute(
+            """
+            create index if not exists idx_scheduled_job_runs_name_id
+            on scheduled_job_runs (job_name, id)
+            """.trimIndent(),
+        )
         execute("delete from scheduled_job_runs")
         execute("delete from scheduled_jobs")
     }
@@ -66,12 +72,13 @@ class ScheduledJobRunPersistenceAdapterTest {
         val started = adapter.start("event-outbox-dispatch", JobTriggerType.SCHEDULED, null, "system")
 
         val finished = adapter.finish(started.id, JobRunStatus.SUCCESS, "rows=9", null, 17)
-        val page = adapter.findRuns("event-outbox-dispatch", null, 10, 0)
+        val page = adapter.findRuns("event-outbox-dispatch", null, 10, null)
 
         assertThat(finished.status).isEqualTo(JobRunStatus.SUCCESS)
         assertThat(finished.summary).isEqualTo("rows=9")
         assertThat(page.runs).containsExactly(finished)
-        assertThat(page.totalCount).isEqualTo(1)
+        assertThat(page.hasNext).isFalse()
+        assertThat(page.nextCursor).isNull()
     }
 
     @Test
@@ -94,10 +101,20 @@ class ScheduledJobRunPersistenceAdapterTest {
         setStartedAt(first.id, sharedStartedAt)
         setStartedAt(second.id, sharedStartedAt)
 
-        val page = adapter.findRuns(jobName = null, runId = null, limit = 1, offset = 0)
+        val firstPage = adapter.findRuns(jobName = null, runId = null, limit = 1, cursor = null)
+        val secondPage = adapter.findRuns(
+            jobName = null,
+            runId = null,
+            limit = 1,
+            cursor = firstPage.nextCursor,
+        )
 
-        assertThat(page.runs.map { it.id }).containsExactly(second.id)
-        assertThat(page.totalCount).isEqualTo(2)
+        assertThat(firstPage.runs.map { it.id }).containsExactly(second.id)
+        assertThat(firstPage.hasNext).isTrue()
+        assertThat(firstPage.nextCursor).isEqualTo(second.id)
+        assertThat(secondPage.runs.map { it.id }).containsExactly(first.id)
+        assertThat(secondPage.hasNext).isFalse()
+        assertThat(secondPage.nextCursor).isNull()
     }
 
     @Test

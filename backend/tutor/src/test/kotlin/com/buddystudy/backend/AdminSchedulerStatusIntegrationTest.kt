@@ -167,15 +167,23 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
     fun `admin can page scheduler run history through HTTP`(): Unit = runBlocking {
         val token = loginAdmin()
 
-        val response = get("/api/v1/admin/jobs/runs?jobName=%20%20%20&limit=1&offset=0", token)
+        val firstResponse = get("/api/v1/admin/jobs/runs?jobName=%20%20%20&limit=1", token)
 
-        assertThat(response.statusCode()).isEqualTo(200)
-        val body = response.json()
-        assertThat(body["runs"]).hasSize(1)
-        assertThat(body["totalCount"].asLong()).isEqualTo(3)
-        assertThat(body["limit"].asInt()).isEqualTo(1)
-        assertThat(body["offset"].asInt()).isEqualTo(0)
-        assertThat(body["runs"][0]["jobName"].asText()).isIn("question-schedule", "user-stats-refresh")
+        assertThat(firstResponse.statusCode()).isEqualTo(200)
+        val firstBody = firstResponse.json()
+        assertThat(firstBody["runs"]).hasSize(1)
+        assertThat(firstBody["limit"].asInt()).isEqualTo(1)
+        assertThat(firstBody["hasNext"].asBoolean()).isTrue()
+        assertThat(firstBody["nextCursor"].asLong()).isPositive()
+        assertThat(firstBody["runs"][0]["jobName"].asText()).isIn("question-schedule", "user-stats-refresh")
+
+        val secondResponse = get(
+            "/api/v1/admin/jobs/runs?jobName=%20%20%20&limit=1&cursor=${firstBody["nextCursor"].asLong()}",
+            token,
+        )
+        assertThat(secondResponse.statusCode()).isEqualTo(200)
+        assertThat(secondResponse.json()["runs"][0]["id"].asLong())
+            .isNotEqualTo(firstBody["runs"][0]["id"].asLong())
     }
 
     @Test
@@ -185,15 +193,27 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
             "select id from scheduled_job_runs where job_name = 'question-schedule' and error_message = 'older retry failed'",
         ).map { row, _ -> (row.get("id") as Number).toLong() }.one().awaitSingle()
 
-        val response = get("/api/v1/admin/jobs/runs?jobName=question-schedule&runId=$olderRunId&limit=10&offset=0", token)
+        val response = get("/api/v1/admin/jobs/runs?jobName=question-schedule&runId=$olderRunId&limit=10", token)
 
         assertThat(response.statusCode()).isEqualTo(200)
         val body = response.json()
         assertThat(body["runs"]).hasSize(1)
-        assertThat(body["totalCount"].asLong()).isEqualTo(1)
+        assertThat(body["hasNext"].asBoolean()).isFalse()
+        assertThat(body["nextCursor"].isNull).isTrue()
         assertThat(body["runs"][0]["id"].asLong()).isEqualTo(olderRunId)
         assertThat(body["runs"][0]["jobName"].asText()).isEqualTo("question-schedule")
         assertThat(body["runs"][0]["displayName"].asText()).isEqualTo("Scheduled question dispatch")
+    }
+
+    @Test
+    fun `deep offset scheduler run requests fail fast`(): Unit = runBlocking {
+        val token = loginAdmin()
+
+        val response = get("/api/v1/admin/jobs/runs?limit=10&offset=5056420", token)
+
+        assertThat(response.statusCode()).isEqualTo(422)
+        assertThat(response.body()).contains("VALIDATION_ERROR")
+        assertThat(response.body()).contains("cursor")
     }
 
     @Test

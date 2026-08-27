@@ -10,7 +10,7 @@ interface ScheduledJobRunPort {
     suspend fun isEnabled(jobName: String): Boolean
     suspend fun start(jobName: String, triggerType: JobTriggerType, retryOfRunId: Long?, createdBy: String): ScheduledJobRun
     suspend fun finish(runId: Long, status: JobRunStatus, summary: String?, errorMessage: String?, durationMs: Long): ScheduledJobRun
-    suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse
+    suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, cursor: Long?): ScheduledJobRunPageResponse
     suspend fun findSnapshotPage(limit: Int, offset: Int): ScheduledJobSnapshotPage
     suspend fun findExistingJobNames(jobNames: List<String>): Set<String>
 }

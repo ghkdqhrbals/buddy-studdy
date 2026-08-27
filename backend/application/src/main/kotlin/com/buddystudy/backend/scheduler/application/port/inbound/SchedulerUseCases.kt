@@ -22,7 +22,7 @@ interface ManagedJobExecutionUseCase {
         createdBy: String = "system",
     ): ScheduledJobRun
 
-    suspend fun findRuns(jobName: String? = null, runId: Long? = null, limit: Int = 10, offset: Int = 0): ScheduledJobRunPageResponse
+    suspend fun findRuns(jobName: String? = null, runId: Long? = null, limit: Int = 10, cursor: Long? = null): ScheduledJobRunPageResponse
 
     suspend fun findStatuses(limit: Int? = null, offset: Int = 0): ScheduledJobStatusResponse
 }

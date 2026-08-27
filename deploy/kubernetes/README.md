@@ -16,7 +16,6 @@ or hang its local API server when used as a long-running server runtime.
 - `redis/`: single-node Redis StatefulSet, service, and hostPath PV/PVC.
 - `libretranslate/`: LibreTranslate Deployment, service, and model PVC.
 - `backend/`: BuddyStudy backend Deployment and service.
-- `admin-frontend/`: admin web frontend Deployment and service.
 - `backup/`: daily MySQL dump CronJob.
 
 ## Apply
@@ -37,7 +36,6 @@ To deploy from a remote host after copying this repository:
 cd /path/to/study-mate
 kubectl apply -k deploy/kubernetes
 kubectl -n buddystudy rollout status deploy/buddystudy-backend
-kubectl -n buddystudy rollout status deploy/buddystudy-admin-frontend
 ```
 
 To copy and apply through the Tailscale SSH target requested for this project:
@@ -153,7 +151,7 @@ Prefer WARP private routing over Spectrum for this project because DB/Redis
 should not be public Internet services.
 
 If GHCR packages are private, create an image pull secret and add it to the
-backend/admin frontend Deployments:
+backend Deployment:
 
 ```sh
 kubectl -n buddystudy create secret docker-registry ghcr-pull-secret \

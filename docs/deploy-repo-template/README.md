@@ -9,8 +9,8 @@ The public API domain is `https://api.ghkdqhrbals.org`.
 
 ## Deployment Modules
 
-Deployments are module-scoped. Backend, admin frontend, monitoring, and health
-monitor changes must be deployed through separate workflows/jobs. Start with
+Deployments are module-scoped. Backend, monitoring, and health monitor changes
+must be deployed through separate workflows/jobs. Start with
 `deployment-modules.md` before adding or changing deploy workflows.
 
 Current workflow templates:
@@ -25,8 +25,6 @@ Current workflow templates:
   partially applied V32 migration.
 - `configure-backend-network.yml`: Redis administrator ingress on the backend
   EC2 security group.
-- `deploy-admin-frontend.yml`: private admin frontend container image
-  submission on the backend EC2 host.
 - `notify-deployment-status.yml`: centralized Slack status receiver for
   one compact iOS release summary and concise threaded progress replies. Set
   `DEPLOY_SLACK_BOT_TOKEN` and `DEPLOY_SLACK_CHANNEL_ID`; the incoming webhook
@@ -176,22 +174,6 @@ runs-on: [self-hosted, Linux, ARM64, ec2]
 
 Use an ARM instance such as `t4g.medium` when backend, MySQL, Redis, Nginx, and
 Promtail share the host.
-
-## Admin Frontend Deploy
-
-The admin frontend is deployed separately from the backend. Copy
-`deploy-admin-frontend.yml` into the deploy repository's `.github/workflows/`
-directory. The app repository's `Build Admin Frontend Image` workflow dispatches
-`admin-frontend-image-published` and waits for **Deploy BuddyStudy Admin
-Frontend** on the EC2 deploy-only runner.
-
-The admin deploy workflow owns only the private `buddystudy-admin-frontend`
-container attached to `buddystudy-swarm-net`, where the backend Nginx serves it
-under `https://api.ghkdqhrbals.org/admin/`. It pulls the immutable image,
-replaces only that container, and verifies its configured image without waiting
-for container state, readiness, or an HTTP health check. Grafana owns runtime
-outage monitoring. The workflow must not rebuild the backend or recreate MySQL,
-Loki, or Grafana.
 
 ## Monitoring Deploy
 

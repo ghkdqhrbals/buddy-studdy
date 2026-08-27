@@ -8,8 +8,6 @@ import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMar
 import io.r2dbc.spi.Connection
 import io.r2dbc.spi.ConnectionFactory
 import io.r2dbc.spi.Row
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactive.awaitFirstOrNull
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -71,38 +69,36 @@ class ScheduledJobRunPersistenceAdapter(
         jobName: String?,
         runId: Long?,
         limit: Int,
-        offset: Int,
+        cursor: Long?,
     ): ScheduledJobRunPageResponse {
         val conditions = mutableListOf<String>()
         if (!jobName.isNullOrBlank()) conditions += "job_name = :jobName"
         if (runId != null) conditions += "id = :runId"
+        if (runId == null && cursor != null) conditions += "id < :cursor"
         val where = conditions.joinToString(prefix = if (conditions.isEmpty()) "" else " where ", separator = " and ")
-        var countSpec = client.sql("select count(*) as total from scheduled_job_runs$where")
-        var rowsSpec = client.sql("select * from scheduled_job_runs$where order by started_at desc, id desc limit :limit offset :offset")
-            .bind("limit", limit).bind("offset", offset)
+        var rowsSpec = client.sql("select * from scheduled_job_runs$where order by id desc limit :fetchLimit")
+            .bind("fetchLimit", if (runId == null) limit + 1 else 1)
         if (!jobName.isNullOrBlank()) {
-            countSpec = countSpec.bind("jobName", jobName.trim())
             rowsSpec = rowsSpec.bind("jobName", jobName.trim())
         }
         if (runId != null) {
-            countSpec = countSpec.bind("runId", runId)
             rowsSpec = rowsSpec.bind("runId", runId)
         }
-        val (total, rows) = coroutineScope {
-            val totalDeferred = async {
-                countSpec.map { row, _ -> row.get("total", java.lang.Long::class.java)!!.toLong() }
-                    .one()
-                    .awaitSingle()
-            }
-            val rowsDeferred = async {
-                rowsSpec.map { row, _ -> row.toRun() }
-                    .all()
-                    .collectList()
-                    .awaitSingle()
-            }
-            totalDeferred.await() to rowsDeferred.await()
+        if (runId == null && cursor != null) {
+            rowsSpec = rowsSpec.bind("cursor", cursor)
         }
-        return ScheduledJobRunPageResponse(rows, total, limit, offset)
+        val fetched = rowsSpec.map { row, _ -> row.toRun() }
+            .all()
+            .collectList()
+            .awaitSingle()
+        val hasNext = runId == null && fetched.size > limit
+        val rows = fetched.take(limit)
+        return ScheduledJobRunPageResponse(
+            runs = rows,
+            limit = limit,
+            nextCursor = if (hasNext) rows.lastOrNull()?.id else null,
+            hasNext = hasNext,
+        )
     }
 
     override suspend fun findSnapshotPage(limit: Int, offset: Int): ScheduledJobSnapshotPage {

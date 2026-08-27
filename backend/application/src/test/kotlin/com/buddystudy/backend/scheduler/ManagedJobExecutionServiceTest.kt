@@ -374,10 +374,11 @@ class ManagedJobExecutionServiceTest {
         )
         val serviceWithCatalog = ManagedJobExecutionService(runs, locks, properties, listOf(maintenance))
 
-        val response = serviceWithCatalog.findRuns(limit = 10, offset = 0)
+        val response = serviceWithCatalog.findRuns(limit = 10, cursor = null)
 
         assertThat(response.runs.single().displayName).isEqualTo(maintenance.displayName)
-        assertThat(response.totalCount).isEqualTo(1)
+        assertThat(response.hasNext).isFalse()
+        assertThat(response.nextCursor).isNull()
     }
 
     private class FakeJob(
@@ -436,11 +437,20 @@ class ManagedJobExecutionServiceTest {
             return updated
         }
 
-        override suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
+        override suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, cursor: Long?): ScheduledJobRunPageResponse {
             val filtered = rows.filter {
                 (jobName == null || it.jobName == jobName) && (runId == null || it.id == runId)
-            }
-            return ScheduledJobRunPageResponse(filtered.drop(offset).take(limit), filtered.size.toLong(), limit, offset)
+            }.filter { cursor == null || it.id < cursor }
+                .sortedByDescending { it.id }
+            val fetched = filtered.take(limit + 1)
+            val hasNext = fetched.size > limit
+            val pageRows = fetched.take(limit)
+            return ScheduledJobRunPageResponse(
+                runs = pageRows,
+                limit = limit,
+                nextCursor = pageRows.lastOrNull()?.id?.takeIf { hasNext },
+                hasNext = hasNext,
+            )
         }
 
         override suspend fun findSnapshotPage(limit: Int, offset: Int): ScheduledJobSnapshotPage {

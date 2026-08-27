@@ -10,7 +10,6 @@ resources:
   - redis/redis.yaml
   - libretranslate/libretranslate.yaml
   - backend/backend.yaml
-  - admin-frontend/admin-frontend.yaml
   - backup/mysql-backup.yaml
 
 commonLabels:

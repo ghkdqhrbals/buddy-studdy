@@ -41,7 +41,7 @@ Use the conservative disclosure reflected in the immutable 2026-08-25 privacy po
 ## 5. QA and controlled rollout
 
 1. Publish GitHub Pages with `publish_public=true` and verify that the Korean, English, and Japanese immutable 2026-08-25 privacy URLs all return the expected documents.
-2. Deploy backend and admin frontend through their existing module-scoped GitHub Actions. Do not use SSH and do not add workflow health checks. The included Flyway row only stages the 2026-08-25 policy with a future sentinel effective time; the currently effective policy must remain unchanged.
+2. Deploy the backend and Monitoring management UI through their separate module-scoped GitHub Actions. Do not use SSH and do not add workflow health checks. The included Flyway row only stages the 2026-08-25 policy with a future sentinel effective time; the currently effective policy must remain unchanged.
 3. Keep `COMMUNITY_FEED` policy OFF after deployment.
 4. With a TestFlight-only v2 build, briefly enable the policy for registered test devices and verify Korean/English/Japanese, dark mode, Dynamic Type, offline handling, simulator plus physical iPhone/iPad, UMP regions and consent states, Native Validator, and Ad Inspector privacy signals.
 5. Turn the policy OFF again after TestFlight validation.

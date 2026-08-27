@@ -418,7 +418,7 @@ test("repository workflow files do not run backend health probes in Actions", ()
 
 test("image build workflows do not run health-check scanners or probes", () => {
   const workflowDir = path.join(repoRoot, ".github", "workflows");
-  for (const workflowName of ["backend-image.yml", "admin-frontend-image.yml"]) {
+  for (const workflowName of ["backend-image.yml"]) {
     const workflow = fs.readFileSync(path.join(workflowDir, workflowName), "utf8");
     assert.doesNotMatch(workflow, /check-workflow\.js/, `${workflowName} must not run health-check policy scanners`);
     assert.deepEqual(validateNoActionsRuntimeHealthChecks(workflow, workflowName), []);

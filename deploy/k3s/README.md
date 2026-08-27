@@ -12,7 +12,6 @@ Linux host or VM
       MySQL
       Redis
       BuddyStuddy backend
-      Admin frontend
       LibreTranslate
       MySQL backup CronJob
 ```

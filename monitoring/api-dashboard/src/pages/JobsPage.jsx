@@ -39,9 +39,10 @@ function JobsWorkspace() {
   const queryClient = useQueryClient();
   const [selectedJob, setSelectedJob] = useState(null);
   const [statusOffset, setStatusOffset] = useState(0);
-  const [runOffset, setRunOffset] = useState(0);
+  const [runCursors, setRunCursors] = useState([null]);
   const [selectedRun, setSelectedRun] = useState(null);
   const jobName = selectedJob?.jobName || "";
+  const runCursor = runCursors[runCursors.length - 1];
 
   const statusesQuery = useQuery({
     queryKey: ["admin", "jobs", "statuses", statusOffset],
@@ -56,10 +57,11 @@ function JobsWorkspace() {
     placeholderData: keepPreviousData,
   });
   const runsQuery = useQuery({
-    queryKey: ["admin", "jobs", "runs", jobName, runOffset],
+    queryKey: ["admin", "jobs", "runs", jobName, runCursor],
     queryFn: () => {
-      const params = new URLSearchParams({ limit: String(RUN_PAGE_SIZE), offset: String(runOffset) });
+      const params = new URLSearchParams({ limit: String(RUN_PAGE_SIZE) });
       if (jobName) params.set("jobName", jobName);
+      if (runCursor != null) params.set("cursor", String(runCursor));
       return adminFetch(`/jobs/runs?${params}`);
     },
     refetchInterval: 30_000,
@@ -85,9 +87,8 @@ function JobsWorkspace() {
   const runs = Array.isArray(runsQuery.data?.runs) ? runsQuery.data.runs : [];
   const runPageTransitioning = runsQuery.isPlaceholderData;
   const visibleRuns = runPageTransitioning ? [] : runs;
-  const total = Number(runsQuery.data?.totalCount) || 0;
-  const page = Math.floor(runOffset / RUN_PAGE_SIZE) + 1;
-  const totalPages = Math.max(1, Math.ceil(total / RUN_PAGE_SIZE));
+  const page = runCursors.length;
+  const hasNextRunPage = Boolean(runsQuery.data?.hasNext && runsQuery.data?.nextCursor);
   const jobsByName = useMemo(() => new Map(statusJobs.map((job) => [job.jobName, job])), [statusJobs]);
   const attentionCount = visibleJobs.filter((job) => job.enabled && (job.stale || job.stuck || job.latestRun?.status === "FAILED")).length;
   const healthyCount = visibleJobs.filter((job) => job.enabled && !job.stale && !job.stuck && job.latestRun?.status === "SUCCESS").length;
@@ -158,7 +159,7 @@ function JobsWorkspace() {
 
   function selectJob(job) {
     setSelectedJob(job);
-    setRunOffset(0);
+    setRunCursors([null]);
     setSelectedRun(null);
   }
 
@@ -184,7 +185,7 @@ function JobsWorkspace() {
             <h2>Job status</h2>
             <p>Select a job to filter its execution history. Monitoring applies only to frequent critical jobs.</p>
           </div>
-          {jobName ? <Button variant="ghost" onClick={() => { setSelectedJob(null); setRunOffset(0); setSelectedRun(null); }}>Show all runs</Button> : null}
+          {jobName ? <Button variant="ghost" onClick={() => { setSelectedJob(null); setRunCursors([null]); setSelectedRun(null); }}>Show all runs</Button> : null}
         </div>
         <DataTable
           columns={jobColumns}
@@ -227,15 +228,18 @@ function JobsWorkspace() {
         <Pagination
           ariaLabel="Execution history pagination"
           page={page}
-          totalPages={totalPages}
+          hasNext={hasNextRunPage}
           label={runPageTransitioning
             ? `Loading execution history page ${page}…`
-            : total
-              ? `${Math.min(runOffset + 1, total)}–${Math.min(runOffset + visibleRuns.length, total)} of ${total}`
+            : visibleRuns.length
+              ? `${visibleRuns.length} runs on this page`
               : "0 runs"}
           fetching={runsQuery.isFetching}
-          onPrevious={() => setRunOffset(Math.max(0, runOffset - RUN_PAGE_SIZE))}
-          onNext={() => setRunOffset(runOffset + RUN_PAGE_SIZE)}
+          onPrevious={() => setRunCursors((current) => current.length > 1 ? current.slice(0, -1) : current)}
+          onNext={() => {
+            const nextCursor = runsQuery.data?.nextCursor;
+            if (nextCursor != null) setRunCursors((current) => [...current, nextCursor]);
+          }}
         />
       </section>
 
