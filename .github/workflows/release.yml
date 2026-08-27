@@ -651,13 +651,24 @@ jobs:
           set -euo pipefail
 
           APP_STORE_APPLY=1 ruby scripts/update-testflight-build-notes.rb
+
+      - name: Select exact build for App Review
+        run: |
+          set -euo pipefail
+
+          APP_STORE_APPLY=1 ruby scripts/select-app-store-build.rb
+
+      - name: Summarize App Review candidate
+        run: |
+          set -euo pipefail
+
           {
             echo "## TestFlight App Review Candidate"
             echo ""
             echo "- Version/build: \`${APP_STORE_VERSION_STRING} (${APP_STORE_BUILD_NUMBER})\`"
             echo "- Backend: \`https://api.ghkdqhrbals.org\`"
             echo "- What to Test: en-US, ko, and ja updated and verified."
-            echo "- Next: Select this exact build in the App Store version's Build section."
+            echo "- App Store version mapping: exact build selected and verified."
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Remove App Store Connect API key

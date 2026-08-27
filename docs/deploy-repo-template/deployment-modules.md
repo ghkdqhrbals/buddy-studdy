@@ -54,9 +54,12 @@ deployment.
 - A job must have a module-specific name such as `deploy_backend`,
   `deploy_admin_frontend`, or `deploy_monitoring`.
 - The iOS release workflow remains an iOS-only module. It separates release
-  planning, the signed IPA build, TestFlight upload, and completion reporting
-  into dependent jobs so each failure boundary is visible without combining
-  backend, monitoring, or admin deployment.
+  planning, the signed IPA build, TestFlight upload, App Review build mapping,
+  and completion reporting into dependent jobs so each failure boundary is
+  visible without combining backend, monitoring, or admin deployment. Review
+  candidates update localized TestFlight notes, select the exact processed
+  build on the editable App Store version, and read the relationship back
+  before the workflow reports success.
 - The iOS archive uses the installed Apple Distribution certificate and App
   Store provisioning profile with manual signing. Archive creation must not
   ask Apple to create or revoke development certificates; the App Store
