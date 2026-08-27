@@ -1494,6 +1494,9 @@ private struct MobileHomeView: View {
             #endif
         }
         .task {
+            if appState.isCommunitySessionActive {
+                await appState.refreshBilling()
+            }
             await loadCommunityQuestionsIfNeeded(userInitiated: false)
             await appState.refreshNotificationUnreadCount()
         }
@@ -1546,10 +1549,12 @@ private struct MobileHomeView: View {
 
             if selectedHomeScope == .all {
                 Task {
+                    await appState.refreshBilling()
                     await loadCommunityQuestionsIfNeeded(userInitiated: false)
                 }
             } else {
                 Task {
+                    await appState.refreshBilling()
                     await appState.refreshQuestionQuota()
                 }
             }
@@ -2371,20 +2376,41 @@ private struct MobileHomeView: View {
     private var profileToolbarControl: some View {
         let strings = appState.strings
 
-        return HomeProfileAvatar(
-            symbolName: appState.profileAvatarSymbolName,
-            displayName: appState.communityProfile?.displayName,
-            colorSeed: signedInProfileColorSeed,
-            usesNeutralColor: signedInProfileColorSeed == nil,
-            size: 34
-        )
-        .frame(width: 34, height: 34)
-        .contentShape(Circle())
+        return HStack(spacing: 7) {
+            HomeProfileAvatar(
+                symbolName: appState.profileAvatarSymbolName,
+                displayName: appState.communityProfile?.displayName,
+                colorSeed: signedInProfileColorSeed,
+                usesNeutralColor: signedInProfileColorSeed == nil,
+                size: 34
+            )
+            .frame(width: 34, height: 34)
+
+            if appState.isCommunitySessionActive {
+                Text(strings.membershipTierName(activeMembershipTierCode))
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 8)
+                    .frame(height: 28)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    }
+            }
+        }
+        .contentShape(Rectangle())
         .onTapGesture {
             isShowingProfileSettings = true
         }
         .accessibilityLabel(strings.profile)
         .accessibilityAddTraits(.isButton)
+    }
+
+    private var activeMembershipTierCode: String {
+        appState.billingStatus?.tierCode ?? appState.questionQuota?.tierCode ?? "TIER1"
     }
 
     private var profileToolbarButton: some View {
@@ -6280,6 +6306,16 @@ private struct MobileProfilePage: View {
             if appState.isCommunitySessionActive {
                 Section(strings.membershipAndBilling) {
                     NavigationLink {
+                        MobileReferralView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.referAndEarnRewards,
+                            subtitle: strings.referralBenefitDescription,
+                            systemImage: "person.2"
+                        )
+                    }
+
+                    NavigationLink {
                         MobileMembershipManagementView()
                     } label: {
                         profileDestinationLabel(
@@ -6406,6 +6442,128 @@ private struct MobileProfilePage: View {
             }
         }
         .padding(.vertical, 3)
+    }
+}
+
+private struct MobileReferralView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var referralCode = ""
+    @State private var didCopyCode = false
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Text(strings.referralBenefitDescription)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(strings.referralProgramRules)
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section(strings.referralYourCode) {
+                if let summary = appState.referralSummary {
+                    HStack(spacing: 10) {
+                        Text(summary.code)
+                            .font(.body.monospaced().weight(.semibold))
+                            .textSelection(.enabled)
+
+                        Spacer(minLength: 8)
+
+                        Button {
+                            UIPasteboard.general.string = summary.code
+                            didCopyCode = true
+                        } label: {
+                            Image(systemName: didCopyCode ? "checkmark" : "doc.on.doc")
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(strings.referralCopy)
+
+                        ShareLink(item: strings.referralShareMessage(code: summary.code)) {
+                            Image(systemName: "square.and.arrow.up")
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(strings.referralShare)
+                    }
+
+                    LabeledContent(
+                        strings.referralSuccessfulCount,
+                        value: strings.referralCount(summary.successfulReferralCount)
+                    )
+                    LabeledContent(
+                        strings.referralRewardMonths,
+                        value: strings.referralMonths(summary.rewardMonthsEarned)
+                    )
+                } else if appState.isLoadingReferral {
+                    HStack(spacing: 9) {
+                        ProgressView()
+                        Text(strings.loading)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if let summary = appState.referralSummary {
+                Section {
+                    if summary.hasRedeemedReferral {
+                        Label(strings.referralRedeemed, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        HStack(spacing: 10) {
+                            TextField(strings.referralEnterCode, text: $referralCode)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled()
+                                .submitLabel(.done)
+                                .onSubmit(redeem)
+
+                            Button(strings.referralRedeem, action: redeem)
+                                .buttonStyle(.borderedProminent)
+                                .disabled(
+                                    referralCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                        || appState.isLoadingReferral
+                                )
+                        }
+                    }
+                }
+            }
+
+            if let message = appState.referralErrorMessage {
+                Section {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .navigationTitle(strings.referAndEarnRewards)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await appState.refreshReferralSummary()
+        }
+        .onChange(of: referralCode) { _, nextValue in
+            let normalized = String(nextValue.uppercased().filter { $0.isLetter || $0.isNumber || $0 == "-" }.prefix(11))
+            if normalized != nextValue {
+                referralCode = normalized
+            }
+        }
+    }
+
+    private func redeem() {
+        Task {
+            if await appState.redeemReferral(code: referralCode) {
+                referralCode = ""
+            }
+        }
     }
 }
 

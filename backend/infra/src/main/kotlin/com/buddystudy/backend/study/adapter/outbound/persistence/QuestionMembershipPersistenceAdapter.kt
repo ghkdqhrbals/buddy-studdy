@@ -1,6 +1,5 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
-import com.buddystudy.account.domain.entity.MembershipStatus
 import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
@@ -25,7 +24,6 @@ import java.util.UUID
  */
 @Repository
 class QuestionMembershipPersistenceAdapter(
-    private val memberships: UserMembershipRepository,
     private val tiers: UserMembershipTierRepository,
     private val template: R2dbcEntityTemplate,
 ) : QuestionMembershipPort {
@@ -34,35 +32,69 @@ class QuestionMembershipPersistenceAdapter(
         activePlanForUser(userId, Instant.now())
 
     private suspend fun activePlanForUser(userId: Long, at: Instant): QuestionMembershipPlan? {
-        val projectedTier = template.databaseClient.sql(
+        val effectivePlan = template.databaseClient.sql(
             """
-            select tier_code
-            from user_entitlement_projection
-            where user_id = :userId
-              and (
-                    source = 'FREE'
-                    or access_status = 'GRACE_PERIOD'
-                    or (access_status = 'ACTIVE' and (expires_at is null or expires_at > :at))
-                  )
+            select candidates.tier_code, candidates.monthly_question_limit
+            from (
+                select
+                    entitlement.tier_code,
+                    tier.monthly_question_limit,
+                    case entitlement.tier_code
+                        when 'TIER3' then 3
+                        when 'TIER2' then 2
+                        when 'TIER1' then 1
+                        else 0
+                    end as tier_rank,
+                    entitlement.projected_at as changed_at
+                from user_entitlement_projection entitlement
+                join user_membership_tiers tier on tier.tier_code = entitlement.tier_code
+                where entitlement.user_id = :userId
+                  and (
+                        entitlement.source = 'FREE'
+                        or entitlement.access_status = 'GRACE_PERIOD'
+                        or (
+                            entitlement.access_status = 'ACTIVE'
+                            and (entitlement.expires_at is null or entitlement.expires_at > :at)
+                        )
+                      )
+
+                union all
+
+                select
+                    membership.tier as tier_code,
+                    coalesce(membership.monthly_question_limit_override, tier.monthly_question_limit)
+                        as monthly_question_limit,
+                    case membership.tier
+                        when 'TIER3' then 3
+                        when 'TIER2' then 2
+                        when 'TIER1' then 1
+                        else 0
+                    end as tier_rank,
+                    membership.updated_at as changed_at
+                from user_memberships membership
+                join user_membership_tiers tier on tier.tier_code = membership.tier
+                where membership.user_id = :userId
+                  and membership.status = 'ACTIVE'
+                  and membership.started_at <= :at
+                  and (membership.expires_at is null or membership.expires_at > :at)
+            ) candidates
+            order by candidates.tier_rank desc,
+                     candidates.monthly_question_limit desc,
+                     candidates.changed_at desc
+            limit 1
             """.trimIndent(),
         ).bind("userId", userId).bind("at", at.utc())
-            .map { row, _ -> row.get("tier_code", String::class.java)!! }
+            .map { row, _ ->
+                QuestionMembershipPlan(
+                    tierCode = row.get("tier_code", String::class.java)!!,
+                    monthlyQuestionLimit = (row.get("monthly_question_limit") as Number).toInt(),
+                )
+            }
             .one().awaitSingleOrNull()
-        if (projectedTier != null) {
-            val tier = tiers.findByTierCode(projectedTier) ?: return null
-            return QuestionMembershipPlan(tier.tierCode, tier.monthlyQuestionLimit)
-        }
+        if (effectivePlan != null) return effectivePlan
 
-        val membership = memberships.findFirstByUserIdAndStatusOrderByUpdatedAtDesc(userId, MembershipStatus.ACTIVE)
-        val activeMembership = membership?.takeIf {
-            !it.startedAt.isAfter(at) && it.expiresAt?.isAfter(at) != false
-        }
-        val tierCode = activeMembership?.tier ?: DEFAULT_TIER
-        val tier = tiers.findByTierCode(tierCode) ?: tiers.findByTierCode(DEFAULT_TIER) ?: return null
-        return QuestionMembershipPlan(
-            tierCode = tier.tierCode,
-            monthlyQuestionLimit = activeMembership?.monthlyQuestionLimitOverride ?: tier.monthlyQuestionLimit,
-        )
+        val fallback = tiers.findByTierCode(DEFAULT_TIER) ?: return null
+        return QuestionMembershipPlan(fallback.tierCode, fallback.monthlyQuestionLimit)
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)

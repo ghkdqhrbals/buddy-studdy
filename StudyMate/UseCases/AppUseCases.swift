@@ -474,6 +474,7 @@ struct AppUseCases {
     let terms: TermsUseCase
     let community: CommunityUseCase
     let billing: BillingUseCase
+    let referral: ReferralUseCase
 
     init(backendClient: RemotePushBackendClientProtocol) {
         let appUpdateRepository = RemoteAppUpdateRepository(backendClient: backendClient)
@@ -487,6 +488,7 @@ struct AppUseCases {
         let settingsRepository = RemoteSettingsRepository(backendClient: backendClient)
         let termsRepository = RemoteTermsRepository(backendClient: backendClient)
         let billingRepository = RemoteBillingRepository(backendClient: backendClient)
+        let referralRepository = RemoteReferralRepository(backendClient: backendClient)
         appUpdate = AppUpdateUseCase(repository: appUpdateRepository)
         backendIdentity = BackendIdentityUseCase(repository: identityRepository)
         googleSignIn = GoogleSignInUseCase(repository: googleSignInRepository)
@@ -498,5 +500,46 @@ struct AppUseCases {
         terms = TermsUseCase(repository: termsRepository)
         community = CommunityUseCase(repository: communityRepository)
         billing = BillingUseCase(repository: billingRepository)
+        referral = ReferralUseCase(repository: referralRepository)
+    }
+}
+
+@MainActor
+protocol ReferralRepository {
+    func summary(registration: RemotePushRegistration) async throws -> BackendReferralSummary
+    func redeem(registration: RemotePushRegistration, code: String) async throws -> BackendReferralSummary
+}
+
+@MainActor
+struct RemoteReferralRepository: ReferralRepository {
+    private let backendClient: RemotePushBackendClientProtocol
+
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
+    }
+
+    func summary(registration: RemotePushRegistration) async throws -> BackendReferralSummary {
+        try await backendClient.fetchReferralSummary(registration: registration)
+    }
+
+    func redeem(registration: RemotePushRegistration, code: String) async throws -> BackendReferralSummary {
+        try await backendClient.redeemReferral(registration: registration, code: code)
+    }
+}
+
+@MainActor
+struct ReferralUseCase {
+    private let repository: ReferralRepository
+
+    init(repository: ReferralRepository) {
+        self.repository = repository
+    }
+
+    func summary(registration: RemotePushRegistration) async throws -> BackendReferralSummary {
+        try await repository.summary(registration: registration)
+    }
+
+    func redeem(registration: RemotePushRegistration, code: String) async throws -> BackendReferralSummary {
+        try await repository.redeem(registration: registration, code: code)
     }
 }

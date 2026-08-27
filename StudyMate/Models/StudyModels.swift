@@ -2865,6 +2865,56 @@ struct AppStrings {
     var renewsOn: String { text("다음 갱신", "Renews", "次回更新") }
     var endsOn: String { text("이용 종료", "Ends", "利用終了") }
     var billingHistory: String { text("결제 내역", "Billing history", "支払い履歴") }
+    var referAndEarnRewards: String { text("친구 추천 보상", "Refer and earn rewards", "友達紹介特典") }
+    var referralBenefitDescription: String {
+        text(
+            "친구에게 Pro(티어 2) 한 달을 선물하고, 추천한 친구 한 명마다 티어 2 한 달을 받으세요.",
+            "Give a month of Pro (Tier 2) and get 1 month of Tier 2 for each person you refer.",
+            "友達にPro（ティア2）を1か月贈り、紹介した友達1人につきティア2を1か月受け取れます。"
+        )
+    }
+    var referralProgramRules: String {
+        text(
+            "추천 코드는 계정당 한 번만 등록할 수 있습니다. 본인 추천과 중복 계정 사용은 제한되며, 보상은 양도하거나 현금으로 교환할 수 없습니다.",
+            "A referral code can be applied once per account. Self-referrals and duplicate-account use are not allowed, and rewards cannot be transferred or redeemed for cash.",
+            "紹介コードは1アカウントにつき1回のみ適用できます。自己紹介や重複アカウントの利用は禁止され、特典の譲渡や換金はできません。"
+        )
+    }
+    var referralYourCode: String { text("내 추천 코드", "Your referral code", "あなたの紹介コード") }
+    var referralSuccessfulCount: String { text("추천 완료", "Successful referrals", "紹介完了") }
+    var referralRewardMonths: String { text("받은 보상", "Reward earned", "獲得特典") }
+    var referralEnterCode: String { text("추천 코드 입력", "Enter referral code", "紹介コードを入力") }
+    var referralRedeem: String { text("코드 등록", "Apply code", "コードを適用") }
+    var referralRedeemed: String { text("추천 코드 등록 완료", "Referral code applied", "紹介コード適用済み") }
+    var referralCopy: String { text("복사", "Copy", "コピー") }
+    var referralShare: String { text("공유", "Share", "共有") }
+    var referralLoadFailed: String {
+        text(
+            "추천 정보를 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
+            "Referral details could not be loaded. Please try again shortly.",
+            "紹介情報を読み込めませんでした。しばらくしてからもう一度お試しください。"
+        )
+    }
+    var referralRedeemFailed: String {
+        text(
+            "추천 코드를 등록하지 못했습니다. 코드를 확인한 뒤 다시 시도하세요.",
+            "The referral code could not be applied. Check the code and try again.",
+            "紹介コードを適用できませんでした。コードを確認してもう一度お試しください。"
+        )
+    }
+    func referralCount(_ count: Int) -> String {
+        text("\(count)명", "\(count)", "\(count)人")
+    }
+    func referralMonths(_ count: Int) -> String {
+        text("\(count)개월", "\(count) month\(count == 1 ? "" : "s")", "\(count)か月")
+    }
+    func referralShareMessage(code: String) -> String {
+        text(
+            "BuddyStudy 추천 코드 \(code)를 등록하면 티어 2를 한 달 동안 이용할 수 있어요.",
+            "Use my BuddyStudy referral code \(code) to get one month of Tier 2.",
+            "BuddyStudyの紹介コード \(code) を使うと、ティア2を1か月利用できます。"
+        )
+    }
     var billingDetails: String { text("결제 상세", "Payment details", "支払い詳細") }
     var billingAmount: String { text("결제 금액", "Amount", "支払い金額") }
     var billingDate: String { text("결제 일시", "Purchase date", "購入日時") }

@@ -330,17 +330,72 @@ class NativeAdvertisementPersistenceAdapter(
 
     override suspend fun isAdFree(userId: Long): Boolean? = database.sql(
         """
-        select case when u.status = 'ANONYMOUS' then false else t.ad_free end as ad_free
+        select case when u.status = 'ANONYMOUS' then false else effective.ad_free end as ad_free
         from users u
-        left join user_entitlement_projection e on e.user_id = u.id
-        left join user_membership_tiers t on t.tier_code = e.tier_code
+        left join (
+            select ranked.user_id, ranked.ad_free
+            from (
+                select
+                    candidates.user_id,
+                    candidates.ad_free,
+                    row_number() over (
+                        partition by candidates.user_id
+                        order by candidates.tier_rank desc, candidates.monthly_question_limit desc,
+                                 candidates.changed_at desc
+                    ) as effective_rank
+                from (
+                    select
+                        entitlement.user_id,
+                        tier.ad_free,
+                        tier.monthly_question_limit,
+                        case entitlement.tier_code
+                            when 'TIER3' then 3
+                            when 'TIER2' then 2
+                            when 'TIER1' then 1
+                            else 0
+                        end as tier_rank,
+                        entitlement.projected_at as changed_at
+                    from user_entitlement_projection entitlement
+                    join user_membership_tiers tier on tier.tier_code = entitlement.tier_code
+                    where entitlement.user_id = :userId
+                      and (
+                            entitlement.source = 'FREE'
+                            or entitlement.access_status = 'GRACE_PERIOD'
+                            or (
+                                entitlement.access_status = 'ACTIVE'
+                                and (entitlement.expires_at is null or entitlement.expires_at > current_timestamp)
+                            )
+                          )
+
+                    union all
+
+                    select
+                        membership.user_id,
+                        tier.ad_free,
+                        coalesce(membership.monthly_question_limit_override, tier.monthly_question_limit),
+                        case membership.tier
+                            when 'TIER3' then 3
+                            when 'TIER2' then 2
+                            when 'TIER1' then 1
+                            else 0
+                        end as tier_rank,
+                        membership.updated_at as changed_at
+                    from user_memberships membership
+                    join user_membership_tiers tier on tier.tier_code = membership.tier
+                    where membership.user_id = :userId
+                      and membership.status = 'ACTIVE'
+                      and membership.started_at <= current_timestamp
+                      and (membership.expires_at is null or membership.expires_at > current_timestamp)
+                ) candidates
+            ) ranked
+            where ranked.effective_rank = 1
+        ) effective on effective.user_id = u.id
         where u.id = :userId
           and (
               u.status = 'ANONYMOUS'
               or (
                   u.status = 'ACTIVE'
-                  and e.access_status in ('ACTIVE', 'GRACE_PERIOD')
-                  and t.tier_code is not null
+                  and effective.ad_free is not null
               )
           )
         """.trimIndent(),

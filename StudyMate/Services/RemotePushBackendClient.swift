@@ -432,6 +432,15 @@ protocol RemotePushBackendClientProtocol {
         invoiceID: Int64
     ) async throws -> BackendBillingInvoice
 
+    func fetchReferralSummary(
+        registration: RemotePushRegistration
+    ) async throws -> BackendReferralSummary
+
+    func redeemReferral(
+        registration: RemotePushRegistration,
+        code: String
+    ) async throws -> BackendReferralSummary
+
     func requestBillingRefund(
         registration: RemotePushRegistration,
         paymentID: Int64,
@@ -787,6 +796,19 @@ extension RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         invoiceID: Int64
     ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchReferralSummary(
+        registration: RemotePushRegistration
+    ) async throws -> BackendReferralSummary {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func redeemReferral(
+        registration: RemotePushRegistration,
+        code: String
+    ) async throws -> BackendReferralSummary {
         throw RemotePushBackendError.invalidResponse
     }
 
@@ -1442,6 +1464,32 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         let data = try await perform(request)
         return try decoder.decode(BackendBillingInvoiceDetail.self, from: data).invoice
+    }
+
+    func fetchReferralSummary(
+        registration: RemotePushRegistration
+    ) async throws -> BackendReferralSummary {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "referrals", "me")
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendReferralSummary.self, from: data)
+    }
+
+    func redeemReferral(
+        registration: RemotePushRegistration,
+        code: String
+    ) async throws -> BackendReferralSummary {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "referrals", "redeem")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(ReferralRedemptionRequest(code: code))
+        let data = try await perform(request)
+        return try decoder.decode(BackendReferralSummary.self, from: data)
     }
 
     func requestBillingRefund(
@@ -2877,6 +2925,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var reason: String?
     }
 
+    private struct ReferralRedemptionRequest: Encodable {
+        var code: String
+    }
+
     private struct CommunityCommentRequest: Encodable {
         var body: String
         var sourceLanguage: String
@@ -3159,6 +3211,15 @@ struct BackendBillingStatus: Decodable, Equatable {
         synchronizedAt = try values.decode(Date.self, forKey: .synchronizedAt)
         quota = try values.decode(BackendBillingQuotaStatus.self, forKey: .quota)
     }
+}
+
+struct BackendReferralSummary: Decodable, Equatable, Sendable {
+    var code: String
+    var successfulReferralCount: Int
+    var rewardMonthsEarned: Int
+    var rewardStartsAt: Date?
+    var rewardEndsAt: Date?
+    var hasRedeemedReferral: Bool
 }
 
 struct BackendBillingPlanTransition: Decodable, Equatable {

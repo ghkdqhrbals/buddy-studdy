@@ -34,6 +34,7 @@ class NativeAdvertisementPersistenceAdapterTest {
             execute("drop table if exists native_ad_selection_history")
             execute("drop table if exists native_ad_slots")
             execute("drop table if exists native_ad_campaigns")
+            execute("drop table if exists user_memberships")
             execute("drop table if exists user_entitlement_projection")
             execute("drop table if exists user_membership_tiers")
             execute("drop table if exists users")
@@ -51,6 +52,7 @@ class NativeAdvertisementPersistenceAdapterTest {
                 """
                 create table user_membership_tiers (
                     tier_code varchar(64) primary key,
+                    monthly_question_limit int not null,
                     ad_free bigint not null
                 )
                 """.trimIndent(),
@@ -60,7 +62,24 @@ class NativeAdvertisementPersistenceAdapterTest {
                 create table user_entitlement_projection (
                     user_id bigint primary key,
                     tier_code varchar(64) not null,
-                    access_status varchar(32) not null
+                    source varchar(32) not null,
+                    access_status varchar(32) not null,
+                    expires_at timestamp null,
+                    projected_at timestamp not null
+                )
+                """.trimIndent(),
+            )
+            execute(
+                """
+                create table user_memberships (
+                    id bigint auto_increment primary key,
+                    user_id bigint not null,
+                    tier varchar(64) not null,
+                    monthly_question_limit_override int null,
+                    status varchar(32) not null,
+                    started_at timestamp not null,
+                    expires_at timestamp null,
+                    updated_at timestamp not null
                 )
                 """.trimIndent(),
             )
@@ -176,12 +195,17 @@ class NativeAdvertisementPersistenceAdapterTest {
                     (12, 'ACTIVE', 'other@example.com', 'Other')
                 """.trimIndent(),
             )
-            execute("insert into user_membership_tiers (tier_code, ad_free) values ('TIER1', 0), ('TIER2', 1)")
+            execute(
+                "insert into user_membership_tiers (tier_code, monthly_question_limit, ad_free) " +
+                    "values ('TIER1', 30, 0), ('TIER2', 300, 1), ('TIER3', 1000, 1)",
+            )
             execute(
                 """
-                insert into user_entitlement_projection (user_id, tier_code, access_status) values
-                    (10, 'TIER2', 'ACTIVE'),
-                    (12, 'TIER1', 'UNKNOWN')
+                insert into user_entitlement_projection (
+                    user_id, tier_code, source, access_status, expires_at, projected_at
+                ) values
+                    (10, 'TIER2', 'APP_STORE', 'ACTIVE', null, timestamp '2026-08-01 00:00:00'),
+                    (12, 'TIER1', 'FREE', 'ACTIVE', null, timestamp '2026-08-01 00:00:00')
                 """.trimIndent(),
             )
             execute(
@@ -203,8 +227,25 @@ class NativeAdvertisementPersistenceAdapterTest {
     fun `ad eligibility includes anonymous users and fails closed for unresolved active accounts`(): Unit = runBlocking {
         assertThat(adapter.isAdFree(11)).isFalse()
         assertThat(adapter.isAdFree(10)).isTrue()
-        assertThat(adapter.isAdFree(12)).isNull()
+        assertThat(adapter.isAdFree(12)).isFalse()
         assertThat(adapter.isAdFree(999)).isNull()
+    }
+
+    @Test
+    fun `active referral tier outranks the free entitlement projection for ad eligibility`(): Unit = runBlocking {
+        execute(
+            """
+            insert into user_memberships (
+                user_id, tier, monthly_question_limit_override, status, started_at, expires_at, updated_at
+            ) values (
+                12, 'TIER2', null, 'ACTIVE',
+                timestamp '2026-08-01 00:00:00', timestamp '2099-09-01 00:00:00',
+                timestamp '2026-08-01 00:00:00'
+            )
+            """.trimIndent(),
+        )
+
+        assertThat(adapter.isAdFree(12)).isTrue()
     }
 
     @Test

@@ -63,7 +63,11 @@ class BillingService(
             ?.takeUnless { it.isExpiredAt(now) }
         val quota = memberships.quotaStatusForUser(principal.userId, now)
             ?: throw billingError(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Question quota was not found.")
-        val effectiveTierCode = entitlement?.tierCode ?: quota.tierCode
+        // Quota resolution includes temporary grants such as referral rewards. Keeping the
+        // highest candidate also prevents a briefly stale quota projection from downgrading
+        // a verified App Store entitlement in the response.
+        val effectiveTierCode = listOfNotNull(entitlement?.tierCode, quota.tierCode)
+            .maxBy(::tierRank)
         // A missing tier policy must never accidentally make a user eligible for advertising.
         val adFree = ledger.adFreeForTier(effectiveTierCode) ?: true
         val periodStartedAt = quota.periodStartedAt ?: now
@@ -128,6 +132,13 @@ class BillingService(
         source == EntitlementSource.APP_STORE &&
             accessStatus == SubscriptionAccessStatus.ACTIVE &&
             expiresAt?.isAfter(now) == false
+
+    private fun tierRank(tierCode: String): Int = when (tierCode) {
+        "TIER3" -> 3
+        "TIER2" -> 2
+        "TIER1" -> 1
+        else -> 0
+    }
 
     /**
      * New purchases are monthly-only. Disabled legacy products still resolve through [BillingLedgerPort.tierProduct]

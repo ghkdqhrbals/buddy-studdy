@@ -123,6 +123,9 @@ final class AppState: ObservableObject {
     @Published private(set) var billingInvoices: [BackendBillingInvoice] = []
     @Published private(set) var isLoadingBilling = false
     @Published private(set) var billingErrorMessage: String?
+    @Published private(set) var referralSummary: BackendReferralSummary?
+    @Published private(set) var isLoadingReferral = false
+    @Published private(set) var referralErrorMessage: String?
     @Published private(set) var serviceAvailability = BackendServiceAvailability.operational
     @Published private(set) var isCheckingAppControl = false
     @Published private(set) var appUpdateDecision: BackendAppUpdateDecision?
@@ -618,6 +621,7 @@ final class AppState: ObservableObject {
     private var termsUseCase: TermsUseCase { appUseCases.terms }
     private var communityUseCase: CommunityUseCase { appUseCases.community }
     private var billingUseCase: BillingUseCase { appUseCases.billing }
+    private var referralUseCase: ReferralUseCase { appUseCases.referral }
     private let actionRunner = AppActionRunner()
     private let notificationService: NotificationServicing
     private let cloudSyncProvider: CloudSyncProviding
@@ -1280,6 +1284,9 @@ final class AppState: ObservableObject {
             billingInvoices = []
             questionQuota = nil
             billingErrorMessage = nil
+            referralSummary = nil
+            referralErrorMessage = nil
+            isLoadingReferral = false
         }
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
@@ -4701,6 +4708,9 @@ final class AppState: ObservableObject {
         billingInvoices = []
         billingErrorMessage = nil
         isLoadingBilling = false
+        referralSummary = nil
+        referralErrorMessage = nil
+        isLoadingReferral = false
         #if os(iOS)
         Task { @MainActor in
             await RevenueCatBillingBridge.shared.logOut(
@@ -6993,6 +7003,104 @@ final class AppState: ObservableObject {
             anchorType: resolvedStatus.quota.anchorType,
             policyVersion: resolvedStatus.quota.policyVersion
         )
+    }
+
+    func refreshReferralSummary() async {
+        guard !isLoadingReferral else {
+            return
+        }
+        let clientGeneration = backendClientGeneration
+        let currentReferralUseCase = referralUseCase
+        guard isCommunitySessionActive,
+              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "referral-summary"
+              ) else {
+            referralSummary = nil
+            referralErrorMessage = nil
+            return
+        }
+
+        isLoadingReferral = true
+        defer { isLoadingReferral = false }
+        do {
+            let summary = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "referral-summary",
+                operation: { recoveredRegistration in
+                    try await currentReferralUseCase.summary(registration: recoveredRegistration)
+                }
+            )
+            guard clientGeneration == backendClientGeneration,
+                  isCommunitySessionActive else {
+                return
+            }
+            referralSummary = summary
+            referralErrorMessage = nil
+        } catch where !Self.isCancellationLikeError(error) {
+            guard clientGeneration == backendClientGeneration,
+                  isCommunitySessionActive else {
+                return
+            }
+            referralErrorMessage = strings.referralLoadFailed
+            log(.warning, "추천 정보를 불러오지 못했습니다: \(error.localizedDescription)")
+        } catch {
+            return
+        }
+    }
+
+    @discardableResult
+    func redeemReferral(code: String) async -> Bool {
+        let normalizedCode = code
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard !normalizedCode.isEmpty,
+              !isLoadingReferral,
+              isCommunitySessionActive,
+              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "referral-redeem"
+              ) else {
+            referralErrorMessage = strings.referralRedeemFailed
+            return false
+        }
+
+        let clientGeneration = backendClientGeneration
+        let currentReferralUseCase = referralUseCase
+        isLoadingReferral = true
+        defer { isLoadingReferral = false }
+        do {
+            let summary = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "referral-redeem",
+                operation: { recoveredRegistration in
+                    try await currentReferralUseCase.redeem(
+                        registration: recoveredRegistration,
+                        code: normalizedCode
+                    )
+                }
+            )
+            guard clientGeneration == backendClientGeneration,
+                  isCommunitySessionActive else {
+                return false
+            }
+            referralSummary = summary
+            referralErrorMessage = nil
+            await refreshBilling()
+            return true
+        } catch where !Self.isCancellationLikeError(error) {
+            guard clientGeneration == backendClientGeneration,
+                  isCommunitySessionActive else {
+                return false
+            }
+            referralErrorMessage = strings.referralRedeemFailed
+            log(.warning, "추천 코드를 등록하지 못했습니다: \(error.localizedDescription)")
+            return false
+        } catch {
+            return false
+        }
     }
 
     func syncAppleBillingTransaction(
