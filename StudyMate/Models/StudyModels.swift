@@ -3010,11 +3010,11 @@ struct AppStrings {
     func membershipTierName(_ tierCode: String) -> String {
         switch tierCode.uppercased() {
         case "TIER1":
-            return text("티어 1", "Tier 1", "ティア1")
+            return text("Tier 1", "Tier 1", "ティア1")
         case "TIER2":
-            return text("티어 2", "Tier 2", "ティア2")
+            return text("Tier 2", "Tier 2", "ティア2")
         case "TIER3":
-            return text("티어 3", "Tier 3", "ティア3")
+            return text("Tier 3", "Tier 3", "ティア3")
         default:
             return tierCode
         }

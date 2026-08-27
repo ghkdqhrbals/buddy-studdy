@@ -2375,38 +2375,47 @@ private struct MobileHomeView: View {
 
     private var profileToolbarControl: some View {
         let strings = appState.strings
+        let tierName = strings.membershipTierName(activeMembershipTierCode)
 
-        return HStack(spacing: 7) {
-            HomeProfileAvatar(
-                symbolName: appState.profileAvatarSymbolName,
-                displayName: appState.communityProfile?.displayName,
-                colorSeed: signedInProfileColorSeed,
-                usesNeutralColor: signedInProfileColorSeed == nil,
-                size: 34
-            )
-            .frame(width: 34, height: 34)
-
-            if appState.isCommunitySessionActive {
-                Text(strings.membershipTierName(activeMembershipTierCode))
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 8)
-                    .frame(height: 28)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-                    }
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
+        return Button {
             isShowingProfileSettings = true
+        } label: {
+            HStack(spacing: 7) {
+                HomeProfileAvatar(
+                    symbolName: appState.profileAvatarSymbolName,
+                    displayName: appState.communityProfile?.displayName,
+                    colorSeed: signedInProfileColorSeed,
+                    usesNeutralColor: signedInProfileColorSeed == nil,
+                    size: 34
+                )
+                .frame(width: 34, height: 34)
+
+                if appState.isCommunitySessionActive {
+                    Text(tierName)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 8)
+                        .frame(height: 28)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                        }
+                        .layoutPriority(1)
+                }
+            }
+            .fixedSize(horizontal: true, vertical: true)
+            .contentShape(Rectangle())
         }
-        .accessibilityLabel(strings.profile)
-        .accessibilityAddTraits(.isButton)
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: true)
+        .accessibilityLabel(
+            appState.isCommunitySessionActive
+                ? "\(strings.profile), \(tierName)"
+                : strings.profile
+        )
     }
 
     private var activeMembershipTierCode: String {
@@ -6247,12 +6256,29 @@ private struct MobileProfilePage: View {
                             .padding(.vertical, 2)
                         }
                         .buttonStyle(.plain)
-                    } else {
+                    } else if appState.isLoadingBilling {
                         HStack(spacing: 9) {
                             ProgressView()
                             Text(strings.loading)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                        }
+                        .frame(minHeight: 36)
+                    } else {
+                        HStack(spacing: 12) {
+                            Text(strings.serviceTemporarilyUnavailable)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Spacer(minLength: 8)
+
+                            Button(strings.retry) {
+                                Task {
+                                    await appState.refreshBilling()
+                                }
+                            }
+                            .buttonStyle(.bordered)
                         }
                         .frame(minHeight: 36)
                     }
@@ -6538,10 +6564,22 @@ private struct MobileReferralView: View {
 
             if let message = appState.referralErrorMessage {
                 Section {
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 12) {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: 8)
+
+                        Button(strings.retry) {
+                            Task {
+                                await appState.refreshReferralSummary()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(appState.isLoadingReferral)
+                    }
                 }
             }
         }
