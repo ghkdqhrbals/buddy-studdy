@@ -9,6 +9,7 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdPlacement
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
 import java.time.Instant
 
@@ -34,6 +35,50 @@ class AdminNativeAdvertisementControllerTest {
 
         assertThat(policies.adminToken).isEqualTo("operator-token")
         assertThat(policies.placement).isEqualTo("COMMUNITY_FEED")
+    }
+
+    @Test
+    fun `placement policy update binds and forwards every AdMob frequency control`(): Unit = runBlocking {
+        val policies = FakeAdminNativeAdPlacementPolicyWebPort()
+        val client = WebTestClient.bindToController(AdminNativeAdPlacementPolicyController(policies)).build()
+
+        client.put()
+            .uri("/api/v1/admin/native-ad-placement-policies/COMMUNITY_FEED")
+            .header("Authorization", "Bearer operator-token")
+            .contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(
+                """
+                {
+                  "placement": "COMMUNITY_FEED",
+                  "enabled": true,
+                  "dailyDeliveryCap": 5,
+                  "minimumSecondsBetweenDeliveries": 10800,
+                  "minimumFeedItemCount": 6,
+                  "earliestPosition": 3,
+                  "latestPosition": 8,
+                  "startsAt": "2026-08-28T00:00:00Z",
+                  "endsAt": "2026-09-28T00:00:00Z"
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isOk
+
+        assertThat(policies.adminToken).isEqualTo("operator-token")
+        assertThat(policies.placement).isEqualTo("COMMUNITY_FEED")
+        assertThat(policies.updateRequest).isEqualTo(
+            AdminNativeAdPlacementPolicyRequest(
+                placement = "COMMUNITY_FEED",
+                enabled = true,
+                dailyDeliveryCap = 5,
+                minimumSecondsBetweenDeliveries = 10_800,
+                minimumFeedItemCount = 6,
+                earliestPosition = 3,
+                latestPosition = 8,
+                startsAt = Instant.parse("2026-08-28T00:00:00Z"),
+                endsAt = Instant.parse("2026-09-28T00:00:00Z"),
+            ),
+        )
     }
 
     @Test
@@ -131,6 +176,7 @@ class AdminNativeAdvertisementControllerTest {
     private class FakeAdminNativeAdPlacementPolicyWebPort : AdminNativeAdPlacementPolicyWebPort {
         var adminToken: String? = null
         var placement: String? = null
+        var updateRequest: AdminNativeAdPlacementPolicyRequest? = null
 
         override suspend fun policy(adminToken: String, placement: String): AdminNativeAdPlacementPolicyResponse {
             this.adminToken = adminToken
@@ -142,7 +188,12 @@ class AdminNativeAdvertisementControllerTest {
             adminToken: String,
             placement: String,
             request: AdminNativeAdPlacementPolicyRequest,
-        ): AdminNativeAdPlacementPolicyResponse = response()
+        ): AdminNativeAdPlacementPolicyResponse {
+            this.adminToken = adminToken
+            this.placement = placement
+            updateRequest = request
+            return response()
+        }
 
         private fun response() = AdminNativeAdPlacementPolicyResponse(
             placement = "COMMUNITY_FEED",

@@ -422,6 +422,19 @@ class NativeAdvertisementPersistenceAdapter(
         minimumSecondsBetweenDeliveries: Int,
     ): NativeAdSlotEntity? {
         if (dailyDeliveryCap <= 0) return null
+        // Keep the lock order users -> delivery state -> slot so first-time state creation cannot deadlock.
+        database.sql(
+            """
+            select id
+            from users
+            where id = :userId
+            for update
+            """.trimIndent(),
+        ).bind("userId", reservation.userId)
+            .map { row, _ -> row.long("id") }
+            .one()
+            .awaitSingleOrNull()
+            ?: return null
         val deliveryDay = reservation.deliveredAt.atZone(ZoneOffset.UTC).toLocalDate()
         database.sql(
             """

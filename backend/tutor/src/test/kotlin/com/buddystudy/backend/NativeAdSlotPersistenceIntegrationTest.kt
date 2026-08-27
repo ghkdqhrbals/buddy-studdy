@@ -60,12 +60,16 @@ class NativeAdSlotPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
-    fun `concurrent delivery reservation is atomic and respects interval and daily cap`(): Unit = runBlocking {
+    fun `concurrent delivery reservation is atomic across devices and resets its cap on the next UTC day`(): Unit = runBlocking {
         val now = Instant.parse("2026-08-25T01:00:00Z")
         val concurrent = coroutineScope {
             (1..8).map { index ->
                 async(Dispatchers.IO) {
-                    slots.reserveSlot(reservation("slot-concurrent-$index", now), 2, 60)
+                    slots.reserveSlot(
+                        reservation("slot-concurrent-$index", now, "native-slot-device-$index"),
+                        2,
+                        60,
+                    )
                 }
             }.awaitAll()
         }
@@ -74,9 +78,10 @@ class NativeAdSlotPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(slots.reserveSlot(reservation("slot-too-soon", now.plusSeconds(59)), 2, 60)).isNull()
         assertThat(slots.reserveSlot(reservation("slot-second", now.plusSeconds(60)), 2, 60)).isNotNull()
         assertThat(slots.reserveSlot(reservation("slot-over-cap", now.plusSeconds(120)), 2, 60)).isNull()
+        assertThat(slots.reserveSlot(reservation("slot-next-day", now.plusSeconds(86_400)), 2, 60)).isNotNull()
 
         val persisted = count("select count(*) from native_ad_slots where user_id = ${user.id}")
-        assertThat(persisted).isEqualTo(2)
+        assertThat(persisted).isEqualTo(3)
     }
 
     @Test
@@ -104,7 +109,10 @@ class NativeAdSlotPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
         ).bind("userId", user.id).fetch().rowsUpdated().awaitSingle()
         assertThat(eligibility.isAdFree(user.id)).isFalse()
 
-        database.sql("update user_entitlement_projection set tier_code = 'TIER2' where user_id = :userId")
+        database.sql(
+            "update user_entitlement_projection " +
+                "set tier_code = 'TIER2', source = 'APP_STORE' where user_id = :userId",
+        )
             .bind("userId", user.id).fetch().rowsUpdated().awaitSingle()
         assertThat(eligibility.isAdFree(user.id)).isTrue()
 
@@ -146,10 +154,14 @@ class NativeAdSlotPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(count("select count(*) from native_ad_selection_history where user_id = ${user.id}")).isZero()
     }
 
-    private fun reservation(slotId: String, deliveredAt: Instant) = NativeAdSlotReservation(
+    private fun reservation(
+        slotId: String,
+        deliveredAt: Instant,
+        deviceId: String = "native-slot-device",
+    ) = NativeAdSlotReservation(
         slotId = slotId,
         userId = user.id,
-        deviceId = "native-slot-device",
+        deviceId = deviceId,
         placement = "COMMUNITY_FEED",
         language = "ko",
         position = 2,

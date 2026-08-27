@@ -71,6 +71,12 @@ const checks = [
     message: "Placement-policy validation must enforce the 60-second, feed-size, position, bounds, and period rules.",
   },
   {
+    ok: placementPolicyPanelSource.includes("form.minimumSecondsBetweenDeliveries / 3600")
+      && placementPolicyPanelSource.includes('update("minimumSecondsBetweenDeliveries", Math.round(value * 3600))')
+      && placementPolicyPanelSource.includes('hint="Hours per user · minimum 1 minute"'),
+    message: "AdMob repeat-gap editing must use the same hour-based input as Coupang while preserving seconds in the API contract.",
+  },
+  {
     ok: placementPolicyPanelSource.includes("Slots delivered")
       && placementPolicyPanelSource.includes("policy.metrics.adMobImpressions")
       && placementPolicyPanelSource.includes("policy.metrics.adMobClicks")

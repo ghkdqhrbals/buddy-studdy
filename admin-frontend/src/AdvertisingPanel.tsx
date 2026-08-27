@@ -679,8 +679,14 @@ function PlacementPolicyPanel({
                 <Field label="Daily delivery cap" hint="Per user, per UTC day · 0 disables delivery">
                   <NumberInput value={form.dailyDeliveryCap} max={100} onChange={(value) => update("dailyDeliveryCap", value)} />
                 </Field>
-                <Field label="Minimum repeat gap" hint="Seconds per user · minimum 60">
-                  <NumberInput value={form.minimumSecondsBetweenDeliveries} min={60} max={2_592_000} onChange={(value) => update("minimumSecondsBetweenDeliveries", value)} />
+                <Field label="Minimum repeat gap" hint="Hours per user · minimum 1 minute">
+                  <NumberInput
+                    value={form.minimumSecondsBetweenDeliveries / 3600}
+                    min={1 / 60}
+                    max={720}
+                    step={1 / 60}
+                    onChange={(value) => update("minimumSecondsBetweenDeliveries", Math.round(value * 3600))}
+                  />
                 </Field>
                 <Field label="Minimum public questions" hint="At least 4 questions">
                   <NumberInput value={form.minimumFeedItemCount} min={4} max={100} onChange={(value) => update("minimumFeedItemCount", value)} />
