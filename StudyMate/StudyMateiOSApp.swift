@@ -94,6 +94,7 @@ private struct StudyMateiOSBootstrapView: View {
             }
 
             didBootstrap = true
+            AdMobPrivacyCoordinator.shared.prepareForAppLaunch()
             let state = AppState()
             StudyNotificationDelegate.shared.configure(appState: state)
             StudyRemoteNotificationBridge.shared.configure(appState: state)

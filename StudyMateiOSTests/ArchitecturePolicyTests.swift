@@ -2959,6 +2959,85 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertLessThan(delegateRegistration.lowerBound, launchReturn.lowerBound)
     }
 
+    func testAdMobConsentRefreshBeginsBeforeApplicationStateBootstrap() throws {
+        let root = try repositoryRoot()
+        let appContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift"),
+            encoding: .utf8
+        )
+        let bootstrap = try XCTUnwrap(
+            appContent.range(of: "private struct StudyMateiOSBootstrapView: View")
+        )
+        let bootstrapBody = appContent[bootstrap.lowerBound...]
+        let didBootstrap = try XCTUnwrap(
+            bootstrapBody.range(of: "didBootstrap = true")
+        )
+        let consentRefresh = try XCTUnwrap(
+            bootstrapBody.range(
+                of: "AdMobPrivacyCoordinator.shared.prepareForAppLaunch()"
+            )
+        )
+        let appStateCreation = try XCTUnwrap(
+            bootstrapBody.range(of: "let state = AppState()")
+        )
+
+        XCTAssertLessThan(didBootstrap.lowerBound, consentRefresh.lowerBound)
+        XCTAssertLessThan(consentRefresh.lowerBound, appStateCreation.lowerBound)
+    }
+
+    func testAdMobSDKStartRemainsScopedToAnAuthorizedNativeAdSlot() throws {
+        let root = try repositoryRoot()
+        let serviceContent = try String(
+            contentsOf: root.appendingPathComponent(
+                "StudyMate/Services/AdMobNativeAdvertising.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertEqual(
+            serviceContent.components(separatedBy: "MobileAds.shared.start()").count - 1,
+            1
+        )
+
+        let authorizedStart = try XCTUnwrap(
+            serviceContent.range(of: "func startMobileAdsIfAuthorized(")
+        )
+        let privacyCoordinatorEnd = try XCTUnwrap(
+            serviceContent.range(
+                of: "\n}\n\n@MainActor\nprivate final class AdMobNativeAdLoadAttempt",
+                range: authorizedStart.upperBound..<serviceContent.endIndex
+            )
+        )
+        let authorizedStartBody = serviceContent[
+            authorizedStart.lowerBound..<privacyCoordinatorEnd.lowerBound
+        ]
+        XCTAssertTrue(authorizedStartBody.contains("MobileAds.shared.start()"))
+
+        let requestStart = try XCTUnwrap(
+            serviceContent.range(of: "func requestNativeAd(")
+        )
+        let requestBody = serviceContent[requestStart.lowerBound...]
+        XCTAssertTrue(
+            requestBody.contains(
+                "AdMobPrivacyCoordinator.shared.startMobileAdsIfAuthorized("
+            )
+        )
+
+        let launchPreparationStart = try XCTUnwrap(
+            serviceContent.range(of: "func prepareForAppLaunch()")
+        )
+        let regularPreparationStart = try XCTUnwrap(
+            serviceContent.range(
+                of: "func prepare(completion:",
+                range: launchPreparationStart.upperBound..<serviceContent.endIndex
+            )
+        )
+        let launchPreparationBody = serviceContent[
+            launchPreparationStart.lowerBound..<regularPreparationStart.lowerBound
+        ]
+        XCTAssertFalse(launchPreparationBody.contains("MobileAds.shared"))
+    }
+
     func testAPIValidationDecodesBackendValidFieldName() throws {
         let payload = Data(#"{"openaiKeyConfigured":true,"valid":true,"openaiModel":"gpt-5.4"}"#.utf8)
 

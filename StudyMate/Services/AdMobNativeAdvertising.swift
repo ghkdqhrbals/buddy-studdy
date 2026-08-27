@@ -191,12 +191,13 @@ final class AdMobPrivacyCoordinator: ObservableObject {
             ConsentInformation.shared.privacyOptionsRequirementStatus == .required
     }
 
+    func prepareForAppLaunch() {
+        prepare { _ in }
+    }
+
     func prepare(completion: @escaping (AdMobPrivacyAuthorization) -> Void) {
         switch preparationState {
         case .prepared(let authorization):
-            if authorization.permitsRequest {
-                configureAndStartMobileAdsIfNeeded()
-            }
             completion(authorization)
             return
         case .preparing:
@@ -213,6 +214,12 @@ final class AdMobPrivacyCoordinator: ObservableObject {
     }
 
     func presentPrivacyOptions() async {
+        await withCheckedContinuation { continuation in
+            prepare { _ in
+                continuation.resume()
+            }
+        }
+
         var didCompleteConsentGathering = false
         do {
             try await ConsentForm.presentPrivacyOptionsForm(from: nil)
@@ -241,9 +248,6 @@ final class AdMobPrivacyCoordinator: ObservableObject {
                 forceNewGeneration: true
             )
             preparationState = .prepared(authorization)
-            if authorization.permitsRequest {
-                configureAndStartMobileAdsIfNeeded()
-            }
         }
     }
 
@@ -290,9 +294,6 @@ final class AdMobPrivacyCoordinator: ObservableObject {
             permitsRequest: permitsRequest,
             forceNewGeneration: true
         )
-        if authorization.permitsRequest {
-            configureAndStartMobileAdsIfNeeded()
-        }
 
         preparationState = .prepared(authorization)
         let completions = waitingCompletions
@@ -353,7 +354,14 @@ final class AdMobPrivacyCoordinator: ObservableObject {
         return value
     }
 
-    private func configureAndStartMobileAdsIfNeeded() {
+    func startMobileAdsIfAuthorized(
+        _ authorization: AdMobPrivacyAuthorization
+    ) -> Bool {
+        guard authorization.permitsRequest,
+              authorization == currentAuthorization else {
+            return false
+        }
+
         if !didConfigureMobileAds {
             let mobileAds = MobileAds.shared
             let requestConfiguration = mobileAds.requestConfiguration
@@ -365,9 +373,11 @@ final class AdMobPrivacyCoordinator: ObservableObject {
             didConfigureMobileAds = true
         }
 
-        guard !didStartMobileAds else { return }
-        didStartMobileAds = true
-        MobileAds.shared.start()
+        if !didStartMobileAds {
+            didStartMobileAds = true
+            MobileAds.shared.start()
+        }
+        return true
     }
 }
 
@@ -509,7 +519,10 @@ final class AdMobNativeAdCoordinator: NSObject, NativeAdDelegate {
                     now: Date()
                   ),
                   let adUnitID = AdMobAppConfiguration.nativeAdUnitID,
-                  let rootViewController = AdMobPresentationContext.rootViewController else {
+                  let rootViewController = AdMobPresentationContext.rootViewController,
+                  AdMobPrivacyCoordinator.shared.startMobileAdsIfAuthorized(
+                    authorization
+                  ) else {
                 finish(
                     slotID: slotID,
                     nativeAd: nil,

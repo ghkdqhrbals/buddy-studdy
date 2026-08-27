@@ -109,6 +109,9 @@ rg -q '<key>BuddyStudyAdMobNativeAdUnitID</key>' "$project_root/StudyMate/iOSInf
 rg -q '<string>\$\(ADMOB_NATIVE_AD_UNIT_ID\)</string>' "$project_root/StudyMate/iOSInfo.plist"
 rg -q '<key>SKAdNetworkItems</key>' "$project_root/StudyMate/iOSInfo.plist"
 test "$(rg -c '<key>SKAdNetworkIdentifier</key>' "$project_root/StudyMate/iOSInfo.plist")" -ge 50
+rg -q 'AdMobPrivacyCoordinator\.shared\.prepareForAppLaunch()' "$project_root/StudyMate/StudyMateiOSApp.swift"
+rg -q 'startMobileAdsIfAuthorized' "$project_root/StudyMate/Services/AdMobNativeAdvertising.swift"
+test "$(rg -c 'MobileAds\.shared\.start\(\)' "$project_root/StudyMate/Services/AdMobNativeAdvertising.swift")" -eq 1
 rg -q 'Validate AdMob configuration' "$project_root/StudyMate.xcodeproj/project.pbxproj"
 rg -q 'ca-app-pub-3940256099942544~1458002511' "$project_root/StudyMate.xcodeproj/project.pbxproj"
 rg -q 'ca-app-pub-3940256099942544/3986624511' "$project_root/StudyMate.xcodeproj/project.pbxproj"
