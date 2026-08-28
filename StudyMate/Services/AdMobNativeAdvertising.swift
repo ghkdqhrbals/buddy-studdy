@@ -33,7 +33,11 @@ struct NativeAdvertisementRequestPolicy {
 
 struct NativeAdvertisementRowLayoutPolicy {
     static let contentInset: CGFloat = 10
-    static let mediaSideLength: CGFloat = 120
+    // Keep the AdMob creative in the same compact row geometry as the feed cards.
+    // The native ad's media is the single visual asset; the separate app icon is
+    // intentionally not shown because AdMob creatives commonly provide the same
+    // artwork in both assets.
+    static let mediaSideLength: CGFloat = 64
     static let textStackSpacing: CGFloat = 5
     static let headlineLineLimit = 2
     static let callToActionLineLimit = 1
@@ -995,7 +999,6 @@ private struct MobileAdMobNativeAdView: UIViewRepresentable {
 
 private final class BuddyStudyNativeAdView: NativeAdView {
     private let media = MediaView()
-    private let iconImageView = UIImageView()
     private let headlineLabel = UILabel()
     private let badgeLabel = UILabel()
     private let callToActionButton = UIButton(type: .system)
@@ -1018,9 +1021,6 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         headlineLabel.text = nativeAd.headline
         media.mediaContent = nativeAd.mediaContent
 
-        iconImageView.image = nativeAd.icon?.image
-        iconImageView.isHidden = nativeAd.icon?.image == nil
-
         callToActionButton.setTitle(nativeAd.callToAction, for: .normal)
         callToActionButton.isHidden = nativeAd.callToAction?.isEmpty != false
         callToActionButton.isUserInteractionEnabled = false
@@ -1037,11 +1037,6 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         media.contentMode = .scaleAspectFill
         media.clipsToBounds = true
         media.layer.cornerRadius = 12
-
-        iconImageView.translatesAutoresizingMaskIntoConstraints = false
-        iconImageView.contentMode = .scaleAspectFill
-        iconImageView.clipsToBounds = true
-        iconImageView.layer.cornerRadius = 7
 
         headlineLabel.font = .preferredFont(forTextStyle: .headline)
         headlineLabel.adjustsFontForContentSizeCategory = true
@@ -1087,7 +1082,6 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         metadataSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let metadataRow = UIStackView(
             arrangedSubviews: [
-                iconImageView,
                 badgeLabel,
                 metadataSpacer,
                 choicesView,
@@ -1107,9 +1101,6 @@ private final class BuddyStudyNativeAdView: NativeAdView {
 
         addSubview(media)
         addSubview(textStack)
-
-        let iconWidthConstraint = iconImageView.widthAnchor.constraint(equalToConstant: 24)
-        iconWidthConstraint.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
             media.leadingAnchor.constraint(
@@ -1148,8 +1139,6 @@ private final class BuddyStudyNativeAdView: NativeAdView {
 
             badgeLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 18),
             badgeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24),
-            iconWidthConstraint,
-            iconImageView.heightAnchor.constraint(equalTo: iconImageView.widthAnchor),
             callToActionButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
 
             choicesView.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
@@ -1157,7 +1146,6 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         ])
 
         headlineView = headlineLabel
-        iconView = iconImageView
         callToActionView = callToActionButton
         mediaView = media
         adChoicesView = choicesView

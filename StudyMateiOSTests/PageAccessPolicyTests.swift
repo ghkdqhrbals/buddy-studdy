@@ -781,7 +781,7 @@ final class NativeAdvertisementPolicyTests: XCTestCase {
     }
 
     func testNativeAdRowLayoutUsesCompactMinimumAndExpandsForIntrinsicContent() {
-        XCTAssertEqual(NativeAdvertisementRowLayoutPolicy.mediaSideLength, 120)
+        XCTAssertEqual(NativeAdvertisementRowLayoutPolicy.mediaSideLength, 64)
         XCTAssertEqual(NativeAdvertisementRowLayoutPolicy.headlineLineLimit, 2)
         XCTAssertEqual(NativeAdvertisementRowLayoutPolicy.callToActionLineLimit, 1)
         XCTAssertEqual(NativeAdvertisementRowLayoutPolicy.textStackSpacing, 5)
@@ -795,6 +795,7 @@ final class NativeAdvertisementPolicyTests: XCTestCase {
             NativeAdvertisementRowLayoutPolicy.mediaSideLength +
                 (NativeAdvertisementRowLayoutPolicy.contentInset * 2)
         )
+        XCTAssertEqual(NativeAdvertisementRowLayoutPolicy.minimumHeight, 84)
         XCTAssertLessThan(NativeAdvertisementRowLayoutPolicy.minimumHeight, 196)
         XCTAssertEqual(
             NativeAdvertisementRowLayoutPolicy.resolvedHeight(fittingHeight: 80),
