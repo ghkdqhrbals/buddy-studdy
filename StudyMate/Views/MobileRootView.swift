@@ -2266,7 +2266,6 @@ private struct MobileHomeView: View {
             MobileNativeAdvertisementSlotRow(slot: slot, strings: strings)
                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 10))
                 .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
         }
     }
 

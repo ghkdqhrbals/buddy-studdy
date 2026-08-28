@@ -161,6 +161,17 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertEqual(Set(localizations), Set(["ko", "en", "ja"]))
     }
 
+    func testIOSBundleDisablesNativeAdValidatorOverlay() throws {
+        let root = try repositoryRoot()
+        let infoPlistURL = root.appendingPathComponent("StudyMate/iOSInfo.plist")
+        let data = try Data(contentsOf: infoPlistURL)
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+
+        XCTAssertEqual(plist["GADNativeAdValidatorEnabled"] as? Bool, false)
+    }
+
     func testAnalyticsConfigurationRequiresMatchingFirebaseApp() {
         let configured: [String: Any] = [
             "BUNDLE_ID": "io.github.ghkdqhrbals.StudyMate",

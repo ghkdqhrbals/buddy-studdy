@@ -38,7 +38,12 @@ struct NativeAdvertisementRowLayoutPolicy {
     // use Google's Native demo unit rather than its separate Native Video unit.
     // The separate app icon is hidden so only the primary image is shown.
     static let mediaSideLength: CGFloat = 64
-    static let textStackSpacing: CGFloat = 5
+    static let mediaCornerRadius: CGFloat = 9
+    static let sectionSpacing: CGFloat = 10
+    static let mainContentSpacing: CGFloat = 10
+    static let textStackSpacing: CGFloat = 6
+    static let metadataSpacing: CGFloat = 7
+    static let callToActionMinimumHeight: CGFloat = 28
     static let headlineLineLimit = 2
     static let callToActionLineLimit = 1
     static let minimumHeight = mediaSideLength + (contentInset * 2)
@@ -803,13 +808,10 @@ struct MobileNativeAdvertisementSlotRow: View {
     }
 
     private var loadingPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color(.secondarySystemBackground))
-            .overlay {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel(strings.advertisementLoading)
-            }
+        ProgressView()
+            .controlSize(.small)
+            .accessibilityLabel(strings.advertisementLoading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(false)
     }
 
@@ -1001,6 +1003,7 @@ private struct MobileAdMobNativeAdView: UIViewRepresentable {
 private final class BuddyStudyNativeAdView: NativeAdView {
     private let media = MediaView()
     private let headlineLabel = UILabel()
+    private let advertiserLabel = UILabel()
     private let badgeLabel = UILabel()
     private let callToActionButton = UIButton(type: .system)
     private let choicesView = AdChoicesView()
@@ -1019,6 +1022,8 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         self.nativeAd = nil
 
         badgeLabel.text = advertisementLabel
+        advertiserLabel.text = nativeAd.advertiser?.trimmingCharacters(in: .whitespacesAndNewlines)
+        advertiserLabel.isHidden = advertiserLabel.text?.isEmpty != false
         headlineLabel.text = nativeAd.headline
         media.mediaContent = nativeAd.mediaContent
 
@@ -1030,22 +1035,22 @@ private final class BuddyStudyNativeAdView: NativeAdView {
     }
 
     private func configureView() {
-        backgroundColor = .secondarySystemBackground
-        layer.cornerRadius = 18
-        layer.masksToBounds = true
+        backgroundColor = .clear
 
         media.translatesAutoresizingMaskIntoConstraints = false
         media.contentMode = .scaleAspectFill
         media.clipsToBounds = true
-        media.layer.cornerRadius = 12
+        media.layer.cornerRadius = NativeAdvertisementRowLayoutPolicy.mediaCornerRadius
+        media.setContentHuggingPriority(.required, for: .horizontal)
+        media.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        headlineLabel.font = .preferredFont(forTextStyle: .headline)
-        headlineLabel.adjustsFontForContentSizeCategory = true
         headlineLabel.textColor = .label
         headlineLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
-        badgeLabel.font = .preferredFont(forTextStyle: .caption2)
-        badgeLabel.adjustsFontForContentSizeCategory = true
+        advertiserLabel.textColor = .secondaryLabel
+        advertiserLabel.lineBreakMode = .byTruncatingTail
+        advertiserLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         badgeLabel.textAlignment = .center
         badgeLabel.textColor = .secondaryLabel
         badgeLabel.backgroundColor = UIColor.tertiarySystemFill
@@ -1054,23 +1059,25 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         badgeLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         var callToActionConfiguration = UIButton.Configuration.filled()
-        callToActionConfiguration.baseBackgroundColor = .tintColor
-        callToActionConfiguration.baseForegroundColor = .white
-        callToActionConfiguration.cornerStyle = .medium
+        callToActionConfiguration.baseBackgroundColor = .tertiarySystemFill
+        callToActionConfiguration.baseForegroundColor = .secondaryLabel
+        callToActionConfiguration.cornerStyle = .capsule
         callToActionConfiguration.contentInsets = NSDirectionalEdgeInsets(
-            top: 6,
-            leading: 10,
-            bottom: 6,
-            trailing: 10
+            top: 4,
+            leading: 9,
+            bottom: 4,
+            trailing: 9
         )
         callToActionButton.configuration = callToActionConfiguration
-        callToActionButton.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
-        callToActionButton.titleLabel?.adjustsFontForContentSizeCategory = true
         callToActionButton.titleLabel?.textAlignment = .center
+        callToActionButton.setContentHuggingPriority(.required, for: .horizontal)
+        callToActionButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         callToActionButton.setContentCompressionResistancePriority(.required, for: .vertical)
+        updateTypography()
         updateLineLimits()
         _ = registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
             (view: BuddyStudyNativeAdView, _) in
+            view.updateTypography()
             view.updateLineLimits()
         }
 
@@ -1083,6 +1090,7 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         metadataSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let metadataRow = UIStackView(
             arrangedSubviews: [
+                advertiserLabel,
                 badgeLabel,
                 metadataSpacer,
                 choicesView,
@@ -1090,30 +1098,46 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         )
         metadataRow.axis = .horizontal
         metadataRow.alignment = .center
-        metadataRow.spacing = NativeAdvertisementRowLayoutPolicy.textStackSpacing
+        metadataRow.spacing = NativeAdvertisementRowLayoutPolicy.metadataSpacing
+
+        let callToActionSpacer = UIView()
+        callToActionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        callToActionSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let callToActionRow = UIStackView(
+            arrangedSubviews: [callToActionButton, callToActionSpacer]
+        )
+        callToActionRow.axis = .horizontal
+        callToActionRow.alignment = .center
 
         let textStack = UIStackView(
-            arrangedSubviews: [metadataRow, headlineLabel, callToActionButton]
+            arrangedSubviews: [headlineLabel, callToActionRow]
         )
-        textStack.translatesAutoresizingMaskIntoConstraints = false
         textStack.axis = .vertical
         textStack.alignment = .fill
         textStack.spacing = NativeAdvertisementRowLayoutPolicy.textStackSpacing
 
-        addSubview(media)
-        addSubview(textStack)
+        let mainContentRow = UIStackView(arrangedSubviews: [textStack, media])
+        mainContentRow.axis = .horizontal
+        mainContentRow.alignment = .top
+        mainContentRow.spacing = NativeAdvertisementRowLayoutPolicy.mainContentSpacing
+
+        let contentStack = UIStackView(arrangedSubviews: [metadataRow, mainContentRow])
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.axis = .vertical
+        contentStack.alignment = .fill
+        contentStack.spacing = NativeAdvertisementRowLayoutPolicy.sectionSpacing
+
+        addSubview(contentStack)
 
         NSLayoutConstraint.activate([
-            media.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: NativeAdvertisementRowLayoutPolicy.contentInset
-            ),
-            media.topAnchor.constraint(
+            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentStack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentStack.topAnchor.constraint(
                 equalTo: topAnchor,
                 constant: NativeAdvertisementRowLayoutPolicy.contentInset
             ),
-            media.bottomAnchor.constraint(
-                lessThanOrEqualTo: bottomAnchor,
+            contentStack.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
                 constant: -NativeAdvertisementRowLayoutPolicy.contentInset
             ),
             media.widthAnchor.constraint(
@@ -1121,35 +1145,43 @@ private final class BuddyStudyNativeAdView: NativeAdView {
             ),
             media.heightAnchor.constraint(equalTo: media.widthAnchor),
 
-            textStack.leadingAnchor.constraint(
-                equalTo: media.trailingAnchor,
-                constant: NativeAdvertisementRowLayoutPolicy.contentInset
-            ),
-            textStack.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -NativeAdvertisementRowLayoutPolicy.contentInset
-            ),
-            textStack.topAnchor.constraint(
-                equalTo: topAnchor,
-                constant: NativeAdvertisementRowLayoutPolicy.contentInset
-            ),
-            textStack.bottomAnchor.constraint(
-                lessThanOrEqualTo: bottomAnchor,
-                constant: -NativeAdvertisementRowLayoutPolicy.contentInset
-            ),
-
             badgeLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 18),
             badgeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24),
-            callToActionButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
+            callToActionButton.heightAnchor.constraint(
+                greaterThanOrEqualToConstant: NativeAdvertisementRowLayoutPolicy.callToActionMinimumHeight
+            ),
 
             choicesView.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
             choicesView.heightAnchor.constraint(greaterThanOrEqualToConstant: 20),
         ])
 
         headlineView = headlineLabel
+        advertiserView = advertiserLabel
         callToActionView = callToActionButton
         mediaView = media
         adChoicesView = choicesView
+    }
+
+    private func updateTypography() {
+        advertiserLabel.font = scaledFont(textStyle: .caption1, pointSize: 12, weight: .semibold)
+        badgeLabel.font = scaledFont(textStyle: .caption2, pointSize: 11, weight: .semibold)
+        headlineLabel.font = scaledFont(textStyle: .body, pointSize: 17, weight: .medium)
+        callToActionButton.titleLabel?.font = scaledFont(
+            textStyle: .footnote,
+            pointSize: 13,
+            weight: .semibold
+        )
+    }
+
+    private func scaledFont(
+        textStyle: UIFont.TextStyle,
+        pointSize: CGFloat,
+        weight: UIFont.Weight
+    ) -> UIFont {
+        UIFontMetrics(forTextStyle: textStyle).scaledFont(
+            for: .systemFont(ofSize: pointSize, weight: weight),
+            compatibleWith: traitCollection
+        )
     }
 
     private func updateLineLimits() {
