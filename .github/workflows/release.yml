@@ -820,6 +820,7 @@ jobs:
       APPSTORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY_BASE64 }}
       APP_STORE_VERSION_STRING: ${{ needs.plan_ios_release.outputs.release_version }}
       APP_STORE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
+      APP_STORE_SYNC_VERSION: "1"
 
     steps:
       - name: Checkout
