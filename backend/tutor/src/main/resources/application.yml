@@ -87,6 +87,12 @@ buddystudy:
     batch-size: ${SCHEDULER_BATCH_SIZE:50}
     processing-timeout-seconds: ${SCHEDULER_PROCESSING_TIMEOUT_SECONDS:300}
     worker-id: ${SCHEDULER_WORKER_ID:}
+    history-success-retention-days: ${SCHEDULER_HISTORY_SUCCESS_RETENTION_DAYS:30}
+    history-failure-retention-days: ${SCHEDULER_HISTORY_FAILURE_RETENTION_DAYS:90}
+    history-cleanup-batch-size: ${SCHEDULER_HISTORY_CLEANUP_BATCH_SIZE:5000}
+    history-cleanup-max-rows-per-run: ${SCHEDULER_HISTORY_CLEANUP_MAX_ROWS_PER_RUN:250000}
+    history-cleanup-cron: "${SCHEDULER_HISTORY_CLEANUP_CRON:0 40 3 * * *}"
+    history-cleanup-zone: ${SCHEDULER_HISTORY_CLEANUP_ZONE:UTC}
   openai:
     user-content-api-key: ${OPENAI_API_KEY_USER:${OPENAI_USER_CONTENT_API_KEY:${OPENAI_API_KEY:}}}
     system-api-key: ${OPENAI_API_KEY_SYSTEM:${OPENAI_SYSTEM_API_KEY:}}

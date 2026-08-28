@@ -5,6 +5,7 @@ import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobSnapshotPage
+import java.time.Instant
 
 interface ScheduledJobRunPort {
     suspend fun isEnabled(jobName: String): Boolean
@@ -13,6 +14,14 @@ interface ScheduledJobRunPort {
     suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, cursor: Long?): ScheduledJobRunPageResponse
     suspend fun findSnapshotPage(limit: Int, offset: Int): ScheduledJobSnapshotPage
     suspend fun findExistingJobNames(jobNames: List<String>): Set<String>
+}
+
+interface ScheduledJobHistoryRetentionPort {
+    suspend fun deleteExpiredTerminalRuns(
+        successCutoff: Instant,
+        failureCutoff: Instant,
+        limit: Int,
+    ): Int
 }
 
 interface JobLockPort {

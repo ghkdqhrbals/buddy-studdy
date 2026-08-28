@@ -30,6 +30,10 @@ data class BuddyStudyProperties(
         var batchSize: Int = 50,
         var processingTimeoutSeconds: Long = 300,
         var workerId: String = "",
+        var historySuccessRetentionDays: Long = 30,
+        var historyFailureRetentionDays: Long = 90,
+        var historyCleanupBatchSize: Int = 5_000,
+        var historyCleanupMaxRowsPerRun: Int = 250_000,
     )
     data class OpenAI(
         var userContentApiKey: String = "",

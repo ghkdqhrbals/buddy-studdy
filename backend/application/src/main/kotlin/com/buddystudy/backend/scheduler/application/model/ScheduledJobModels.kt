@@ -38,6 +38,14 @@ data class ScheduledJobRunPageResponse(
     val hasNext: Boolean,
 )
 
+data class ScheduledJobHistoryCleanupResult(
+    val deletedRuns: Int,
+    val batches: Int,
+    val capped: Boolean,
+    val successCutoff: Instant,
+    val failureCutoff: Instant,
+)
+
 data class ScheduledJobSnapshot(
     val jobName: String,
     val enabled: Boolean,

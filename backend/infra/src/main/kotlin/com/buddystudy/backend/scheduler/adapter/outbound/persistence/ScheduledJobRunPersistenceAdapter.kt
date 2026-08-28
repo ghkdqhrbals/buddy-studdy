@@ -2,6 +2,7 @@ package com.buddystudy.backend.scheduler.adapter.outbound.persistence
 
 import com.buddystudy.backend.scheduler.application.model.*
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
+import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobHistoryRetentionPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
 import com.buddystudy.backend.common.adapter.outbound.persistence.bindIndexed
 import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMarkers
@@ -19,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
 @Repository
 class ScheduledJobRunPersistenceAdapter(
     private val client: DatabaseClient,
-) : ScheduledJobRunPort {
+) : ScheduledJobRunPort, ScheduledJobHistoryRetentionPort {
     override suspend fun isEnabled(jobName: String): Boolean =
         client.sql("select enabled from scheduled_jobs where job_name = :jobName").bind("jobName", jobName)
             .map { row, _ -> row.get("enabled", java.lang.Boolean::class.java)!!.booleanValue() }
@@ -150,6 +151,38 @@ class ScheduledJobRunPersistenceAdapter(
             .awaitSingle()
             .toSet()
     }
+
+    override suspend fun deleteExpiredTerminalRuns(
+        successCutoff: Instant,
+        failureCutoff: Instant,
+        limit: Int,
+    ): Int = client.sql(
+        """
+        delete from scheduled_job_runs
+        where id in (
+            select deletable.id
+            from (
+                select candidate.id
+                from scheduled_job_runs candidate
+                left join scheduled_job_runs retry_child on retry_child.retry_of_run_id = candidate.id
+                where retry_child.id is null
+                  and candidate.finished_at is not null
+                  and (
+                    (candidate.status in ('SUCCESS', 'SKIPPED') and candidate.started_at < :successCutoff)
+                    or (candidate.status = 'FAILED' and candidate.started_at < :failureCutoff)
+                  )
+                order by candidate.id
+                limit :limit
+            ) deletable
+        )
+        """.trimIndent(),
+    ).bind("successCutoff", successCutoff)
+        .bind("failureCutoff", failureCutoff)
+        .bind("limit", limit.coerceAtLeast(1))
+        .fetch()
+        .rowsUpdated()
+        .awaitSingle()
+        .toInt()
 
     private suspend fun findLatestRunIds(names: List<String>): List<LatestRunIds> {
         val indexedTopOneQueries = names.indices.joinToString("\nunion all\n") { index ->

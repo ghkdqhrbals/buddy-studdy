@@ -165,6 +165,70 @@ class ScheduledJobRunPersistenceAdapterTest {
             .containsExactly("question-schedule")
     }
 
+    @Test
+    fun `deletes only expired terminal runs and keeps retry parents until children are removed`(): Unit = runBlocking {
+        val oldSuccess = finishRun("old-success", JobRunStatus.SUCCESS)
+        val oldSkipped = finishRun("old-skipped", JobRunStatus.SKIPPED)
+        val recentSuccess = finishRun("recent-success", JobRunStatus.SUCCESS)
+        val retainedFailure = finishRun("retained-failure", JobRunStatus.FAILED)
+        val expiredFailure = finishRun("expired-failure", JobRunStatus.FAILED)
+        val running = adapter.start("old-running", JobTriggerType.SCHEDULED, null, "system")
+        val retryParent = finishRun("retry-parent", JobRunStatus.FAILED)
+        val retryChild = adapter.finish(
+            adapter.start("retry-child", JobTriggerType.RETRY, retryParent.id, "system").id,
+            JobRunStatus.FAILED,
+            null,
+            "failed",
+            1,
+        )
+        val now = Instant.parse("2026-08-28T00:00:00Z")
+        setStartedAt(oldSuccess.id, now.minusSeconds(31L * 86_400))
+        setStartedAt(oldSkipped.id, now.minusSeconds(31L * 86_400))
+        setStartedAt(recentSuccess.id, now.minusSeconds(29L * 86_400))
+        setStartedAt(retainedFailure.id, now.minusSeconds(89L * 86_400))
+        setStartedAt(expiredFailure.id, now.minusSeconds(91L * 86_400))
+        setStartedAt(running.id, now.minusSeconds(120L * 86_400))
+        setStartedAt(retryParent.id, now.minusSeconds(100L * 86_400))
+        setStartedAt(retryChild.id, now.minusSeconds(10L * 86_400))
+
+        val deleted = adapter.deleteExpiredTerminalRuns(
+            successCutoff = now.minusSeconds(30L * 86_400),
+            failureCutoff = now.minusSeconds(90L * 86_400),
+            limit = 100,
+        )
+
+        assertThat(deleted).isEqualTo(3)
+        assertThat(remainingRunIds()).containsExactlyInAnyOrder(
+            recentSuccess.id,
+            retainedFailure.id,
+            running.id,
+            retryParent.id,
+            retryChild.id,
+        )
+    }
+
+    @Test
+    fun `removes retry chains from leaf to parent across batches`(): Unit = runBlocking {
+        val parent = finishRun("retry-parent", JobRunStatus.FAILED)
+        val child = adapter.finish(
+            adapter.start("retry-child", JobTriggerType.RETRY, parent.id, "system").id,
+            JobRunStatus.FAILED,
+            null,
+            "failed",
+            1,
+        )
+        val now = Instant.parse("2026-08-28T00:00:00Z")
+        setStartedAt(parent.id, now.minusSeconds(100L * 86_400))
+        setStartedAt(child.id, now.minusSeconds(100L * 86_400))
+
+        val firstBatch = adapter.deleteExpiredTerminalRuns(now, now.minusSeconds(90L * 86_400), 1)
+        val secondBatch = adapter.deleteExpiredTerminalRuns(now, now.minusSeconds(90L * 86_400), 1)
+
+        assertThat(firstBatch).isEqualTo(1)
+        assertThat(secondBatch).isEqualTo(1)
+        assertThat(remainingRunIds()).isEmpty()
+    }
+
     private suspend fun execute(sql: String) {
         client.sql(sql).fetch().rowsUpdated().awaitSingle()
     }
@@ -177,4 +241,18 @@ class ScheduledJobRunPersistenceAdapterTest {
             .rowsUpdated()
             .awaitSingle()
     }
+
+    private suspend fun finishRun(jobName: String, status: JobRunStatus) = adapter.finish(
+        adapter.start(jobName, JobTriggerType.SCHEDULED, null, "system").id,
+        status,
+        null,
+        if (status == JobRunStatus.FAILED) "failed" else null,
+        1,
+    )
+
+    private suspend fun remainingRunIds(): List<Long> = client.sql("select id from scheduled_job_runs order by id")
+        .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
+        .all()
+        .collectList()
+        .awaitSingle()
 }
