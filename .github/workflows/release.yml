@@ -107,10 +107,6 @@ jobs:
             echo "AdMob test builds must be uploaded to TestFlight." >&2
             exit 1
           fi
-          if [ "${admob_test_mode}" = "true" ] && [ "${review_candidate}" != "false" ]; then
-            echo "AdMob test builds can never be App Review candidates." >&2
-            exit 1
-          fi
 
           build_number="${GITHUB_RUN_NUMBER}"
           artifact_name="BuddyStudy-iOS-${version}-${build_number}"
@@ -301,10 +297,6 @@ jobs:
 
           case "${ADMOB_TEST_MODE}" in
             true)
-              if [ "${APP_REVIEW_CANDIDATE}" != "false" ]; then
-                echo "AdMob test builds can never be App Review candidates." >&2
-                exit 1
-              fi
               if [ "${ADMOB_APP_ID}" != "ca-app-pub-3940256099942544~1458002511" ] \
                 || [ "${ADMOB_NATIVE_AD_UNIT_ID}" != "ca-app-pub-3940256099942544/3986624511" ]; then
                 echo "AdMob test builds must use Google's exact iOS demo identifiers." >&2
@@ -525,7 +517,7 @@ jobs:
 
           mkdir -p build dist
           internal_testing_only_plist=""
-          if [ "${ADMOB_TEST_MODE}" = "true" ]; then
+          if [ "${ADMOB_TEST_MODE}" = "true" ] && [ "${APP_REVIEW_CANDIDATE}" = "false" ]; then
             internal_testing_only_plist="
             <key>testFlightInternalTestingOnly</key>
             <true/>"
@@ -562,7 +554,7 @@ jobs:
           PLIST
 
           plutil -lint build/export-options.plist
-          if [ "${ADMOB_TEST_MODE}" = "true" ]; then
+          if [ "${ADMOB_TEST_MODE}" = "true" ] && [ "${APP_REVIEW_CANDIDATE}" = "false" ]; then
             if [ "$(/usr/libexec/PlistBuddy -c 'Print :testFlightInternalTestingOnly' build/export-options.plist)" != "true" ]; then
               echo "AdMob test exports must be permanently restricted to internal TestFlight." >&2
               exit 1
@@ -750,7 +742,7 @@ jobs:
     needs:
       - plan_ios_release
       - upload_testflight
-    if: ${{ needs.plan_ios_release.outputs.admob_test_mode == 'true' }}
+    if: ${{ needs.plan_ios_release.outputs.admob_test_mode == 'true' && needs.plan_ios_release.outputs.review_candidate == 'false' }}
     env:
       APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
       APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}

@@ -33,10 +33,9 @@ struct NativeAdvertisementRequestPolicy {
 
 struct NativeAdvertisementRowLayoutPolicy {
     static let contentInset: CGFloat = 10
-    // Keep the AdMob creative in the same compact row geometry as the feed cards.
-    // The native ad's media is the single visual asset; the separate app icon is
-    // intentionally not shown because AdMob creatives commonly provide the same
-    // artwork in both assets.
+    // Keep static creatives in the same compact row geometry as the feed cards.
+    // Video creatives are rejected before rendering because this compact slot is
+    // intentionally not a video placement. The separate app icon is also hidden.
     static let mediaSideLength: CGFloat = 64
     static let textStackSpacing: CGFloat = 5
     static let headlineLineLimit = 2
@@ -441,6 +440,10 @@ private final class AdMobNativeAdLoadAttempt: NSObject, NativeAdLoaderDelegate {
     }
 
     func adLoader(_ adLoader: AdLoader, didReceive nativeAd: NativeAd) {
+        guard !nativeAd.mediaContent.hasVideoContent else {
+            finish(with: nil)
+            return
+        }
         finish(with: nativeAd)
     }
 

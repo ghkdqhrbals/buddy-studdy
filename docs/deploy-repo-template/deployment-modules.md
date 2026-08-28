@@ -59,13 +59,13 @@ deployment.
   candidates update localized TestFlight notes, select the exact processed
   build on the editable App Store version, and read the relationship back
   before the workflow reports success.
-- A manually dispatched iOS AdMob test build must set `admob_test_mode=true`,
-  keep `app_review_candidate=false`, use only Google's exact iOS demo app and
-  Native unit IDs, and export with `testFlightInternalTestingOnly=true`. The
-  workflow must verify `buildAudienceType=INTERNAL_ONLY` through App Store
-  Connect before adding the exact build to an internal tester group. Normal
-  manual and tag releases remain `APP_STORE_ELIGIBLE` and continue to reject
-  every Google demo publisher identifier.
+- A manually dispatched iOS AdMob test build must set `admob_test_mode=true`
+  and use only Google's exact iOS demo app and Native unit IDs. When
+  `app_review_candidate=true`, it remains eligible for App Store Connect review
+  and does not export with `testFlightInternalTestingOnly=true`; when false,
+  the workflow must verify `buildAudienceType=INTERNAL_ONLY` before adding the
+  exact build to an internal tester group. Production releases continue to
+  reject every Google demo publisher identifier.
 - The iOS archive uses the installed Apple Distribution certificate and App
   Store provisioning profile with manual signing. Archive creation must not
   ask Apple to create or revoke development certificates; the App Store

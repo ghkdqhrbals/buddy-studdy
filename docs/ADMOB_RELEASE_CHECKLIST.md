@@ -9,7 +9,7 @@ BuddyStudy's production AdMob app and Native unit were created on 2026-08-25. Th
 3. Configure and publish the EEA/UK GDPR message and applicable U.S. state privacy messages in Privacy & messaging. Include a privacy-options entry point so UMP can expose it from Settings when required.
 4. Confirm the BuddyStudy EEA/UK message writes `IABTCF_gdprApplies` and IAB TCF Purpose 1 choices, and the US-state message writes the UMP GPP keys. The app requires Purpose 1 only when the TCF applicability signal says European regulations apply, respects the US GPP decision with `canRequestAds`, and fails closed for missing regional evidence or UMP errors without changing the account-wide Consent Mode setting used by other apps.
 5. Confirm that requests are non-personalized, teen-rated, publisher first-party ID is disabled, SDK crash reporting is disabled, and no ATT/IDFA flow exists. BuddyStudy's app gate does not request Limited Ads after a Purpose 1 denial.
-6. Register simulator and physical QA devices as test devices when their identifiers are available. Google sample IDs are allowed only in Debug or in the guarded internal-only TestFlight mode described below; production and App Review builds must use issued IDs.
+6. Register simulator and physical QA devices as test devices when their identifiers are available. Google sample IDs are allowed in Debug and in the explicit AdMob test mode described below; use the App Review candidate option when the test-ad build must be reviewable, and use the internal-only option for tester-only QA.
 
 ## 2. Repository and CI values
 
@@ -20,7 +20,7 @@ Set these GitHub Actions repository variables before producing a Release archive
 
 The normal iOS release and tag paths reject empty, malformed, or Google sample values and check the archived and exported `Info.plist`. Keep the workflow on Xcode 26.2 or later.
 
-For AdMob fill and layout QA before the AdMob account can serve production ads, manually dispatch `Release iOS App` with `admob_test_mode=true`, `upload_to_app_store_connect=true`, and `app_review_candidate=false`. That explicit mode uses Google's exact iOS demo app and Native unit IDs in a Release archive, exports with `testFlightInternalTestingOnly=true`, and requires App Store Connect to report `buildAudienceType=INTERNAL_ONLY` before the exact build is added to an internal tester group. An internal-only build cannot be distributed through external TestFlight or submitted to the App Store. Never select it for review, and never weaken the production path's sample-ID rejection.
+For AdMob fill and layout QA before the AdMob account can serve production ads, manually dispatch `Release iOS App` with `admob_test_mode=true` and `upload_to_app_store_connect=true`. The Google demo app and Native unit IDs are used in the Release archive. Set `app_review_candidate=true` when the test-ad build must be uploaded as the App Review candidate; set it to `false` for tester-only QA, which exports with `testFlightInternalTestingOnly=true` and is added to the internal tester group. The internal-only variant cannot be submitted to App Review.
 
 ## 3. app-ads.txt
 
