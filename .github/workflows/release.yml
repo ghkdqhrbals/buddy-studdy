@@ -347,20 +347,27 @@ jobs:
             exit 1
           fi
 
-          if ! plutil -convert json -o - "${profile_plist_path}" |
-            jq -e --arg expected "applinks:api.ghkdqhrbals.org" '
-              .Entitlements["com.apple.developer.associated-domains"] as $domains
-              | if ($domains | type) == "string" then
-                  $domains == "*" or $domains == $expected
-                elif ($domains | type) == "array" then
-                  ($domains | index("*")) != null or ($domains | index($expected)) != null
-                else
-                  false
-                end
-            ' >/dev/null; then
-            echo "Provisioning profile must include the BuddyStudy referral Associated Domain." >&2
-            exit 1
-          fi
+          python3 - "${profile_plist_path}" <<'PY'
+          import plistlib
+          import sys
+
+          profile_path = sys.argv[1]
+          with open(profile_path, "rb") as profile_file:
+              profile = plistlib.load(profile_file)
+
+          domains = profile.get("Entitlements", {}).get(
+              "com.apple.developer.associated-domains",
+              [],
+          )
+          if isinstance(domains, str):
+              domains = [domains]
+
+          expected = "applinks:api.ghkdqhrbals.org"
+          if "*" not in domains and expected not in domains:
+              raise SystemExit(
+                  "Provisioning profile must include the BuddyStudy referral Associated Domain."
+              )
+          PY
 
           mkdir -p \
             "${HOME}/Library/MobileDevice/Provisioning Profiles" \
