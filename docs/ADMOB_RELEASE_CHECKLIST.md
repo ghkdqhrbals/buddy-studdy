@@ -20,7 +20,7 @@ Set these GitHub Actions repository variables before producing a Release archive
 
 The normal iOS release and tag paths reject empty, malformed, or Google sample values and check the archived and exported `Info.plist`. Keep the workflow on Xcode 26.2 or later.
 
-For AdMob fill and layout QA before the AdMob account can serve production ads, manually dispatch `Release iOS App` with `admob_test_mode=true` and `upload_to_app_store_connect=true`. The Google demo app and Native unit IDs are used in the Release archive. Set `app_review_candidate=true` when the test-ad build must be uploaded as the App Review candidate; set it to `false` for tester-only QA, which exports with `testFlightInternalTestingOnly=true` and is added to the internal tester group. The internal-only variant cannot be submitted to App Review.
+For AdMob fill and layout QA before the AdMob account can serve production ads, manually dispatch `Release iOS App` with `admob_test_mode=true` and `upload_to_app_store_connect=true`. The Release archive uses Google's image Native demo unit (`ca-app-pub-3940256099942544/3986624511`), never the separate Native Video demo unit (`ca-app-pub-3940256099942544/2521693316`). Production uses the `COMMUNITY_FEED` unit with its AdMob media type restricted to Image. Set `app_review_candidate=true` when the image-test-ad build must be uploaded as the App Review candidate; set it to `false` for tester-only QA, which exports with `testFlightInternalTestingOnly=true` and is added to the internal tester group. The internal-only variant cannot be submitted to App Review.
 
 ## 3. app-ads.txt
 

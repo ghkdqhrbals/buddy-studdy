@@ -244,6 +244,8 @@ jobs:
 
           case "${ADMOB_TEST_MODE}" in
             true)
+              # Use Google's image Native demo creative. The separate Native Video
+              # demo unit (ending in /2521693316) is intentionally not supported.
               {
                 echo "ADMOB_APP_ID=ca-app-pub-3940256099942544~1458002511"
                 echo "ADMOB_NATIVE_AD_UNIT_ID=ca-app-pub-3940256099942544/3986624511"
@@ -299,7 +301,7 @@ jobs:
             true)
               if [ "${ADMOB_APP_ID}" != "ca-app-pub-3940256099942544~1458002511" ] \
                 || [ "${ADMOB_NATIVE_AD_UNIT_ID}" != "ca-app-pub-3940256099942544/3986624511" ]; then
-                echo "AdMob test builds must use Google's exact iOS demo identifiers." >&2
+                echo "AdMob test builds must use Google's iOS demo app ID and image Native demo unit ID." >&2
                 exit 1
               fi
               ;;

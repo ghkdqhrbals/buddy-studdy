@@ -860,7 +860,7 @@ final class NativeAdvertisementPolicyTests: XCTestCase {
         )
         XCTAssertFalse(
             AdMobIdentifierPolicy.isValidNativeAdUnitID(
-                "ca-app-pub-3940256099942544/2521693316",
+                AdMobIdentifierPolicy.sampleVideoNativeAdUnitID,
                 allowsSample: false
             )
         )
@@ -869,6 +869,21 @@ final class NativeAdvertisementPolicyTests: XCTestCase {
                 "ca-app-pub-invalid/123",
                 allowsSample: false
             )
+        )
+    }
+
+    func testAdMobTestBuildUsesImageNativeDemoUnitInsteadOfNativeVideo() {
+        XCTAssertEqual(
+            AdMobIdentifierPolicy.sampleImageNativeAdUnitID,
+            "ca-app-pub-3940256099942544/3986624511"
+        )
+        XCTAssertEqual(
+            AdMobIdentifierPolicy.sampleVideoNativeAdUnitID,
+            "ca-app-pub-3940256099942544/2521693316"
+        )
+        XCTAssertNotEqual(
+            AdMobIdentifierPolicy.sampleImageNativeAdUnitID,
+            AdMobIdentifierPolicy.sampleVideoNativeAdUnitID
         )
     }
 

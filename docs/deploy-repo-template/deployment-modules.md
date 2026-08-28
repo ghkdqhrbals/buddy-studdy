@@ -60,7 +60,9 @@ deployment.
   build on the editable App Store version, and read the relationship back
   before the workflow reports success.
 - A manually dispatched iOS AdMob test build must set `admob_test_mode=true`
-  and use only Google's exact iOS demo app and Native unit IDs. When
+  and use only Google's exact iOS demo app ID and image Native demo unit ID
+  (`ca-app-pub-3940256099942544/3986624511`). It must never use Google's
+  separate Native Video demo unit (`ca-app-pub-3940256099942544/2521693316`). When
   `app_review_candidate=true`, it remains eligible for App Store Connect review
   and does not export with `testFlightInternalTestingOnly=true`; when false,
   the workflow must verify `buildAudienceType=INTERNAL_ONLY` before adding the

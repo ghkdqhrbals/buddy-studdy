@@ -33,9 +33,10 @@ struct NativeAdvertisementRequestPolicy {
 
 struct NativeAdvertisementRowLayoutPolicy {
     static let contentInset: CGFloat = 10
-    // Keep static creatives in the same compact row geometry as the feed cards.
-    // Video creatives are rejected before rendering because this compact slot is
-    // intentionally not a video placement. The separate app icon is also hidden.
+    // Keep image creatives in the same compact row geometry as the feed cards.
+    // Production restricts COMMUNITY_FEED to Image in AdMob, while test builds
+    // use Google's Native demo unit rather than its separate Native Video unit.
+    // The separate app icon is hidden so only the primary image is shown.
     static let mediaSideLength: CGFloat = 64
     static let textStackSpacing: CGFloat = 5
     static let headlineLineLimit = 2
@@ -76,7 +77,8 @@ struct NativeAdvertisementSlotStateMachine: Equatable {
 enum AdMobIdentifierPolicy {
     static let googleDemoPublisherPrefix = "ca-app-pub-3940256099942544"
     static let sampleAppID = "ca-app-pub-3940256099942544~1458002511"
-    static let sampleNativeAdUnitID = "ca-app-pub-3940256099942544/3986624511"
+    static let sampleImageNativeAdUnitID = "ca-app-pub-3940256099942544/3986624511"
+    static let sampleVideoNativeAdUnitID = "ca-app-pub-3940256099942544/2521693316"
 
     static func isValidAppID(_ value: String, allowsSample: Bool) -> Bool {
         isValid(value, separator: "~", allowsSample: allowsSample)
@@ -440,10 +442,6 @@ private final class AdMobNativeAdLoadAttempt: NSObject, NativeAdLoaderDelegate {
     }
 
     func adLoader(_ adLoader: AdLoader, didReceive nativeAd: NativeAd) {
-        guard !nativeAd.mediaContent.hasVideoContent else {
-            finish(with: nil)
-            return
-        }
         finish(with: nativeAd)
     }
 
