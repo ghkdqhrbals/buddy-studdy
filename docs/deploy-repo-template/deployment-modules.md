@@ -611,7 +611,11 @@ deployment.
   Air` independently, then run the monitoring routing workflow only when the
   public hostname or origin port changed. The deploy pulls an immutable
   multi-architecture GHCR digest on the MacBook Air; it does not build source
-  on the self-hosted runner. The production Redis node list and password come
+  on the self-hosted runner. The checked-in manual default pins
+  RedisStreamScope `v2.4.2` at multi-architecture digest
+  `sha256:b912d963abbb54759cb1b383f2c298c0dd7f1256a231e0102802e1c9307aa1e0`;
+  future upgrades must update the version and immutable digest together. The
+  production Redis node list and password come
   from the standalone `RSC_REDIS_HOST` and `RSC_REDIS_PASSWORD`. Public traffic passes
   the existing monitoring Nginx gateway and uses RedisStreamScope's own session
   authentication. GitHub Actions submits the container without using an HTTP

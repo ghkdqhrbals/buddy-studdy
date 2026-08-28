@@ -6,7 +6,7 @@ on:
       image_ref:
         description: Immutable RedisStreamScope image reference
         required: true
-        default: ghcr.io/ghkdqhrbals/redisstreamscope@sha256:fe0b881f071a70c896bb9dda84a00c79343100a4748f9dd0b968574bf7e99a98
+        default: ghcr.io/ghkdqhrbals/redisstreamscope@sha256:b912d963abbb54759cb1b383f2c298c0dd7f1256a231e0102802e1c9307aa1e0
         type: string
 
 concurrency:
