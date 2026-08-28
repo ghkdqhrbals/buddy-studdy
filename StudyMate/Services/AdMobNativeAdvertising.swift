@@ -1088,12 +1088,16 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         let metadataSpacer = UIView()
         metadataSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         metadataSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        // AdChoices is rendered and colored by Google. Keep it beside the ad
+        // attribution instead of in the trailing overflow-menu position used by
+        // regular feed cards.
         let metadataRow = UIStackView(
             arrangedSubviews: [
                 advertiserLabel,
                 badgeLabel,
-                metadataSpacer,
                 choicesView,
+                metadataSpacer,
             ]
         )
         metadataRow.axis = .horizontal
