@@ -42,8 +42,7 @@ data class ScheduledJobHistoryCleanupResult(
     val deletedRuns: Int,
     val batches: Int,
     val capped: Boolean,
-    val successCutoff: Instant,
-    val failureCutoff: Instant,
+    val cutoff: Instant,
 )
 
 data class ScheduledJobSnapshot(

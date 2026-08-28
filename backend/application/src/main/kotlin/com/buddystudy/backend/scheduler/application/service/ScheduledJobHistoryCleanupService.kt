@@ -15,18 +15,16 @@ class ScheduledJobHistoryCleanupService(
 ) : ScheduledJobHistoryCleanupUseCase {
     override suspend fun cleanup(now: Instant): ScheduledJobHistoryCleanupResult {
         val scheduler = properties.scheduler
-        val successRetentionDays = scheduler.historySuccessRetentionDays.coerceAtLeast(1)
-        val failureRetentionDays = scheduler.historyFailureRetentionDays.coerceAtLeast(successRetentionDays)
+        val retentionDays = scheduler.historyRetentionDays.coerceIn(1, MAX_RETENTION_DAYS)
         val batchSize = scheduler.historyCleanupBatchSize.coerceIn(1, MAX_BATCH_SIZE)
         val maxRows = scheduler.historyCleanupMaxRowsPerRun.coerceAtLeast(1)
-        val successCutoff = now.minus(Duration.ofDays(successRetentionDays))
-        val failureCutoff = now.minus(Duration.ofDays(failureRetentionDays))
+        val cutoff = now.minus(Duration.ofDays(retentionDays))
 
         var deletedRuns = 0
         var batches = 0
         while (deletedRuns < maxRows) {
             val limit = minOf(batchSize, maxRows - deletedRuns)
-            val deleted = history.deleteExpiredTerminalRuns(successCutoff, failureCutoff, limit)
+            val deleted = history.deleteExpiredTerminalRuns(cutoff, limit)
                 .coerceIn(0, limit)
             if (deleted == 0) break
             deletedRuns += deleted
@@ -37,12 +35,12 @@ class ScheduledJobHistoryCleanupService(
             deletedRuns = deletedRuns,
             batches = batches,
             capped = deletedRuns >= maxRows,
-            successCutoff = successCutoff,
-            failureCutoff = failureCutoff,
+            cutoff = cutoff,
         )
     }
 
     private companion object {
+        const val MAX_RETENTION_DAYS = 7L
         const val MAX_BATCH_SIZE = 50_000
     }
 }

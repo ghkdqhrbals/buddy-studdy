@@ -18,8 +18,7 @@ interface ScheduledJobRunPort {
 
 interface ScheduledJobHistoryRetentionPort {
     suspend fun deleteExpiredTerminalRuns(
-        successCutoff: Instant,
-        failureCutoff: Instant,
+        cutoff: Instant,
         limit: Int,
     ): Int
 }

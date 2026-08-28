@@ -166,7 +166,7 @@ class ScheduledJobRunPersistenceAdapterTest {
     }
 
     @Test
-    fun `deletes only expired terminal runs and keeps retry parents until children are removed`(): Unit = runBlocking {
+    fun `deletes terminal runs past the cutoff and keeps retry parents until children are removed`(): Unit = runBlocking {
         val oldSuccess = finishRun("old-success", JobRunStatus.SUCCESS)
         val oldSkipped = finishRun("old-skipped", JobRunStatus.SKIPPED)
         val recentSuccess = finishRun("recent-success", JobRunStatus.SUCCESS)
@@ -182,18 +182,17 @@ class ScheduledJobRunPersistenceAdapterTest {
             1,
         )
         val now = Instant.parse("2026-08-28T00:00:00Z")
-        setStartedAt(oldSuccess.id, now.minusSeconds(31L * 86_400))
-        setStartedAt(oldSkipped.id, now.minusSeconds(31L * 86_400))
-        setStartedAt(recentSuccess.id, now.minusSeconds(29L * 86_400))
-        setStartedAt(retainedFailure.id, now.minusSeconds(89L * 86_400))
-        setStartedAt(expiredFailure.id, now.minusSeconds(91L * 86_400))
+        setStartedAt(oldSuccess.id, now.minusSeconds(8L * 86_400))
+        setStartedAt(oldSkipped.id, now.minusSeconds(8L * 86_400))
+        setStartedAt(recentSuccess.id, now.minusSeconds(6L * 86_400))
+        setStartedAt(retainedFailure.id, now.minusSeconds(6L * 86_400))
+        setStartedAt(expiredFailure.id, now.minusSeconds(8L * 86_400))
         setStartedAt(running.id, now.minusSeconds(120L * 86_400))
-        setStartedAt(retryParent.id, now.minusSeconds(100L * 86_400))
-        setStartedAt(retryChild.id, now.minusSeconds(10L * 86_400))
+        setStartedAt(retryParent.id, now.minusSeconds(10L * 86_400))
+        setStartedAt(retryChild.id, now.minusSeconds(1L * 86_400))
 
         val deleted = adapter.deleteExpiredTerminalRuns(
-            successCutoff = now.minusSeconds(30L * 86_400),
-            failureCutoff = now.minusSeconds(90L * 86_400),
+            cutoff = now.minusSeconds(7L * 86_400),
             limit = 100,
         )
 
@@ -221,8 +220,9 @@ class ScheduledJobRunPersistenceAdapterTest {
         setStartedAt(parent.id, now.minusSeconds(100L * 86_400))
         setStartedAt(child.id, now.minusSeconds(100L * 86_400))
 
-        val firstBatch = adapter.deleteExpiredTerminalRuns(now, now.minusSeconds(90L * 86_400), 1)
-        val secondBatch = adapter.deleteExpiredTerminalRuns(now, now.minusSeconds(90L * 86_400), 1)
+        val cutoff = now.minusSeconds(7L * 86_400)
+        val firstBatch = adapter.deleteExpiredTerminalRuns(cutoff, 1)
+        val secondBatch = adapter.deleteExpiredTerminalRuns(cutoff, 1)
 
         assertThat(firstBatch).isEqualTo(1)
         assertThat(secondBatch).isEqualTo(1)

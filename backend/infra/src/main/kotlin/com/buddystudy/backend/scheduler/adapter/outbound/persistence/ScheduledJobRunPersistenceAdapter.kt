@@ -153,8 +153,7 @@ class ScheduledJobRunPersistenceAdapter(
     }
 
     override suspend fun deleteExpiredTerminalRuns(
-        successCutoff: Instant,
-        failureCutoff: Instant,
+        cutoff: Instant,
         limit: Int,
     ): Int = client.sql(
         """
@@ -167,17 +166,14 @@ class ScheduledJobRunPersistenceAdapter(
                 left join scheduled_job_runs retry_child on retry_child.retry_of_run_id = candidate.id
                 where retry_child.id is null
                   and candidate.finished_at is not null
-                  and (
-                    (candidate.status in ('SUCCESS', 'SKIPPED') and candidate.started_at < :successCutoff)
-                    or (candidate.status = 'FAILED' and candidate.started_at < :failureCutoff)
-                  )
+                  and candidate.status in ('SUCCESS', 'SKIPPED', 'FAILED')
+                  and candidate.started_at < :cutoff
                 order by candidate.id
                 limit :limit
             ) deletable
         )
         """.trimIndent(),
-    ).bind("successCutoff", successCutoff)
-        .bind("failureCutoff", failureCutoff)
+    ).bind("cutoff", cutoff)
         .bind("limit", limit.coerceAtLeast(1))
         .fetch()
         .rowsUpdated()

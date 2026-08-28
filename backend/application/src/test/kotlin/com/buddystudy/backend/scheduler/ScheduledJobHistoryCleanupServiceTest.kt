@@ -10,12 +10,11 @@ import java.time.Instant
 
 class ScheduledJobHistoryCleanupServiceTest {
     @Test
-    fun `cleans history in bounded batches and uses separate failure retention`(): Unit = runBlocking {
+    fun `cleans history in bounded batches and caps retention at seven days`(): Unit = runBlocking {
         val history = RecordingHistoryRetentionPort(2, 2, 1)
         val properties = BuddyStudyProperties(
             scheduler = BuddyStudyProperties.Scheduler(
-                historySuccessRetentionDays = 30,
-                historyFailureRetentionDays = 90,
+                historyRetentionDays = 30,
                 historyCleanupBatchSize = 2,
                 historyCleanupMaxRowsPerRun = 5,
             ),
@@ -27,8 +26,8 @@ class ScheduledJobHistoryCleanupServiceTest {
         assertThat(result.deletedRuns).isEqualTo(5)
         assertThat(result.batches).isEqualTo(3)
         assertThat(result.capped).isTrue()
-        assertThat(result.successCutoff).isEqualTo(Instant.parse("2026-07-29T00:00:00Z"))
-        assertThat(result.failureCutoff).isEqualTo(Instant.parse("2026-05-30T00:00:00Z"))
+        assertThat(result.cutoff).isEqualTo(Instant.parse("2026-08-21T00:00:00Z"))
+        assertThat(history.calls.map { it.cutoff }).containsOnly(Instant.parse("2026-08-21T00:00:00Z"))
         assertThat(history.calls.map { it.limit }).containsExactly(2, 2, 1)
     }
 
@@ -56,18 +55,16 @@ class ScheduledJobHistoryCleanupServiceTest {
         val calls = mutableListOf<Call>()
 
         override suspend fun deleteExpiredTerminalRuns(
-            successCutoff: Instant,
-            failureCutoff: Instant,
+            cutoff: Instant,
             limit: Int,
         ): Int {
-            calls += Call(successCutoff, failureCutoff, limit)
+            calls += Call(cutoff, limit)
             return if (results.isEmpty()) 0 else results.removeAt(0)
         }
     }
 
     private data class Call(
-        val successCutoff: Instant,
-        val failureCutoff: Instant,
+        val cutoff: Instant,
         val limit: Int,
     )
 }
