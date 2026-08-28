@@ -18,6 +18,7 @@ module TestFlightInternalDistribution
     IN_EXPORT_COMPLIANCE_REVIEW
     EXPIRED
   ].freeze
+  SUPPORTED_BUILD_AUDIENCES = %w[APP_STORE_ELIGIBLE INTERNAL_ONLY].freeze
 
   class Error < StandardError; end
   class ConfigurationError < Error; end
@@ -35,6 +36,14 @@ module TestFlightInternalDistribution
     return true if value == "1"
 
     raise ConfigurationError, "APP_STORE_APPLY must be exactly 0 or 1"
+  end
+
+  def validate_build_audience!(value)
+    audience = optional_value(value) || "APP_STORE_ELIGIBLE"
+    return audience if SUPPORTED_BUILD_AUDIENCES.include?(audience)
+
+    raise ConfigurationError,
+          "TESTFLIGHT_EXPECTED_BUILD_AUDIENCE must be APP_STORE_ELIGIBLE or INTERNAL_ONLY"
   end
 
   def positive_number!(value, label, integer: false)
@@ -383,10 +392,13 @@ module TestFlightInternalDistribution
       @wall_clock = wall_clock
     end
 
-    def distribute(app:, build:, expected_app_id:, expected_bundle_id:, target_group_id: nil,
+    def distribute(app:, build:, expected_app_id:, expected_bundle_id:,
+                   expected_build_audience: "APP_STORE_ELIGIBLE", target_group_id: nil,
                    target_group_name: nil, apply: false)
+      expected_build_audience =
+        TestFlightInternalDistribution.validate_build_audience!(expected_build_audience)
       verify_app!(app, expected_app_id, expected_bundle_id)
-      verify_build!(build)
+      verify_build!(build, expected_build_audience)
       verify_build_app!(build.fetch("id"), expected_app_id, expected_bundle_id)
       group = resolve_group(
         app_id: expected_app_id,
@@ -435,13 +447,13 @@ module TestFlightInternalDistribution
             "#{expected_bundle_id}"
     end
 
-    def verify_build!(build)
+    def verify_build!(build, expected_build_audience)
       unless build.fetch("processingState") == "VALID"
         raise IdentityError, "Refusing to distribute a build that is not VALID"
       end
-      unless build.fetch("buildAudienceType") == "APP_STORE_ELIGIBLE"
+      unless build.fetch("buildAudienceType") == expected_build_audience
         raise IdentityError,
-              "Refusing to distribute a review candidate that is not APP_STORE_ELIGIBLE"
+              "Refusing to distribute a build whose audience is not #{expected_build_audience}"
       end
       if build["expired"] == true
         raise DistributionBlockedError, "Refusing to distribute an expired TestFlight build"

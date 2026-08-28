@@ -20,6 +20,11 @@ on:
         required: true
         default: true
         type: boolean
+      admob_test_mode:
+        description: "Use Google's demo AdMob IDs and distribute the build to internal testers only."
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -33,6 +38,7 @@ jobs:
       release_build_number: ${{ steps.release.outputs.release_build_number }}
       upload_enabled: ${{ steps.release.outputs.upload_enabled }}
       review_candidate: ${{ steps.release.outputs.review_candidate }}
+      admob_test_mode: ${{ steps.release.outputs.admob_test_mode }}
       artifact_name: ${{ steps.release.outputs.artifact_name }}
       deployment_targets: ${{ steps.release.outputs.deployment_targets }}
 
@@ -46,6 +52,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version || '' }}
           INPUT_UPLOAD_ENABLED: ${{ inputs.upload_to_app_store_connect }}
           INPUT_REVIEW_CANDIDATE: ${{ inputs.app_review_candidate }}
+          INPUT_ADMOB_TEST_MODE: ${{ inputs.admob_test_mode }}
         run: |
           set -euo pipefail
 
@@ -88,11 +95,34 @@ jobs:
             exit 1
           fi
 
+          admob_test_mode="${INPUT_ADMOB_TEST_MODE:-false}"
+          case "${admob_test_mode}" in
+            true|false) ;;
+            *)
+              echo "Invalid AdMob test-mode setting: ${admob_test_mode}" >&2
+              exit 1
+              ;;
+          esac
+          if [ "${admob_test_mode}" = "true" ] && [ "${upload_enabled}" != "true" ]; then
+            echo "AdMob test builds must be uploaded to TestFlight." >&2
+            exit 1
+          fi
+          if [ "${admob_test_mode}" = "true" ] && [ "${review_candidate}" != "false" ]; then
+            echo "AdMob test builds can never be App Review candidates." >&2
+            exit 1
+          fi
+
           build_number="${GITHUB_RUN_NUMBER}"
           artifact_name="BuddyStudy-iOS-${version}-${build_number}"
+          if [ "${admob_test_mode}" = "true" ]; then
+            artifact_name="${artifact_name}-AdMobTest"
+          fi
           deployment_targets="iOS 서명 IPA"
           if [ "${upload_enabled}" = "true" ]; then
             deployment_targets="${deployment_targets}, TestFlight"
+          fi
+          if [ "${admob_test_mode}" = "true" ]; then
+            deployment_targets="${deployment_targets}, 내부 AdMob 테스트 그룹"
           fi
           if [ "${review_candidate}" = "true" ]; then
             deployment_targets="${deployment_targets}, App Review 재심사 후보"
@@ -103,6 +133,7 @@ jobs:
             echo "release_build_number=${build_number}"
             echo "upload_enabled=${upload_enabled}"
             echo "review_candidate=${review_candidate}"
+            echo "admob_test_mode=${admob_test_mode}"
             echo "artifact_name=${artifact_name}"
             echo "deployment_targets=${deployment_targets}"
           } >> "${GITHUB_OUTPUT}"
@@ -114,6 +145,7 @@ jobs:
             echo "- Build: \`${build_number}\`"
             echo "- Targets: ${deployment_targets}"
             echo "- App Review candidate: \`${review_candidate}\`"
+            echo "- AdMob test mode: \`${admob_test_mode}\`"
             echo "- Backend: \`https://api.ghkdqhrbals.org\`"
             echo "- Source: \`${GITHUB_SHA}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -158,6 +190,9 @@ jobs:
       REVENUECAT_PUBLIC_SDK_KEY: ${{ secrets.REVENUECAT_PUBLIC_SDK_KEY }}
       ADMOB_APP_ID: ${{ vars.ADMOB_APP_ID }}
       ADMOB_NATIVE_AD_UNIT_ID: ${{ vars.ADMOB_NATIVE_AD_UNIT_ID }}
+      ADMOB_TEST_MODE: ${{ needs.plan_ios_release.outputs.admob_test_mode }}
+      BUDDYSTUDY_ADMOB_TEST_BUILD: >-
+        ${{ needs.plan_ios_release.outputs.admob_test_mode == 'true' && 'YES' || 'NO' }}
       RELEASE_VERSION: ${{ needs.plan_ios_release.outputs.release_version }}
       RELEASE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
       APP_REVIEW_CANDIDATE: ${{ needs.plan_ios_release.outputs.review_candidate }}
@@ -207,7 +242,25 @@ jobs:
             exit 1
           fi
 
-      - name: Validate release secrets
+      - name: Resolve guarded AdMob identifiers
+        run: |
+          set -euo pipefail
+
+          case "${ADMOB_TEST_MODE}" in
+            true)
+              {
+                echo "ADMOB_APP_ID=ca-app-pub-3940256099942544~1458002511"
+                echo "ADMOB_NATIVE_AD_UNIT_ID=ca-app-pub-3940256099942544/3986624511"
+              } >> "${GITHUB_ENV}"
+              ;;
+            false) ;;
+            *)
+              echo "Invalid AdMob test-mode setting: ${ADMOB_TEST_MODE}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Validate release secrets and AdMob mode
         run: |
           set -euo pipefail
 
@@ -242,29 +295,49 @@ jobs:
             exit 1
           fi
           if ! [[ "${ADMOB_NATIVE_AD_UNIT_ID}" =~ ^ca-app-pub-[0-9]{16}/[0-9]{10}$ ]]; then
-            echo "Repository variable ADMOB_NATIVE_AD_UNIT_ID must contain a production native ad unit ID." >&2
-            exit 1
-          fi
-          if [[ "${ADMOB_APP_ID}" == ca-app-pub-3940256099942544~* ]] \
-            || [[ "${ADMOB_NATIVE_AD_UNIT_ID}" == ca-app-pub-3940256099942544/* ]]; then
-            echo "All identifiers from Google's demo AdMob publisher are forbidden in Release archives." >&2
+            echo "ADMOB_NATIVE_AD_UNIT_ID must contain a valid native ad unit ID." >&2
             exit 1
           fi
 
-          admob_app_publisher="${ADMOB_APP_ID%%~*}"
-          admob_unit_publisher="${ADMOB_NATIVE_AD_UNIT_ID%%/*}"
-          if [ "${admob_app_publisher}" != "${admob_unit_publisher}" ]; then
-            echo "The AdMob app and Native unit must belong to the same publisher." >&2
-            exit 1
-          fi
+          case "${ADMOB_TEST_MODE}" in
+            true)
+              if [ "${APP_REVIEW_CANDIDATE}" != "false" ]; then
+                echo "AdMob test builds can never be App Review candidates." >&2
+                exit 1
+              fi
+              if [ "${ADMOB_APP_ID}" != "ca-app-pub-3940256099942544~1458002511" ] \
+                || [ "${ADMOB_NATIVE_AD_UNIT_ID}" != "ca-app-pub-3940256099942544/3986624511" ]; then
+                echo "AdMob test builds must use Google's exact iOS demo identifiers." >&2
+                exit 1
+              fi
+              ;;
+            false)
+              if [[ "${ADMOB_APP_ID}" == ca-app-pub-3940256099942544~* ]] \
+                || [[ "${ADMOB_NATIVE_AD_UNIT_ID}" == ca-app-pub-3940256099942544/* ]]; then
+                echo "Google demo AdMob identifiers are forbidden in production Release archives." >&2
+                exit 1
+              fi
 
-          admob_publisher_digits="${admob_app_publisher#ca-app-pub-}"
-          if ! grep -Fxq \
-            "google.com, pub-${admob_publisher_digits}, DIRECT, f08c47fec0942fa0" \
-            docs/app-ads.txt; then
-            echo "docs/app-ads.txt must match the publisher used by the Release AdMob identifiers." >&2
-            exit 1
-          fi
+              admob_app_publisher="${ADMOB_APP_ID%%~*}"
+              admob_unit_publisher="${ADMOB_NATIVE_AD_UNIT_ID%%/*}"
+              if [ "${admob_app_publisher}" != "${admob_unit_publisher}" ]; then
+                echo "The AdMob app and Native unit must belong to the same publisher." >&2
+                exit 1
+              fi
+
+              admob_publisher_digits="${admob_app_publisher#ca-app-pub-}"
+              if ! grep -Fxq \
+                "google.com, pub-${admob_publisher_digits}, DIRECT, f08c47fec0942fa0" \
+                docs/app-ads.txt; then
+                echo "docs/app-ads.txt must match the publisher used by the Release AdMob identifiers." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Invalid AdMob test-mode setting: ${ADMOB_TEST_MODE}" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Install Firebase iOS configuration
         run: |
@@ -404,6 +477,7 @@ jobs:
             REVENUECAT_PUBLIC_SDK_KEY="${REVENUECAT_PUBLIC_SDK_KEY}" \
             ADMOB_APP_ID="${ADMOB_APP_ID}" \
             ADMOB_NATIVE_AD_UNIT_ID="${ADMOB_NATIVE_AD_UNIT_ID}" \
+            BUDDYSTUDY_ADMOB_TEST_BUILD="${BUDDYSTUDY_ADMOB_TEST_BUILD}" \
             BUDDYSTUDY_BACKEND_BASE_URL="${PRODUCTION_BACKEND_BASE_URL}" \
             MARKETING_VERSION="${RELEASE_VERSION}" \
             CURRENT_PROJECT_VERSION="${RELEASE_BUILD_NUMBER}"
@@ -450,6 +524,12 @@ jobs:
           set -euo pipefail
 
           mkdir -p build dist
+          internal_testing_only_plist=""
+          if [ "${ADMOB_TEST_MODE}" = "true" ]; then
+            internal_testing_only_plist="
+            <key>testFlightInternalTestingOnly</key>
+            <true/>"
+          fi
           cat > build/export-options.plist <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -476,9 +556,21 @@ jobs:
             <string>Production</string>
             <key>manageAppVersionAndBuildNumber</key>
             <false/>
+          ${internal_testing_only_plist}
           </dict>
           </plist>
           PLIST
+
+          plutil -lint build/export-options.plist
+          if [ "${ADMOB_TEST_MODE}" = "true" ]; then
+            if [ "$(/usr/libexec/PlistBuddy -c 'Print :testFlightInternalTestingOnly' build/export-options.plist)" != "true" ]; then
+              echo "AdMob test exports must be permanently restricted to internal TestFlight." >&2
+              exit 1
+            fi
+          elif /usr/libexec/PlistBuddy -c 'Print :testFlightInternalTestingOnly' build/export-options.plist >/dev/null 2>&1; then
+            echo "Production exports must not carry the internal-testing-only restriction." >&2
+            exit 1
+          fi
 
           xcodebuild -exportArchive \
             -archivePath build/StudyMateiOS.xcarchive \
@@ -545,13 +637,15 @@ jobs:
             --arg run_id "${GITHUB_RUN_ID}" \
             --arg backend_base_url "${PRODUCTION_BACKEND_BASE_URL}" \
             --argjson app_review_candidate "${APP_REVIEW_CANDIDATE}" \
+            --argjson admob_test_mode "${ADMOB_TEST_MODE}" \
             '{
               version: $version,
               build: $build,
               sourceSha: $source_sha,
               runId: $run_id,
               backendBaseURL: $backend_base_url,
-              appReviewCandidate: $app_review_candidate
+              appReviewCandidate: $app_review_candidate,
+              admobTestMode: $admob_test_mode
             }' > dist/release-metadata.json
 
       - name: Upload signed IPA artifact
@@ -579,6 +673,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.plan_ios_release.outputs.release_version }}
       RELEASE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
       APP_REVIEW_CANDIDATE: ${{ needs.plan_ios_release.outputs.review_candidate }}
+      ADMOB_TEST_MODE: ${{ needs.plan_ios_release.outputs.admob_test_mode }}
       PRODUCTION_BACKEND_BASE_URL: https://api.ghkdqhrbals.org
       ARTIFACT_NAME: ${{ needs.plan_ios_release.outputs.artifact_name }}
 
@@ -634,6 +729,7 @@ jobs:
             echo "- IPA: \`$(basename "${ipa_path}")\`"
             echo "- Version/build: \`${RELEASE_VERSION} (${RELEASE_BUILD_NUMBER})\`"
             echo "- App Review resubmission candidate: \`${APP_REVIEW_CANDIDATE}\`"
+            echo "- AdMob test mode: \`${ADMOB_TEST_MODE}\`"
             echo "- Backend: \`${PRODUCTION_BACKEND_BASE_URL}\`"
             echo "- Result: App Store Connect accepted the upload."
             if [ "${APP_REVIEW_CANDIDATE}" = "true" ]; then
@@ -646,6 +742,69 @@ jobs:
       - name: Remove App Store Connect API key
         if: ${{ always() }}
         run: rm -f "${RUNNER_TEMP}/app-store-connect-private-keys/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
+
+  distribute_admob_test_internal:
+    name: Distribute AdMob Test Build Internally
+    runs-on: macos-26
+    timeout-minutes: 40
+    needs:
+      - plan_ios_release
+      - upload_testflight
+    if: ${{ needs.plan_ios_release.outputs.admob_test_mode == 'true' }}
+    env:
+      APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+      APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+      APPSTORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY_BASE64 }}
+      APP_STORE_APP_ID: "6774108938"
+      APP_BUNDLE_ID: io.github.ghkdqhrbals.StudyMate
+      APP_STORE_VERSION_STRING: ${{ needs.plan_ios_release.outputs.release_version }}
+      APP_STORE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
+      APP_STORE_APPLY: "1"
+      TESTFLIGHT_INTERNAL_GROUP_ID: "5f6797bb-38a0-400b-8269-74aa6f5f3bec"
+      TESTFLIGHT_EXPECTED_BUILD_AUDIENCE: INTERNAL_ONLY
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare App Store Connect API key
+        run: |
+          set -euo pipefail
+
+          for name in \
+            APPSTORE_CONNECT_KEY_ID \
+            APPSTORE_CONNECT_ISSUER_ID \
+            APPSTORE_CONNECT_PRIVATE_KEY_BASE64; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub Actions secret: ${name}" >&2
+              exit 1
+            fi
+          done
+
+          private_key_path="${RUNNER_TEMP}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
+          echo "${APPSTORE_CONNECT_PRIVATE_KEY_BASE64}" |
+            base64 --decode > "${private_key_path}"
+          chmod 600 "${private_key_path}"
+          echo "APPSTORE_CONNECT_PRIVATE_KEY_PATH=${private_key_path}" >> "${GITHUB_ENV}"
+
+      - name: Distribute exact test build to the internal group
+        run: |
+          set -euo pipefail
+
+          ruby scripts/distribute-testflight-internal.rb
+
+          {
+            echo "## Internal AdMob Test Build"
+            echo ""
+            echo "- Version/build: \`${APP_STORE_VERSION_STRING} (${APP_STORE_BUILD_NUMBER})\`"
+            echo "- AdMob IDs: Google iOS demo app and Native unit"
+            echo "- Scope: internal TestFlight testers only"
+            echo "- App Review selection: unchanged"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove App Store Connect API key
+        if: ${{ always() }}
+        run: rm -f "${RUNNER_TEMP}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
 
   sync_testflight_review_notes:
     name: Label TestFlight App Review Candidate

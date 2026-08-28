@@ -13,7 +13,7 @@ one workflow run just because they share a host.
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
 | Flyway V32 recovery | `Repair BuddyStudy Backend Flyway V32` | manual, one-time | EC2 self-hosted | Guarded removal of only the failed V32 history row and V32 partial check constraints |
 | Backend administrator recovery | `Reset BuddyStudy Backend Administrator` | manual, one-time | EC2 self-hosted | Activate only the fixed `admin` monitoring operator and replace its BCrypt password hash |
-| iOS TestFlight | `Release iOS App` | `v*`, manual | GitHub-hosted macOS | Release planning, signed IPA build, artifact retention, and TestFlight upload as separate jobs |
+| iOS TestFlight | `Release iOS App` | `v*`, manual | GitHub-hosted macOS | Release planning, signed IPA build, artifact retention, TestFlight upload, and guarded internal-only AdMob test distribution as separate jobs |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, deployment history, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, and the backend/FRC maintenance operator UI |
 | Redis Stream operations | `Deploy RedisStreamScope on MacBook Air` | manual | MacBook Air self-hosted | RedisStreamScope runtime, persisted SQLite/config volume, production Redis connection, and attachment to the existing monitoring gateway |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI, Grafana, and RedisStreamScope |
@@ -59,6 +59,13 @@ deployment.
   candidates update localized TestFlight notes, select the exact processed
   build on the editable App Store version, and read the relationship back
   before the workflow reports success.
+- A manually dispatched iOS AdMob test build must set `admob_test_mode=true`,
+  keep `app_review_candidate=false`, use only Google's exact iOS demo app and
+  Native unit IDs, and export with `testFlightInternalTestingOnly=true`. The
+  workflow must verify `buildAudienceType=INTERNAL_ONLY` through App Store
+  Connect before adding the exact build to an internal tester group. Normal
+  manual and tag releases remain `APP_STORE_ELIGIBLE` and continue to reject
+  every Google demo publisher identifier.
 - The iOS archive uses the installed Apple Distribution certificate and App
   Store provisioning profile with manual signing. Archive creation must not
   ask Apple to create or revoke development certificates; the App Store

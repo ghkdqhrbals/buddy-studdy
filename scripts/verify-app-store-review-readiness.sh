@@ -139,7 +139,7 @@ rg -q 'admob_app_publisher=.*ADMOB_APP_ID' "$project_root/.github/workflows/rele
 rg -q 'admob_unit_publisher=.*ADMOB_NATIVE_AD_UNIT_ID' "$project_root/.github/workflows/release.yml"
 rg -q 'docs/app-ads\.txt must match the publisher' "$project_root/.github/workflows/release.yml"
 rg -q 'Gem::Version\.new\("26\.2"\)' "$project_root/.github/workflows/release.yml"
-rg -q 'native-ad-placement-policies/\${COMMUNITY_FEED_PLACEMENT}' "$project_root/monitoring/api-dashboard/src/pages/AdvertisingPage.jsx"
+rg -Fq 'native-ad-placement-policies/${COMMUNITY_FEED_PLACEMENT}' "$project_root/monitoring/api-dashboard/src/pages/AdvertisingPage.jsx"
 rg -q '\? "UNKNOWN" : placementStatus' "$project_root/monitoring/api-dashboard/src/pages/AdvertisingPage.jsx"
 rg -q 'contentHash: contentHash' "$project_root/StudyMate/Services/RemotePushBackendClient.swift"
 rg -q "com.apple.developer.applesignin" "$project_root/StudyMate/StudyMateiOS.entitlements"

@@ -36,6 +36,9 @@ begin
     "TESTFLIGHT_BUILD_WAIT_INTERVAL_SECONDS"
   )
   apply = TestFlightInternalDistribution.validate_apply!(ENV["APP_STORE_APPLY"])
+  expected_build_audience = TestFlightInternalDistribution.validate_build_audience!(
+    ENV["TESTFLIGHT_EXPECTED_BUILD_AUDIENCE"]
+  )
   client = TestFlightInternalDistribution::AppStoreConnectClient.new(
     key_id: required_env("APPSTORE_CONNECT_KEY_ID"),
     issuer_id: required_env("APPSTORE_CONNECT_ISSUER_ID"),
@@ -65,11 +68,13 @@ begin
 
   puts "App: #{app.dig('attributes', 'name')} (#{expected_app_id}, #{bundle_id})"
   puts "Exact build: #{marketing_version} (#{build_number}) [#{build.fetch('processingState')}]"
+  puts "Expected build audience: #{expected_build_audience}"
   result = TestFlightInternalDistribution::Distributor.new(client: client).distribute(
     app: app,
     build: build,
     expected_app_id: expected_app_id,
     expected_bundle_id: bundle_id,
+    expected_build_audience: expected_build_audience,
     target_group_id: ENV["TESTFLIGHT_INTERNAL_GROUP_ID"],
     target_group_name: ENV["TESTFLIGHT_INTERNAL_GROUP_NAME"],
     apply: apply

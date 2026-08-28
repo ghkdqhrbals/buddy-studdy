@@ -113,6 +113,17 @@ class TestFlightInternalDistributionTest < Minitest::Test
     end
   end
 
+  def test_build_audience_defaults_to_app_store_eligible_and_is_allowlisted
+    assert_equal "APP_STORE_ELIGIBLE",
+                 TestFlightInternalDistribution.validate_build_audience!(nil)
+    assert_equal "INTERNAL_ONLY",
+                 TestFlightInternalDistribution.validate_build_audience!("INTERNAL_ONLY")
+
+    assert_raises(TestFlightInternalDistribution::ConfigurationError) do
+      TestFlightInternalDistribution.validate_build_audience!("EXTERNAL_TESTFLIGHT")
+    end
+  end
+
   def test_beta_readiness_waits_for_an_internal_ready_state
     clock = 0.0
     client = FakeClient.new(
@@ -353,6 +364,46 @@ class TestFlightInternalDistributionTest < Minitest::Test
     end
 
     assert_includes error.message, "APP_STORE_ELIGIBLE"
+  end
+
+  def test_accepts_an_internal_only_build_only_when_explicitly_expected
+    client = FakeClient.new(
+      groups: [group],
+      group_build_responses: [[]],
+      build_app: app,
+      group_app: app
+    )
+
+    result = distributor(client).distribute(
+      app: app,
+      build: build(audience: "INTERNAL_ONLY"),
+      expected_app_id: APP_ID,
+      expected_bundle_id: BUNDLE_ID,
+      expected_build_audience: "INTERNAL_ONLY",
+      target_group_id: "group-id",
+      apply: false
+    )
+
+    assert_equal :add, result
+    assert_empty client.added
+  end
+
+  def test_refuses_an_app_store_build_when_internal_only_is_expected
+    client = FakeClient.new(build_app: app)
+
+    error = assert_raises(TestFlightInternalDistribution::IdentityError) do
+      distributor(client).distribute(
+        app: app,
+        build: build,
+        expected_app_id: APP_ID,
+        expected_bundle_id: BUNDLE_ID,
+        expected_build_audience: "INTERNAL_ONLY",
+        target_group_id: "group-id",
+        apply: false
+      )
+    end
+
+    assert_includes error.message, "INTERNAL_ONLY"
   end
 
   def test_refuses_to_claim_distribution_to_an_empty_internal_group
