@@ -97,7 +97,7 @@ class ReferralRewardManager(
             return
         }
 
-        // V91 could cascade a referral before V93 introduced durable claims. A surviving
+        // V91 could cascade a referral before V96 introduced durable claims. A surviving
         // REFERRAL membership without its grant is therefore treated conservatively as a
         // prior redemption. This can reject a legacy inviter-only orphan, but prevents a
         // previously rewarded referred account from minting another month.

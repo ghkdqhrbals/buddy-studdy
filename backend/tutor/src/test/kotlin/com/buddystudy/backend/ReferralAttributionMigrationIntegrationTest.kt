@@ -11,7 +11,7 @@ import java.sql.Statement
 
 class ReferralAttributionMigrationIntegrationTest {
     @Test
-    fun `V93 backfills rewarded claims and preserves surviving rewards when inviter is deleted`() {
+    fun `V96 backfills rewarded claims and preserves surviving rewards when inviter is deleted`() {
         val mysql: MySQLContainer<*> = MySQLContainer("mysql:8.4")
             .withDatabaseName("buddystudy_referral_attribution_migration")
             .withUsername("buddystudy")
@@ -19,13 +19,13 @@ class ReferralAttributionMigrationIntegrationTest {
 
         mysql.start()
         try {
-            flyway(mysql, target = "92").migrate()
+            flyway(mysql, target = "94").migrate()
             val seeded = mysql.connection().use(::seedReferral)
 
-            val result = flyway(mysql, target = "93").migrate()
+            val result = flyway(mysql, target = "96").migrate()
 
             mysql.connection().use { connection ->
-                assertThat(result.migrationsExecuted).isEqualTo(1)
+                assertThat(result.migrationsExecuted).isEqualTo(2)
                 assertThat(connection.stringValue(
                     "select status from referral_signup_attributions where referred_user_id = ${seeded.referredUserId}",
                 )).isEqualTo("REWARDED")
