@@ -1,6 +1,9 @@
 package com.buddystudy.backend.profile.adapter.outbound.persistence
 
 import com.buddystudy.backend.profile.application.model.ReferralAccountSummary
+import com.buddystudy.backend.profile.application.model.PendingReferralAttribution
+import com.buddystudy.backend.profile.application.model.PendingReferralAttributionStatus
+import com.buddystudy.backend.profile.application.model.ReferralRecord
 import com.buddystudy.backend.profile.application.port.outbound.ReferralPort
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -14,12 +17,9 @@ import java.time.ZoneOffset
 class ReferralPersistenceAdapter(
     private val database: DatabaseClient,
 ) : ReferralPort {
-    override suspend fun codeForUser(userId: Long): String? = database.sql(
-        "select code from referral_codes where user_id = :userId",
-    ).bind("userId", userId)
-        .map { row, _ -> row.get("code", String::class.java)!! }
-        .one()
-        .awaitSingleOrNull()
+    override suspend fun codeForUser(userId: Long): String? = codeForUser(userId, forUpdate = false)
+
+    override suspend fun lockCodeForUser(userId: Long): String? = codeForUser(userId, forUpdate = true)
 
     override suspend fun createCode(userId: Long, code: String, now: Instant): Boolean = database.sql(
         """
@@ -54,12 +54,15 @@ class ReferralPersistenceAdapter(
             .size
     }
 
-    override suspend fun hasRedeemed(userId: Long): Boolean = database.sql(
-        "select exists(select 1 from referrals where referred_user_id = :userId) as redeemed",
-    ).bind("userId", userId)
-        .map { row, _ -> row.boolean("redeemed") }
-        .one()
-        .awaitSingle()
+    override suspend fun referralForReferredUser(userId: Long): ReferralRecord? = referralForReferredUser(
+        userId = userId,
+        forUpdate = false,
+    )
+
+    override suspend fun lockReferralForReferredUser(userId: Long): ReferralRecord? = referralForReferredUser(
+        userId = userId,
+        forUpdate = true,
+    )
 
     override suspend fun createReferral(
         inviterUserId: Long,
@@ -91,6 +94,85 @@ class ReferralPersistenceAdapter(
             .awaitSingle()
     }
 
+    override suspend fun pendingAttribution(userId: Long): PendingReferralAttribution? = pendingAttribution(
+        userId = userId,
+        forUpdate = false,
+    )
+
+    override suspend fun lockPendingAttribution(userId: Long): PendingReferralAttribution? = pendingAttribution(
+        userId = userId,
+        forUpdate = true,
+    )
+
+    override suspend fun createPendingAttribution(
+        inviterUserId: Long,
+        referredUserId: Long,
+        code: String,
+        now: Instant,
+    ): Boolean = database.sql(
+        """
+        insert ignore into referral_signup_attributions (
+            inviter_user_id, referred_user_id, referral_code, status,
+            captured_at, resolved_at, created_at, updated_at
+        ) values (
+            :inviterUserId, :referredUserId, :code, 'PENDING',
+            :now, null, :now, :now
+        )
+        """.trimIndent(),
+    ).bind("inviterUserId", inviterUserId)
+        .bind("referredUserId", referredUserId)
+        .bind("code", code)
+        .bind("now", now.utc())
+        .fetch()
+        .rowsUpdated()
+        .awaitSingle() == 1L
+
+    override suspend fun createRewardedAttribution(
+        inviterUserId: Long?,
+        referredUserId: Long,
+        code: String,
+        now: Instant,
+    ): Boolean {
+        var statement = database.sql(
+            """
+            insert ignore into referral_signup_attributions (
+                inviter_user_id, referred_user_id, referral_code, status,
+                captured_at, resolved_at, created_at, updated_at
+            ) values (
+                :inviterUserId, :referredUserId, :code, 'REWARDED',
+                :now, :now, :now, :now
+            )
+            """.trimIndent(),
+        ).bind("referredUserId", referredUserId)
+            .bind("code", code)
+            .bind("now", now.utc())
+        statement = if (inviterUserId == null) {
+            statement.bindNull("inviterUserId", java.lang.Long::class.java)
+        } else {
+            statement.bind("inviterUserId", inviterUserId)
+        }
+        return statement.fetch().rowsUpdated().awaitSingle() == 1L
+    }
+
+    override suspend fun completePendingAttribution(
+        attributionId: Long,
+        expectedStatus: PendingReferralAttributionStatus,
+        status: PendingReferralAttributionStatus,
+        now: Instant,
+    ): Boolean = database.sql(
+        """
+        update referral_signup_attributions
+        set status = :status, resolved_at = :now, updated_at = :now
+        where id = :id and status = :expectedStatus
+        """.trimIndent(),
+    ).bind("status", status.name)
+        .bind("now", now.utc())
+        .bind("id", attributionId)
+        .bind("expectedStatus", expectedStatus.name)
+        .fetch()
+        .rowsUpdated()
+        .awaitSingle() == 1L
+
     override suspend fun rewardBase(userId: Long, now: Instant): Instant = database.sql(
         """
         select max(expires_at) as latest_expiry
@@ -110,6 +192,25 @@ class ReferralPersistenceAdapter(
         .one()
         .awaitSingle()
         .toInstant(ZoneOffset.UTC)
+
+    override suspend fun hasUntrackedReferralMembership(userId: Long): Boolean = database.sql(
+        """
+        select exists(
+            select 1
+            from user_memberships membership
+            where membership.user_id = :userId
+              and membership.source = 'REFERRAL'
+              and not exists (
+                  select 1
+                  from referral_reward_grants grant_row
+                  where grant_row.membership_id = membership.id
+              )
+        ) as has_untracked_referral_membership
+        """.trimIndent(),
+    ).bind("userId", userId)
+        .map { row, _ -> row.boolean("has_untracked_referral_membership") }
+        .one()
+        .awaitSingle()
 
     override suspend fun grantTier2Month(
         referralId: Long,
@@ -168,7 +269,7 @@ class ReferralPersistenceAdapter(
             .one()
             .awaitSingle()
 
-        return database.sql(
+        val inserted = database.sql(
             """
             insert ignore into referral_reward_grants (
                 referral_id, beneficiary_user_id, membership_id, tier_code,
@@ -186,7 +287,26 @@ class ReferralPersistenceAdapter(
             .bind("now", now.utc())
             .fetch()
             .rowsUpdated()
-            .awaitSingle() == 1L
+            .awaitSingle()
+        if (inserted == 1L) return true
+        val existingGrantId = database.sql(
+            """
+            select id
+            from referral_reward_grants
+            where referral_id = :referralId and beneficiary_user_id = :beneficiaryUserId
+            for update
+            """.trimIndent(),
+        ).bind("referralId", referralId)
+            .bind("beneficiaryUserId", beneficiaryUserId)
+            .map { row, _ -> (row.get("id") as Number).toLong() }
+            .one()
+            .awaitSingleOrNull()
+        database.sql("delete from user_memberships where id = :membershipId")
+            .bind("membershipId", membershipId)
+            .fetch()
+            .rowsUpdated()
+            .awaitSingle()
+        return existingGrantId != null
     }
 
     override suspend fun accountSummary(userId: Long): ReferralAccountSummary = database.sql(
@@ -196,7 +316,24 @@ class ReferralPersistenceAdapter(
             coalesce((select sum(reward_months) from referral_reward_grants where beneficiary_user_id = :userId), 0) as reward_months,
             (select min(starts_at) from referral_reward_grants where beneficiary_user_id = :userId) as reward_starts_at,
             (select max(ends_at) from referral_reward_grants where beneficiary_user_id = :userId) as reward_ends_at,
-            exists(select 1 from referrals where referred_user_id = :userId) as has_redeemed
+            (
+                exists(select 1 from referrals where referred_user_id = :userId)
+                or exists(
+                    select 1 from referral_signup_attributions
+                    where referred_user_id = :userId and status = 'REWARDED'
+                )
+                or exists(
+                    select 1
+                    from user_memberships membership
+                    where membership.user_id = :userId
+                      and membership.source = 'REFERRAL'
+                      and not exists (
+                          select 1
+                          from referral_reward_grants grant_row
+                          where grant_row.membership_id = membership.id
+                      )
+                )
+            ) as has_redeemed
         """.trimIndent(),
     ).bind("userId", userId)
         .map { row, _ ->
@@ -210,6 +347,58 @@ class ReferralPersistenceAdapter(
         }
         .one()
         .awaitSingle()
+
+    private suspend fun pendingAttribution(userId: Long, forUpdate: Boolean): PendingReferralAttribution? {
+        val lockClause = if (forUpdate) " for update" else ""
+        return database.sql(
+            """
+            select id, inviter_user_id, referred_user_id, referral_code, status
+            from referral_signup_attributions
+            where referred_user_id = :userId$lockClause
+            """.trimIndent(),
+        ).bind("userId", userId)
+            .map { row, _ ->
+                PendingReferralAttribution(
+                    id = (row.get("id") as Number).toLong(),
+                    inviterUserId = (row.get("inviter_user_id") as Number?)?.toLong(),
+                    referredUserId = (row.get("referred_user_id") as Number).toLong(),
+                    referralCode = row.get("referral_code", String::class.java)!!,
+                    status = PendingReferralAttributionStatus.valueOf(row.get("status", String::class.java)!!),
+                )
+            }
+            .one()
+            .awaitSingleOrNull()
+    }
+
+    private suspend fun codeForUser(userId: Long, forUpdate: Boolean): String? {
+        val lockClause = if (forUpdate) " for update" else ""
+        return database.sql("select code from referral_codes where user_id = :userId$lockClause")
+            .bind("userId", userId)
+            .map { row, _ -> row.get("code", String::class.java)!! }
+            .one()
+            .awaitSingleOrNull()
+    }
+
+    private suspend fun referralForReferredUser(userId: Long, forUpdate: Boolean): ReferralRecord? {
+        val lockClause = if (forUpdate) " for update" else ""
+        return database.sql(
+            """
+            select id, inviter_user_id, referred_user_id, referral_code
+            from referrals
+            where referred_user_id = :userId$lockClause
+            """.trimIndent(),
+        ).bind("userId", userId)
+            .map { row, _ ->
+                ReferralRecord(
+                    id = (row.get("id") as Number).toLong(),
+                    inviterUserId = (row.get("inviter_user_id") as Number?)?.toLong(),
+                    referredUserId = (row.get("referred_user_id") as Number).toLong(),
+                    referralCode = row.get("referral_code", String::class.java)!!,
+                )
+            }
+            .one()
+            .awaitSingleOrNull()
+    }
 }
 
 private fun Instant.utc(): LocalDateTime = LocalDateTime.ofInstant(this, ZoneOffset.UTC)

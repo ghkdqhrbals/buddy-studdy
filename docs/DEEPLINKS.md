@@ -1,12 +1,14 @@
 # BuddyStudy iOS 딥링크
 
-이 문서는 iOS 앱이 현재 실제로 해석하는 `buddystudy://` 딥링크와 화면 이동
-결과를 정리한다. 새 링크를 발급할 때는 아래 **권장 URI**만 사용한다. 별칭은 이미
-전송된 알림과 이전 앱 버전의 호환을 위한 입력이다.
+이 문서는 iOS 앱이 해석하는 `buddystudy://` 화면 딥링크와 HTTPS 추천 Universal
+Link의 이동 결과를 정리한다. 새 링크를 발급할 때는 아래 **권장 URI**만 사용한다.
+별칭은 이미 전송된 알림과 이전 앱 버전의 호환을 위한 입력이다.
 
 구현의 기준은 다음과 같다.
 
 - URL 등록: `StudyMate/iOSInfo.plist`
+- Universal Link 등록: `StudyMate/StudyMateiOS.entitlements`와
+  `https://api.ghkdqhrbals.org/.well-known/apple-app-site-association`
 - URL 파싱: `AppRoute` in `StudyMate/Models/StudyModels.swift`
 - 외부 URL 진입: `StudyMate/StudyMateiOSApp.swift`
 - 앱 화면 이동: `AppState.openRoute` in `StudyMate/ViewModels/AppState.swift`
@@ -16,7 +18,8 @@
 
 ## 공통 규칙
 
-- 스킴은 `buddystudy` 하나만 지원한다.
+- 일반 화면 이동은 `buddystudy` 스킴을 사용한다. 추천은 예외적으로
+  `https://api.ghkdqhrbals.org/referrals/{code}`만 표준 외부 URL로 사용한다.
 - 호스트와 경로 이름은 대소문자를 구분하지 않지만 ID 값은 원문을 유지한다.
 - 화면 ID는 경로에 넣는 방식을 권장한다. 예:
   `buddystudy://records/record-123`
@@ -29,6 +32,30 @@
 - 앱 초기화 전에 URL이 들어오면 보관했다가 `AppState` 준비 후 순서대로 처리한다.
 - 앱이 실행 중일 때 푸시가 수신되기만 한 경우에는 이동하지 않는다. 사용자가
   시스템 알림이나 알림함 항목을 명시적으로 눌러야 이동한다.
+
+## 추천 Universal Link
+
+추천 공유의 canonical URL은 다음 한 형태다.
+
+```text
+https://api.ghkdqhrbals.org/referrals/{code}
+```
+
+- Associated Domains가 확인된 설치 기기에서는 iOS가 링크를 앱으로 전달한다.
+  앱은 코드를 신규 계정 인증과 필수 약관 화면이 끝날 때까지 pending 상태로
+  보존한다.
+- 링크 귀속은 해당 코드로 시작한 인증에서 새 계정이 만들어진 경우에만 성립한다.
+  기존 계정 로그인은 귀속하거나 보상하지 않는다.
+- 새 계정이 필수 약관에 모두 동의해 `ACTIVE`가 될 때 추천인과 신규 가입자에게
+  각각 Pro(`TIER2`) 1개월을 지급한다. 계정당 1회이고 자기 추천은 거부하며,
+  추천 기록과 양쪽 지급은 멱등인 단일 트랜잭션으로 처리한다.
+- 기존 수동 코드 입력은 링크를 다시 열 수 없거나 랜딩에서 코드를 복사한 경우,
+  서버가 정한 짧은 가입 유효기간 안에서만 허용하는 귀속 복구 fallback이다. 신규
+  계정 온보딩이라는 동일한 자격 조건을 우회하지 않는다.
+- 앱이 설치되지 않았으면 서버 랜딩 페이지가 App Store 이동과 코드 복사를
+  제공한다. Universal Link만으로는 App Store 설치 뒤 코드를 앱에 완전히
+  전달하는 deferred deep link를 보장할 수 없으며, 이를 자동화하려면 별도의 외부
+  attribution provider가 필요하다.
 
 ## 화면별 권장 딥링크
 
@@ -96,7 +123,9 @@ buddystudy://public/questions/987
 
 | 진입 채널 | 동작 |
 | --- | --- |
-| Safari, 메모, 다른 앱의 URL | `onOpenURL`로 받아 목적지 탭 또는 홈 내 화면으로 직접 이동한다. |
+| Safari, 메모, 다른 앱의 `buddystudy://` URL | `onOpenURL`로 받아 목적지 탭 또는 홈 내 화면으로 직접 이동한다. |
+| 추천 Universal Link, 앱 설치됨 | iOS가 canonical HTTPS URL을 앱으로 전달하고 신규 가입용 pending code를 보존한다. |
+| 추천 HTTPS URL, 앱 미설치 | 서버 랜딩에서 App Store 이동과 referral code 복사를 제공한다. 설치를 거친 자동 귀속은 보장하지 않는다. |
 | 시스템 푸시 탭 | 홈과 내 학습 목록은 홈으로 직접 이동한다. 그 외 목적지는 **알림** 탭을 선택하고 해당 목적지 하나만 알림 탭 내비게이션 스택에 올린다. |
 | 앱 알림함 항목 탭 | 선택한 항목을 읽음 처리한 뒤 같은 목적지를 연다. 홈 공지 팝업은 알림 화면을 닫고 홈에서 표시한다. |
 | 푸시 단순 수신 | 데이터만 갱신하고 화면은 이동하지 않는다. |
@@ -208,3 +237,6 @@ stats, statistics, settings, profile, public
 6. iOS 라우트 파싱 테스트, 알림 라우팅 테스트, backend 관리자 검증 테스트를
    추가한다.
 7. 이 문서와 `ARCHITECTURE.md`, 필요하면 `NOTIFICATION_SYSTEM.md`를 갱신한다.
+8. Universal Link라면 Associated Domains, AASA의 app ID/경로 범위, 리다이렉트
+   없는 HTTPS 응답, 설치/미설치 랜딩, 실제 iPhone의 cold/warm launch를 함께
+   검증한다.

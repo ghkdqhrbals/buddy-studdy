@@ -313,11 +313,15 @@ Request:
 
 ```json
 {
-  "idToken": "google-id-token"
+  "idToken": "google-id-token",
+  "referralCode": "BS-ABCDEFGH"
 }
 ```
 
-The backend verifies the ID token against `GOOGLE_IOS_CLIENT_ID`, then links the Google identity to the device.
+The backend verifies the ID token against `GOOGLE_IOS_CLIENT_ID`, then links the
+Google identity to the device. `referralCode` is optional. It is accepted only
+for a newly created account that is still completing required terms; signing in
+to an existing active account never creates referral attribution.
 
 Tester email/password login is also supported. New email accounts must verify a 6-digit signup code first.
 
@@ -358,11 +362,14 @@ Request:
 {
   "email": "tester@example.com",
   "password": "secret123",
-  "verificationCode": "123456"
+  "verificationCode": "123456",
+  "referralCode": "BS-ABCDEFGH"
 }
 ```
 
-If the email already exists, `verificationCode` can be omitted. If it does not exist, the backend verifies the code and creates an active `EMAIL` user. Passwords are stored only as SHA-256 hashes.
+If the email already exists, `verificationCode` can be omitted. If it does not
+exist, the backend verifies the code and creates a `PENDING_TERMS` `EMAIL` user.
+Passwords are stored only as SHA-256 hashes.
 
 Response:
 
@@ -377,9 +384,62 @@ Response:
     "avatarColorSeed": "avatar-color-mint"
   },
   "accessToken": "jwt",
-  "accessTokenExpiresAt": "2026-09-05T00:00:00+00:00"
+  "accessTokenExpiresAt": "2026-09-05T00:00:00+00:00",
+  "isNewAccount": true,
+  "referralAttributed": true
 }
 ```
+
+`referralAttributed` confirms that the server durably retained the attribution;
+it does not mean the reward has been issued yet. The backend grants both the
+inviter and the new member one non-renewing month of `TIER2` in the transaction
+that accepts the final required term and changes the member to `ACTIVE`.
+
+### Referrals
+
+```http
+GET /api/v1/referrals/me
+Authorization: Bearer <accessToken>
+
+POST /api/v1/referrals/redeem
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+The summary response includes the server-owned canonical URL. The iOS client
+accepts only the exact BuddyStudy HTTPS host and path; for compatibility with a
+staggered backend rollout, it may reconstruct that same canonical URL only from
+a strictly validated referral code:
+
+```json
+{
+  "code": "BS-ABCDEFGH",
+  "referralUrl": "https://api.ghkdqhrbals.org/referrals/BS-ABCDEFGH",
+  "successfulReferralCount": 1,
+  "rewardMonthsEarned": 1,
+  "rewardStartsAt": "2026-08-28T00:00:00Z",
+  "rewardEndsAt": "2026-09-28T00:00:00Z",
+  "hasRedeemedReferral": false
+}
+```
+
+Manual redemption is a recovery path for missed link attribution, not a general
+promotion for existing accounts. By default it is available only during the
+first 24 hours after account creation. Repeating a successful redemption with
+the same code returns the existing result; changing to another code conflicts.
+
+The public link and Associated Domains metadata require no authentication:
+
+```http
+GET /referrals/BS-ABCDEFGH
+GET /.well-known/apple-app-site-association
+```
+
+An installed iOS app receives a valid referral path as a Universal Link. Without
+the app, the HTML landing page offers the App Store and a copyable code. This
+landing does not claim fully deferred attribution through an App Store install.
+
+### Profile
 
 `PATCH /api/v1/profile` accepts the pixel-avatar fields
 `avatarSymbolName`, `avatarColorSeed`, and `avatarMode`. New profile-photo

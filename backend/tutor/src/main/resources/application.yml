@@ -78,6 +78,12 @@ buddystudy:
   auth:
     jwt-secret: ${AUTH_JWT_SECRET:${BACKEND_MASTER_KEY:dev-buddystudy-secret-must-be-overridden}}
     access-token-days: ${ACCESS_TOKEN_DAYS:90}
+  referral:
+    public-base-url: ${REFERRAL_PUBLIC_BASE_URL:https://api.ghkdqhrbals.org}
+    app-store-app-id: ${REFERRAL_APP_STORE_APP_ID:6774108938}
+    apple-app-id: ${REFERRAL_APPLE_APP_ID:4CL25TC734.io.github.ghkdqhrbals.StudyMate}
+    # Legacy clients may repair missed signup attribution only during this post-creation window.
+    manual-redemption-grace-hours: ${REFERRAL_MANUAL_REDEMPTION_GRACE_HOURS:24}
   crypto:
     master-key: ${BACKEND_MASTER_KEY:dev-buddystudy-master-key}
   scheduler:

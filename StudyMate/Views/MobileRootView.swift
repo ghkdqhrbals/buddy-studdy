@@ -10,6 +10,7 @@ struct MobileRootView: View {
     @EnvironmentObject private var appState: AppState
     @State private var isRecordsLoginPagePresented = false
     @State private var isStatisticsLoginPagePresented = false
+    @State private var isReferralLoginPagePresented = false
 
     var body: some View {
         let strings = appState.strings
@@ -37,6 +38,10 @@ struct MobileRootView: View {
                                         .padding(.horizontal, 16)
                                         .mobileTabTitle(studyScreenTitle(for: route))
                                 }
+                            }
+                            .navigationDestination(isPresented: $isReferralLoginPagePresented) {
+                                MobileLoginPage()
+                                    .padding(.horizontal, 16)
                             }
                     }
                     .tabItem {
@@ -150,10 +155,20 @@ struct MobileRootView: View {
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
         }
+        .alert(item: $appState.referralNotice) { notice in
+            Alert(
+                title: Text(strings.referralInvitationTitle),
+                message: Text(strings.referralNoticeMessage(notice)),
+                dismissButton: .default(Text(strings.close)) {
+                    appState.dismissReferralNotice()
+                }
+            )
+        }
         .onAppear {
             AppAnalytics.setLanguage(appState.settings.appLanguage)
             AppAnalytics.setSignedIn(appState.isCommunitySessionActive)
             trackCurrentScreen()
+            handleReferralLoginRequest(appState.shouldPresentReferralLogin)
         }
         .onChange(of: appState.hasCompletedOnboarding) { _, _ in
             trackCurrentScreen()
@@ -175,6 +190,9 @@ struct MobileRootView: View {
         }
         .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
             AppAnalytics.setSignedIn(isSignedIn)
+        }
+        .onChange(of: appState.shouldPresentReferralLogin) { _, shouldPresent in
+            handleReferralLoginRequest(shouldPresent)
         }
     }
 
@@ -198,6 +216,17 @@ struct MobileRootView: View {
         }
 
         return appState.strings.tabStudy
+    }
+
+    private func handleReferralLoginRequest(_ shouldPresent: Bool) {
+        guard shouldPresent else {
+            return
+        }
+        defer { appState.didPresentReferralLogin() }
+        guard !appState.isCommunitySessionActive else {
+            return
+        }
+        isReferralLoginPagePresented = true
     }
 
     private func trackCurrentScreen() {
@@ -1046,6 +1075,23 @@ private struct MobileLoginPage: View {
             Spacer(minLength: 72)
 
             MobileLoginLogo(size: 96)
+
+            if let pendingReferralCode = appState.pendingReferralCode {
+                VStack(spacing: 6) {
+                    Label(strings.referralInvitationTitle, systemImage: "gift.fill")
+                        .font(.subheadline.weight(.semibold))
+                    Text(strings.referralInvitationReady)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Text(pendingReferralCode)
+                        .font(.footnote.monospaced().weight(.semibold))
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity)
+                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                .padding(.top, 22)
+            }
 
             Spacer(minLength: 0)
 
@@ -6474,7 +6520,7 @@ private struct MobileProfilePage: View {
 private struct MobileReferralView: View {
     @EnvironmentObject private var appState: AppState
     @State private var referralCode = ""
-    @State private var didCopyCode = false
+    @State private var didCopyLink = false
 
     private var strings: AppStrings {
         appState.strings
@@ -6496,29 +6542,46 @@ private struct MobileReferralView: View {
 
             Section(strings.referralYourCode) {
                 if let summary = appState.referralSummary {
-                    HStack(spacing: 10) {
-                        Text(summary.code)
-                            .font(.body.monospaced().weight(.semibold))
-                            .textSelection(.enabled)
+                    if let referralURL = summary.canonicalReferralURL {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(referralURL.absoluteString)
+                                .font(.footnote.monospaced())
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
 
-                        Spacer(minLength: 8)
+                            HStack(spacing: 10) {
+                                Text(summary.code)
+                                    .font(.caption.monospaced().weight(.semibold))
+                                    .foregroundStyle(.secondary)
 
-                        Button {
-                            UIPasteboard.general.string = summary.code
-                            didCopyCode = true
-                        } label: {
-                            Image(systemName: didCopyCode ? "checkmark" : "doc.on.doc")
-                                .frame(width: 28, height: 28)
+                                Spacer(minLength: 8)
+
+                                Button {
+                                    UIPasteboard.general.string = referralURL.absoluteString
+                                    didCopyLink = true
+                                } label: {
+                                    Image(systemName: didCopyLink ? "checkmark" : "doc.on.doc")
+                                        .frame(width: 28, height: 28)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(strings.referralCopy)
+
+                                ShareLink(
+                                    item: referralURL,
+                                    subject: Text(strings.referralInvitationTitle),
+                                    message: Text(strings.referralShareMessage(code: summary.code))
+                                ) {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .frame(width: 28, height: 28)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(strings.referralShare)
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(strings.referralCopy)
-
-                        ShareLink(item: strings.referralShareMessage(code: summary.code)) {
-                            Image(systemName: "square.and.arrow.up")
-                                .frame(width: 28, height: 28)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(strings.referralShare)
+                    } else {
+                        Label(strings.referralLinkUnavailable, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
 
                     LabeledContent(

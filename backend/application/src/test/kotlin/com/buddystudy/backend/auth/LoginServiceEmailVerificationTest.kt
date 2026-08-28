@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.account.domain.entity.UserStatus
+import com.buddystudy.account.domain.entity.UserProvider
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.auth.domain.entity.UserDeviceEntity
 import com.buddystudy.common.domain.SupportedLanguage
@@ -29,6 +30,12 @@ import com.buddystudy.backend.auth.application.service.RandomTokenGenerator
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.profile.application.port.outbound.ReferralPort
+import com.buddystudy.backend.profile.application.model.PendingReferralAttribution
+import com.buddystudy.backend.profile.application.model.PendingReferralAttributionStatus
+import com.buddystudy.backend.profile.application.model.ReferralAccountSummary
+import com.buddystudy.backend.profile.application.model.ReferralRecord
+import com.buddystudy.backend.profile.application.service.ReferralRewardManager
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -45,6 +52,7 @@ class LoginServiceEmailVerificationTest {
     private val roles = InMemoryRoleAssignmentPort()
     private val appleIdentities = StubAppleIdentityPort()
     private val googleIdentities = StubGoogleIdentityPort()
+    private val referralPort = InMemoryReferralPort()
     private val properties = BuddyStudyProperties().apply {
         auth.jwtSecret = "test-jwt-secret"
         email.verificationTtlSeconds = 180
@@ -69,6 +77,7 @@ class LoginServiceEmailVerificationTest {
             roles,
             tokenProvider,
             RandomDisplayNameProvider(),
+            ReferralRewardManager(users, referralPort, properties),
         ),
         deviceRegistrations = DeviceRegistrationManager(
             users,
@@ -88,6 +97,8 @@ class LoginServiceEmailVerificationTest {
         val response = login.appleLogin(principal, "apple-token")
 
         assertThat(response.profile.email).isEqualTo("apple-user@example.com")
+        assertThat(response.isNewAccount).isTrue()
+        assertThat(response.referralAttributed).isFalse()
         assertThat(users.findByProviderAndProviderId("APPLE", "apple-provider-id")).isNotNull
     }
 
@@ -336,18 +347,44 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
-    fun `google login uses identity returned by verifier`(): Unit = runBlocking {
+    fun `google login uses identity returned by verifier without failing an invalid referral`() = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
 
         val response = login.googleLogin(
             Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true),
             "google-id-token",
+            "invalid-referral",
         )
 
         assertThat(response.profile.email).isEqualTo("google@example.com")
         assertThat(response.profile.displayName).matches("[A-Z][a-z]+-[A-Z][a-z]+-\\d{4}")
         assertThat(response.profile.displayName).isNotEqualTo("Google User")
+        assertThat(response.isNewAccount).isTrue()
+        assertThat(response.referralAttributed).isFalse()
         assertThat(users.findByProviderAndProviderId("GOOGLE", "google-provider-id")).isNotNull
+    }
+
+    @Test
+    fun `google signup reports a captured referral attribution`(): Unit = runBlocking {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        val inviter = users.save(
+            UserEntity(
+                provider = UserProvider.EMAIL,
+                providerId = "inviter@example.com",
+                email = "inviter@example.com",
+                status = UserStatus.ACTIVE,
+            ),
+        )
+        referralPort.codeOwners["BS-ABCDEFGH"] = inviter.id
+
+        val response = login.googleLogin(
+            Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true),
+            "google-id-token",
+            "bs-abcdefgh",
+        )
+
+        assertThat(response.isNewAccount).isTrue()
+        assertThat(response.referralAttributed).isTrue()
     }
 
     @Test
@@ -446,6 +483,77 @@ class LoginServiceEmailVerificationTest {
 
         fun countByProviderAndProviderId(provider: String, providerId: String): Int =
             users.values.count { it.provider.name == provider && it.providerId == providerId }
+    }
+
+    private class InMemoryReferralPort : ReferralPort {
+        val codeOwners = mutableMapOf<String, Long>()
+        private val pending = mutableMapOf<Long, PendingReferralAttribution>()
+
+        override suspend fun codeForUser(userId: Long): String? = codeOwners.entries.firstOrNull { it.value == userId }?.key
+        override suspend fun lockCodeForUser(userId: Long): String? = codeForUser(userId)
+
+        override suspend fun createCode(userId: Long, code: String, now: Instant): Boolean {
+            if (code in codeOwners || userId in codeOwners.values) return false
+            codeOwners[code] = userId
+            return true
+        }
+
+        override suspend fun inviterUserId(code: String): Long? = codeOwners[code]
+        override suspend fun lockUsers(userIds: List<Long>): Int = userIds.distinct().size
+        override suspend fun referralForReferredUser(userId: Long): ReferralRecord? = null
+        override suspend fun lockReferralForReferredUser(userId: Long): ReferralRecord? = null
+        override suspend fun createReferral(inviterUserId: Long, referredUserId: Long, code: String, now: Instant): Long? = 1
+        override suspend fun pendingAttribution(userId: Long): PendingReferralAttribution? = pending[userId]
+        override suspend fun lockPendingAttribution(userId: Long): PendingReferralAttribution? = pending[userId]
+
+        override suspend fun createPendingAttribution(
+            inviterUserId: Long,
+            referredUserId: Long,
+            code: String,
+            now: Instant,
+        ): Boolean {
+            if (referredUserId in pending) return false
+            pending[referredUserId] = PendingReferralAttribution(
+                id = (pending.size + 1).toLong(),
+                inviterUserId = inviterUserId,
+                referredUserId = referredUserId,
+                referralCode = code,
+                status = PendingReferralAttributionStatus.PENDING,
+            )
+            return true
+        }
+
+        override suspend fun createRewardedAttribution(
+            inviterUserId: Long?,
+            referredUserId: Long,
+            code: String,
+            now: Instant,
+        ): Boolean = false
+
+        override suspend fun completePendingAttribution(
+            attributionId: Long,
+            expectedStatus: PendingReferralAttributionStatus,
+            status: PendingReferralAttributionStatus,
+            now: Instant,
+        ): Boolean = false
+
+        override suspend fun rewardBase(userId: Long, now: Instant): Instant = now
+        override suspend fun hasUntrackedReferralMembership(userId: Long): Boolean = false
+        override suspend fun grantTier2Month(
+            referralId: Long,
+            beneficiaryUserId: Long,
+            startsAt: Instant,
+            endsAt: Instant,
+            now: Instant,
+        ): Boolean = true
+
+        override suspend fun accountSummary(userId: Long): ReferralAccountSummary = ReferralAccountSummary(
+            successfulReferralCount = 0,
+            rewardMonthsEarned = 0,
+            rewardStartsAt = null,
+            rewardEndsAt = null,
+            hasRedeemedReferral = false,
+        )
     }
 
     private class InMemoryDevicePort : DevicePort {

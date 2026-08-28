@@ -136,10 +136,10 @@ class AuthWebAdapter(
     override suspend fun token(deviceId: String, clientSecret: String) = issueDeviceToken.token(deviceId, clientSecret)
 
     override suspend fun google(body: GoogleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
-        login.googleLogin(loginPrincipal(authentication, deviceId, clientSecret), body.idToken)
+        login.googleLogin(loginPrincipal(authentication, deviceId, clientSecret), body.idToken, body.referralCode)
 
     override suspend fun apple(body: AppleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
-        login.appleLogin(loginPrincipal(authentication, deviceId, clientSecret), body.idToken)
+        login.appleLogin(loginPrincipal(authentication, deviceId, clientSecret), body.idToken, body.referralCode)
 
     override suspend fun emailCode(body: EmailVerificationCodeRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse {
         loginPrincipal(authentication, deviceId, clientSecret)
@@ -190,6 +190,7 @@ private fun EmailLoginRequest.toCommand() = EmailLoginCommand(
     email = email,
     password = password,
     verificationCode = verificationCode,
+    referralCode = referralCode,
 )
 
 private fun PushTokenRequest.toCommand() = PushTokenCommand(

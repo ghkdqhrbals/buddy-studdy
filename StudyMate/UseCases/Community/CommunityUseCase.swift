@@ -90,21 +90,25 @@ struct CommunityUseCase {
 
     func loginWithGoogle(
         registration: RemotePushRegistration,
-        idToken: String
+        idToken: String,
+        referralCode: String? = nil
     ) async throws -> CommunityLoginResult {
         try await repository.loginWithGoogle(
             registration: registration,
-            idToken: idToken
+            idToken: idToken,
+            referralCode: referralCode
         )
     }
 
     func loginWithApple(
         registration: RemotePushRegistration,
-        idToken: String
+        idToken: String,
+        referralCode: String? = nil
     ) async throws -> CommunityLoginResult {
         try await repository.loginWithApple(
             registration: registration,
-            idToken: idToken
+            idToken: idToken,
+            referralCode: referralCode
         )
     }
 
@@ -122,13 +126,15 @@ struct CommunityUseCase {
         registration: RemotePushRegistration,
         email: String,
         password: String,
-        verificationCode: String?
+        verificationCode: String?,
+        referralCode: String? = nil
     ) async throws -> CommunityLoginResult {
         try await repository.loginWithEmail(
             registration: registration,
             email: email,
             password: password,
-            verificationCode: verificationCode
+            verificationCode: verificationCode,
+            referralCode: referralCode
         )
     }
 

@@ -83,6 +83,8 @@ struct RemotePushRegistration: Codable, Equatable {
 struct CommunityLoginResult: Equatable {
     var profile: CommunityUserProfile
     var registration: RemotePushRegistration
+    var referralAttributed: Bool? = nil
+    var isNewAccount: Bool? = nil
 }
 
 struct AvatarCatalogResponse: Codable, Equatable {
@@ -543,12 +545,14 @@ protocol RemotePushBackendClientProtocol {
 
     func loginWithGoogle(
         registration: RemotePushRegistration,
-        idToken: String
+        idToken: String,
+        referralCode: String?
     ) async throws -> CommunityLoginResult
 
     func loginWithApple(
         registration: RemotePushRegistration,
-        idToken: String
+        idToken: String,
+        referralCode: String?
     ) async throws -> CommunityLoginResult
 
     func requestEmailVerificationCode(
@@ -560,7 +564,8 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         email: String,
         password: String,
-        verificationCode: String?
+        verificationCode: String?,
+        referralCode: String?
     ) async throws -> CommunityLoginResult
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile
@@ -832,7 +837,8 @@ extension RemotePushBackendClientProtocol {
 
     func loginWithApple(
         registration: RemotePushRegistration,
-        idToken: String
+        idToken: String,
+        referralCode: String?
     ) async throws -> CommunityLoginResult {
         throw RemotePushBackendError.invalidResponse
     }
@@ -1902,7 +1908,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     func loginWithGoogle(
         registration: RemotePushRegistration,
-        idToken: String
+        idToken: String,
+        referralCode: String? = nil
     ) async throws -> CommunityLoginResult {
         var request = loginRequest(
             registration: registration,
@@ -1910,7 +1917,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(GoogleLoginRequest(idToken: idToken))
+        request.httpBody = try encoder.encode(
+            GoogleLoginRequest(idToken: idToken, referralCode: referralCode)
+        )
         let data = try await perform(request)
         let response = try decoder.decode(CommunityLoginResponse.self, from: data)
         let updatedRegistration = RemotePushRegistration(
@@ -1920,12 +1929,18 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             accessToken: response.accessToken,
             accessTokenExpiresAt: response.accessTokenExpiresAt
         )
-        return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
+        return CommunityLoginResult(
+            profile: response.profile,
+            registration: updatedRegistration,
+            referralAttributed: response.referralAttributed,
+            isNewAccount: response.isNewAccount
+        )
     }
 
     func loginWithApple(
         registration: RemotePushRegistration,
-        idToken: String
+        idToken: String,
+        referralCode: String? = nil
     ) async throws -> CommunityLoginResult {
         var request = loginRequest(
             registration: registration,
@@ -1933,7 +1948,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(AppleLoginRequest(idToken: idToken))
+        request.httpBody = try encoder.encode(
+            AppleLoginRequest(idToken: idToken, referralCode: referralCode)
+        )
         let data = try await perform(request)
         let response = try decoder.decode(CommunityLoginResponse.self, from: data)
         let updatedRegistration = RemotePushRegistration(
@@ -1943,7 +1960,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             accessToken: response.accessToken,
             accessTokenExpiresAt: response.accessTokenExpiresAt
         )
-        return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
+        return CommunityLoginResult(
+            profile: response.profile,
+            registration: updatedRegistration,
+            referralAttributed: response.referralAttributed,
+            isNewAccount: response.isNewAccount
+        )
     }
 
     func requestEmailVerificationCode(
@@ -1966,7 +1988,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         email: String,
         password: String,
-        verificationCode: String?
+        verificationCode: String?,
+        referralCode: String? = nil
     ) async throws -> CommunityLoginResult {
         var request = loginRequest(
             registration: registration,
@@ -1978,7 +2001,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             EmailLoginRequest(
                 email: email,
                 password: password,
-                verificationCode: verificationCode?.trimmingCharacters(in: .whitespacesAndNewlines)
+                verificationCode: verificationCode?.trimmingCharacters(in: .whitespacesAndNewlines),
+                referralCode: referralCode
             )
         )
         let data = try await perform(request)
@@ -1990,7 +2014,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             accessToken: response.accessToken,
             accessTokenExpiresAt: response.accessTokenExpiresAt
         )
-        return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
+        return CommunityLoginResult(
+            profile: response.profile,
+            registration: updatedRegistration,
+            referralAttributed: response.referralAttributed,
+            isNewAccount: response.isNewAccount
+        )
     }
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile {
@@ -2845,10 +2874,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private struct GoogleLoginRequest: Encodable {
         var idToken: String
+        var referralCode: String?
     }
 
     private struct AppleLoginRequest: Encodable {
         var idToken: String
+        var referralCode: String?
     }
 
     private struct EmailVerificationCodeRequest: Encodable {
@@ -2864,6 +2895,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var email: String
         var password: String
         var verificationCode: String?
+        var referralCode: String?
     }
 
     private struct ProfileUpdateRequest: Encodable {
@@ -2886,6 +2918,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var profile: CommunityUserProfile
         var accessToken: String
         var accessTokenExpiresAt: Date
+        var referralAttributed: Bool?
+        var isNewAccount: Bool?
     }
 
     private struct RecordPublicityRequest: Encodable {
@@ -3220,6 +3254,55 @@ struct BackendReferralSummary: Decodable, Equatable, Sendable {
     var rewardStartsAt: Date?
     var rewardEndsAt: Date?
     var hasRedeemedReferral: Bool
+    var referralUrl: URL? = nil
+
+    var canonicalReferralURL: URL? {
+        guard let normalizedCode = ReferralLink.normalizedCode(code) else {
+            return nil
+        }
+        if let referralUrl,
+           let components = URLComponents(url: referralUrl, resolvingAgainstBaseURL: false),
+           components.scheme?.lowercased() == ReferralLink.canonicalScheme,
+           components.percentEncodedHost?.lowercased() == ReferralLink.canonicalHost,
+           let link = ReferralLink(url: referralUrl),
+           link.code == normalizedCode {
+            return referralUrl
+        }
+        guard let fallbackURL = URL(
+            string: "https://api.ghkdqhrbals.org/referrals/\(normalizedCode)"
+        ),
+        ReferralLink(url: fallbackURL)?.code == normalizedCode else {
+            return nil
+        }
+        return fallbackURL
+    }
+}
+
+extension BackendReferralSummary {
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case successfulReferralCount
+        case rewardMonthsEarned
+        case rewardStartsAt
+        case rewardEndsAt
+        case hasRedeemedReferral
+        case referralUrl
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        code = try values.decode(String.self, forKey: .code)
+        successfulReferralCount = try values.decode(Int.self, forKey: .successfulReferralCount)
+        rewardMonthsEarned = try values.decode(Int.self, forKey: .rewardMonthsEarned)
+        rewardStartsAt = try values.decodeIfPresent(Date.self, forKey: .rewardStartsAt)
+        rewardEndsAt = try values.decodeIfPresent(Date.self, forKey: .rewardEndsAt)
+        hasRedeemedReferral = try values.decode(Bool.self, forKey: .hasRedeemedReferral)
+        if let rawReferralURL = try? values.decode(String.self, forKey: .referralUrl) {
+            referralUrl = URL(string: rawReferralURL)
+        } else {
+            referralUrl = nil
+        }
+    }
 }
 
 struct BackendBillingPlanTransition: Decodable, Equatable {

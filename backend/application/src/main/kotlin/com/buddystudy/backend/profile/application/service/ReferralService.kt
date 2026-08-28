@@ -5,6 +5,7 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.profile.application.model.ReferralLandingResponse
 import com.buddystudy.backend.profile.application.model.ReferralSummaryResponse
 import com.buddystudy.backend.profile.application.port.inbound.ReferralUseCase
 import com.buddystudy.backend.profile.application.port.outbound.ReferralPort
@@ -12,13 +13,14 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
-import java.time.ZoneOffset
 
 @Service
 class ReferralService(
     private val users: UserPort,
     private val referrals: ReferralPort,
     private val codeGenerator: ReferralCodeGenerator,
+    private val rewards: ReferralRewardManager,
+    private val links: ReferralLinkProvider,
     private val clock: Clock = Clock.systemUTC(),
 ) : ReferralUseCase {
 
@@ -31,39 +33,20 @@ class ReferralService(
     @Transactional
     override suspend fun redeem(principal: Principal, code: String): ReferralSummaryResponse {
         requireActiveUser(principal)
-        val normalizedCode = code.trim().uppercase()
-        if (!CODE.matches(normalizedCode)) throw validation("Referral code is invalid.")
+        rewards.redeemDuringSignupGrace(principal.userId, code, clock.instant())
+        return response(principal.userId, findOrCreateCode(principal.userId))
+    }
+
+    @Transactional(readOnly = true)
+    override suspend fun landing(code: String): ReferralLandingResponse {
+        val normalizedCode = ReferralCodePolicy.normalizeOrNull(code)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Referral code was not found.")
         val inviterUserId = referrals.inviterUserId(normalizedCode)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Referral code was not found.")
-        if (inviterUserId == principal.userId) throw validation("You cannot redeem your own referral code.")
-
-        val inviter = users.findById(inviterUserId)
-        if (inviter?.status != UserStatus.ACTIVE) {
+        if (users.findById(inviterUserId)?.status != UserStatus.ACTIVE) {
             throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Referral code was not found.")
         }
-
-        val now = clock.instant()
-        if (referrals.lockUsers(listOf(inviterUserId, principal.userId).sorted()) != 2) {
-            throw validation("Referral accounts are unavailable.")
-        }
-        if (referrals.hasRedeemed(principal.userId)) throw validation("A referral code has already been redeemed.")
-        val referralId = referrals.createReferral(inviterUserId, principal.userId, normalizedCode, now)
-            ?: throw validation("A referral code has already been redeemed.")
-
-        listOf(inviterUserId, principal.userId).forEach { beneficiaryUserId ->
-            val startsAt = referrals.rewardBase(beneficiaryUserId, now)
-            val endsAt = startsAt.atZone(ZoneOffset.UTC).plusMonths(1).toInstant()
-            check(
-                referrals.grantTier2Month(
-                    referralId = referralId,
-                    beneficiaryUserId = beneficiaryUserId,
-                    startsAt = startsAt,
-                    endsAt = endsAt,
-                    now = now,
-                ),
-            ) { "Referral reward grant was not persisted." }
-        }
-        return response(principal.userId, findOrCreateCode(principal.userId))
+        return links.landing(normalizedCode)
     }
 
     private suspend fun requireActiveUser(principal: Principal) {
@@ -80,7 +63,7 @@ class ReferralService(
         repeat(MAX_CODE_ATTEMPTS) {
             val code = codeGenerator.next()
             if (referrals.createCode(userId, code, clock.instant())) return code
-            referrals.codeForUser(userId)?.let { return it }
+            referrals.lockCodeForUser(userId)?.let { return it }
         }
         throw IllegalStateException("A unique referral code could not be allocated.")
     }
@@ -89,6 +72,7 @@ class ReferralService(
         val summary = referrals.accountSummary(userId)
         return ReferralSummaryResponse(
             code = code,
+            referralUrl = links.referralUrl(code),
             successfulReferralCount = summary.successfulReferralCount,
             rewardMonthsEarned = summary.rewardMonthsEarned,
             rewardStartsAt = summary.rewardStartsAt,
@@ -97,14 +81,7 @@ class ReferralService(
         )
     }
 
-    private fun validation(message: String) = ApiException(
-        HttpStatus.UNPROCESSABLE_ENTITY,
-        ApiErrorCode.VALIDATION_ERROR,
-        message,
-    )
-
     private companion object {
-        val CODE = Regex("^BS-[A-Z2-9]{8}$")
         const val MAX_CODE_ATTEMPTS = 8
     }
 }

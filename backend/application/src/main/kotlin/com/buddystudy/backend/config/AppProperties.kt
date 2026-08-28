@@ -20,6 +20,7 @@ data class BuddyStudyProperties(
     var billing: Billing = Billing(),
     var quota: Quota = Quota(),
     var mcp: Mcp = Mcp(),
+    var referral: Referral = Referral(),
 ) {
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
     data class Crypto(var masterKey: String = "")
@@ -178,6 +179,12 @@ data class BuddyStudyProperties(
             "127.0.0.1:*",
         ),
         var requestTimeoutSeconds: Long = 30,
+    )
+    data class Referral(
+        var publicBaseUrl: String = "https://api.ghkdqhrbals.org",
+        var appStoreAppId: Long = 6774108938,
+        var appleAppId: String = "4CL25TC734.io.github.ghkdqhrbals.StudyMate",
+        var manualRedemptionGraceHours: Long = 24,
     )
 }
 

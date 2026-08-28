@@ -33,7 +33,10 @@ class ReferralController(
     suspend fun summary(authentication: Authentication): ReferralSummaryResponse = referrals.summary(authentication)
 
     @PostMapping("/redeem")
-    @Operation(summary = "Redeem another user's referral code once")
+    @Operation(
+        summary = "Recover a missed signup referral attribution",
+        description = "Available only during the configured post-signup grace window. Repeating the same code is idempotent.",
+    )
     suspend fun redeem(
         @Valid @RequestBody request: RedeemReferralRequest,
         authentication: Authentication,

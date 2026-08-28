@@ -45,6 +45,12 @@ private enum AppErrorMessageTarget: Equatable {
     case notification
 }
 
+private enum PendingReferralRedemptionOutcome {
+    case succeeded(BackendReferralSummary)
+    case terminalFailure
+    case transientFailure
+}
+
 enum EmailCommunitySignInResult: Equatable {
     case signedIn
     case verificationRequired
@@ -126,6 +132,9 @@ final class AppState: ObservableObject {
     @Published private(set) var referralSummary: BackendReferralSummary?
     @Published private(set) var isLoadingReferral = false
     @Published private(set) var referralErrorMessage: String?
+    @Published private(set) var pendingReferralCode: String?
+    @Published private(set) var shouldPresentReferralLogin = false
+    @Published var referralNotice: ReferralNotice?
     @Published private(set) var serviceAvailability = BackendServiceAvailability.operational
     @Published private(set) var isCheckingAppControl = false
     @Published private(set) var appUpdateDecision: BackendAppUpdateDecision?
@@ -602,6 +611,7 @@ final class AppState: ObservableObject {
     private let communityProfileCacheUseCase: CommunityProfileCacheUseCase
     private let communitySessionUseCase: CommunitySessionUseCase
     private let onboardingStateUseCase: OnboardingStateUseCase
+    private let pendingReferralUseCase: PendingReferralUseCase
     private let developerSettingsUseCase: DeveloperSettingsUseCase
     private let currentStudySessionUseCase: CurrentStudySessionUseCase
     private let localStudySettingsUseCase: LocalStudySettingsUseCase
@@ -677,6 +687,8 @@ final class AppState: ObservableObject {
     private var appControlRefreshTask: Task<Bool, Never>?
     private var lastAppControlPresentationKey: String?
     private var pendingTermsRequirementRetry: (() async -> Void)?
+    private var deferredReferralLink: ReferralLink?
+    private var referralProfileResolutionTask: Task<Void, Never>?
     private var pendingAnswerDraft: PendingAnswerDraft?
     private var lastBackgroundQuestionPreparationAt: Date?
     private var didStart = false
@@ -871,12 +883,163 @@ final class AppState: ObservableObject {
     }
 
     func openDeepLink(_ url: URL) {
+        if let referralLink = ReferralLink(url: url) {
+            openReferralLink(referralLink)
+            return
+        }
+
         guard let route = AppRoute(url: url) else {
             log(.warning, "지원하지 않는 딥링크를 무시했습니다. url=\(url.absoluteString)")
             return
         }
 
         openRoute(route)
+    }
+
+    func didPresentReferralLogin() {
+        shouldPresentReferralLogin = false
+    }
+
+    func dismissReferralNotice() {
+        referralNotice = nil
+    }
+
+    private func openReferralLink(_ link: ReferralLink) {
+        setSelectedTab(.home)
+        guard isCommunitySessionActive else {
+            captureReferralForAuthentication(link)
+            return
+        }
+
+        guard let profile = communityProfile else {
+            deferReferralResolutionUntilProfileIsAuthoritative(link)
+            return
+        }
+        resolveReferralForSignedInProfile(link, profile: profile)
+    }
+
+    private func captureReferralForAuthentication(_ link: ReferralLink) {
+        guard let pending = pendingReferralUseCase.capture(
+            code: link.code,
+            source: .authentication
+        ) else {
+            return
+        }
+        pendingReferralCode = pending.code
+        guard pending.code == link.code,
+              pending.state == .captured,
+              pending.accountID == nil else {
+            shouldPresentReferralLogin = false
+            referralNotice = .attributionPending
+            log(.info, "서버 확인이 끝나지 않은 추천을 새 링크로 덮어쓰지 않았습니다.")
+            return
+        }
+        shouldPresentReferralLogin = true
+        log(.info, "신규 가입 인증을 위해 추천 링크를 보관했습니다.")
+    }
+
+    private func deferReferralResolutionUntilProfileIsAuthoritative(_ link: ReferralLink) {
+        guard let pending = pendingReferralUseCase.capture(
+            code: link.code,
+            source: .authentication
+        ) else {
+            return
+        }
+        pendingReferralCode = pending.code
+        guard pending.code == link.code,
+              pending.state == .captured else {
+            referralNotice = .attributionPending
+            return
+        }
+        if deferredReferralLink == nil {
+            deferredReferralLink = link
+        }
+        scheduleDeferredReferralProfileResolution()
+        log(.info, "저장된 로그인 세션의 프로필 상태를 확인한 뒤 추천 링크를 처리합니다.")
+    }
+
+    private func scheduleDeferredReferralProfileResolution() {
+        guard deferredReferralLink != nil,
+              isCommunitySessionActive,
+              communityProfile == nil,
+              referralProfileResolutionTask == nil else {
+            return
+        }
+        referralProfileResolutionTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+            await self.loadCommunityProfile()
+            self.referralProfileResolutionTask = nil
+            self.resolveDeferredReferralLinkIfPossible()
+        }
+    }
+
+    private func resolveDeferredReferralLinkIfPossible() {
+        guard let link = deferredReferralLink,
+              !isCommunitySessionActive || communityProfile != nil else {
+            return
+        }
+        deferredReferralLink = nil
+        openReferralLink(link)
+    }
+
+    private func resolveReferralForSignedInProfile(
+        _ link: ReferralLink,
+        profile: CommunityUserProfile
+    ) {
+        guard profile.status.uppercased() == "PENDING_TERMS" else {
+            if let pending = pendingReferralUseCase.pendingAttribution() {
+                guard let accountID = pending.accountID else {
+                    clearPendingReferral(ifMatching: pending.code)
+                    referralNotice = .existingAccount
+                    log(.info, "활성 계정에서 연 추천 링크를 저장하지 않았습니다.")
+                    return
+                }
+                guard accountID == profile.id else {
+                    clearPendingReferral(ifMatching: pending.code)
+                    referralNotice = .notEligible
+                    log(.info, "다른 계정에 연결된 추천 보류 상태를 삭제했습니다.")
+                    return
+                }
+                switch pending.state {
+                case .serverConfirmed:
+                    referralNotice = .attributionPending
+                    refreshReferralCompletionInBackground()
+                    return
+                case .captured:
+                    referralNotice = .attributionPending
+                    recoverCapturedReferralInBackground(pending)
+                    return
+                }
+            } else {
+                clearPendingReferral()
+            }
+            referralNotice = .existingAccount
+            log(.info, "활성 계정에서 연 추천 링크를 저장하지 않았습니다.")
+            return
+        }
+
+        if let existing = pendingReferralUseCase.pendingAttribution(),
+           let accountID = existing.accountID,
+           accountID != profile.id {
+            clearPendingReferral(ifMatching: existing.code)
+            referralNotice = .notEligible
+            log(.info, "다른 계정에 연결된 추천을 필수 약관 계정으로 재귀속하지 않았습니다.")
+            return
+        }
+        guard let pending = pendingReferralUseCase.capture(
+            code: link.code,
+            source: .requiredTerms,
+            accountID: profile.id
+        ) else {
+            return
+        }
+        pendingReferralCode = pending.code
+        referralNotice = pending.state == .serverConfirmed
+            ? .attributionPendingTerms
+            : .readyAfterTerms
+        log(.info, "필수 약관 가입 흐름에서 추천 링크를 보관했습니다.")
     }
 
     func presentHomeAnnouncement(_ announcement: HomeAnnouncement) {
@@ -1419,6 +1582,8 @@ final class AppState: ObservableObject {
         communitySessionUseCase: CommunitySessionUseCase? = nil,
         onboardingStateRepository: OnboardingStateRepository? = nil,
         onboardingStateUseCase: OnboardingStateUseCase? = nil,
+        pendingReferralRepository: PendingReferralRepository? = nil,
+        pendingReferralUseCase: PendingReferralUseCase? = nil,
         developerSettingsRepository: DeveloperSettingsRepository? = nil,
         developerSettingsUseCase: DeveloperSettingsUseCase? = nil,
         currentStudySessionRepository: CurrentStudySessionRepository? = nil,
@@ -1456,6 +1621,8 @@ final class AppState: ObservableObject {
             communitySessionUseCase: communitySessionUseCase,
             onboardingStateRepository: onboardingStateRepository,
             onboardingStateUseCase: onboardingStateUseCase,
+            pendingReferralRepository: pendingReferralRepository,
+            pendingReferralUseCase: pendingReferralUseCase,
             developerSettingsRepository: developerSettingsRepository,
             developerSettingsUseCase: developerSettingsUseCase,
             currentStudySessionRepository: currentStudySessionRepository,
@@ -1474,6 +1641,7 @@ final class AppState: ObservableObject {
         let loadedCloudSyncState = localUseCases.cloudSyncState.loadState()
         let loadedSettings = loadedLocalStudySettings.settings
         let storedHasCompletedOnboarding = localUseCases.onboardingState.hasCompletedOnboarding()
+        let loadedPendingReferralAttribution = localUseCases.pendingReferral.pendingAttribution()
         #if os(iOS)
         let loadedHasCompletedOnboarding = true
         #else
@@ -1527,6 +1695,7 @@ final class AppState: ObservableObject {
         self.communityProfileCacheUseCase = localUseCases.communityProfileCache
         self.communitySessionUseCase = localUseCases.communitySession
         self.onboardingStateUseCase = localUseCases.onboardingState
+        self.pendingReferralUseCase = localUseCases.pendingReferral
         self.developerSettingsUseCase = localUseCases.developerSettings
         self.currentStudySessionUseCase = localUseCases.currentStudySession
         self.localStudySettingsUseCase = localUseCases.localStudySettings
@@ -1542,6 +1711,13 @@ final class AppState: ObservableObject {
         self.appControlSettingsStore = settingsStore
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
+        self.pendingReferralCode = loadedPendingReferralAttribution?.code
+        self.deferredReferralLink = loadedIsCommunitySignedIn
+            ? loadedPendingReferralAttribution.flatMap { ReferralLink(code: $0.code) }
+            : nil
+        self.shouldPresentReferralLogin = loadedPendingReferralAttribution?.state == .captured
+            && loadedPendingReferralAttribution?.accountID == nil
+            && !loadedIsCommunitySignedIn
         let loadedCurrentStudySession = localUseCases.currentStudySession.loadSession()
         let loadedPendingQuestionGeneration = localUseCases.currentStudySession.loadPendingQuestionGenerationProcess()
         self.currentQuestion = loadedCurrentStudySession.question
@@ -2131,6 +2307,7 @@ final class AppState: ObservableObject {
         answerGradingPollingTask?.cancel()
         appControlBoundaryTask?.cancel()
         appControlRefreshTask?.cancel()
+        referralProfileResolutionTask?.cancel()
         #if os(iOS)
         appleBillingUpdatesTask?.cancel()
         appleBillingRecoveryTask?.cancel()
@@ -2144,6 +2321,7 @@ final class AppState: ObservableObject {
         }
 
         didStart = true
+        scheduleDeferredReferralProfileResolution()
         #if os(iOS)
         startAppleBillingTransactionListener()
         #endif
@@ -4377,6 +4555,7 @@ final class AppState: ObservableObject {
 
     func signInToCommunity(idToken: String) async {
         logAuthTrace("community_sign_in_token_exchange_start", reason: "google-login", deduplicate: false)
+        let submittedReferralCode = pendingReferralCodeForAuthentication()
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "google-login") else {
             AppAnalytics.login(method: .google, outcome: .failed)
             logAuthTrace("community_sign_in_missing_registration", reason: "google-login", deduplicate: false)
@@ -4392,13 +4571,18 @@ final class AppState: ObservableObject {
                 ) { recoveredRegistration in
                     try await communityUseCase.loginWithGoogle(
                         registration: recoveredRegistration,
-                        idToken: idToken
+                        idToken: idToken,
+                        referralCode: submittedReferralCode
                     )
                 }
             },
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
+                handleCommunityAuthenticationReferralResult(
+                    result,
+                    submittedReferralCode: submittedReferralCode
+                )
                 communityErrorMessage = nil
                 AppAnalytics.login(method: .google, outcome: .completed)
                 logAuthTrace("community_sign_in_success", reason: "google-login", deduplicate: false)
@@ -4421,6 +4605,7 @@ final class AppState: ObservableObject {
     func signInToCommunityWithApple(identityToken: String) async {
         logAuthTrace("community_sign_in_start", reason: "apple", deduplicate: false)
         AppAnalytics.login(method: .apple, outcome: .started)
+        let submittedReferralCode = pendingReferralCodeForAuthentication()
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "apple-login") else {
             AppAnalytics.login(method: .apple, outcome: .failed)
             logAuthTrace("community_sign_in_missing_registration", reason: "apple-login", deduplicate: false)
@@ -4437,13 +4622,18 @@ final class AppState: ObservableObject {
                 ) { recoveredRegistration in
                     try await communityUseCase.loginWithApple(
                         registration: recoveredRegistration,
-                        idToken: identityToken
+                        idToken: identityToken,
+                        referralCode: submittedReferralCode
                     )
                 }
             },
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
+                handleCommunityAuthenticationReferralResult(
+                    result,
+                    submittedReferralCode: submittedReferralCode
+                )
                 AppAnalytics.login(method: .apple, outcome: .completed)
                 logAuthTrace("community_sign_in_success", reason: "apple-login", deduplicate: false)
                 refreshCommunitySignInDataInBackground(reason: "apple-login")
@@ -4560,6 +4750,7 @@ final class AppState: ObservableObject {
         logAuthTrace("community_sign_in_start", reason: "email-login", deduplicate: false)
         AppAnalytics.login(method: .email, outcome: .started)
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let submittedReferralCode = pendingReferralCodeForAuthentication()
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-login") else {
             AppAnalytics.login(method: .email, outcome: .failed)
             logAuthTrace("community_sign_in_missing_registration", reason: "email-login", deduplicate: false)
@@ -4578,13 +4769,18 @@ final class AppState: ObservableObject {
                         registration: recoveredRegistration,
                         email: normalizedEmail,
                         password: password,
-                        verificationCode: verificationCode
+                        verificationCode: verificationCode,
+                        referralCode: submittedReferralCode
                     )
                 }
             },
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
+                handleCommunityAuthenticationReferralResult(
+                    result,
+                    submittedReferralCode: submittedReferralCode
+                )
                 AppAnalytics.login(method: .email, outcome: .completed)
                 logAuthTrace("community_sign_in_success", reason: "email-login", deduplicate: false)
             },
@@ -4638,6 +4834,156 @@ final class AppState: ObservableObject {
         if identityRecoveryFailed {
             communityErrorMessage = fallbackMessage
         }
+    }
+
+    private func handleCommunityAuthenticationReferralResult(
+        _ result: CommunityLoginResult,
+        submittedReferralCode: String?
+    ) {
+        guard let submittedReferralCode,
+              pendingReferralCode == ReferralLink.normalizedCode(submittedReferralCode) else {
+            return
+        }
+
+        if let referralAttributed = result.referralAttributed {
+            if referralAttributed {
+                guard let confirmed = pendingReferralUseCase.markServerConfirmed(
+                    code: submittedReferralCode,
+                    accountID: result.profile.id
+                ) else {
+                    return
+                }
+                pendingReferralCode = confirmed.code
+                shouldPresentReferralLogin = false
+                if result.profile.status.uppercased() == "PENDING_TERMS" {
+                    referralNotice = .attributionPendingTerms
+                } else {
+                    refreshReferralCompletionInBackground()
+                }
+            } else {
+                clearPendingReferral(ifMatching: submittedReferralCode)
+                referralNotice = .notEligible
+            }
+            return
+        }
+
+        if result.isNewAccount == false || result.profile.status.uppercased() == "ACTIVE" {
+            clearPendingReferral(ifMatching: submittedReferralCode)
+            referralNotice = .notEligible
+        }
+    }
+
+    private func pendingReferralCodeForAuthentication() -> String? {
+        guard let pending = pendingReferralUseCase.pendingAttribution(),
+              pending.state == .captured,
+              pending.accountID == nil else {
+            return nil
+        }
+        return pending.code
+    }
+
+    private func clearPendingReferral(ifMatching code: String? = nil) {
+        guard pendingReferralUseCase.clear(ifMatching: code) else {
+            return
+        }
+        pendingReferralCode = nil
+        shouldPresentReferralLogin = false
+    }
+
+    private func refreshReferralCompletionInBackground() {
+        guard let expectedPending = pendingReferralUseCase.pendingAttribution() else {
+            return
+        }
+        let sessionGeneration = communitySessionState.generation
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+            let freshSummary = await self.refreshReferralSummary()
+            guard self.isCurrentReferralReconciliation(
+                sessionGeneration: sessionGeneration,
+                expectedPending: expectedPending
+            ) else {
+                return
+            }
+            await self.refreshBilling()
+            guard self.isCurrentReferralReconciliation(
+                sessionGeneration: sessionGeneration,
+                expectedPending: expectedPending
+            ) else {
+                return
+            }
+            if freshSummary?.hasRedeemedReferral == true {
+                self.clearPendingReferral(ifMatching: expectedPending.code)
+                self.referralNotice = .rewardApplied
+            } else {
+                self.referralNotice = .attributionPending
+            }
+        }
+    }
+
+    private func recoverCapturedReferralInBackground(
+        _ pending: PendingReferralAttribution
+    ) {
+        let sessionGeneration = communitySessionState.generation
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+            let outcome = await self.performReferralRedemption(code: pending.code)
+            guard self.isCurrentReferralReconciliation(
+                sessionGeneration: sessionGeneration,
+                expectedPending: pending
+            ) else {
+                return
+            }
+            if case .terminalFailure = outcome {
+                self.clearPendingReferral(ifMatching: pending.code)
+                self.referralNotice = .notEligible
+                return
+            }
+            var expectedPending = pending
+            if case .succeeded = outcome,
+               let accountID = pending.accountID ?? self.communityProfile?.id,
+               let confirmed = self.pendingReferralUseCase.markServerConfirmed(
+                code: pending.code,
+                accountID: accountID
+               ) {
+                self.pendingReferralCode = confirmed.code
+                expectedPending = confirmed
+            }
+
+            let freshSummary = await self.refreshReferralSummary()
+            guard self.isCurrentReferralReconciliation(
+                sessionGeneration: sessionGeneration,
+                expectedPending: expectedPending
+            ) else {
+                return
+            }
+            await self.refreshBilling()
+            guard self.isCurrentReferralReconciliation(
+                sessionGeneration: sessionGeneration,
+                expectedPending: expectedPending
+            ) else {
+                return
+            }
+            if freshSummary?.hasRedeemedReferral == true {
+                self.clearPendingReferral(ifMatching: pending.code)
+                self.referralNotice = .rewardApplied
+            } else {
+                self.referralNotice = .attributionPending
+            }
+        }
+    }
+
+    private func isCurrentReferralReconciliation(
+        sessionGeneration: UInt64,
+        expectedPending: PendingReferralAttribution?
+    ) -> Bool {
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            return false
+        }
+        return pendingReferralUseCase.pendingAttribution() == expectedPending
     }
 
     func signOutFromCommunity() {
@@ -4711,6 +5057,7 @@ final class AppState: ObservableObject {
         referralSummary = nil
         referralErrorMessage = nil
         isLoadingReferral = false
+        resetReferralStateAfterCommunitySessionInvalidation()
         #if os(iOS)
         Task { @MainActor in
             await RevenueCatBillingBridge.shared.logOut(
@@ -4725,6 +5072,20 @@ final class AppState: ObservableObject {
         backendAccessState = .signedOut
         communityProfileCacheUseCase.saveSignedOutProfile(avatarSymbolName: profileAvatarSymbolName)
         logAuthTrace("community_session_reset_end", reason: "resetCommunitySignInState", deduplicate: false)
+    }
+
+    private func resetReferralStateAfterCommunitySessionInvalidation() {
+        referralProfileResolutionTask?.cancel()
+        referralProfileResolutionTask = nil
+        deferredReferralLink = nil
+        if let pending = pendingReferralUseCase.pendingAttribution(),
+           pending.state == .serverConfirmed || pending.accountID != nil {
+            clearPendingReferral(ifMatching: pending.code)
+        } else {
+            pendingReferralCode = pendingReferralUseCase.pendingAttribution()?.code
+        }
+        referralNotice = nil
+        shouldPresentReferralLogin = pendingReferralCodeForAuthentication() != nil
     }
 
     private func resetLikedQuestionsTransientState() {
@@ -4795,9 +5156,13 @@ final class AppState: ObservableObject {
 
     func loadCommunityProfile() async {
         logAuthTrace("community_profile_load_start", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
+        let sessionGeneration = communitySessionState.generation
         guard isCommunitySessionActive,
               let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile") else {
             logAuthTrace("community_profile_load_skipped", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
+            return
+        }
+        guard isCurrentCommunitySession(sessionGeneration) else {
             return
         }
 
@@ -4806,10 +5171,16 @@ final class AppState: ObservableObject {
                 try await communityUseCase.fetchMyProfile(registration: registration)
             },
             onSuccess: { profile in
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    return
+                }
                 applyCommunityProfile(profile)
                 logAuthTrace("community_profile_load_success", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
             },
             onFailure: { error in
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    return
+                }
                 let handled = handleCommunityError(error)
                 if handled {
                     communityProfile = nil
@@ -5172,6 +5543,7 @@ final class AppState: ObservableObject {
             )
         }
         applyProfilePageAccess(resolvedProfile)
+        resolveDeferredReferralLinkIfPossible()
         logAuthTrace(
             "community_profile_apply_end",
             page: .profile,
@@ -7005,10 +7377,12 @@ final class AppState: ObservableObject {
         )
     }
 
-    func refreshReferralSummary() async {
+    @discardableResult
+    func refreshReferralSummary() async -> BackendReferralSummary? {
         guard !isLoadingReferral else {
-            return
+            return nil
         }
+        let sessionGeneration = communitySessionState.generation
         let clientGeneration = backendClientGeneration
         let currentReferralUseCase = referralUseCase
         guard isCommunitySessionActive,
@@ -7019,7 +7393,10 @@ final class AppState: ObservableObject {
               ) else {
             referralSummary = nil
             referralErrorMessage = nil
-            return
+            return nil
+        }
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            return nil
         }
 
         isLoadingReferral = true
@@ -7033,28 +7410,40 @@ final class AppState: ObservableObject {
                 }
             )
             guard clientGeneration == backendClientGeneration,
-                  isCommunitySessionActive else {
-                return
+                  isCurrentCommunitySession(sessionGeneration) else {
+                return nil
             }
             referralSummary = summary
             referralErrorMessage = nil
+            return summary
         } catch where !Self.isCancellationLikeError(error) {
             guard clientGeneration == backendClientGeneration,
-                  isCommunitySessionActive else {
-                return
+                  isCurrentCommunitySession(sessionGeneration) else {
+                return nil
             }
             referralErrorMessage = strings.referralLoadFailed
             log(.warning, "추천 정보를 불러오지 못했습니다: \(error.localizedDescription)")
+            return nil
         } catch {
-            return
+            return nil
         }
     }
 
     @discardableResult
     func redeemReferral(code: String) async -> Bool {
+        if case .succeeded = await performReferralRedemption(code: code) {
+            return true
+        }
+        return false
+    }
+
+    private func performReferralRedemption(
+        code: String
+    ) async -> PendingReferralRedemptionOutcome {
         let normalizedCode = code
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
+        let sessionGeneration = communitySessionState.generation
         guard !normalizedCode.isEmpty,
               !isLoadingReferral,
               isCommunitySessionActive,
@@ -7064,7 +7453,10 @@ final class AppState: ObservableObject {
                 reason: "referral-redeem"
               ) else {
             referralErrorMessage = strings.referralRedeemFailed
-            return false
+            return .transientFailure
+        }
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            return .transientFailure
         }
 
         let clientGeneration = backendClientGeneration
@@ -7083,24 +7475,38 @@ final class AppState: ObservableObject {
                 }
             )
             guard clientGeneration == backendClientGeneration,
-                  isCommunitySessionActive else {
-                return false
+                  isCurrentCommunitySession(sessionGeneration) else {
+                return .transientFailure
             }
             referralSummary = summary
             referralErrorMessage = nil
             await refreshBilling()
-            return true
+            return .succeeded(summary)
         } catch where !Self.isCancellationLikeError(error) {
             guard clientGeneration == backendClientGeneration,
-                  isCommunitySessionActive else {
-                return false
+                  isCurrentCommunitySession(sessionGeneration) else {
+                return .transientFailure
             }
             referralErrorMessage = strings.referralRedeemFailed
             log(.warning, "추천 코드를 등록하지 못했습니다: \(error.localizedDescription)")
-            return false
+            return Self.isTerminalReferralRedemptionError(error)
+                ? .terminalFailure
+                : .transientFailure
         } catch {
+            return .transientFailure
+        }
+    }
+
+    private static func isTerminalReferralRedemptionError(_ error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError,
+              case .httpStatus(let statusCode, _, _) = backendError,
+              (400..<500).contains(statusCode) else {
             return false
         }
+        return statusCode != 401
+            && statusCode != 408
+            && statusCode != 425
+            && statusCode != 429
     }
 
     func syncAppleBillingTransaction(
@@ -10308,6 +10714,7 @@ final class AppState: ObservableObject {
         contentHash: String? = nil,
         source: BackendTermsAgreementSource = .settings
     ) async -> Bool {
+        let wasRequiredTermsGatePresented = isRequiredTermsGatePresented
         let activeTerm = activeTerms.first { $0.type == type }
         let resolvedVersion = version ?? activeTerm?.version
         let resolvedContentHash = contentHash ?? activeTerm?.contentHash
@@ -10335,6 +10742,9 @@ final class AppState: ObservableObject {
                 pendingTermsRequirementRetry = nil
                 await retry()
             }
+            if wasRequiredTermsGatePresented {
+                await finishReferralOnboardingAfterRequiredTerms()
+            }
         }
         return true
     }
@@ -10346,6 +10756,7 @@ final class AppState: ObservableObject {
         contentHash: String? = nil,
         source: BackendTermsAgreementSource = .settings
     ) {
+        let wasRequiredTermsGatePresented = isRequiredTermsGatePresented
         let activeTerm = activeTerms.first { $0.type == type }
         let resolvedVersion = version ?? activeTerm?.version
         let resolvedContentHash = contentHash ?? activeTerm?.contentHash
@@ -10376,6 +10787,92 @@ final class AppState: ObservableObject {
                     self.pendingTermsRequirementRetry = nil
                     await retry()
                 }
+                if wasRequiredTermsGatePresented {
+                    await self.finishReferralOnboardingAfterRequiredTerms()
+                }
+            }
+        }
+    }
+
+    func finishReferralOnboardingAfterRequiredTerms() async {
+        let sessionGeneration = communitySessionState.generation
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            return
+        }
+        let pending = pendingReferralUseCase.pendingAttribution()
+        var expectedPending = pending
+        let hadReferralContext = pending != nil
+            || referralNotice == .readyAfterTerms
+            || referralNotice == .attributionPendingTerms
+            || referralNotice == .attributionPending
+        var redemptionOutcome: PendingReferralRedemptionOutcome?
+
+        if let pending, pending.state == .captured {
+            if let accountID = pending.accountID {
+                if let currentAccountID = communityProfile?.id {
+                    if accountID != currentAccountID {
+                        clearPendingReferral(ifMatching: pending.code)
+                        expectedPending = nil
+                        redemptionOutcome = .terminalFailure
+                    } else {
+                        redemptionOutcome = await performReferralRedemption(code: pending.code)
+                    }
+                } else {
+                    redemptionOutcome = .transientFailure
+                }
+            } else {
+                redemptionOutcome = await performReferralRedemption(code: pending.code)
+            }
+            guard isCurrentReferralReconciliation(
+                sessionGeneration: sessionGeneration,
+                expectedPending: expectedPending
+            ) else {
+                return
+            }
+            if case .terminalFailure? = redemptionOutcome {
+                clearPendingReferral(ifMatching: pending.code)
+                expectedPending = nil
+            } else if case .succeeded? = redemptionOutcome,
+                      let accountID = pending.accountID ?? communityProfile?.id,
+                      let confirmed = pendingReferralUseCase.markServerConfirmed(
+                        code: pending.code,
+                        accountID: accountID
+                      ) {
+                pendingReferralCode = confirmed.code
+                expectedPending = confirmed
+            }
+        }
+
+        let freshSummary = await refreshReferralSummary()
+        guard isCurrentReferralReconciliation(
+            sessionGeneration: sessionGeneration,
+            expectedPending: expectedPending
+        ) else {
+            return
+        }
+        await refreshBilling()
+        guard isCurrentReferralReconciliation(
+            sessionGeneration: sessionGeneration,
+            expectedPending: expectedPending
+        ) else {
+            return
+        }
+
+        if hadReferralContext,
+           freshSummary?.hasRedeemedReferral == true {
+            clearPendingReferral()
+            referralNotice = .rewardApplied
+            return
+        }
+
+        switch redemptionOutcome {
+        case .terminalFailure?:
+            referralNotice = .notEligible
+        case .transientFailure?, .succeeded?:
+            referralNotice = .attributionPending
+        case nil:
+            if hadReferralContext {
+                referralNotice = .attributionPending
             }
         }
     }
@@ -11073,6 +11570,7 @@ final class AppState: ObservableObject {
         backendAccessState = .signedOut
         setCommunitySessionSignedIn(false)
         communityProfile = nil
+        resetReferralStateAfterCommunitySessionInvalidation()
         guard var registration = storedBackendIdentityUseCase.loadRegistration(),
               registration.accessToken != nil || registration.accessTokenExpiresAt != nil else {
             logAuthTrace("backend_access_token_clear_skipped", reason: "clearStoredBackendAccessToken", deduplicate: false)

@@ -220,6 +220,8 @@ private object AnonymousRoutes {
         Route(HttpMethod.GET, "/api/v1/public/**"),
         Route(HttpMethod.GET, "/api/v2/public/**"),
         Route(HttpMethod.GET, "/api/v1/profile/photo/**"),
+        Route(HttpMethod.GET, "/referrals/**"),
+        Route(HttpMethod.GET, "/.well-known/apple-app-site-association"),
         Route(HttpMethod.POST, "/api/v1/billing/apple/notifications"),
         Route(HttpMethod.POST, "/api/v1/billing/revenuecat/webhooks"),
         Route(null, "/api/v1/admin/**"),

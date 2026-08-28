@@ -147,6 +147,14 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 5. A newly registered email or Google account receives a Reddit-style `Adjective-Noun-####` display name. Registered display names are case-insensitively unique and remain editable subject to the same uniqueness rule.
 6. Account deletion immediately disables the member identity, revokes its sessions, reconnects the current device anonymously, and durably emits `ACCOUNT_WITHDRAWN`. Idempotent asynchronous cleanup removes profile assets, public questions, studies, records, reactions, notifications, and related account data.
 
+### Referrals
+
+1. Every share action uses the canonical referral URL `https://api.ghkdqhrbals.org/referrals/{code}`. Manual code entry remains an attribution-recovery fallback only within the server-defined short sign-up eligibility window and follows the same rules as the link flow.
+2. Referral attribution is limited to a newly created authenticated account whose sign-up flow began with a valid pending referral code. Opening a link or entering a code while signing in to an existing account does not earn a reward.
+3. The reward is granted only after the new account accepts all required terms and becomes `ACTIVE`. The inviter and the new member then each receive one month of Pro (`TIER2`).
+4. A new account can be attributed once, self-referral is rejected, and retries are idempotent. The referral record and both membership grants commit atomically so neither side can receive only half of the reward.
+5. With the app installed, the canonical URL opens the iOS app as a Universal Link. Without the app, the backend landing page offers the App Store destination and a copyable referral code. A completely deferred deep link across App Store installation is not guaranteed without an external attribution provider.
+
 ### Sync And Push
 
 1. Backend sync stores settings, records, answer drafts, generated questions, grading results, and topic statistics in MySQL.

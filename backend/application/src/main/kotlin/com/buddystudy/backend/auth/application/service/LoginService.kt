@@ -167,7 +167,13 @@ class LoginService(
         } else if (existingUser.passwordHash != passwordHash) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_EMAIL_CREDENTIALS, "Invalid email or password.")
         }
-        return authenticatedLogins.attachEmailIdentity(principal, normalized, passwordHash, Instant.now())
+        return authenticatedLogins.attachEmailIdentity(
+            principal = principal,
+            email = normalized,
+            passwordHash = passwordHash,
+            referralCode = command.referralCode,
+            now = Instant.now(),
+        )
     }
 
     override suspend fun emailCode(email: String): EmailVerificationCodeResponse {
@@ -179,16 +185,16 @@ class LoginService(
         return EmailVerificationCodeResponse(normalized, ttl.seconds)
     }
 
-    override suspend fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse {
+    override suspend fun googleLogin(principal: Principal, idToken: String, referralCode: String?): GoogleLoginResponse {
         val identity = googleIdentities.verify(idToken)
             ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid Google token.")
-        return authenticatedLogins.attachGoogleIdentity(principal, identity, Instant.now())
+        return authenticatedLogins.attachGoogleIdentity(principal, identity, referralCode, Instant.now())
     }
 
-    override suspend fun appleLogin(principal: Principal, idToken: String): GoogleLoginResponse {
+    override suspend fun appleLogin(principal: Principal, idToken: String, referralCode: String?): GoogleLoginResponse {
         val identity = appleIdentities.verify(idToken)
             ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid Apple token.")
-        return authenticatedLogins.attachAppleIdentity(principal, identity, Instant.now())
+        return authenticatedLogins.attachAppleIdentity(principal, identity, referralCode, Instant.now())
     }
 
     private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status.name)

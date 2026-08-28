@@ -11,5 +11,10 @@ data class RegisterDeviceCommand(
     val appBuild: String? = null,
 )
 
-data class EmailLoginCommand(val email: String, val password: String, val verificationCode: String? = null)
+data class EmailLoginCommand(
+    val email: String,
+    val password: String,
+    val verificationCode: String? = null,
+    val referralCode: String? = null,
+)
 data class PushTokenCommand(val apnsToken: String, val apnsEnvironment: String = "production")

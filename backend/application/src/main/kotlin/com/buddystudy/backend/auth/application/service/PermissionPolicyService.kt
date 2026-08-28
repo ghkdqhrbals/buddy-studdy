@@ -24,6 +24,7 @@ import com.buddystudy.backend.auth.application.port.outbound.TermsAgreementQuery
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.profile.application.service.ReferralRewardManager
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -38,6 +39,7 @@ class PermissionPolicyService(
     private val permissions: PermissionQueryPort,
     private val evaluator: PermissionEvaluator,
     private val users: UserPort,
+    private val referralRewards: ReferralRewardManager,
 ) : TermsUseCase, PermissionEvaluationUseCase, NotificationPreferenceUseCase {
     @Transactional(readOnly = true)
     override suspend fun activeTerms(principal: Principal?): List<TermsResponse> {
@@ -207,10 +209,12 @@ class PermissionPolicyService(
         if (principal.anonymous) return
         val user = users.findById(principal.userId) ?: return
         if (user.status != UserStatus.PENDING_TERMS) return
-        if (!terms.hasRequiredAgreements(user.id, principal.deviceId, Instant.now())) return
+        val now = Instant.now()
+        if (!terms.hasRequiredAgreements(user.id, principal.deviceId, now)) return
         user.status = UserStatus.ACTIVE
-        user.updatedAt = Instant.now()
+        user.updatedAt = now
         users.save(user)
+        referralRewards.activatePendingAttribution(user.id, now)
     }
 
     private companion object {

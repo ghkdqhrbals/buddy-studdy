@@ -3,6 +3,7 @@ package com.buddystudy.backend.auth
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceCommand
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceType
 import com.buddystudy.backend.auth.application.model.TermsAgreementCommand
@@ -21,9 +22,11 @@ import com.buddystudy.backend.auth.application.port.outbound.UserPermissionProje
 import com.buddystudy.backend.auth.application.service.PermissionPolicyService
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.profile.application.service.ReferralRewardManager
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito
 import java.time.Instant
 import java.util.Optional
 
@@ -34,6 +37,7 @@ class PermissionPolicyServiceTest {
     private val evaluator = FakePermissionEvaluator()
     private val notificationPreferences = FakeNotificationPreferencePort()
     private val users = FakeUserPort()
+    private val referralRewards = Mockito.mock(ReferralRewardManager::class.java)
     private val service = PermissionPolicyService(
         terms = terms,
         termAgreements = agreements,
@@ -42,7 +46,33 @@ class PermissionPolicyServiceTest {
         notificationPreferences = notificationPreferences,
         notificationPreferenceCommands = notificationPreferences,
         users = users,
+        referralRewards = referralRewards,
     )
+
+    @Test
+    fun `required terms activation resolves pending referral in the same use case`(): Unit = runBlocking {
+        terms.active += ActiveTermsProjection(
+            id = 42,
+            code = TermsType.TERMS_OF_SERVICE.code,
+            version = "2026-08-27",
+            title = "서비스 이용약관",
+            url = "https://example.com/terms",
+            contentHash = "sha256:terms",
+            required = true,
+            mutable = false,
+        )
+        users.save(UserEntity(id = 7, status = UserStatus.PENDING_TERMS))
+        val principal = activePrincipal().copy(status = UserStatus.PENDING_TERMS.name)
+
+        service.saveAgreement(
+            principal,
+            TermsAgreementCommand(TermsType.TERMS_OF_SERVICE, "AGREED", "SIGNUP"),
+        )
+
+        val activatedUser = users.findById(7)!!
+        assertThat(activatedUser.status).isEqualTo(UserStatus.ACTIVE)
+        Mockito.verify(referralRewards).activatePendingAttribution(7, activatedUser.updatedAt)
+    }
 
     @Test
     fun `first profile terms agreement is saved when no prior user agreement exists`(): Unit = runBlocking {

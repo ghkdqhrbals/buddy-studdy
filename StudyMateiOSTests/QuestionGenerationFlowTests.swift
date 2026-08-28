@@ -21,6 +21,967 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(decoded, .failed)
     }
 
+    func testReferralLinkParserIsStrictAndSeparateFromAppRoute() throws {
+        let webURL = try XCTUnwrap(
+            URL(string: "https://api.ghkdqhrbals.org/referrals/BS-ABCDEFGH")
+        )
+        let customURL = try XCTUnwrap(
+            URL(string: "buddystudy://referrals/bs-abcdefgh")
+        )
+        XCTAssertEqual(ReferralLink(url: webURL)?.code, "BS-ABCDEFGH")
+        XCTAssertEqual(ReferralLink(url: customURL)?.code, "BS-ABCDEFGH")
+        XCTAssertNil(AppRoute(url: customURL))
+
+        let rejectedURLs = [
+            "http://api.ghkdqhrbals.org/referrals/BS-ABCDEFGH",
+            "https://example.com/referrals/BS-ABCDEFGH",
+            "https://api%2eghkdqhrbals.org/referrals/BS-ABCDEFGH",
+            "https://api.ghkdqhrbals.org:443/referrals/BS-ABCDEFGH",
+            "https://api.ghkdqhrbals.org/referrals/BS-ABCDEFGH/extra",
+            "https://api.ghkdqhrbals.org/referrals/BS-ABCDEFGH?campaign=1",
+            "https://api.ghkdqhrbals.org/referrals/BS-ABCDEF01",
+            "buddystudy://profile/BS-ABCDEFGH",
+        ]
+        for rawURL in rejectedURLs {
+            XCTAssertNil(
+                ReferralLink(url: try XCTUnwrap(URL(string: rawURL))),
+                rawURL
+            )
+        }
+    }
+
+    func testPendingReferralPersistsThroughSettingsStoreUseCase() throws {
+        let suiteName = "PendingReferralTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        let useCase = PendingReferralUseCase(
+            repository: SettingsStorePendingReferralRepository(settingsStore: store)
+        )
+
+        let initialCapturedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let captured = useCase.capture(
+            code: " bs-abcdefgh ",
+            source: .authentication,
+            capturedAt: initialCapturedAt
+        )
+        XCTAssertEqual(captured?.code, "BS-ABCDEFGH")
+        XCTAssertEqual(captured?.source, .authentication)
+        XCTAssertEqual(captured?.state, .captured)
+        let relaunchedUseCase = PendingReferralUseCase(
+            repository: SettingsStorePendingReferralRepository(
+                settingsStore: SettingsStore(
+                    defaults: defaults,
+                    usesSecureBackendIdentityStorage: false
+                )
+            )
+        )
+        XCTAssertEqual(relaunchedUseCase.pendingAttribution()?.code, "BS-ABCDEFGH")
+        let bound = relaunchedUseCase.capture(
+            code: "BS-ABCDEFGH",
+            source: .requiredTerms,
+            accountID: 42,
+            capturedAt: Date().addingTimeInterval(3_600)
+        )
+        XCTAssertEqual(bound?.capturedAt, captured?.capturedAt)
+        XCTAssertEqual(bound?.accountID, 42)
+        XCTAssertEqual(bound?.source, .requiredTerms)
+        XCTAssertNil(
+            relaunchedUseCase.markServerConfirmed(
+                code: "BS-ABCDEFGH",
+                accountID: 99
+            )
+        )
+        XCTAssertEqual(
+            relaunchedUseCase.markServerConfirmed(
+                code: "BS-ABCDEFGH",
+                accountID: 42
+            )?.state,
+            .serverConfirmed
+        )
+        XCTAssertEqual(
+            relaunchedUseCase.capture(
+                code: "BS-ZYXWVUTS",
+                source: .authentication
+            )?.code,
+            "BS-ABCDEFGH"
+        )
+        XCTAssertEqual(relaunchedUseCase.pendingAttribution()?.accountID, 42)
+        XCTAssertFalse(relaunchedUseCase.clear(ifMatching: "BS-ZYXWVUTS"))
+        XCTAssertTrue(relaunchedUseCase.clear(ifMatching: "BS-ABCDEFGH"))
+        XCTAssertNil(relaunchedUseCase.pendingAttribution())
+
+        let legacyCapturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "bs-abcdefgh",
+                source: .requiredTerms,
+                capturedAt: legacyCapturedAt,
+                accountID: 42,
+                state: .serverConfirmed
+            )
+        )
+        let normalizedLegacy = relaunchedUseCase.pendingAttribution()
+        XCTAssertEqual(normalizedLegacy?.code, "BS-ABCDEFGH")
+        XCTAssertEqual(normalizedLegacy?.capturedAt, legacyCapturedAt)
+        XCTAssertEqual(normalizedLegacy?.accountID, 42)
+        XCTAssertEqual(normalizedLegacy?.state, .serverConfirmed)
+    }
+
+    func testReferralSummaryPrefersValidatedServerURLAndFallsBackToCanonicalLink() throws {
+        let canonicalURL = try XCTUnwrap(
+            URL(string: "https://api.ghkdqhrbals.org/referrals/BS-ABCDEFGH")
+        )
+        var summary = BackendReferralSummary(
+            code: "BS-ABCDEFGH",
+            successfulReferralCount: 0,
+            rewardMonthsEarned: 0,
+            rewardStartsAt: nil,
+            rewardEndsAt: nil,
+            hasRedeemedReferral: false,
+            referralUrl: canonicalURL
+        )
+        XCTAssertEqual(summary.canonicalReferralURL, canonicalURL)
+
+        summary.referralUrl = URL(
+            string: "https://malicious.example/referrals/BS-ABCDEFGH"
+        )
+        XCTAssertEqual(summary.canonicalReferralURL, canonicalURL)
+        summary.referralUrl = nil
+        XCTAssertEqual(summary.canonicalReferralURL, canonicalURL)
+        summary.referralUrl = URL(
+            string: "buddystudy://referrals/BS-ABCDEFGH"
+        )
+        XCTAssertEqual(summary.canonicalReferralURL, canonicalURL)
+
+        let malformedServerURLSummary = try JSONDecoder().decode(
+            BackendReferralSummary.self,
+            from: Data(
+                """
+                {
+                  "code": "BS-ABCDEFGH",
+                  "successfulReferralCount": 0,
+                  "rewardMonthsEarned": 0,
+                  "rewardStartsAt": null,
+                  "rewardEndsAt": null,
+                  "hasRedeemedReferral": false,
+                  "referralUrl": "https://%"
+                }
+                """.utf8
+            )
+        )
+        XCTAssertNil(malformedServerURLSummary.referralUrl)
+        XCTAssertEqual(malformedServerURLSummary.canonicalReferralURL, canonicalURL)
+    }
+
+    func testGoogleAppleAndEmailAuthCarryReferralCodeAndDecodeAttribution() async throws {
+        let receivedReferralCodes = LockedValue<[String]>([])
+        let client = makeClient { request in
+            let data = try Self.bodyData(from: request)
+            let body = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+            if let referralCode = body["referralCode"] as? String {
+                receivedReferralCodes.set(receivedReferralCodes.value + [referralCode])
+            }
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "profile": {
+                    "id": 7,
+                    "displayName": "New-Buddy-0007",
+                    "status": "PENDING_TERMS"
+                  },
+                  "accessToken": "access-token",
+                  "accessTokenExpiresAt": "2026-08-29T00:00:00Z",
+                  "referralAttributed": true,
+                  "isNewAccount": true
+                }
+                """
+            )
+        }
+
+        let google = try await client.loginWithGoogle(
+            registration: Self.registration,
+            idToken: "google-token",
+            referralCode: "BS-ABCDEFGH"
+        )
+        _ = try await client.loginWithApple(
+            registration: Self.registration,
+            idToken: "apple-token",
+            referralCode: "BS-ABCDEFGH"
+        )
+        _ = try await client.loginWithEmail(
+            registration: Self.registration,
+            email: "new@example.com",
+            password: "password",
+            verificationCode: "123456",
+            referralCode: "BS-ABCDEFGH"
+        )
+
+        XCTAssertEqual(google.referralAttributed, true)
+        XCTAssertEqual(google.isNewAccount, true)
+        XCTAssertEqual(
+            receivedReferralCodes.value,
+            ["BS-ABCDEFGH", "BS-ABCDEFGH", "BS-ABCDEFGH"]
+        )
+    }
+
+    func testReferralLinkCapturePersistsWithoutReplacingDraft() throws {
+        let suiteName = "ReferralAppStateTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        let appState = AppState(settingsStore: store)
+        appState.lastAnswer = "작성 중인 답변"
+
+        appState.openDeepLink(
+            try XCTUnwrap(
+                URL(string: "https://api.ghkdqhrbals.org/referrals/BS-ABCDEFGH")
+            )
+        )
+
+        XCTAssertEqual(appState.pendingReferralCode, "BS-ABCDEFGH")
+        XCTAssertTrue(appState.shouldPresentReferralLogin)
+        XCTAssertEqual(appState.lastAnswer, "작성 중인 답변")
+        XCTAssertEqual(store.loadPendingReferralAttribution()?.code, "BS-ABCDEFGH")
+    }
+
+    func testTerminalReferralRejectionClearsPendingCodeWithoutReplacingDraft() async throws {
+        let suiteName = "ReferralRejectionAppStateTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: "device-1",
+                clientSecret: "client-secret",
+                apnsToken: "",
+                accessToken: "e30.eyJkZXZpY2VfaWQiOiJkZXZpY2UtMSIsImlzX2Fub255bW91cyI6dHJ1ZSwic3RhdHVzIjoiQU5PTllNT1VTIn0.signature",
+                accessTokenExpiresAt: Date().addingTimeInterval(3_600)
+            )
+        )
+        let submittedReferralCodes = LockedValue<[String]>([])
+        let client = makeClient { request in
+            guard request.url?.path == "/api/v1/auth/google" else {
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+            let data = try Self.bodyData(from: request)
+            let body = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+            if let referralCode = body["referralCode"] as? String {
+                submittedReferralCodes.set(
+                    submittedReferralCodes.value + [referralCode]
+                )
+            }
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "profile": {
+                    "id": 7,
+                    "displayName": "Existing-Buddy-0007",
+                    "status": "ACTIVE",
+                    "provider": "GOOGLE"
+                  },
+                  "accessToken": "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJkZXZpY2VfaWQiOiJkZXZpY2UtMSIsImlzX2Fub255bW91cyI6ZmFsc2UsInN0YXR1cyI6IkFDVElWRSJ9.",
+                  "accessTokenExpiresAt": "2030-08-29T00:00:00Z",
+                  "referralAttributed": false,
+                  "isNewAccount": false
+                }
+                """
+            )
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+        appState.lastAnswer = "작성 중인 답변"
+
+        appState.openDeepLink(
+            try XCTUnwrap(
+                URL(string: "https://api.ghkdqhrbals.org/referrals/BS-ABCDEFGH")
+            )
+        )
+        await appState.signInToCommunity(idToken: "google-token")
+
+        XCTAssertEqual(submittedReferralCodes.value, ["BS-ABCDEFGH"])
+        XCTAssertNil(appState.pendingReferralCode)
+        XCTAssertNil(store.loadPendingReferralAttribution())
+        XCTAssertEqual(appState.referralNotice, .notEligible)
+        XCTAssertEqual(appState.lastAnswer, "작성 중인 답변")
+    }
+
+    func testAttributedLoginWaitsForRedeemedSummaryBeforeShowingReward() async throws {
+        let suiteName = "ReferralConfirmationAppStateTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveRemotePushRegistration(Self.anonymousRegistration)
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/api/v1/auth/google"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "profile": {
+                        "id": 7,
+                        "displayName": "New-Buddy-0007",
+                        "status": "ACTIVE",
+                        "provider": "GOOGLE"
+                      },
+                      "accessToken": "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJkZXZpY2VfaWQiOiJkZXZpY2UtMSIsImlzX2Fub255bW91cyI6ZmFsc2UsInN0YXR1cyI6IkFDVElWRSJ9.",
+                      "accessTokenExpiresAt": "2030-08-29T00:00:00Z",
+                      "referralAttributed": true,
+                      "isNewAccount": true
+                    }
+                    """
+                )
+            case ("GET", "/api/v1/referrals/me"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "code": "BS-ZYXWVUTS",
+                      "successfulReferralCount": 0,
+                      "rewardMonthsEarned": 0,
+                      "rewardStartsAt": null,
+                      "rewardEndsAt": null,
+                      "hasRedeemedReferral": false,
+                      "referralUrl": "https://api.ghkdqhrbals.org/referrals/BS-ZYXWVUTS"
+                    }
+                    """
+                )
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+
+        appState.openDeepLink(
+            try XCTUnwrap(
+                URL(string: "https://api.ghkdqhrbals.org/referrals/BS-ABCDEFGH")
+            )
+        )
+        await appState.signInToCommunity(idToken: "google-token")
+        let didFinishVerification = await waitUntil(maxAttempts: 250) {
+            appState.referralNotice == .attributionPending
+        }
+
+        XCTAssertTrue(didFinishVerification)
+        XCTAssertNotEqual(appState.referralNotice, .rewardApplied)
+        XCTAssertEqual(appState.pendingReferralCode, "BS-ABCDEFGH")
+        XCTAssertEqual(
+            store.loadPendingReferralAttribution()?.state,
+            .serverConfirmed
+        )
+        XCTAssertEqual(store.loadPendingReferralAttribution()?.accountID, 7)
+    }
+
+    func testStoredActiveAccountWaitsForAuthoritativeProfileBeforeRejectingReferralLink() async throws {
+        let suiteName = "ActiveReferralAppStateTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        QuestionGenerationURLProtocol.responseDelayNanoseconds = 150_000_000
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/profile")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "id": 7,
+                  "displayName": "Existing-Buddy-0007",
+                  "status": "ACTIVE",
+                  "provider": "GOOGLE"
+                }
+                """
+            )
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+
+        appState.openDeepLink(
+            try XCTUnwrap(URL(string: "buddystudy://referrals/BS-ABCDEFGH"))
+        )
+
+        XCTAssertNil(appState.referralNotice)
+        XCTAssertEqual(appState.pendingReferralCode, "BS-ABCDEFGH")
+        XCTAssertEqual(
+            store.loadPendingReferralAttribution()?.state,
+            .captured
+        )
+        XCTAssertFalse(appState.shouldPresentReferralLogin)
+        let didResolveProfile = await waitUntil {
+            appState.referralNotice == .existingAccount
+        }
+
+        XCTAssertTrue(didResolveProfile)
+        XCTAssertEqual(appState.referralNotice, .existingAccount)
+        XCTAssertNil(store.loadPendingReferralAttribution())
+    }
+
+    func testPendingTermsProfileUsesTermsSpecificReferralNotice() async throws {
+        let suiteName = "PendingTermsReferralAppStateTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/profile")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "id": 8,
+                  "displayName": "New-Buddy-0008",
+                  "status": "PENDING_TERMS",
+                  "provider": "GOOGLE"
+                }
+                """
+            )
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+
+        appState.openDeepLink(
+            try XCTUnwrap(URL(string: "buddystudy://referrals/BS-ABCDEFGH"))
+        )
+        let didResolveProfile = await waitUntil {
+            appState.referralNotice == .readyAfterTerms
+        }
+
+        XCTAssertTrue(didResolveProfile)
+        XCTAssertEqual(store.loadPendingReferralAttribution()?.accountID, 8)
+        XCTAssertFalse(appState.shouldPresentReferralLogin)
+    }
+
+    func testRelaunchRestoresAccountlessCapturedReferralUntilProfileIsAuthoritative() async throws {
+        let suiteName = "AccountlessCapturedReferralRelaunchTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .authentication,
+                accountID: nil
+            )
+        )
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/profile")
+            return Self.pendingTermsProfileResponse(for: request)
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+
+        XCTAssertNil(appState.referralNotice)
+        XCTAssertEqual(appState.pendingReferralCode, "BS-ABCDEFGH")
+        XCTAssertFalse(appState.shouldPresentReferralLogin)
+
+        await appState.loadCommunityProfile()
+
+        XCTAssertEqual(appState.referralNotice, .readyAfterTerms)
+        XCTAssertEqual(store.loadPendingReferralAttribution()?.accountID, 7)
+        XCTAssertEqual(store.loadPendingReferralAttribution()?.state, .captured)
+    }
+
+    func testRequiredTermsTerminalReferralFailureClearsPendingAttribution() async throws {
+        let suiteName = "TerminalTermsReferralTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .requiredTerms,
+                accountID: 7
+            )
+        )
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/profile"):
+                return Self.pendingTermsProfileResponse(for: request)
+            case ("POST", "/api/v1/referrals/redeem"):
+                return Self.response(
+                    for: request,
+                    statusCode: 409,
+                    body: """
+                    {
+                      "code": "REFERRAL_NOT_ELIGIBLE",
+                      "message": "Referral is not eligible"
+                    }
+                    """
+                )
+            case ("GET", "/api/v1/referrals/me"):
+                return Self.unredeemedReferralSummaryResponse(for: request)
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+        await appState.loadCommunityProfile()
+
+        await appState.finishReferralOnboardingAfterRequiredTerms()
+
+        XCTAssertNil(appState.pendingReferralCode)
+        XCTAssertNil(store.loadPendingReferralAttribution())
+        XCTAssertEqual(appState.referralNotice, .notEligible)
+    }
+
+    func testRequiredTermsTransientReferralFailureKeepsPendingAttribution() async throws {
+        let suiteName = "TransientTermsReferralTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .requiredTerms,
+                accountID: 7
+            )
+        )
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/profile"):
+                return Self.pendingTermsProfileResponse(for: request)
+            case ("POST", "/api/v1/referrals/redeem"),
+                 ("GET", "/api/v1/referrals/me"):
+                return Self.response(for: request, statusCode: 503, body: "{}")
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+        await appState.loadCommunityProfile()
+
+        await appState.finishReferralOnboardingAfterRequiredTerms()
+
+        XCTAssertEqual(appState.pendingReferralCode, "BS-ABCDEFGH")
+        XCTAssertEqual(
+            store.loadPendingReferralAttribution()?.state,
+            .captured
+        )
+        XCTAssertEqual(appState.referralNotice, .attributionPending)
+    }
+
+    func testSuccessfulRedeemWaitsForFreshSummaryBeforeShowingReward() async throws {
+        let suiteName = "UnconfirmedRedeemReferralTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .requiredTerms,
+                accountID: 7
+            )
+        )
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/profile"):
+                return Self.pendingTermsProfileResponse(for: request)
+            case ("POST", "/api/v1/referrals/redeem"):
+                return Self.redeemedReferralSummaryResponse(for: request)
+            case ("GET", "/api/v1/referrals/me"):
+                return Self.response(for: request, statusCode: 503, body: "{}")
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+        await appState.loadCommunityProfile()
+
+        await appState.finishReferralOnboardingAfterRequiredTerms()
+
+        XCTAssertEqual(appState.referralNotice, .attributionPending)
+        XCTAssertNotEqual(appState.referralNotice, .rewardApplied)
+        XCTAssertEqual(appState.pendingReferralCode, "BS-ABCDEFGH")
+        XCTAssertEqual(
+            store.loadPendingReferralAttribution()?.state,
+            .serverConfirmed
+        )
+    }
+
+    func testRequiredTermsReferralCompletionCannotRestoreNoticeAfterSignOut() async throws {
+        let suiteName = "ReferralTermsSignOutRaceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .requiredTerms,
+                accountID: 7
+            )
+        )
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            request.url?.path == "/api/v1/referrals/redeem" ? 150_000_000 : 0
+        }
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/profile"):
+                return Self.pendingTermsProfileResponse(for: request)
+            case ("POST", "/api/v1/referrals/redeem"):
+                return Self.redeemedReferralSummaryResponse(for: request)
+            default:
+                return Self.response(for: request, statusCode: 204, body: "")
+            }
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+        await appState.loadCommunityProfile()
+        let completion = Task { @MainActor in
+            await appState.finishReferralOnboardingAfterRequiredTerms()
+        }
+        try? await Task.sleep(nanoseconds: 30_000_000)
+
+        appState.signOutFromCommunity()
+        await completion.value
+
+        XCTAssertFalse(appState.isCommunitySessionActive)
+        XCTAssertNil(store.loadPendingReferralAttribution())
+        XCTAssertNil(appState.referralNotice)
+    }
+
+    func testActiveRelaunchReconcilesServerConfirmedReferralWithFreshSummary() async throws {
+        let suiteName = "ConfirmedReferralRelaunchTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .authentication,
+                accountID: 7,
+                state: .serverConfirmed
+            )
+        )
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/profile"):
+                return Self.activeProfileResponse(for: request)
+            case ("GET", "/api/v1/referrals/me"):
+                return Self.redeemedReferralSummaryResponse(for: request)
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+
+        await appState.loadCommunityProfile()
+        let didReconcile = await waitUntil(maxAttempts: 250) {
+            appState.referralNotice == .rewardApplied
+        }
+
+        XCTAssertTrue(didReconcile)
+        XCTAssertNil(store.loadPendingReferralAttribution())
+    }
+
+    func testActiveRelaunchLetsServerDecideEligibilityForOldCapturedReferral() async throws {
+        let suiteName = "CapturedReferralRelaunchTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .requiredTerms,
+                capturedAt: Date().addingTimeInterval(-72 * 60 * 60),
+                accountID: 7
+            )
+        )
+        let redeemRequestCount = LockedValue(0)
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/profile"):
+                return Self.activeProfileResponse(for: request)
+            case ("POST", "/api/v1/referrals/redeem"):
+                redeemRequestCount.set(redeemRequestCount.value + 1)
+                return Self.redeemedReferralSummaryResponse(for: request)
+            case ("GET", "/api/v1/referrals/me"):
+                return Self.redeemedReferralSummaryResponse(for: request)
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+
+        await appState.loadCommunityProfile()
+        let didRecover = await waitUntil(maxAttempts: 250) {
+            appState.referralNotice == .rewardApplied
+        }
+
+        XCTAssertTrue(didRecover)
+        XCTAssertEqual(redeemRequestCount.value, 1)
+        XCTAssertNil(store.loadPendingReferralAttribution())
+    }
+
+    func testActiveRelaunchClearsReferralBoundToAnotherAccount() async throws {
+        let suiteName = "MismatchedReferralRelaunchTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .requiredTerms,
+                accountID: 99
+            )
+        )
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/profile")
+            return Self.activeProfileResponse(for: request)
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+
+        await appState.loadCommunityProfile()
+
+        XCTAssertNil(store.loadPendingReferralAttribution())
+        XCTAssertEqual(appState.referralNotice, .notEligible)
+    }
+
+    func testPendingTermsRelaunchDoesNotRebindReferralFromAnotherAccount() async throws {
+        let suiteName = "MismatchedPendingTermsReferralTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .requiredTerms,
+                accountID: 99
+            )
+        )
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/profile")
+            return Self.pendingTermsProfileResponse(for: request)
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+
+        await appState.loadCommunityProfile()
+
+        XCTAssertNil(store.loadPendingReferralAttribution())
+        XCTAssertNil(appState.pendingReferralCode)
+        XCTAssertEqual(appState.referralNotice, .notEligible)
+    }
+
+    func testDelayedReferralSummaryCannotRestoreNoticeAfterSignOut() async throws {
+        let suiteName = "ReferralSignOutRaceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .authentication,
+                accountID: 7,
+                state: .serverConfirmed
+            )
+        )
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            request.url?.path == "/api/v1/referrals/me" ? 150_000_000 : 0
+        }
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/profile"):
+                return Self.activeProfileResponse(for: request)
+            case ("GET", "/api/v1/referrals/me"):
+                return Self.redeemedReferralSummaryResponse(for: request)
+            case ("POST", "/api/v1/auth/logout"):
+                return Self.response(for: request, statusCode: 204, body: "")
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+        await appState.loadCommunityProfile()
+        try? await Task.sleep(nanoseconds: 30_000_000)
+
+        appState.signOutFromCommunity()
+        try? await Task.sleep(nanoseconds: 220_000_000)
+
+        XCTAssertFalse(appState.isCommunitySessionActive)
+        XCTAssertNil(store.loadPendingReferralAttribution())
+        XCTAssertNil(appState.referralNotice)
+    }
+
+    func testDelayedProfileCannotReactivateSessionOrLoseReferralAfterSignOut() async throws {
+        let suiteName = "ReferralProfileSignOutRaceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(
+            defaults: defaults,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .authentication
+            )
+        )
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            request.url?.path == "/api/v1/profile" ? 150_000_000 : 0
+        }
+        let client = makeClient { request in
+            if request.url?.path == "/api/v1/profile" {
+                return Self.activeProfileResponse(for: request)
+            }
+            return Self.response(for: request, statusCode: 204, body: "")
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client
+        )
+        let profileLoad = Task { @MainActor in
+            await appState.loadCommunityProfile()
+        }
+        try? await Task.sleep(nanoseconds: 30_000_000)
+
+        appState.signOutFromCommunity()
+        await profileLoad.value
+
+        XCTAssertFalse(appState.isCommunitySessionActive)
+        XCTAssertNil(appState.communityProfile)
+        XCTAssertEqual(store.loadPendingReferralAttribution()?.code, "BS-ABCDEFGH")
+        XCTAssertTrue(appState.shouldPresentReferralLogin)
+        XCTAssertNil(appState.referralNotice)
+    }
+
+    func testReferralNoticesAreLocalizedInKoreanEnglishAndJapanese() {
+        let korean = AppStrings(language: .korean).referralRewardAppliedNotice
+        let english = AppStrings(language: .english).referralRewardAppliedNotice
+        let japanese = AppStrings(language: .japanese).referralRewardAppliedNotice
+
+        XCTAssertNotEqual(korean, english)
+        XCTAssertNotEqual(english, japanese)
+        XCTAssertTrue(japanese.contains("Pro"))
+        for language in AppLanguage.allCases {
+            let strings = AppStrings(language: language)
+            XCTAssertNotEqual(
+                strings.referralInvitationReady,
+                strings.referralReadyAfterTermsNotice
+            )
+        }
+    }
+
     func testOpeningStudyOnlyPersistsSelectionWithoutUpdatingBackendSettings() async throws {
         let suiteName = "StudyNavigationSettingsTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -1123,6 +2084,14 @@ final class QuestionGenerationFlowTests: XCTestCase {
         }
         let eventProvider = TestAppNotificationEventProvider()
         let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        store.savePendingReferralAttribution(
+            PendingReferralAttribution(
+                code: "BS-ABCDEFGH",
+                source: .authentication,
+                accountID: 7,
+                state: .serverConfirmed
+            )
+        )
         let client = makeClient { request in
             XCTAssertEqual(request.url?.path, "/api/v1/public/questions/liked")
             return Self.response(
@@ -1145,6 +2114,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertFalse(appState.hasLoadedLikedCommunityQuestions)
         XCTAssertFalse(appState.isCommunitySessionActive)
         XCTAssertNil(store.loadRemotePushRegistration()?.accessToken)
+        XCTAssertNil(store.loadPendingReferralAttribution())
+        XCTAssertNil(appState.referralNotice)
     }
 
     func testCreateQuestionSendsIdempotencyKeyAndDecodesAcceptedProcess() async throws {
@@ -3144,6 +4115,14 @@ final class QuestionGenerationFlowTests: XCTestCase {
         apnsToken: ""
     )
 
+    private static let anonymousRegistration = RemotePushRegistration(
+        deviceID: "device-1",
+        clientSecret: "client-secret",
+        apnsToken: "",
+        accessToken: "e30.eyJkZXZpY2VfaWQiOiJkZXZpY2UtMSIsImlzX2Fub255bW91cyI6dHJ1ZSwic3RhdHVzIjoiQU5PTllNT1VTIn0.signature",
+        accessTokenExpiresAt: Date().addingTimeInterval(3_600)
+    )
+
     private static let signedInRegistration = RemotePushRegistration(
         deviceID: "device-1",
         clientSecret: "client-secret",
@@ -3164,6 +4143,80 @@ final class QuestionGenerationFlowTests: XCTestCase {
             headerFields: ["Content-Type": "application/json"]
         )!
         return (response, Data(body.utf8))
+    }
+
+    private static func pendingTermsProfileResponse(
+        for request: URLRequest
+    ) -> (HTTPURLResponse, Data) {
+        response(
+            for: request,
+            statusCode: 200,
+            body: """
+            {
+              "id": 7,
+              "displayName": "New-Buddy-0007",
+              "status": "PENDING_TERMS",
+              "provider": "GOOGLE"
+            }
+            """
+        )
+    }
+
+    private static func activeProfileResponse(
+        for request: URLRequest
+    ) -> (HTTPURLResponse, Data) {
+        response(
+            for: request,
+            statusCode: 200,
+            body: """
+            {
+              "id": 7,
+              "displayName": "New-Buddy-0007",
+              "status": "ACTIVE",
+              "provider": "GOOGLE"
+            }
+            """
+        )
+    }
+
+    private static func unredeemedReferralSummaryResponse(
+        for request: URLRequest
+    ) -> (HTTPURLResponse, Data) {
+        response(
+            for: request,
+            statusCode: 200,
+            body: """
+            {
+              "code": "BS-ZYXWVUTS",
+              "successfulReferralCount": 0,
+              "rewardMonthsEarned": 0,
+              "rewardStartsAt": null,
+              "rewardEndsAt": null,
+              "hasRedeemedReferral": false,
+              "referralUrl": "https://api.ghkdqhrbals.org/referrals/BS-ZYXWVUTS"
+            }
+            """
+        )
+    }
+
+    private static func redeemedReferralSummaryResponse(
+        for request: URLRequest
+    ) -> (HTTPURLResponse, Data) {
+        response(
+            for: request,
+            statusCode: 200,
+            body: """
+            {
+              "code": "BS-ZYXWVUTS",
+              "successfulReferralCount": 0,
+              "rewardMonthsEarned": 1,
+              "rewardStartsAt": "2026-08-28T00:00:00Z",
+              "rewardEndsAt": "2026-09-28T00:00:00Z",
+              "hasRedeemedReferral": true,
+              "referralUrl": "https://api.ghkdqhrbals.org/referrals/BS-ZYXWVUTS"
+            }
+            """
+        )
     }
 
     private static func communityQuestionPageJSON(

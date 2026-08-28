@@ -347,6 +347,21 @@ jobs:
             exit 1
           fi
 
+          if ! plutil -convert json -o - "${profile_plist_path}" |
+            jq -e --arg expected "applinks:api.ghkdqhrbals.org" '
+              .Entitlements["com.apple.developer.associated-domains"] as $domains
+              | if ($domains | type) == "string" then
+                  $domains == "*" or $domains == $expected
+                elif ($domains | type) == "array" then
+                  ($domains | index("*")) != null or ($domains | index($expected)) != null
+                else
+                  false
+                end
+            ' >/dev/null; then
+            echo "Provisioning profile must include the BuddyStudy referral Associated Domain." >&2
+            exit 1
+          fi
+
           mkdir -p \
             "${HOME}/Library/MobileDevice/Provisioning Profiles" \
             "${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles"
@@ -407,12 +422,21 @@ jobs:
           fi
 
           codesign --verify --deep --strict --verbose=2 "${app_path}"
-          codesign -d --entitlements - "${app_path}" > "${RUNNER_TEMP}/ios-archive-entitlements.plist"
+          codesign --display --entitlements - --xml "${app_path}" > "${RUNNER_TEMP}/ios-archive-entitlements.plist"
+          plutil -lint "${RUNNER_TEMP}/ios-archive-entitlements.plist"
 
           grep -q "aps-environment" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
           grep -q "iCloud.io.github.ghkdqhrbals.StudyMate" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
           grep -q "com.apple.developer.icloud-services" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
           grep -q "com.apple.developer.applesignin" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
+          if ! plutil -convert json -o - "${RUNNER_TEMP}/ios-archive-entitlements.plist" |
+            jq -e --arg expected "applinks:api.ghkdqhrbals.org" '
+              .["com.apple.developer.associated-domains"] as $domains
+              | ($domains | type) == "array" and ($domains | index($expected)) != null
+            ' >/dev/null; then
+            echo "Signed archive must include the exact BuddyStudy referral Associated Domain." >&2
+            exit 1
+          fi
 
       - name: Export signed IPA
         run: |
@@ -489,12 +513,21 @@ jobs:
           fi
 
           codesign --verify --deep --strict --verbose=2 "${app_path}"
-          codesign -d --entitlements - "${app_path}" > "${RUNNER_TEMP}/ios-export-entitlements.plist"
+          codesign --display --entitlements - --xml "${app_path}" > "${RUNNER_TEMP}/ios-export-entitlements.plist"
+          plutil -lint "${RUNNER_TEMP}/ios-export-entitlements.plist"
 
           grep -q "aps-environment" "${RUNNER_TEMP}/ios-export-entitlements.plist"
           grep -q "production" "${RUNNER_TEMP}/ios-export-entitlements.plist"
           grep -q "iCloud.io.github.ghkdqhrbals.StudyMate" "${RUNNER_TEMP}/ios-export-entitlements.plist"
           grep -q "com.apple.developer.icloud-services" "${RUNNER_TEMP}/ios-export-entitlements.plist"
+          if ! plutil -convert json -o - "${RUNNER_TEMP}/ios-export-entitlements.plist" |
+            jq -e --arg expected "applinks:api.ghkdqhrbals.org" '
+              .["com.apple.developer.associated-domains"] as $domains
+              | ($domains | type) == "array" and ($domains | index($expected)) != null
+            ' >/dev/null; then
+            echo "Exported IPA must include the exact BuddyStudy referral Associated Domain." >&2
+            exit 1
+          fi
 
       - name: Write release metadata
         run: |

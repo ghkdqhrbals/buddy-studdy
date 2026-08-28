@@ -20,9 +20,11 @@ import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentity
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.profile.application.model.toProfile
+import com.buddystudy.backend.profile.application.service.ReferralRewardManager
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
+import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
@@ -34,14 +36,17 @@ class AuthenticatedLoginManager(
     private val roles: RoleAssignmentPort,
     private val tokenService: TokenProvider,
     private val displayNames: RandomDisplayNameProvider,
+    private val referralRewards: ReferralRewardManager,
 ) {
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     suspend fun attachAppleIdentity(
         principal: Principal,
         identity: AppleIdentity,
+        referralCode: String? = null,
         now: Instant,
     ): GoogleLoginResponse {
-        val user = users.findByProviderAndProviderId("APPLE", identity.providerId)
+        val resolution = users.findByProviderAndProviderId("APPLE", identity.providerId)
+            ?.let { UserResolution(it, isNewAccount = false) }
             ?: createUser(
                 provider = UserProvider.APPLE,
                 providerId = identity.providerId,
@@ -49,16 +54,19 @@ class AuthenticatedLoginManager(
                 now = now,
             )
 
-        return attachAuthenticatedUser(principal, user, now)
+        val referralAttributed = referralRewards.capturePendingAttribution(resolution.user.id, referralCode, now)
+        return attachAuthenticatedUser(principal, resolution.user, resolution.isNewAccount, referralAttributed, now)
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     suspend fun attachGoogleIdentity(
         principal: Principal,
         identity: GoogleIdentity,
+        referralCode: String? = null,
         now: Instant,
     ): GoogleLoginResponse {
-        val user = users.findByProviderAndProviderId("GOOGLE", identity.providerId)
+        val resolution = users.findByProviderAndProviderId("GOOGLE", identity.providerId)
+            ?.let { UserResolution(it, isNewAccount = false) }
             ?: createUser(
                 provider = UserProvider.GOOGLE,
                 providerId = identity.providerId,
@@ -66,17 +74,20 @@ class AuthenticatedLoginManager(
                 now = now,
             )
 
-        return attachAuthenticatedUser(principal, user, now)
+        val referralAttributed = referralRewards.capturePendingAttribution(resolution.user.id, referralCode, now)
+        return attachAuthenticatedUser(principal, resolution.user, resolution.isNewAccount, referralAttributed, now)
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     suspend fun attachEmailIdentity(
         principal: Principal,
         email: String,
         passwordHash: String,
+        referralCode: String? = null,
         now: Instant,
     ): GoogleLoginResponse {
-        val user = users.findByEmailAndProvider(email, "EMAIL")
+        val resolution = users.findByEmailAndProvider(email, "EMAIL")
+            ?.let { UserResolution(it, isNewAccount = false) }
             ?: createUser(
                 provider = UserProvider.EMAIL,
                 providerId = email,
@@ -84,14 +95,15 @@ class AuthenticatedLoginManager(
                 passwordHash = passwordHash,
                 now = now,
             )
-        if (user.passwordHash != passwordHash) {
+        if (resolution.user.passwordHash != passwordHash) {
             throw ApiException(
                 HttpStatus.UNAUTHORIZED,
                 ApiErrorCode.AUTH_INVALID_EMAIL_CREDENTIALS,
                 "Invalid email or password.",
             )
         }
-        return attachAuthenticatedUser(principal, user, now)
+        val referralAttributed = referralRewards.capturePendingAttribution(resolution.user.id, referralCode, now)
+        return attachAuthenticatedUser(principal, resolution.user, resolution.isNewAccount, referralAttributed, now)
     }
 
     private suspend fun createUser(
@@ -100,25 +112,28 @@ class AuthenticatedLoginManager(
         email: String,
         passwordHash: String? = null,
         now: Instant,
-    ): UserEntity {
+    ): UserResolution {
         repeat(DISPLAY_NAME_ATTEMPTS) {
             try {
-                return users.save(
-                    UserEntity(
-                        provider = provider,
-                        providerId = providerId,
-                        email = email,
-                        passwordHash = passwordHash,
-                        status = UserStatus.PENDING_TERMS,
-                        displayName = displayNames.next(),
-                        avatarColorSeed = "avatar-color-mint",
-                        createdAt = now,
-                        updatedAt = now,
+                return UserResolution(
+                    user = users.save(
+                        UserEntity(
+                            provider = provider,
+                            providerId = providerId,
+                            email = email,
+                            passwordHash = passwordHash,
+                            status = UserStatus.PENDING_TERMS,
+                            displayName = displayNames.next(),
+                            avatarColorSeed = "avatar-color-mint",
+                            createdAt = now,
+                            updatedAt = now,
+                        ),
                     ),
+                    isNewAccount = true,
                 )
             } catch (duplicate: DataIntegrityViolationException) {
                 users.findByProviderAndProviderId(provider.name, providerId)?.let {
-                    return it
+                    return UserResolution(it, isNewAccount = false)
                 }
             }
         }
@@ -132,6 +147,8 @@ class AuthenticatedLoginManager(
     private suspend fun attachAuthenticatedUser(
         principal: Principal,
         user: UserEntity,
+        isNewAccount: Boolean,
+        referralAttributed: Boolean,
         now: Instant,
     ): GoogleLoginResponse {
         roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
@@ -140,7 +157,13 @@ class AuthenticatedLoginManager(
         devices.save(device)
         val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
         val token = tokenService.create(user.id, device.deviceId, session.id, false, user.status.name)
-        return GoogleLoginResponse(user.toProfile(), token.first, token.second)
+        return GoogleLoginResponse(
+            profile = user.toProfile(),
+            accessToken = token.first,
+            accessTokenExpiresAt = token.second,
+            isNewAccount = isNewAccount,
+            referralAttributed = referralAttributed,
+        )
     }
 
     private fun UserEntity.toAccountUser() = AccountUser(id = id, status = status.name)
@@ -155,4 +178,9 @@ class AuthenticatedLoginManager(
     private companion object {
         const val DISPLAY_NAME_ATTEMPTS = 12
     }
+
+    private data class UserResolution(
+        val user: UserEntity,
+        val isNewAccount: Boolean,
+    )
 }

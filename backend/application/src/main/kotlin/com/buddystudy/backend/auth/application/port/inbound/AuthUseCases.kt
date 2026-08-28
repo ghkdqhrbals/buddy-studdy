@@ -17,8 +17,8 @@ interface IssueDeviceTokenUseCase {
 }
 
 interface LoginUseCase {
-    suspend fun appleLogin(principal: Principal, idToken: String): GoogleLoginResponse
-    suspend fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse
+    suspend fun appleLogin(principal: Principal, idToken: String, referralCode: String? = null): GoogleLoginResponse
+    suspend fun googleLogin(principal: Principal, idToken: String, referralCode: String? = null): GoogleLoginResponse
     suspend fun emailLogin(principal: Principal, command: EmailLoginCommand): GoogleLoginResponse
     suspend fun emailCode(email: String): EmailVerificationCodeResponse
     suspend fun logout(principal: Principal)

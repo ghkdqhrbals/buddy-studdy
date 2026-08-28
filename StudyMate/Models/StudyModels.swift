@@ -890,6 +890,147 @@ struct HomeAnnouncement: Identifiable, Equatable {
     }
 }
 
+struct ReferralLink: Equatable, Sendable {
+    static let canonicalScheme = "https"
+    static let canonicalHost = "api.ghkdqhrbals.org"
+    static let customScheme = "buddystudy"
+    static let pathComponent = "referrals"
+
+    let code: String
+
+    init?(code: String) {
+        guard let normalizedCode = Self.normalizedCode(code) else {
+            return nil
+        }
+        self.code = normalizedCode
+    }
+
+    init?(url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.user == nil,
+              components.password == nil,
+              components.port == nil,
+              components.query == nil,
+              components.fragment == nil,
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased(),
+              let percentEncodedHost = components.percentEncodedHost?.lowercased(),
+              !percentEncodedHost.contains("%") else {
+            return nil
+        }
+
+        let rawCode: String
+        switch (scheme, host) {
+        case (Self.canonicalScheme, Self.canonicalHost):
+            guard percentEncodedHost == Self.canonicalHost else {
+                return nil
+            }
+            let prefix = "/\(Self.pathComponent)/"
+            guard components.percentEncodedPath.hasPrefix(prefix) else {
+                return nil
+            }
+            rawCode = String(components.percentEncodedPath.dropFirst(prefix.count))
+        case (Self.customScheme, Self.pathComponent):
+            guard percentEncodedHost == Self.pathComponent else {
+                return nil
+            }
+            guard components.percentEncodedPath.hasPrefix("/") else {
+                return nil
+            }
+            rawCode = String(components.percentEncodedPath.dropFirst())
+        default:
+            return nil
+        }
+
+        guard !rawCode.isEmpty,
+              !rawCode.contains("/"),
+              !rawCode.contains("%"),
+              let normalizedCode = Self.normalizedCode(rawCode) else {
+            return nil
+        }
+        code = normalizedCode
+    }
+
+    static func normalizedCode(_ value: String) -> String? {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard normalized.count == 11,
+              normalized.hasPrefix("BS-") else {
+            return nil
+        }
+        let suffix = normalized.dropFirst(3)
+        let allowedCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ23456789")
+        guard suffix.unicodeScalars.allSatisfy(allowedCharacters.contains) else {
+            return nil
+        }
+        return normalized
+    }
+}
+
+enum PendingReferralSource: String, Codable, Equatable, Sendable {
+    case authentication
+    case requiredTerms
+}
+
+enum PendingReferralState: String, Codable, Equatable, Sendable {
+    case captured
+    case serverConfirmed
+}
+
+struct PendingReferralAttribution: Codable, Equatable, Sendable {
+    var code: String
+    var source: PendingReferralSource
+    var capturedAt: Date
+    var accountID: Int?
+    var state: PendingReferralState
+
+    init(
+        code: String,
+        source: PendingReferralSource,
+        capturedAt: Date = Date(),
+        accountID: Int? = nil,
+        state: PendingReferralState = .captured
+    ) {
+        self.code = code
+        self.source = source
+        self.capturedAt = capturedAt
+        self.accountID = accountID
+        self.state = state
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case source
+        case capturedAt
+        case accountID
+        case state
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        code = try container.decode(String.self, forKey: .code)
+        source = try container.decode(PendingReferralSource.self, forKey: .source)
+        capturedAt = try container.decodeIfPresent(Date.self, forKey: .capturedAt)
+            ?? .distantPast
+        accountID = try container.decodeIfPresent(Int.self, forKey: .accountID)
+        state = try container.decodeIfPresent(PendingReferralState.self, forKey: .state)
+            ?? .captured
+    }
+}
+
+enum ReferralNotice: String, Identifiable, Equatable {
+    case existingAccount
+    case readyForSignUp
+    case readyAfterTerms
+    case attributionPendingTerms
+    case attributionPending
+    case rewardApplied
+    case notEligible
+
+    var id: String { rawValue }
+}
+
 enum AppRoute: Equatable, Hashable {
     case home
     case studyList
@@ -2880,14 +3021,71 @@ struct AppStrings {
             "紹介コードは1アカウントにつき1回のみ適用できます。自己紹介や重複アカウントの利用は禁止され、特典の譲渡や換金はできません。"
         )
     }
-    var referralYourCode: String { text("내 추천 코드", "Your referral code", "あなたの紹介コード") }
+    var referralYourCode: String { text("내 추천 링크", "My referral link", "自分の紹介リンク") }
+    var referralLinkUnavailable: String {
+        text(
+            "추천 링크를 만들 수 없어 새로고침이 필요합니다.",
+            "The referral link could not be created. Refresh and try again.",
+            "紹介リンクを作成できませんでした。更新してもう一度お試しください。"
+        )
+    }
     var referralSuccessfulCount: String { text("추천 완료", "Successful referrals", "紹介完了") }
     var referralRewardMonths: String { text("받은 보상", "Reward earned", "獲得特典") }
     var referralEnterCode: String { text("추천 코드 입력", "Enter referral code", "紹介コードを入力") }
     var referralRedeem: String { text("코드 등록", "Apply code", "コードを適用") }
     var referralRedeemed: String { text("추천 코드 등록 완료", "Referral code applied", "紹介コード適用済み") }
-    var referralCopy: String { text("복사", "Copy", "コピー") }
+    var referralCopy: String { text("링크 복사", "Copy link", "リンクをコピー") }
     var referralShare: String { text("공유", "Share", "共有") }
+    var referralInvitationTitle: String { text("친구의 초대", "A friend's invitation", "友達からの招待") }
+    var referralInvitationReady: String {
+        text(
+            "로그인하면 신규 가입 여부를 확인해 추천 혜택을 연결해 드려요.",
+            "Sign in and we'll connect the referral benefit if this creates a new account.",
+            "ログインすると、新規アカウントの場合に紹介特典が適用されます。"
+        )
+    }
+    var referralReadyAfterTermsNotice: String {
+        text(
+            "추천 코드를 보관했어요. 필수 약관에 동의해 가입을 마치면 혜택 적용 여부를 확인할게요.",
+            "Your referral code is saved. Finish the required terms and we'll confirm the benefit.",
+            "紹介コードを保存しました。必須規約への同意を完了すると、特典の適用を確認します。"
+        )
+    }
+    var referralExistingAccountNotice: String {
+        text(
+            "추천 혜택은 이 링크로 새 계정을 만드는 경우에만 받을 수 있어요. 현재 계정에는 추천 코드를 저장하지 않았습니다.",
+            "Referral benefits are only for a new account created from this link. The code was not saved to your current account.",
+            "紹介特典は、このリンクから新しいアカウントを作成した場合のみ受け取れます。現在のアカウントにはコードを保存していません。"
+        )
+    }
+    var referralAttributionPendingTermsNotice: String {
+        text(
+            "추천 가입이 확인됐어요. 필수 약관에 동의해 가입을 마치면 Pro 한 달 혜택이 적용됩니다.",
+            "Your referred sign-up is confirmed. Accept the required terms to receive one month of Pro.",
+            "紹介経由の登録を確認しました。必須規約に同意して登録を完了すると、Proを1か月利用できます。"
+        )
+    }
+    var referralRewardAppliedNotice: String {
+        text(
+            "가입이 완료되어 Pro 한 달 추천 혜택이 적용됐어요.",
+            "Sign-up is complete and your one-month Pro referral benefit is now active.",
+            "登録が完了し、Proを1か月利用できる紹介特典が適用されました。"
+        )
+    }
+    var referralAttributionPendingNotice: String {
+        text(
+            "추천 연결은 접수됐어요. 혜택 확인이 지연되고 있어 추천 화면에서 다시 확인할 수 있습니다.",
+            "Your referral was received, but benefit confirmation is delayed. You can check again from Referrals.",
+            "紹介は受け付けられましたが、特典の確認に時間がかかっています。紹介画面から再確認できます。"
+        )
+    }
+    var referralNotEligibleNotice: String {
+        text(
+            "이 추천은 신규 가입 혜택 조건에 맞지 않아 적용되지 않았어요.",
+            "This referral was not applied because it did not meet the new-account eligibility rules.",
+            "この紹介は新規登録特典の条件を満たしていないため、適用されませんでした。"
+        )
+    }
     var referralLoadFailed: String {
         text(
             "추천 정보를 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
@@ -2910,10 +3108,28 @@ struct AppStrings {
     }
     func referralShareMessage(code: String) -> String {
         text(
-            "BuddyStudy 추천 코드 \(code)를 등록하면 티어 2를 한 달 동안 이용할 수 있어요.",
-            "Use my BuddyStudy referral code \(code) to get one month of Tier 2.",
-            "BuddyStudyの紹介コード \(code) を使うと、ティア2を1か月利用できます。"
+            "BuddyStudy에서 함께 공부해요. 이 초대 링크로 새로 가입하면 Pro를 한 달 동안 이용할 수 있어요. (추천 코드: \(code))",
+            "Study with me on BuddyStudy. Create a new account from this invitation to get one month of Pro. (Referral code: \(code))",
+            "BuddyStudyで一緒に勉強しましょう。この招待から新規登録すると、Proを1か月利用できます。（紹介コード：\(code)）"
         )
+    }
+    func referralNoticeMessage(_ notice: ReferralNotice) -> String {
+        switch notice {
+        case .existingAccount:
+            referralExistingAccountNotice
+        case .readyForSignUp:
+            referralInvitationReady
+        case .readyAfterTerms:
+            referralReadyAfterTermsNotice
+        case .attributionPendingTerms:
+            referralAttributionPendingTermsNotice
+        case .attributionPending:
+            referralAttributionPendingNotice
+        case .rewardApplied:
+            referralRewardAppliedNotice
+        case .notEligible:
+            referralNotEligibleNotice
+        }
     }
     var billingDetails: String { text("결제 상세", "Payment details", "支払い詳細") }
     var billingAmount: String { text("결제 금액", "Amount", "支払い金額") }

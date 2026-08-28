@@ -44,12 +44,14 @@ protocol CommunityRepository {
 
     func loginWithGoogle(
         registration: RemotePushRegistration,
-        idToken: String
+        idToken: String,
+        referralCode: String?
     ) async throws -> CommunityLoginResult
 
     func loginWithApple(
         registration: RemotePushRegistration,
-        idToken: String
+        idToken: String,
+        referralCode: String?
     ) async throws -> CommunityLoginResult
 
     func requestEmailVerificationCode(
@@ -61,7 +63,8 @@ protocol CommunityRepository {
         registration: RemotePushRegistration,
         email: String,
         password: String,
-        verificationCode: String?
+        verificationCode: String?,
+        referralCode: String?
     ) async throws -> CommunityLoginResult
 
     func logout(registration: RemotePushRegistration) async throws

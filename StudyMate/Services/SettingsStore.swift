@@ -28,6 +28,7 @@ final class SettingsStore {
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let isCloudSyncEnabled = "isCloudSyncEnabled"
         static let isCommunitySignedIn = "isCommunitySignedIn"
+        static let pendingReferralAttribution = "pendingReferralAttribution"
         static let profileAvatarSymbolName = "profileAvatarSymbolName"
         static let profileAvatarImageData = "profileAvatarImageData"
         static let profileAvatarColorSeed = "profileAvatarColorSeed"
@@ -744,6 +745,17 @@ final class SettingsStore {
 
     func saveIsCommunitySignedIn(_ isSignedIn: Bool) {
         defaults.set(isSignedIn, forKey: Keys.isCommunitySignedIn)
+    }
+
+    func loadPendingReferralAttribution() -> PendingReferralAttribution? {
+        guard let data = defaults.data(forKey: Keys.pendingReferralAttribution) else {
+            return nil
+        }
+        return try? decoder.decode(PendingReferralAttribution.self, from: data)
+    }
+
+    func savePendingReferralAttribution(_ attribution: PendingReferralAttribution?) {
+        saveOptional(attribution, forKey: Keys.pendingReferralAttribution)
     }
 
     func loadProfileAvatarSymbolName() -> String {

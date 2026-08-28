@@ -64,6 +64,27 @@ automatic-renewal disclosure, and localized links
 to the Terms of Use and Privacy Policy. Purchase, restore, and management remain
 separate user actions on the same screen.
 
+### Referral reward membership
+
+The canonical share URL is
+`https://api.ghkdqhrbals.org/referrals/{code}`. Only a newly created
+authenticated account carrying a valid referral attribution is eligible; signing
+in to an existing account is not. Manual code entry only recovers attribution
+within the server-defined short sign-up eligibility window; it follows the same
+new-account onboarding contract and does not widen eligibility.
+
+The backend grants the reward when the new member accepts all required terms and
+becomes `ACTIVE`. The inviter and new member each receive one non-renewing month
+of Pro (`TIER2`). One new account can be attributed only once, self-referral is
+rejected, and the referral plus both reward grants commit in one transaction.
+Stable uniqueness keys and locked users make repeated activation or redemption
+idempotent and prevent a one-sided reward.
+
+A referral reward is a server-owned temporary membership, not an App Store
+purchase. It creates no invoice, payment, subscription, or RevenueCat
+entitlement. `GET /api/v1/billing/status` remains the client authority for the
+resulting effective tier and quota.
+
 ## Ledger and state
 
 - `invoices` is the current invoice projection.
@@ -88,6 +109,10 @@ separate user actions on the same screen.
   `subscriptions` projects one Apple `originalTransactionId` each.
 - `user_entitlement_projection` selects the single highest currently valid tier
   without summing duplicate subscriptions.
+- `user_memberships` stores temporary non-StoreKit grants such as referral
+  `TIER2` access. Effective membership is the highest currently active tier
+  across this table and `user_entitlement_projection`; overlapping access is not
+  added as duplicate monthly quota.
 - `user_quota` stores one authoritative current row per user: monthly anchor and
   boundaries, effective tier and base limit, bonus, committed and reserved
   counters, derived remaining capacity, policy version, and row version.
@@ -573,6 +598,10 @@ Tier changes use these rules:
   confirmation, webhook delivery, reconciliation, and replay therefore converge
   without a second mutation. A deferred downgrade writes no quota change until
   its lower-tier renewal becomes effective.
+- Referral grant activation makes `TIER2` effective unless a higher valid tier
+  already wins. Its activation and expiration preserve the quota period,
+  committed usage, current-period bonus, and active reservations; expiration
+  falls back to the next valid paid or free tier without resetting allowance.
 
 Example: a TIER3 user with 320 committed questions, 5 active reservations, and
 10 bonus questions selects TIER2. Until the TIER3 period ends the full TIER3

@@ -12,7 +12,13 @@ data class DeviceRegisterResponse(
 
 data class AccessTokenResponse(val accessToken: String, val accessTokenExpiresAt: Instant)
 data class EmailVerificationCodeResponse(val email: String, val expiresInSeconds: Long)
-data class GoogleLoginResponse(val profile: UserProfileResponse, val accessToken: String, val accessTokenExpiresAt: Instant)
+data class GoogleLoginResponse(
+    val profile: UserProfileResponse,
+    val accessToken: String,
+    val accessTokenExpiresAt: Instant,
+    val isNewAccount: Boolean = false,
+    val referralAttributed: Boolean = false,
+)
 typealias EmailLoginResponse = GoogleLoginResponse
 
 data class LoggedInDeviceResponse(
