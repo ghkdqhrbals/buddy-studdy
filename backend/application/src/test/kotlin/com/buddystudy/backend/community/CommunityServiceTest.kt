@@ -315,7 +315,10 @@ class CommunityServiceTest {
         users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
         (100L..103L).forEach { questions.rows += publicQuestion(it, 10, "Topic $it") }
         nativeAdEligibility.adFree = false
-        nativeAdSlots.policy = NativeAdPlacementPolicyEntity(enabled = true)
+        nativeAdSlots.policy = NativeAdPlacementPolicyEntity(
+            enabled = true,
+            minimumSecondsBetweenDeliveries = 0,
+        )
 
         val response = service.getPublicQuestionFeedV2(principal, language = "ko", limit = 20, offset = 0)
 
@@ -325,6 +328,7 @@ class CommunityServiceTest {
         assertThat(slotIndex).isBetween(2, 3)
         assertThat(response.items.last().nativeAdSlot).isNull()
         assertThat(response.items[slotIndex].nativeAdSlot?.placement).isEqualTo("COMMUNITY_FEED")
+        assertThat(nativeAdSlots.lastMinimumSecondsBetweenDeliveries).isZero()
 
         val laterPage = service.getPublicQuestionFeedV2(principal, language = "ko", limit = 1, offset = 1)
         val search = service.getPublicQuestionsV2(principal, query = "Topic", language = "ko", limit = 20, offset = 0)
@@ -909,6 +913,7 @@ class CommunityServiceTest {
     private class FakeNativeAdSlotPort : NativeAdSlotPort {
         var policy: NativeAdPlacementPolicyEntity? = null
         val slots = mutableListOf<NativeAdSlotEntity>()
+        var lastMinimumSecondsBetweenDeliveries: Int? = null
 
         override suspend fun findPlacementPolicy(placement: String) = policy?.takeIf { it.placement == placement }
         override suspend fun savePlacementPolicy(entity: NativeAdPlacementPolicyEntity): NativeAdPlacementPolicyEntity {
@@ -921,6 +926,7 @@ class CommunityServiceTest {
             minimumSecondsBetweenDeliveries: Int,
         ): NativeAdSlotEntity? {
             if (dailyDeliveryCap <= 0) return null
+            lastMinimumSecondsBetweenDeliveries = minimumSecondsBetweenDeliveries
             return NativeAdSlotEntity(
                 id = (slots.size + 1).toLong(),
                 slotId = reservation.slotId,

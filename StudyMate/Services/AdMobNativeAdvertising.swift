@@ -8,7 +8,6 @@ struct NativeAdvertisementRequestPolicy {
     static let loadTimeout: Duration = .seconds(5)
     static let minimumRequestInterval: TimeInterval = 60
     static let cacheLifetime: TimeInterval = 55 * 60
-    static let rowHeight: CGFloat = 196
 
     static func canStartRequest(lastRequestAt: Date?, now: Date) -> Bool {
         guard let lastRequestAt else { return true }
@@ -29,6 +28,19 @@ struct NativeAdvertisementRequestPolicy {
         currentAuthorization.permitsRequest &&
             loadedAuthorizationGeneration == currentAuthorization.generation &&
             isFresh(loadedAt: loadedAt, now: now)
+    }
+}
+
+struct NativeAdvertisementRowLayoutPolicy {
+    static let contentInset: CGFloat = 10
+    static let mediaSideLength: CGFloat = 120
+    static let textStackSpacing: CGFloat = 5
+    static let headlineLineLimit = 2
+    static let callToActionLineLimit = 1
+    static let minimumHeight = mediaSideLength + (contentInset * 2)
+
+    static func resolvedHeight(fittingHeight: CGFloat) -> CGFloat {
+        max(minimumHeight, fittingHeight)
     }
 }
 
@@ -725,16 +737,14 @@ struct MobileNativeAdvertisementSlotRow: View {
             switch viewModel.phase {
             case .loadingAdMob, .loadingFallback:
                 loadingPlaceholder
-                    .frame(height: NativeAdvertisementRequestPolicy.rowHeight)
+                    .frame(minHeight: NativeAdvertisementRowLayoutPolicy.minimumHeight)
             case .displayingAdMob(let nativeAd):
                 MobileAdMobNativeAdView(
                     nativeAd: nativeAd,
                     advertisementLabel: strings.advertisementLabel
                 )
-                .frame(minHeight: NativeAdvertisementRequestPolicy.rowHeight)
             case .displayingFallback(let advertisement):
                 fallbackView(advertisement)
-                    .frame(minHeight: NativeAdvertisementRequestPolicy.rowHeight)
             case .unavailable:
                 Color.clear
                     .frame(height: 0)
@@ -803,11 +813,15 @@ struct MobileNativeAdvertisementSlotRow: View {
             Button {
                 openFallbackAdvertisement(advertisement)
             } label: {
-                MobileNativeAdvertisementRow(advertisement: advertisement, strings: strings)
+                MobileNativeAdvertisementRow(
+                    advertisement: advertisement,
+                    strings: strings,
+                    style: .compactSlot
+                )
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Menu {
                 selectionExplanationButton
@@ -972,7 +986,9 @@ private struct MobileAdMobNativeAdView: UIViewRepresentable {
         )
         return CGSize(
             width: width,
-            height: max(NativeAdvertisementRequestPolicy.rowHeight, fittingSize.height)
+            height: NativeAdvertisementRowLayoutPolicy.resolvedHeight(
+                fittingHeight: fittingSize.height
+            )
         )
     }
 }
@@ -981,8 +997,6 @@ private final class BuddyStudyNativeAdView: NativeAdView {
     private let media = MediaView()
     private let iconImageView = UIImageView()
     private let headlineLabel = UILabel()
-    private let bodyLabel = UILabel()
-    private let advertiserLabel = UILabel()
     private let badgeLabel = UILabel()
     private let callToActionButton = UIButton(type: .system)
     private let choicesView = AdChoicesView()
@@ -1006,12 +1020,6 @@ private final class BuddyStudyNativeAdView: NativeAdView {
 
         iconImageView.image = nativeAd.icon?.image
         iconImageView.isHidden = nativeAd.icon?.image == nil
-
-        bodyLabel.text = nativeAd.body
-        bodyLabel.isHidden = nativeAd.body?.isEmpty != false
-
-        advertiserLabel.text = nativeAd.advertiser
-        advertiserLabel.isHidden = nativeAd.advertiser?.isEmpty != false
 
         callToActionButton.setTitle(nativeAd.callToAction, for: .normal)
         callToActionButton.isHidden = nativeAd.callToAction?.isEmpty != false
@@ -1037,24 +1045,8 @@ private final class BuddyStudyNativeAdView: NativeAdView {
 
         headlineLabel.font = .preferredFont(forTextStyle: .headline)
         headlineLabel.adjustsFontForContentSizeCategory = true
-        headlineLabel.numberOfLines = 0
-        headlineLabel.lineBreakMode = .byWordWrapping
         headlineLabel.textColor = .label
         headlineLabel.setContentCompressionResistancePriority(.required, for: .vertical)
-
-        bodyLabel.font = .preferredFont(forTextStyle: .subheadline)
-        bodyLabel.adjustsFontForContentSizeCategory = true
-        bodyLabel.numberOfLines = 0
-        bodyLabel.lineBreakMode = .byWordWrapping
-        bodyLabel.textColor = .secondaryLabel
-        bodyLabel.setContentCompressionResistancePriority(.required, for: .vertical)
-
-        advertiserLabel.font = .preferredFont(forTextStyle: .caption1)
-        advertiserLabel.adjustsFontForContentSizeCategory = true
-        advertiserLabel.numberOfLines = 0
-        advertiserLabel.lineBreakMode = .byWordWrapping
-        advertiserLabel.textColor = .secondaryLabel
-        advertiserLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         badgeLabel.font = .preferredFont(forTextStyle: .caption2)
         badgeLabel.adjustsFontForContentSizeCategory = true
@@ -1070,18 +1062,21 @@ private final class BuddyStudyNativeAdView: NativeAdView {
         callToActionConfiguration.baseForegroundColor = .white
         callToActionConfiguration.cornerStyle = .medium
         callToActionConfiguration.contentInsets = NSDirectionalEdgeInsets(
-            top: 7,
-            leading: 12,
-            bottom: 7,
-            trailing: 12
+            top: 6,
+            leading: 10,
+            bottom: 6,
+            trailing: 10
         )
         callToActionButton.configuration = callToActionConfiguration
-        callToActionButton.titleLabel?.font = .preferredFont(forTextStyle: .callout)
+        callToActionButton.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
         callToActionButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        callToActionButton.titleLabel?.numberOfLines = 0
-        callToActionButton.titleLabel?.lineBreakMode = .byWordWrapping
         callToActionButton.titleLabel?.textAlignment = .center
         callToActionButton.setContentCompressionResistancePriority(.required, for: .vertical)
+        updateLineLimits()
+        _ = registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
+            (view: BuddyStudyNativeAdView, _) in
+            view.updateLineLimits()
+        }
 
         choicesView.translatesAutoresizingMaskIntoConstraints = false
         choicesView.setContentHuggingPriority(.required, for: .horizontal)
@@ -1094,56 +1089,92 @@ private final class BuddyStudyNativeAdView: NativeAdView {
             arrangedSubviews: [
                 iconImageView,
                 badgeLabel,
-                advertiserLabel,
                 metadataSpacer,
                 choicesView,
             ]
         )
         metadataRow.axis = .horizontal
         metadataRow.alignment = .center
-        metadataRow.spacing = 7
+        metadataRow.spacing = NativeAdvertisementRowLayoutPolicy.textStackSpacing
 
-        let textStack = UIStackView(arrangedSubviews: [metadataRow, headlineLabel, bodyLabel, callToActionButton])
+        let textStack = UIStackView(
+            arrangedSubviews: [metadataRow, headlineLabel, callToActionButton]
+        )
         textStack.translatesAutoresizingMaskIntoConstraints = false
         textStack.axis = .vertical
         textStack.alignment = .fill
-        textStack.spacing = 7
+        textStack.spacing = NativeAdvertisementRowLayoutPolicy.textStackSpacing
 
         addSubview(media)
         addSubview(textStack)
 
-        let iconWidthConstraint = iconImageView.widthAnchor.constraint(equalToConstant: 26)
+        let iconWidthConstraint = iconImageView.widthAnchor.constraint(equalToConstant: 24)
         iconWidthConstraint.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
-            media.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            media.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            media.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -12),
-            media.widthAnchor.constraint(equalToConstant: 132),
+            media.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: NativeAdvertisementRowLayoutPolicy.contentInset
+            ),
+            media.topAnchor.constraint(
+                equalTo: topAnchor,
+                constant: NativeAdvertisementRowLayoutPolicy.contentInset
+            ),
+            media.bottomAnchor.constraint(
+                lessThanOrEqualTo: bottomAnchor,
+                constant: -NativeAdvertisementRowLayoutPolicy.contentInset
+            ),
+            media.widthAnchor.constraint(
+                equalToConstant: NativeAdvertisementRowLayoutPolicy.mediaSideLength
+            ),
             media.heightAnchor.constraint(equalTo: media.widthAnchor),
 
-            textStack.leadingAnchor.constraint(equalTo: media.trailingAnchor, constant: 12),
-            textStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            textStack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            textStack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -12),
+            textStack.leadingAnchor.constraint(
+                equalTo: media.trailingAnchor,
+                constant: NativeAdvertisementRowLayoutPolicy.contentInset
+            ),
+            textStack.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -NativeAdvertisementRowLayoutPolicy.contentInset
+            ),
+            textStack.topAnchor.constraint(
+                equalTo: topAnchor,
+                constant: NativeAdvertisementRowLayoutPolicy.contentInset
+            ),
+            textStack.bottomAnchor.constraint(
+                lessThanOrEqualTo: bottomAnchor,
+                constant: -NativeAdvertisementRowLayoutPolicy.contentInset
+            ),
 
             badgeLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 18),
             badgeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24),
             iconWidthConstraint,
             iconImageView.heightAnchor.constraint(equalTo: iconImageView.widthAnchor),
-            callToActionButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 34),
+            callToActionButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
 
             choicesView.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
             choicesView.heightAnchor.constraint(greaterThanOrEqualToConstant: 20),
         ])
 
         headlineView = headlineLabel
-        bodyView = bodyLabel
-        advertiserView = advertiserLabel
         iconView = iconImageView
         callToActionView = callToActionButton
         mediaView = media
         adChoicesView = choicesView
+    }
+
+    private func updateLineLimits() {
+        let usesAccessibilityLayout = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        headlineLabel.numberOfLines = usesAccessibilityLayout
+            ? 0
+            : NativeAdvertisementRowLayoutPolicy.headlineLineLimit
+        headlineLabel.lineBreakMode = usesAccessibilityLayout ? .byWordWrapping : .byTruncatingTail
+        callToActionButton.titleLabel?.numberOfLines = usesAccessibilityLayout
+            ? 0
+            : NativeAdvertisementRowLayoutPolicy.callToActionLineLimit
+        callToActionButton.titleLabel?.lineBreakMode = usesAccessibilityLayout
+            ? .byWordWrapping
+            : .byTruncatingTail
     }
 }
 #endif

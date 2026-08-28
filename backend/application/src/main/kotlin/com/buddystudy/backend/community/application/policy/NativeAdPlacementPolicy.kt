@@ -8,7 +8,11 @@ object NativeAdPlacementPolicy {
     const val minimumFeedItemCount = 4
     const val earliestPosition = 2
     const val minimumSecondsBetweenDeliveries = 60
+    const val maximumSecondsBetweenDeliveries = 2_592_000
     const val metricsWindowDays = 30L
+
+    fun isValidMinimumSecondsBetweenDeliveries(value: Int): Boolean =
+        value == 0 || value in minimumSecondsBetweenDeliveries..maximumSecondsBetweenDeliveries
 
     fun position(
         policy: NativeAdPlacementPolicyEntity,

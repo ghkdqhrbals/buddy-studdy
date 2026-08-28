@@ -108,7 +108,7 @@ data class AdminNativeAdPlacementPolicyRequest(
     @field:NotBlank var placement: String = "COMMUNITY_FEED",
     var enabled: Boolean = false,
     @field:Min(0) @field:Max(100) var dailyDeliveryCap: Int = 2,
-    @field:Min(60) @field:Max(2_592_000) var minimumSecondsBetweenDeliveries: Int = 21_600,
+    @field:Min(0) @field:Max(2_592_000) var minimumSecondsBetweenDeliveries: Int = 21_600,
     @field:Min(4) @field:Max(100) var minimumFeedItemCount: Int = 4,
     @field:Min(2) @field:Max(99) var earliestPosition: Int = 2,
     @field:Min(2) @field:Max(99) var latestPosition: Int = 7,

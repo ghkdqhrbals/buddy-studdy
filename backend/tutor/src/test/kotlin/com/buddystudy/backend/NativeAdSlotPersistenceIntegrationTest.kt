@@ -85,6 +85,17 @@ class NativeAdSlotPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `zero repeat gap permits consecutive delivery while preserving the daily cap`(): Unit = runBlocking {
+        val now = Instant.parse("2026-08-25T01:00:00Z")
+
+        assertThat(slots.reserveSlot(reservation("slot-no-gap-first", now), 2, 0)).isNotNull()
+        assertThat(slots.reserveSlot(reservation("slot-no-gap-second", now), 2, 0)).isNotNull()
+        assertThat(slots.reserveSlot(reservation("slot-no-gap-over-cap", now), 2, 0)).isNull()
+
+        assertThat(count("select count(*) from native_ad_slots where user_id = ${user.id}")).isEqualTo(2)
+    }
+
+    @Test
     fun `ad eligibility follows the authoritative effective tier and fails closed when unresolved`(): Unit = runBlocking {
         val anonymous = users.save(
             UserEntity(

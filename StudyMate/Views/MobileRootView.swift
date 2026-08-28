@@ -9955,34 +9955,83 @@ private struct MobileHomeCategoryRow: View {
 
 }
 
+enum MobileNativeAdvertisementRowStyle: Equatable {
+    case standard
+    case compactSlot
+
+    var sectionSpacing: CGFloat { self == .compactSlot ? 6 : 10 }
+    var verticalPadding: CGFloat { self == .compactSlot ? 8 : 10 }
+    var disclosureFont: Font { self == .compactSlot ? .caption2 : .caption }
+    var disclosureLineSpacing: CGFloat { self == .compactSlot ? 0 : 2 }
+    var disclosureHorizontalPadding: CGFloat { self == .compactSlot ? 6 : 8 }
+    var disclosureVerticalPadding: CGFloat { self == .compactSlot ? 4 : 6 }
+    var disclosureCornerRadius: CGFloat { self == .compactSlot ? 7 : 8 }
+    var mainContentSpacing: CGFloat { self == .compactSlot ? 8 : 12 }
+    var thumbnailSideLength: CGFloat { self == .compactSlot ? 64 : 92 }
+    var thumbnailCornerRadius: CGFloat { self == .compactSlot ? 9 : 12 }
+    var bodyFont: Font { self == .compactSlot ? .caption : .subheadline }
+    var bodyLineLimit: Int { self == .compactSlot ? 1 : 2 }
+}
+
+enum MobileNativeAdvertisementRowContentPolicy {
+    static func normalizedText(_ value: String) -> String {
+        value
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+    }
+
+    static func promotedBody(
+        _ body: String?,
+        affiliateDisclosure: String?,
+        suppressMatchingDisclosure: Bool
+    ) -> String? {
+        guard let body,
+              !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        guard suppressMatchingDisclosure else { return body }
+
+        let normalizedBody = normalizedText(body)
+        if let affiliateDisclosure,
+           normalizedBody == normalizedText(affiliateDisclosure) {
+            return nil
+        }
+        return normalizedBody
+    }
+}
+
 struct MobileNativeAdvertisementRow: View {
     var advertisement: CommunityNativeAdvertisement
     var strings: AppStrings
+    var style: MobileNativeAdvertisementRowStyle = .standard
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: style.sectionSpacing) {
             advertisementTopMeta
 
             if let disclosure = affiliateDisclosure {
                 Text(disclosure)
-                    .font(.caption)
+                    .font(style.disclosureFont)
                     .foregroundStyle(Color.secondary)
                     .multilineTextAlignment(.leading)
-                    .lineSpacing(2)
+                    .lineSpacing(style.disclosureLineSpacing)
                     .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, style.disclosureHorizontalPadding)
+                    .padding(.vertical, style.disclosureVerticalPadding)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         Color(.secondarySystemBackground),
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        in: RoundedRectangle(
+                            cornerRadius: style.disclosureCornerRadius,
+                            style: .continuous
+                        )
                     )
             }
 
             advertisementMainContent
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, style.verticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(Color.primary)
         .contentShape(Rectangle())
@@ -10020,7 +10069,7 @@ struct MobileNativeAdvertisementRow: View {
     }
 
     private func advertisementMainContent(thumbnail: Image?) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: style.mainContentSpacing) {
             advertisementCopy
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -10028,9 +10077,14 @@ struct MobileNativeAdvertisementRow: View {
                 thumbnail
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 92, height: 92)
+                    .frame(width: style.thumbnailSideLength, height: style.thumbnailSideLength)
                     .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: style.thumbnailCornerRadius,
+                            style: .continuous
+                        )
+                    )
                     .accessibilityHidden(true)
             }
         }
@@ -10044,12 +10098,11 @@ struct MobileNativeAdvertisementRow: View {
                 .lineLimit(2)
                 .truncationMode(.tail)
 
-            if let body = advertisement.body,
-               !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(body)
-                    .font(.subheadline)
+            if let promotedBody {
+                Text(promotedBody)
+                    .font(style.bodyFont)
                     .foregroundStyle(Color.secondary)
-                    .lineLimit(2)
+                    .lineLimit(style.bodyLineLimit)
                     .truncationMode(.tail)
             }
         }
@@ -10069,17 +10122,21 @@ struct MobileNativeAdvertisementRow: View {
     private var affiliateDisclosure: String? {
         if let value = advertisement.affiliateDisclosure?.trimmingCharacters(in: .whitespacesAndNewlines),
            !value.isEmpty {
-            return normalizedDisclosure(value)
+            return MobileNativeAdvertisementRowContentPolicy.normalizedText(value)
         }
         return isCoupangAdvertisement
-            ? normalizedDisclosure(strings.advertisementAffiliateDisclosure)
+            ? MobileNativeAdvertisementRowContentPolicy.normalizedText(
+                strings.advertisementAffiliateDisclosure
+            )
             : nil
     }
 
-    private func normalizedDisclosure(_ value: String) -> String {
-        value
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
+    private var promotedBody: String? {
+        MobileNativeAdvertisementRowContentPolicy.promotedBody(
+            advertisement.body,
+            affiliateDisclosure: affiliateDisclosure,
+            suppressMatchingDisclosure: style == .compactSlot
+        )
     }
 
     private var providerName: String {

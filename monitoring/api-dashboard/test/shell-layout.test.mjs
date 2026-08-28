@@ -67,6 +67,8 @@ test("advertising administration manages Coupang campaigns and explains server r
   assert.match(page, /\/native-ad-campaigns\/\$\{campaign\.id\}\/users\?/);
   assert.match(page, /\/native-ad-placement-policies\/\$\{COMMUNITY_FEED_PLACEMENT\}/);
   assert.match(page, /minimumSecondsBetweenDeliveries/);
+  assert.match(page, /0 = no repeat limit/);
+  assert.match(page, /repeatGapLabel/);
   assert.match(page, /30d slot deliveries/);
   assert.match(page, /AdMob is always attempted first/);
   assert.match(page, /TIER2 and TIER3 never receive a slot/);

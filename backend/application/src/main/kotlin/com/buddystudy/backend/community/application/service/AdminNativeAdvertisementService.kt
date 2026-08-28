@@ -158,7 +158,7 @@ class AdminNativeAdvertisementService(
         val validWindow = command.endsAt?.let { end -> command.startsAt?.let(end::isAfter) ?: true } != false
         val valid = normalizedCommandPlacement == normalizedPlacement &&
             command.dailyDeliveryCap in 0..100 &&
-            command.minimumSecondsBetweenDeliveries in NativeAdPlacementPolicy.minimumSecondsBetweenDeliveries..2_592_000 &&
+            NativeAdPlacementPolicy.isValidMinimumSecondsBetweenDeliveries(command.minimumSecondsBetweenDeliveries) &&
             command.minimumFeedItemCount in NativeAdPlacementPolicy.minimumFeedItemCount..100 &&
             command.earliestPosition in NativeAdPlacementPolicy.earliestPosition..99 &&
             command.latestPosition in command.earliestPosition..99 &&

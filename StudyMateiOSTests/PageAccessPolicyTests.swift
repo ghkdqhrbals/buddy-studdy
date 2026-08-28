@@ -780,6 +780,58 @@ final class NativeAdvertisementPolicyTests: XCTestCase {
         )
     }
 
+    func testNativeAdRowLayoutUsesCompactMinimumAndExpandsForIntrinsicContent() {
+        XCTAssertEqual(NativeAdvertisementRowLayoutPolicy.mediaSideLength, 120)
+        XCTAssertEqual(NativeAdvertisementRowLayoutPolicy.headlineLineLimit, 2)
+        XCTAssertEqual(NativeAdvertisementRowLayoutPolicy.callToActionLineLimit, 1)
+        XCTAssertEqual(NativeAdvertisementRowLayoutPolicy.textStackSpacing, 5)
+        XCTAssertEqual(MobileNativeAdvertisementRowStyle.compactSlot.thumbnailSideLength, 64)
+        XCTAssertLessThan(
+            MobileNativeAdvertisementRowStyle.compactSlot.thumbnailSideLength,
+            MobileNativeAdvertisementRowStyle.standard.thumbnailSideLength
+        )
+        XCTAssertEqual(
+            NativeAdvertisementRowLayoutPolicy.minimumHeight,
+            NativeAdvertisementRowLayoutPolicy.mediaSideLength +
+                (NativeAdvertisementRowLayoutPolicy.contentInset * 2)
+        )
+        XCTAssertLessThan(NativeAdvertisementRowLayoutPolicy.minimumHeight, 196)
+        XCTAssertEqual(
+            NativeAdvertisementRowLayoutPolicy.resolvedHeight(fittingHeight: 80),
+            NativeAdvertisementRowLayoutPolicy.minimumHeight
+        )
+        XCTAssertEqual(
+            NativeAdvertisementRowLayoutPolicy.resolvedHeight(fittingHeight: 184),
+            184
+        )
+    }
+
+    func testNativeAdSlotFallbackKeepsDisclosureWithoutRepeatingItAsBody() {
+        let disclosure = "This content contains affiliate links."
+
+        XCTAssertNil(
+            MobileNativeAdvertisementRowContentPolicy.promotedBody(
+                "  This content contains\n affiliate links.  ",
+                affiliateDisclosure: disclosure,
+                suppressMatchingDisclosure: true
+            )
+        )
+        XCTAssertEqual(
+            MobileNativeAdvertisementRowContentPolicy.promotedBody(
+                "Limited-time study offer",
+                affiliateDisclosure: disclosure,
+                suppressMatchingDisclosure: true
+            ),
+            "Limited-time study offer"
+        )
+        XCTAssertEqual(
+            MobileNativeAdvertisementRowContentPolicy.normalizedText(
+                "Full affiliate\n disclosure remains visible"
+            ),
+            "Full affiliate disclosure remains visible"
+        )
+    }
+
     func testAdMobIdentifiersAllowSamplesOnlyOutsideReleaseValidation() {
         XCTAssertTrue(
             AdMobIdentifierPolicy.isValidAppID(

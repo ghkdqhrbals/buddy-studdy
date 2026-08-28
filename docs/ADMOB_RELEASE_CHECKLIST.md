@@ -48,5 +48,6 @@ Use the conservative disclosure reflected in the immutable 2026-08-25 privacy po
 6. Sync the already-published privacy URLs and updated metadata to App Store Connect, complete review, and verify that the approved build is publicly available. Publish a FORCE app-update campaign for this AdMob-capable version and confirm that older builds are no longer allowed to pass the protected app flow.
 7. In a separate post-approval change, add a new Flyway migration that activates the staged 2026-08-25 policy at a deliberate timestamp, deploy that backend-only change through GitHub Actions, and verify that the app displays and submits the server term's exact version and content hash. Never edit the already-applied staging migration.
 8. Enable the default policy (`2/day`, `6-hour gap`, minimum `4` questions, zero-based positions `2...7`). The immediate rollback is the admin policy OFF switch.
+9. To remove only the per-user repeat-gap throttle, set the Monitoring `Repeat gap` field to `0`. Positive values must remain at least 60 seconds; the daily cap, schedule, feed-size rule, and placement bounds continue to apply independently.
 
 Record the issued identifiers and external-console verification in the private release record. Do not place console credentials, signing secrets, or raw consent diagnostics in this repository.

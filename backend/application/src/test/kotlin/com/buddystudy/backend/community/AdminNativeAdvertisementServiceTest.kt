@@ -47,6 +47,14 @@ class AdminNativeAdvertisementServiceTest {
         assertThat(updated.metrics.slotDeliveries).isEqualTo(12)
         assertThat(updated.metrics.adMobImpressions).isEqualTo(8)
         assertThat(updated.metrics.fallbackSelections).isEqualTo(2)
+
+        val withoutRepeatLimit = service.updatePlacementPolicy(
+            "COMMUNITY_FEED",
+            command.copy(minimumSecondsBetweenDeliveries = 0),
+        )
+        assertThat(withoutRepeatLimit.minimumSecondsBetweenDeliveries).isZero()
+        assertThat(port.placementPolicy?.minimumSecondsBetweenDeliveries).isZero()
+
         assertThatThrownBy {
             runBlocking {
                 service.updatePlacementPolicy(

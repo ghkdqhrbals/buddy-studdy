@@ -271,10 +271,7 @@ class CommunityService(
                 deliveredAt = now,
             ),
             dailyDeliveryCap = policy.dailyDeliveryCap,
-            minimumSecondsBetweenDeliveries = maxOf(
-                NativeAdPlacementPolicy.minimumSecondsBetweenDeliveries,
-                policy.minimumSecondsBetweenDeliveries,
-            ),
+            minimumSecondsBetweenDeliveries = policy.minimumSecondsBetweenDeliveries,
         ) ?: return null
         return slot.position to NativeAdSlotResponse(slot.slotId, slot.placement)
     }

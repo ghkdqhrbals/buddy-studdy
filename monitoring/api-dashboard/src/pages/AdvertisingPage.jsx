@@ -18,6 +18,7 @@ import {
 import { Button } from "../components/Button.jsx";
 import { InlineNotice } from "../components/InlineNotice.jsx";
 import { formatDateTime } from "../lib/format.js";
+import { isValidRepeatGapSeconds, repeatGapLabel } from "../lib/nativeAdPolicy.js";
 
 const PAGE_SIZE = 20;
 const COMMUNITY_FEED_PLACEMENT = "COMMUNITY_FEED";
@@ -187,8 +188,8 @@ function validatePlacementPolicy(form) {
   if (!Number.isInteger(form.dailyDeliveryCap) || form.dailyDeliveryCap < 0 || form.dailyDeliveryCap > 100) {
     errors.push("Daily delivery cap must be between 0 and 100.");
   }
-  if (!Number.isInteger(form.minimumSecondsBetweenDeliveries) || form.minimumSecondsBetweenDeliveries < 60 || form.minimumSecondsBetweenDeliveries > 2_592_000) {
-    errors.push("Minimum repeat gap must be between 60 seconds and 30 days.");
+  if (!isValidRepeatGapSeconds(form.minimumSecondsBetweenDeliveries)) {
+    errors.push("Minimum repeat gap must be 0 (no repeat limit) or between 60 seconds and 30 days.");
   }
   if (!Number.isInteger(form.minimumFeedItemCount) || form.minimumFeedItemCount < 4 || form.minimumFeedItemCount > 100) {
     errors.push("At least four public questions are required.");
@@ -292,7 +293,7 @@ function PlacementPolicyEditor({ policy, onClose, onSaved }) {
           <h3>Frequency and placement</h3>
           <div className="form-grid advertising-ranking-grid">
             <NumberField label="Daily delivery cap" hint="Per user, reset at UTC midnight · 0 disables" value={form.dailyDeliveryCap} max={100} onChange={(value) => update("dailyDeliveryCap", value)} />
-            <NumberField label="Minimum repeat gap" hint="Hours per user · minimum 1 minute" value={form.minimumSecondsBetweenDeliveries / 3600} min={1 / 60} max={720} step={1 / 60} onChange={(value) => update("minimumSecondsBetweenDeliveries", Math.round(value * 3600))} />
+            <NumberField label="Minimum repeat gap" hint="Hours per user · 0 = no repeat limit · positive values minimum 1 minute" value={form.minimumSecondsBetweenDeliveries / 3600} min={0} max={720} step={1 / 60} onChange={(value) => update("minimumSecondsBetweenDeliveries", Math.round(value * 3600))} />
             <NumberField label="Minimum public items" hint="At least two questions before and one after" value={form.minimumFeedItemCount} min={4} max={100} onChange={(value) => update("minimumFeedItemCount", value)} />
             <div className="advertising-position-fields">
               <NumberField label="Earliest position" hint="0-based · minimum 2" value={form.earliestPosition} min={2} max={99} onChange={(value) => update("earliestPosition", value)} />
@@ -339,7 +340,7 @@ function PlacementPolicyPanel({ policy, loading, error, onEdit }) {
         <>
           <div className="advertising-placement-facts">
             <div><span>Daily cap</span><strong>{Number(policy.dailyDeliveryCap || 0).toLocaleString()}</strong><small>per user · UTC</small></div>
-            <div><span>Repeat gap</span><strong>{`${Number(policy.minimumSecondsBetweenDeliveries || 0) / 3600}h`}</strong><small>minimum 60 seconds</small></div>
+            <div><span>Repeat gap</span><strong>{repeatGapLabel(policy.minimumSecondsBetweenDeliveries)}</strong><small>0 = no repeat limit · positive minimum 60 seconds</small></div>
             <div><span>Feed rule</span><strong>{`${policy.minimumFeedItemCount}+ · ${policy.earliestPosition}–${policy.latestPosition}`}</strong><small>items · 0-based position</small></div>
             <div><span>Schedule</span><strong>{placementSchedule(policy)}</strong><small>{policy.updatedAt ? `Updated ${formatDateTime(policy.updatedAt)}` : "Default OFF"}</small></div>
           </div>

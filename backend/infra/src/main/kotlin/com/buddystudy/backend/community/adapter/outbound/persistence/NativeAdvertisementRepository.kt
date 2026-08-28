@@ -469,7 +469,12 @@ class NativeAdvertisementPersistenceAdapter(
             .awaitSingle()
         val countToday = if (state.deliveryDay == deliveryDay) state.dailyCount else 0
         if (countToday >= dailyDeliveryCap) return null
-        if (state.lastDeliveredAt?.let { Duration.between(it, reservation.deliveredAt).seconds < minimumSecondsBetweenDeliveries } == true) {
+        if (
+            minimumSecondsBetweenDeliveries > 0 &&
+            state.lastDeliveredAt?.let {
+                Duration.between(it, reservation.deliveredAt).seconds < minimumSecondsBetweenDeliveries
+            } == true
+        ) {
             return null
         }
         database.sql(

@@ -10,6 +10,14 @@ class NativeAdPlacementPolicyTest {
     private val now = Instant.parse("2026-08-25T00:00:00Z")
 
     @Test
+    fun `repeat gap accepts disabled or at least one minute and rejects intermediate values`() {
+        assertThat(NativeAdPlacementPolicy.isValidMinimumSecondsBetweenDeliveries(0)).isTrue()
+        assertThat(NativeAdPlacementPolicy.isValidMinimumSecondsBetweenDeliveries(59)).isFalse()
+        assertThat(NativeAdPlacementPolicy.isValidMinimumSecondsBetweenDeliveries(60)).isTrue()
+        assertThat(NativeAdPlacementPolicy.isValidMinimumSecondsBetweenDeliveries(2_592_001)).isFalse()
+    }
+
+    @Test
     fun `disabled scheduled expired and undersized feeds do not receive a slot`() {
         assertThat(NativeAdPlacementPolicy.position(policy(enabled = false), 10, now, 0)).isNull()
         assertThat(NativeAdPlacementPolicy.position(policy(startsAt = now.plusSeconds(1)), 10, now, 0)).isNull()

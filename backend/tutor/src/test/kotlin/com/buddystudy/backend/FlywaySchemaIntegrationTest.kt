@@ -986,6 +986,23 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
         }.one().awaitSingle()
         assertThat(defaults).isEqualTo(PlacementDefaults(false, 2, 21_600, 4, 2, 7))
 
+        databaseClient.sql(
+            "update native_ad_placement_policies " +
+                "set minimum_seconds_between_deliveries = 0 where placement = 'COMMUNITY_FEED'",
+        ).fetch().rowsUpdated().awaitSingle()
+        assertThatThrownBy {
+            runBlocking {
+                databaseClient.sql(
+                    "update native_ad_placement_policies " +
+                        "set minimum_seconds_between_deliveries = 59 where placement = 'COMMUNITY_FEED'",
+                ).fetch().rowsUpdated().awaitSingle()
+            }
+        }.hasMessageContaining("chk_native_ad_placement_policy_limits")
+        databaseClient.sql(
+            "update native_ad_placement_policies " +
+                "set minimum_seconds_between_deliveries = 21600 where placement = 'COMMUNITY_FEED'",
+        ).fetch().rowsUpdated().awaitSingle()
+
         val slotIndexes = databaseClient.sql(
             """
             select index_name, non_unique
