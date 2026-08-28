@@ -1765,6 +1765,8 @@
 		1200000000000000000000A3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ADMOB_APP_ID = "ca-app-pub-6088017773958522~4861541440";
+				ADMOB_NATIVE_AD_UNIT_ID = "ca-app-pub-6088017773958522/6777258345";
 				APNS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				BUDDYSTUDY_BACKEND_BASE_URL = "https://api.ghkdqhrbals.org";
