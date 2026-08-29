@@ -128,6 +128,30 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(clientSource.contains("selectionID, \"view\""))
     }
 
+    func testCompactFallbackAdvertisementMenuUsesNeutralFeedOverflowStyle() throws {
+        let root = try repositoryRoot()
+        let source = try String(
+            contentsOf: root.appendingPathComponent(
+                "StudyMate/Services/AdMobNativeAdvertising.swift"
+            ),
+            encoding: .utf8
+        )
+        let fallbackStart = try XCTUnwrap(source.range(of: "private func fallbackView"))
+        let fallbackEnd = try XCTUnwrap(
+            source.range(
+                of: "private var selectionExplanationButton",
+                range: fallbackStart.upperBound..<source.endIndex
+            )
+        )
+        let fallbackSource = source[fallbackStart.lowerBound..<fallbackEnd.lowerBound]
+
+        XCTAssertTrue(fallbackSource.contains("Image(systemName: \"ellipsis\")"))
+        XCTAssertTrue(fallbackSource.contains(".foregroundStyle(Color.secondary)"))
+        XCTAssertTrue(fallbackSource.contains(".frame(width: 44, height: 44)"))
+        XCTAssertTrue(fallbackSource.contains(".buttonStyle(.plain)"))
+        XCTAssertTrue(fallbackSource.contains(".accessibilityLabel(strings.more)"))
+    }
+
     func testCommunityUserBlockingCopyIsLocalizedInEveryLanguage() {
         let korean = AppStrings(language: .korean)
         let english = AppStrings(language: .english)

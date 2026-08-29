@@ -837,10 +837,12 @@ struct MobileNativeAdvertisementSlotRow: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 36, height: 36)
+                    .foregroundStyle(Color.secondary)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(strings.more)
         }
         .contextMenu {
             selectionExplanationButton
