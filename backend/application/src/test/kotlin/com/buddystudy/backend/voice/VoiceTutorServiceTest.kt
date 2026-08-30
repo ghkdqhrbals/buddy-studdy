@@ -16,6 +16,10 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersiste
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersonalization
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersonalizationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSummaryPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcAnswer
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcCleanupClaim
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcCleanupPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
@@ -31,6 +35,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.Flow
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -51,14 +56,68 @@ class VoiceTutorServiceTest {
 
         val status = service.status(principal)
         val failure = runCatching {
-            service.createSession(principal, 42, "ko", null, "disabled-attempt")
+            service.createSession(principal, 42, "ko", null, "disabled-attempt", false, null)
         }.exceptionOrNull()
 
         assertThat(properties.voiceTutor.enabled).isFalse()
         assertThat(status.eligible).isFalse()
         assertThat(status.reason).isEqualTo("UNAVAILABLE")
+        assertThat(status.recording.enabled).isFalse()
+        assertThat(status.recording.consentRequired).isTrue()
         assertThat(failure).isInstanceOf(ApiException::class.java)
         assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.VOICE_TUTOR_PROVIDER_UNAVAILABLE)
+        assertThat(persistence.reserveCalls).isZero()
+    }
+
+    @Test
+    fun `recording consent is versioned audited and returned through the unified contract`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val properties = properties().apply {
+            voiceTutor.recordingEnabled = true
+            voiceTutor.recordingBucket = "private-recordings"
+            voiceTutor.recordingRetentionDays = 30
+        }
+        val service = service(persistence, properties)
+
+        val response = service.createSession(
+            principal,
+            42,
+            "ko",
+            null,
+            "recorded-session",
+            true,
+            "voice-recording-v1",
+        )
+
+        assertThat(response.recording.enabled).isTrue()
+        assertThat(response.recording.available).isFalse()
+        assertThat(response.recording.recordingId).isEqualTo(persistence.session.id)
+        assertThat(response.recording.retentionDays).isEqualTo(30)
+        assertThat(persistence.session.recordingConsentedAt).isEqualTo(now)
+        assertThat(persistence.session.recordingConsentVersion).isEqualTo("voice-recording-v1")
+    }
+
+    @Test
+    fun `recording consent without the fixed displayed version fails before reservation`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val properties = properties().apply {
+            voiceTutor.recordingEnabled = true
+            voiceTutor.recordingBucket = "private-recordings"
+        }
+
+        val failure = runCatching {
+            service(persistence, properties).createSession(
+                principal,
+                42,
+                "ko",
+                null,
+                "missing-consent-version",
+                true,
+                null,
+            )
+        }.exceptionOrNull()
+
+        assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
         assertThat(persistence.reserveCalls).isZero()
     }
 
@@ -67,10 +126,16 @@ class VoiceTutorServiceTest {
         val persistence = FakePersistence(now)
         val service = service(persistence)
 
-        val response = service.createSession(principal, 42, "ko", null, "voice-attempt-1")
+        val response = service.createSession(principal, 42, "ko", null, "voice-attempt-1", false, null)
 
         assertThat(response.websocketUrl)
             .isEqualTo("/api/v1/voice-tutor/sessions/${persistence.session.id}/stream")
+        assertThat(response.sdpUrl)
+            .isEqualTo("/api/v1/voice-tutor/sessions/${persistence.session.id}/webrtc")
+        assertThat(response.controlWebsocketUrl)
+            .isEqualTo("/api/v1/voice-tutor/sessions/${persistence.session.id}/control")
+        assertThat(response.realtimeTransport).isEqualTo("WEBRTC")
+        assertThat(response.controlWebsocketProtocol).isEqualTo("buddystudy.voice.control.v2")
         assertThat(response.quota.limitSeconds).isEqualTo(18_000)
         assertThat(response.quota.reservedSeconds).isEqualTo(3_600)
         assertThat(response.quota.remainingSeconds).isEqualTo(14_400)
@@ -87,7 +152,7 @@ class VoiceTutorServiceTest {
         val service = service(persistence)
 
         val failure = runCatching {
-            runBlocking { service.createSession(principal, 42, "ko", null, "free-voice-attempt") }
+            runBlocking { service.createSession(principal, 42, "ko", null, "free-voice-attempt", false, null) }
         }.exceptionOrNull()
 
         assertThat(failure).isInstanceOf(ApiException::class.java)
@@ -104,7 +169,7 @@ class VoiceTutorServiceTest {
 
         val status = service.status(principal)
         val failure = runCatching {
-            service.createSession(principal, 42, "ko", null, "paid-zero-cap")
+            service.createSession(principal, 42, "ko", null, "paid-zero-cap", false, null)
         }.exceptionOrNull()
 
         assertThat(status.eligible).isFalse()
@@ -114,18 +179,62 @@ class VoiceTutorServiceTest {
     }
 
     @Test
+    fun `reusing a Voice Tutor idempotency key with different immutable parameters returns conflict`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now).apply {
+            reserveOverride = ReserveVoiceTutorSessionResult.IdempotencyConflict
+        }
+
+        val failure = runCatching {
+            service(persistence).createSession(
+                principal,
+                42,
+                "ko",
+                "marin",
+                "reused-key",
+                false,
+                null,
+            )
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(ApiException::class.java)
+        assertThat((failure as ApiException).status).isEqualTo(HttpStatus.CONFLICT)
+        assertThat(failure.code).isEqualTo(ApiErrorCode.VOICE_TUTOR_SESSION_CONFLICT)
+    }
+
+    @Test
     fun `misconfigured public websocket base is rejected before quota reservation`() {
         val persistence = FakePersistence(now)
         val properties = properties().apply { voiceTutor.publicBaseUrl = "http://api.example.test" }
         val service = service(persistence, properties)
 
         val failure = runCatching {
-            runBlocking { service.createSession(principal, 42, "ko", null, "voice-attempt-2") }
+            runBlocking { service.createSession(principal, 42, "ko", null, "voice-attempt-2", false, null) }
         }.exceptionOrNull()
 
         assertThat(failure).isInstanceOf(ApiException::class.java)
         assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.VOICE_TUTOR_PROVIDER_UNAVAILABLE)
         assertThat(persistence.reserveCalls).isZero()
+    }
+
+    @Test
+    fun `public websocket base produces same-origin WebRTC and control URLs`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val properties = properties().apply { voiceTutor.publicBaseUrl = "wss://api.example.test:8443" }
+
+        val response = service(persistence, properties).createSession(
+            principal,
+            42,
+            "ko",
+            null,
+            "voice-public-base",
+            false,
+            null,
+        )
+
+        assertThat(response.sdpUrl)
+            .isEqualTo("https://api.example.test:8443/api/v1/voice-tutor/sessions/${persistence.session.id}/webrtc")
+        assertThat(response.controlWebsocketUrl)
+            .isEqualTo("wss://api.example.test:8443/api/v1/voice-tutor/sessions/${persistence.session.id}/control")
     }
 
     @Test
@@ -250,6 +359,123 @@ class VoiceTutorServiceTest {
     }
 
     @Test
+    fun `durable recovery hangs up a negotiated WebRTC call that never claimed control`() = runBlocking<Unit> {
+        val callId = "rtc_orphan-call"
+        val persistence = FakePersistence(now).apply {
+            staleUserIds = listOf(principal.userId)
+            reconciledSessions = listOf(
+                session.copy(
+                    providerSessionId = callId,
+                    status = VoiceTutorSessionStatus.COMPLETED,
+                    endedAt = now,
+                    finalizedAt = now,
+                ),
+            )
+        }
+        val webRtc = FakeWebRtc()
+
+        service(persistence, webRtc = webRtc).recoverStaleSessions(10)
+
+        assertThat(webRtc.hangups).containsExactly(callId)
+        assertThat(persistence.clearProviderCalls).isEqualTo(1)
+        assertThat(persistence.reconciledSessions.single().providerSessionId).isNull()
+    }
+
+    @Test
+    fun `terminal WebRTC hangup failure remains durable and clears only after a later successful retry`() = runBlocking<Unit> {
+        val callId = "rtc_retry-call"
+        val persistence = FakePersistence(now).apply {
+            session = session.copy(
+                providerSessionId = callId,
+                status = VoiceTutorSessionStatus.COMPLETED,
+                endedAt = now,
+                finalizedAt = now,
+            )
+            terminalHangups = listOf(session)
+        }
+        val webRtc = FakeWebRtc(failuresRemaining = 1)
+        val service = service(persistence, webRtc = webRtc)
+
+        assertThat(service.recoverStaleSessions(10)).isEqualTo(1)
+        assertThat(persistence.session.providerSessionId).isEqualTo(callId)
+        assertThat(persistence.clearProviderCalls).isZero()
+
+        assertThat(service.recoverStaleSessions(10)).isEqualTo(1)
+        assertThat(webRtc.hangups).containsExactly(callId, callId)
+        assertThat(persistence.session.providerSessionId).isNull()
+        assertThat(persistence.clearProviderCalls).isEqualTo(1)
+        assertThat(persistence.lastTerminalHangupLimit).isEqualTo(10)
+    }
+
+    @Test
+    fun `orphan provider marker retries with a lease until hangup succeeds`() = runBlocking<Unit> {
+        val callId = "rtc_unattached-call"
+        val cleanup = FakeWebRtcCleanup().apply {
+            claims = listOf(VoiceTutorWebRtcCleanupClaim(callId, principal.userId, "orphan-session", "claim-1"))
+        }
+        val webRtc = FakeWebRtc(failuresRemaining = 1)
+        val service = service(FakePersistence(now), webRtc = webRtc, webRtcCleanup = cleanup)
+
+        assertThat(service.recoverStaleSessions(10)).isEqualTo(1)
+        assertThat(cleanup.retryCalls).containsExactly(callId)
+        assertThat(cleanup.completedClaims).isEmpty()
+
+        assertThat(service.recoverStaleSessions(10)).isEqualTo(1)
+        assertThat(webRtc.hangups).containsExactly(callId, callId)
+        assertThat(cleanup.completedClaims).containsExactly(callId)
+        assertThat(cleanup.claims).isEmpty()
+    }
+
+    @Test
+    fun `normal WebRTC cleanup clears the provider marker after hangup and finalization succeed`() = runBlocking<Unit> {
+        val callId = "rtc_control-call"
+        val persistence = FakePersistence(now).apply {
+            session = session.copy(
+                providerSessionId = callId,
+                status = VoiceTutorSessionStatus.ACTIVE,
+                connectedAt = now.minusSeconds(20),
+                relayHeartbeatAt = now,
+            )
+        }
+        val webRtc = FakeWebRtc()
+        val cleanup = FakeWebRtcCleanup()
+
+        val detail = service(persistence, webRtc = webRtc, webRtcCleanup = cleanup).finishWebRtc(
+            principal,
+            persistence.session.id,
+            callId,
+            "CLIENT_DISCONNECTED",
+        )
+
+        assertThat(detail.state).isEqualTo(VoiceTutorSessionStatus.COMPLETED)
+        assertThat(webRtc.hangups).containsExactly(callId)
+        assertThat(persistence.session.providerSessionId).isNull()
+        assertThat(persistence.clearProviderCalls).isEqualTo(1)
+        assertThat(cleanup.completedCalls).containsExactly(callId)
+    }
+
+    @Test
+    fun `legacy provider ids are never hung up or cleared by WebRTC recovery`() = runBlocking<Unit> {
+        val legacyId = "provider-legacy-call"
+        val persistence = FakePersistence(now).apply {
+            session = session.copy(
+                providerSessionId = legacyId,
+                status = VoiceTutorSessionStatus.COMPLETED,
+                endedAt = now,
+                finalizedAt = now,
+            )
+            terminalHangups = listOf(session)
+        }
+        val webRtc = FakeWebRtc()
+
+        service(persistence, webRtc = webRtc).recoverStaleSessions(10)
+
+        assertThat(webRtc.hangups).isEmpty()
+        assertThat(persistence.clearProviderCalls).isZero()
+        assertThat(persistence.session.providerSessionId).isEqualTo(legacyId)
+    }
+
+    @Test
     fun `an open relay is rejected after its authenticated device session is revoked`() = runBlocking<Unit> {
         var authorized = true
         val persistence = FakePersistence(now)
@@ -316,6 +542,7 @@ class VoiceTutorServiceTest {
             "relayProvider",
             "appendTranscript",
             "finish",
+            "finishWebRtc",
         )
         val permissions = VoiceTutorService::class.declaredMemberFunctions
             .filter { it.name in securedOperations }
@@ -335,6 +562,8 @@ class VoiceTutorServiceTest {
         relayAuthorization: VoiceTutorRelayAuthorizationPort = object : VoiceTutorRelayAuthorizationPort {
             override suspend fun isAuthorized(userId: Long, deviceId: String, authSessionId: Long, now: Instant) = true
         },
+        webRtc: VoiceTutorWebRtcPort = FakeWebRtc(),
+        webRtcCleanup: VoiceTutorWebRtcCleanupPort = FakeWebRtcCleanup(),
     ) = VoiceTutorService(
         persistence = persistence,
         personalization = object : VoiceTutorPersonalizationPort {
@@ -357,6 +586,8 @@ class VoiceTutorServiceTest {
         relayAuthorization = relayAuthorization,
         properties = properties,
         clock = Clock.fixed(now, ZoneOffset.UTC),
+        webRtc = webRtc,
+        webRtcCleanup = webRtcCleanup,
     )
 
     private fun properties() = BuddyStudyProperties().apply {
@@ -386,6 +617,73 @@ class VoiceTutorServiceTest {
         }
     }
 
+    private class FakeWebRtc(var failuresRemaining: Int = 0) : VoiceTutorWebRtcPort {
+        val hangups = mutableListOf<String>()
+
+        override suspend fun negotiate(
+            request: VoiceTutorRealtimeRequest,
+            offerSdp: String,
+            onProviderCallCreated: suspend (callId: String) -> Unit,
+        ): VoiceTutorWebRtcAnswer {
+            onProviderCallCreated("rtc_fake")
+            return VoiceTutorWebRtcAnswer("answer", "rtc_fake")
+        }
+
+        override suspend fun relaySideband(
+            callId: String,
+            clientEvents: Flow<String>,
+            terminalEvents: Flow<VoiceTutorRelayTermination>,
+            onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
+        ) = Unit
+
+        override suspend fun hangup(callId: String) {
+            hangups += callId
+            if (failuresRemaining > 0) {
+                failuresRemaining -= 1
+                error("provider hangup failed")
+            }
+        }
+    }
+
+    private class FakeWebRtcCleanup : VoiceTutorWebRtcCleanupPort {
+        var claims: List<VoiceTutorWebRtcCleanupClaim> = emptyList()
+        val completedCalls = mutableListOf<String>()
+        val completedClaims = mutableListOf<String>()
+        val retryCalls = mutableListOf<String>()
+
+        override suspend fun recordPending(
+            callId: String,
+            userId: Long,
+            sessionId: String,
+            recoverAfter: Instant,
+            now: Instant,
+        ) = Unit
+
+        override suspend fun attachSession(callId: String, userId: Long, sessionId: String, now: Instant): Boolean = true
+
+        override suspend fun claimOrphaned(
+            limit: Int,
+            now: Instant,
+            claimLeaseSeconds: Long,
+        ): List<VoiceTutorWebRtcCleanupClaim> = claims.take(limit)
+
+        override suspend fun complete(callId: String): Boolean {
+            completedCalls += callId
+            return true
+        }
+
+        override suspend fun completeClaim(callId: String, claimToken: String): Boolean {
+            completedClaims += callId
+            claims = claims.filterNot { it.callId == callId && it.claimToken == claimToken }
+            return true
+        }
+
+        override suspend fun retryClaim(callId: String, claimToken: String, error: String, now: Instant): Boolean {
+            retryCalls += callId
+            return true
+        }
+    }
+
     private class FakePersistence(private val now: Instant) : VoiceTutorPersistencePort {
         var quotaSnapshot = VoiceTutorQuotaSnapshot(
             tierCode = "TIER2",
@@ -407,6 +705,10 @@ class VoiceTutorServiceTest {
         var lastMaxSessionSeconds = 0
         var staleUserIds: List<Long> = emptyList()
         var reconcileCalls = 0
+        var reconciledSessions: List<VoiceTutorSession> = emptyList()
+        var terminalHangups: List<VoiceTutorSession> = emptyList()
+        var clearProviderCalls = 0
+        var lastTerminalHangupLimit = 0
         var lastReadyTimeoutSeconds = 0L
         var lastHeartbeatLeaseSeconds = 0L
         private var resultClaimed = false
@@ -420,7 +722,7 @@ class VoiceTutorServiceTest {
             reconcileCalls += 1
             lastReadyTimeoutSeconds = readyTimeoutSeconds
             lastHeartbeatLeaseSeconds = heartbeatLeaseSeconds
-            return emptyList()
+            return reconciledSessions
         }
 
         override suspend fun quota(userId: Long, now: Instant) = quotaSnapshot
@@ -434,6 +736,8 @@ class VoiceTutorServiceTest {
             voice: String,
             maxSessionSeconds: Int,
             now: Instant,
+            recordingConsentedAt: Instant?,
+            recordingConsentVersion: String?,
         ): ReserveVoiceTutorSessionResult {
             reserveCalls += 1
             reserveOverride?.let { return it }
@@ -447,6 +751,8 @@ class VoiceTutorServiceTest {
                 reservedSeconds = maxSessionSeconds,
                 maxSessionSeconds = maxSessionSeconds,
                 hardEndsAt = now.plusSeconds(maxSessionSeconds.toLong()),
+                recordingConsentedAt = recordingConsentedAt,
+                recordingConsentVersion = recordingConsentVersion,
             )
             quotaSnapshot = quotaSnapshot.copy(reservedSeconds = maxSessionSeconds)
             return ReserveVoiceTutorSessionResult.Reserved(ReservedVoiceTutorSession(session, quotaSnapshot))
@@ -473,6 +779,11 @@ class VoiceTutorServiceTest {
             readyTimeoutSeconds: Long,
             heartbeatLeaseSeconds: Long,
         ) = staleUserIds.take(limit)
+
+        override suspend fun terminalWebRtcSessionsAwaitingHangup(limit: Int): List<VoiceTutorSession> {
+            lastTerminalHangupLimit = limit
+            return terminalHangups.filter { it.providerSessionId != null }.take(limit)
+        }
 
         override suspend fun markActive(userId: Long, sessionId: String, now: Instant): VoiceTutorSession? {
             markActiveCalls += 1
@@ -506,6 +817,43 @@ class VoiceTutorServiceTest {
         override suspend fun attachProviderSession(userId: Long, sessionId: String, providerSessionId: String, now: Instant): Boolean {
             if (session.userId != userId || session.id != sessionId || session.status != VoiceTutorSessionStatus.ACTIVE) return false
             session = session.copy(providerSessionId = providerSessionId, connectedAt = session.connectedAt ?: now, updatedAt = now)
+            return true
+        }
+
+        override suspend fun clearWebRtcProviderSession(
+            userId: Long,
+            sessionId: String,
+            providerSessionId: String,
+            now: Instant,
+        ): Boolean {
+            clearProviderCalls += 1
+            val current = sequenceOf(session)
+                .plus(reconciledSessions.asSequence())
+                .plus(terminalHangups.asSequence())
+                .firstOrNull {
+                    it.userId == userId &&
+                        it.id == sessionId &&
+                        it.providerSessionId == providerSessionId &&
+                        it.status in setOf(VoiceTutorSessionStatus.COMPLETED, VoiceTutorSessionStatus.FAILED) &&
+                        providerSessionId.startsWith("rtc_")
+                } ?: return false
+            if (session.userId == current.userId && session.id == current.id) {
+                session = session.copy(providerSessionId = null, updatedAt = now)
+            }
+            reconciledSessions = reconciledSessions.map {
+                if (it.userId == userId && it.id == sessionId && it.providerSessionId == providerSessionId) {
+                    it.copy(providerSessionId = null, updatedAt = now)
+                } else {
+                    it
+                }
+            }
+            terminalHangups = terminalHangups.map {
+                if (it.userId == userId && it.id == sessionId && it.providerSessionId == providerSessionId) {
+                    it.copy(providerSessionId = null, updatedAt = now)
+                } else {
+                    it
+                }
+            }
             return true
         }
 

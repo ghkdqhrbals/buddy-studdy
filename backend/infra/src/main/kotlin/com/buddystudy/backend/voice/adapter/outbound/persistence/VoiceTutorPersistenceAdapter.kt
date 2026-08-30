@@ -90,11 +90,20 @@ class VoiceTutorPersistenceAdapter(
         voice: String,
         maxSessionSeconds: Int,
         now: Instant,
+        recordingConsentedAt: Instant?,
+        recordingConsentVersion: String?,
     ): ReserveVoiceTutorSessionResult {
         val createdAt = lockUserCreatedAt(userId) ?: return ReserveVoiceTutorSessionResult.UserNotFound
         val quota = ensureQuota(userId, createdAt, now)
         val existing = sessionByIdempotency(userId, idempotencyKey)
         if (existing != null) {
+            val sameImmutableRequest = existing.studyId == studyId &&
+                existing.language == language &&
+                existing.model == model &&
+                existing.voice == voice &&
+                (existing.recordingConsentedAt != null) == (recordingConsentedAt != null) &&
+                existing.recordingConsentVersion == recordingConsentVersion
+            if (!sameImmutableRequest) return ReserveVoiceTutorSessionResult.IdempotencyConflict
             return ReserveVoiceTutorSessionResult.Reserved(
                 ReservedVoiceTutorSession(existing, quota.toSnapshot()),
             )
@@ -133,20 +142,22 @@ class VoiceTutorPersistenceAdapter(
             .fetch().rowsUpdated().awaitSingle()
         check(updated == 1L) { "Voice Tutor quota changed concurrently while reserving a session." }
 
-        database.sql(
+        var insert = database.sql(
             """
             insert into voice_tutor_sessions (
                 id, user_id, study_id, idempotency_key, provider_session_id,
                 status, result_status, language, model, voice,
                 topic_snapshot, difficulty_snapshot,
                 period_started_at, period_ends_at, reserved_seconds, charged_seconds,
-                max_session_seconds, hard_ends_at, created_at, updated_at
+                max_session_seconds, hard_ends_at, recording_consented_at, recording_consent_version,
+                created_at, updated_at
             ) values (
                 :id, :userId, :studyId, :idempotencyKey, null,
                 'READY', 'PENDING', :language, :model, :voice,
                 :topic, :difficulty,
                 :periodStartedAt, :periodEndsAt, :reservedSeconds, 0,
-                :maxSessionSeconds, :hardEndsAt, :now, :now
+                :maxSessionSeconds, :hardEndsAt, :recordingConsentedAt, :recordingConsentVersion,
+                :now, :now
             )
             """.trimIndent(),
         ).bind("id", sessionId)
@@ -163,8 +174,17 @@ class VoiceTutorPersistenceAdapter(
             .bind("reservedSeconds", reservationSeconds)
             .bind("maxSessionSeconds", maxSessionSeconds)
             .bind("hardEndsAt", hardEndsAt.utc())
-            .bind("now", now.utc())
-            .fetch().rowsUpdated().awaitSingle()
+        insert = if (recordingConsentedAt == null) {
+            insert.bindNull("recordingConsentedAt", LocalDateTime::class.java)
+        } else {
+            insert.bind("recordingConsentedAt", recordingConsentedAt.utc())
+        }
+        insert = if (recordingConsentVersion == null) {
+            insert.bindNull("recordingConsentVersion", String::class.java)
+        } else {
+            insert.bind("recordingConsentVersion", recordingConsentVersion)
+        }
+        insert.bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
 
         val session = findSessionRow(userId, sessionId, lock = false)
             ?: error("Reserved Voice Tutor session could not be loaded.")
@@ -258,6 +278,19 @@ class VoiceTutorPersistenceAdapter(
         .bind("limit", limit.coerceIn(1, 500))
         .map { row, _ -> row.long("user_id") }.all().collectList().awaitSingle()
 
+    override suspend fun terminalWebRtcSessionsAwaitingHangup(limit: Int): List<VoiceTutorSession> = database.sql(
+        """
+        select *
+        from voice_tutor_sessions
+        where status in ('COMPLETED', 'FAILED')
+          and provider_session_id is not null
+          and left(provider_session_id, 4) = 'rtc_'
+        order by finalized_at, id
+        limit :limit
+        """.trimIndent(),
+    ).bind("limit", limit.coerceIn(1, 500))
+        .map { row, _ -> row.session() }.all().collectList().awaitSingle()
+
     @Transactional(isolation = Isolation.READ_COMMITTED)
     override suspend fun markActive(userId: Long, sessionId: String, now: Instant): VoiceTutorSession? {
         val updated = database.sql(
@@ -340,6 +373,28 @@ class VoiceTutorPersistenceAdapter(
         """.trimIndent(),
     ).bind("providerSessionId", providerSessionId)
         .bind("now", now.utc()).bind("sessionId", sessionId).bind("userId", userId)
+        .fetch().rowsUpdated().awaitSingle() == 1L
+
+    override suspend fun clearWebRtcProviderSession(
+        userId: Long,
+        sessionId: String,
+        providerSessionId: String,
+        now: Instant,
+    ): Boolean = database.sql(
+        """
+        update voice_tutor_sessions
+        set provider_session_id = null,
+            updated_at = :now
+        where id = :sessionId
+          and user_id = :userId
+          and status in ('COMPLETED', 'FAILED')
+          and provider_session_id = :providerSessionId
+          and left(provider_session_id, 4) = 'rtc_'
+        """.trimIndent(),
+    ).bind("now", now.utc())
+        .bind("sessionId", sessionId)
+        .bind("userId", userId)
+        .bind("providerSessionId", providerSessionId)
         .fetch().rowsUpdated().awaitSingle() == 1L
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -750,6 +805,8 @@ class VoiceTutorPersistenceAdapter(
         connectedAt = nullableInstant("connected_at"),
         relayHeartbeatAt = nullableInstant("relay_heartbeat_at"),
         acceptedAudioBytes = long("accepted_audio_bytes"),
+        recordingConsentedAt = nullableInstant("recording_consented_at"),
+        recordingConsentVersion = get("recording_consent_version", String::class.java),
         endedAt = nullableInstant("ended_at"),
         finalizedAt = nullableInstant("finalized_at"),
         endReason = get("end_reason", String::class.java),

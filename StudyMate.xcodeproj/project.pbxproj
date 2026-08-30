@@ -19,6 +19,9 @@
 		F81000000000000000000005 /* VoiceTutorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000006 /* VoiceTutorViewModel.swift */; };
 		F81000000000000000000007 /* VoiceTutorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000008 /* VoiceTutorView.swift */; };
 		F81000000000000000000009 /* VoiceTutorContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8100000000000000000000A /* VoiceTutorContractTests.swift */; };
+		F82000000000000000000001 /* VoiceTutorWebRTCTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000002 /* VoiceTutorWebRTCTransport.swift */; };
+		F82000000000000000000003 /* VoiceTutorRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000004 /* VoiceTutorRecording.swift */; };
+		F82000000000000000000005 /* LiveKitWebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F82000000000000000000006 /* LiveKitWebRTC */; };
 		B90000000000000000000002 /* StudyMateDev.storekit in Resources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000001 /* StudyMateDev.storekit */; };
 		110000000000000000000101 /* StudyMateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000001 /* StudyMateApp.swift */; };
 		110000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
@@ -376,6 +379,8 @@
 		F81000000000000000000004 /* VoiceTutorAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorAudioEngine.swift; sourceTree = "<group>"; };
 		F81000000000000000000006 /* VoiceTutorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorViewModel.swift; sourceTree = "<group>"; };
 		F81000000000000000000008 /* VoiceTutorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorView.swift; sourceTree = "<group>"; };
+		F82000000000000000000002 /* VoiceTutorWebRTCTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorWebRTCTransport.swift; sourceTree = "<group>"; };
+		F82000000000000000000004 /* VoiceTutorRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorRecording.swift; sourceTree = "<group>"; };
 		110000000000000000000180 /* NotificationLandingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationLandingCoordinator.swift; sourceTree = "<group>"; };
 		11000000000000000000001A /* KeyboardDoneToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDoneToolbar.swift; sourceTree = "<group>"; };
 		11000000000000000000001B /* GoogleOAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuthService.swift; sourceTree = "<group>"; };
@@ -461,6 +466,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F82000000000000000000005 /* LiveKitWebRTC in Frameworks */,
 				A10000000000000000000001 /* GoogleMobileAds in Frameworks */,
 				F60000000000000000000006 /* FirebaseAnalyticsCore in Frameworks */,
 				F70000000000000000000006 /* FirebaseRemoteConfig in Frameworks */,
@@ -852,6 +858,8 @@
 				A10000000000000000000004 /* AdMobNativeAdvertising.swift */,
 				F81000000000000000000004 /* VoiceTutorAudioEngine.swift */,
 				F81000000000000000000002 /* VoiceTutorRealtimeClient.swift */,
+				F82000000000000000000002 /* VoiceTutorWebRTCTransport.swift */,
+				F82000000000000000000004 /* VoiceTutorRecording.swift */,
 				110000000000000000000004 /* SettingsStore.swift */,
 				110000000000000000000005 /* OpenAIClient.swift */,
 				110000000000000000000006 /* NotificationService.swift */,
@@ -1041,6 +1049,7 @@
 			);
 			name = StudyMateiOS;
 			packageProductDependencies = (
+				F82000000000000000000006 /* LiveKitWebRTC */,
 				A10000000000000000000002 /* GoogleMobileAds */,
 				C80000000000000000000002 /* RevenueCat */,
 				D40000000000000000000002 /* MarkdownUI */,
@@ -1104,6 +1113,7 @@
 			mainGroup = 110000000000000000000060;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				F82000000000000000000007 /* XCRemoteSwiftPackageReference "webrtc-xcframework" */,
 				A10000000000000000000006 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
 				C80000000000000000000003 /* XCRemoteSwiftPackageReference "purchases-ios" */,
 				D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
@@ -1354,6 +1364,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F82000000000000000000001 /* VoiceTutorWebRTCTransport.swift in Sources */,
+				F82000000000000000000003 /* VoiceTutorRecording.swift in Sources */,
 				A10000000000000000000003 /* AdMobNativeAdvertising.swift in Sources */,
 				120000000000000000000101 /* StudyMateiOSApp.swift in Sources */,
 				F60000000000000000000001 /* AppAnalytics.swift in Sources */,
@@ -1880,6 +1892,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		F82000000000000000000007 /* XCRemoteSwiftPackageReference "webrtc-xcframework" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/livekit/webrtc-xcframework.git";
+			requirement = {
+				kind = exactVersion;
+				version = 144.7559.14;
+			};
+		};
 		A10000000000000000000006 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
@@ -1915,6 +1935,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		F82000000000000000000006 /* LiveKitWebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F82000000000000000000007 /* XCRemoteSwiftPackageReference "webrtc-xcframework" */;
+			productName = LiveKitWebRTC;
+		};
 		A10000000000000000000002 /* GoogleMobileAds */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000006 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;

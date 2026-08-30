@@ -446,6 +446,16 @@ protocol RemotePushBackendClientProtocol {
         idempotencyKey: String
     ) async throws -> BackendVoiceTutorSessionStart
 
+    func createVoiceTutorSession(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage,
+        voice: String?,
+        recordingConsent: Bool,
+        recordingConsentVersion: String?,
+        idempotencyKey: String
+    ) async throws -> BackendVoiceTutorSessionStart
+
     func endVoiceTutorSession(
         registration: RemotePushRegistration,
         sessionID: String
@@ -461,6 +471,26 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         sessionID: String
     ) async throws -> BackendVoiceTutorSessionDetail
+
+    func uploadVoiceTutorRecording(
+        registration: RemotePushRegistration,
+        sessionID: String,
+        fileURL: URL,
+        contentType: String,
+        contentLength: Int64,
+        sha256: String,
+        durationMilliseconds: Int64
+    ) async throws
+
+    func fetchVoiceTutorRecordingAccess(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorRecordingAccess
+
+    func deleteVoiceTutorRecording(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws
 
     func fetchReferralSummary(
         registration: RemotePushRegistration
@@ -746,6 +776,24 @@ extension RemotePushBackendClientProtocol {
         throw RemotePushBackendError.invalidResponse
     }
 
+    func createVoiceTutorSession(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage,
+        voice: String?,
+        recordingConsent: Bool,
+        recordingConsentVersion: String?,
+        idempotencyKey: String
+    ) async throws -> BackendVoiceTutorSessionStart {
+        try await createVoiceTutorSession(
+            registration: registration,
+            studyID: studyID,
+            language: language,
+            voice: voice,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func fetchNativeAdvertisementFallback(
         registration: RemotePushRegistration,
         slotID: String
@@ -867,6 +915,32 @@ extension RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         sessionID: String
     ) async throws -> BackendVoiceTutorSessionDetail {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func uploadVoiceTutorRecording(
+        registration: RemotePushRegistration,
+        sessionID: String,
+        fileURL: URL,
+        contentType: String,
+        contentLength: Int64,
+        sha256: String,
+        durationMilliseconds: Int64
+    ) async throws {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchVoiceTutorRecordingAccess(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorRecordingAccess {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func deleteVoiceTutorRecording(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws {
         throw RemotePushBackendError.invalidResponse
     }
 
@@ -1574,6 +1648,35 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(BackendVoiceTutorSessionStart.self, from: data)
     }
 
+    func createVoiceTutorSession(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage,
+        voice: String?,
+        recordingConsent: Bool,
+        recordingConsentVersion: String?,
+        idempotencyKey: String
+    ) async throws -> BackendVoiceTutorSessionStart {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "voice-tutor", "sessions")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = try encoder.encode(
+            VoiceTutorSessionCreateRequest(
+                studyId: studyID,
+                language: language.backendCode,
+                voice: voice,
+                recordingConsent: recordingConsent,
+                recordingConsentVersion: recordingConsentVersion
+            )
+        )
+        let data = try await perform(request, logsBodyContents: false)
+        return try decoder.decode(BackendVoiceTutorSessionStart.self, from: data)
+    }
+
     func endVoiceTutorSession(
         registration: RemotePushRegistration,
         sessionID: String
@@ -1622,6 +1725,117 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         let data = try await perform(request, logsBodyContents: false)
         return try decoder.decode(BackendVoiceTutorSessionDetail.self, from: data)
+    }
+
+    func uploadVoiceTutorRecording(
+        registration: RemotePushRegistration,
+        sessionID: String,
+        fileURL: URL,
+        contentType: String,
+        contentLength: Int64,
+        sha256: String,
+        durationMilliseconds: Int64
+    ) async throws {
+        // Completion can commit on the server even if its response is lost.
+        // Recover that case before requesting a new grant. A recording deleted
+        // on this or another device is also terminal: discard the local retry,
+        // never upload it again after the owner's deletion.
+        let existingSession = try await fetchVoiceTutorSession(
+            registration: registration,
+            sessionID: sessionID
+        )
+        if existingSession.sessionId == sessionID,
+           existingSession.recording?.recordingId == sessionID,
+           ["AVAILABLE", "DELETED"].contains(existingSession.recording?.status?.uppercased() ?? "") {
+            return
+        }
+
+        var createRequest = authenticatedRequest(
+            registration: registration,
+            url: endpoint(
+                "api", "v1", "voice-tutor", "sessions", sessionID,
+                "recording", "uploads"
+            )
+        )
+        createRequest.httpMethod = "POST"
+        createRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        createRequest.httpBody = try encoder.encode(
+            VoiceTutorRecordingUploadCreateRequest(
+                contentType: contentType,
+                contentLength: contentLength,
+                sha256: sha256,
+                durationMilliseconds: durationMilliseconds
+            )
+        )
+        let createData = try await perform(createRequest, logsBodyContents: false)
+        let upload = try decoder.decode(BackendVoiceTutorRecordingUpload.self, from: createData)
+        guard upload.uploadUrl.scheme?.lowercased() == "https",
+              upload.uploadUrl.user == nil,
+              upload.uploadUrl.password == nil else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var signedRequest = URLRequest(url: upload.uploadUrl)
+        signedRequest.httpMethod = "PUT"
+        signedRequest.timeoutInterval = 120
+        for (name, value) in upload.headers where Self.isSafeSignedUploadHeader(name) {
+            signedRequest.setValue(value, forHTTPHeaderField: name)
+        }
+        if signedRequest.value(forHTTPHeaderField: "Content-Type") == nil {
+            signedRequest.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
+        let (_, response) = try await session.upload(for: signedRequest, fromFile: fileURL)
+        guard let httpResponse = response as? HTTPURLResponse,
+              Self.canCompleteVoiceTutorRecordingUpload(
+                afterHTTPStatus: httpResponse.statusCode
+              ) else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var completeRequest = authenticatedRequest(
+            registration: registration,
+            url: endpoint(
+                "api", "v1", "voice-tutor", "sessions", sessionID,
+                "recording", "uploads", upload.recordingId, "complete"
+            )
+        )
+        completeRequest.httpMethod = "POST"
+        _ = try await perform(completeRequest, logsBodyContents: false)
+    }
+
+    func fetchVoiceTutorRecordingAccess(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorRecordingAccess {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint(
+                "api", "v1", "voice-tutor", "sessions", sessionID,
+                "recording", "access"
+            )
+        )
+        let data = try await perform(request, logsBodyContents: false)
+        let access = try decoder.decode(BackendVoiceTutorRecordingAccess.self, from: data)
+        guard access.url.scheme?.lowercased() == "https",
+              access.url.user == nil,
+              access.url.password == nil else {
+            throw RemotePushBackendError.invalidResponse
+        }
+        return access
+    }
+
+    func deleteVoiceTutorRecording(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint(
+                "api", "v1", "voice-tutor", "sessions", sessionID, "recording"
+            )
+        )
+        request.httpMethod = "DELETE"
+        _ = try await perform(request, logsBodyContents: false)
     }
 
     func fetchReferralSummary(
@@ -2717,10 +2931,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     userInfo: [APITrafficNotification.userInfoKey: entry]
                 )
                 didPostTrafficLog = true
-                if statusCode == 401 {
+                if statusCode == 401,
+                   let requestIdentity = BackendUnauthorizedRequestIdentity(request: request) {
                     NotificationCenter.default.post(
                         name: BackendAuthorizationNotification.didReceiveUnauthorized,
-                        object: self
+                        object: self,
+                        userInfo: [
+                            BackendAuthorizationNotification.requestIdentityUserInfoKey: requestIdentity
+                        ]
                     )
                 }
                 throw RemotePushBackendError.httpStatus(statusCode, responseBodyText, backendError)
@@ -2790,6 +3008,22 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             .map { "\($0.key): \($0.value)" }
             .sorted()
             .joined(separator: "\n")
+    }
+
+    private static func isSafeSignedUploadHeader(_ name: String) -> Bool {
+        switch name.lowercased() {
+        case "authorization", "cookie", "host", "proxy-authorization", "x-device-id",
+             "x-client-secret":
+            return false
+        default:
+            return true
+        }
+    }
+
+    nonisolated static func canCompleteVoiceTutorRecordingUpload(
+        afterHTTPStatus statusCode: Int
+    ) -> Bool {
+        (200..<300).contains(statusCode) || statusCode == 412
     }
 
     private static func decodeBackendAPIError(from data: Data) -> BackendAPIError? {
@@ -3125,6 +3359,15 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var studyId: Int
         var language: String
         var voice: String?
+        var recordingConsent: Bool = false
+        var recordingConsentVersion: String? = nil
+    }
+
+    private struct VoiceTutorRecordingUploadCreateRequest: Encodable {
+        var contentType: String
+        var contentLength: Int64
+        var sha256: String
+        var durationMilliseconds: Int64
     }
 
     private struct ReferralRedemptionRequest: Encodable {
@@ -3695,6 +3938,73 @@ struct BackendVoiceTutorActiveSession: Decodable, Equatable, Sendable, Identifia
     var id: String { sessionId }
 }
 
+struct BackendVoiceTutorRecording: Decodable, Equatable, Sendable {
+    var enabled: Bool
+    var consentRequired: Bool
+    var available: Bool
+    var status: String?
+    var retentionDays: Int?
+    var expiresAt: Date?
+    var recordingId: String?
+    var contentType: String?
+    var contentLength: Int64?
+    var durationSeconds: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled
+        case consentRequired
+        case available
+        case status
+        case retentionDays
+        case expiresAt
+        case recordingId
+        case contentType
+        case contentLength
+        case durationSeconds
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        consentRequired = try values.decodeIfPresent(Bool.self, forKey: .consentRequired) ?? true
+        status = try values.decodeIfPresent(String.self, forKey: .status)
+        available = (try values.decodeIfPresent(Bool.self, forKey: .available))
+            ?? (status?.uppercased() == "READY")
+        retentionDays = try values.decodeIfPresent(Int.self, forKey: .retentionDays).map { max(0, $0) }
+        expiresAt = try values.decodeIfPresent(Date.self, forKey: .expiresAt)
+        recordingId = try values.decodeIfPresent(String.self, forKey: .recordingId)
+        contentType = try values.decodeIfPresent(String.self, forKey: .contentType)
+        contentLength = try values.decodeIfPresent(Int64.self, forKey: .contentLength).map { max(0, $0) }
+        durationSeconds = try values.decodeIfPresent(Int.self, forKey: .durationSeconds).map { max(0, $0) }
+    }
+}
+
+struct BackendVoiceTutorRecordingUpload: Decodable, Equatable, Sendable {
+    var uploadUrl: URL
+    var headers: [String: String]
+    var recordingId: String
+}
+
+struct BackendVoiceTutorRecordingAccess: Decodable, Equatable, Sendable {
+    var url: URL
+    var expiresAt: Date?
+
+    private enum CodingKeys: String, CodingKey {
+        case url
+        case accessUrl
+        case playbackUrl
+        case expiresAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        url = try values.decodeIfPresent(URL.self, forKey: .url)
+            ?? values.decodeIfPresent(URL.self, forKey: .accessUrl)
+            ?? values.decode(URL.self, forKey: .playbackUrl)
+        expiresAt = try values.decodeIfPresent(Date.self, forKey: .expiresAt)
+    }
+}
+
 struct BackendVoiceTutorStatus: Decodable, Equatable, Sendable {
     var eligible: Bool
     var reason: String?
@@ -3702,6 +4012,7 @@ struct BackendVoiceTutorStatus: Decodable, Equatable, Sendable {
     var quota: BackendVoiceTutorQuota
     var activeSession: BackendVoiceTutorActiveSession?
     var maxSessionSeconds: Int
+    var recording: BackendVoiceTutorRecording?
 
     private enum CodingKeys: String, CodingKey {
         case eligible
@@ -3711,6 +4022,7 @@ struct BackendVoiceTutorStatus: Decodable, Equatable, Sendable {
         case quota
         case activeSession
         case maxSessionSeconds
+        case recording
     }
 
     init(from decoder: Decoder) throws {
@@ -3732,6 +4044,7 @@ struct BackendVoiceTutorStatus: Decodable, Equatable, Sendable {
             0,
             try values.decodeIfPresent(Int.self, forKey: .maxSessionSeconds) ?? 0
         )
+        recording = try values.decodeIfPresent(BackendVoiceTutorRecording.self, forKey: .recording)
     }
 }
 
@@ -3740,6 +4053,11 @@ struct BackendVoiceTutorSessionStart: Decodable, Equatable, Sendable {
     var state: String
     var webSocketURL: URL?
     var webSocketProtocol: String
+    var realtimeTransport: String
+    var sdpURL: URL?
+    var controlWebSocketURL: URL?
+    var controlWebSocketProtocol: String
+    var recording: BackendVoiceTutorRecording?
     var createdAt: Date?
     var hardEndsAt: Date?
     var quota: BackendVoiceTutorQuota
@@ -3751,6 +4069,14 @@ struct BackendVoiceTutorSessionStart: Decodable, Equatable, Sendable {
         case webSocketUrl
         case websocketProtocol
         case webSocketProtocol
+        case realtimeTransport
+        case sdpUrl
+        case sdpURL
+        case controlWebsocketUrl
+        case controlWebSocketUrl
+        case controlWebsocketProtocol
+        case controlWebSocketProtocol
+        case recording
         case createdAt
         case startedAt
         case hardEndsAt
@@ -3767,6 +4093,20 @@ struct BackendVoiceTutorSessionStart: Decodable, Equatable, Sendable {
         webSocketProtocol = try values.decodeIfPresent(String.self, forKey: .websocketProtocol)
             ?? values.decodeIfPresent(String.self, forKey: .webSocketProtocol)
             ?? "buddystudy.voice.v1"
+        realtimeTransport = try values.decodeIfPresent(String.self, forKey: .realtimeTransport)
+            ?? "PCM_WEBSOCKET"
+        let sdpURLString = try values.decodeIfPresent(String.self, forKey: .sdpUrl)
+            ?? values.decodeIfPresent(String.self, forKey: .sdpURL)
+        sdpURL = sdpURLString.flatMap(URL.init(string:))
+        let controlURLString = try values.decodeIfPresent(String.self, forKey: .controlWebsocketUrl)
+            ?? values.decodeIfPresent(String.self, forKey: .controlWebSocketUrl)
+        controlWebSocketURL = controlURLString.flatMap(URL.init(string:))
+        controlWebSocketProtocol = try values.decodeIfPresent(
+            String.self,
+            forKey: .controlWebsocketProtocol
+        ) ?? values.decodeIfPresent(String.self, forKey: .controlWebSocketProtocol)
+            ?? "buddystudy.voice.control.v2"
+        recording = try values.decodeIfPresent(BackendVoiceTutorRecording.self, forKey: .recording)
         createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt)
             ?? values.decodeIfPresent(Date.self, forKey: .startedAt)
         hardEndsAt = try values.decodeIfPresent(Date.self, forKey: .hardEndsAt)
@@ -3962,6 +4302,7 @@ struct BackendVoiceTutorSessionDetail: Decodable, Equatable, Sendable, Identifia
     var transcriptTurns: [BackendVoiceTutorTranscriptTurn]
     var pollAfterMilliseconds: Int?
     var quota: BackendVoiceTutorQuota?
+    var recording: BackendVoiceTutorRecording?
 
     var id: String { sessionId }
 
@@ -3986,6 +4327,7 @@ struct BackendVoiceTutorSessionDetail: Decodable, Equatable, Sendable, Identifia
         case pollAfterMs
         case pollAfterMilliseconds
         case quota
+        case recording
         case session
     }
 
@@ -4006,6 +4348,10 @@ struct BackendVoiceTutorSessionDetail: Decodable, Equatable, Sendable, Identifia
                 ?? nested.pollAfterMilliseconds
             nested.quota = try values.decodeIfPresent(BackendVoiceTutorQuota.self, forKey: .quota)
                 ?? nested.quota
+            nested.recording = try values.decodeIfPresent(
+                BackendVoiceTutorRecording.self,
+                forKey: .recording
+            ) ?? nested.recording
             self = nested
             return
         }
@@ -4032,6 +4378,7 @@ struct BackendVoiceTutorSessionDetail: Decodable, Equatable, Sendable, Identifia
         pollAfterMilliseconds = try values.decodeIfPresent(Int.self, forKey: .pollAfterMs)
             ?? values.decodeIfPresent(Int.self, forKey: .pollAfterMilliseconds)
         quota = try values.decodeIfPresent(BackendVoiceTutorQuota.self, forKey: .quota)
+        recording = try values.decodeIfPresent(BackendVoiceTutorRecording.self, forKey: .recording)
     }
 }
 

@@ -2519,6 +2519,42 @@ enum APITrafficNotification {
 
 enum BackendAuthorizationNotification {
     static let didReceiveUnauthorized = Notification.Name("studyBackendDidReceiveUnauthorized")
+    static let requestIdentityUserInfoKey = "studyBackendUnauthorizedRequestIdentity"
+}
+
+// Deliberately in-memory only: never serialize or log request credentials.
+// An old request's 401 must not invalidate a newly signed-in account.
+struct BackendUnauthorizedRequestIdentity: Equatable, Sendable {
+    private var deviceID: String
+    private var clientSecret: String
+    private var authorization: String?
+
+    init?(request: URLRequest) {
+        guard let deviceID = request.value(forHTTPHeaderField: "X-Device-Id"),
+              !deviceID.isEmpty,
+              let clientSecret = request.value(forHTTPHeaderField: "X-Client-Secret"),
+              !clientSecret.isEmpty else {
+            return nil
+        }
+        self.deviceID = deviceID
+        self.clientSecret = clientSecret
+        authorization = request.value(forHTTPHeaderField: "Authorization")
+    }
+
+    func matches(registration: RemotePushRegistration?) -> Bool {
+        guard let registration,
+              registration.deviceID == deviceID,
+              registration.clientSecret == clientSecret else {
+            return false
+        }
+        // Use the actual stored token, not hasAccessToken: expiry can change
+        // while an otherwise-current request is in flight.
+        let currentAuthorization = registration.accessToken.flatMap { token in
+            token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? nil : "Bearer \(token)"
+        }
+        return authorization == currentAuthorization
+    }
 }
 
 enum BackendServiceStatus: String, Codable, Equatable {
@@ -3023,6 +3059,46 @@ struct AppStrings {
     var voiceTutorMute: String { text("음소거", "Mute", "ミュート") }
     var voiceTutorUnmute: String { text("음소거 해제", "Unmute", "ミュート解除") }
     var voiceTutorEndSession: String { text("학습 종료", "End session", "学習を終了") }
+    var voiceTutorRecordingConsentTitle: String {
+        text(
+            "통화 녹음 및 저장에 동의",
+            "Agree to record and save this call",
+            "通話の録音と保存に同意する"
+        )
+    }
+    var voiceTutorRecordingConsentDescription: String {
+        text(
+            "나와 선생님의 음성을 학습 복습용으로 저장합니다. 동의하지 않아도 통화할 수 있으며, 저장된 녹음은 언제든 삭제할 수 있습니다.",
+            "Your voice and the tutor's voice are saved for review. You can call without recording and delete a saved recording at any time.",
+            "自分とチューターの音声を復習用に保存します。同意しなくても通話でき、保存した録音はいつでも削除できます。"
+        )
+    }
+    func voiceTutorRecordingRetention(_ days: Int) -> String {
+        let safeDays = max(1, days)
+        return text(
+            "녹음은 기본 \(safeDays)일 동안 보관됩니다.",
+            "Recordings are retained for \(safeDays) days by default.",
+            "録音は標準で\(safeDays)日間保存されます。"
+        )
+    }
+    var voiceTutorRecordingActive: String { text("REC 녹음 중", "REC Recording", "REC 録音中") }
+    var voiceTutorSavedRecording: String { text("저장된 통화 녹음", "Saved call recording", "保存された通話録音") }
+    var voiceTutorPlayRecording: String { text("녹음 재생", "Play recording", "録音を再生") }
+    var voiceTutorPauseRecording: String { text("일시정지", "Pause", "一時停止") }
+    var voiceTutorDeleteRecording: String { text("녹음 삭제", "Delete recording", "録音を削除") }
+    var voiceTutorDeleteRecordingConfirmation: String {
+        text(
+            "이 통화 녹음을 영구적으로 삭제할까요?",
+            "Permanently delete this call recording?",
+            "この通話録音を完全に削除しますか？"
+        )
+    }
+    var voiceTutorRecordingPreparing: String {
+        text("녹음을 안전하게 저장하는 중입니다.", "The recording is being saved securely.", "録音を安全に保存しています。")
+    }
+    var voiceTutorRecordingUnavailable: String {
+        text("녹음을 불러올 수 없습니다.", "The recording could not be loaded.", "録音を読み込めませんでした。")
+    }
     var voiceTutorMicrophoneDenied: String {
         text(
             "음성 학습을 시작하려면 설정에서 마이크 접근을 허용해 주세요.",

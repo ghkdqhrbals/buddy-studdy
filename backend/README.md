@@ -16,7 +16,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores APNs device tokens.
 - Stores per-device study settings and schedule.
 - Stores study records, answer drafts, skipped/deleted states, and grading results.
-- Relays foreground-only Pro Voice Tutor audio through a server-owned OpenAI Realtime connection, keeps overlapping learner audio without cancelling the tutor's current one-sentence response, waits for response-scoped device playback completion before replying, accounts for monthly time in seconds, and stores bounded transcript turns plus a separate private learning result without retaining original audio.
+- Negotiates foreground-only Pro Voice Tutor audio over direct iOS/OpenAI WebRTC while retaining server-owned sideband control (with a bounded PCM relay fallback), keeps overlapping learner audio without cancelling the tutor's current one-sentence response, waits for response-scoped device playback completion before replying, accounts for monthly time in seconds, and stores bounded transcript turns plus a separate private learning result. A separately default-off, explicit-consent flow may retain one private mixed call recording under the lifecycle below.
 - Stores optional community profiles for Google-signed-in users.
 - Stores community question reports and can forward them by email when SMTP is configured.
 - Exposes an authenticated, stateless MCP server for private learning context, studies, questions, grading, Voice Tutor quota/history/results, and topic statistics when enabled.
@@ -63,7 +63,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `BUDDYSTUDY_STREAMS_ENABLED`: global Redis Stream listener switch. Keep it enabled in normal local and production runtimes; disabling it pauses generation, grading, translation, push, notification, account-withdrawal, and community-event consumers together.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
 - `OPENAI_API_KEY_SYSTEM`: system-workload key used only for post-study child-topic suggestions.
-- `OPENAI_API_KEY_USER`: regular user-content workload key used for question generation, embeddings, translation, answer feedback, grading, the Voice Tutor realtime relay, and Tutor Learning Result summaries. It remains server-only for realtime work and is never returned to iOS or MCP clients. It must be a different OpenAI key from `OPENAI_API_KEY_SYSTEM`; a third Voice Tutor-specific key type is not supported. `OPENAI_USER_CONTENT_API_KEY` and `OPENAI_API_KEY` remain compatibility fallbacks for this value only and never supply the system client; `OPENAI_SYSTEM_API_KEY` remains a compatibility fallback for the system value.
+- `OPENAI_API_KEY_USER`: regular user-content workload key used for question generation, embeddings, translation, answer feedback, grading, Voice Tutor call negotiation/sideband and PCM fallback, and Tutor Learning Result summaries. It remains server-only and is never returned to iOS or MCP clients. It must be a different OpenAI key from `OPENAI_API_KEY_SYSTEM`; a third Voice Tutor-specific key type is not supported. `OPENAI_USER_CONTENT_API_KEY` and `OPENAI_API_KEY` remain compatibility fallbacks for this value only and never supply the system client; `OPENAI_SYSTEM_API_KEY` remains a compatibility fallback for the system value.
 - `VOICE_TUTOR_ENABLED`: enables authenticated Pro Voice Tutor REST/WebSocket registration; defaults to `false` in every environment until the Voice Tutor legal release checklist is approved. An approved deployment must opt in explicitly. Disabling it rejects new live sessions without changing stored entitlement or history, stale-session settlement, or pending-result recovery.
 - `OPENAI_REALTIME_MODEL`: realtime voice model; defaults to `gpt-realtime-2.1`.
 - `OPENAI_REALTIME_VOICE`: realtime output voice; defaults to `marin`.
@@ -76,9 +76,15 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `VOICE_TUTOR_SUMMARY_MODEL`: model used to derive the private Tutor Learning Result; defaults to `OPENAI_MODEL`, whose current default is `gpt-5.4`.
 - `VOICE_TUTOR_SUMMARY_PROMPT_VERSION`: persisted/result audit version for the summary contract; defaults to `voice-tutor-summary-v1`.
 - `VOICE_TUTOR_SUMMARY_RECOVERY_POLL_MS`, `VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS`, `VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE`, `VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS`: bounded result-generation recovery controls; defaults to `5000`, `5000`, `10`, and `300`.
-- `VOICE_TUTOR_TRANSCRIPT_MAX_CHARS`: maximum bounded transcript text accepted for one session; defaults to `100000`. Original microphone and model audio is never persisted.
+- `VOICE_TUTOR_TRANSCRIPT_MAX_CHARS`: maximum bounded transcript text accepted for one session; defaults to `100000`. Realtime audio frames are never written to application logs or MySQL; an original mixed recording is stored only through the separate explicit-consent recording flow below.
 - `VOICE_TUTOR_TRANSCRIPT_MAX_TURNS`: maximum persisted transcript turns per session; defaults to `2000`.
 - `VOICE_TUTOR_PUBLIC_BASE_URL`: optional public BuddyStudy `wss` base URL used to construct the returned session URL. When empty, the backend returns an owner-authenticated relative WebSocket path and iOS resolves it against its configured backend origin.
+- `VOICE_TUTOR_RECORDING_ENABLED`: independently enables new Voice Tutor recording consent and upload grants. It defaults to `false`, even when live Voice Tutor is enabled, and must remain off until the recording-specific legal release checklist is approved.
+- `VOICE_TUTOR_RECORDING_BUCKET`, `VOICE_TUTOR_RECORDING_REGION`, `VOICE_TUTOR_RECORDING_KMS_KEY_ID`: private S3 storage. The bucket is required to enable recording, S3 Block Public Access must remain on, and an empty KMS key selects SSE-S3; a configured key selects SSE-KMS. Bucket lifecycle must expire current versions, noncurrent versions, and delete markers no later than `VOICE_TUTOR_RECORDING_RETENTION_DAYS`.
+- `VOICE_TUTOR_RECORDING_RETENTION_DAYS`: absolute recording retention from the server-recorded call end; defaults to `30` days and is clamped to 1–365 days. Retrying an identical pending upload never extends that deadline.
+- `VOICE_TUTOR_RECORDING_PRESIGN_SECONDS`, `VOICE_TUTOR_RECORDING_MAX_BYTES`: short-lived owner-scoped upload/download grant lifetime and maximum mixed AAC/M4A object size; defaults are `300` seconds and `134217728` bytes.
+- `VOICE_TUTOR_RECORDING_UPLOAD_COMPLETION_SAFETY_SECONDS`: bounded post-expiry deadline through which owner deletion and account-withdrawal cleanup retry a recording key or owner prefix every minute; defaults to `300` seconds and is clamped to 60–3,600 seconds. Retries continue every 24 hours forever after this deadline.
+- `VOICE_TUTOR_RECORDING_RETENTION_ENABLED`, `VOICE_TUTOR_RECORDING_RETENTION_BATCH_SIZE`, `VOICE_TUTOR_RECORDING_RETENTION_MAX_ROWS_PER_RUN`, `VOICE_TUTOR_RECORDING_RETENTION_CRON`, `VOICE_TUTOR_RECORDING_RETENTION_ZONE`: bounded object-retention and mandatory permanent deletion-retry controls; defaults are `true`, `100`, `1000`, minutely (`0 * * * * *`), and `UTC`. Disabling ordinary age-based retention does not disable owner-deleted key cleanup, withdrawal tombstones, or their minute-to-daily retries.
 - `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. Local `dev` imports `buddystudy/dev` with a `local-secret.` prefix and maps `OPENAI_API_KEY_USER`, `OPENAI_API_KEY_SYSTEM`, their compatibility fallbacks, SMTP, APNs, RevenueCat, and Firebase Remote Config values, so database and Redis values in that secret cannot override local services. Explicit non-empty environment variables override the corresponding AWS values. Use the `dev-aws` profile to import the entire development secret; `prod` imports `buddystudy/prod`. Store APNs as `APNS_AUTH_KEY_BASE64`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, and `APNS_ENV`; store RevenueCat server verification credentials as `REVENUECAT_PROJECT_ID`, `REVENUECAT_APP_ID`, and `REVENUECAT_SERVER_API_KEY`; store Firebase publication credentials as `FIREBASE_PROJECT_ID` and `FIREBASE_SERVICE_ACCOUNT_JSON_BASE64`. Other keys use the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `OPENAI_API_KEY_USER`, `OPENAI_API_KEY_SYSTEM`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
   Spring property keys are also supported by Spring Cloud AWS, for example `spring.r2dbc.url`, `spring.r2dbc.username`, `spring.r2dbc.password`, and the separate `spring.flyway.*` keys. Keep runtime R2DBC and Flyway JDBC URLs in their respective formats.
 
@@ -86,7 +92,7 @@ The settings API may retain a user's OpenAI API key encrypted at rest for backwa
 
 The monthly Voice Tutor entitlement is not an environment-variable counter.
 `user_membership_tiers.monthly_voice_seconds_limit` is authoritative and defaults
-to zero for TIER1 and 18,000 seconds for TIER2/TIER3. The authenticated
+to zero for TIER1 and 3,600 seconds for TIER2/TIER3. The authenticated
 membership-tier admin API can change `monthlyVoiceSecondsLimit`. The dedicated
 user admin voice-limit API stores a nullable, persistent personal cap: the
 override takes precedence over the tier default, can lower a paid allowance to
@@ -96,6 +102,36 @@ controls feature/provider behavior and the per-session ceiling only. The voice
 quota uses its own account-created monthly anchor and advances an overdue period
 lazily on authenticated Voice Tutor access; it is not handled by the question
 quota's managed rollover job.
+
+Voice Tutor recording is a separate, default-off capability. A session can
+receive a recording upload only when the registered owner explicitly sends
+`recordingConsent=true` together with the fixed `voice-recording-v1` consent
+version at reservation time. One mixed AAC-in-M4A (`audio/mp4`) object is
+allowed per session. MySQL stores metadata and consent audit fields only, never
+the binary audio. Upload completion HEAD-checks the signed content type, exact
+byte length, and SHA-256 checksum before the object becomes available. Signed
+PUTs carry `If-None-Match: *`, so a completed object cannot be overwritten with
+the still-live grant. Upload and playback URLs are short-lived, owner-only S3
+signatures. Bucket names and object keys are not returned as standalone response
+fields, but the signed URL necessarily contains its bucket host and object-key
+path until expiry; the app must not log it, and MCP never receives it. Every
+metadata lookup is joined to the authenticated
+session owner, deletion is idempotent and immediate, and the retention job
+atomically claims an expired metadata snapshot as deleted before removing its object. Object deletion removes
+every S3 version and delete marker, not just the current key. Account withdrawal
+first commits an FK-free owner-prefix cleanup tombstone in an independent
+transaction, attempts an immediate prefix delete, and then completes relational
+cleanup even if that first storage call fails. Because S3 may allow a PUT that started
+before signature expiry to finish afterward, the managed job repeatedly deletes
+owner-deleted keys and withdrawn prefixes minutely through the configured safety
+deadline after the applicable latest grant expiry, then daily forever. Withdrawal
+tombstones are permanent; storage or outer transaction failures cannot roll back
+the independently committed marker. The private bucket must independently expire
+current versions, noncurrent versions, and delete markers no later than the configured
+recording retention so untracked or unusually late uploads also have a storage-level bound.
+Keep the bucket configured while
+retained objects exist even if new capture is disabled. MCP intentionally has
+no recording upload, URL, download, or original-audio resource.
 
 ## Local Run
 

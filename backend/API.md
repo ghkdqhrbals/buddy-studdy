@@ -219,7 +219,7 @@ Authorization: Bearer <BACKEND_API_TOKEN>
 Content-Type: application/json
 
 {
-  "monthlyVoiceSecondsLimit": 18000
+  "monthlyVoiceSecondsLimit": 3600
 }
 ```
 
@@ -526,7 +526,7 @@ Patch request:
 }
 ```
 
-`DELETE /api/v1/profile` immediately withdraws the active member, revokes its sessions, scrubs login/profile secrets, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`. In the same transaction it writes an `ACCOUNT_WITHDRAWN` outbox event. An at-least-once Redis Stream consumer then idempotently removes profile assets, public questions, studies, records, reactions, user-block relationships, notifications, and related data.
+`DELETE /api/v1/profile` immediately withdraws the active member, revokes its sessions, scrubs login/profile secrets, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`. In the same transaction it writes an `ACCOUNT_WITHDRAWN` outbox event. An at-least-once Redis Stream consumer then idempotently removes profile assets, public questions, studies, records, reactions, user-block relationships, notifications, and related data. Before deleting Voice Tutor recording metadata or account rows, that consumer commits an FK-free S3 owner-prefix tombstone in an independent transaction and attempts to delete every version and delete marker currently under the prefix. An initial S3 failure does not roll back the marker or indefinitely block relational withdrawal. The managed retention job keeps the tombstone permanently: it retries minutely through the configured upload-completion safety deadline after the latest possible signed PUT expiry, then retries daily forever so even a PUT that finishes unusually late is removed after the user row is gone.
 
 ### Permission Policy, Terms, And Notifications
 
@@ -813,12 +813,24 @@ Authorization: Bearer <accessToken>
     "tierCode": "TIER2",
     "periodStartedAt": "2026-08-15T09:00:00Z",
     "resetAt": "2026-09-15T09:00:00Z",
-    "limitSeconds": 18000,
+    "limitSeconds": 3600,
     "usedSeconds": 900,
     "reservedSeconds": 0,
-    "remainingSeconds": 17100
+    "remainingSeconds": 2700
   },
   "maxSessionSeconds": 3600,
+  "recording": {
+    "enabled": true,
+    "consentRequired": true,
+    "available": false,
+    "status": null,
+    "retentionDays": 30,
+    "expiresAt": null,
+    "recordingId": null,
+    "contentType": null,
+    "contentLength": null,
+    "durationSeconds": null
+  },
   "activeSession": null
 }
 ```
@@ -831,16 +843,31 @@ Authorization: Bearer <accessToken>
 Idempotency-Key: ios-voice-<uuid>
 Content-Type: application/json
 
-{"studyId":42,"language":"ko","voice":"marin"}
+{
+  "studyId": 42,
+  "language": "ko",
+  "voice": "marin",
+  "recordingConsent": true,
+  "recordingConsentVersion": "voice-recording-v1"
+}
 ```
 
 `Idempotency-Key` must contain 1–191 characters and is scoped to the
 authenticated user. Retrying the same key returns the same session and does not
 reserve seconds twice. Only one non-terminal session is allowed per user. The
 optional `voice` falls back to the server configuration. A successful new
-reservation returns `201` with `sessionId`, `state=READY`, `websocketUrl`,
-`websocketProtocol=buddystudy.voice.v1`, `createdAt`, `hardEndsAt`, and the
-post-reservation quota. The server reserves at most the minimum of remaining
+reservation returns `201` with `sessionId`, `state=READY`,
+`realtimeTransport=WEBRTC`, relative-by-default `sdpUrl` and
+`controlWebsocketUrl`, `controlWebsocketProtocol=buddystudy.voice.control.v2`,
+the legacy `websocketUrl`/`buddystudy.voice.v1` fallback, `createdAt`,
+`hardEndsAt`, and the post-reservation quota. Status, create, and session-detail responses use the
+same `recording` object. `enabled` reports whether the separately default-off
+recording feature and private bucket are configured; `consentRequired` is
+always true. When consent was captured but no upload exists, `recordingId` is
+the opaque session ID while `status` and `expiresAt` remain null. Omitting
+recording consent leaves `recordingId` null. A true consent must include the
+exact fixed version `voice-recording-v1`; the server stores its version and
+timestamp for audit and never upgrades consent implicitly. The server reserves at most the minimum of remaining
 monthly seconds, the configured per-session ceiling, and time until reset.
 
 History uses an opaque newest-first cursor:
@@ -856,6 +883,10 @@ Authorization: Bearer <accessToken>
 Clients must return the cursor unchanged rather than parsing or synthesizing
 it. Detail includes the session, authoritative quota, bounded ordered
 `transcriptTurns`, and the private Tutor Learning Result when available.
+Detail also returns the unified `recording` metadata object even when no
+recording row exists. Recording states are `PENDING`, `AVAILABLE`, `FAILED`, or
+`DELETED`; clients use the explicit `available` boolean before requesting
+playback.
 
 Both explicit REST finalization and the WebSocket control event are supported:
 
@@ -865,14 +896,68 @@ Authorization: Bearer <accessToken>
 ```
 
 The request has no body. For a reserved session it finalizes immediately. For
-an active relay it requests `ENDING`; the owning WebSocket performs the one
-terminal settlement after a bounded transcript drain. The transaction charges
-the greater of rounded-up server-observed connected seconds and rounded-up
-accepted 24 kHz mono PCM duration, releases unused reservation, and is
-idempotent, so a repeated request returns the same terminal result without
-charging again.
+an active call it requests `ENDING`; the owning control/relay socket performs
+the one terminal settlement after a bounded transcript drain. The transaction
+charges rounded-up server-observed connected seconds; the legacy PCM fallback
+charges the greater accepted 24 kHz mono PCM duration. It releases unused
+reservation and is idempotent, so a repeated request returns the same terminal
+result without charging again. Recording duration is never a billing input.
 
-Connect to the fixed stream path on the same authenticated BuddyStudy backend
+For the primary low-latency transport, negotiate media first:
+
+```http
+POST /api/v1/voice-tutor/sessions/{sessionId}/webrtc
+Authorization: Bearer <accessToken>
+Content-Type: application/sdp
+Accept: application/sdp
+
+v=0
+...
+m=audio ...
+```
+
+The bounded SDP must contain exactly one audio media section, DTLS SHA-256
+fingerprint, and ICE credentials. Any `m=application` data channel or other
+media section is rejected so a modified app cannot send `session.update`,
+`response.create`, `response.cancel`, or truncation directly to OpenAI. The
+backend creates the call with its regular server-side key, stores the opaque
+provider call ID, and returns the SDP answer as `application/sdp` with
+`Cache-Control: no-store`. iOS applies the answer to the same peer connection;
+only microphone/model RTP media then travels directly between iOS and OpenAI.
+
+After SDP succeeds, connect the authenticated server-control socket from the
+same origin:
+
+```http
+GET /api/v1/voice-tutor/sessions/{sessionId}/control
+Authorization: Bearer <accessToken>
+Sec-WebSocket-Protocol: buddystudy.voice.control.v2
+```
+
+One session permits one atomic control claim. The backend attaches to the same
+OpenAI call over its authenticated sideband before it emits
+`buddystudy.voice.session.ready`; iOS keeps its local microphone track disabled
+until that event. The control socket accepts only rate-bounded heartbeat,
+session end, and `buddystudy.voice.playout.drained` with a matching
+`responseId`. It carries sanitized lifecycle/VAD/transcript/response events but
+never duplicates WebRTC audio deltas. Provider close, auth revocation, deadline,
+client disconnect, protocol overflow, or explicit end all terminate the
+sideband, hang up the call, and converge on the same settlement.
+
+Server VAD uses `create_response=false` and `interrupt_response=false`; the
+backend alone creates responses and constrains each tutor turn to one short,
+complete sentence. Learner speech over tutor output is captured but never
+cancels, truncates, clears, or replaces that sentence. Before requesting the
+next reply for the coalesced learner turn, the same response must be completed,
+OpenAI must emit `output_audio_buffer.stopped`, and iOS must observe its final
+rendered PCM, wait the current output latency plus I/O buffer duration, and send
+the matching playout-drained acknowledgement. A cleared/incomplete response or
+missing drain is terminal rather than misreported as finished. The configured
+long-monologue intervention can still let the tutor take the floor with one
+short complete sentence while learner capture continues.
+
+The following `/stream` contract is the compatibility PCM fallback, not the
+primary iOS media path. Connect to the fixed stream path on the same authenticated BuddyStudy backend
 origin. `websocketUrl` is an informational same-origin URL (relative by
 default); clients must derive or validate the final origin and must never send
 the bearer token to a server-provided cross-origin URL:
@@ -928,7 +1013,7 @@ BuddyStudy also emits synthetic server events. Every synthetic event includes
 
 | Type | Additional fields and meaning |
 | --- | --- |
-| `buddystudy.voice.session.ready` | `hardEndsAt`, `quotaRemainingSeconds`; the upstream relay is ready |
+| `buddystudy.voice.session.ready` | `hardEndsAt`, `quotaRemainingSeconds`, `transport`; the provider relay/sideband is ready and WebRTC may enable its microphone |
 | `buddystudy.voice.heartbeat.ack` | `state`; the validated advisory heartbeat was acknowledged |
 | `buddystudy.voice.quota.updated` | `limitSeconds`, `usedSeconds`, `reservedSeconds`, `remainingSeconds`, `chargedSeconds` |
 | `buddystudy.voice.session.ending` | `reason`, `hardEndsAt`; the server deadline is closing the stream |
@@ -939,6 +1024,85 @@ BuddyStudy also emits synthetic server events. Every synthetic event includes
 When `resultStatus=PROCESSING`, clients wait `pollAfterMs` and refresh the
 detail endpoint. Session states are `READY`, `ACTIVE`, `ENDING`, `COMPLETED`, or
 `FAILED`; result states are `PENDING`, `PROCESSING`, `COMPLETED`, or `FAILED`.
+
+An explicitly consented terminal session may upload exactly one mixed
+AAC-in-M4A file. The binary goes directly to private S3; MySQL stores metadata
+only:
+
+```http
+POST /api/v1/voice-tutor/sessions/{sessionId}/recording/uploads
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{
+  "contentType": "audio/mp4",
+  "contentLength": 1048576,
+  "sha256": "<64 lowercase hex characters>",
+  "durationMilliseconds": 60000
+}
+```
+
+`durationSeconds` is accepted as an alternative to `durationMilliseconds`. If
+both are omitted, the terminal server-metered session duration is used. A call
+with zero charged seconds cannot receive an upload grant. Duration may exceed
+the smaller of charged time and the session ceiling by no more than five seconds.
+`contentLength` is bounded by both `VOICE_TUTOR_RECORDING_MAX_BYTES` and
+32 KiB per second of that server-metered duration envelope plus 256 KiB of
+container overhead; only `audio/mp4` is accepted. The
+response contains a short-lived HTTPS `uploadUrl`, `headers` (also repeated as
+the compatibility alias `requiredHeaders`), opaque `recordingId`, `expiresAt`,
+and the unified `recording` metadata. The client must send every signed header
+unchanged with one `PUT` of the complete M4A file. The signed request includes
+`If-None-Match: *`, so the grant cannot overwrite a completed object.
+The retention deadline is fixed from the server-recorded call end; renewing the
+same pending contract rotates only its short upload grant and never extends that
+deadline.
+
+After a successful S3 PUT, finalize it with no request body:
+
+```http
+POST /api/v1/voice-tutor/sessions/{sessionId}/recording/uploads/{recordingId}/complete
+Authorization: Bearer <accessToken>
+```
+
+The `recordingId` must equal the owned session's opaque recording ID. The
+backend uses S3 HEAD metadata to match the signed content type, exact byte
+length, and SHA-256 checksum. A mismatch deletes the object, marks the metadata
+failed, and returns validation failure; an object is playable only after this
+step returns `AVAILABLE`.
+
+Playback access and deletion are owner-scoped:
+
+```http
+GET /api/v1/voice-tutor/sessions/{sessionId}/recording/access
+DELETE /api/v1/voice-tutor/sessions/{sessionId}/recording
+Authorization: Bearer <accessToken>
+```
+
+Access returns `{"url":"<short-lived signed HTTPS URL>","expiresAt":"...","recording":{...}}`;
+`downloadUrl` is included only as a compatibility alias. Delete returns `204`
+and is idempotent. Access fails closed near the absolute retention boundary, and
+the S3 signer never rounds a shorter requested lifetime up past it. Physical deletion removes every S3 version and delete marker
+for the recording key. If its signed PUT could still be in flight, the managed
+job physically deletes the key minutely after grant expiry through the configured
+upload-completion safety deadline and daily forever afterward; no successful
+delete permanently closes the retry condition. The API returns neither the bucket nor object
+key as a standalone response field and never returns a permanent URL. The
+owner-only signed URL necessarily contains its S3 bucket host and object-key path
+until expiry; clients must not log it, and MCP never receives it. Recordings
+expire after 30 days by default
+(operator-configurable from 1–365 days); a bounded managed job deletes expired
+metadata snapshots before removing their objects. Account withdrawal first commits an
+FK-free owner-prefix cleanup tombstone independently, then attempts an immediate
+all-version prefix delete before relational cleanup. Initial storage failure is
+left to the durable marker rather than blocking relational withdrawal. The
+managed job repeatedly deletes that prefix minutely through the same post-expiry
+safety deadline and daily forever afterward. The permanent tombstone therefore
+keeps a PUT authorized before expiry from becoming an untracked orphan after
+account rows disappear. The private bucket must also enforce current-version,
+noncurrent-version, and delete-marker lifecycle cleanup no later than the configured
+recording retention as a storage-level backstop. New recording capture remains disabled unless
+`VOICE_TUTOR_RECORDING_ENABLED=true`, independent of the live Tutor flag.
 
 When MCP is enabled, its Voice Tutor contract is owner-scoped and read-only:
 
@@ -955,10 +1119,17 @@ authoritative snapshot, the shared read use case may settle an expired session
 or lazily advance an overdue monthly period; this server housekeeping does not
 grant MCP a live-session mutation tool.
 
-BuddyStudy does not persist original microphone or model audio. Voice REST
-bodies and WebSocket frames are excluded from API body logs, provider-history
-bodies, analytics, and error attachments. Only bounded transcript text,
-session/accounting metadata, and the derived private result are stored.
+MCP deliberately exposes no recording upload endpoint, presigned playback URL,
+recording object key, or original-audio resource. Session detail metadata may
+describe recording state, but MCP cannot retrieve the binary.
+
+Realtime microphone/model audio frames, Voice REST bodies, and WebSocket frames
+are excluded from API body logs, provider-history bodies, analytics, and error
+attachments. Only when the separate feature flag is enabled and explicit
+versioned consent was captured may iOS upload one mixed recording to private
+S3. Original audio is never stored as a MySQL BLOB. Bounded transcript text,
+session/accounting and recording metadata, and the derived private result are
+stored under the policies above.
 
 Common Voice Tutor failures are `VOICE_TUTOR_PRO_REQUIRED` (`403`),
 `VOICE_TUTOR_QUOTA_EXCEEDED` (`403`), `VOICE_TUTOR_SESSION_CONFLICT` (`409`),

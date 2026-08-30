@@ -80,6 +80,7 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(longValue("select count(*) from app_notifications where event_id = 'new-$suffix'")).isEqualTo(1)
         assertThat(longValue("select count(*) from user_voice_quota where user_id = $userId")).isZero()
         assertThat(longValue("select count(*) from voice_tutor_sessions where id = '$voiceSessionId'")).isZero()
+        assertThat(longValue("select count(*) from voice_tutor_recordings where session_id = '$voiceSessionId'")).isZero()
         assertThat(longValue("select count(*) from voice_tutor_transcript_turns where session_id = '$voiceSessionId'")).isZero()
         assertThat(longValue("select count(*) from voice_tutor_results where session_id = '$voiceSessionId'")).isZero()
     }
@@ -207,13 +208,15 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
                 status, result_status, language, model, voice, topic_snapshot, difficulty_snapshot,
                 period_started_at, period_ends_at, reserved_seconds, charged_seconds,
                 max_session_seconds, hard_ends_at, connected_at, ended_at, finalized_at,
-                finalization_key, end_reason, created_at, updated_at
+                finalization_key, end_reason, recording_consented_at, recording_consent_version,
+                created_at, updated_at
             ) values (
                 :id, :userId, null, :idempotencyKey, :providerSessionId,
                 'COMPLETED', 'COMPLETED', 'ko', 'gpt-realtime-2.1', 'marin', 'Private topic', 5,
                 :createdAt, :periodEndsAt, 60, 60,
                 60, :endedAt, :createdAt, :endedAt, :endedAt,
-                :finalizationKey, 'USER_ENDED', :createdAt, :endedAt
+                :finalizationKey, 'USER_ENDED', :createdAt, 'voice-recording-v1',
+                :createdAt, :endedAt
             )
             """.trimIndent(),
         ).bind("id", sessionId).bind("userId", userId)
@@ -222,6 +225,27 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             .bind("createdAt", createdAt).bind("endedAt", createdAt.plusSeconds(60))
             .bind("periodEndsAt", createdAt.plusSeconds(31L * 86_400))
             .bind("finalizationKey", "voice-session:$sessionId:finalize")
+            .fetch().rowsUpdated().awaitSingle()
+        client.sql(
+            """
+            insert into voice_tutor_recordings (
+                session_id, user_id, object_key, status, content_type,
+                expected_bytes, actual_bytes, sha256_hex, duration_milliseconds,
+                consented_at, consent_version, upload_expires_at, retained_until,
+                completed_at, created_at, updated_at
+            ) values (
+                :sessionId, :userId, :objectKey, 'AVAILABLE', 'audio/mp4',
+                1024, 1024, :sha256, 60000,
+                :createdAt, 'voice-recording-v1', :uploadExpiresAt, :retainedUntil,
+                :completedAt, :createdAt, :completedAt
+            )
+            """.trimIndent(),
+        ).bind("sessionId", sessionId).bind("userId", userId)
+            .bind("objectKey", "voice-tutor-recordings/$userId/$sessionId/recording.m4a")
+            .bind("sha256", "ab".repeat(32))
+            .bind("createdAt", createdAt).bind("uploadExpiresAt", createdAt.plusSeconds(300))
+            .bind("retainedUntil", createdAt.plusSeconds(30L * 86_400))
+            .bind("completedAt", createdAt.plusSeconds(60))
             .fetch().rowsUpdated().awaitSingle()
         client.sql(
             """

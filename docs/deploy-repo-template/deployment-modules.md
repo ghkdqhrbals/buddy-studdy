@@ -417,24 +417,69 @@ deployment.
   `VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS`,
   `VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE`,
   `VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS`,
-  `VOICE_TUTOR_TRANSCRIPT_MAX_CHARS`, `VOICE_TUTOR_TRANSCRIPT_MAX_TURNS`, and optional
-  `VOICE_TUTOR_PUBLIC_BASE_URL`. `deploy-backend.yml` reads each as an
+  `VOICE_TUTOR_TRANSCRIPT_MAX_CHARS`, `VOICE_TUTOR_TRANSCRIPT_MAX_TURNS`, optional
+  `VOICE_TUTOR_PUBLIC_BASE_URL`, `VOICE_TUTOR_RECORDING_ENABLED`,
+  `VOICE_TUTOR_RECORDING_BUCKET`, `VOICE_TUTOR_RECORDING_REGION`, optional
+  `VOICE_TUTOR_RECORDING_KMS_KEY_ID`, `VOICE_TUTOR_RECORDING_RETENTION_DAYS`,
+  `VOICE_TUTOR_RECORDING_PRESIGN_SECONDS`, `VOICE_TUTOR_RECORDING_MAX_BYTES`,
+  `VOICE_TUTOR_RECORDING_RETENTION_ENABLED`,
+  `VOICE_TUTOR_RECORDING_RETENTION_BATCH_SIZE`,
+  `VOICE_TUTOR_RECORDING_RETENTION_MAX_ROWS_PER_RUN`,
+  `VOICE_TUTOR_RECORDING_UPLOAD_COMPLETION_SAFETY_SECONDS`,
+  `VOICE_TUTOR_RECORDING_RETENTION_CRON`, and
+  `VOICE_TUTOR_RECORDING_RETENTION_ZONE`. `deploy-backend.yml` reads each as an
   optional GitHub Actions repository variable and writes the resolved value to
   the generated runtime `.env`. The deployment template deliberately defaults
-  `VOICE_TUTOR_ENABLED` to `false` until the legal release checklist is
-  complete; after legal approval, set the repository variable explicitly to
-  `true`. The remaining deployment defaults mirror the application contract:
+  both `VOICE_TUTOR_ENABLED` and `VOICE_TUTOR_RECORDING_ENABLED` to `false`
+  until their legal release checklists are complete; after legal approval, set
+  each repository variable explicitly to `true`. Enabling recording without a
+  bucket fails deployment validation. The remaining deployment defaults mirror the application contract:
   `gpt-realtime-2.1`, `marin`, `3600`, `15`, `60`, `12`, `5000`, `5000`, `100`,
   `gpt-5.4`, `voice-tutor-summary-v1`, `5000`, `5000`, `10`, `300`,
-  `100000`, `2000`, and an
-  empty public base URL, in that order. The 3,600-second call ceiling follows
+  `100000`, `2000`, an empty public base URL, an empty private bucket,
+  `ap-northeast-2`, SSE-S3 when no KMS key is supplied, `30`, `300`,
+  `134217728`, `true`, `100`, `1000`, `300`, `0 * * * * *`, and `UTC`, in that
+  order. The 3,600-second call ceiling follows
   the provider's 60-minute Realtime session limit; the independently
-  configurable plan allowance remains 18,000 seconds (300 minutes) by
-  default. The generated Nginx route performs an authenticated WebSocket
-  upgrade, disables proxy buffering, and keeps a 4,000-second idle ceiling.
+  configurable plan allowance remains 3,600 seconds (60 minutes) by
+  default. The generated Nginx route performs authenticated WebSocket upgrades
+  for both the legacy `/stream` fallback and the WebRTC `/control` sideband,
+  disables proxy buffering, and keeps a 4,000-second idle ceiling. A separate
+  audio-SDP-only `/webrtc` route caps the request body at 64 KiB and uses a
+  310-second edge timeout, slightly above the backend's hard-clamped 300-second
+  provider negotiation maximum, so backend cleanup retains ownership of calls
+  whose OpenAI negotiation times out.
   The regular server-only `OPENAI_API_KEY_USER` from the existing AWS
   application secret serves both realtime relay and result summarization; no
-  Voice Tutor key or third OpenAI key is created. This feature adds no
+  Voice Tutor key or third OpenAI key is created. Private recording objects use
+  deterministic owner/session prefixes, never public URLs, and a single mixed
+  AAC-in-M4A object per session. The backend instance role needs only
+  `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, and
+  `s3:DeleteObjectVersion` on the recording prefix plus `s3:ListBucket` and
+  `s3:ListBucketVersions` constrained to that prefix. Version-aware deletion is
+  required even when bucket versioning is currently disabled so a future bucket
+  setting cannot strand noncurrent recordings. Configure bucket lifecycle to
+  expire current versions, noncurrent versions, and delete markers no later than
+  `VOICE_TUTOR_RECORDING_RETENTION_DAYS`; the application retries do not replace
+  this storage-level backstop. When a customer-managed KMS
+  key is configured, also grant the minimum encrypt/decrypt/data-key permissions
+  for that key. Keep S3 Block Public Access enabled. Do not clear the bucket
+  setting merely because new recording capture is disabled: retention and
+  account-withdrawal cleanup still need it until all existing objects are gone.
+  The configured bucket/region and deterministic key-prefix schema are part of
+  the durable cleanup contract. Do not rotate them while recording metadata or
+  prefix tombstones exist unless a migration keeps the old namespace reachable
+  by the cleanup worker; changing only the environment would strand old targets.
+  The retention job runs every minute because it also owns durable, FK-free
+  post-withdrawal prefix tombstones. It retries each prefix minutely through the
+  configured safety deadline after the latest possible signed PUT expiry and
+  daily forever afterward; tombstones are permanent and are never removed after
+  a successful delete. Owner-deleted recording keys use the same minute-to-daily
+  indefinite retry cadence while their metadata exists. Tombstone upserts commit independently before relational withdrawal,
+  so initial S3 failure or an outer cleanup rollback cannot erase the retry;
+  ordinary object retention can be disabled without disabling these withdrawal
+  retries.
+  This feature adds no
   container, monitoring module, deployment workflow, or runtime health-check
   gate. Monthly per-tier seconds remain database/admin-owned.
 - MySQL credentials and connection URLs are owned by the

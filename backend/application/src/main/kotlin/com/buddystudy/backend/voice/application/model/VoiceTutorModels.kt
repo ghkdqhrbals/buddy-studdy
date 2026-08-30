@@ -2,6 +2,8 @@ package com.buddystudy.backend.voice.application.model
 
 import com.buddystudy.voice.domain.VoiceTutorResult
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
+import com.buddystudy.voice.domain.VoiceTutorRecording
+import com.buddystudy.voice.domain.VoiceTutorRecordingStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
@@ -24,6 +26,7 @@ data class VoiceTutorStatusResponse(
     val tierCode: String,
     val quota: VoiceTutorQuotaResponse,
     val maxSessionSeconds: Int,
+    val recording: VoiceTutorRecordingResponse,
     val activeSession: VoiceTutorSessionResponse?,
 )
 
@@ -47,13 +50,20 @@ data class VoiceTutorCreateSessionResponse(
     val sessionId: String,
     val state: VoiceTutorSessionStatus,
     val websocketUrl: String,
+    val sdpUrl: String,
+    val controlWebsocketUrl: String,
     val websocketProtocol: String = WEBSOCKET_PROTOCOL,
+    val realtimeTransport: String = REALTIME_TRANSPORT,
+    val controlWebsocketProtocol: String = CONTROL_WEBSOCKET_PROTOCOL,
     val createdAt: Instant,
     val hardEndsAt: Instant,
+    val recording: VoiceTutorRecordingResponse,
     val quota: VoiceTutorQuotaResponse,
 ) {
     companion object {
         const val WEBSOCKET_PROTOCOL = "buddystudy.voice.v1"
+        const val REALTIME_TRANSPORT = "WEBRTC"
+        const val CONTROL_WEBSOCKET_PROTOCOL = "buddystudy.voice.control.v2"
     }
 }
 
@@ -62,6 +72,44 @@ data class VoiceTutorTranscriptTurnResponse(
     val role: VoiceTutorTranscriptRole,
     val transcript: String,
     val occurredAt: Instant,
+)
+
+data class VoiceTutorRecordingUploadResponse(
+    val uploadUrl: String,
+    val method: String = "PUT",
+    val headers: Map<String, String>,
+    val requiredHeaders: Map<String, String> = headers,
+    val recordingId: String,
+    val expiresAt: Instant,
+    val recording: VoiceTutorRecordingResponse,
+)
+
+data class VoiceTutorRecordingDownloadResponse(
+    val url: String,
+    val downloadUrl: String = url,
+    val expiresAt: Instant,
+    val recording: VoiceTutorRecordingResponse,
+)
+
+data class VoiceTutorRecordingResponse(
+    val enabled: Boolean,
+    val consentRequired: Boolean = true,
+    val available: Boolean,
+    val status: VoiceTutorRecordingStatus?,
+    val retentionDays: Int,
+    val expiresAt: Instant?,
+    val recordingId: String?,
+    val contentType: String?,
+    val contentLength: Long?,
+    val durationSeconds: Int?,
+)
+
+data class VoiceTutorRecordingRetentionResult(
+    val deletedRecordings: Int,
+    val attemptedRecordings: Int,
+    val capped: Boolean,
+    val completedPrefixCleanups: Int = 0,
+    val attemptedPrefixCleanups: Int = 0,
 )
 
 data class VoiceTutorResultResponse(
@@ -93,6 +141,7 @@ data class VoiceTutorSessionDetailResponse(
     val quota: VoiceTutorQuotaResponse,
     val transcriptTurns: List<VoiceTutorTranscriptTurnResponse>,
     val result: VoiceTutorResultResponse?,
+    val recording: VoiceTutorRecordingResponse,
 )
 
 data class VoiceTutorSessionsPageResponse(
@@ -143,6 +192,7 @@ data class ReservedVoiceTutorSession(
 
 sealed interface ReserveVoiceTutorSessionResult {
     data class Reserved(val value: ReservedVoiceTutorSession) : ReserveVoiceTutorSessionResult
+    data object IdempotencyConflict : ReserveVoiceTutorSessionResult
     data class NotEligible(val quota: VoiceTutorQuotaSnapshot) : ReserveVoiceTutorSessionResult
     data class Exhausted(val quota: VoiceTutorQuotaSnapshot) : ReserveVoiceTutorSessionResult
     data class ActiveSession(val session: VoiceTutorSession, val quota: VoiceTutorQuotaSnapshot) : ReserveVoiceTutorSessionResult
@@ -200,6 +250,18 @@ fun VoiceTutorResult.toResponse() = VoiceTutorResultResponse(
     promptVersion = promptVersion,
     errorMessage = errorMessage,
     createdAt = createdAt,
+)
+
+fun VoiceTutorRecording.toResponse(enabled: Boolean, retentionDays: Int, now: Instant) = VoiceTutorRecordingResponse(
+    enabled = enabled,
+    available = status == VoiceTutorRecordingStatus.AVAILABLE && retainedUntil.isAfter(now),
+    status = status,
+    retentionDays = retentionDays,
+    expiresAt = retainedUntil,
+    recordingId = sessionId,
+    contentType = contentType,
+    contentLength = actualBytes ?: expectedBytes,
+    durationSeconds = ((durationMilliseconds + 999L) / 1_000L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
 )
 
 private fun Instant.coerceAtMost(other: Instant): Instant = if (isAfter(other)) other else this

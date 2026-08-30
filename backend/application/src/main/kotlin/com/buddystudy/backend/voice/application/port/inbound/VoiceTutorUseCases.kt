@@ -6,6 +6,10 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorRelayContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionsPageResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorStatusResponse
+import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingDownloadResponse
+import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingResponse
+import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingRetentionResult
+import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingUploadResponse
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
@@ -21,11 +25,33 @@ interface VoiceTutorUseCase {
         language: String,
         voice: String?,
         idempotencyKey: String,
+        recordingConsent: Boolean = false,
+        recordingConsentVersion: String? = null,
     ): VoiceTutorCreateSessionResponse
 
     suspend fun sessions(principal: Principal, limit: Int, cursor: String?): VoiceTutorSessionsPageResponse
     suspend fun session(principal: Principal, sessionId: String): VoiceTutorSessionDetailResponse
     suspend fun endSession(principal: Principal, sessionId: String): VoiceTutorSessionDetailResponse
+}
+
+interface VoiceTutorRecordingUseCase {
+    suspend fun initiateUpload(
+        principal: Principal,
+        sessionId: String,
+        contentType: String,
+        contentLength: Long,
+        sha256: String,
+        durationMilliseconds: Long?,
+        durationSeconds: Long?,
+    ): VoiceTutorRecordingUploadResponse
+
+    suspend fun completeUpload(principal: Principal, sessionId: String, recordingId: String): VoiceTutorRecordingResponse
+    suspend fun download(principal: Principal, sessionId: String): VoiceTutorRecordingDownloadResponse
+    suspend fun delete(principal: Principal, sessionId: String)
+}
+
+interface VoiceTutorRecordingRetentionUseCase {
+    suspend fun cleanupExpired(): VoiceTutorRecordingRetentionResult
 }
 
 interface VoiceTutorRelayUseCase {
@@ -60,6 +86,15 @@ interface VoiceTutorRelayUseCase {
     suspend fun finish(
         principal: Principal,
         sessionId: String,
+        reason: String,
+        failed: Boolean = false,
+        failureMessage: String? = null,
+    ): VoiceTutorSessionDetailResponse
+
+    suspend fun finishWebRtc(
+        principal: Principal,
+        sessionId: String,
+        providerSessionId: String,
         reason: String,
         failed: Boolean = false,
         failureMessage: String? = null,

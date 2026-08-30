@@ -5,7 +5,10 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestFactory
+import org.junit.jupiter.api.DynamicTest.dynamicTest
 import reactor.test.StepVerifier
 import java.time.Duration
 import java.util.Base64
@@ -429,6 +432,138 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         controller.close()
     }
 
+    @TestFactory
+    fun `webrtc releases a queued turn only after every completion signal in any order`() =
+        listOf(
+            listOf("done", "provider-stopped", "client-drained"),
+            listOf("done", "client-drained", "provider-stopped"),
+            listOf("provider-stopped", "done", "client-drained"),
+            listOf("provider-stopped", "client-drained", "done"),
+            listOf("client-drained", "done", "provider-stopped"),
+            listOf("client-drained", "provider-stopped", "done"),
+        ).map { ordering ->
+            dynamicTest(ordering.joinToString(" -> ")) {
+                val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+                val activeControl = AtomicReference<String>()
+
+                StepVerifier.create(controller.providerEvents().take(2))
+                    .then { queueOrdinaryResponse(controller) }
+                    .assertNext(activeControl::set)
+                    .then {
+                        controller.observeProviderEvent(
+                            responseEvent("response.created", "response-webrtc", activeControl.get()),
+                        )
+                        learnerTurn(controller)
+                        applyWebRtcGateSignal(controller, activeControl.get(), ordering[0])
+                    }
+                    .expectNoEvent(Duration.ofMillis(10))
+                    .then { applyWebRtcGateSignal(controller, activeControl.get(), ordering[1]) }
+                    .expectNoEvent(Duration.ofMillis(10))
+                    .then { applyWebRtcGateSignal(controller, activeControl.get(), ordering[2]) }
+                    .assertNext { raw ->
+                        assertThat(mapper.readTree(raw).path("type").asText()).isEqualTo("response.create")
+                    }
+                    .verifyComplete()
+
+                controller.close()
+            }
+        }
+
+    @Test
+    fun `webrtc stale provider and client drain ids cannot release current response`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val activeControl = AtomicReference<String>()
+
+        StepVerifier.create(controller.providerEvents().take(2))
+            .then { queueOrdinaryResponse(controller) }
+            .assertNext(activeControl::set)
+            .then {
+                controller.observeProviderEvent(
+                    responseEvent("response.created", "response-current", activeControl.get()),
+                )
+                learnerTurn(controller)
+                controller.observeProviderEvent(
+                    responseEvent("response.done", "response-current", activeControl.get()),
+                )
+                controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "response-stale"))
+                controller.observeClientEvent(playoutDrainedEvent("response-stale"))
+            }
+            .expectNoEvent(Duration.ofMillis(20))
+            .then {
+                controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "response-current"))
+            }
+            .expectNoEvent(Duration.ofMillis(20))
+            .then { controller.observeClientEvent(playoutDrainedEvent("response-current")) }
+            .assertNext { raw ->
+                assertThat(mapper.readTree(raw).path("type").asText()).isEqualTo("response.create")
+            }
+            .verifyComplete()
+
+        controller.close()
+    }
+
+    @Test
+    fun `webrtc never cancels truncates or clears when learner starts over tutor`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val activeControl = AtomicReference<String>()
+
+        StepVerifier.create(controller.providerEvents())
+            .then { queueOrdinaryResponse(controller) }
+            .assertNext(activeControl::set)
+            .then {
+                controller.observeProviderEvent(
+                    responseEvent("response.created", "response-speaking", activeControl.get()),
+                )
+                controller.observeProviderEvent(event("input_audio_buffer.speech_started"))
+            }
+            .expectNoEvent(Duration.ofMillis(25))
+            .thenCancel()
+            .verify()
+
+        controller.close()
+    }
+
+    @Test
+    fun `webrtc cleared or non-completed response is terminal`() {
+        listOf("cancelled", "incomplete", "failed").forEach { status ->
+            val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+            val control = controller.providerEvents().next().doOnSubscribe { queueOrdinaryResponse(controller) }.block()!!
+            controller.observeProviderEvent(responseEvent("response.created", "response-$status", control))
+
+            assertThatThrownBy {
+                controller.observeProviderEvent(
+                    responseEvent("response.done", "response-$status", control, status = status),
+                )
+            }.isInstanceOf(VoiceTutorProviderIncompleteResponseException::class.java)
+            controller.close()
+        }
+
+        val clearedController = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val clearedControl = clearedController.providerEvents().next()
+            .doOnSubscribe { queueOrdinaryResponse(clearedController) }
+            .block()!!
+        clearedController.observeProviderEvent(
+            responseEvent("response.created", "response-cleared", clearedControl),
+        )
+        assertThatThrownBy {
+            clearedController.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.cleared", "response-cleared"),
+            )
+        }.isInstanceOf(VoiceTutorProviderOutputBufferClearedException::class.java)
+        clearedController.close()
+    }
+
+    @Test
+    fun `webrtc audio deltas stay off the client control path`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val control = controller.providerEvents().next().doOnSubscribe { queueOrdinaryResponse(controller) }.block()!!
+        controller.observeProviderEvent(responseEvent("response.created", "response-audio", control))
+
+        assertThat(controller.observeProviderEvent(audioDeltaEvent("response-audio")))
+            .isEqualTo(VoiceTutorProviderRelayDisposition.PERSIST_ONLY)
+        controller.close()
+    }
+
     @Test
     fun `terminal blocks responses and keeps final transcripts persistence only`() {
         val controller = controller()
@@ -499,11 +634,15 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         state.awaitDrain(Duration.ofMillis(50)).block(Duration.ofSeconds(1))
     }
 
-    private fun controller(nanoTime: () -> Long = System::nanoTime) = VoiceTutorDuplexTurnController(
+    private fun controller(
+        nanoTime: () -> Long = System::nanoTime,
+        transport: VoiceTutorRealtimeTransport = VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY,
+    ) = VoiceTutorDuplexTurnController(
         mapper = mapper,
         continuousSpeechLimit = Duration.ofSeconds(30),
         responseTimeout = Duration.ofSeconds(60),
         nanoTime = nanoTime,
+        transport = transport,
     )
 
     private fun queueOrdinaryResponse(controller: VoiceTutorDuplexTurnController) {
@@ -551,4 +690,27 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
 
     private fun playbackCompletedEvent(id: String): String =
         """{"type":"buddystudy.voice.playback.completed","responseId":"$id"}"""
+
+    private fun playoutDrainedEvent(id: String): String =
+        """{"type":"buddystudy.voice.playout.drained","responseId":"$id"}"""
+
+    private fun outputBufferEvent(type: String, id: String): String =
+        """{"type":"$type","response_id":"$id"}"""
+
+    private fun applyWebRtcGateSignal(
+        controller: VoiceTutorDuplexTurnController,
+        control: String,
+        signal: String,
+    ) {
+        when (signal) {
+            "done" -> controller.observeProviderEvent(
+                responseEvent("response.done", "response-webrtc", control),
+            )
+            "provider-stopped" -> controller.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.stopped", "response-webrtc"),
+            )
+            "client-drained" -> controller.observeClientEvent(playoutDrainedEvent("response-webrtc"))
+            else -> error("Unknown gate signal: $signal")
+        }
+    }
 }

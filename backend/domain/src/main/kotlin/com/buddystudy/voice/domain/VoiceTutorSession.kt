@@ -22,6 +22,13 @@ enum class VoiceTutorTranscriptRole {
     TUTOR,
 }
 
+enum class VoiceTutorRecordingStatus {
+    PENDING,
+    AVAILABLE,
+    FAILED,
+    DELETED,
+}
+
 data class VoiceTutorSession(
     val id: String,
     val userId: Long,
@@ -44,10 +51,33 @@ data class VoiceTutorSession(
     val connectedAt: Instant?,
     val relayHeartbeatAt: Instant?,
     val acceptedAudioBytes: Long,
+    val recordingConsentedAt: Instant? = null,
+    val recordingConsentVersion: String? = null,
     val endedAt: Instant?,
     val finalizedAt: Instant?,
     val endReason: String?,
     val failureCode: String?,
+    val failureMessage: String?,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
+data class VoiceTutorRecording(
+    val sessionId: String,
+    val userId: Long,
+    val objectKey: String,
+    val status: VoiceTutorRecordingStatus,
+    val contentType: String,
+    val expectedBytes: Long,
+    val actualBytes: Long?,
+    val sha256Hex: String,
+    val durationMilliseconds: Long,
+    val consentedAt: Instant,
+    val consentVersion: String,
+    val uploadExpiresAt: Instant,
+    val retainedUntil: Instant,
+    val completedAt: Instant?,
+    val deletedAt: Instant?,
     val failureMessage: String?,
     val createdAt: Instant,
     val updatedAt: Instant,

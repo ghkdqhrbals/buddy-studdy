@@ -11,6 +11,7 @@ import com.buddystudy.backend.voice.application.model.ReserveVoiceTutorSessionRe
 import com.buddystudy.backend.voice.application.model.VoiceTutorCreateSessionResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorRelayContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionCursor
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionsPageResponse
@@ -28,12 +29,20 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtime
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAuthorizationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSummaryPort
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorRecordingPersistencePort
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorWebRtcPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRecordingPersistencePort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcCleanupClaim
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcCleanupPort
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorWebRtcCleanupPort
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import org.springframework.http.HttpStatus
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import kotlinx.coroutines.flow.Flow
 import java.net.URI
@@ -50,7 +59,11 @@ class VoiceTutorService(
     private val relayAuthorization: VoiceTutorRelayAuthorizationPort,
     private val properties: BuddyStudyProperties,
     private val clock: Clock = Clock.systemUTC(),
+    private val recordings: VoiceTutorRecordingPersistencePort = UnavailableVoiceTutorRecordingPersistencePort,
+    private val webRtc: VoiceTutorWebRtcPort = UnavailableVoiceTutorWebRtcPort,
+    private val webRtcCleanup: VoiceTutorWebRtcCleanupPort = UnavailableVoiceTutorWebRtcCleanupPort,
 ) : VoiceTutorUseCase, VoiceTutorRelayUseCase, VoiceTutorResultRecoveryUseCase, VoiceTutorSessionRecoveryUseCase {
+    private val logger = LoggerFactory.getLogger(javaClass)
     @RequirePermission(Permissions.VOICE_TUTOR_READ)
     override suspend fun status(principal: Principal): VoiceTutorStatusResponse {
         val registered = registered(principal)
@@ -72,6 +85,7 @@ class VoiceTutorService(
             tierCode = quota.tierCode,
             quota = quota.toResponse(),
             maxSessionSeconds = configuredMaxSessionSeconds(),
+            recording = recordingResponse(),
             activeSession = active?.toResponse(now),
         )
     }
@@ -83,6 +97,8 @@ class VoiceTutorService(
         language: String,
         voice: String?,
         idempotencyKey: String,
+        recordingConsent: Boolean,
+        recordingConsentVersion: String?,
     ): VoiceTutorCreateSessionResponse {
         val registered = registered(principal)
         requireAvailable()
@@ -94,6 +110,21 @@ class VoiceTutorService(
         val selectedVoice = voice?.trim()?.takeIf(String::isNotEmpty) ?: properties.voiceTutor.voice
         if (!VOICE_NAME.matches(selectedVoice)) throw validation("Invalid Voice Tutor voice.")
         val publicWebsocketBase = validatedPublicWebsocketBase()
+        val consentVersion = recordingConsentVersion?.trim()?.takeIf(String::isNotEmpty)
+        if (recordingConsent) {
+            if (consentVersion != RECORDING_CONSENT_VERSION) {
+                throw validation("The Voice Tutor recording consent version is missing or unsupported.")
+            }
+            if (!recordingAvailable()) {
+                throw ApiException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    ApiErrorCode.VOICE_TUTOR_PROVIDER_UNAVAILABLE,
+                    "Voice Tutor recording is temporarily unavailable.",
+                )
+            }
+        } else if (consentVersion != null) {
+            throw validation("recordingConsentVersion requires explicit recordingConsent.")
+        }
 
         val now = clock.instant()
         reconcile(registered.userId, now)
@@ -106,6 +137,8 @@ class VoiceTutorService(
             voice = selectedVoice,
             maxSessionSeconds = configuredMaxSessionSeconds(),
             now = now,
+            recordingConsentedAt = now.takeIf { recordingConsent },
+            recordingConsentVersion = consentVersion.takeIf { recordingConsent },
         )) {
             is ReserveVoiceTutorSessionResult.Reserved -> {
                 val session = result.value.session
@@ -113,8 +146,11 @@ class VoiceTutorService(
                     sessionId = session.id,
                     state = session.status,
                     websocketUrl = websocketUrl(publicWebsocketBase, session.id),
+                    sdpUrl = webRtcSdpUrl(publicWebsocketBase, session.id),
+                    controlWebsocketUrl = controlWebsocketUrl(publicWebsocketBase, session.id),
                     createdAt = session.createdAt,
                     hardEndsAt = session.hardEndsAt,
+                    recording = recordingResponse(session),
                     quota = result.value.quota.toResponse(),
                 )
             }
@@ -135,6 +171,11 @@ class VoiceTutorService(
                 ApiErrorCode.VOICE_TUTOR_SESSION_CONFLICT,
                 "Another Voice Tutor session is already active.",
                 metadata = mapOf("activeSessionId" to result.session.id, "hardEndsAt" to result.session.hardEndsAt),
+            )
+            ReserveVoiceTutorSessionResult.IdempotencyConflict -> throw ApiException(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.VOICE_TUTOR_SESSION_CONFLICT,
+                "Idempotency-Key was already used with different Voice Tutor session parameters.",
             )
             ReserveVoiceTutorSessionResult.StudyNotFound -> throw notFound("Study was not found.")
             ReserveVoiceTutorSessionResult.UserNotFound -> throw notFound("User was not found.")
@@ -330,10 +371,41 @@ class VoiceTutorService(
     ): VoiceTutorSessionDetailResponse {
         val registered = registered(principal)
         val id = requiredSessionId(sessionId)
+        return finishSession(registered, id, reason, failed, failureMessage)
+    }
+
+    @RequirePermission(Permissions.VOICE_TUTOR_READ)
+    override suspend fun finishWebRtc(
+        principal: Principal,
+        sessionId: String,
+        providerSessionId: String,
+        reason: String,
+        failed: Boolean,
+        failureMessage: String?,
+    ): VoiceTutorSessionDetailResponse {
+        val registered = registered(principal)
+        val id = requiredSessionId(sessionId)
+        val callId = providerSessionId.trim().takeIf(WEBRTC_PROVIDER_CALL_ID::matches)
+            ?: return finishSession(registered, id, reason, failed, failureMessage)
+        val providerEnded = hangupWebRtcProvider(id, callId)
+        val detail = finishSession(registered, id, reason, failed, failureMessage)
+        if (providerEnded) {
+            clearWebRtcProviderSession(registered.userId, id, callId)
+        }
+        return detail
+    }
+
+    private suspend fun finishSession(
+        registered: Principal,
+        sessionId: String,
+        reason: String,
+        failed: Boolean,
+        failureMessage: String?,
+    ): VoiceTutorSessionDetailResponse {
         val now = clock.instant()
         val finalized = persistence.finalize(
             userId = registered.userId,
-            sessionId = id,
+            sessionId = sessionId,
             reason = reason.trim().take(64).ifEmpty { "SESSION_ENDED" },
             failed = failed,
             failureMessage = failureMessage?.take(1000),
@@ -343,13 +415,13 @@ class VoiceTutorService(
         if (failed && finalized.resultStatus != VoiceTutorResultStatus.COMPLETED) {
             persistence.failResult(
                 registered.userId,
-                id,
+                sessionId,
                 properties.voiceTutor.summaryPromptVersion,
                 failureMessage ?: "The realtime session failed before a learning summary could be generated.",
                 clock.instant(),
             )
         }
-        return detail(registered.userId, id)
+        return detail(registered.userId, sessionId)
     }
 
     private suspend fun summarize(userId: Long, session: VoiceTutorSession) {
@@ -415,6 +487,11 @@ class VoiceTutorService(
             transcriptTurns = persistence.transcript(userId, sessionId, properties.voiceTutor.transcriptMaxCharacters)
                 .map { it.toResponse() },
             result = persistence.result(userId, sessionId)?.toResponse(),
+            recording = recordings.recording(userId, sessionId)?.toResponse(
+                enabled = recordingAvailable(),
+                retentionDays = configuredRecordingRetentionDays(),
+                now = clock.instant(),
+            ) ?: recordingResponse(session),
         )
     }
 
@@ -457,32 +534,117 @@ class VoiceTutorService(
         val now = clock.instant()
         val readyTimeoutSeconds = configuredConnectTimeoutSeconds()
         val heartbeatLeaseSeconds = configuredHeartbeatLeaseSeconds()
+        val safeLimit = limit.coerceIn(1, 500)
+        val orphanedCalls = webRtcCleanup.claimOrphaned(safeLimit, now, heartbeatLeaseSeconds)
+        orphanedCalls.forEach { claim ->
+            recoverOrphanedWebRtcProvider(claim)
+        }
+        val pendingHangups = persistence.terminalWebRtcSessionsAwaitingHangup(safeLimit)
+        pendingHangups.forEach { session ->
+            runCatching { hangupAndClearWebRtcProvider(session) }
+        }
         val userIds = persistence.staleSessionUserIds(
-            limit.coerceIn(1, 500),
+            safeLimit,
             now,
             readyTimeoutSeconds,
             heartbeatLeaseSeconds,
         )
         userIds.forEach { userId ->
-            runCatching {
-                persistence.reconcileExpired(
-                    userId,
-                    now,
-                    readyTimeoutSeconds,
-                    heartbeatLeaseSeconds,
-                )
-            }
+            runCatching { reconcile(userId, now) }
         }
-        return userIds.size
+        return orphanedCalls.size + pendingHangups.size + userIds.size
     }
 
     private suspend fun reconcile(userId: Long, now: Instant) {
-        persistence.reconcileExpired(
+        val settled = persistence.reconcileExpired(
             userId,
             now,
             configuredConnectTimeoutSeconds(),
             configuredHeartbeatLeaseSeconds(),
         )
+        settled.forEach { session ->
+            hangupAndClearWebRtcProvider(session)
+        }
+    }
+
+    private suspend fun hangupAndClearWebRtcProvider(session: VoiceTutorSession): Boolean {
+        val callId = session.providerSessionId?.takeIf(WEBRTC_PROVIDER_CALL_ID::matches) ?: return false
+        if (!hangupWebRtcProvider(session.id, callId)) return false
+        return clearWebRtcProviderSession(session.userId, session.id, callId)
+    }
+
+    private suspend fun hangupWebRtcProvider(sessionId: String, callId: String): Boolean = try {
+        webRtc.hangup(callId)
+        true
+    } catch (error: Throwable) {
+        logger.warn(
+            "voice_tutor_webrtc_hangup_failed sessionId={} errorType={}",
+            sessionId,
+            error.javaClass.simpleName,
+        )
+        false
+    }
+
+    private suspend fun clearWebRtcProviderSession(userId: Long, sessionId: String, callId: String): Boolean = try {
+        val cleared = persistence.clearWebRtcProviderSession(userId, sessionId, callId, clock.instant())
+        if (cleared) {
+            runCatching { webRtcCleanup.complete(callId) }
+                .onFailure { error ->
+                    logger.warn(
+                        "voice_tutor_webrtc_cleanup_marker_completion_failed sessionId={} errorType={}",
+                        sessionId,
+                        error.javaClass.simpleName,
+                    )
+                }
+        }
+        cleared
+    } catch (error: Throwable) {
+        logger.warn(
+            "voice_tutor_webrtc_hangup_ack_failed sessionId={} errorType={}",
+            sessionId,
+            error.javaClass.simpleName,
+        )
+        false
+    }
+
+    private suspend fun recoverOrphanedWebRtcProvider(claim: VoiceTutorWebRtcCleanupClaim) {
+        if (!WEBRTC_PROVIDER_CALL_ID.matches(claim.callId)) {
+            runCatching {
+                webRtcCleanup.retryClaim(
+                    claim.callId,
+                    claim.claimToken,
+                    "Invalid WebRTC provider call marker.",
+                    clock.instant(),
+                )
+            }
+            return
+        }
+        try {
+            webRtc.hangup(claim.callId)
+        } catch (error: Throwable) {
+            runCatching {
+                webRtcCleanup.retryClaim(
+                    claim.callId,
+                    claim.claimToken,
+                    error.javaClass.simpleName.take(1000),
+                    clock.instant(),
+                )
+            }
+            logger.warn(
+                "voice_tutor_orphan_webrtc_hangup_failed sessionId={} errorType={}",
+                claim.sessionId,
+                error.javaClass.simpleName,
+            )
+            return
+        }
+        runCatching { webRtcCleanup.completeClaim(claim.callId, claim.claimToken) }
+            .onFailure { error ->
+                logger.warn(
+                    "voice_tutor_orphan_webrtc_cleanup_completion_failed sessionId={} errorType={}",
+                    claim.sessionId,
+                    error.javaClass.simpleName,
+                )
+            }
     }
 
     private fun configuredConnectTimeoutSeconds() = properties.voiceTutor.connectTimeoutSeconds.coerceIn(5, 300)
@@ -491,6 +653,25 @@ class VoiceTutorService(
 
     private fun websocketUrl(publicWebsocketBase: String?, sessionId: String): String =
         "${publicWebsocketBase.orEmpty()}/api/v1/voice-tutor/sessions/$sessionId/stream"
+
+    private fun controlWebsocketUrl(publicWebsocketBase: String?, sessionId: String): String =
+        "${publicWebsocketBase.orEmpty()}/api/v1/voice-tutor/sessions/$sessionId/control"
+
+    private fun webRtcSdpUrl(publicWebsocketBase: String?, sessionId: String): String {
+        val publicHttpBase = publicWebsocketBase?.let { base ->
+            val uri = URI(base)
+            URI(
+                "https",
+                uri.userInfo,
+                uri.host,
+                uri.port,
+                uri.path,
+                null,
+                null,
+            ).toString().removeSuffix("/")
+        }
+        return "${publicHttpBase.orEmpty()}/api/v1/voice-tutor/sessions/$sessionId/webrtc"
+    }
 
     private fun validatedPublicWebsocketBase(): String? {
         val configured = properties.voiceTutor.publicBaseUrl.trim().removeSuffix("/")
@@ -558,6 +739,25 @@ class VoiceTutorService(
         properties.openai.userContentApiKey.isNotBlank() &&
         properties.voiceTutor.model.isNotBlank()
 
+    private fun recordingAvailable(): Boolean = properties.voiceTutor.recordingEnabled &&
+        properties.voiceTutor.recordingBucket.isNotBlank()
+
+    private fun recordingResponse(session: VoiceTutorSession? = null): VoiceTutorRecordingResponse =
+        VoiceTutorRecordingResponse(
+            enabled = recordingAvailable(),
+            available = false,
+            status = null,
+            retentionDays = configuredRecordingRetentionDays(),
+            expiresAt = null,
+            recordingId = session?.id?.takeIf { session.recordingConsentedAt != null },
+            contentType = RECORDING_CONTENT_TYPE.takeIf { session?.recordingConsentedAt != null },
+            contentLength = null,
+            durationSeconds = session?.chargedSeconds?.takeIf { it > 0 },
+        )
+
+    private fun configuredRecordingRetentionDays(): Int =
+        properties.voiceTutor.recordingRetentionDays.coerceIn(1, 365).toInt()
+
     private fun configuredMaxSessionSeconds(): Int =
         properties.voiceTutor.maxSessionSeconds.coerceIn(1, MAX_CONFIGURED_SESSION_SECONDS)
 
@@ -586,7 +786,10 @@ class VoiceTutorService(
         const val MAX_TRANSCRIPT_TURNS = 2_000
         const val MAX_ACCEPTED_AUDIO_BATCH_BYTES = 480_000L
         const val MAX_CONTEXT_CHARACTERS = 20_000
+        const val RECORDING_CONSENT_VERSION = "voice-recording-v1"
+        const val RECORDING_CONTENT_TYPE = "audio/mp4"
         val VOICE_NAME = Regex("[A-Za-z0-9_-]{1,64}")
         val UUID_PATTERN = Regex("[0-9a-fA-F-]{36}")
+        val WEBRTC_PROVIDER_CALL_ID = Regex("rtc_[A-Za-z0-9_-]{1,187}")
     }
 }

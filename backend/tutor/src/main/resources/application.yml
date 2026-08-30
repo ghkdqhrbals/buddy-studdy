@@ -93,6 +93,19 @@ buddystudy:
     transcript-max-characters: ${VOICE_TUTOR_TRANSCRIPT_MAX_CHARS:100000}
     transcript-max-turns: ${VOICE_TUTOR_TRANSCRIPT_MAX_TURNS:2000}
     public-base-url: ${VOICE_TUTOR_PUBLIC_BASE_URL:}
+    recording-enabled: ${VOICE_TUTOR_RECORDING_ENABLED:false}
+    recording-bucket: ${VOICE_TUTOR_RECORDING_BUCKET:}
+    recording-region: ${VOICE_TUTOR_RECORDING_REGION:ap-northeast-2}
+    recording-kms-key-id: ${VOICE_TUTOR_RECORDING_KMS_KEY_ID:}
+    recording-retention-days: ${VOICE_TUTOR_RECORDING_RETENTION_DAYS:30}
+    recording-presign-seconds: ${VOICE_TUTOR_RECORDING_PRESIGN_SECONDS:300}
+    recording-max-bytes: ${VOICE_TUTOR_RECORDING_MAX_BYTES:134217728}
+    recording-retention-enabled: ${VOICE_TUTOR_RECORDING_RETENTION_ENABLED:true}
+    recording-retention-batch-size: ${VOICE_TUTOR_RECORDING_RETENTION_BATCH_SIZE:100}
+    recording-retention-max-rows-per-run: ${VOICE_TUTOR_RECORDING_RETENTION_MAX_ROWS_PER_RUN:1000}
+    recording-upload-completion-safety-seconds: ${VOICE_TUTOR_RECORDING_UPLOAD_COMPLETION_SAFETY_SECONDS:300}
+    recording-retention-cron: "${VOICE_TUTOR_RECORDING_RETENTION_CRON:0 * * * * *}"
+    recording-retention-zone: ${VOICE_TUTOR_RECORDING_RETENTION_ZONE:UTC}
   logging:
     api:
       detail: ${API_LOG_DETAIL:detailed}

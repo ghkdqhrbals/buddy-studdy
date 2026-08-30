@@ -25,13 +25,20 @@ internal class VoiceTutorRealtimeEventPolicy(
         if (node.path("event_id").asText().startsWith(INTERNAL_CONTROL_EVENT_PREFIX)) {
             throw VoiceTutorClientProtocolException("Voice Tutor client event id is reserved.")
         }
-        if (type == VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT) {
+        if (type == VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT ||
+            type == VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT
+        ) {
             validatePlaybackCompletion(node)
         }
         return type in ALLOWED_CLIENT_EVENTS
     }
 
-    fun providerDecision(raw: String, sessionId: String, serverTime: Instant): ProviderEventDecision {
+    fun providerDecision(
+        raw: String,
+        sessionId: String,
+        serverTime: Instant,
+        transport: VoiceTutorProviderTransport = VoiceTutorProviderTransport.LEGACY_PCM_RELAY,
+    ): ProviderEventDecision {
         val node = runCatching { mapper.readTree(raw) }.getOrNull()
             ?: return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
         return when (val type = node.path("type").asText()) {
@@ -41,7 +48,9 @@ internal class VoiceTutorRealtimeEventPolicy(
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_ERROR")
             }
             "response.output_audio.delta" -> if (validProviderAudioDelta(node)) {
-                ProviderEventDecision(raw)
+                ProviderEventDecision(
+                    payload = raw.takeIf { transport == VoiceTutorProviderTransport.LEGACY_PCM_RELAY },
+                )
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
@@ -80,8 +89,50 @@ internal class VoiceTutorRealtimeEventPolicy(
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
+            VoiceTutorRealtimeContract.SIDEBAND_READY_EVENT -> if (
+                transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND
+            ) {
+                ProviderEventDecision(
+                    mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.SIDEBAND_READY_EVENT)),
+                )
+            } else {
+                ProviderEventDecision(payload = null)
+            }
+            in WEBRTC_OUTPUT_BUFFER_BOUNDARY_EVENTS -> if (
+                transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
+                validProviderResponseId(node.path("response_id"))
+            ) {
+                ProviderEventDecision(
+                    mapper.writeValueAsString(
+                        linkedMapOf(
+                            "type" to type,
+                            "response_id" to node.path("response_id").asText(),
+                        ),
+                    ),
+                )
+            } else if (transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND) {
+                providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+            } else {
+                ProviderEventDecision(payload = null)
+            }
+            "output_audio_buffer.cleared" -> if (
+                transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
+                validProviderResponseId(node.path("response_id"))
+            ) {
+                providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PLAYOUT_CLEARED")
+            } else if (transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND) {
+                providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+            } else {
+                ProviderEventDecision(payload = null)
+            }
             in PASSTHROUGH_PROVIDER_EVENTS -> ProviderEventDecision(raw)
-            "response.created", "response.done" -> responseDecision(node, type, sessionId, serverTime)
+            "response.created", "response.done" -> responseDecision(
+                node,
+                type,
+                sessionId,
+                serverTime,
+                transport,
+            )
             else -> ProviderEventDecision(payload = null)
         }
     }
@@ -91,6 +142,7 @@ internal class VoiceTutorRealtimeEventPolicy(
         type: String,
         sessionId: String,
         serverTime: Instant,
+        transport: VoiceTutorProviderTransport,
     ): ProviderEventDecision {
         val response = node.path("response")
         if (!validProviderResponseId(response.path("id"))) {
@@ -102,6 +154,13 @@ internal class VoiceTutorRealtimeEventPolicy(
         }
         if (type == "response.done" && status == "failed") {
             return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_ERROR")
+        }
+        if (
+            type == "response.done" &&
+            transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
+            status != "completed"
+        ) {
+            return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_INCOMPLETE_RESPONSE")
         }
         return ProviderEventDecision(
             mapper.writeValueAsString(
@@ -198,6 +257,7 @@ internal class VoiceTutorRealtimeEventPolicy(
             CLIENT_END_EVENT,
             CLIENT_HEARTBEAT_EVENT,
             VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT,
+            VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT,
         )
         private val TUTOR_TRANSCRIPT_DELTA_PROVIDER_EVENTS = setOf(
             "response.output_audio_transcript.delta",
@@ -214,6 +274,10 @@ internal class VoiceTutorRealtimeEventPolicy(
         private val PASSTHROUGH_PROVIDER_EVENTS = setOf(
             "input_audio_buffer.speech_started",
             "input_audio_buffer.speech_stopped",
+        )
+        private val WEBRTC_OUTPUT_BUFFER_BOUNDARY_EVENTS = setOf(
+            "output_audio_buffer.started",
+            "output_audio_buffer.stopped",
         )
         private val RESPONSE_DONE_STATUSES = setOf("completed", "cancelled", "incomplete", "failed")
     }
@@ -309,9 +373,15 @@ internal class VoiceTutorClientTrafficGuard(
         const val MAX_CONTROL_EVENT_BURST = 8
         val RATE_LIMITED_CONTROL_EVENTS = setOf(
             VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT,
+            VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT,
             "input_audio_buffer.commit",
         )
     }
+}
+
+internal enum class VoiceTutorProviderTransport {
+    LEGACY_PCM_RELAY,
+    WEBRTC_SIDEBAND,
 }
 
 internal class VoiceTutorClientProtocolException(message: String) : RuntimeException(message)

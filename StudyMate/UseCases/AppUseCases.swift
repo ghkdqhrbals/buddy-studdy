@@ -221,6 +221,8 @@ protocol VoiceTutorRepository {
         studyID: Int,
         language: AppLanguage,
         voice: String?,
+        recordingConsent: Bool,
+        recordingConsentVersion: String?,
         idempotencyKey: String
     ) async throws -> BackendVoiceTutorSessionStart
     func endSession(
@@ -236,6 +238,23 @@ protocol VoiceTutorRepository {
         registration: RemotePushRegistration,
         sessionID: String
     ) async throws -> BackendVoiceTutorSessionDetail
+    func uploadRecording(
+        registration: RemotePushRegistration,
+        sessionID: String,
+        fileURL: URL,
+        contentType: String,
+        contentLength: Int64,
+        sha256: String,
+        durationMilliseconds: Int64
+    ) async throws
+    func recordingAccess(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorRecordingAccess
+    func deleteRecording(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws
 }
 
 @MainActor
@@ -255,6 +274,8 @@ struct RemoteVoiceTutorRepository: VoiceTutorRepository {
         studyID: Int,
         language: AppLanguage,
         voice: String?,
+        recordingConsent: Bool,
+        recordingConsentVersion: String?,
         idempotencyKey: String
     ) async throws -> BackendVoiceTutorSessionStart {
         try await backendClient.createVoiceTutorSession(
@@ -262,6 +283,8 @@ struct RemoteVoiceTutorRepository: VoiceTutorRepository {
             studyID: studyID,
             language: language,
             voice: voice,
+            recordingConsent: recordingConsent,
+            recordingConsentVersion: recordingConsentVersion,
             idempotencyKey: idempotencyKey
         )
     }
@@ -297,6 +320,46 @@ struct RemoteVoiceTutorRepository: VoiceTutorRepository {
             sessionID: sessionID
         )
     }
+
+    func uploadRecording(
+        registration: RemotePushRegistration,
+        sessionID: String,
+        fileURL: URL,
+        contentType: String,
+        contentLength: Int64,
+        sha256: String,
+        durationMilliseconds: Int64
+    ) async throws {
+        try await backendClient.uploadVoiceTutorRecording(
+            registration: registration,
+            sessionID: sessionID,
+            fileURL: fileURL,
+            contentType: contentType,
+            contentLength: contentLength,
+            sha256: sha256,
+            durationMilliseconds: durationMilliseconds
+        )
+    }
+
+    func recordingAccess(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorRecordingAccess {
+        try await backendClient.fetchVoiceTutorRecordingAccess(
+            registration: registration,
+            sessionID: sessionID
+        )
+    }
+
+    func deleteRecording(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws {
+        try await backendClient.deleteVoiceTutorRecording(
+            registration: registration,
+            sessionID: sessionID
+        )
+    }
 }
 
 @MainActor
@@ -316,6 +379,8 @@ struct VoiceTutorUseCase {
         studyID: Int,
         language: AppLanguage,
         voice: String? = nil,
+        recordingConsent: Bool = false,
+        recordingConsentVersion: String? = nil,
         idempotencyKey: String
     ) async throws -> BackendVoiceTutorSessionStart {
         try await repository.createSession(
@@ -323,6 +388,8 @@ struct VoiceTutorUseCase {
             studyID: studyID,
             language: language,
             voice: voice,
+            recordingConsent: recordingConsent,
+            recordingConsentVersion: recordingConsentVersion,
             idempotencyKey: idempotencyKey
         )
     }
@@ -347,6 +414,40 @@ struct VoiceTutorUseCase {
         sessionID: String
     ) async throws -> BackendVoiceTutorSessionDetail {
         try await repository.session(registration: registration, sessionID: sessionID)
+    }
+
+    func uploadRecording(
+        registration: RemotePushRegistration,
+        sessionID: String,
+        fileURL: URL,
+        contentType: String,
+        contentLength: Int64,
+        sha256: String,
+        durationMilliseconds: Int64
+    ) async throws {
+        try await repository.uploadRecording(
+            registration: registration,
+            sessionID: sessionID,
+            fileURL: fileURL,
+            contentType: contentType,
+            contentLength: contentLength,
+            sha256: sha256,
+            durationMilliseconds: durationMilliseconds
+        )
+    }
+
+    func recordingAccess(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorRecordingAccess {
+        try await repository.recordingAccess(registration: registration, sessionID: sessionID)
+    }
+
+    func deleteRecording(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws {
+        try await repository.deleteRecording(registration: registration, sessionID: sessionID)
     }
 }
 

@@ -4,6 +4,9 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorCreateSessionRes
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionsPageResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorStatusResponse
+import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingDownloadResponse
+import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingResponse
+import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingUploadResponse
 import org.springframework.security.core.Authentication
 
 interface VoiceTutorWebPort {
@@ -23,4 +26,16 @@ interface VoiceTutorWebPort {
 
     suspend fun session(sessionId: String, authentication: Authentication): VoiceTutorSessionDetailResponse
     suspend fun endSession(sessionId: String, authentication: Authentication): VoiceTutorSessionDetailResponse
+    suspend fun createRecordingUpload(
+        sessionId: String,
+        request: CreateVoiceTutorRecordingUploadRequest,
+        authentication: Authentication,
+    ): VoiceTutorRecordingUploadResponse
+    suspend fun completeRecordingUpload(
+        sessionId: String,
+        recordingId: String,
+        authentication: Authentication,
+    ): VoiceTutorRecordingResponse
+    suspend fun recordingAccess(sessionId: String, authentication: Authentication): VoiceTutorRecordingDownloadResponse
+    suspend fun deleteRecording(sessionId: String, authentication: Authentication)
 }

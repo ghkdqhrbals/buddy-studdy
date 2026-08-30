@@ -41,6 +41,9 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case userSpeechStopped
     case responseStarted(responseID: String?, isTutorIntervention: Bool)
     case responseFinished(responseID: String?)
+    case outputAudioBufferStarted(responseID: String?)
+    case outputAudioBufferStopped(responseID: String?)
+    case outputAudioBufferCleared(responseID: String?)
     case ignored(type: String)
 }
 
@@ -150,6 +153,12 @@ enum VoiceTutorRealtimeEventParser {
         case "response.done", "response.completed":
             let response = object["response"] as? [String: Any]
             return .responseFinished(responseID: response.flatMap { string("id", in: $0) })
+        case "output_audio_buffer.started":
+            return .outputAudioBufferStarted(responseID: string("response_id", in: object))
+        case "output_audio_buffer.stopped":
+            return .outputAudioBufferStopped(responseID: string("response_id", in: object))
+        case "output_audio_buffer.cleared":
+            return .outputAudioBufferCleared(responseID: string("response_id", in: object))
         case "error":
             let nestedError = object["error"] as? [String: Any]
             return .serviceError(
@@ -268,6 +277,24 @@ actor VoiceTutorWebSocketTransport {
             ]
         )
         guard let text = String(data: payload, encoding: .utf8) else {
+            throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8
+        }
+        try await socketTask.send(.string(text))
+    }
+
+    func sendPlayoutDrained(responseID: String) async throws {
+        try await sendJSON([
+            "type": "buddystudy.voice.playout.drained",
+            "responseId": responseID
+        ])
+    }
+
+    func sendJSON(_ object: [String: Any]) async throws {
+        guard let socketTask else {
+            throw TransportError.notConnected
+        }
+        let data = try JSONSerialization.data(withJSONObject: object)
+        guard let text = String(data: data, encoding: .utf8) else {
             throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8
         }
         try await socketTask.send(.string(text))

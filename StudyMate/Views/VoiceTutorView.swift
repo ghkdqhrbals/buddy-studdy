@@ -1,10 +1,12 @@
 #if os(iOS)
+import AVFoundation
 import SwiftUI
 
 struct VoiceTutorView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedStudyID: Int?
     @State private var showsMembership = false
+    @State private var recordingConsent = false
 
     private var strings: AppStrings { appState.strings }
 
@@ -74,9 +76,40 @@ struct VoiceTutorView: View {
                         }
                         .pickerStyle(.menu)
 
+                        if status?.recording?.enabled == true {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Toggle(
+                                    strings.voiceTutorRecordingConsentTitle,
+                                    isOn: $recordingConsent
+                                )
+                                .font(.subheadline.weight(.semibold))
+
+                                Text(strings.voiceTutorRecordingConsentDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                Text(
+                                    strings.voiceTutorRecordingRetention(
+                                        status?.recording?.retentionDays ?? 30
+                                    )
+                                )
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+
                         if let selectedStudy {
                             NavigationLink {
-                                VoiceTutorSessionView(appState: appState, study: selectedStudy)
+                                VoiceTutorSessionView(
+                                    appState: appState,
+                                    study: selectedStudy,
+                                    recordingConsent: recordingConsent,
+                                    onRecordingConsentConsumed: {
+                                        recordingConsent = false
+                                    }
+                                )
                             } label: {
                                 Label(strings.voiceTutorStart, systemImage: "mic.circle.fill")
                                     .fontWeight(.semibold)
@@ -139,17 +172,25 @@ struct VoiceTutorView: View {
         .navigationTitle(strings.voiceTutorTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            recordingConsent = false
+            await appState.retryPendingVoiceTutorRecordingUploads()
             await appState.refreshVoiceTutorStatus()
             await appState.loadVoiceTutorSessions(reset: true)
             selectFirstStudyIfNeeded()
         }
         .refreshable {
+            recordingConsent = false
             await appState.refreshVoiceTutorStatus()
             await appState.loadVoiceTutorSessions(reset: true)
             selectFirstStudyIfNeeded()
         }
         .onChange(of: appState.voiceTutorStudies.map(\.id)) { _, _ in
             selectFirstStudyIfNeeded()
+        }
+        .onChange(of: status?.recording?.enabled) { _, isEnabled in
+            if isEnabled != true {
+                recordingConsent = false
+            }
         }
         .sheet(isPresented: $showsMembership) {
             NavigationStack {
@@ -328,12 +369,23 @@ struct VoiceTutorSessionView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: VoiceTutorViewModel
     private let strings: AppStrings
+    private let onRecordingConsentConsumed: () -> Void
 
-    init(appState: AppState, study: BackendStudyRoom) {
+    init(
+        appState: AppState,
+        study: BackendStudyRoom,
+        recordingConsent: Bool,
+        onRecordingConsentConsumed: @escaping () -> Void = {}
+    ) {
         _viewModel = StateObject(
-            wrappedValue: VoiceTutorViewModel(appState: appState, study: study)
+            wrappedValue: VoiceTutorViewModel(
+                appState: appState,
+                study: study,
+                recordingConsent: recordingConsent
+            )
         )
         strings = appState.strings
+        self.onRecordingConsentConsumed = onRecordingConsentConsumed
     }
 
     var body: some View {
@@ -373,6 +425,7 @@ struct VoiceTutorSessionView: View {
         .navigationTitle(viewModel.study.topic)
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            onRecordingConsentConsumed()
             await viewModel.start()
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -399,6 +452,16 @@ struct VoiceTutorSessionView: View {
 
             Text(statusText)
                 .font(.title3.weight(.semibold))
+
+            if viewModel.isRecording {
+                Label(strings.voiceTutorRecordingActive, systemImage: "record.circle.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.red.opacity(0.1), in: Capsule())
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
 
             if let sessionSecondsRemaining = viewModel.sessionSecondsRemaining {
                 Text(strings.voiceTutorSessionRemaining(sessionSecondsRemaining))
@@ -599,6 +662,16 @@ private struct VoiceTutorSessionDetailView: View {
 
                     VoiceTutorResultSections(detail: detail, strings: strings)
 
+                    if let recording = detail.recording,
+                       recording.available
+                        || ["PENDING", "UPLOADING", "PROCESSING", "READY"]
+                            .contains(recording.status?.uppercased() ?? "") {
+                        VoiceTutorRecordingPlaybackView(
+                            sessionID: sessionID,
+                            recording: recording
+                        )
+                    }
+
                     if !detail.transcriptTurns.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Text(strings.voiceTutorLiveCaptions)
@@ -639,6 +712,130 @@ private struct VoiceTutorSessionDetailView: View {
             _ = await appState.loadVoiceTutorSessionDetail(sessionID: sessionID)
             isLoading = false
         }
+    }
+}
+
+private struct VoiceTutorRecordingPlaybackView: View {
+    @EnvironmentObject private var appState: AppState
+    let sessionID: String
+    let recording: BackendVoiceTutorRecording
+
+    @State private var player: AVPlayer?
+    @State private var isPlaying = false
+    @State private var isLoading = false
+    @State private var isDeleting = false
+    @State private var showsDeleteConfirmation = false
+    @State private var errorMessage: String?
+
+    private var strings: AppStrings { appState.strings }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(strings.voiceTutorSavedRecording, systemImage: "waveform")
+                .font(.headline)
+
+            Text(strings.voiceTutorRecordingRetention(recording.retentionDays ?? 30))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if recording.available {
+                HStack(spacing: 12) {
+                    Button {
+                        Task { await togglePlayback() }
+                    } label: {
+                        Label(
+                            isPlaying
+                                ? strings.voiceTutorPauseRecording
+                                : strings.voiceTutorPlayRecording,
+                            systemImage: isPlaying ? "pause.fill" : "play.fill"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isLoading || isDeleting)
+
+                    Button(role: .destructive) {
+                        showsDeleteConfirmation = true
+                    } label: {
+                        Label(strings.voiceTutorDeleteRecording, systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isLoading || isDeleting)
+
+                    if isLoading || isDeleting {
+                        ProgressView()
+                    }
+                }
+            } else {
+                HStack(spacing: 9) {
+                    ProgressView()
+                    Text(strings.voiceTutorRecordingPreparing)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+        .confirmationDialog(
+            strings.voiceTutorDeleteRecordingConfirmation,
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(strings.voiceTutorDeleteRecording, role: .destructive) {
+                Task { await deleteRecording() }
+            }
+            Button(strings.cancel, role: .cancel) {}
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
+            isPlaying = false
+        }
+    }
+
+    private func togglePlayback() async {
+        if isPlaying {
+            player?.pause()
+            isPlaying = false
+            return
+        }
+        errorMessage = nil
+        if player == nil {
+            isLoading = true
+            defer { isLoading = false }
+            do {
+                let access = try await appState.voiceTutorRecordingAccess(sessionID: sessionID)
+                player = AVPlayer(url: access.url)
+            } catch {
+                errorMessage = strings.voiceTutorRecordingUnavailable
+                return
+            }
+        }
+        await player?.seek(to: .zero)
+        player?.play()
+        isPlaying = true
+    }
+
+    private func deleteRecording() async {
+        guard !isDeleting else { return }
+        isDeleting = true
+        errorMessage = nil
+        player?.pause()
+        player = nil
+        isPlaying = false
+        do {
+            try await appState.deleteVoiceTutorRecording(sessionID: sessionID)
+        } catch {
+            errorMessage = strings.voiceTutorRecordingUnavailable
+        }
+        isDeleting = false
     }
 }
 

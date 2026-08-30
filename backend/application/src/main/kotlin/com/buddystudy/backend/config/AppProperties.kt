@@ -202,6 +202,17 @@ data class BuddyStudyProperties(
         var transcriptMaxCharacters: Int = 100_000,
         var transcriptMaxTurns: Int = 2_000,
         var publicBaseUrl: String = "",
+        var recordingEnabled: Boolean = false,
+        var recordingBucket: String = "",
+        var recordingRegion: String = "ap-northeast-2",
+        var recordingKmsKeyId: String = "",
+        var recordingRetentionDays: Long = 30,
+        var recordingPresignSeconds: Long = 300,
+        var recordingMaxBytes: Long = 134_217_728,
+        var recordingRetentionEnabled: Boolean = true,
+        var recordingRetentionBatchSize: Int = 100,
+        var recordingRetentionMaxRowsPerRun: Int = 1_000,
+        var recordingUploadCompletionSafetySeconds: Long = 300,
     )
     data class Referral(
         var publicBaseUrl: String = "https://api.ghkdqhrbals.org",

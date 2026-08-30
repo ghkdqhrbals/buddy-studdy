@@ -1,5 +1,5 @@
 {
-  "originHash" : "889a3caafda13103f0366d50bcde88b6d61a023e127ef33848f6341e2ea3817e",
+  "originHash" : "30d1be5b6bde58df87b2dfb73011c6fbe4e6d844bf1681a9ffea31c27fd02bbe",
   "pins" : [
     {
       "identity" : "abseil-cpp-binary",
@@ -170,6 +170,15 @@
       "state" : {
         "revision" : "13b248eaa73b7826f0efb1bcf455e251d65ecb1b",
         "version" : "3.1.0"
+      }
+    },
+    {
+      "identity" : "webrtc-xcframework",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/livekit/webrtc-xcframework.git",
+      "state" : {
+        "revision" : "06e2a8a840079ace0dac5d4f2901a12a1d6b9157",
+        "version" : "144.7559.14"
       }
     }
   ],

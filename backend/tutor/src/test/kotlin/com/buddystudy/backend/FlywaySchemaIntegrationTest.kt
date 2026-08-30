@@ -58,6 +58,30 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var externalApiHistory: ExternalApiHistoryPort
 
     @Test
+    fun `Pro monthly voice default is sixty minutes without changing question limits`(): Unit = runBlocking {
+        val tiers = databaseClient.sql(
+            """
+            select tier_code, monthly_question_limit, monthly_voice_seconds_limit
+            from user_membership_tiers
+            where tier_code in ('TIER1', 'TIER2', 'TIER3')
+            order by tier_code
+            """.trimIndent(),
+        ).map { row, _ ->
+            Triple(
+                row.get("tier_code", String::class.java)!!,
+                (row.get("monthly_question_limit") as Number).toInt(),
+                (row.get("monthly_voice_seconds_limit") as Number).toInt(),
+            )
+        }.all().collectList().awaitSingle()
+
+        assertThat(tiers).containsExactly(
+            Triple("TIER1", 30, 0),
+            Triple("TIER2", 300, 3_600),
+            Triple("TIER3", 1_000, 3_600),
+        )
+    }
+
+    @Test
     fun `scheduler run history has a global newest-first index`(): Unit = runBlocking {
         val columns = databaseClient.sql(
             """
@@ -190,6 +214,52 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
         }.one().awaitSingle()
 
         assertThat(schedule).containsExactly(true, "FIXED_DELAY", "60s", 3, 300, 300)
+    }
+
+    @Test
+    fun `voice recording withdrawal tombstones are FK free and cleaned by the minutely managed job`(): Unit = runBlocking {
+        val columns = databaseClient.sql(
+            """
+            select column_name
+            from information_schema.columns
+            where table_schema = database()
+              and table_name = 'voice_tutor_recording_prefix_cleanups'
+            """.trimIndent(),
+        ).map { row, _ -> row.get("column_name", String::class.java)!! }
+            .all().collectList().awaitSingle()
+        val foreignKeys = databaseClient.sql(
+            """
+            select count(*) as foreign_key_count
+            from information_schema.referential_constraints
+            where constraint_schema = database()
+              and table_name = 'voice_tutor_recording_prefix_cleanups'
+            """.trimIndent(),
+        ).map { row, _ -> (row.get("foreign_key_count") as Number).toLong() }
+            .one().awaitSingle()
+        val schedule = databaseClient.sql(
+            """
+            select enabled, schedule_type, schedule_value
+            from scheduled_jobs
+            where job_name = 'voice-tutor-recording-retention'
+            """.trimIndent(),
+        ).map { row, _ ->
+            listOf(
+                row.get("enabled", java.lang.Boolean::class.java)?.booleanValue(),
+                row.get("schedule_type", String::class.java),
+                row.get("schedule_value", String::class.java),
+            )
+        }.one().awaitSingle()
+
+        assertThat(columns).contains(
+            "user_id",
+            "cleanup_until",
+            "next_attempt_at",
+            "last_attempted_at",
+            "attempt_count",
+            "last_failure_message",
+        )
+        assertThat(foreignKeys).isZero()
+        assertThat(schedule).containsExactly(true, "CRON", "0 * * * * * UTC")
     }
 
     @Test

@@ -13,9 +13,15 @@ import reactor.netty.http.server.WebsocketServerSpec
 @Configuration
 class VoiceTutorWebSocketConfig {
     @Bean
-    fun voiceTutorWebSocketMapping(handler: VoiceTutorWebSocketHandler): HandlerMapping =
+    fun voiceTutorWebSocketMapping(
+        handler: VoiceTutorWebSocketHandler,
+        controlHandler: VoiceTutorControlWebSocketHandler,
+    ): HandlerMapping =
         SimpleUrlHandlerMapping(
-            mapOf("/api/v1/voice-tutor/sessions/*/stream" to handler),
+            mapOf(
+                "/api/v1/voice-tutor/sessions/*/stream" to handler,
+                "/api/v1/voice-tutor/sessions/*/control" to controlHandler,
+            ),
             Ordered.HIGHEST_PRECEDENCE,
         )
 

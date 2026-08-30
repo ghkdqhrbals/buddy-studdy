@@ -31,7 +31,8 @@ In scope:
 - asynchronous question request and process polling;
 - asynchronous answer submission and grading polling;
 - grading score, feedback, explanation, and rubric details;
-- read-only Voice Tutor quota, bounded session history, transcript/result detail;
+- read-only Voice Tutor quota, bounded session history, transcript/result detail,
+  and safe optional-recording status metadata;
 - topic-first statistics and study-tree growth;
 - MCP resources for compact, stable context reads.
 
@@ -40,7 +41,8 @@ Out of scope for this release:
 - public or anonymous MCP data access;
 - MCP sampling, elicitation, prompts, subscriptions, or server-side sessions;
 - direct synchronous OpenAI generation from an MCP request;
-- starting, streaming, reconnecting, ending, extending, or deleting a Voice Tutor session;
+- starting, streaming, reconnecting, ending, extending, recording, uploading,
+  downloading, or deleting a Voice Tutor session or recording;
 - a second record store or direct `UserDefaults`/client persistence path;
 - MCP OAuth 2.1 discovery, dynamic client registration, or scoped MCP tokens;
 - automatic production activation or deployment.
@@ -117,7 +119,7 @@ receive. Never put it in prompts, logs, repository files, or browser code.
 | `list_records` | Read | `record:read` | Bounded page with score/feedback when ready |
 | `get_record` | Read | `record:read` | Full score, feedback, explanation, and rubric |
 | `list_voice_tutor_sessions` | Read | `voice-tutor:read` | Owner-scoped opaque-cursor page; returns `sessions` and `nextCursor` without live-session mutation |
-| `get_voice_tutor_session` | Read | `voice-tutor:read` | Owned session, bounded transcript turns, and private learning result |
+| `get_voice_tutor_session` | Read | `voice-tutor:read` | Owned session, bounded transcript turns, private learning result, and safe recording status metadata; never binary audio, object keys, or signed URLs |
 | `get_voice_tutor_quota` | Read | `voice-tutor:read` | Server-owned seconds, remaining time, and reset boundary |
 | `get_topic_stats` | Read | `stats:read` | Topic-first, bounded statistics |
 | `get_study_growth` | Read | `stats:read` | Optional UTC interval |
@@ -225,10 +227,12 @@ explicit user confirmation
 - Page sizes, string lengths, arrays, timestamps, enums, and unknown arguments
   are constrained by JSON Schema and application validation.
 - The server never accepts a caller-supplied user ID or token passthrough.
-- Voice Tutor transcript turns and results remain private owner-scoped content.
-  Tool arguments and returned content are never copied into API exchange logs,
-  provider-history bodies, analytics, or error messages; original session audio
-  is not stored and is therefore never available through MCP.
+- Voice Tutor transcript turns, results, consent state, and recording metadata
+  remain private owner-scoped content. Tool arguments and returned content are
+  never copied into API exchange logs, provider-history bodies, analytics, or
+  error messages. MCP has no tool/resource for realtime frames, locally pending
+  files, S3 object keys, upload grants, or presigned playback URLs, regardless
+  of whether the owner explicitly recorded a call through the iOS app.
 
 ## Configuration
 

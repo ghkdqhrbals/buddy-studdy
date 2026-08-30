@@ -9,6 +9,7 @@ plugins {
 dependencyManagement {
     imports {
         mavenBom(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
+        mavenBom("io.awspring.cloud:spring-cloud-aws-dependencies:4.0.2")
         mavenBom("org.springframework.ai:spring-ai-bom:2.0.1")
         mavenBom("io.modelcontextprotocol.sdk:mcp-bom:2.0.1")
     }
@@ -44,6 +45,7 @@ dependencies {
     implementation("org.springdoc:springdoc-openapi-starter-webflux-api:3.0.3")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
+    implementation("software.amazon.awssdk:s3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
     implementation("com.github.pemistahl:lingua:1.2.2")

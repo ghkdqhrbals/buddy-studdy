@@ -6,10 +6,169 @@ import XCTest
 @MainActor
 final class QuestionGenerationFlowTests: XCTestCase {
     override func tearDown() {
-        QuestionGenerationURLProtocol.requestHandler = nil
+        QuestionGenerationURLProtocol.requestHandlers.removeAll()
         QuestionGenerationURLProtocol.responseDelayNanoseconds = 0
         QuestionGenerationURLProtocol.responseDelayHandler = nil
         super.tearDown()
+    }
+
+    func testVoiceTutorRecordingRetryRecoversLostCompletionResponse() async throws {
+        let sessionID = "00000000-0000-4000-8000-000000000007"
+        var requests: [URLRequest] = []
+        let client = makeClient { request in
+            requests.append(request)
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/voice-tutor/sessions/\(sessionID)")
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            let body = """
+            {"sessionId":"\(sessionID)","state":"COMPLETED","recording":{"enabled":true,"available":true,"status":"AVAILABLE","recordingId":"\(sessionID)"}}
+            """
+            return (response, Data(body.utf8))
+        }
+
+        try await client.uploadVoiceTutorRecording(
+            registration: Self.signedInRegistration,
+            sessionID: sessionID,
+            fileURL: URL(fileURLWithPath: "/unused-recording.m4a"),
+            contentType: "audio/mp4",
+            contentLength: 1,
+            sha256: String(repeating: "0", count: 64),
+            durationMilliseconds: 1
+        )
+
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func testBackendUnauthorizedNotificationCarriesFailingRequestIdentity() async throws {
+        let eventProvider = DefaultAppNotificationEventProvider()
+        var receivedIdentity: BackendUnauthorizedRequestIdentity?
+        let observation = eventProvider.observeBackendUnauthorized { identity in
+            receivedIdentity = identity
+        }
+        defer { observation.cancel() }
+        var registration = Self.signedInRegistration
+        registration.clientSecret = "notification-test-\(UUID().uuidString)"
+        let client = makeClient { request in
+            Self.response(for: request, statusCode: 401, body: "{}")
+        }
+
+        do {
+            _ = try await client.fetchVoiceTutorSession(
+                registration: registration,
+                sessionID: "00000000-0000-4000-8000-000000000008"
+            )
+            XCTFail("The unauthorized request must fail")
+        } catch {
+            guard case RemotePushBackendError.httpStatus(401, _, _) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+
+        let didReceiveIdentity = await waitUntil { receivedIdentity != nil }
+        XCTAssertTrue(didReceiveIdentity)
+        XCTAssertTrue(try XCTUnwrap(receivedIdentity).matches(registration: registration))
+        var replacementRegistration = registration
+        replacementRegistration.accessToken = "replacement-account-token"
+        XCTAssertFalse(try XCTUnwrap(receivedIdentity).matches(registration: replacementRegistration))
+    }
+
+    func testVoiceTutorRecordingRetryDoesNotReuploadDeletedRecording() async throws {
+        let sessionID = "00000000-0000-4000-8000-000000000009"
+        var requestCount = 0
+        let client = makeClient { request in
+            requestCount += 1
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/voice-tutor/sessions/\(sessionID)")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {"sessionId":"\(sessionID)","state":"COMPLETED","recording":{"enabled":true,"available":false,"status":"DELETED","recordingId":"\(sessionID)"}}
+                """
+            )
+        }
+
+        try await client.uploadVoiceTutorRecording(
+            registration: Self.signedInRegistration,
+            sessionID: sessionID,
+            fileURL: URL(fileURLWithPath: "/unused-deleted-recording.m4a"),
+            contentType: "audio/mp4",
+            contentLength: 1,
+            sha256: String(repeating: "0", count: 64),
+            durationMilliseconds: 1
+        )
+
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    func testDelayedVoiceTutorDetailCannotEnterReplacementAccountCache() async throws {
+        let suiteName = "VoiceTutorAccountReplacementTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let sessionID = "00000000-0000-4000-8000-000000000010"
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        var requestStarted = false
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            if request.url?.path == "/api/v1/voice-tutor/sessions/\(sessionID)" {
+                requestStarted = true
+                return 200_000_000
+            }
+            return 0
+        }
+        let client = makeClient { request in
+            if request.url?.path == "/api/v1/voice-tutor/sessions/replacement-session" {
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"sessionId":"replacement-session","state":"COMPLETED","topic":"Account B lesson"}"#
+                )
+            }
+            XCTAssertEqual(request.url?.path, "/api/v1/voice-tutor/sessions/\(sessionID)")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {"sessionId":"\(sessionID)","state":"COMPLETED","topic":"Account A private lesson"}
+                """
+            )
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        appState.communityProfile = CommunityUserProfile(
+            id: 7, displayName: "Account A", status: "ACTIVE", provider: "GOOGLE", bio: "", avatarURL: nil
+        )
+        let inFlight = Task { @MainActor in
+            await appState.loadVoiceTutorSessionDetail(sessionID: sessionID)
+        }
+        let didStart = await waitUntil { requestStarted }
+        XCTAssertTrue(didStart)
+
+        // Replace the owner while keeping the same backend instance and signed-in
+        // flag. The old backend-generation-only guard incorrectly accepted this.
+        var replacementRegistration = Self.signedInRegistration
+        replacementRegistration.accessToken = try XCTUnwrap(Self.signedInRegistration.accessToken) + "replacement-account"
+        store.saveRemotePushRegistration(replacementRegistration)
+        appState.communityProfile = CommunityUserProfile(
+            id: 8, displayName: "Account B", status: "ACTIVE", provider: "GOOGLE", bio: "", avatarURL: nil
+        )
+        let loadedReplacementDetail = await appState.loadVoiceTutorSessionDetail(sessionID: "replacement-session")
+        let replacementDetail = try XCTUnwrap(loadedReplacementDetail)
+
+        let staleDetail = await inFlight.value
+
+        XCTAssertNil(staleDetail)
+        XCTAssertNil(appState.voiceTutorSessionDetails[sessionID])
+        XCTAssertEqual(appState.voiceTutorSessionDetails[replacementDetail.sessionId]?.topic, "Account B lesson")
+        XCTAssertEqual(store.loadRemotePushRegistration()?.accessToken, replacementRegistration.accessToken)
+        XCTAssertTrue(appState.isCommunitySessionActive)
     }
 
     func testQuestionStatusDecodesFailedAsTerminalBackendState() throws {
@@ -2108,7 +2267,9 @@ final class QuestionGenerationFlowTests: XCTestCase {
         await appState.loadLikedCommunityQuestions(reset: true, userInitiated: true)
         XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["liked-1"])
 
-        eventProvider.sendBackendUnauthorized()
+        try eventProvider.sendBackendUnauthorized(
+            for: XCTUnwrap(store.loadRemotePushRegistration())
+        )
 
         XCTAssertTrue(appState.likedCommunityQuestions.isEmpty)
         XCTAssertFalse(appState.hasLoadedLikedCommunityQuestions)
@@ -2116,6 +2277,42 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertNil(store.loadRemotePushRegistration()?.accessToken)
         XCTAssertNil(store.loadPendingReferralAttribution())
         XCTAssertNil(appState.referralNotice)
+    }
+
+    func testStaleBackendUnauthorizedEventPreservesCurrentSignedInState() async throws {
+        let suiteName = "StaleUnauthorizedTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let eventProvider = TestAppNotificationEventProvider()
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/public/questions/liked")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: Self.communityQuestionPageJSON(ids: ["current-account-liked"], totalCount: 1, offset: 0)
+            )
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client,
+            appNotificationEventProvider: eventProvider
+        )
+        await appState.loadLikedCommunityQuestions(reset: true, userInitiated: true)
+        let currentRegistration = try XCTUnwrap(store.loadRemotePushRegistration())
+        var staleRegistration = currentRegistration
+        staleRegistration.accessToken = "previous-account-access-token"
+
+        try eventProvider.sendBackendUnauthorized(for: staleRegistration)
+
+        XCTAssertTrue(appState.isCommunitySessionActive)
+        XCTAssertTrue(appState.hasLoadedLikedCommunityQuestions)
+        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["current-account-liked"])
+        XCTAssertEqual(store.loadRemotePushRegistration()?.accessToken, currentRegistration.accessToken)
     }
 
     func testCreateQuestionSendsIdempotencyKeyAndDecodesAcceptedProcess() async throws {
@@ -4102,7 +4299,9 @@ final class QuestionGenerationFlowTests: XCTestCase {
     ) -> RemotePushBackendClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [QuestionGenerationURLProtocol.self]
-        QuestionGenerationURLProtocol.requestHandler = handler
+        let clientID = UUID().uuidString
+        configuration.httpAdditionalHeaders = [QuestionGenerationURLProtocol.clientIDHeader: clientID]
+        QuestionGenerationURLProtocol.requestHandlers[clientID] = handler
         return RemotePushBackendClient(
             baseURL: URL(string: "https://example.test")!,
             session: URLSession(configuration: configuration)
@@ -4310,7 +4509,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
 @MainActor
 private final class TestAppNotificationEventProvider: AppNotificationEventProviding {
-    private var unauthorizedHandler: (() -> Void)?
+    private var unauthorizedHandler: ((BackendUnauthorizedRequestIdentity) -> Void)?
 
     func observeAPITrafficLogs(
         _ handler: @MainActor @escaping (APITrafficLogEntry) -> Void
@@ -4319,20 +4518,27 @@ private final class TestAppNotificationEventProvider: AppNotificationEventProvid
     }
 
     func observeBackendUnauthorized(
-        _ handler: @MainActor @escaping () -> Void
+        _ handler: @MainActor @escaping (BackendUnauthorizedRequestIdentity) -> Void
     ) -> AnyCancellable {
         unauthorizedHandler = handler
         return AnyCancellable {}
     }
 
-    func sendBackendUnauthorized() {
-        unauthorizedHandler?()
+    func sendBackendUnauthorized(for registration: RemotePushRegistration) throws {
+        var request = URLRequest(url: URL(string: "https://example.test/api/v1/voice-tutor/quota")!)
+        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
+        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+        if let token = registration.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        unauthorizedHandler?(try XCTUnwrap(BackendUnauthorizedRequestIdentity(request: request)))
     }
 }
 
 private final class QuestionGenerationURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var requestHandler:
-        ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    static let clientIDHeader = "X-BuddyStudy-Test-Client-ID"
+    nonisolated(unsafe) static var requestHandlers:
+        [String: (URLRequest) throws -> (HTTPURLResponse, Data)] = [:]
     nonisolated(unsafe) static var responseDelayNanoseconds: UInt64 = 0
     nonisolated(unsafe) static var responseDelayHandler: ((URLRequest) -> UInt64)?
 
@@ -4348,15 +4554,22 @@ private final class QuestionGenerationURLProtocol: URLProtocol, @unchecked Senda
         let protocolReference = UncheckedSendableBox(self)
         Task { @MainActor in
             let protocolInstance = protocolReference.value
+            guard let clientID = protocolInstance.request.value(forHTTPHeaderField: Self.clientIDHeader),
+                  Self.requestHandlers[clientID] != nil else {
+                protocolInstance.client?.urlProtocol(protocolInstance, didFailWithError: URLError(.cancelled))
+                return
+            }
             let responseDelay = Self.responseDelayHandler?(protocolInstance.request)
                 ?? Self.responseDelayNanoseconds
             if responseDelay > 0 {
                 try? await Task.sleep(nanoseconds: responseDelay)
             }
-            guard let requestHandler = Self.requestHandler else {
+            // Logout/registration cleanup can outlive its test. Never deliver
+            // an old client's request to the next test's response fixture.
+            guard let requestHandler = Self.requestHandlers[clientID] else {
                 protocolInstance.client?.urlProtocol(
                     protocolInstance,
-                    didFailWithError: URLError(.badServerResponse)
+                    didFailWithError: URLError(.cancelled)
                 )
                 return
             }

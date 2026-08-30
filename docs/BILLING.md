@@ -53,8 +53,8 @@ can still be reconciled without exposing those products for a new checkout.
 | Tier | Monthly questions | Monthly Voice Tutor | Public-feed ads | Product | Period | Korea price |
 | --- | ---: | ---: | --- | --- | --- | ---: |
 | TIER1 | 30 | 0 | Eligible | Free | — | Free |
-| TIER2 | 300 | 18,000 seconds (300 minutes) | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier2.monthly` | P1M | ₩7,900 |
-| TIER3 | 1,000 | 18,000 seconds (300 minutes) | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier3.monthly` | P1M | ₩17,900 |
+| TIER2 | 300 | 3,600 seconds (60 minutes) | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier2.monthly` | P1M | ₩7,900 |
+| TIER3 | 1,000 | 3,600 seconds (60 minutes) | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier3.monthly` | P1M | ₩17,900 |
 
 The mapping is server-owned. A client-supplied product that is absent, disabled,
 or has a different product type is rejected before an invoice is written.
@@ -315,7 +315,7 @@ arbitrary price, tier, currency, or allowance.
 | Edge | Call and transferred values | Result and guarantee |
 | --- | --- | --- |
 | E1 | `GET /api/v1/billing/catalog`; no query or body; common authenticated headers | Requests the server-owned product mapping for the signed-in user. |
-| E2 | `{"appAccountToken":"<uuid>","products":[{"tierCode":"TIER2","description":"...","monthlyQuestionLimit":300,"monthlyVoiceSecondsLimit":18000,"productId":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","productType":"AUTO_RENEWABLE_SUBSCRIPTION","billingPeriod":"P1M","sortOrder":20}]}` | `appAccountToken` is the stable BuddyStudy billing identity and RevenueCat App User ID. Product price is still displayed from StoreKit/RevenueCat, and neither price nor either allowance is trusted from the client. |
+| E2 | `{"appAccountToken":"<uuid>","products":[{"tierCode":"TIER2","description":"...","monthlyQuestionLimit":300,"monthlyVoiceSecondsLimit":3600,"productId":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","productType":"AUTO_RENEWABLE_SUBSCRIPTION","billingPeriod":"P1M","sortOrder":20}]}` | `appAccountToken` is the stable BuddyStudy billing identity and RevenueCat App User ID. Product price is still displayed from StoreKit/RevenueCat, and neither price nor either allowance is trusted from the client. |
 | E3 | `POST /api/v1/billing/checkouts` with `{"productId":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","idempotencyKey":"ios-checkout-<uuid>"}` | `productId`: 1–191 characters, `[A-Za-z0-9._-]+`. `idempotencyKey`: 8–191 characters, `[A-Za-z0-9._:-]+`, scoped to the authenticated user. |
 | E4 | Internal transaction writes `INVOICE_CREATED`, invoice type `NORMAL`, status `WAITING`, authenticated `userId`, selected `tierCode/productId`, generated `invoiceNumber`, aggregate sequence and event ID. | Invoice and first event commit together. Replaying the same user-scoped idempotency key returns the existing checkout rather than creating another order. |
 | E5 | `BillingInvoiceSummary`: `id`, `invoiceNumber`, `type`, `tierCode`, `productId`, `status`, `version`, payment/transaction fields, timestamps, `fulfilledAt`, `latestEventType`. At creation, payment fields and `fulfilledAt` are `null`. | The app retains both numeric `id` and UUID `invoiceNumber`: `invoiceNumber` correlates the JWS submission; `id` is used for bounded invoice reads. |
@@ -654,22 +654,29 @@ or answer drafts. The plan catalog stores the authoritative monthly allowance in
 `user_membership_tiers.monthly_voice_seconds_limit`:
 
 - TIER1 defaults to `0` seconds and cannot start a Voice Tutor session.
-- TIER2 and TIER3 default to `18,000` seconds, displayed as 300 minutes.
+- TIER2 and TIER3 default to `3,600` seconds, displayed as 60 minutes.
+  Migration V100 lowers only the original 18,000-second tier seed; other
+  operator-set tier values and every per-user override remain unchanged.
 - The existing authenticated membership-tier administration boundary accepts an
   additive `monthlyVoiceSecondsLimit`, so operators can change a tier allowance
   without an app release. The database value, not an iOS constant or RevenueCat
   metadata, is authoritative.
+- The authenticated per-user administration boundary accepts nullable
+  `monthlyVoiceSecondsLimitOverride`, parallel to the question-limit override.
+  A value overrides only that user's monthly voice base; `null` restores the
+  current tier value without resetting used/reserved seconds or the period.
 - `VOICE_TUTOR_MAX_SESSION_SECONDS` is an independent environment-configured
   ceiling for one session. Its default is `3,600` and the application hard-clamps
   it to the provider's 60-minute Realtime session limit; the reservable duration
   is the smaller of that ceiling and the member's current remaining seconds.
-  The 18,000-second plan allowance is therefore available across up to five
-  full 60-minute sessions rather than one continuous 300-minute provider session.
+  The 3,600-second monthly allowance can be used in one call or split across
+  shorter calls; changing the monthly allowance does not extend one provider session.
 
 `user_voice_quota` owns the current monthly seconds projection. Its fixed anchor
 is the account creation time, independent from the question quota's optional
-first-paid-purchase anchor change. It keeps its own effective tier, base, used,
-reserved, remaining, period, and row version.
+first-paid-purchase anchor change. It keeps its own effective tier, tier base,
+nullable per-user limit override, effective base, used, reserved, remaining,
+period, and row version.
 `voice_tutor_sessions` is the exactly-once reservation and settlement identity.
 `voice_tutor_transcript_turns` and `voice_tutor_results` hold the separate private
 lesson history; they are not billing counters and never enter graded-question
@@ -681,15 +688,17 @@ Session accounting follows these rules:
    voice quota after applying any overdue rollover. It rejects an ineffective
    TIER1 entitlement or zero remaining time and reserves at most
    `min(remaining_seconds, VOICE_TUTOR_MAX_SESSION_SECONDS)`.
-2. The backend, not iOS, timestamps accepted connection activity, counts decoded
-   24 kHz mono PCM bytes admitted by the relay, and enforces the deadline.
-   Client-provided elapsed time is never authoritative.
+2. The backend, not iOS, timestamps accepted WebRTC/control activity and
+   enforces the deadline. Direct WebRTC media bypasses BuddyStudy, so its charge
+   is server-observed connected time; the bounded PCM fallback additionally
+   counts decoded 24 kHz mono bytes. Client-provided elapsed time and recording
+   duration are never authoritative billing inputs.
 3. Explicit end, foreground loss, provider failure, stream disconnect, quota
    deadline, and abandoned-session recovery converge on one terminal settlement.
-   The transaction charges the greater of rounded-up backend-observed connected
-   seconds and rounded-up accepted PCM duration, bounded by the reservation,
-   then releases the unused reservation. Replayed end requests return the
-   settled session without changing counters again.
+   The transaction charges rounded-up backend-observed connected seconds (or
+   the greater rounded-up accepted PCM duration for the fallback), bounded by
+   the reservation, then releases the unused reservation. Replayed end requests
+   return the settled session without changing counters again.
 4. A session accepted before a monthly boundary retains that period identity.
    Late settlement completes the old reservation without subtracting from or
    releasing seconds into the new current period.

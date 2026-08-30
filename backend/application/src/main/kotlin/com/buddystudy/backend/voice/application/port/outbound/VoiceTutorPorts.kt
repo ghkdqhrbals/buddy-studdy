@@ -5,6 +5,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorQuotaSnapshot
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionCursor
 import com.buddystudy.voice.domain.VoiceTutorResult
+import com.buddystudy.voice.domain.VoiceTutorRecording
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
@@ -61,6 +62,8 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
         voice: String,
         maxSessionSeconds: Int,
         now: Instant,
+        recordingConsentedAt: Instant? = null,
+        recordingConsentVersion: String? = null,
     ): ReserveVoiceTutorSessionResult
 
     suspend fun activeSession(userId: Long): VoiceTutorSession?
@@ -77,11 +80,18 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
         readyTimeoutSeconds: Long,
         heartbeatLeaseSeconds: Long,
     ): List<Long>
+    suspend fun terminalWebRtcSessionsAwaitingHangup(limit: Int): List<VoiceTutorSession>
     suspend fun markActive(userId: Long, sessionId: String, now: Instant): VoiceTutorSession?
     suspend fun requestEnd(userId: Long, sessionId: String, now: Instant): VoiceTutorSession?
     suspend fun heartbeat(userId: Long, sessionId: String, now: Instant): VoiceTutorSessionStatus?
     suspend fun addAcceptedAudioBytes(userId: Long, sessionId: String, bytes: Long): Boolean
     suspend fun attachProviderSession(userId: Long, sessionId: String, providerSessionId: String, now: Instant): Boolean
+    suspend fun clearWebRtcProviderSession(
+        userId: Long,
+        sessionId: String,
+        providerSessionId: String,
+        now: Instant,
+    ): Boolean
 
     suspend fun appendTranscript(
         userId: Long,
@@ -115,6 +125,190 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
     ): Boolean
     suspend fun completeResult(userId: Long, generated: VoiceTutorGeneratedResult, sessionId: String, now: Instant)
     suspend fun failResult(userId: Long, sessionId: String, promptVersion: String, error: String, now: Instant)
+}
+
+data class VoiceTutorRecordingSession(
+    val sessionId: String,
+    val userId: Long,
+    val status: VoiceTutorSessionStatus,
+    val maxSessionSeconds: Int,
+    val durationSeconds: Int,
+    val endedAt: Instant?,
+    val recordingConsentedAt: Instant?,
+    val recordingConsentVersion: String?,
+)
+
+data class VoiceTutorRecordingObjectMetadata(
+    val contentType: String,
+    val byteSize: Long,
+    val checksumSha256Base64: String?,
+)
+
+data class VoiceTutorRecordingUploadGrant(
+    val objectKey: String,
+    val uploadUrl: String,
+    val requiredHeaders: Map<String, String>,
+    val expiresAt: Instant,
+)
+
+data class VoiceTutorRecordingDownloadGrant(
+    val downloadUrl: String,
+    val expiresAt: Instant,
+)
+
+data class VoiceTutorRecordingPrefixCleanup(
+    val userId: Long,
+    val cleanupUntil: Instant,
+)
+
+data class VoiceTutorRecordingUploadSnapshot(
+    val objectKey: String,
+    val contentType: String,
+    val expectedBytes: Long,
+    val sha256Hex: String,
+    val durationMilliseconds: Long,
+    val uploadExpiresAt: Instant,
+    val updatedAt: Instant,
+)
+
+fun VoiceTutorRecording.uploadSnapshot() = VoiceTutorRecordingUploadSnapshot(
+    objectKey = objectKey,
+    contentType = contentType,
+    expectedBytes = expectedBytes,
+    sha256Hex = sha256Hex,
+    durationMilliseconds = durationMilliseconds,
+    uploadExpiresAt = uploadExpiresAt,
+    updatedAt = updatedAt,
+)
+
+interface VoiceTutorRecordingPersistencePort {
+    suspend fun latestUploadExpiry(userId: Long): Instant?
+    suspend fun schedulePrefixCleanup(userId: Long, cleanupUntil: Instant, now: Instant)
+    suspend fun pendingPrefixCleanups(now: Instant, limit: Int): List<VoiceTutorRecordingPrefixCleanup>
+    suspend fun deferPrefixCleanup(
+        userId: Long,
+        expectedCleanupUntil: Instant,
+        attemptedAt: Instant,
+        nextAttemptAt: Instant,
+        failureMessage: String?,
+    ): Boolean
+    suspend fun session(userId: Long, sessionId: String): VoiceTutorRecordingSession?
+    suspend fun recording(userId: Long, sessionId: String): VoiceTutorRecording?
+    suspend fun savePending(
+        recording: VoiceTutorRecording,
+        expected: VoiceTutorRecordingUploadSnapshot?,
+    ): VoiceTutorRecording?
+    suspend fun markAvailable(
+        userId: Long,
+        sessionId: String,
+        expected: VoiceTutorRecordingUploadSnapshot,
+        actualBytes: Long,
+        completedAt: Instant,
+    ): VoiceTutorRecording?
+    suspend fun markFailed(
+        userId: Long,
+        sessionId: String,
+        expected: VoiceTutorRecordingUploadSnapshot,
+        failureMessage: String,
+        now: Instant,
+    ): VoiceTutorRecording?
+    suspend fun markDeleted(
+        userId: Long,
+        sessionId: String,
+        expected: VoiceTutorRecording,
+        deletedAt: Instant,
+    ): VoiceTutorRecording?
+    suspend fun markExpiredDeleted(expected: VoiceTutorRecording, deletedAt: Instant): VoiceTutorRecording?
+    suspend fun expired(
+        now: Instant,
+        uploadCompletionSafetySeconds: Long,
+        includeOrdinaryRetention: Boolean,
+        limit: Int,
+    ): List<VoiceTutorRecording>
+}
+
+object UnavailableVoiceTutorRecordingPersistencePort : VoiceTutorRecordingPersistencePort {
+    override suspend fun latestUploadExpiry(userId: Long): Instant? = null
+    override suspend fun schedulePrefixCleanup(userId: Long, cleanupUntil: Instant, now: Instant) = Unit
+    override suspend fun pendingPrefixCleanups(now: Instant, limit: Int): List<VoiceTutorRecordingPrefixCleanup> = emptyList()
+    override suspend fun deferPrefixCleanup(
+        userId: Long,
+        expectedCleanupUntil: Instant,
+        attemptedAt: Instant,
+        nextAttemptAt: Instant,
+        failureMessage: String?,
+    ): Boolean = false
+    override suspend fun session(userId: Long, sessionId: String): VoiceTutorRecordingSession? = null
+    override suspend fun recording(userId: Long, sessionId: String): VoiceTutorRecording? = null
+    override suspend fun savePending(
+        recording: VoiceTutorRecording,
+        expected: VoiceTutorRecordingUploadSnapshot?,
+    ): VoiceTutorRecording =
+        error("Voice Tutor recording persistence is not configured.")
+    override suspend fun markAvailable(
+        userId: Long,
+        sessionId: String,
+        expected: VoiceTutorRecordingUploadSnapshot,
+        actualBytes: Long,
+        completedAt: Instant,
+    ): VoiceTutorRecording? = null
+    override suspend fun markFailed(
+        userId: Long,
+        sessionId: String,
+        expected: VoiceTutorRecordingUploadSnapshot,
+        failureMessage: String,
+        now: Instant,
+    ): VoiceTutorRecording? = null
+    override suspend fun markDeleted(
+        userId: Long,
+        sessionId: String,
+        expected: VoiceTutorRecording,
+        deletedAt: Instant,
+    ): VoiceTutorRecording? = null
+    override suspend fun markExpiredDeleted(
+        expected: VoiceTutorRecording,
+        deletedAt: Instant,
+    ): VoiceTutorRecording? = null
+    override suspend fun expired(
+        now: Instant,
+        uploadCompletionSafetySeconds: Long,
+        includeOrdinaryRetention: Boolean,
+        limit: Int,
+    ): List<VoiceTutorRecording> = emptyList()
+}
+
+interface VoiceTutorRecordingStoragePort {
+    suspend fun presignUpload(
+        userId: Long,
+        sessionId: String,
+        contentType: String,
+        byteSize: Long,
+        sha256Hex: String,
+        expiresAt: Instant,
+    ): VoiceTutorRecordingUploadGrant
+
+    suspend fun inspect(objectKey: String): VoiceTutorRecordingObjectMetadata?
+    suspend fun presignDownload(objectKey: String, sessionId: String, expiresAt: Instant): VoiceTutorRecordingDownloadGrant
+    suspend fun delete(objectKey: String)
+    suspend fun deleteAll(userId: Long)
+}
+
+object UnavailableVoiceTutorRecordingStoragePort : VoiceTutorRecordingStoragePort {
+    private fun unavailable(): Nothing = error("Voice Tutor recording storage is not configured.")
+
+    override suspend fun presignUpload(
+        userId: Long,
+        sessionId: String,
+        contentType: String,
+        byteSize: Long,
+        sha256Hex: String,
+        expiresAt: Instant,
+    ): VoiceTutorRecordingUploadGrant = unavailable()
+
+    override suspend fun inspect(objectKey: String): VoiceTutorRecordingObjectMetadata? = unavailable()
+    override suspend fun presignDownload(objectKey: String, sessionId: String, expiresAt: Instant): VoiceTutorRecordingDownloadGrant = unavailable()
+    override suspend fun delete(objectKey: String) = unavailable()
+    override suspend fun deleteAll(userId: Long) = unavailable()
 }
 
 interface VoiceTutorPersonalizationPort {

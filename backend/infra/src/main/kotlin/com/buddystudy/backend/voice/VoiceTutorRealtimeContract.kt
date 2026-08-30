@@ -6,4 +6,6 @@ internal object VoiceTutorRealtimeContract {
     const val CONTINUOUS_INTERVENTION_TURN = "continuous_intervention"
     const val TUTOR_INTERVENTION_FIELD = "buddystudyTutorIntervention"
     const val PLAYBACK_COMPLETED_EVENT = "buddystudy.voice.playback.completed"
+    const val PLAYOUT_DRAINED_EVENT = "buddystudy.voice.playout.drained"
+    const val SIDEBAND_READY_EVENT = "buddystudy.provider.sideband.ready"
 }

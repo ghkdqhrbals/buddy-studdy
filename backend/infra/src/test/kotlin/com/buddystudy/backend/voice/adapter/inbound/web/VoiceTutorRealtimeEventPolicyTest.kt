@@ -59,6 +59,28 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
+    fun `webrtc playout drain is validated and kept local`() {
+        assertThat(
+            policy.shouldForwardClientEvent(
+                """{"type":"buddystudy.voice.playout.drained","responseId":"response_123"}""",
+            ),
+        ).isFalse()
+
+        listOf("", "response/123", "x".repeat(192)).forEach { responseId ->
+            assertThatThrownBy {
+                policy.shouldForwardClientEvent(
+                    mapper.writeValueAsString(
+                        mapOf(
+                            "type" to "buddystudy.voice.playout.drained",
+                            "responseId" to responseId,
+                        ),
+                    ),
+                )
+            }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        }
+    }
+
+    @Test
     fun `only drain and relay terminal cancel races are nonfatal provider errors`() {
         listOf(
             "buddystudy-internal-drain-1",
@@ -143,6 +165,86 @@ class VoiceTutorRealtimeEventPolicyTest {
                 Instant.EPOCH,
             ).terminate,
         ).isTrue()
+    }
+
+    @Test
+    fun `webrtc sideband forwards only sanitized buffer boundaries and suppresses audio delta`() {
+        val audio = policy.providerDecision(
+            """{"type":"response.output_audio.delta","response_id":"response-1","delta":"AA=="}""",
+            "session-1",
+            Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
+        )
+        assertThat(audio.terminate).isFalse()
+        assertThat(audio.payload).isNull()
+
+        listOf("output_audio_buffer.started", "output_audio_buffer.stopped").forEach { type ->
+            val decision = policy.providerDecision(
+                """{"type":"$type","event_id":"discard-me","response_id":"response-1","private":"discard-me"}""",
+                "session-1",
+                Instant.EPOCH,
+                VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
+            )
+            val payload = mapper.readTree(decision.payload)
+            assertThat(decision.terminate).isFalse()
+            assertThat(payload.path("type").asText()).isEqualTo(type)
+            assertThat(payload.path("response_id").asText()).isEqualTo("response-1")
+            assertThat(payload.toString()).doesNotContain("event_id", "private")
+        }
+
+        val malformed = policy.providerDecision(
+            """{"type":"output_audio_buffer.stopped","response_id":"../../response"}""",
+            "session-1",
+            Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
+        )
+        assertThat(malformed.terminate).isTrue()
+        assertThat(mapper.readTree(malformed.payload).path("code").asText())
+            .isEqualTo("VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+    }
+
+    @Test
+    fun `webrtc cleared and non-completed responses terminate`() {
+        val cleared = policy.providerDecision(
+            """{"type":"output_audio_buffer.cleared","response_id":"response-1"}""",
+            "session-1",
+            Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
+        )
+        assertThat(cleared.terminate).isTrue()
+        assertThat(mapper.readTree(cleared.payload).path("code").asText())
+            .isEqualTo("VOICE_TUTOR_PROVIDER_PLAYOUT_CLEARED")
+
+        listOf("cancelled", "incomplete").forEach { status ->
+            val decision = policy.providerDecision(
+                """{"type":"response.done","response":{"id":"response-1","status":"$status"}}""",
+                "session-1",
+                Instant.EPOCH,
+                VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
+            )
+            assertThat(decision.terminate).isTrue()
+            assertThat(mapper.readTree(decision.payload).path("code").asText())
+                .isEqualTo("VOICE_TUTOR_PROVIDER_INCOMPLETE_RESPONSE")
+        }
+    }
+
+    @Test
+    fun `sideband ready is exposed only on the webrtc control path`() {
+        val ready = policy.providerDecision(
+            """{"type":"buddystudy.provider.sideband.ready","private":"discard-me"}""",
+            "session-1",
+            Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
+        )
+        assertThat(mapper.readTree(ready.payload).toString())
+            .isEqualTo("""{"type":"buddystudy.provider.sideband.ready"}""")
+
+        val legacy = policy.providerDecision(
+            """{"type":"buddystudy.provider.sideband.ready"}""",
+            "session-1",
+            Instant.EPOCH,
+        )
+        assertThat(legacy.payload).isNull()
     }
 
     @Test

@@ -67,6 +67,43 @@ enum BackendStudyLoadState: Equatable {
 struct VoiceTutorLiveConnection: Sendable {
     var session: BackendVoiceTutorSessionStart
     var request: URLRequest
+    var webRTC: VoiceTutorWebRTCConnection?
+    var ownerUserID: Int64
+    var recordingLifecycleGeneration: UInt64
+    var isCurrent: @MainActor @Sendable () -> Bool
+    var endSession: @MainActor @Sendable () async throws -> BackendVoiceTutorSessionDetail
+}
+
+struct VoiceTutorWebRTCConnection: Sendable {
+    var sdpRequest: URLRequest
+    var controlRequest: URLRequest
+}
+
+struct VoiceTutorConnectionIdentityFence: Sendable {
+    var communityGeneration: UInt64
+    var ownerUserID: Int
+    var deviceID: String
+    var clientSecret: String
+
+    func matches(
+        communityState: CommunitySessionStateStore,
+        currentOwnerUserID: Int?,
+        currentRegistration: RemotePushRegistration?
+    ) -> Bool {
+        guard communityState.isCurrent(communityGeneration),
+              currentOwnerUserID == ownerUserID,
+              let currentRegistration else {
+            return false
+        }
+        return currentRegistration.deviceID == deviceID
+            && currentRegistration.clientSecret == clientSecret
+    }
+}
+
+private struct VoiceTutorRequestContext {
+    var registration: RemotePushRegistration
+    var identityFence: VoiceTutorConnectionIdentityFence
+    var isCurrent: @MainActor @Sendable () -> Bool
 }
 
 enum VoiceTutorPreparationError: Error {
@@ -147,6 +184,8 @@ final class AppState: ObservableObject {
     @Published private(set) var isLoadingVoiceTutorStatus = false
     @Published private(set) var isLoadingVoiceTutorSessions = false
     @Published private(set) var voiceTutorErrorMessage: String?
+    private var voiceTutorStatusRequestGeneration: UInt64 = 0
+    private var voiceTutorSessionsRequestGeneration: UInt64 = 0
     @Published private(set) var referralSummary: BackendReferralSummary?
     @Published private(set) var isLoadingReferral = false
     @Published private(set) var referralErrorMessage: String?
@@ -1486,11 +1525,7 @@ final class AppState: ObservableObject {
             billingInvoices = []
             questionQuota = nil
             billingErrorMessage = nil
-            voiceTutorStatus = nil
-            voiceTutorSessions = []
-            voiceTutorSessionDetails = [:]
-            voiceTutorNextCursor = nil
-            voiceTutorErrorMessage = nil
+            resetVoiceTutorState()
             referralSummary = nil
             referralErrorMessage = nil
             isLoadingReferral = false
@@ -1832,8 +1867,12 @@ final class AppState: ObservableObject {
             appNotificationEventProvider.observeAPITrafficLogs { [weak self] entry in
                 self?.appendAPITrafficLog(entry)
             },
-            appNotificationEventProvider.observeBackendUnauthorized { [weak self] in
-                self?.clearStoredBackendAccessToken()
+            appNotificationEventProvider.observeBackendUnauthorized { [weak self] identity in
+                guard let self,
+                      identity.matches(registration: self.storedBackendIdentityUseCase.loadRegistration()) else {
+                    return
+                }
+                self.clearStoredBackendAccessToken()
             },
         ]
 
@@ -2365,6 +2404,9 @@ final class AppState: ObservableObject {
         }
 
         didStart = true
+        #if os(iOS)
+        await cleanupLocalVoiceTutorRecordings()
+        #endif
         scheduleDeferredReferralProfileResolution()
         #if os(iOS)
         startAppleBillingTransactionListener()
@@ -2433,6 +2475,9 @@ final class AppState: ObservableObject {
     }
 
     func handleAppBecameActive() async {
+        #if os(iOS)
+        await cleanupLocalVoiceTutorRecordings()
+        #endif
         #if DEBUG
         if isAppStoreScreenshotFixtureEnabled {
             return
@@ -2480,6 +2525,16 @@ final class AppState: ObservableObject {
         log(.info, "iOS foreground 진입은 조용한 동기화만 수행합니다. 예약 질문은 서버/APNs와 타이머 경로가 담당합니다.")
         #endif
     }
+
+    #if os(iOS)
+    private func cleanupLocalVoiceTutorRecordings() async {
+        do {
+            try await VoiceTutorRecordingStore.shared.cleanupExpiredAndOrphaned()
+        } catch {
+            log(.warning, "만료된 음성 튜터 로컬 녹음 정리를 다음 실행으로 연기했습니다.")
+        }
+    }
+    #endif
 
     var isServiceUnderMaintenance: Bool {
         serviceAvailability.isUnderMaintenance
@@ -5072,6 +5127,13 @@ final class AppState: ObservableObject {
 
     private func resetCommunitySignInState() {
         logAuthTrace("community_session_reset_start", reason: "resetCommunitySignInState", deduplicate: false)
+        #if os(iOS)
+        do {
+            try VoiceTutorRecordingStore.purgeAll()
+        } catch {
+            log(.warning, "로컬 음성 튜터 녹음 파일을 정리하지 못했습니다.")
+        }
+        #endif
         cancelAllAnswerGradingPolling(reason: "community-session-reset")
         setCommunitySessionSignedIn(false)
         studyRoomState.replace(with: [])
@@ -5098,13 +5160,7 @@ final class AppState: ObservableObject {
         billingInvoices = []
         billingErrorMessage = nil
         isLoadingBilling = false
-        voiceTutorStatus = nil
-        voiceTutorSessions = []
-        voiceTutorSessionDetails = [:]
-        voiceTutorNextCursor = nil
-        voiceTutorErrorMessage = nil
-        isLoadingVoiceTutorStatus = false
-        isLoadingVoiceTutorSessions = false
+        resetVoiceTutorState()
         referralSummary = nil
         referralErrorMessage = nil
         isLoadingReferral = false
@@ -5571,6 +5627,16 @@ final class AppState: ObservableObject {
     }
 
     private func applyCommunityProfile(_ profile: CommunityUserProfile) {
+        if let previousOwnerID = communityProfile?.id, previousOwnerID != profile.id {
+            resetVoiceTutorState()
+            #if os(iOS)
+            do {
+                try VoiceTutorRecordingStore.purgeAll()
+            } catch {
+                log(.warning, "계정 변경 후 로컬 음성 튜터 녹음 파일 정리를 다음 실행으로 연기했습니다.")
+            }
+            #endif
+        }
         logAuthTrace(
             "community_profile_apply_start",
             page: .profile,
@@ -7428,41 +7494,101 @@ final class AppState: ObservableObject {
         )
     }
 
+    private func resetVoiceTutorState() {
+        voiceTutorStatusRequestGeneration &+= 1
+        voiceTutorSessionsRequestGeneration &+= 1
+        voiceTutorStatus = nil
+        voiceTutorSessions = []
+        voiceTutorSessionDetails = [:]
+        voiceTutorNextCursor = nil
+        voiceTutorErrorMessage = nil
+        isLoadingVoiceTutorStatus = false
+        isLoadingVoiceTutorSessions = false
+    }
+
+    private func makeVoiceTutorRequestContext() throws -> VoiceTutorRequestContext {
+        guard isCommunitySessionActive,
+              let ownerUserID = communityProfile?.id,
+              ownerUserID > 0 else {
+            throw VoiceTutorPreparationError.signInRequired
+        }
+        guard let registration = storedBackendIdentityUseCase.loadRegistration() else {
+            throw VoiceTutorPreparationError.missingRegistration
+        }
+        let identityFence = VoiceTutorConnectionIdentityFence(
+            communityGeneration: communitySessionState.generation,
+            ownerUserID: ownerUserID,
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret
+        )
+        let clientGeneration = backendClientGeneration
+        return VoiceTutorRequestContext(
+            registration: registration,
+            identityFence: identityFence,
+            isCurrent: { [weak self] in
+                guard let self, self.backendClientGeneration == clientGeneration else { return false }
+                return identityFence.matches(
+                    communityState: self.communitySessionState,
+                    currentOwnerUserID: self.communityProfile?.id,
+                    currentRegistration: self.storedBackendIdentityUseCase.loadRegistration()
+                )
+            }
+        )
+    }
+
+    private func prepareVoiceTutorRegistration(
+        context: VoiceTutorRequestContext,
+        reason: String
+    ) async throws -> RemotePushRegistration {
+        guard context.isCurrent(),
+              let registration = await registrationWithAccessToken(
+                context.registration,
+                reason: reason,
+                validity: context.isCurrent
+              ), context.isCurrent() else {
+            throw VoiceTutorPreparationError.missingRegistration
+        }
+        return registration
+    }
+
     func refreshVoiceTutorStatus() async {
         guard !isLoadingVoiceTutorStatus else {
             return
         }
-        let clientGeneration = backendClientGeneration
         let currentVoiceTutorUseCase = voiceTutorUseCase
-        guard isCommunitySessionActive,
-              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
-              let registration = await registrationWithAccessToken(
-                storedRegistration,
-                reason: "voice-tutor-status"
-              ) else {
+        guard let context = try? makeVoiceTutorRequestContext() else {
             voiceTutorStatus = nil
             voiceTutorErrorMessage = nil
             return
         }
-
+        voiceTutorStatusRequestGeneration &+= 1
+        let requestGeneration = voiceTutorStatusRequestGeneration
         isLoadingVoiceTutorStatus = true
-        defer { isLoadingVoiceTutorStatus = false }
+        defer {
+            if requestGeneration == voiceTutorStatusRequestGeneration {
+                isLoadingVoiceTutorStatus = false
+            }
+        }
         do {
+            let registration = try await prepareVoiceTutorRegistration(
+                context: context,
+                reason: "voice-tutor-status"
+            )
             let status = try await performWithBackendIdentityRecovery(
                 registration: registration,
                 reason: "voice-tutor-status",
+                validity: context.isCurrent,
                 operation: { recoveredRegistration in
                     try await currentVoiceTutorUseCase.status(registration: recoveredRegistration)
                 }
             )
-            guard clientGeneration == backendClientGeneration,
-                  isCommunitySessionActive else {
+            guard context.isCurrent(), requestGeneration == voiceTutorStatusRequestGeneration else {
                 return
             }
             voiceTutorStatus = status
             voiceTutorErrorMessage = nil
         } catch where !Self.isCancellationLikeError(error) {
-            guard clientGeneration == backendClientGeneration else {
+            guard context.isCurrent(), requestGeneration == voiceTutorStatusRequestGeneration else {
                 return
             }
             voiceTutorErrorMessage = voiceTutorDisplayMessage(for: error)
@@ -7480,14 +7606,8 @@ final class AppState: ObservableObject {
         if !reset, cursor == nil {
             return
         }
-        let clientGeneration = backendClientGeneration
         let currentVoiceTutorUseCase = voiceTutorUseCase
-        guard isCommunitySessionActive,
-              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
-              let registration = await registrationWithAccessToken(
-                storedRegistration,
-                reason: "voice-tutor-sessions"
-              ) else {
+        guard let context = try? makeVoiceTutorRequestContext() else {
             if reset {
                 voiceTutorSessions = []
                 voiceTutorNextCursor = nil
@@ -7495,12 +7615,23 @@ final class AppState: ObservableObject {
             return
         }
 
+        voiceTutorSessionsRequestGeneration &+= 1
+        let requestGeneration = voiceTutorSessionsRequestGeneration
         isLoadingVoiceTutorSessions = true
-        defer { isLoadingVoiceTutorSessions = false }
+        defer {
+            if requestGeneration == voiceTutorSessionsRequestGeneration {
+                isLoadingVoiceTutorSessions = false
+            }
+        }
         do {
+            let registration = try await prepareVoiceTutorRegistration(
+                context: context,
+                reason: "voice-tutor-sessions"
+            )
             let page = try await performWithBackendIdentityRecovery(
                 registration: registration,
                 reason: "voice-tutor-sessions",
+                validity: context.isCurrent,
                 operation: { recoveredRegistration in
                     try await currentVoiceTutorUseCase.sessions(
                         registration: recoveredRegistration,
@@ -7509,8 +7640,7 @@ final class AppState: ObservableObject {
                     )
                 }
             )
-            guard clientGeneration == backendClientGeneration,
-                  isCommunitySessionActive else {
+            guard context.isCurrent(), requestGeneration == voiceTutorSessionsRequestGeneration else {
                 return
             }
             if reset {
@@ -7522,7 +7652,7 @@ final class AppState: ObservableObject {
             voiceTutorNextCursor = page.nextCursor
             voiceTutorErrorMessage = nil
         } catch where !Self.isCancellationLikeError(error) {
-            guard clientGeneration == backendClientGeneration else {
+            guard context.isCurrent(), requestGeneration == voiceTutorSessionsRequestGeneration else {
                 return
             }
             voiceTutorErrorMessage = voiceTutorDisplayMessage(for: error)
@@ -7534,21 +7664,20 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func loadVoiceTutorSessionDetail(sessionID: String) async -> BackendVoiceTutorSessionDetail? {
-        let clientGeneration = backendClientGeneration
         let currentVoiceTutorUseCase = voiceTutorUseCase
-        guard isCommunitySessionActive,
-              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
-              let registration = await registrationWithAccessToken(
-                storedRegistration,
-                reason: "voice-tutor-session-detail"
-              ) else {
+        guard let context = try? makeVoiceTutorRequestContext() else {
             return nil
         }
 
         do {
+            let registration = try await prepareVoiceTutorRegistration(
+                context: context,
+                reason: "voice-tutor-session-detail"
+            )
             let detail = try await performWithBackendIdentityRecovery(
                 registration: registration,
                 reason: "voice-tutor-session-detail",
+                validity: context.isCurrent,
                 operation: { recoveredRegistration in
                     try await currentVoiceTutorUseCase.session(
                         registration: recoveredRegistration,
@@ -7556,15 +7685,14 @@ final class AppState: ObservableObject {
                     )
                 }
             )
-            guard clientGeneration == backendClientGeneration,
-                  isCommunitySessionActive else {
+            guard context.isCurrent() else {
                 return nil
             }
             voiceTutorSessionDetails[sessionID] = detail
             voiceTutorErrorMessage = nil
             return detail
         } catch where !Self.isCancellationLikeError(error) {
-            guard clientGeneration == backendClientGeneration else {
+            guard context.isCurrent() else {
                 return nil
             }
             voiceTutorErrorMessage = voiceTutorDisplayMessage(for: error)
@@ -7577,67 +7705,286 @@ final class AppState: ObservableObject {
 
     func createVoiceTutorConnection(
         studyID: Int,
-        voice: String? = nil
+        voice: String? = nil,
+        recordingConsent: Bool = false
     ) async throws -> VoiceTutorLiveConnection {
-        guard isCommunitySessionActive else {
-            throw VoiceTutorPreparationError.signInRequired
-        }
-        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
-              let registration = await registrationWithAccessToken(
-                storedRegistration,
-                reason: "voice-tutor-session-create"
-              ) else {
+        let context = try makeVoiceTutorRequestContext()
+        let identityFence = context.identityFence
+        let ownerUserID = identityFence.ownerUserID
+        let currentVoiceTutorUseCase = voiceTutorUseCase
+        #if os(iOS)
+        let recordingLifecycleGeneration = VoiceTutorRecordingStore.lifecycleGeneration()
+        guard VoiceTutorRecordingStore.isCurrentLifecycleGeneration(recordingLifecycleGeneration) else {
             throw VoiceTutorPreparationError.missingRegistration
         }
-
-        let currentVoiceTutorUseCase = voiceTutorUseCase
-        let session = try await performWithBackendIdentityRecovery(
-            registration: registration,
-            reason: "voice-tutor-session-create",
-            operation: { recoveredRegistration in
-                try await currentVoiceTutorUseCase.createSession(
-                    registration: recoveredRegistration,
-                    studyID: studyID,
-                    language: self.settings.appLanguage,
-                    voice: voice,
-                    idempotencyKey: self.appIdentifierProvider.makeIdentifier()
+        #else
+        let recordingLifecycleGeneration: UInt64 = 0
+        #endif
+        let registration = try await prepareVoiceTutorRegistration(
+            context: context,
+            reason: "voice-tutor-session-create"
+        )
+        let voiceTutorContextIsCurrent = context.isCurrent
+        let idempotencyKey = appIdentifierProvider.makeIdentifier()
+        var createdSessionForCleanup: BackendVoiceTutorSessionStart?
+        var createdSessionRegistration = registration
+        do {
+            let session = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "voice-tutor-session-create",
+                validity: voiceTutorContextIsCurrent,
+                operation: { recoveredRegistration in
+                    let created = try await currentVoiceTutorUseCase.createSession(
+                        registration: recoveredRegistration,
+                        studyID: studyID,
+                        language: self.settings.appLanguage,
+                        voice: voice,
+                        recordingConsent: recordingConsent,
+                        recordingConsentVersion: recordingConsent ? "voice-recording-v1" : nil,
+                        idempotencyKey: idempotencyKey
+                    )
+                    createdSessionRegistration = recoveredRegistration
+                    createdSessionForCleanup = created
+                    return created
+                }
+            )
+            guard voiceTutorContextIsCurrent() else {
+                throw VoiceTutorPreparationError.missingRegistration
+            }
+            #if os(iOS)
+            guard VoiceTutorRecordingStore.isCurrentLifecycleGeneration(
+                recordingLifecycleGeneration
+            ) else {
+                throw VoiceTutorPreparationError.missingRegistration
+            }
+            #endif
+            guard let activeRegistration = storedBackendIdentityUseCase.loadRegistration(),
+                  activeRegistration.deviceID == identityFence.deviceID,
+                  activeRegistration.clientSecret == identityFence.clientSecret else {
+                throw VoiceTutorPreparationError.missingRegistration
+            }
+            guard let request = makeVoiceTutorWebSocketRequest(
+                session: session,
+                registration: activeRegistration
+            ) else {
+                throw VoiceTutorPreparationError.invalidWebSocketURL
+            }
+            let webRTC: VoiceTutorWebRTCConnection?
+            if session.realtimeTransport.uppercased() == "WEBRTC" {
+                guard let sdpRequest = makeVoiceTutorSameOriginRequest(
+                    url: session.sdpURL,
+                    registration: activeRegistration,
+                    isWebSocket: false,
+                    webSocketProtocol: nil
+                ), let controlRequest = makeVoiceTutorSameOriginRequest(
+                    url: session.controlWebSocketURL,
+                    registration: activeRegistration,
+                    isWebSocket: true,
+                    webSocketProtocol: session.controlWebSocketProtocol
+                ) else {
+                    throw VoiceTutorPreparationError.invalidWebSocketURL
+                }
+                webRTC = VoiceTutorWebRTCConnection(
+                    sdpRequest: sdpRequest,
+                    controlRequest: controlRequest
+                )
+            } else {
+                webRTC = nil
+            }
+            applyVoiceTutorQuota(session.quota)
+            let liveRegistration = createdSessionRegistration
+            return VoiceTutorLiveConnection(
+                session: session,
+                request: request,
+                webRTC: webRTC,
+                ownerUserID: Int64(ownerUserID),
+                recordingLifecycleGeneration: recordingLifecycleGeneration,
+                isCurrent: {
+                    #if os(iOS)
+                    voiceTutorContextIsCurrent()
+                        && VoiceTutorRecordingStore.isCurrentLifecycleGeneration(recordingLifecycleGeneration)
+                    #else
+                    voiceTutorContextIsCurrent()
+                    #endif
+                },
+                endSession: { [weak self] in
+                    guard let self else {
+                        return try await currentVoiceTutorUseCase.endSession(
+                            registration: liveRegistration,
+                            sessionID: session.sessionId
+                        )
+                    }
+                    return try await self.endVoiceTutorSession(
+                        sessionID: session.sessionId,
+                        registration: liveRegistration,
+                        useCase: currentVoiceTutorUseCase,
+                        validity: voiceTutorContextIsCurrent,
+                        allowStaleCleanup: true
+                    )
+                }
+            )
+        } catch {
+            // The session may have been created by a refreshed A-account token
+            // even though B became current before the response arrived. Cleanup
+            // must use the exact registration that succeeded, never B's current
+            // registration, and also covers every post-create URL/contract error.
+            if let createdSessionForCleanup {
+                _ = try? await currentVoiceTutorUseCase.endSession(
+                    registration: createdSessionRegistration,
+                    sessionID: createdSessionForCleanup.sessionId
                 )
             }
-        )
-        guard let activeRegistration = storedBackendIdentityUseCase.loadRegistration() else {
-            throw VoiceTutorPreparationError.missingRegistration
+            throw error
         }
-        guard let request = makeVoiceTutorWebSocketRequest(
-            session: session,
-            registration: activeRegistration
-        ) else {
-            throw VoiceTutorPreparationError.invalidWebSocketURL
-        }
-        applyVoiceTutorQuota(session.quota)
-        return VoiceTutorLiveConnection(session: session, request: request)
     }
 
     @discardableResult
     func endVoiceTutorSession(sessionID: String) async throws -> BackendVoiceTutorSessionDetail {
-        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
-              let registration = await registrationWithAccessToken(
-                storedRegistration,
-                reason: "voice-tutor-session-end"
-              ) else {
-            throw VoiceTutorPreparationError.missingRegistration
+        let context = try makeVoiceTutorRequestContext()
+        let currentVoiceTutorUseCase = voiceTutorUseCase
+        let registration = try await prepareVoiceTutorRegistration(
+            context: context,
+            reason: "voice-tutor-session-end"
+        )
+        return try await endVoiceTutorSession(
+            sessionID: sessionID,
+            registration: registration,
+            useCase: currentVoiceTutorUseCase,
+            validity: context.isCurrent,
+            allowStaleCleanup: false
+        )
+    }
+
+    private func endVoiceTutorSession(
+        sessionID: String,
+        registration: RemotePushRegistration,
+        useCase: VoiceTutorUseCase,
+        validity: @MainActor @escaping () -> Bool,
+        allowStaleCleanup: Bool
+    ) async throws -> BackendVoiceTutorSessionDetail {
+        guard validity() else {
+            guard allowStaleCleanup else { throw CancellationError() }
+            // Terminate the old live call with its own client and credentials;
+            // never refresh credentials or publish its detail into a new owner.
+            return try await useCase.endSession(registration: registration, sessionID: sessionID)
         }
         let detail = try await performWithBackendIdentityRecovery(
             registration: registration,
             reason: "voice-tutor-session-end",
+            validity: validity,
             operation: { recoveredRegistration in
-                try await self.voiceTutorUseCase.endSession(
+                try await useCase.endSession(
                     registration: recoveredRegistration,
                     sessionID: sessionID
                 )
             }
         )
+        guard validity() else { throw CancellationError() }
         voiceTutorSessionDetails[sessionID] = detail
         return detail
+    }
+
+    #if os(iOS)
+    func uploadVoiceTutorRecording(_ pending: VoiceTutorPendingRecording) async throws {
+        let context = try makeVoiceTutorRequestContext()
+        guard Int64(context.identityFence.ownerUserID) == pending.ownerUserID else {
+            throw VoiceTutorRecordingError.invalidOwner
+        }
+        let currentVoiceTutorUseCase = voiceTutorUseCase
+        let registration = try await prepareVoiceTutorRegistration(
+            context: context,
+            reason: "voice-tutor-recording-upload"
+        )
+        let mediaURL = try await VoiceTutorRecordingStore.shared.mediaURL(for: pending)
+        guard context.isCurrent() else { throw CancellationError() }
+        try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "voice-tutor-recording-upload",
+            validity: context.isCurrent,
+            operation: { recoveredRegistration in
+                try await currentVoiceTutorUseCase.uploadRecording(
+                    registration: recoveredRegistration,
+                    sessionID: pending.sessionID,
+                    fileURL: mediaURL,
+                    contentType: pending.contentType,
+                    contentLength: pending.contentLength,
+                    sha256: pending.sha256,
+                    durationMilliseconds: pending.durationMilliseconds
+                )
+            }
+        )
+        guard context.isCurrent() else { throw CancellationError() }
+        try await VoiceTutorRecordingStore.shared.remove(pending)
+        guard context.isCurrent() else { throw CancellationError() }
+        _ = await loadVoiceTutorSessionDetail(sessionID: pending.sessionID)
+    }
+
+    func retryPendingVoiceTutorRecordingUploads() async {
+        guard let context = try? makeVoiceTutorRequestContext(),
+              let pending = try? await VoiceTutorRecordingStore.shared.pendingRecordings(
+                ownerUserID: Int64(context.identityFence.ownerUserID)
+              ), context.isCurrent() else {
+            return
+        }
+        for recording in pending where !Task.isCancelled {
+            guard context.isCurrent() else { return }
+            do {
+                try await uploadVoiceTutorRecording(recording)
+            } catch {
+                guard context.isCurrent() else { return }
+                // The protected sidecar is retained for a later foreground retry.
+                log(.warning, "음성 튜터 녹음 업로드를 다음 실행으로 연기했습니다.")
+            }
+        }
+    }
+    #endif
+
+    func voiceTutorRecordingAccess(
+        sessionID: String
+    ) async throws -> BackendVoiceTutorRecordingAccess {
+        let context = try makeVoiceTutorRequestContext()
+        let currentVoiceTutorUseCase = voiceTutorUseCase
+        let registration = try await prepareVoiceTutorRegistration(
+            context: context,
+            reason: "voice-tutor-recording-access"
+        )
+        return try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "voice-tutor-recording-access",
+            validity: context.isCurrent,
+            operation: { recoveredRegistration in
+                try await currentVoiceTutorUseCase.recordingAccess(
+                    registration: recoveredRegistration,
+                    sessionID: sessionID
+                )
+            }
+        )
+    }
+
+    func deleteVoiceTutorRecording(sessionID: String) async throws {
+        let context = try makeVoiceTutorRequestContext()
+        let currentVoiceTutorUseCase = voiceTutorUseCase
+        let registration = try await prepareVoiceTutorRegistration(
+            context: context,
+            reason: "voice-tutor-recording-delete"
+        )
+        try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "voice-tutor-recording-delete",
+            validity: context.isCurrent,
+            operation: { recoveredRegistration in
+                try await currentVoiceTutorUseCase.deleteRecording(
+                    registration: recoveredRegistration,
+                    sessionID: sessionID
+                )
+            }
+        )
+        guard context.isCurrent() else { throw CancellationError() }
+        #if os(iOS)
+        try VoiceTutorRecordingStore.removeUnfinalizedFiles(sessionID: sessionID)
+        #endif
+        voiceTutorSessionDetails.removeValue(forKey: sessionID)
+        _ = await loadVoiceTutorSessionDetail(sessionID: sessionID)
     }
 
     func applyVoiceTutorQuota(_ quota: BackendVoiceTutorQuota) {
@@ -7734,6 +8081,69 @@ final class AppState: ObservableObject {
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
         request.setValue("buddystudy.voice.v1", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        return request
+    }
+
+    private func makeVoiceTutorSameOriginRequest(
+        url: URL?,
+        registration: RemotePushRegistration,
+        isWebSocket: Bool,
+        webSocketProtocol: String?
+    ) -> URLRequest? {
+        guard let url,
+              let baseURL = URL(string: configuredBackendBaseURLDescription),
+              let base = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              let resolvedURL = URL(string: url.relativeString, relativeTo: baseURL)?.absoluteURL,
+              var target = URLComponents(url: resolvedURL, resolvingAgainstBaseURL: false),
+              let baseHost = base.host?.lowercased(),
+              target.host?.lowercased() == baseHost,
+              target.user == nil,
+              target.password == nil,
+              target.fragment == nil else {
+            return nil
+        }
+        let baseScheme = base.scheme?.lowercased()
+        let targetScheme = target.scheme?.lowercased()
+        let effectivePort: (URLComponents, String?) -> Int? = { components, scheme in
+            if let port = components.port { return port }
+            switch scheme {
+            case "https", "wss": return 443
+            case "http", "ws": return 80
+            default: return nil
+            }
+        }
+        guard effectivePort(base, baseScheme) == effectivePort(target, targetScheme),
+              baseScheme == "https" || (isDebuggingEnabled && baseScheme == "http") else {
+            return nil
+        }
+        if isWebSocket {
+            switch targetScheme {
+            case "https", "wss": target.scheme = "wss"
+            case "http", "ws":
+                guard isDebuggingEnabled else { return nil }
+                target.scheme = "ws"
+            default: return nil
+            }
+        } else {
+            guard targetScheme == "https" || (isDebuggingEnabled && targetScheme == "http") else {
+                return nil
+            }
+        }
+        guard let targetURL = target.url else { return nil }
+        var request = URLRequest(url: targetURL)
+        request.timeoutInterval = 30
+        if let token = registration.accessToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if isWebSocket,
+           let webSocketProtocol = webSocketProtocol?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !webSocketProtocol.isEmpty,
+           !webSocketProtocol.contains(","),
+           !webSocketProtocol.contains("\n"),
+           !webSocketProtocol.contains("\r") {
+            request.setValue(webSocketProtocol, forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        }
         return request
     }
 
@@ -11779,8 +12189,12 @@ final class AppState: ObservableObject {
     private func registrationWithAccessToken(
         _ registration: RemotePushRegistration,
         reason: String,
-        syncSettingsAfterRegistration: Bool = true
+        syncSettingsAfterRegistration: Bool = true,
+        validity: (@MainActor () -> Bool)? = nil
     ) async -> RemotePushRegistration? {
+        guard validity?() ?? true else {
+            return nil
+        }
         guard !registration.hasAccessToken else {
             logAuthTrace("backend_access_token_reuse", reason: reason)
             return registration
@@ -11789,11 +12203,17 @@ final class AppState: ObservableObject {
         do {
             logAuthTrace("backend_access_token_bootstrap_start", reason: reason, deduplicate: false)
             let updatedRegistration = try await backendIdentityUseCase.bootstrapAccessToken(registration: registration)
+            guard validity?() ?? true else {
+                return nil
+            }
             storedBackendIdentityUseCase.saveRegistration(updatedRegistration)
             logAuthTrace("backend_access_token_bootstrap_success", reason: reason, deduplicate: false)
             log(.info, "백엔드 access token을 갱신했습니다. reason=\(reason), deviceID=\(updatedRegistration.deviceID)")
             return updatedRegistration
         } catch {
+            guard validity?() ?? true else {
+                return nil
+            }
             if appErrorHandlingUseCase.shouldResetBackendIdentity(after: error) {
                 logAuthTrace(
                     "backend_access_token_bootstrap_reset_identity",
@@ -11805,7 +12225,8 @@ final class AppState: ObservableObject {
                 return await resetBackendIdentityAndRegisterFresh(
                     previousRegistration: registration,
                     reason: "\(reason)-device-recovery",
-                    syncSettingsAfterRegistration: syncSettingsAfterRegistration
+                    syncSettingsAfterRegistration: syncSettingsAfterRegistration,
+                    validity: validity
                 )
             }
             logAuthTrace(
@@ -11823,11 +12244,22 @@ final class AppState: ObservableObject {
         registration: RemotePushRegistration,
         reason: String,
         syncSettingsAfterRegistration: Bool = true,
+        validity: (@MainActor () -> Bool)? = nil,
         operation: (RemotePushRegistration) async throws -> T
     ) async throws -> T {
+        func ensureValidity() throws {
+            guard validity?() ?? true else {
+                throw CancellationError()
+            }
+        }
+
+        try ensureValidity()
         do {
-            return try await operation(registration)
+            let result = try await operation(registration)
+            try ensureValidity()
+            return result
         } catch {
+            try ensureValidity()
             if appErrorHandlingUseCase.shouldRefreshBackendAccessToken(after: error) {
                 logAuthTrace(
                     "backend_access_token_recovery_start",
@@ -11838,17 +12270,24 @@ final class AppState: ObservableObject {
                 var expiredRegistration = registration
                 expiredRegistration.accessToken = nil
                 expiredRegistration.accessTokenExpiresAt = nil
+                try ensureValidity()
                 storedBackendIdentityUseCase.saveRegistration(expiredRegistration)
-                guard let refreshedRegistration = await registrationWithAccessToken(
+                let refreshedRegistration = await registrationWithAccessToken(
                     expiredRegistration,
                     reason: "\(reason)-access-token-recovery",
-                    syncSettingsAfterRegistration: syncSettingsAfterRegistration
-                ) else {
+                    syncSettingsAfterRegistration: syncSettingsAfterRegistration,
+                    validity: validity
+                )
+                try ensureValidity()
+                guard let refreshedRegistration else {
                     logAuthTrace("backend_access_token_recovery_failure", reason: reason, deduplicate: false)
                     throw error
                 }
                 logAuthTrace("backend_access_token_recovery_success", reason: reason, deduplicate: false)
-                return try await operation(refreshedRegistration)
+                try ensureValidity()
+                let result = try await operation(refreshedRegistration)
+                try ensureValidity()
+                return result
             }
 
             guard appErrorHandlingUseCase.shouldResetBackendIdentity(after: error) else {
@@ -11860,29 +12299,76 @@ final class AppState: ObservableObject {
                 extra: ["error=\(error.localizedDescription)"],
                 deduplicate: false
             )
-            guard let recoveredRegistration = await resetBackendIdentityAndRegisterFresh(
+            try ensureValidity()
+            let recoveredRegistration = await resetBackendIdentityAndRegisterFresh(
                 previousRegistration: registration,
                 reason: reason,
-                syncSettingsAfterRegistration: syncSettingsAfterRegistration
-            ) else {
+                syncSettingsAfterRegistration: syncSettingsAfterRegistration,
+                validity: validity
+            )
+            try ensureValidity()
+            guard let recoveredRegistration else {
                 logAuthTrace("backend_identity_recovery_failure", reason: reason, deduplicate: false)
                 throw error
             }
 
             logAuthTrace("backend_identity_recovery_success", reason: reason, deduplicate: false)
-            return try await operation(recoveredRegistration)
+            try ensureValidity()
+            let result = try await operation(recoveredRegistration)
+            try ensureValidity()
+            return result
         }
     }
 
     private func resetBackendIdentityAndRegisterFresh(
         previousRegistration: RemotePushRegistration,
         reason: String,
-        syncSettingsAfterRegistration: Bool = true
+        syncSettingsAfterRegistration: Bool = true,
+        validity: (@MainActor () -> Bool)? = nil
     ) async -> RemotePushRegistration? {
+        guard validity?() ?? true else {
+            return nil
+        }
+        let apnsToken = previousRegistration.apnsToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let validity {
+            do {
+                // A fenced voice request must not clear B's identity while an
+                // A-account device-registration request is suspended. Obtain
+                // the replacement first, then commit reset + save together on
+                // the main actor only if the original context is still current.
+                let registration = try await requestFreshBackendDeviceRegistration(
+                    apnsToken: apnsToken.isEmpty ? nil : apnsToken
+                )
+                guard validity() else {
+                    return nil
+                }
+                storedBackendIdentityUseCase.saveRegistration(nil)
+                resetCommunitySignInState()
+                clearCommunityFeedPage()
+                storedBackendIdentityUseCase.saveRegistration(registration)
+                if syncSettingsAfterRegistration {
+                    let replacementGeneration = communitySessionState.generation
+                    try await updateBackendSettings(
+                        registration: registration,
+                        reason: "\(reason)-identity-reset",
+                        includeAPIKey: true,
+                        validity: {
+                            self.communitySessionState.generation == replacementGeneration
+                                && self.storedBackendIdentityUseCase.loadRegistration()?.deviceID == registration.deviceID
+                                && self.storedBackendIdentityUseCase.loadRegistration()?.clientSecret == registration.clientSecret
+                        }
+                    )
+                }
+                log(.warning, "백엔드 device/token이 무효화되어 새 기기로 복구했습니다. reason=\(reason), oldDeviceID=\(previousRegistration.deviceID), newDeviceID=\(registration.deviceID)")
+                return registration
+            } catch {
+                log(.warning, "백엔드 device/token 복구 실패: \(error.localizedDescription), reason=\(reason), oldDeviceID=\(previousRegistration.deviceID)")
+                return nil
+            }
+        }
         storedBackendIdentityUseCase.saveRegistration(nil)
         resetCommunitySignInState()
         clearCommunityFeedPage()
-        let apnsToken = previousRegistration.apnsToken.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             let registration = try await registerFreshBackendDevice(
                 apnsToken: apnsToken.isEmpty ? nil : apnsToken,
@@ -11904,13 +12390,7 @@ final class AppState: ObservableObject {
         includeAPIKey: Bool,
         syncSettingsAfterRegistration: Bool = true
     ) async throws -> RemotePushRegistration {
-        let registration = try await backendIdentityUseCase.registerDevice(
-            installationIdentifier: storedBackendIdentityUseCase.installationIdentifier(),
-            apnsToken: apnsToken,
-            language: settings.appLanguage,
-            timezone: appTimeZoneProvider.currentIdentifier,
-            apnsEnvironment: Self.backendAPNSEnvironment
-        )
+        let registration = try await requestFreshBackendDeviceRegistration(apnsToken: apnsToken)
         storedBackendIdentityUseCase.saveRegistration(registration)
         log(.info, "새 백엔드 기기를 등록했습니다. reason=\(reason), deviceID=\(registration.deviceID)")
         if syncSettingsAfterRegistration {
@@ -11923,6 +12403,18 @@ final class AppState: ObservableObject {
         return registration
     }
 
+    private func requestFreshBackendDeviceRegistration(
+        apnsToken: String?
+    ) async throws -> RemotePushRegistration {
+        try await backendIdentityUseCase.registerDevice(
+            installationIdentifier: storedBackendIdentityUseCase.installationIdentifier(),
+            apnsToken: apnsToken,
+            language: settings.appLanguage,
+            timezone: appTimeZoneProvider.currentIdentifier,
+            apnsEnvironment: Self.backendAPNSEnvironment
+        )
+    }
+
     private func clearStoredBackendAccessToken() {
         logAuthTrace("backend_access_token_clear_start", reason: "clearStoredBackendAccessToken", deduplicate: false)
         cancelAllAnswerGradingPolling(reason: "backend-access-token-cleared")
@@ -11931,6 +12423,14 @@ final class AppState: ObservableObject {
         setCommunitySessionSignedIn(false)
         communityProfile = nil
         resetReferralStateAfterCommunitySessionInvalidation()
+        resetVoiceTutorState()
+        #if os(iOS)
+        do {
+            try VoiceTutorRecordingStore.purgeAll()
+        } catch {
+            log(.warning, "인증 무효화 후 로컬 음성 튜터 녹음 파일 정리를 다음 실행으로 연기했습니다.")
+        }
+        #endif
         guard var registration = storedBackendIdentityUseCase.loadRegistration(),
               registration.accessToken != nil || registration.accessTokenExpiresAt != nil else {
             logAuthTrace("backend_access_token_clear_skipped", reason: "clearStoredBackendAccessToken", deduplicate: false)
@@ -11947,8 +12447,12 @@ final class AppState: ObservableObject {
     private func updateBackendSettings(
         registration: RemotePushRegistration,
         reason: String,
-        includeAPIKey: Bool = false
+        includeAPIKey: Bool = false,
+        validity: (@MainActor () -> Bool)? = nil
     ) async throws {
+        guard validity?() ?? true else {
+            throw CancellationError()
+        }
         let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         #if os(iOS)
         let shouldEnableRemotePush = QuestionSchedulePolicy.shouldEnableIOSRemotePush(
@@ -11969,6 +12473,9 @@ final class AppState: ObservableObject {
             apiKey: shouldUploadAPIKey ? trimmedAPIKey : nil,
             enabled: shouldEnableRemotePush
         )
+        guard validity?() ?? true else {
+            throw CancellationError()
+        }
         if shouldUploadAPIKey {
             isBackendOpenAIKeyConfigured = true
         }

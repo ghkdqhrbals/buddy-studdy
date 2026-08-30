@@ -74,6 +74,7 @@ class OpenAIVoiceTutorRealtimeAdapter(
                 responseTimeout = Duration.ofSeconds(
                     properties.voiceTutor.responseTimeoutSeconds.coerceIn(10, 120),
                 ),
+                transport = VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY,
             )
             val clientEventFlux = clientEvents.asFlux()
                 .handle<String> { raw, sink ->
@@ -181,11 +182,17 @@ class OpenAIVoiceTutorRealtimeAdapter(
     }
 }
 
+internal enum class VoiceTutorRealtimeTransport {
+    LEGACY_PCM_RELAY,
+    WEBRTC_SIDEBAND,
+}
+
 internal class VoiceTutorDuplexTurnController(
     private val mapper: com.fasterxml.jackson.databind.ObjectMapper = JsonMapperProvider.mapper,
     private val continuousSpeechLimit: Duration,
     private val responseTimeout: Duration,
     private val nanoTime: () -> Long = System::nanoTime,
+    private val transport: VoiceTutorRealtimeTransport = VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY,
 ) {
     private val controls = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<String>(MAX_BUFFERED_CONTROLS).get())
@@ -200,6 +207,8 @@ internal class VoiceTutorDuplexTurnController(
     private var earliestResponsePlaybackEndNanos: Long? = null
     private var providerResponseDone = false
     private var playbackCompleted = false
+    private var providerOutputBufferStopped = false
+    private var clientPlayoutDrained = false
     private var playbackTimer: Disposable? = null
     private var responseTimer: Disposable? = null
     private var queuedCommittedTurn = false
@@ -215,13 +224,22 @@ internal class VoiceTutorDuplexTurnController(
         val node = runCatching { mapper.readTree(raw) }.getOrNull() ?: return false
         return when (node.path("type").asText()) {
             VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT -> {
-                if (closed) return true
+                if (closed || transport != VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY) return true
                 val responseId = node.path("responseId").asText()
                 if (responseActive && responseId.isNotBlank() && responseId == activeResponseId) {
                     playbackCompleted = true
                     if (providerResponseDone) {
                         advancePlaybackGate()
                     }
+                }
+                true
+            }
+            VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT -> {
+                if (closed || transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) return true
+                val responseId = node.path("responseId").asText()
+                if (responseActive && responseId.isNotBlank() && responseId == activeResponseId) {
+                    clientPlayoutDrained = true
+                    advancePlaybackGate()
                 }
                 true
             }
@@ -237,8 +255,25 @@ internal class VoiceTutorDuplexTurnController(
             return terminalDisposition(node)
         }
         return when (node.path("type").asText()) {
-            "response.output_audio.delta" -> accepted(observeResponseAudio(node))
+            "response.output_audio.delta" -> if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+                accepted(
+                    matchesKnownActiveResponse(node.path("response_id").asText()),
+                    VoiceTutorProviderRelayDisposition.PERSIST_ONLY,
+                )
+            } else {
+                accepted(observeResponseAudio(node))
+            }
             "response.output_audio.done" -> accepted(matchesActiveResponse(node.path("response_id").asText()))
+            "output_audio_buffer.started" -> accepted(
+                transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
+                    matchesKnownActiveResponse(node.path("response_id").asText()),
+                VoiceTutorProviderRelayDisposition.FORWARD_ONLY,
+            )
+            "output_audio_buffer.stopped" -> accepted(
+                observeOutputBufferStopped(node),
+                VoiceTutorProviderRelayDisposition.FORWARD_ONLY,
+            )
+            "output_audio_buffer.cleared" -> observeOutputBufferCleared(node)
             in TUTOR_TRANSCRIPT_EVENTS -> accepted(matchesKnownActiveResponse(node.path("response_id").asText()))
             in USER_TRANSCRIPT_EVENTS -> VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
             "input_audio_buffer.speech_started" -> {
@@ -367,6 +402,8 @@ internal class VoiceTutorDuplexTurnController(
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false
         playbackCompleted = false
+        providerOutputBufferStopped = false
+        clientPlayoutDrained = false
         responseTimer?.dispose()
         val responseGeneration = activeResponseGeneration
         responseTimer = Mono.delay(responseTimeout)
@@ -405,6 +442,12 @@ internal class VoiceTutorDuplexTurnController(
     private fun observeResponseDone(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
         if (!responseActive) return false
         val response = node.path("response")
+        if (
+            transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
+            response.path("status").asText() != "completed"
+        ) {
+            throw VoiceTutorProviderIncompleteResponseException()
+        }
         if (response.path("status").asText() !in COMPLETING_RESPONSE_STATUSES) return true
         if (!matchesActiveResponseToken(response)) return false
         val responseId = response.path("id").asText()
@@ -419,6 +462,27 @@ internal class VoiceTutorDuplexTurnController(
         return true
     }
 
+    private fun observeOutputBufferStopped(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
+        if (transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) return false
+        val responseId = node.path("response_id").asText()
+        if (!matchesKnownActiveResponse(responseId)) return false
+        providerOutputBufferStopped = true
+        advancePlaybackGate()
+        return true
+    }
+
+    private fun observeOutputBufferCleared(
+        node: com.fasterxml.jackson.databind.JsonNode,
+    ): VoiceTutorProviderRelayDisposition {
+        if (transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+            return VoiceTutorProviderRelayDisposition.DROP
+        }
+        // A cleared WebRTC buffer means a tutor sentence was cut short. It is never
+        // a valid turn completion, including when a stale or forged response id is used.
+        node.path("response_id").asText()
+        throw VoiceTutorProviderOutputBufferClearedException()
+    }
+
     private fun matchesActiveResponse(responseId: String): Boolean =
         responseActive && responseId.isNotBlank() && (activeResponseId == null || responseId == activeResponseId)
 
@@ -431,6 +495,17 @@ internal class VoiceTutorDuplexTurnController(
 
     private fun advancePlaybackGate() {
         if (!responseActive || !providerResponseDone) return
+        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+            if (providerOutputBufferStopped && clientPlayoutDrained) {
+                finishActiveResponse()
+            } else if (playbackTimer == null) {
+                val responseGeneration = activeResponseGeneration
+                val responseId = activeResponseId
+                playbackTimer = Mono.delay(responseTimeout)
+                    .subscribe { fireWebRtcPlayoutTimeout(responseGeneration, responseId) }
+            }
+            return
+        }
         if (activeResponseAudioBytes == 0L) {
             finishActiveResponse()
             return
@@ -506,6 +581,23 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     @Synchronized
+    internal fun fireWebRtcPlayoutTimeout(responseGeneration: Long, responseId: String?) {
+        if (
+            closed ||
+            transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND ||
+            !responseActive ||
+            !providerResponseDone ||
+            (providerOutputBufferStopped && clientPlayoutDrained) ||
+            responseGeneration != activeResponseGeneration ||
+            responseId != activeResponseId
+        ) {
+            return
+        }
+        playbackTimer = null
+        controls.tryEmitError(VoiceTutorProviderPlayoutTimeoutException())
+    }
+
+    @Synchronized
     private fun firePlaybackTimer(
         responseGeneration: Long,
         responseId: String?,
@@ -540,6 +632,8 @@ internal class VoiceTutorDuplexTurnController(
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false
         playbackCompleted = false
+        providerOutputBufferStopped = false
+        clientPlayoutDrained = false
         if (closed) return
         if (userSpeaking) {
             if (interventionDeadlineElapsedWhileResponseActive) {
@@ -555,9 +649,12 @@ internal class VoiceTutorDuplexTurnController(
     private fun internalEventId(action: String): String =
         "$DUPLEX_EVENT_PREFIX$action-${UUID.randomUUID()}"
 
-    private fun accepted(accepted: Boolean): VoiceTutorProviderRelayDisposition =
+    private fun accepted(
+        accepted: Boolean,
+        disposition: VoiceTutorProviderRelayDisposition = VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST,
+    ): VoiceTutorProviderRelayDisposition =
         if (accepted) {
-            VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
+            disposition
         } else {
             VoiceTutorProviderRelayDisposition.DROP
         }
@@ -605,12 +702,25 @@ internal data class VoiceTutorProviderRelayDisposition(
     companion object {
         val DROP = VoiceTutorProviderRelayDisposition(persist = false, forwardToClient = false)
         val PERSIST_ONLY = VoiceTutorProviderRelayDisposition(persist = true, forwardToClient = false)
+        val FORWARD_ONLY = VoiceTutorProviderRelayDisposition(persist = false, forwardToClient = true)
         val FORWARD_AND_PERSIST = VoiceTutorProviderRelayDisposition(persist = true, forwardToClient = true)
     }
 }
 
 internal class VoiceTutorProviderResponseTimeoutException : RuntimeException(
     "Voice Tutor provider response timed out.",
+)
+
+internal class VoiceTutorProviderPlayoutTimeoutException : RuntimeException(
+    "Voice Tutor provider playout completion timed out.",
+)
+
+internal class VoiceTutorProviderOutputBufferClearedException : RuntimeException(
+    "Voice Tutor provider cleared an active output buffer.",
+)
+
+internal class VoiceTutorProviderIncompleteResponseException : RuntimeException(
+    "Voice Tutor provider returned an incomplete realtime response.",
 )
 
 internal class VoiceTutorProviderDrainState(
