@@ -211,6 +211,8 @@ internal class VoiceTutorDuplexTurnController(
     private var clientPlayoutDrained = false
     private var playbackTimer: Disposable? = null
     private var responseTimer: Disposable? = null
+    private var openingResponseRequested = false
+    private var openingResponsePending = false
     private var queuedCommittedTurn = false
     private var pendingSpeechCommitCount = 0
     private var interventionDeadlineElapsedWhileResponseActive = false
@@ -218,6 +220,14 @@ internal class VoiceTutorDuplexTurnController(
     private var closed = false
 
     fun providerEvents(): Flux<String> = controls.asFlux().filter { !closed }
+
+    @Synchronized
+    fun startOpeningResponse() {
+        if (closed || openingResponseRequested) return
+        openingResponseRequested = true
+        openingResponsePending = true
+        createNormalResponseIfReady()
+    }
 
     @Synchronized
     fun observeClientEvent(raw: String): Boolean {
@@ -255,6 +265,12 @@ internal class VoiceTutorDuplexTurnController(
             return terminalDisposition(node)
         }
         return when (node.path("type").asText()) {
+            "session.updated" -> {
+                if (transport == VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY) {
+                    startOpeningResponse()
+                }
+                VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
+            }
             "response.output_audio.delta" -> if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
                 accepted(
                     matchesKnownActiveResponse(node.path("response_id").asText()),
@@ -316,7 +332,10 @@ internal class VoiceTutorDuplexTurnController(
     @Synchronized
     internal fun fireContinuousSpeechDeadline() {
         interventionTimer = null
-        if (closed || !userSpeaking || interventionDeliveredDuringCurrentSpeech) return
+        if (
+            closed || !openingResponseRequested || openingResponsePending ||
+            !userSpeaking || interventionDeliveredDuringCurrentSpeech
+        ) return
         if (responseActive) {
             interventionDeadlineElapsedWhileResponseActive = true
             return
@@ -355,16 +374,26 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     private fun scheduleIntervention() {
-        if (closed || interventionDeliveredDuringCurrentSpeech) return
+        if (closed || !openingResponseRequested || openingResponsePending || interventionDeliveredDuringCurrentSpeech) return
         interventionTimer?.dispose()
         interventionTimer = Mono.delay(continuousSpeechLimit)
             .subscribe { fireContinuousSpeechDeadline() }
     }
 
     private fun createNormalResponseIfReady() {
-        if (closed || userSpeaking || pendingSpeechCommitCount > 0 || !queuedCommittedTurn || responseActive) return
-        queuedCommittedTurn = false
-        val responseEventId = internalEventId("turn-response")
+        if (
+            closed || !openingResponseRequested || userSpeaking || pendingSpeechCommitCount > 0 || responseActive ||
+            (!openingResponsePending && !queuedCommittedTurn)
+        ) return
+        val opening = openingResponsePending
+        if (opening) {
+            openingResponsePending = false
+        } else {
+            queuedCommittedTurn = false
+        }
+        // Opening speech uses the same response/playout gate as an ordinary turn.
+        // Keep any early learner commit queued until that entire sentence is heard.
+        val responseEventId = internalEventId(if (opening) "opening-response" else "turn-response")
         beginResponse(responseEventId)
         emit(
             linkedMapOf(

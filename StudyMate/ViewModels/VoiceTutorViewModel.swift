@@ -20,6 +20,54 @@ enum VoiceTutorSessionPhase: Equatable {
             return false
         }
     }
+
+    static func completed(outcome: Self, serverState: String?, serverReason: String? = nil) -> Self {
+        let reason = serverReason?.uppercased() ?? ""
+        let failedReason = reason.hasSuffix("_ERROR") || reason.hasSuffix("_TIMEOUT")
+            || ["AUTH_REVOKED", "CONTROL_BACKPRESSURE", "CLIENT_DISCONNECTED"].contains(reason)
+        return outcome == .failed || serverState?.uppercased() == "FAILED" || failedReason ? .failed : .ended
+    }
+}
+
+struct VoiceTutorSessionQuotaState: Equatable {
+    private(set) var remainingSeconds = 0
+    private(set) var limitSeconds = 0
+    private(set) var reservedSeconds = 0
+
+    mutating func apply(_ quota: BackendVoiceTutorQuota) {
+        remainingSeconds = quota.remainingSeconds
+        limitSeconds = quota.limitSeconds
+        reservedSeconds = quota.reservedSeconds
+    }
+
+    mutating func updateRemainingSeconds(_ seconds: Int) {
+        remainingSeconds = max(0, seconds)
+    }
+}
+
+struct VoiceTutorConnectionAttemptFence {
+    private(set) var currentID = UUID()
+
+    mutating func begin() -> UUID {
+        currentID = UUID()
+        return currentID
+    }
+
+    func isCurrent(_ candidate: UUID) -> Bool { candidate == currentID }
+}
+
+enum VoiceTutorAttemptDelivery {
+    @MainActor
+    static func deliver<Value: Sendable>(
+        isCurrent: @MainActor () -> Bool,
+        operation: @MainActor () async -> Value,
+        apply: @MainActor (Value) async -> Void
+    ) async {
+        guard !Task.isCancelled, isCurrent() else { return }
+        let value = await operation()
+        guard !Task.isCancelled, isCurrent() else { return }
+        await apply(value)
+    }
 }
 
 struct VoiceTutorCaption: Identifiable, Equatable {
@@ -228,13 +276,16 @@ final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var phase: VoiceTutorSessionPhase = .idle
     @Published private(set) var captions: [VoiceTutorCaption] = []
     @Published private(set) var assistantTranscriptDraft = ""
-    @Published private(set) var quotaRemainingSeconds = 0
-    @Published private(set) var quotaLimitSeconds = 0
+    @Published private(set) var sessionQuota = VoiceTutorSessionQuotaState()
     @Published private(set) var sessionSecondsRemaining: Int?
     @Published private(set) var detail: BackendVoiceTutorSessionDetail?
     @Published private(set) var errorMessage: String?
     @Published private(set) var isMuted = false
     @Published private(set) var isRecording = false
+
+    var quotaRemainingSeconds: Int { sessionQuota.remainingSeconds }
+    var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
+    var quotaReservedSeconds: Int { sessionQuota.reservedSeconds }
 
     let study: BackendStudyRoom
 
@@ -258,6 +309,7 @@ final class VoiceTutorViewModel: ObservableObject {
     private var isFinalizing = false
     private var duplexPlaybackState = VoiceTutorDuplexPlaybackState()
     private var webRTCDrainState = VoiceTutorWebRTCPlayoutDrainState()
+    private var connectionAttemptFence = VoiceTutorConnectionAttemptFence()
 
     init(
         appState: AppState,
@@ -272,14 +324,17 @@ final class VoiceTutorViewModel: ObservableObject {
         self.audioEngine = audioEngine
         self.transport = transport
         let quota = appState.voiceTutorStatus?.quota ?? appState.billingStatus?.voiceTutor?.quota
-        quotaRemainingSeconds = quota?.remainingSeconds ?? 0
-        quotaLimitSeconds = quota?.limitSeconds ?? 0
+        if let quota { sessionQuota.apply(quota) }
     }
 
     func start() async {
-        guard phase == .idle || phase == .failed else {
+        guard !isFinalizing, phase == .idle || phase == .failed else {
             return
         }
+        let attemptID = connectionAttemptFence.begin()
+        sessionID = nil
+        clearSessionCountdown()
+        isMuted = false
         errorMessage = nil
         detail = nil
         captions = []
@@ -292,7 +347,11 @@ final class VoiceTutorViewModel: ObservableObject {
         let requestedOwnerID = appState.communityProfile?.id
         let requestedLifecycleGeneration = VoiceTutorRecordingStore.lifecycleGeneration()
 
-        guard await VoiceTutorAudioEngine.requestMicrophonePermission() else {
+        let hasMicrophonePermission = await VoiceTutorAudioEngine.requestMicrophonePermission()
+        guard connectionAttemptFence.isCurrent(attemptID), phase == .requestingPermission else {
+            return
+        }
+        guard hasMicrophonePermission else {
             errorMessage = appState.strings.voiceTutorMicrophoneDenied
             phase = .failed
             return
@@ -313,15 +372,15 @@ final class VoiceTutorViewModel: ObservableObject {
                 studyID: study.id,
                 recordingConsent: recordingConsent
             )
-            guard phase == .connecting, connection.isCurrent() else {
+            guard connectionAttemptFence.isCurrent(attemptID),
+                  phase == .connecting, connection.isCurrent() else {
                 _ = try? await connection.endSession()
                 return
             }
             activeConnection = connection
             sessionID = connection.session.sessionId
             hardEndsAt = connection.session.hardEndsAt
-            quotaRemainingSeconds = connection.session.quota.remainingSeconds
-            quotaLimitSeconds = connection.session.quota.limitSeconds
+            sessionQuota.apply(connection.session.quota)
             updateSessionCountdown()
 
             if recordingConsent, connection.session.recording?.enabled == true {
@@ -339,16 +398,19 @@ final class VoiceTutorViewModel: ObservableObject {
                 self.webRTCTransport = webRTCTransport
                 webRTCTransport.onRenderedPCM = { [weak self] uptime in
                     Task { @MainActor [weak self] in
+                        guard self?.connectionAttemptFence.isCurrent(attemptID) == true else { return }
                         self?.handleWebRTCRenderedPCM(at: uptime)
                     }
                 }
                 webRTCTransport.onInterruption = { [weak self] in
                     Task { @MainActor [weak self] in
+                        guard self?.connectionAttemptFence.isCurrent(attemptID) == true else { return }
                         await self?.handleAudioSessionInterruption()
                     }
                 }
                 webRTCTransport.onConnectionFailure = { [weak self] in
                     Task { @MainActor [weak self] in
+                        guard self?.connectionAttemptFence.isCurrent(attemptID) == true else { return }
                         await self?.handleWebRTCConnectionFailure()
                     }
                 }
@@ -356,6 +418,10 @@ final class VoiceTutorViewModel: ObservableObject {
                     sdpRequest: webRTCConnection.sdpRequest,
                     recorder: recorder
                 )
+                guard connectionAttemptFence.isCurrent(attemptID) else {
+                    webRTCTransport.close()
+                    return
+                }
                 guard connection.isCurrent() else { throw CancellationError() }
                 guard phase == .connecting else {
                     webRTCTransport.close()
@@ -366,7 +432,9 @@ final class VoiceTutorViewModel: ObservableObject {
                 try await transport.connect(request: webRTCConnection.controlRequest)
             } else {
                 try await transport.connect(request: connection.request)
-                guard connection.isCurrent() else { throw CancellationError() }
+                guard connectionAttemptFence.isCurrent(attemptID), connection.isCurrent() else {
+                    throw CancellationError()
+                }
                 guard phase == .connecting else {
                     await transport.disconnect(closeCode: .goingAway)
                     return
@@ -387,18 +455,22 @@ final class VoiceTutorViewModel: ObservableObject {
                     },
                     onPlaybackCompleted: { [weak self] responseID in
                         Task { @MainActor [weak self] in
-                            await self?.handleTutorPlaybackCompleted(responseID: responseID)
+                            guard self?.connectionAttemptFence.isCurrent(attemptID) == true else { return }
+                            await self?.handleTutorPlaybackCompleted(responseID: responseID, attemptID: attemptID)
                         }
                     },
                     onInterruption: { [weak self] in
                         Task { @MainActor [weak self] in
+                            guard self?.connectionAttemptFence.isCurrent(attemptID) == true else { return }
                             await self?.handleAudioSessionInterruption()
                         }
                     }
                 )
             }
-            guard connection.isCurrent() else { throw CancellationError() }
-            startReceivingEvents()
+            guard connectionAttemptFence.isCurrent(attemptID), connection.isCurrent() else {
+                throw CancellationError()
+            }
+            startReceivingEvents(attemptID: attemptID)
             startHeartbeat()
             guard phase == .connecting || phase == .listening || phase == .speaking else {
                 audioEngine.stop()
@@ -415,20 +487,15 @@ final class VoiceTutorViewModel: ObservableObject {
             // A foreground-loss/user stop can close WebRTC while an awaited SDP
             // step is resuming. Re-run idempotent teardown without replacing the
             // terminal UI state chosen by the stop path.
+            guard connectionAttemptFence.isCurrent(attemptID) else { return }
             webRTCTransport?.close()
             webRTCTransport = nil
             return
         } catch {
-            audioEngine.stop()
-            webRTCTransport?.close()
-            webRTCTransport = nil
-            stopAudioSendPump()
-            stopHeartbeat()
-            await transport.disconnect(closeCode: .goingAway)
-            await finishRecordingIfNeeded()
-            await endCreatedSessionIfNeeded()
+            guard connectionAttemptFence.isCurrent(attemptID), !isFinalizing,
+                  phase.isLive else { return }
             errorMessage = localizedMessage(for: error)
-            phase = .failed
+            await stop(shouldNotifyServerOverSocket: false, outcome: .failed)
         }
     }
 
@@ -449,7 +516,7 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     func stopForBackground() async {
-        guard phase != .idle, phase != .ended, !isFinalizing else {
+        guard phase.isLive || phase == .ending, !isFinalizing else {
             return
         }
         await stop(shouldNotifyServerOverSocket: true)
@@ -460,17 +527,20 @@ final class VoiceTutorViewModel: ObservableObject {
             return
         }
         errorMessage = appState.strings.voiceTutorAudioInterrupted
-        await stop(shouldNotifyServerOverSocket: true)
+        await stop(shouldNotifyServerOverSocket: true, outcome: .failed)
     }
 
     private func handleWebRTCConnectionFailure() async {
         guard phase.isLive, !isFinalizing else { return }
         errorMessage = appState.strings.voiceTutorConnectionFailed
-        await stop(shouldNotifyServerOverSocket: false)
+        await stop(shouldNotifyServerOverSocket: false, outcome: .failed)
     }
 
-    private func stop(shouldNotifyServerOverSocket: Bool) async {
-        guard !isFinalizing, phase != .ended else {
+    private func stop(
+        shouldNotifyServerOverSocket: Bool,
+        outcome: VoiceTutorSessionPhase = .ended
+    ) async {
+        guard !isFinalizing, phase.isLive || phase == .ending else {
             return
         }
         recorder?.stopAcceptingFrames()
@@ -489,8 +559,7 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         await finishAudioSendPump()
         stopHeartbeat()
-        countdownTask?.cancel()
-        countdownTask = nil
+        clearSessionCountdown()
 
         let serverEndStream = shouldNotifyServerOverSocket ? makeServerEndStream() : nil
         var didSendSocketEnd = false
@@ -515,7 +584,8 @@ final class VoiceTutorViewModel: ObservableObject {
         if serverEnded == nil, let activeConnection {
             endedDetail = try? await activeConnection.endSession()
         }
-        receiveTask?.cancel()
+        // A socket failure reaches this method from receiveTask itself. Closing
+        // the socket ends the receive loop without cancelling REST settlement.
         receiveTask = nil
         playoutDrainTask?.cancel()
         playoutDrainTask = nil
@@ -526,17 +596,9 @@ final class VoiceTutorViewModel: ObservableObject {
         await finishSession(
             initialDetail: endedDetail,
             pollAfterMilliseconds: serverEnded?.pollAfterMilliseconds
-                ?? endedDetail?.pollAfterMilliseconds
+                ?? endedDetail?.pollAfterMilliseconds,
+            outcome: .completed(outcome: outcome, serverState: nil, serverReason: serverEnded?.reason)
         )
-    }
-
-    private func endCreatedSessionIfNeeded() async {
-        guard let activeConnection else {
-            return
-        }
-        _ = try? await activeConnection.endSession()
-        self.sessionID = nil
-        self.activeConnection = nil
     }
 
     private func stopForInvalidatedContext() async {
@@ -556,13 +618,13 @@ final class VoiceTutorViewModel: ObservableObject {
         await stop(shouldNotifyServerOverSocket: false)
     }
 
-    private func startReceivingEvents() {
+    private func startReceivingEvents(attemptID: UUID) {
         receiveTask?.cancel()
         receiveTask = Task { [weak self] in
             guard let self else {
                 return
             }
-            await self.receiveEvents()
+            await self.receiveEvents(attemptID: attemptID)
         }
     }
 
@@ -674,33 +736,46 @@ final class VoiceTutorViewModel: ObservableObject {
         }
     }
 
-    private func receiveEvents() async {
+    private func receiveEvents(attemptID: UUID) async {
         do {
             while !Task.isCancelled {
+                guard connectionAttemptFence.isCurrent(attemptID) else { return }
                 let event = try await transport.receive()
+                guard connectionAttemptFence.isCurrent(attemptID) else { return }
                 guard activeConnection?.isCurrent() == true else {
                     await stopForInvalidatedContext()
                     return
                 }
-                await handle(event)
+                await handle(event, attemptID: attemptID)
+                guard connectionAttemptFence.isCurrent(attemptID),
+                      phase.isLive || phase == .ending else { return }
             }
         } catch is CancellationError {
             return
         } catch {
-            guard !isFinalizing, phase != .ended else {
+            guard connectionAttemptFence.isCurrent(attemptID),
+                  !isFinalizing, phase.isLive || phase == .ending else {
                 return
             }
             audioEngine.stop()
             errorMessage = appState.strings.voiceTutorConnectionFailed
-            phase = .failed
-            await stop(shouldNotifyServerOverSocket: false)
+            await stop(shouldNotifyServerOverSocket: false, outcome: .failed)
         }
     }
 
-    private func handle(_ event: VoiceTutorRealtimeEvent) async {
-        guard activeConnection?.isCurrent() == true else {
+    private func handle(_ event: VoiceTutorRealtimeEvent, attemptID: UUID) async {
+        guard connectionAttemptFence.isCurrent(attemptID) else { return }
+        guard let connection = activeConnection, connection.isCurrent() else {
             await stopForInvalidatedContext()
             return
+        }
+        if isFinalizing {
+            switch event {
+            case .sessionEnded, .quotaUpdated:
+                break
+            default:
+                return
+            }
         }
         switch event {
         case .sessionReady(let hardEndsAt, let remainingSeconds):
@@ -710,15 +785,13 @@ final class VoiceTutorViewModel: ObservableObject {
             }
             self.hardEndsAt = hardEndsAt ?? self.hardEndsAt
             if let remainingSeconds {
-                quotaRemainingSeconds = max(0, remainingSeconds)
+                sessionQuota.updateRemainingSeconds(remainingSeconds)
             }
             updateSessionCountdown()
             phase = .listening
         case .quotaUpdated(let quota):
-            quotaLimitSeconds = quota.limitSeconds
-            quotaRemainingSeconds = quota.remainingSeconds
             let existingQuota = appState.voiceTutorStatus?.quota
-            appState.applyVoiceTutorQuota(
+            applyServerQuota(
                 BackendVoiceTutorQuota(
                     periodStartedAt: existingQuota?.periodStartedAt,
                     resetAt: existingQuota?.resetAt,
@@ -745,9 +818,12 @@ final class VoiceTutorViewModel: ObservableObject {
                 await finishFromServer(ended)
             }
         case .resultReady:
-            if let sessionID {
-                detail = await appState.loadVoiceTutorSessionDetail(sessionID: sessionID)
-            }
+            let completedSessionID = connection.session.sessionId
+            await VoiceTutorAttemptDelivery.deliver(
+                isCurrent: { self.connectionAttemptFence.isCurrent(attemptID) && connection.isCurrent() },
+                operation: { await self.appState.loadVoiceTutorSessionDetail(sessionID: completedSessionID) },
+                apply: { self.detail = $0 }
+            )
         case .heartbeatAcknowledged:
             break
         case .serviceError(let code, _, _):
@@ -761,8 +837,7 @@ final class VoiceTutorViewModel: ObservableObject {
             default:
                 errorMessage = appState.strings.voiceTutorConnectionFailed
             }
-            phase = .failed
-            await stop(shouldNotifyServerOverSocket: false)
+            await stop(shouldNotifyServerOverSocket: false, outcome: .failed)
         case .audioDelta(let delta):
             guard !usesWebRTC else { break }
             guard duplexPlaybackState.assistantAudioBegan(responseID: delta.responseID) else {
@@ -779,7 +854,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 try audioEngine.playPCM24(delta)
             } catch {
                 errorMessage = appState.strings.voiceTutorConnectionFailed
-                await stop(shouldNotifyServerOverSocket: false)
+                await stop(shouldNotifyServerOverSocket: false, outcome: .failed)
                 break
             }
             phase = .speaking
@@ -845,18 +920,20 @@ final class VoiceTutorViewModel: ObservableObject {
             // observed clear as a protocol violation instead of acknowledging
             // a sentence that was not played to completion.
             errorMessage = appState.strings.voiceTutorConnectionFailed
-            await stop(shouldNotifyServerOverSocket: false)
+            await stop(shouldNotifyServerOverSocket: false, outcome: .failed)
         case .ignored:
             break
         }
     }
 
-    private func handleTutorPlaybackCompleted(responseID: String) async {
-        guard phase.isLive, activeConnection?.isCurrent() == true else {
+    private func handleTutorPlaybackCompleted(responseID: String, attemptID: UUID) async {
+        guard connectionAttemptFence.isCurrent(attemptID), phase.isLive,
+              let connection = activeConnection, connection.isCurrent() else {
             return
         }
         try? await transport.sendPlaybackCompleted(responseID: responseID)
-        guard activeConnection?.isCurrent() == true,
+        guard !Task.isCancelled, connectionAttemptFence.isCurrent(attemptID),
+              phase.isLive, connection.isCurrent(),
               duplexPlaybackState.responseFinished(responseID: responseID) else {
             return
         }
@@ -870,6 +947,8 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     private func scheduleWebRTCPlayoutDrainIfReady() {
+        guard let connection = activeConnection, connection.isCurrent() else { return }
+        let attemptID = connectionAttemptFence.currentID
         let audioSession = AVAudioSession.sharedInstance()
         let latency = audioSession.outputLatency + audioSession.ioBufferDuration + 0.02
         guard let drain = webRTCDrainState.drainDeadline(
@@ -885,6 +964,8 @@ final class VoiceTutorViewModel: ObservableObject {
             }
             guard let self,
                   !Task.isCancelled,
+                  self.connectionAttemptFence.isCurrent(attemptID),
+                  connection.isCurrent(), self.phase.isLive,
                   self.webRTCDrainState.markDrainDispatched(
                     responseID: drain.responseID,
                     generation: drain.generation,
@@ -892,17 +973,32 @@ final class VoiceTutorViewModel: ObservableObject {
                   ) else {
                 return
             }
-            do {
-                try await self.transport.sendPlayoutDrained(responseID: drain.responseID)
-            } catch {
-                self.errorMessage = self.appState.strings.voiceTutorConnectionFailed
-                await self.stop(shouldNotifyServerOverSocket: false)
-                return
-            }
-            guard self.duplexPlaybackState.responseFinished(responseID: drain.responseID) else {
-                return
-            }
-            self.phase = .listening
+            await VoiceTutorAttemptDelivery.deliver(
+                isCurrent: {
+                    self.connectionAttemptFence.isCurrent(attemptID)
+                        && connection.isCurrent() && self.phase.isLive && !self.isFinalizing
+                },
+                operation: {
+                    do {
+                        try await self.transport.sendPlayoutDrained(responseID: drain.responseID)
+                        return true
+                    } catch {
+                        return false
+                    }
+                },
+                apply: { didSend in
+                    // This is the drain task itself. Detach its handle before
+                    // stop() cancels other tasks, preserving REST settlement.
+                    self.playoutDrainTask = nil
+                    guard didSend else {
+                        self.errorMessage = self.appState.strings.voiceTutorConnectionFailed
+                        await self.stop(shouldNotifyServerOverSocket: false, outcome: .failed)
+                        return
+                    }
+                    guard self.duplexPlaybackState.responseFinished(responseID: drain.responseID) else { return }
+                    self.phase = .listening
+                }
+            )
         }
     }
 
@@ -920,8 +1016,7 @@ final class VoiceTutorViewModel: ObservableObject {
         webRTCTransport = nil
         stopAudioSendPump()
         stopHeartbeat()
-        countdownTask?.cancel()
-        countdownTask = nil
+        clearSessionCountdown()
         // This method runs inside receiveTask. Cancelling it here would also cancel
         // the result polling and leave the completed learning summary unloaded.
         receiveTask = nil
@@ -929,7 +1024,8 @@ final class VoiceTutorViewModel: ObservableObject {
         await finishRecordingIfNeeded()
         await finishSession(
             initialDetail: nil,
-            pollAfterMilliseconds: ended.pollAfterMilliseconds
+            pollAfterMilliseconds: ended.pollAfterMilliseconds,
+            outcome: .completed(outcome: .ended, serverState: nil, serverReason: ended.reason)
         )
     }
 
@@ -957,9 +1053,11 @@ final class VoiceTutorViewModel: ObservableObject {
 
     private func finishSession(
         initialDetail: BackendVoiceTutorSessionDetail?,
-        pollAfterMilliseconds: Int?
+        pollAfterMilliseconds: Int?,
+        outcome: VoiceTutorSessionPhase = .ended
     ) async {
         detail = activeConnection?.isCurrent() == true ? initialDetail : nil
+        if let quota = detail?.quota { applyServerQuota(quota) }
         if activeConnection?.isCurrent() == true, let sessionID {
             detail = await pollForResult(
                 sessionID: sessionID,
@@ -967,8 +1065,14 @@ final class VoiceTutorViewModel: ObservableObject {
                 initialDelayMilliseconds: pollAfterMilliseconds
             )
         }
+        if activeConnection?.isCurrent() == true, let quota = detail?.quota {
+            applyServerQuota(quota)
+        }
         if activeConnection?.isCurrent() == true {
             await appState.refreshVoiceTutorStatus()
+        }
+        if activeConnection?.isCurrent() == true, let quota = appState.voiceTutorStatus?.quota {
+            sessionQuota.apply(quota)
         }
         if activeConnection?.isCurrent() == true {
             await appState.loadVoiceTutorSessions(reset: true)
@@ -982,7 +1086,11 @@ final class VoiceTutorViewModel: ObservableObject {
         webRTCDrainState.reset()
         usesWebRTC = false
         isFinalizing = false
-        phase = .ended
+        clearSessionCountdown()
+        phase = .completed(outcome: outcome, serverState: detail?.state)
+        if phase == .failed, errorMessage == nil {
+            errorMessage = appState.strings.voiceTutorConnectionFailed
+        }
         activeConnection = nil
     }
 
@@ -995,7 +1103,7 @@ final class VoiceTutorViewModel: ObservableObject {
         var delayMilliseconds = max(250, min(initialDelayMilliseconds ?? 750, 5_000))
         for attempt in 0..<8 {
             guard activeConnection?.isCurrent() == true else { return nil }
-            if current?.result != nil || current?.resultStatus?.uppercased() == "COMPLETED" {
+            if current?.result != nil || ["COMPLETED", "FAILED"].contains(current?.resultStatus?.uppercased() ?? "") {
                 return current
             }
             if attempt > 0 || initialDetail != nil {
@@ -1040,19 +1148,37 @@ final class VoiceTutorViewModel: ObservableObject {
 
     private func startCountdown() {
         countdownTask?.cancel()
+        let attemptID = connectionAttemptFence.currentID
+        let connection = activeConnection
         countdownTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard let self, !Task.isCancelled else {
+                guard let self, !Task.isCancelled,
+                      self.connectionAttemptFence.isCurrent(attemptID) else {
                     return
                 }
-                guard self.activeConnection?.isCurrent() == true else {
+                guard connection?.isCurrent() == true else {
+                    // Context cleanup originates here; do not self-cancel it
+                    // when stop() clears the displayed countdown.
+                    self.countdownTask = nil
                     await self.stopForInvalidatedContext()
                     return
                 }
                 self.updateSessionCountdown()
             }
         }
+    }
+
+    private func clearSessionCountdown() {
+        countdownTask?.cancel()
+        countdownTask = nil
+        hardEndsAt = nil
+        sessionSecondsRemaining = nil
+    }
+
+    private func applyServerQuota(_ quota: BackendVoiceTutorQuota) {
+        sessionQuota.apply(quota)
+        appState.applyVoiceTutorQuota(quota)
     }
 
     private func updateSessionCountdown() {

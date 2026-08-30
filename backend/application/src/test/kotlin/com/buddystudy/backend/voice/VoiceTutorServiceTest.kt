@@ -325,6 +325,29 @@ class VoiceTutorServiceTest {
     }
 
     @Test
+    fun `tutor greets first and waits for explicit readiness before teaching`() = runBlocking<Unit> {
+        for ((language, languageName) in listOf("ko" to "Korean", "en" to "English", "ja" to "Japanese")) {
+            val persistence = FakePersistence(now).apply {
+                session = session.copy(language = language)
+            }
+
+            val instructions = service(persistence).connect(principal, persistence.session.id).instructions
+            val trustedInstructions = instructions.substringBeforeLast('\n')
+
+            assertThat(trustedInstructions)
+                .contains("Your first response must warmly greet the learner as their AI tutor")
+                .contains("ask whether they are ready to start the lesson")
+                .contains("clearly agree or explicitly ask to start before teaching")
+                .contains("asking study questions, or assessing answers")
+                .contains("hello or 안녕")
+                .contains("never means the lesson has ended or is complete")
+                .contains("acknowledge that the lesson is starting")
+                .contains("exactly one short, complete sentence in each response")
+                .contains("Use $languageName throughout the greeting and conversation")
+        }
+    }
+
+    @Test
     fun `active REST end requests relay shutdown and relay remains the single finalization owner`() = runBlocking<Unit> {
         val persistence = FakePersistence(now).apply {
             session = session.copy(

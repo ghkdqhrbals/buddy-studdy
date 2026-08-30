@@ -253,6 +253,30 @@ class RequestLoggingFilterTest {
     }
 
     @Test
+    fun `voice tutor logging preserves and reports websocket upgrade headers`(output: CapturedOutput) {
+        val request = MockServerHttpRequest.get(
+            "/api/v1/voice-tutor/sessions/00000000-0000-0000-0000-000000000001/control",
+        )
+            .header("Upgrade", "websocket")
+            .header("Connection", "upgrade")
+            .header("Sec-WebSocket-Protocol", "buddystudy.voice.control.v2")
+            .build()
+        val exchange = MockServerWebExchange.from(request)
+
+        compactFilter.filter(exchange, WebFilterChain { current ->
+            assertThat(current).isSameAs(exchange)
+            assertThat(current.request).isSameAs(request)
+            assertThat(current.request.headers.upgrade).isEqualTo("websocket")
+            assertThat(current.request.headers.connection).containsExactly("upgrade")
+            Mono.empty()
+        }).block()
+
+        assertThat(output.out).contains("\"Upgrade\":\"websocket\"")
+        assertThat(output.out).contains("\"Connection\":\"upgrade\"")
+        assertThat(output.out).contains("\"Sec-WebSocket-Protocol\":\"buddystudy.voice.control.v2\"")
+    }
+
+    @Test
     fun `voice tutor matrix parameter cannot bypass body suppression`(output: CapturedOutput) = runBlocking<Unit> {
         execute(
             MockServerHttpRequest.get("/api/v1/voice-tutor;mode=pro/sessions/session-id").build(),

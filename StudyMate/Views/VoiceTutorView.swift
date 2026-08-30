@@ -277,7 +277,7 @@ private struct VoiceTutorQuotaView: View {
     var strings: AppStrings
 
     private var usedSeconds: Int {
-        max(0, status.quota.usedSeconds + status.quota.reservedSeconds)
+        max(0, status.quota.usedSeconds)
     }
 
     private var progress: Double {
@@ -290,7 +290,9 @@ private struct VoiceTutorQuotaView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text(strings.voiceTutorRemainingTime(status.quota.remainingSeconds))
+                Text(status.quota.reservedSeconds > 0
+                    ? strings.voiceTutorUnreservedTime(status.quota.remainingSeconds)
+                    : strings.voiceTutorRemainingTime(status.quota.remainingSeconds))
                     .font(.headline)
                 Spacer()
                 Text(strings.membershipTierName(status.tierCode))
@@ -310,13 +312,19 @@ private struct VoiceTutorQuotaView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
+            if status.quota.reservedSeconds > 0 {
+                Text(strings.voiceTutorReservedTime(status.quota.reservedSeconds))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if status.maxSessionSeconds > 0 {
                 Text(strings.voiceTutorSessionLimit(status.maxSessionSeconds))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            if status.quota.remainingSeconds == 0 {
+            if status.quota.remainingSeconds == 0 && status.quota.reservedSeconds == 0 {
                 Text(strings.voiceTutorQuotaReached)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.orange)
@@ -404,7 +412,7 @@ struct VoiceTutorSessionView: View {
                         .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 }
 
-                if viewModel.phase == .ended {
+                if viewModel.phase == .ended || (viewModel.phase == .failed && viewModel.detail != nil) {
                     VoiceTutorResultSections(detail: viewModel.detail, strings: strings)
                 }
 
@@ -463,7 +471,7 @@ struct VoiceTutorSessionView: View {
                     .accessibilityAddTraits(.updatesFrequently)
             }
 
-            if let sessionSecondsRemaining = viewModel.sessionSecondsRemaining {
+            if viewModel.phase.isLive, let sessionSecondsRemaining = viewModel.sessionSecondsRemaining {
                 Text(strings.voiceTutorSessionRemaining(sessionSecondsRemaining))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -474,15 +482,24 @@ struct VoiceTutorSessionView: View {
     }
 
     private var quotaSummary: some View {
-        HStack {
-            Label(
-                strings.voiceTutorRemainingTime(viewModel.quotaRemainingSeconds),
-                systemImage: "clock"
-            )
-            .font(.subheadline.weight(.medium))
-            Spacer()
-            if viewModel.quotaLimitSeconds > 0 {
-                Text(strings.voiceTutorMonthlyAllowance(viewModel.quotaLimitSeconds))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(
+                    viewModel.quotaReservedSeconds > 0
+                        ? strings.voiceTutorUnreservedTime(viewModel.quotaRemainingSeconds)
+                        : strings.voiceTutorRemainingTime(viewModel.quotaRemainingSeconds),
+                    systemImage: "clock"
+                )
+                .font(.subheadline.weight(.medium))
+                Spacer()
+                if viewModel.quotaLimitSeconds > 0 {
+                    Text(strings.voiceTutorMonthlyAllowance(viewModel.quotaLimitSeconds))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if viewModel.quotaReservedSeconds > 0 {
+                Text(strings.voiceTutorReservedTime(viewModel.quotaReservedSeconds))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -497,7 +514,7 @@ struct VoiceTutorSessionView: View {
                 .font(.headline)
 
             if viewModel.captions.isEmpty && viewModel.assistantTranscriptDraft.isEmpty {
-                Text(strings.voiceTutorListening)
+                Text(viewModel.phase.isLive ? strings.voiceTutorListening : strings.voiceTutorNoTranscript)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 100, alignment: .center)
@@ -590,8 +607,10 @@ struct VoiceTutorSessionView: View {
             return "waveform.circle.fill"
         case .listening:
             return "ear.fill"
-        case .ending, .ended:
+        case .ended:
             return "checkmark.circle.fill"
+        case .ending:
+            return "hourglass"
         case .failed:
             return "exclamationmark.triangle.fill"
         case .idle, .requestingPermission, .connecting:

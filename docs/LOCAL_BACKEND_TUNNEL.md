@@ -3,6 +3,12 @@
 Use this when you want the iOS app or local tools to reach the BuddyStudy
 development stack running on the Mac Kubernetes target.
 
+For an already-running Docker development stack, keep its existing `backend`
+Compose network, database, and Redis. The API origin is
+`http://127.0.0.1:8080`, not the Kubernetes NodePort below. The `dev` profile
+imports the configured AWS development secret; a tunnel issue does not require
+another database, Redis instance, or a different Spring profile.
+
 ## 1. Run the local stack
 
 ```sh
@@ -45,6 +51,30 @@ In BuddyStudy on iPhone:
 4. Tap Save.
 
 After saving, every backend API request made by the app uses the debug URL until Debugging Mode is turned off.
+
+## Realtime voice requires WebSocket forwarding
+
+Voice calls use an SDP `POST /api/v1/voice-tutor/sessions/{id}/webrtc` and a
+separate WebSocket `GET /api/v1/voice-tutor/sessions/{id}/control`. A successful
+SDP response or ordinary API request does not verify the control connection:
+the authenticated control request must successfully upgrade to WebSocket.
+
+Cloudflare Tunnel supports WebSockets, but every intermediate origin proxy
+must also support the upgrade and bidirectional forwarding. In particular,
+`Upgrade: websocket`, `Connection: Upgrade`, and the negotiated
+`buddystudy.voice.control.v2` subprotocol must reach the backend. If a proxy
+removes the upgrade headers, the backend rejects the handshake with HTTP 422;
+do not weaken handshake validation or turn the rejected request into a normal
+HTTP response. See [Cloudflare's WebSocket documentation](https://developers.cloudflare.com/network/websockets/).
+
+When Routingflare/TunnelBar manages the connector, inspect the running
+cloudflared process's generated configuration, not just
+`~/.cloudflared/config.yaml`. An origin such as a local Routingflare proxy port
+is an additional hop before the API. Compare the same unauthenticated diagnostic
+request's upgrade headers at the direct API and proxy origins; HTTP 401 is
+expected without credentials and does not itself indicate a broken upgrade.
+Do not log access tokens or client secrets during this check. Any route repair
+must retain its existing access policy and affect only the intended dev route.
 
 ## TCP access
 

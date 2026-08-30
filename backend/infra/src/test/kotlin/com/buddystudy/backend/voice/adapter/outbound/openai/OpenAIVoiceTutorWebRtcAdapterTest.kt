@@ -199,6 +199,39 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         relay.dispose()
     }
 
+    @Test
+    fun `sideband dispatches the opening after both provider directions and client readiness`() {
+        val subscriptions = mutableListOf<String>()
+        val sent = mutableListOf<String>()
+        var readyEmitted = false
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = java.time.Duration.ofSeconds(30),
+            responseTimeout = java.time.Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+        )
+        val receive = Mono.never<Void>().doOnSubscribe { subscriptions += "receive" }
+        val send = controller.providerEvents()
+            .doOnSubscribe { subscriptions += "send" }
+            .doOnNext { raw ->
+                assertThat(readyEmitted).isTrue()
+                sent += raw
+            }
+            .then()
+        val ready = Mono.fromRunnable<Void> {
+            assertThat(subscriptions).containsExactly("receive", "send")
+            readyEmitted = true
+            controller.startOpeningResponse()
+        }.then()
+
+        val relay = webRtcSidebandLifecycle(receive, send, ready).subscribe()
+
+        assertThat(sent).hasSize(1)
+        assertThat(mapper.readTree(sent.single()).path("type").asText()).isEqualTo("response.create")
+        assertThat(relay.isDisposed).isFalse()
+        relay.dispose()
+        controller.close()
+    }
+
     private fun validSdp(includeDataChannel: Boolean = false): String = buildString {
         append("v=0\r\n")
         append("o=- 1 1 IN IP4 127.0.0.1\r\n")

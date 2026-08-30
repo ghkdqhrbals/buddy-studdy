@@ -9,6 +9,15 @@ enum VoiceTutorWebRTCError: Error {
     case offerCreationFailed
     case invalidSDPResponse
     case sdpExchangeFailed(Int)
+    case mediaConnectionFailed
+    case mediaConnectionTimedOut
+}
+
+enum VoiceTutorWebRTCMediaReadiness: Equatable {
+    case waiting
+    case connected
+    case failed
+    case timedOut
 }
 
 private struct VoiceTutorUncheckedSendable<Value>: @unchecked Sendable {
@@ -178,14 +187,21 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
 
         let offer = try await createOffer(peer: peer, constraints: constraints)
         try ensureOpen()
+        // Keep a validated value snapshot before handing the description to
+        // WebRTC. Teardown must never turn a later SDP read into an empty POST.
+        let offerSDP = try Self.validatedOfferSDP(offer.sdp)
         try await setLocalDescription(offer, peer: peer)
         try ensureOpen()
-        let answerSDP = try await exchangeSDP(offer.sdp, request: sdpRequest)
+        let answerSDP = try await exchangeSDP(offerSDP, request: sdpRequest)
         try ensureOpen()
         let answer = LKRTCSessionDescription(type: .answer, sdp: answerSDP)
         try await setRemoteDescription(answer, peer: peer)
         try ensureOpen()
         attachRemoteAudioTrackIfPresent(on: peer)
+        // SDP installation is not media readiness. Open the backend control
+        // socket only after ICE + DTLS are connected so its opening tutor turn
+        // cannot run ahead of the iPhone's media path.
+        try await waitForMediaConnection(peer: peer)
     }
 
     func setMuted(_ muted: Bool) {
@@ -333,13 +349,15 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         let boxed: VoiceTutorUncheckedSendable<LKRTCSessionDescription> = try await
             withCheckedThrowingContinuation { continuation in
             peer.offer(for: constraints) { description, error in
-                if let description {
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let description {
                     continuation.resume(
                         returning: VoiceTutorUncheckedSendable(value: description)
                     )
                 } else {
                     continuation.resume(
-                        throwing: error ?? VoiceTutorWebRTCError.offerCreationFailed
+                        throwing: VoiceTutorWebRTCError.offerCreationFailed
                     )
                 }
             }
@@ -374,7 +392,8 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     }
 
     private func exchangeSDP(_ offer: String, request: URLRequest) async throws -> String {
-        let request = Self.sdpExchangeRequest(offer: offer, authenticatedRequest: request)
+        let request = try Self.sdpExchangeRequest(offer: offer, authenticatedRequest: request)
+        try ensureOpen()
         let (data, response) = try await networkSession.data(for: request)
         guard let response = response as? HTTPURLResponse else {
             throw VoiceTutorWebRTCError.invalidSDPResponse
@@ -390,11 +409,63 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         return answer
     }
 
-    static func sdpExchangeRequest(offer: String, authenticatedRequest: URLRequest) -> URLRequest {
+    private func waitForMediaConnection(peer: LKRTCPeerConnection) async throws {
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        while true {
+            try ensureOpen()
+            switch Self.mediaReadiness(
+                state: peer.connectionState,
+                elapsedSeconds: ProcessInfo.processInfo.systemUptime - startedAt
+            ) {
+            case .connected:
+                try ensureOpen()
+                return
+            case .failed:
+                throw VoiceTutorWebRTCError.mediaConnectionFailed
+            case .timedOut:
+                throw VoiceTutorWebRTCError.mediaConnectionTimedOut
+            case .waiting:
+                // Cancellation wakes immediately; close() is observed within
+                // one short poll, without retaining delegate continuations.
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+    }
+
+    static func mediaReadiness(
+        state: LKRTCPeerConnectionState,
+        elapsedSeconds: TimeInterval,
+        timeoutSeconds: TimeInterval = 15
+    ) -> VoiceTutorWebRTCMediaReadiness {
+        if state == .connected { return .connected }
+        if state == .failed || state == .closed { return .failed }
+        if elapsedSeconds >= timeoutSeconds { return .timedOut }
+        return .waiting
+    }
+
+    static func validatedOfferSDP(_ offer: String) throws -> String {
+        let snapshot = String(decoding: offer.utf8, as: UTF8.self)
+        let lines = snapshot.split(whereSeparator: \.isNewline).map(String.init)
+        let media = lines.filter { $0.hasPrefix("m=") }
+        guard snapshot.utf8.count <= 65_536,
+              lines.first == "v=0",
+              media.count == 1,
+              let audio = media.first,
+              audio.hasPrefix("m=audio "),
+              !lines.contains(where: { $0.hasPrefix("a=sctp-") || $0.hasPrefix("a=sctpmap:") }) else {
+            throw VoiceTutorWebRTCError.offerCreationFailed
+        }
+        return snapshot
+    }
+
+    static func sdpExchangeRequest(offer: String, authenticatedRequest: URLRequest) throws -> URLRequest {
+        let offer = try validatedOfferSDP(offer)
         var request = authenticatedRequest
         request.httpMethod = "POST"
         request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
         request.setValue("application/sdp", forHTTPHeaderField: "Accept")
+        request.setValue(nil, forHTTPHeaderField: "Content-Length")
+        request.httpBodyStream = nil
         request.httpBody = Data(offer.utf8)
         return request
     }
@@ -418,6 +489,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     }
 
     private func ensureOpen() throws {
+        try Task.checkCancellation()
         stateLock.lock()
         let closed = isClosed
         stateLock.unlock()

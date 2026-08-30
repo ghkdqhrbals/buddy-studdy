@@ -9,6 +9,8 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import org.junit.jupiter.api.DynamicTest.dynamicTest
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Sinks
 import reactor.test.StepVerifier
 import java.time.Duration
 import java.util.Base64
@@ -18,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 class OpenAIVoiceTutorRealtimeAdapterTest {
     private val mapper = JsonMapperProvider.mapper
+    private val preparedProviderEvents = mutableMapOf<VoiceTutorDuplexTurnController, Flux<String>>()
 
     @Test
     fun `safety identifier is a stable keyed pseudonym rather than a bare user id hash`() {
@@ -58,11 +61,176 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         assertThat(cancel.path("event_id").asText()).startsWith("buddystudy-internal-relay-terminal-")
     }
 
+    @TestFactory
+    fun `teacher opening is proactive and idempotent for each transport`() =
+        VoiceTutorRealtimeTransport.entries.map { transport ->
+            dynamicTest(transport.name) {
+                val controller = controller(transport = transport, readyForLearnerTurns = false)
+                val openingControl = AtomicReference<String>()
+
+                StepVerifier.create(providerEvents(controller))
+                    .then { controller.startOpeningResponse() }
+                    .assertNext { raw ->
+                        openingControl.set(raw)
+                        val node = mapper.readTree(raw)
+                        assertThat(node.path("type").asText()).isEqualTo("response.create")
+                        assertThat(node.path("event_id").asText())
+                            .startsWith("buddystudy-internal-duplex-opening-response-")
+                        assertThat(node.path("response").has("instructions")).isFalse()
+                        assertThat(
+                            node.path("response").path("metadata")
+                                .path(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY).asText(),
+                        ).isEqualTo(node.path("event_id").asText())
+                    }
+                    .then { controller.startOpeningResponse() }
+                    .expectNoEvent(Duration.ofMillis(10))
+                    .then {
+                        controller.observeProviderEvent(
+                            responseEvent("response.created", "opening", openingControl.get()),
+                        )
+                        controller.observeProviderEvent(
+                            responseEvent("response.done", "opening", openingControl.get()),
+                        )
+                        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+                            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "opening"))
+                            controller.observeClientEvent(playoutDrainedEvent("opening"))
+                        }
+                        controller.startOpeningResponse()
+                    }
+                    .expectNoEvent(Duration.ofMillis(10))
+                    .then { controller.close() }
+                    .verifyComplete()
+            }
+        }
+
+    @Test
+    fun `legacy opening waits for session configuration acknowledgement`() {
+        val controller = controller(readyForLearnerTurns = false)
+
+        StepVerifier.create(providerEvents(controller))
+            .then { controller.observeProviderEvent(event("session.created")) }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then { controller.observeProviderEvent(event("session.updated")) }
+            .assertNext { raw ->
+                assertThat(mapper.readTree(raw).path("event_id").asText())
+                    .startsWith("buddystudy-internal-duplex-opening-response-")
+            }
+            .then { controller.observeProviderEvent(event("session.updated")) }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then { controller.close() }
+            .verifyComplete()
+    }
+
+    @Test
+    fun `opening preserves an early learner commit until its complete sentence drains`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val openingControl = AtomicReference<String>()
+
+        StepVerifier.create(providerEvents(controller).take(2))
+            .then {
+                controller.observeProviderEvent(event("input_audio_buffer.speech_started"))
+                controller.observeProviderEvent(event("input_audio_buffer.committed"))
+                controller.startOpeningResponse()
+            }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then { controller.observeProviderEvent(event("input_audio_buffer.speech_stopped")) }
+            .assertNext { raw ->
+                openingControl.set(raw)
+                assertThat(mapper.readTree(raw).path("event_id").asText())
+                    .startsWith("buddystudy-internal-duplex-opening-response-")
+            }
+            .then {
+                controller.observeProviderEvent(responseEvent("response.created", "opening", openingControl.get()))
+                controller.observeProviderEvent(responseEvent("response.done", "opening", openingControl.get()))
+                controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "opening"))
+            }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then { controller.observeClientEvent(playoutDrainedEvent("opening")) }
+            .assertNext { raw ->
+                val node = mapper.readTree(raw)
+                assertThat(node.path("type").asText()).isEqualTo("response.create")
+                assertThat(node.path("event_id").asText())
+                    .startsWith("buddystudy-internal-duplex-turn-response-")
+            }
+            .verifyComplete()
+
+        controller.close()
+    }
+
+    @Test
+    fun `fully committed learner greeting before readiness stays queued behind the opening`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val openingControl = AtomicReference<String>()
+
+        StepVerifier.create(providerEvents(controller).take(2))
+            .then { learnerTurn(controller) }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then { controller.startOpeningResponse() }
+            .assertNext { raw ->
+                openingControl.set(raw)
+                assertThat(mapper.readTree(raw).path("event_id").asText())
+                    .startsWith("buddystudy-internal-duplex-opening-response-")
+            }
+            .then {
+                controller.observeProviderEvent(responseEvent("response.created", "opening", openingControl.get()))
+                controller.observeProviderEvent(responseEvent("response.done", "opening", openingControl.get()))
+                controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "opening"))
+            }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then { controller.observeClientEvent(playoutDrainedEvent("opening")) }
+            .assertNext { raw ->
+                assertThat(mapper.readTree(raw).path("event_id").asText())
+                    .startsWith("buddystudy-internal-duplex-turn-response-")
+            }
+            .verifyComplete()
+
+        controller.close()
+    }
+
+    @Test
+    fun `continuous speech cannot take the floor before readiness or the pending opening`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+
+        StepVerifier.create(providerEvents(controller).take(1))
+            .then {
+                controller.observeProviderEvent(event("input_audio_buffer.speech_started"))
+                controller.fireContinuousSpeechDeadline()
+            }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then {
+                controller.startOpeningResponse()
+                controller.fireContinuousSpeechDeadline()
+            }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then {
+                controller.observeProviderEvent(event("input_audio_buffer.speech_stopped"))
+                controller.observeProviderEvent(event("input_audio_buffer.committed"))
+            }
+            .assertNext { raw ->
+                val node = mapper.readTree(raw)
+                assertThat(node.path("event_id").asText())
+                    .startsWith("buddystudy-internal-duplex-opening-response-")
+                assertThat(node.path("response").has("instructions")).isFalse()
+            }
+            .verifyComplete()
+
+        controller.close()
+    }
+
     @Test
     fun `ordinary user turn creates exactly one server owned response after commit`() {
         val controller = controller()
 
-        StepVerifier.create(controller.providerEvents().take(1))
+        StepVerifier.create(providerEvents(controller).take(1))
             .then { queueOrdinaryResponse(controller) }
             .assertNext { raw ->
                 val node = mapper.readTree(raw)
@@ -83,7 +251,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller()
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(activeControl::set)
             .then {
@@ -108,7 +276,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller(now::get)
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(activeControl::set)
             .then {
@@ -138,7 +306,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller(now::get)
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(activeControl::set)
             .then {
@@ -170,7 +338,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller(now::get)
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(activeControl::set)
             .then {
@@ -199,7 +367,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller()
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(activeControl::set)
             .then {
@@ -228,7 +396,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller()
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(activeControl::set)
             .then {
@@ -254,7 +422,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller()
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then {
                 assertThat(
                     controller.observeProviderEvent(
@@ -288,7 +456,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller()
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(activeControl::set)
             .then {
@@ -311,7 +479,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller()
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents())
+        StepVerifier.create(providerEvents(controller))
             .then { queueOrdinaryResponse(controller) }
             .assertNext { raw ->
                 activeControl.set(raw)
@@ -337,7 +505,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val firstControl = AtomicReference<String>()
         val secondControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents())
+        StepVerifier.create(providerEvents(controller))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(firstControl::set)
             .then {
@@ -352,12 +520,12 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
             .assertNext(secondControl::set)
             .then {
                 val firstEventId = mapper.readTree(firstControl.get()).path("event_id").asText()
-                controller.fireResponseTimeout(responseGeneration = 1, createEventId = firstEventId)
+                controller.fireResponseTimeout(responseGeneration = 2, createEventId = firstEventId)
             }
             .expectNoEvent(Duration.ofMillis(25))
             .then {
                 val secondEventId = mapper.readTree(secondControl.get()).path("event_id").asText()
-                controller.fireResponseTimeout(responseGeneration = 2, createEventId = secondEventId)
+                controller.fireResponseTimeout(responseGeneration = 3, createEventId = secondEventId)
             }
             .assertNext { raw ->
                 assertThat(mapper.readTree(raw).path("type").asText()).isEqualTo("response.cancel")
@@ -371,7 +539,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller()
         val interventionControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then {
                 controller.observeProviderEvent(event("input_audio_buffer.speech_started"))
                 controller.fireContinuousSpeechDeadline()
@@ -409,7 +577,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller()
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(activeControl::set)
             .then {
@@ -446,7 +614,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
                 val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
                 val activeControl = AtomicReference<String>()
 
-                StepVerifier.create(controller.providerEvents().take(2))
+                StepVerifier.create(providerEvents(controller).take(2))
                     .then { queueOrdinaryResponse(controller) }
                     .assertNext(activeControl::set)
                     .then {
@@ -474,7 +642,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents().take(2))
+        StepVerifier.create(providerEvents(controller).take(2))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(activeControl::set)
             .then {
@@ -507,7 +675,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
         val activeControl = AtomicReference<String>()
 
-        StepVerifier.create(controller.providerEvents())
+        StepVerifier.create(providerEvents(controller))
             .then { queueOrdinaryResponse(controller) }
             .assertNext(activeControl::set)
             .then {
@@ -527,7 +695,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
     fun `webrtc cleared or non-completed response is terminal`() {
         listOf("cancelled", "incomplete", "failed").forEach { status ->
             val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
-            val control = controller.providerEvents().next().doOnSubscribe { queueOrdinaryResponse(controller) }.block()!!
+            val control = providerEvents(controller).next().doOnSubscribe { queueOrdinaryResponse(controller) }.block()!!
             controller.observeProviderEvent(responseEvent("response.created", "response-$status", control))
 
             assertThatThrownBy {
@@ -539,7 +707,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         }
 
         val clearedController = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
-        val clearedControl = clearedController.providerEvents().next()
+        val clearedControl = providerEvents(clearedController).next()
             .doOnSubscribe { queueOrdinaryResponse(clearedController) }
             .block()!!
         clearedController.observeProviderEvent(
@@ -556,7 +724,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
     @Test
     fun `webrtc audio deltas stay off the client control path`() {
         val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
-        val control = controller.providerEvents().next().doOnSubscribe { queueOrdinaryResponse(controller) }.block()!!
+        val control = providerEvents(controller).next().doOnSubscribe { queueOrdinaryResponse(controller) }.block()!!
         controller.observeProviderEvent(responseEvent("response.created", "response-audio", control))
 
         assertThat(controller.observeProviderEvent(audioDeltaEvent("response-audio")))
@@ -570,7 +738,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val activeControl = AtomicReference<String>()
         val completed = AtomicBoolean(false)
         val emittedControls = AtomicLong(0)
-        val subscription = controller.providerEvents().subscribe(
+        val subscription = providerEvents(controller).subscribe(
             {
                 activeControl.set(it)
                 emittedControls.incrementAndGet()
@@ -637,13 +805,42 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
     private fun controller(
         nanoTime: () -> Long = System::nanoTime,
         transport: VoiceTutorRealtimeTransport = VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY,
-    ) = VoiceTutorDuplexTurnController(
-        mapper = mapper,
-        continuousSpeechLimit = Duration.ofSeconds(30),
-        responseTimeout = Duration.ofSeconds(60),
-        nanoTime = nanoTime,
-        transport = transport,
-    )
+        readyForLearnerTurns: Boolean = true,
+    ): VoiceTutorDuplexTurnController {
+        val controller = VoiceTutorDuplexTurnController(
+            mapper = mapper,
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            nanoTime = nanoTime,
+            transport = transport,
+        )
+        if (!readyForLearnerTurns) return controller
+
+        // Mid-conversation tests enter through the real opening lifecycle, then
+        // expose only subsequent controls; no production readiness gate is bypassed.
+        val buffered = Sinks.many().unicast().onBackpressureBuffer<String>()
+        val opening = mutableListOf<String>()
+        var preparing = true
+        val subscription = controller.providerEvents().subscribe(
+            { raw -> if (preparing) opening += raw else buffered.tryEmitNext(raw) },
+            { error -> buffered.tryEmitError(error) },
+            { buffered.tryEmitComplete() },
+        )
+        controller.startOpeningResponse()
+        assertThat(opening).hasSize(1)
+        controller.observeProviderEvent(responseEvent("response.created", "fixture-opening", opening.single()))
+        controller.observeProviderEvent(responseEvent("response.done", "fixture-opening", opening.single()))
+        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "fixture-opening"))
+            controller.observeClientEvent(playoutDrainedEvent("fixture-opening"))
+        }
+        preparing = false
+        preparedProviderEvents[controller] = buffered.asFlux().doFinally { subscription.dispose() }
+        return controller
+    }
+
+    private fun providerEvents(controller: VoiceTutorDuplexTurnController): Flux<String> =
+        preparedProviderEvents[controller] ?: controller.providerEvents()
 
     private fun queueOrdinaryResponse(controller: VoiceTutorDuplexTurnController) {
         learnerTurn(controller)

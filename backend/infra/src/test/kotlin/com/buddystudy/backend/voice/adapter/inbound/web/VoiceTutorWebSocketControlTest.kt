@@ -1,15 +1,27 @@
 package com.buddystudy.backend.voice.adapter.inbound.web
 
+import com.buddystudy.backend.common.adapter.inbound.web.ApiErrorResponseFactory
+import com.buddystudy.backend.common.adapter.inbound.web.ApiLoggingPolicy
+import com.buddystudy.backend.common.adapter.inbound.web.ErrorHandler
+import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.voice.application.model.VoiceTutorCreateSessionResponse
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.springframework.context.support.StaticMessageSource
 import org.springframework.core.io.buffer.DefaultDataBufferFactory
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest
+import org.springframework.mock.web.server.MockServerWebExchange
+import org.springframework.web.reactive.socket.WebSocketHandler
 import org.springframework.web.reactive.socket.WebSocketMessage
 import org.springframework.web.reactive.socket.server.support.HandshakeWebSocketService
 import org.springframework.web.reactive.socket.server.upgrade.ReactorNettyRequestUpgradeStrategy
+import org.springframework.web.server.ServerWebInputException
+import reactor.core.publisher.Mono
 import reactor.core.publisher.Sinks
 import reactor.test.StepVerifier
 import java.time.Duration
@@ -32,6 +44,72 @@ class VoiceTutorWebSocketControlTest {
 
         assertThat(strategy.websocketServerSpec.maxFramePayloadLength())
             .isEqualTo(VOICE_TUTOR_MAX_WEBSOCKET_FRAME_BYTES)
+    }
+
+    @Test
+    fun `control handshake rejects proxy-stripped upgrade headers before the relay`() {
+        val adapter = VoiceTutorWebSocketConfig().voiceTutorWebSocketHandlerAdapter()
+        val errorHandler = ErrorHandler(
+            ApiErrorResponseFactory(StaticMessageSource()),
+            ApiLoggingPolicy("compact"),
+        )
+        val handler = WebSocketHandler { error("Invalid handshake must not open the relay.") }
+
+        for (missingHeader in listOf(HttpHeaders.UPGRADE, HttpHeaders.CONNECTION)) {
+            val request = MockServerHttpRequest.get(
+                "/api/v1/voice-tutor/sessions/00000000-0000-0000-0000-000000000001/control",
+            )
+                .header(HttpHeaders.CONNECTION, "keep-alive")
+                .header("Sec-WebSocket-Version", "13")
+                .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+                .header("Sec-WebSocket-Protocol", VoiceTutorControlWebSocketHandler.CONTROL_PROTOCOL)
+            if (missingHeader == HttpHeaders.CONNECTION) {
+                request.header(HttpHeaders.UPGRADE, "websocket")
+            }
+            val exchange = MockServerWebExchange.from(request.build())
+
+            StepVerifier.create(adapter.handle(exchange, handler))
+                .expectErrorSatisfies { error ->
+                    assertThat(error).isInstanceOf(ServerWebInputException::class.java)
+                    assertThat(error).hasMessageContaining("Invalid '$missingHeader' header")
+                    val response = errorHandler.invalidInput(error as ServerWebInputException, exchange)
+                    assertThat(response.statusCode).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)
+                    assertThat(response.body?.error?.errorCode).isEqualTo(ApiErrorCode.VALIDATION_ERROR.name)
+                }
+                .verify(Duration.ofSeconds(1))
+        }
+    }
+
+    @Test
+    fun `valid control handshake reaches upgrade with the negotiated protocol`() {
+        var upgradeReached = false
+        val protocol = VoiceTutorControlWebSocketHandler.CONTROL_PROTOCOL
+        val service = HandshakeWebSocketService { _, _, selectedProtocol, handshake ->
+            upgradeReached = true
+            assertThat(selectedProtocol).isEqualTo(protocol)
+            assertThat(handshake.get().subProtocol).isEqualTo(protocol)
+            Mono.empty()
+        }
+        val handler = object : WebSocketHandler {
+            override fun getSubProtocols() = listOf(protocol)
+            override fun handle(session: org.springframework.web.reactive.socket.WebSocketSession): Mono<Void> =
+                error("The upgrade strategy owns the session.")
+        }
+        val exchange = MockServerWebExchange.from(
+            MockServerHttpRequest.get(
+                "/api/v1/voice-tutor/sessions/00000000-0000-0000-0000-000000000001/control",
+            )
+                .header(HttpHeaders.UPGRADE, "websocket")
+                .header(HttpHeaders.CONNECTION, "upgrade")
+                .header("Sec-WebSocket-Version", "13")
+                .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+                .header("Sec-WebSocket-Protocol", protocol)
+                .build(),
+        )
+
+        service.handleRequest(exchange, handler).block(Duration.ofSeconds(1))
+
+        assertThat(upgradeReached).isTrue()
     }
 
     @Test

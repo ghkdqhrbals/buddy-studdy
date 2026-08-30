@@ -3054,6 +3054,9 @@ struct AppStrings {
     var voiceTutorEnding: String { text("학습을 정리하는 중", "Wrapping up the session", "学習をまとめています") }
     var voiceTutorEnded: String { text("음성 학습 완료", "Voice session complete", "音声学習が完了しました") }
     var voiceTutorLiveCaptions: String { text("실시간 대화", "Live conversation", "リアルタイム会話") }
+    var voiceTutorNoTranscript: String {
+        text("저장된 대화가 없습니다.", "No transcript was saved.", "保存された会話はありません。")
+    }
     var voiceTutorYou: String { text("나", "You", "自分") }
     var voiceTutorTeacher: String { text("선생님", "Tutor", "チューター") }
     var voiceTutorMute: String { text("음소거", "Mute", "ミュート") }
@@ -3169,6 +3172,18 @@ struct AppStrings {
     func voiceTutorUsedTime(_ seconds: Int) -> String {
         let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: false)
         return text("\(duration) 사용", "\(duration) used", "\(duration)使用")
+    }
+    func voiceTutorUnreservedTime(_ seconds: Int) -> String {
+        let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: true)
+        return text("추가 통화 가능 \(duration)", "\(duration) available outside this call", "追加通話可能 \(duration)")
+    }
+    func voiceTutorReservedTime(_ seconds: Int) -> String {
+        let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: true)
+        return text(
+            "진행 중인 통화에 \(duration) 예약 중 · 남은 시간은 종료 후 반환됩니다.",
+            "\(duration) reserved for this call. Unused time is released when it ends.",
+            "進行中の通話に\(duration)を確保中。未使用の時間は終了後に戻ります。"
+        )
     }
     func voiceTutorSessionLimit(_ seconds: Int) -> String {
         let duration = voiceTutorDuration(seconds)

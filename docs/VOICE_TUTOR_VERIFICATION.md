@@ -80,6 +80,58 @@ xcodebuild -project StudyMate.xcodeproj -scheme StudyMateiOS \
   -only-testing:StudyMateiOSTests/QuestionGenerationFlowTests test
 ```
 
+## Local dev call-recovery follow-up
+
+- The reported immediate disconnect was reproduced at the control handshake,
+  not by interpreting the learner's greeting as an end command. SDP negotiation
+  succeeded, but the local Routingflare origin proxy removed `Upgrade` and
+  changed `Connection` to `keep-alive`, producing HTTP 422 on `/control`.
+  Identical unauthenticated probes retained both upgrade headers at port 8080
+  and lost them through the local proxy and public dev route. Their expected
+  HTTP 401 responses were used only to inspect header forwarding; they are not
+  evidence of a successful authenticated call.
+- Read-only quota inspection showed four seconds charged across the reported
+  attempts, no remaining reservation, and 3,596 seconds available. No quota,
+  entitlement, or user-data correction was performed. The erroneous zero was
+  the app's stale reservation snapshot.
+- Failure cleanup now preserves failure/retry state and server failure reasons,
+  clears terminal countdowns, and reconciles settled quota. Per-attempt fences
+  reject old callbacks, delayed detail results, and delayed playout successes
+  or failures after retry; cleanup avoids cancelling its own settlement work.
+- iOS rejects empty/non-audio SDP locally, preserves authenticated request
+  headers and exact SDP bytes, and waits for combined ICE/DTLS connection before
+  opening control. The teacher-first greeting and readiness-confirmation
+  instructions use the existing one-sentence response/playout policy.
+- Backend follow-up tests passed: 25 application voice-session tests, 34
+  realtime adapter/turn-controller tests, 12 WebRTC adapter tests, and 15
+  control-handshake/logging tests. Startup regressions cover a fully committed
+  learner greeting before readiness, one opening per call, queued learner turns
+  behind the opening's full playout, and no premature continuous-speech
+  intervention. Existing mid-conversation fixtures now enter through the real
+  opening/completion/drain lifecycle rather than a test-only readiness bypass.
+  The final combined run passed all 86 tests with zero failures. Log:
+  `build/voiceCallRecoveryBackendTests.log`.
+- The updated JVM JAR build passed using the existing local JDK/cache, without
+  building another Docker image or creating a new database/Redis stack. Log:
+  `build/voiceCallRecoveryBackendBuild.log`.
+- Generic `StudyMateiOS` Debug build passed. Log:
+  `build/iOSVoiceCallRecoveryGenericBuild.log`.
+- The signed app was installed and launched on the physical iPhone 16 Pro;
+  26 selected non-mutating contract tests passed with zero failures. These
+  include the new media-readiness, SDP, failure outcome, released reservation,
+  and genuinely suspended old-attempt/cancelled-result regressions, plus the
+  existing sentence-overlap and same-response drain contracts. Log:
+  `build/iOSVoiceCallRecoveryDeviceTests.log`. Recording purge/file tests were
+  excluded to preserve user data, and no additional DerivedData directory was
+  created.
+- The user repaired Routingflare's WebSocket forwarding separately. Repeating
+  the public dev probe then preserved `Upgrade: websocket`,
+  `Connection: Upgrade`, and `buddystudy.voice.control.v2`, matching the direct
+  API probe. No bypass, tunnel change, or route change was made for this fix.
+  An authenticated control upgrade and audible teacher greeting still require
+  a live call; the unauthenticated probe, device contracts, and app launch are
+  not an acoustic end-to-end pass.
+
 ## Release gates
 
 `VOICE_TUTOR_ENABLED` and `VOICE_TUTOR_RECORDING_ENABLED` remain default-off.

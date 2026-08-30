@@ -201,6 +201,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                     false,
                     true,
                 )
+                turnController.startOpeningResponse()
             }.then()
             // Subscribe both provider directions before telling the mobile peer to
             // enable its microphone. The ready branch intentionally never completes

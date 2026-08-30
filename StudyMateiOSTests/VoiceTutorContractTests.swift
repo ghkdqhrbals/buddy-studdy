@@ -176,12 +176,13 @@ final class VoiceTutorContractTests: XCTestCase {
         authenticatedRequest.httpBody = Data("old-body".utf8)
         authenticatedRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         authenticatedRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        authenticatedRequest.setValue("0", forHTTPHeaderField: "Content-Length")
         authenticatedRequest.setValue("Bearer fixture-token", forHTTPHeaderField: "Authorization")
         authenticatedRequest.setValue("fixture-device", forHTTPHeaderField: "X-Device-Id")
         authenticatedRequest.setValue("fixture-secret", forHTTPHeaderField: "X-Client-Secret")
         let offer = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"
 
-        let request = VoiceTutorWebRTCTransport.sdpExchangeRequest(
+        let request = try VoiceTutorWebRTCTransport.sdpExchangeRequest(
             offer: offer,
             authenticatedRequest: authenticatedRequest
         )
@@ -189,6 +190,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/sdp")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/sdp")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Content-Length"))
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-token")
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Device-Id"), "fixture-device")
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Client-Secret"), "fixture-secret")
@@ -196,6 +198,189 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(request.url, authenticatedRequest.url)
         XCTAssertEqual(request.timeoutInterval, authenticatedRequest.timeoutInterval)
         XCTAssertEqual(authenticatedRequest.httpBody, Data("old-body".utf8))
+    }
+
+    func testSDPExchangeRejectsEmptyIncompleteAndNonAudioOffersBeforeSending() throws {
+        let request = URLRequest(url: try XCTUnwrap(URL(string: "https://voice-tutor.test/session/webrtc")))
+        let invalidOffers = [
+            "", " \r\n", "v=0\r\n", "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n",
+            "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n",
+            "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n",
+            "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=sctp-port:5000\r\n",
+            "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=x:" + String(repeating: "x", count: 65_536)
+        ]
+        for offer in invalidOffers {
+            XCTAssertThrowsError(try VoiceTutorWebRTCTransport.sdpExchangeRequest(
+                offer: offer, authenticatedRequest: request
+            )) { error in
+                guard case VoiceTutorWebRTCError.offerCreationFailed = error else {
+                    return XCTFail("Expected a local offer validation failure")
+                }
+            }
+        }
+    }
+
+    func testSDPSnapshotAndRepeatedAttemptsKeepTheirOwnNonemptyOutgoingBodies() throws {
+        let authenticated = URLRequest(url: try XCTUnwrap(URL(string: "https://voice-tutor.test/session/webrtc")))
+        var offeredSDP = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=ice-ufrag:first\r\n"
+        let firstSnapshot = try VoiceTutorWebRTCTransport.validatedOfferSDP(offeredSDP)
+        offeredSDP = ""
+        let first = try VoiceTutorWebRTCTransport.sdpExchangeRequest(
+            offer: firstSnapshot, authenticatedRequest: authenticated
+        )
+        let secondSDP = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=ice-ufrag:second\r\n"
+        let second = try VoiceTutorWebRTCTransport.sdpExchangeRequest(
+            offer: secondSDP, authenticatedRequest: first
+        )
+
+        XCTAssertTrue(offeredSDP.isEmpty)
+        XCTAssertEqual(first.httpBody, Data(firstSnapshot.utf8))
+        XCTAssertEqual(second.httpBody, Data(secondSDP.utf8))
+        XCTAssertNotEqual(first.httpBody, second.httpBody)
+        XCTAssertGreaterThan(try XCTUnwrap(second.httpBody).count, 0)
+    }
+
+    func testMediaReadinessWaitsForCombinedICEAndDTLSConnection() {
+        XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .new, elapsedSeconds: 0), .waiting)
+        XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .connecting, elapsedSeconds: 14.9), .waiting)
+        XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .connected, elapsedSeconds: 1), .connected)
+        XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .failed, elapsedSeconds: 1), .failed)
+        XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .closed, elapsedSeconds: 1), .failed)
+        XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .connecting, elapsedSeconds: 15), .timedOut)
+        XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .disconnected, elapsedSeconds: 15), .timedOut)
+    }
+
+    func testDelayedOldConnectionCallbackCannotEndARetriedAttempt() {
+        var fence = VoiceTutorConnectionAttemptFence()
+        let firstAttempt = fence.begin()
+        var disconnects = 0
+        let delayedFirstFailure = {
+            if fence.isCurrent(firstAttempt) { disconnects += 1 }
+        }
+        let retryAttempt = fence.begin()
+        delayedFirstFailure()
+
+        XCTAssertFalse(fence.isCurrent(firstAttempt))
+        XCTAssertTrue(fence.isCurrent(retryAttempt))
+        XCTAssertEqual(disconnects, 0)
+        if fence.isCurrent(retryAttempt) { disconnects += 1 }
+        XCTAssertEqual(disconnects, 1)
+    }
+
+    func testFailedVoiceCallCannotBecomeSuccessfulDuringSettlement() {
+        XCTAssertEqual(VoiceTutorSessionPhase.completed(outcome: .failed, serverState: "ENDED"), .failed)
+        XCTAssertEqual(VoiceTutorSessionPhase.completed(outcome: .ended, serverState: "FAILED"), .failed)
+        XCTAssertEqual(VoiceTutorSessionPhase.completed(outcome: .ended, serverState: "ENDED"), .ended)
+        for phase in [VoiceTutorSessionPhase.ending, .ended, .failed] {
+            XCTAssertFalse(phase.isLive, "Terminal/settling calls must not show a live countdown")
+        }
+    }
+
+    func testServerFailureReasonSurvivesUnavailableSessionDetail() {
+        for reason in ["PROVIDER_ERROR", "CLIENT_PROTOCOL_ERROR", "RELAY_HEARTBEAT_TIMEOUT", "AUTH_REVOKED"] {
+            XCTAssertEqual(
+                VoiceTutorSessionPhase.completed(outcome: .ended, serverState: nil, serverReason: reason),
+                .failed
+            )
+        }
+        for reason in ["USER_ENDED", "TIME_LIMIT", "SERVER_FINALIZED"] {
+            XCTAssertEqual(
+                VoiceTutorSessionPhase.completed(outcome: .ended, serverState: nil, serverReason: reason),
+                .ended
+            )
+        }
+    }
+
+    @MainActor
+    func testDelayedAttemptDeliveryDropsOldSuccessAndFailureAfterRetry() async {
+        for didSend in [true, false] {
+            var fence = VoiceTutorConnectionAttemptFence()
+            let oldAttempt = fence.begin()
+            let started = expectation(description: "old acknowledgement suspended")
+            let gate = VoiceTutorContractResponseGate()
+            var appliedOutcomes: [Bool] = []
+            let delivery = Task {
+                await VoiceTutorAttemptDelivery.deliver(
+                    isCurrent: { fence.isCurrent(oldAttempt) },
+                    operation: {
+                        started.fulfill()
+                        await gate.wait()
+                        return didSend
+                    },
+                    apply: { appliedOutcomes.append($0) }
+                )
+            }
+            let ready = await XCTWaiter.fulfillment(of: [started], timeout: 5)
+            XCTAssertEqual(ready, .completed)
+            let newAttempt = fence.begin()
+            gate.open()
+            await delivery.value
+
+            XCTAssertTrue(fence.isCurrent(newAttempt))
+            XCTAssertTrue(appliedOutcomes.isEmpty, "Old send success/failure must not mutate or stop the retry")
+        }
+    }
+
+    @MainActor
+    func testCancelledDelayedResultDeliveryCannotPublishEvenWithinSameAttempt() async {
+        let gate = VoiceTutorContractResponseGate()
+        let started = expectation(description: "session detail suspended")
+        var publishedDetail: String?
+        let delivery = Task {
+            await VoiceTutorAttemptDelivery.deliver(
+                isCurrent: { true },
+                operation: {
+                    started.fulfill()
+                    await gate.wait()
+                    return "old-session-detail"
+                },
+                apply: { publishedDetail = $0 }
+            )
+        }
+        let ready = await XCTWaiter.fulfillment(of: [started], timeout: 5)
+        XCTAssertEqual(ready, .completed)
+        delivery.cancel()
+        gate.open()
+        await delivery.value
+
+        XCTAssertNil(publishedDetail)
+    }
+
+    func testReleasedReservationReplacesTheCallsZeroRemainingSnapshot() {
+        var state = VoiceTutorSessionQuotaState()
+        state.apply(BackendVoiceTutorQuota(
+            limitSeconds: 3_600, usedSeconds: 0, reservedSeconds: 3_600, remainingSeconds: 0
+        ))
+        XCTAssertEqual(state.remainingSeconds, 0)
+        XCTAssertEqual(state.reservedSeconds, 3_600)
+
+        state.apply(BackendVoiceTutorQuota(
+            limitSeconds: 3_600, usedSeconds: 4, reservedSeconds: 0, remainingSeconds: 3_596
+        ))
+        XCTAssertEqual(state.remainingSeconds, 3_596)
+        XCTAssertEqual(state.reservedSeconds, 0)
+        XCTAssertEqual(state.limitSeconds, 3_600)
+        XCTAssertEqual(AppStrings(language: .korean).voiceTutorRemainingTime(state.remainingSeconds), "60분 남음")
+        XCTAssertTrue(AppStrings(language: .korean).voiceTutorReservedTime(3_600).contains("예약"))
+        XCTAssertTrue(AppStrings(language: .english).voiceTutorReservedTime(3_600).contains("reserved"))
+    }
+
+    func testReceiveFailureFinalizationDoesNotCancelItsOwnQuotaRefresh() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let sourceURL = root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift")
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw XCTSkip("Source-contract check requires the local repository; behavior tests run on iPhone.")
+        }
+        let source = try String(
+            contentsOf: sourceURL,
+            encoding: .utf8
+        )
+        let stop = try XCTUnwrap(source.range(of: "private func stop(\n"))
+        let nextMethod = try XCTUnwrap(source.range(of: "private func stopForInvalidatedContext"))
+        let teardown = String(source[stop.lowerBound..<nextMethod.lowerBound])
+        XCTAssertFalse(teardown.contains("receiveTask?.cancel()"))
+        XCTAssertTrue(teardown.contains("clearSessionCountdown()"))
+        XCTAssertTrue(teardown.contains("outcome: .completed(outcome: outcome"))
     }
 
     func testConnectionIdentityFenceAllowsOnlyCurrentSignedInOwnerDeviceAndSecret() {
