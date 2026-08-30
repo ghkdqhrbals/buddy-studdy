@@ -16,6 +16,8 @@ import org.springframework.http.HttpStatus
 import org.springframework.web.reactive.function.client.ClientResponse
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
+import reactor.core.publisher.Sinks
+import java.time.Duration
 
 class OpenAIVoiceTutorWebRtcAdapterTest {
     private val mapper = JsonMapperProvider.mapper
@@ -49,7 +51,9 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
 
         val turnDetection = session.path("audio").path("input").path("turn_detection")
         assertThat(turnDetection.path("type").asText()).isEqualTo("server_vad")
+        assertThat(turnDetection.path("create_response").isBoolean).isTrue()
         assertThat(turnDetection.path("create_response").asBoolean()).isFalse()
+        assertThat(turnDetection.path("interrupt_response").isBoolean).isTrue()
         assertThat(turnDetection.path("interrupt_response").asBoolean()).isFalse()
     }
 
@@ -201,37 +205,92 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
     }
 
     @Test
-    fun `sideband dispatches the opening after both provider directions and client readiness`() {
+    fun `sideband verifies provider configuration before readiness and opening without losing an early learner turn`() {
         val subscriptions = mutableListOf<String>()
         val sent = mutableListOf<String>()
         var readyEmitted = false
+        val handshake = VoiceTutorWebRtcSessionHandshake("rtc_opening", Duration.ofSeconds(15))
+        val providerEvents = Sinks.many().unicast().onBackpressureBuffer<String>()
         val controller = VoiceTutorDuplexTurnController(
-            continuousSpeechLimit = java.time.Duration.ofSeconds(30),
-            responseTimeout = java.time.Duration.ofSeconds(60),
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
             transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
         )
-        val receive = Mono.never<Void>().doOnSubscribe { subscriptions += "receive" }
-        val send = controller.providerEvents()
+        val receive = providerEvents.asFlux()
+            .doOnSubscribe { subscriptions += "receive" }
+            .doOnNext { raw ->
+                if (!handshake.observeProviderEvent(raw)) controller.observeProviderEvent(raw)
+            }
+            .then()
+        val send = Flux.concat(handshake.initialProviderEvents(), controller.providerEvents())
             .doOnSubscribe { subscriptions += "send" }
             .doOnNext { raw ->
-                assertThat(readyEmitted).isTrue()
+                if (mapper.readTree(raw).path("type").asText() == "response.create") {
+                    assertThat(readyEmitted).isTrue()
+                }
                 sent += raw
             }
             .then()
-        val ready = Mono.fromRunnable<Void> {
-            assertThat(subscriptions).containsExactly("receive", "send")
-            readyEmitted = true
-            controller.startOpeningResponse()
-        }.then()
+        val ready = handshake.awaitConfirmation().then(
+            Mono.fromRunnable<Void> {
+                assertThat(subscriptions).containsExactly("receive", "send")
+                readyEmitted = true
+                controller.startOpeningResponse()
+            },
+        )
 
         val diagnostics = VoiceTutorSidebandDiagnostics("rtc_opening")
         val relay = webRtcSidebandLifecycle(receive, send, ready, diagnostics).subscribe()
+        fun emitProvider(raw: String) {
+            assertThat(providerEvents.tryEmitNext(raw)).isEqualTo(Sinks.EmitResult.OK)
+        }
+        val confirmedConfiguration = """{
+            "type":"session.updated",
+            "session":{"type":"realtime","audio":{"input":{"turn_detection":{
+                "type":"server_vad","create_response":false,"interrupt_response":false
+            }}}}
+        }""".trimIndent()
+        try {
+            assertThat(sent).hasSize(1)
+            assertThat(mapper.readTree(sent.single()).path("type").asText()).isEqualTo("session.update")
+            assertThat(readyEmitted).isFalse()
 
-        assertThat(sent).hasSize(1)
-        assertThat(mapper.readTree(sent.single()).path("type").asText()).isEqualTo("response.create")
-        assertThat(relay.isDisposed).isFalse()
-        relay.dispose()
-        controller.close()
+            emitProvider(confirmedConfiguration.replace("session.updated", "session.created"))
+            emitProvider("""{"type":"input_audio_buffer.speech_started"}""")
+            emitProvider("""{"type":"input_audio_buffer.speech_stopped"}""")
+            emitProvider("""{"type":"input_audio_buffer.committed","item_id":"early-greeting"}""")
+            assertThat(readyEmitted).isFalse()
+            assertThat(sent).hasSize(1)
+
+            emitProvider(confirmedConfiguration)
+            assertThat(readyEmitted).isTrue()
+            assertThat(sent).hasSize(2)
+            val opening = mapper.readTree(sent.last())
+            assertThat(opening.path("type").asText()).isEqualTo("response.create")
+            assertThat(opening.path("event_id").asText()).contains("opening-response")
+            emitProvider(confirmedConfiguration)
+            assertThat(sent).hasSize(2)
+
+            val response = mapOf(
+                "id" to "response-opening",
+                "status" to "completed",
+                "metadata" to opening.path("response").path("metadata"),
+            )
+            emitProvider(mapper.writeValueAsString(mapOf("type" to "response.created", "response" to response)))
+            emitProvider(mapper.writeValueAsString(mapOf("type" to "response.done", "response" to response)))
+            emitProvider("""{"type":"output_audio_buffer.stopped","response_id":"response-opening"}""")
+            assertThat(sent).hasSize(2)
+            controller.observeClientEvent(
+                """{"type":"buddystudy.voice.playout.drained","responseId":"response-opening"}""",
+            )
+            assertThat(sent).hasSize(3)
+            assertThat(mapper.readTree(sent.last()).path("event_id").asText()).contains("turn-response")
+            assertThat(sent.joinToString()).doesNotContain("response.cancel", "conversation.item.truncate")
+            assertThat(relay.isDisposed).isFalse()
+        } finally {
+            relay.dispose()
+            controller.close()
+        }
     }
 
     private fun validSdp(includeDataChannel: Boolean = false): String = buildString {

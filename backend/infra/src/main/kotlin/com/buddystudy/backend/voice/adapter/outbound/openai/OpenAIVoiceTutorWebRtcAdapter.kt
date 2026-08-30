@@ -133,11 +133,14 @@ class OpenAIVoiceTutorWebRtcAdapter(
             .toUri()
         val headers = HttpHeaders().apply {
             setBearerAuth(properties.openai.userContentApiKey)
-            set("OpenAI-Beta", "realtime=v1")
         }
 
         sidebandClient.execute(providerUri, headers) { providerSession ->
             val diagnostics = VoiceTutorSidebandDiagnostics(validatedCallId)
+            val sessionHandshake = VoiceTutorWebRtcSessionHandshake(
+                validatedCallId,
+                Duration.ofSeconds(properties.voiceTutor.connectTimeoutSeconds.coerceIn(5, 300)),
+            )
             val turnController = VoiceTutorDuplexTurnController(
                 mapper = mapper,
                 continuousSpeechLimit = Duration.ofSeconds(
@@ -163,8 +166,10 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 .ignoreElements()
                 .thenMany(Flux.empty<String>())
                 .doFinally { turnController.close() }
-            val liveControls = Flux.merge(turnController.providerEvents(), observedClientEvents)
-                .takeUntilOther(terminal)
+            val liveControls = Flux.concat(
+                sessionHandshake.initialProviderEvents(),
+                Flux.merge(turnController.providerEvents(), observedClientEvents),
+            ).takeUntilOther(terminal)
             val terminalProviderEvents = terminal.flatMapMany { termination ->
                 if (termination.cancelActiveResponse) {
                     Flux.just(responseCancelEvent("relay-terminal"))
@@ -180,6 +185,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 .map { it.payloadAsText }
                 .concatMap { raw ->
                     diagnostics.observeProviderEvent(raw)
+                    if (sessionHandshake.observeProviderEvent(raw)) return@concatMap Mono.empty<Void>()
                     val observed = runCatching { turnController.observeProviderEvent(raw) }
                     val observationFailure = observed.exceptionOrNull()
                     if (
@@ -203,17 +209,15 @@ class OpenAIVoiceTutorWebRtcAdapter(
                     }.then()
                 }
                 .then()
-            val ready = mono {
-                onProviderEvent(
-                    SIDEBAND_READY_PAYLOAD,
-                    false,
-                    true,
-                )
-                turnController.startOpeningResponse()
-            }.then()
+            val ready = sessionHandshake.awaitConfirmation().then(
+                mono {
+                    onProviderEvent(SIDEBAND_READY_PAYLOAD, false, true)
+                    turnController.startOpeningResponse()
+                }.then(),
+            )
             // Subscribe both provider directions before telling the mobile peer to
-            // enable its microphone. The ready branch intentionally never completes
-            // after its callback, so it cannot win and tear down the relay.
+            // enable its microphone, and require the provider's effective turn
+            // settings before the first response. Ready success never ends the relay.
             webRtcSidebandLifecycle(receive, send, ready, diagnostics, providerSession.closeStatus())
                 .then(Mono.defer { providerSession.close() })
                 .doFinally { turnController.close() }
@@ -246,11 +250,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
             "audio" to linkedMapOf(
                 "input" to linkedMapOf(
                     "transcription" to mapOf("model" to "gpt-4o-mini-transcribe"),
-                    "turn_detection" to linkedMapOf(
-                        "type" to "server_vad",
-                        "create_response" to false,
-                        "interrupt_response" to false,
-                    ),
+                    "turn_detection" to voiceTutorServerOwnedTurnDetection(),
                 ),
                 "output" to linkedMapOf(
                     "voice" to request.voice,

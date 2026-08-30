@@ -190,6 +190,31 @@ xcodebuild -project StudyMate.xcodeproj -scheme StudyMateiOS \
   triggered by these tests. Existing DerivedData was reused. Logs:
   `build/iOSVoicePlayoutGenericBuild.log` and
   `build/iOSVoicePlayoutDeviceTests.log`.
+- A subsequent instrumented short call established the first terminal source
+  as `PROVIDER_EVENT_ERROR`, immediately after `input_audio_buffer.speech_started`
+  and `output_audio_buffer.cleared`. Its outbound relay completed before the
+  receive-branch exception escaped, so the old fallback still persisted
+  `PROVIDER_CLOSED / COMPLETED`. The handler now records failure before emitting
+  the terminal signal; a regression models this exact send-winning race. This
+  observed case is a provider-buffer integrity event, not evidence of a
+  Routingflare transport close. The uninstrumented earlier calls remain
+  unattributed rather than being retroactively assigned the same cause.
+- The GA sideband now sends the turn policy through `session.update` and
+  requires `session.updated` to confirm `server_vad` and both explicit false
+  booleans before ready or the opening response. Missing/mismatched policy does
+  not silently enable the microphone; acknowledgement uses the existing bounded
+  connection timeout. The old beta header is not sent on this GA path. Effective
+  policy diagnostics contain only a hashed call reference and allowlisted
+  configuration fields, never the returned session/instructions. This validates
+  the applied contract; it does not yet prove the provider never clears a
+  buffer after acknowledging that contract during a real call.
+- Verification of the policy handshake and failure race passed 93 focused
+  backend tests: 29 session-handshake, 13 relay-lifecycle, 5 control-handler,
+  12 WebRTC-adapter, and 34 realtime turn-controller cases, with zero failures
+  or skipped cases. The JVM JAR build also passed. Confirmation ordering,
+  missing or incorrectly typed flags, cancellation, timeout, an early queued
+  learner turn, and full sentence drain remain covered without calling the
+  provider. Log: `build/voiceTutorConfigurationHandshakeBackend.log`.
 
 ## Release gates
 

@@ -266,9 +266,16 @@ class VoiceTutorControlWebSocketHandler(
                     VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
                 )
                 if (decision.terminate) {
+                    // Emitting terminal can synchronously complete provider
+                    // send and cancel this receive branch before its throw is
+                    // delivered. Record failure first so that race cannot turn
+                    // a provider error/cleared sentence into a successful call.
+                    val error = VoiceTutorProviderReportedException()
+                    failure.compareAndSet(null, error)
+                    endReason.compareAndSet("PROVIDER_CLOSED", "PROVIDER_ERROR")
                     decision.payload?.let(::emitProviderPayload)
                     signalTerminal("PROVIDER_EVENT_ERROR", cancelActiveResponse = false)
-                    throw VoiceTutorProviderReportedException()
+                    throw error
                 }
                 if (persist) inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull()
                 if (forwardToClient && type !in WEBRTC_MEDIA_EVENTS) {

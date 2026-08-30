@@ -41,6 +41,27 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceTutorControlWebSocketHandlerTest {
     @Test
+    fun `provider cleared event stays failed when terminal send wins before receive throws`() {
+        withControlLogs { logs ->
+            val result = runControlScenario(
+                providerEventBeforeCompletion = """{"type":"output_audio_buffer.cleared","response_id":"private-provider-response"}""",
+                provider = { _, _ -> },
+            )
+
+            assertThat(result.failed).isTrue()
+            assertThat(result.reason).isEqualTo("PROVIDER_ERROR")
+            assertThat(logs.list.map { it.formattedMessage }).anySatisfy {
+                assertThat(it).contains(
+                    "voice_tutor_control_terminal", "source=PROVIDER_EVENT_ERROR",
+                    "reason=PROVIDER_ERROR", "errorType=VoiceTutorProviderReportedException",
+                )
+            }
+            assertThat(logs.list.map { it.formattedMessage }.joinToString("\n"))
+                .doesNotContain("private-provider-response")
+        }
+    }
+
+    @Test
     fun `unexpected provider error is failed and diagnostics omit raw call IDs and exception messages`() {
         withControlLogs { logs ->
             val result = runControlScenario(
@@ -226,6 +247,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         clientPayload: String? = null,
         clientCompletes: Boolean = false,
         closeStatus: Mono<CloseStatus> = Mono.empty(),
+        providerEventBeforeCompletion: String? = null,
         provider: suspend (Flow<String>, Flow<VoiceTutorRelayTermination>) -> Unit,
     ): ControlResult {
         val now = Instant.now()
@@ -250,7 +272,18 @@ class VoiceTutorControlWebSocketHandlerTest {
                 clientEvents: Flow<String>,
                 terminalEvents: Flow<VoiceTutorRelayTermination>,
                 onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
-            ) = provider(clientEvents, terminalEvents)
+            ) {
+                if (providerEventBeforeCompletion != null) {
+                    try {
+                        onProviderEvent(providerEventBeforeCompletion, false, true)
+                    } catch (_: VoiceTutorProviderReportedException) {
+                        // Model the actual firstWithSignal race: terminal send
+                        // completes normally while receive is being cancelled,
+                        // so its provider error never escapes relaySideband.
+                    }
+                }
+                provider(clientEvents, terminalEvents)
+            }
 
             override suspend fun hangup(callId: String) = error("Finalization owns hangup.")
         }
