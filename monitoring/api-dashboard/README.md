@@ -5,7 +5,7 @@ Grafana, and the private TestZone API behind the backend administrator session.
 
 ## Pages
 
-- `/`: paginated API request logs and request/response/trace details
+- `/`: paginated API request logs and unmasked request/response/trace details
 - `/performance.html`: endpoint latency and throughput grouped by API
 - `/system.html`: application, database, Redis, host, and runtime metrics
 - `/audit.html`: monitoring workspace page, authentication, and action history
@@ -31,6 +31,14 @@ state, dense reusable tables, and a right-side object inspector. Redis field
 values and outbox payload JSON can be explored as a nested tree or raw JSON
 without flattening the stored object. The migration and controller boundary are documented in
 `docs/observability/MONITORING_REACT_MIGRATION.md`.
+
+API exchange logs are intentionally rendered exactly as captured by the
+backend, including authorization, client-secret, cookie, token, password, and
+other credential fields in request/response headers and bodies. Existing body
+capture limits and MCP body suppression still apply. The administrator session
+boundary protects this raw view; Slack/Codex search output and incident
+dispatches apply their own redaction before data leaves the monitoring system,
+and API exchange log events and breadcrumbs are excluded from Sentry.
 
 ## Access Audit
 

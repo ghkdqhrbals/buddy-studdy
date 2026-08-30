@@ -299,7 +299,9 @@ sustained-load conclusion.
 - Server-side authorization resolves the stored user-device relationship.
 - OpenAI calls happen only in the backend.
 - Runtime secrets are supplied by AWS Secrets Manager during the backend deploy.
-- Logs redact configured secrets and authorization material.
+- The administrator-only Loki/API Logs path retains captured headers and bodies
+  without field-based masking; Redis Stream inspection, outbound API history,
+  Slack/Codex output, incident dispatch, and Sentry keep separate boundaries.
 - Terms and permissions are backend policy; UI behavior is selected from stable
   API error codes.
 
@@ -316,7 +318,7 @@ sustained-load conclusion.
 ### Request Tracing
 
 Each API exchange includes a request ID, method, path, status, duration, client
-IP, sanitized headers, request body, and response body. Related logs can be
+IP, raw captured headers, request body, and response body. Related logs can be
 collected by request ID in the API log dashboard.
 
 ### Dashboards

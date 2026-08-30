@@ -3,7 +3,7 @@
 This document is the engineering source of truth used when updating BuddyStudy's
 Terms of Service, Privacy Policy, and Marketing Information Consent.
 
-Last reviewed: 2026-08-25
+Last reviewed: 2026-08-30
 
 ## Published Documents
 
@@ -43,7 +43,7 @@ older client from recording agreement to a document it did not display.
 | App control | Firebase Remote Config: app, device, and configuration request metadata | Google project retention settings |
 | Product analytics | Google Analytics for Firebase in release builds; coarse screen and feature events | Firebase project retention settings |
 | Error diagnostics | Sentry error and fatal events; error-session replay with all text and images masked | Sentry project retention settings |
-| API and operation logs | Loki; credentials and tokens are redacted | 7 days |
+| API and operation logs | Loki; captured request/response headers and bodies may include unmasked credentials and tokens in the administrator-only API Logs view | 7 days |
 | Database backups | Encrypted operational backup | Up to 14 days |
 | Local app data | Settings, drafts, logs and cache on the device | App reset, deletion, or cache lifecycle |
 
@@ -83,8 +83,12 @@ advertising. TIER2 and TIER3 do not receive an ad slot.
 - Sentry keeps `sendDefaultPii` disabled. Network bodies and headers,
   screenshots, and view hierarchy attachments stay disabled. Replay text and
   images remain masked.
-- Request logging must redact passwords, verification codes, access tokens,
-  Google ID tokens, APNs credentials, client secrets, and API keys.
+- API exchange logging intentionally retains captured passwords, verification
+  codes, access tokens, Google ID tokens, APNs credentials, client secrets, and
+  API keys without masking for the administrator-only API Logs view. Redis
+  Stream inspection, outbound API history, Slack/Codex output, and incident
+  dispatch keep their separate redaction boundaries, while raw API exchange
+  events and breadcrumbs are excluded from Sentry.
 - Request and response bodies on `/api/v1/mcp` must never be captured in API
   logs because they can contain resume text, interests, answers, feedback, and
   scores. The authenticated principal may be copied into tool context, but the

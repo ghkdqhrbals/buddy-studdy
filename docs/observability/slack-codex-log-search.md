@@ -49,6 +49,6 @@ Codex는 스크립트 출력 그대로 Slack에 전달한다. 응답에는 다�
 
 ## 원칙
 
-- Slack 메시지에 인증 비밀번호, APNs token, Authorization header 원문을 추가로 노출하지 않는다. 로그 수집 단계에서 이미 redaction된 값만 사용한다.
+- Loki의 API 로그는 Monitoring 관리자 화면에서 원문으로 보관·표시하지만, 이 스크립트는 Slack 응답을 만들기 직전에 인증 비밀번호, APNs token, Authorization header, client secret을 다시 마스킹한다.
 - 1억 건 규모를 가정하고 즉시 전체 검색을 하지 않는다. 시간 범위, requestId, path, status, 또는 검색어 중 하나 이상으로 좁힌 뒤 조회한다.
 - 대시보드 UI에 Slack 토큰이나 webhook URL을 넣지 않는다. Slack 전송은 Codex 또는 서버 사이드에서만 수행한다.

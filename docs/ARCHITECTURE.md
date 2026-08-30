@@ -71,7 +71,7 @@ runtime comparison or rollback does not fork application behavior.
   - Local persistence facade.
   - Stores settings, API keys, draft state, backend metadata, and exposes an in-memory record cache for the current session.
   - Does not trim records as a retention policy. The backend owns durable record history, while the app incrementally fills its in-memory cache from paginated responses.
-  - Stores backend device registration and a stable installation identifier in the iOS Keychain. The registration request sends the identifier over TLS, request logs redact it, and the backend persists only its SHA-256 hash so repeated registration is idempotent.
+  - Stores backend device registration and a stable installation identifier in the iOS Keychain. The registration request sends the identifier over TLS, the administrator-only API exchange log retains the captured request value without masking, and the backend persists only its SHA-256 hash so repeated registration is idempotent.
   - Keeps a pending referral code across app launch, authentication, and the required-terms gate until the backend returns a terminal attribution result. The value is short-lived account-onboarding state, not proof that a reward is due; the backend owns the sign-up eligibility window.
 
 - `Services/OpenAIClient.swift`
@@ -113,7 +113,7 @@ runtime comparison or rollback does not fork application behavior.
   - Public base URL: `https://api.ghkdqhrbals.org`.
   - Serves the canonical referral URL `https://api.ghkdqhrbals.org/referrals/{code}`. The associated-domain file lets an installed iOS app receive that path as a Universal Link; otherwise the public server landing page offers the App Store and a copyable code.
   - Runs behind Nginx on host port `443`.
-  - API request, exception, and authentication logs share `ApiLoggingPolicy`. The `dev` profile emits compact method/path/status/duration logs without body capture, request IDs, IP addresses, headers, or full stack traces; production keeps detailed structured logs for operations.
+  - API request, exception, and authentication logs share `ApiLoggingPolicy`. The `dev` profile keeps raw captured headers and bodies while omitting request IDs, IP addresses, and full stack traces; production adds that request identity and diagnostic detail to the same structured exchange log.
   - Uses a private Dockerized MySQL container with a persistent named volume.
   - Separates OpenAI workload ownership. `SystemOpenAIClient` and
     `OPENAI_API_KEY_SYSTEM` serve only post-study child-topic suggestions.

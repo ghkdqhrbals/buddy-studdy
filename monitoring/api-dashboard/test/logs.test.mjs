@@ -53,6 +53,21 @@ test("parseApiExchange extracts flat backend request logging fields", () => {
   assert.deepEqual(parsed.response.body, { ok: true });
 });
 
+test("parseApiExchange preserves unmasked backend headers and bodies", () => {
+  const line = [
+    "2026-08-30T12:00:00.000Z INFO [raw-log-fields] 1 --- [buddystudy-backend]",
+    'c.b.RequestLoggingFilter : api_exchange {"requestId":"raw-log-fields","clientIp":"203.0.113.9","userId":"42","method":"POST","path":"/api/v1/devices/register","query":"","requestHeaders":{"authorization":"Bearer test-access-token","x-client-secret":"test-client-secret"},"requestBody":{"password":"test-password"},"status":200,"durationMs":"2.50","responseHeaders":{"set-cookie":"test-session-cookie"},"responseBody":{"accessToken":"test-response-token"}}',
+  ].join(" ");
+
+  const parsed = parseApiExchange(["1788062400000000000", line]);
+
+  assert.equal(parsed.request.headers.authorization, "Bearer test-access-token");
+  assert.equal(parsed.request.headers["x-client-secret"], "test-client-secret");
+  assert.equal(parsed.request.body.password, "test-password");
+  assert.equal(parsed.response.headers["set-cookie"], "test-session-cookie");
+  assert.equal(parsed.response.body.accessToken, "test-response-token");
+});
+
 test("parseApiExchange uses anonymous marker for legacy logs without user id", () => {
   const line =
     'c.b.RequestLoggingFilter : api_exchange {"requestId":"legacy","clientIp":"198.51.100.7","method":"GET","path":"/api/v1/public/questions","status":200,"durationMs":"1.00"}';
