@@ -6,6 +6,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorRelayContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionsPageResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorStatusResponse
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import kotlinx.coroutines.flow.Flow
@@ -39,7 +40,12 @@ interface VoiceTutorRelayUseCase {
         principal: Principal,
         context: VoiceTutorRelayContext,
         clientEvents: Flow<String>,
-        onProviderEvent: suspend (String) -> Unit,
+        terminalEvents: Flow<VoiceTutorRelayTermination>,
+        onProviderEvent: suspend (
+            raw: String,
+            persist: Boolean,
+            forwardToClient: Boolean,
+        ) -> Unit,
     )
 
     suspend fun appendTranscript(

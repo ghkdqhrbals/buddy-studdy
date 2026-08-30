@@ -78,6 +78,7 @@ buddystudy:
     voice: ${OPENAI_REALTIME_VOICE:marin}
     max-session-seconds: ${VOICE_TUTOR_MAX_SESSION_SECONDS:3600}
     connect-timeout-seconds: ${VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS:15}
+    response-timeout-seconds: ${VOICE_TUTOR_RESPONSE_TIMEOUT_SECONDS:60}
     heartbeat-lease-seconds: ${VOICE_TUTOR_HEARTBEAT_LEASE_SECONDS:60}
     continuous-speech-intervention-seconds: ${VOICE_TUTOR_CONTINUOUS_SPEECH_INTERVENTION_SECONDS:12}
     session-recovery-poll-ms: ${VOICE_TUTOR_SESSION_RECOVERY_POLL_MS:5000}

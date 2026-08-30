@@ -5,6 +5,7 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.reactor.asFlux
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -22,6 +23,7 @@ import reactor.netty.http.client.HttpClient
 import reactor.netty.http.client.WebsocketClientSpec
 import reactor.util.concurrent.Queues
 import java.time.Duration
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.TimeoutException
 
@@ -43,7 +45,12 @@ class OpenAIVoiceTutorRealtimeAdapter(
     override suspend fun relay(
         request: VoiceTutorRealtimeRequest,
         clientEvents: Flow<String>,
-        onProviderEvent: suspend (String) -> Unit,
+        terminalEvents: Flow<VoiceTutorRelayTermination>,
+        onProviderEvent: suspend (
+            raw: String,
+            persist: Boolean,
+            forwardToClient: Boolean,
+        ) -> Unit,
     ) {
         val providerUri = UriComponentsBuilder.fromUriString(OPENAI_REALTIME_URL)
             .queryParam("model", request.model)
@@ -64,14 +71,35 @@ class OpenAIVoiceTutorRealtimeAdapter(
                 continuousSpeechLimit = Duration.ofSeconds(
                     properties.voiceTutor.continuousSpeechInterventionSeconds.coerceIn(5, 30),
                 ),
+                responseTimeout = Duration.ofSeconds(
+                    properties.voiceTutor.responseTimeoutSeconds.coerceIn(10, 120),
+                ),
             )
             val clientEventFlux = clientEvents.asFlux()
+                .handle<String> { raw, sink ->
+                    if (!turnController.observeClientEvent(raw)) {
+                        sink.next(raw)
+                    }
+                }
                 .doFinally { turnController.close() }
+            val terminal = terminalEvents.asFlux()
+                .next()
+                .doOnNext { turnController.close() }
+                .cache()
             val liveEvents = Flux.merge(clientEventFlux, turnController.providerEvents())
+                .takeUntilOther(terminal)
                 .doOnNext(drainState::observeClientEvent)
+            val terminalProviderEvents = terminal.flatMapMany { termination ->
+                if (termination.cancelActiveResponse) {
+                    Flux.just(responseCancelEvent("relay-terminal"))
+                } else {
+                    Flux.empty()
+                }
+            }
             val outbound = Flux.concat(
                 Mono.just(sessionUpdate(request)),
                 liveEvents,
+                terminalProviderEvents,
                 Mono.defer {
                     val commit = drainState.beginDrain()
                     if (commit == null) Mono.empty<String>() else Mono.just(commit)
@@ -84,12 +112,14 @@ class OpenAIVoiceTutorRealtimeAdapter(
                 .filter { it.type == WebSocketMessage.Type.TEXT }
                 .map { it.payloadAsText }
                 .concatMap { raw ->
-                    val shouldForward = turnController.observeProviderEvent(raw)
-                    if (shouldForward) {
-                        mono { onProviderEvent(raw) }.thenReturn(raw)
-                    } else {
-                        Mono.just(raw)
-                    }
+                    val disposition = turnController.observeProviderEvent(raw)
+                    mono {
+                        onProviderEvent(
+                            raw,
+                            disposition.persist,
+                            disposition.forwardToClient,
+                        )
+                    }.thenReturn(raw)
                 }
                 .doOnNext(drainState::observeProviderEvent)
                 .then()
@@ -137,6 +167,13 @@ class OpenAIVoiceTutorRealtimeAdapter(
         ),
     )
 
+    internal fun responseCancelEvent(action: String): String = mapper.writeValueAsString(
+        linkedMapOf(
+            "event_id" to "buddystudy-internal-${action.take(32).ifBlank { "cancel" }}-${UUID.randomUUID()}",
+            "type" to "response.cancel",
+        ),
+    )
+
     private companion object {
         const val OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
         const val MAX_PROVIDER_FRAME_BYTES = 65_536
@@ -147,98 +184,120 @@ class OpenAIVoiceTutorRealtimeAdapter(
 internal class VoiceTutorDuplexTurnController(
     private val mapper: com.fasterxml.jackson.databind.ObjectMapper = JsonMapperProvider.mapper,
     private val continuousSpeechLimit: Duration,
+    private val responseTimeout: Duration,
+    private val nanoTime: () -> Long = System::nanoTime,
 ) {
     private val controls = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<String>(MAX_BUFFERED_CONTROLS).get())
     private var interventionTimer: Disposable? = null
     private var userSpeaking = false
+    private var interventionDeliveredDuringCurrentSpeech = false
     private var responseActive = false
-    private var normalResponsePending = false
-    private var normalInputCommitted = false
-    private var suppressNextSpeechStarted = false
-    private var suppressNextSpeechStoppedResponse = false
+    private var activeResponseGeneration = 0L
+    private var activeResponseCreateEventId: String? = null
+    private var activeResponseId: String? = null
+    private var activeResponseAudioBytes = 0L
+    private var earliestResponsePlaybackEndNanos: Long? = null
+    private var providerResponseDone = false
+    private var playbackCompleted = false
+    private var playbackTimer: Disposable? = null
+    private var responseTimer: Disposable? = null
+    private var queuedCommittedTurn = false
+    private var pendingSpeechCommitCount = 0
+    private var interventionDeadlineElapsedWhileResponseActive = false
+    @Volatile
     private var closed = false
 
-    fun providerEvents(): Flux<String> = controls.asFlux()
+    fun providerEvents(): Flux<String> = controls.asFlux().filter { !closed }
 
     @Synchronized
-    fun observeProviderEvent(raw: String): Boolean {
-        val node = runCatching { mapper.readTree(raw) }.getOrNull() ?: return true
+    fun observeClientEvent(raw: String): Boolean {
+        val node = runCatching { mapper.readTree(raw) }.getOrNull() ?: return false
         return when (node.path("type").asText()) {
-            "input_audio_buffer.speech_started" -> {
-                userSpeaking = true
-                if (suppressNextSpeechStarted) {
-                    suppressNextSpeechStarted = false
-                    false
-                } else {
-                    scheduleIntervention()
-                    true
+            VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT -> {
+                if (closed) return true
+                val responseId = node.path("responseId").asText()
+                if (responseActive && responseId.isNotBlank() && responseId == activeResponseId) {
+                    playbackCompleted = true
+                    if (providerResponseDone) {
+                        advancePlaybackGate()
+                    }
                 }
+                true
+            }
+            else -> false
+        }
+    }
+
+    @Synchronized
+    fun observeProviderEvent(raw: String): VoiceTutorProviderRelayDisposition {
+        val node = runCatching { mapper.readTree(raw) }.getOrNull()
+            ?: return VoiceTutorProviderRelayDisposition.DROP
+        if (closed) {
+            return terminalDisposition(node)
+        }
+        return when (node.path("type").asText()) {
+            "response.output_audio.delta" -> accepted(observeResponseAudio(node))
+            "response.output_audio.done" -> accepted(matchesActiveResponse(node.path("response_id").asText()))
+            in TUTOR_TRANSCRIPT_EVENTS -> accepted(matchesKnownActiveResponse(node.path("response_id").asText()))
+            in USER_TRANSCRIPT_EVENTS -> VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
+            "input_audio_buffer.speech_started" -> {
+                if (!userSpeaking) {
+                    pendingSpeechCommitCount = (pendingSpeechCommitCount + 1)
+                        .coerceAtMost(MAX_PENDING_SPEECH_COMMITS)
+                    interventionDeliveredDuringCurrentSpeech = false
+                }
+                userSpeaking = true
+                interventionDeadlineElapsedWhileResponseActive = false
+                scheduleIntervention()
+                VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
             }
             "input_audio_buffer.speech_stopped" -> {
                 userSpeaking = false
                 interventionTimer?.dispose()
                 interventionTimer = null
-                suppressNextSpeechStarted = false
-                if (suppressNextSpeechStoppedResponse) {
-                    suppressNextSpeechStoppedResponse = false
-                    normalResponsePending = false
-                    normalInputCommitted = false
-                } else {
-                    normalResponsePending = true
-                    normalInputCommitted = false
+                interventionDeliveredDuringCurrentSpeech = false
+                interventionDeadlineElapsedWhileResponseActive = false
+                if (pendingSpeechCommitCount == 0) {
+                    createNormalResponseIfReady()
                 }
-                true
+                VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
             }
             "input_audio_buffer.committed" -> {
-                if (normalResponsePending) {
-                    normalInputCommitted = true
-                    createNormalResponseIfReady()
+                if (pendingSpeechCommitCount > 0) {
+                    pendingSpeechCommitCount -= 1
                 }
-                true
-            }
-            "response.created" -> {
-                responseActive = true
-                true
-            }
-            "response.done" -> {
-                responseActive = false
+                queuedCommittedTurn = true
                 createNormalResponseIfReady()
-                true
+                VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
             }
-            "error" -> {
-                val clientEventId = node.path("error").path("event_id").asText()
-                if (clientEventId.startsWith(DUPLEX_EVENT_PREFIX)) {
-                    responseActive = false
-                    createNormalResponseIfReady()
-                }
-                true
-            }
-            else -> true
+            "response.created" -> accepted(observeResponseCreated(node))
+            "response.done" -> accepted(observeResponseDone(node))
+            "error" -> VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
+            else -> VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
         }
     }
 
     @Synchronized
     internal fun fireContinuousSpeechDeadline() {
-        if (closed || !userSpeaking || responseActive) return
-        responseActive = true
-        normalResponsePending = false
-        normalInputCommitted = false
-        suppressNextSpeechStarted = true
-        suppressNextSpeechStoppedResponse = true
+        interventionTimer = null
+        if (closed || !userSpeaking || interventionDeliveredDuringCurrentSpeech) return
+        if (responseActive) {
+            interventionDeadlineElapsedWhileResponseActive = true
+            return
+        }
+        interventionDeliveredDuringCurrentSpeech = true
+        interventionDeadlineElapsedWhileResponseActive = false
+        val responseEventId = internalEventId("continuous-response")
+        beginResponse(responseEventId)
         emit(
             linkedMapOf(
-                "event_id" to internalEventId("commit"),
-                "type" to "input_audio_buffer.commit",
-            ),
-        )
-        emit(
-            linkedMapOf(
-                "event_id" to internalEventId("continuous-response"),
+                "event_id" to responseEventId,
                 "type" to "response.create",
                 "response" to linkedMapOf(
                     "instructions" to CONTINUOUS_SPEECH_INTERVENTION_INSTRUCTIONS,
                     "metadata" to linkedMapOf(
+                        VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
                         VoiceTutorRealtimeContract.TURN_METADATA_KEY to
                             VoiceTutorRealtimeContract.CONTINUOUS_INTERVENTION_TURN,
                     ),
@@ -247,52 +306,312 @@ internal class VoiceTutorDuplexTurnController(
         )
     }
 
-    @Synchronized
     fun close() {
-        if (closed) return
         closed = true
-        interventionTimer?.dispose()
-        interventionTimer = null
-        controls.tryEmitComplete()
+        synchronized(this) {
+            interventionTimer?.dispose()
+            interventionTimer = null
+            playbackTimer?.dispose()
+            playbackTimer = null
+            responseTimer?.dispose()
+            responseTimer = null
+            controls.tryEmitComplete()
+        }
     }
 
     private fun scheduleIntervention() {
+        if (closed || interventionDeliveredDuringCurrentSpeech) return
         interventionTimer?.dispose()
         interventionTimer = Mono.delay(continuousSpeechLimit)
             .subscribe { fireContinuousSpeechDeadline() }
     }
 
     private fun createNormalResponseIfReady() {
-        if (closed || !normalResponsePending || !normalInputCommitted || responseActive) return
-        normalResponsePending = false
-        normalInputCommitted = false
-        responseActive = true
+        if (closed || userSpeaking || pendingSpeechCommitCount > 0 || !queuedCommittedTurn || responseActive) return
+        queuedCommittedTurn = false
+        val responseEventId = internalEventId("turn-response")
+        beginResponse(responseEventId)
         emit(
             linkedMapOf(
-                "event_id" to internalEventId("turn-response"),
+                "event_id" to responseEventId,
                 "type" to "response.create",
+                "response" to linkedMapOf(
+                    "metadata" to linkedMapOf(
+                        VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
+                    ),
+                ),
             ),
         )
     }
 
     private fun emit(event: Map<String, Any?>) {
+        if (closed) return
         val result = controls.tryEmitNext(mapper.writeValueAsString(event))
         if (result.isFailure && result != Sinks.EmitResult.FAIL_CANCELLED && result != Sinks.EmitResult.FAIL_TERMINATED) {
             controls.tryEmitError(IllegalStateException("Voice Tutor provider control buffer overflowed."))
         }
     }
 
+    private fun beginResponse(createEventId: String) {
+        playbackTimer?.dispose()
+        playbackTimer = null
+        activeResponseGeneration = if (activeResponseGeneration == Long.MAX_VALUE) {
+            1
+        } else {
+            activeResponseGeneration + 1
+        }
+        responseActive = true
+        activeResponseCreateEventId = createEventId
+        activeResponseId = null
+        activeResponseAudioBytes = 0
+        earliestResponsePlaybackEndNanos = null
+        providerResponseDone = false
+        playbackCompleted = false
+        responseTimer?.dispose()
+        val responseGeneration = activeResponseGeneration
+        responseTimer = Mono.delay(responseTimeout)
+            .subscribe { fireResponseTimeout(responseGeneration, createEventId) }
+    }
+
+    private fun observeResponseCreated(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
+        if (!responseActive) return false
+        if (!matchesActiveResponseToken(node.path("response"))) return false
+        val responseId = node.path("response").path("id").asText()
+        if (!matchesActiveResponse(responseId)) return false
+        if (activeResponseId == null) {
+            activeResponseId = responseId
+        }
+        return true
+    }
+
+    private fun observeResponseAudio(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
+        if (!responseActive || activeResponseId == null) return false
+        val responseId = node.path("response_id").asText()
+        if (!matchesActiveResponse(responseId)) return false
+        if (activeResponseId == null) {
+            activeResponseId = responseId
+        }
+        val bytes = runCatching { Base64.getDecoder().decode(node.path("delta").asText()).size.toLong() }
+            .getOrDefault(0)
+        if (bytes > 0) {
+            val receivedAt = nanoTime()
+            val playbackStart = maxOf(earliestResponsePlaybackEndNanos ?: receivedAt, receivedAt)
+            earliestResponsePlaybackEndNanos = playbackStart + audioDurationNanos(bytes)
+        }
+        activeResponseAudioBytes = (activeResponseAudioBytes + bytes).coerceAtMost(MAX_RESPONSE_AUDIO_BYTES)
+        return true
+    }
+
+    private fun observeResponseDone(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
+        if (!responseActive) return false
+        val response = node.path("response")
+        if (response.path("status").asText() !in COMPLETING_RESPONSE_STATUSES) return true
+        if (!matchesActiveResponseToken(response)) return false
+        val responseId = response.path("id").asText()
+        if (!matchesActiveResponse(responseId)) return false
+        if (activeResponseId == null) {
+            activeResponseId = responseId
+        }
+        providerResponseDone = true
+        responseTimer?.dispose()
+        responseTimer = null
+        advancePlaybackGate()
+        return true
+    }
+
+    private fun matchesActiveResponse(responseId: String): Boolean =
+        responseActive && responseId.isNotBlank() && (activeResponseId == null || responseId == activeResponseId)
+
+    private fun matchesKnownActiveResponse(responseId: String): Boolean =
+        responseActive && activeResponseId != null && responseId == activeResponseId
+
+    private fun matchesActiveResponseToken(response: com.fasterxml.jackson.databind.JsonNode): Boolean =
+        response.path("metadata").path(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY).asText() ==
+            activeResponseCreateEventId
+
+    private fun advancePlaybackGate() {
+        if (!responseActive || !providerResponseDone) return
+        if (activeResponseAudioBytes == 0L) {
+            finishActiveResponse()
+            return
+        }
+        if (playbackCompleted) {
+            val remainingNanos = earliestPlaybackCompletionNanos() - nanoTime()
+            if (remainingNanos <= 0) {
+                finishActiveResponse()
+            } else {
+                schedulePlaybackTimer(remainingNanos, requiresAcknowledgement = true)
+            }
+        } else {
+            val fallbackNanos = (responseAudioDurationNanos() + PLAYBACK_ACK_GRACE_NANOS)
+                .coerceAtLeast(PLAYBACK_ACK_MIN_NANOS)
+            schedulePlaybackTimer(fallbackNanos, requiresAcknowledgement = false)
+        }
+    }
+
+    private fun earliestPlaybackCompletionNanos(): Long {
+        return earliestResponsePlaybackEndNanos ?: nanoTime()
+    }
+
+    private fun responseAudioDurationNanos(): Long =
+        audioDurationNanos(activeResponseAudioBytes)
+
+    private fun audioDurationNanos(audioBytes: Long): Long =
+        ((audioBytes * NANOS_PER_SECOND) + PCM_BYTES_PER_SECOND - 1) / PCM_BYTES_PER_SECOND
+
+    private fun schedulePlaybackTimer(delayNanos: Long, requiresAcknowledgement: Boolean) {
+        val responseGeneration = activeResponseGeneration
+        val responseId = activeResponseId
+        playbackTimer?.dispose()
+        playbackTimer = Mono.delay(Duration.ofNanos(delayNanos.coerceAtLeast(1)))
+            .subscribe {
+                firePlaybackTimer(responseGeneration, responseId, requiresAcknowledgement)
+            }
+    }
+
+    @Synchronized
+    internal fun firePlaybackTimeout(responseId: String?) {
+        firePlaybackTimer(activeResponseGeneration, responseId, requiresAcknowledgement = false)
+    }
+
+    @Synchronized
+    internal fun firePlaybackFloor(responseId: String?) {
+        firePlaybackTimer(activeResponseGeneration, responseId, requiresAcknowledgement = true)
+    }
+
+    @Synchronized
+    internal fun fireResponseTimeout(createEventId: String?) {
+        fireResponseTimeout(activeResponseGeneration, createEventId)
+    }
+
+    @Synchronized
+    internal fun fireResponseTimeout(responseGeneration: Long, createEventId: String?) {
+        if (
+            closed ||
+            !responseActive ||
+            providerResponseDone ||
+            responseGeneration != activeResponseGeneration ||
+            createEventId != activeResponseCreateEventId
+        ) {
+            return
+        }
+        responseTimer = null
+        emit(
+            linkedMapOf(
+                "event_id" to "buddystudy-internal-response-timeout-${UUID.randomUUID()}",
+                "type" to "response.cancel",
+            ),
+        )
+        controls.tryEmitError(VoiceTutorProviderResponseTimeoutException())
+    }
+
+    @Synchronized
+    private fun firePlaybackTimer(
+        responseGeneration: Long,
+        responseId: String?,
+        requiresAcknowledgement: Boolean,
+    ) {
+        if (
+            !closed &&
+            responseActive &&
+            providerResponseDone &&
+            responseGeneration == activeResponseGeneration &&
+            responseId == activeResponseId &&
+            (!requiresAcknowledgement || playbackCompleted)
+        ) {
+            if (nanoTime() >= earliestPlaybackCompletionNanos()) {
+                finishActiveResponse()
+            } else {
+                advancePlaybackGate()
+            }
+        }
+    }
+
+    private fun finishActiveResponse() {
+        if (!responseActive) return
+        playbackTimer?.dispose()
+        playbackTimer = null
+        responseTimer?.dispose()
+        responseTimer = null
+        responseActive = false
+        activeResponseCreateEventId = null
+        activeResponseId = null
+        activeResponseAudioBytes = 0
+        earliestResponsePlaybackEndNanos = null
+        providerResponseDone = false
+        playbackCompleted = false
+        if (closed) return
+        if (userSpeaking) {
+            if (interventionDeadlineElapsedWhileResponseActive) {
+                fireContinuousSpeechDeadline()
+            } else if (interventionTimer == null) {
+                scheduleIntervention()
+            }
+        } else {
+            createNormalResponseIfReady()
+        }
+    }
+
     private fun internalEventId(action: String): String =
         "$DUPLEX_EVENT_PREFIX$action-${UUID.randomUUID()}"
 
+    private fun accepted(accepted: Boolean): VoiceTutorProviderRelayDisposition =
+        if (accepted) {
+            VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
+        } else {
+            VoiceTutorProviderRelayDisposition.DROP
+        }
+
+    private fun terminalDisposition(
+        node: com.fasterxml.jackson.databind.JsonNode,
+    ): VoiceTutorProviderRelayDisposition = when (node.path("type").asText()) {
+        in USER_TRANSCRIPT_EVENTS -> VoiceTutorProviderRelayDisposition.PERSIST_ONLY
+        in TUTOR_TRANSCRIPT_EVENTS -> if (matchesKnownActiveResponse(node.path("response_id").asText())) {
+            VoiceTutorProviderRelayDisposition.PERSIST_ONLY
+        } else {
+            VoiceTutorProviderRelayDisposition.DROP
+        }
+        else -> VoiceTutorProviderRelayDisposition.DROP
+    }
+
     private companion object {
         const val MAX_BUFFERED_CONTROLS = 32
+        const val MAX_PENDING_SPEECH_COMMITS = 32
+        const val MAX_RESPONSE_AUDIO_BYTES = 172_800_000L
+        const val PCM_BYTES_PER_SECOND = 48_000L
+        const val NANOS_PER_SECOND = 1_000_000_000L
+        const val PLAYBACK_ACK_GRACE_NANOS = 5_000_000_000L
+        const val PLAYBACK_ACK_MIN_NANOS = 5_000_000_000L
         const val DUPLEX_EVENT_PREFIX = "buddystudy-internal-duplex-"
+        val TUTOR_TRANSCRIPT_EVENTS = setOf(
+            "response.output_audio_transcript.delta",
+            "response.output_audio_transcript.done",
+        )
+        val USER_TRANSCRIPT_EVENTS = setOf(
+            "conversation.item.input_audio_transcription.delta",
+            "conversation.item.input_audio_transcription.completed",
+        )
+        val COMPLETING_RESPONSE_STATUSES = setOf("completed", "cancelled", "incomplete")
         const val CONTINUOUS_SPEECH_INTERVENTION_INSTRUCTIONS =
-            "The learner has been speaking continuously. Briefly intervene only to correct an important misconception " +
-                "or to refocus an overly long monologue; otherwise invite them to continue. Be concise and respectful."
+            "The learner has been speaking continuously. Use exactly one short, complete, respectful sentence " +
+                "asking them to wrap up their current point, then let them continue."
     }
 }
+
+internal data class VoiceTutorProviderRelayDisposition(
+    val persist: Boolean,
+    val forwardToClient: Boolean,
+) {
+    companion object {
+        val DROP = VoiceTutorProviderRelayDisposition(persist = false, forwardToClient = false)
+        val PERSIST_ONLY = VoiceTutorProviderRelayDisposition(persist = true, forwardToClient = false)
+        val FORWARD_AND_PERSIST = VoiceTutorProviderRelayDisposition(persist = true, forwardToClient = true)
+    }
+}
+
+internal class VoiceTutorProviderResponseTimeoutException : RuntimeException(
+    "Voice Tutor provider response timed out.",
+)
 
 internal class VoiceTutorProviderDrainState(
     private val mapper: com.fasterxml.jackson.databind.ObjectMapper = JsonMapperProvider.mapper,
@@ -317,10 +636,6 @@ internal class VoiceTutorProviderDrainState(
             "input_audio_buffer.commit" -> {
                 bufferedAudio = false
                 unidentifiedTranscriptionPending = true
-                touch()
-            }
-            "input_audio_buffer.clear" -> {
-                bufferedAudio = false
                 touch()
             }
             "response.create" -> {

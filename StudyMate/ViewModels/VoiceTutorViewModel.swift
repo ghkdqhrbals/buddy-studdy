@@ -58,63 +58,56 @@ enum VoiceTutorLiveTextBounds {
     }
 }
 
-enum VoiceTutorUserSpeechStartDisposition: Equatable {
-    case interventionContinuation
-    case bargeIn(cancelResponse: Bool)
-}
-
 struct VoiceTutorDuplexPlaybackState: Equatable {
     private(set) var isUserSpeaking = false
     private(set) var assistantResponseActive = false
+    private(set) var activeResponseID: String?
     private(set) var tutorInterventionActive = false
 
-    mutating func responseStarted(isTutorIntervention: Bool) -> Bool {
-        assistantResponseActive = true
-        tutorInterventionActive = isTutorIntervention
-        if isUserSpeaking && !isTutorIntervention {
-            // A normal response can race with a newer learner turn. Only the
-            // server-marked continuous-speech intervention owns the floor.
-            assistantResponseActive = false
-            return true
-        }
-        return false
-    }
-
-    mutating func assistantAudioBegan() {
-        assistantResponseActive = true
-    }
-
-    func permitsAssistantAudio(
-        itemID: String?,
-        interruptedItemID: String?
-    ) -> Bool {
-        if let interruptedItemID, itemID == interruptedItemID {
+    @discardableResult
+    mutating func responseStarted(responseID: String?, isTutorIntervention: Bool) -> Bool {
+        guard let responseID, !responseID.isEmpty else {
             return false
         }
-        return !isUserSpeaking || tutorInterventionActive
+        assistantResponseActive = true
+        activeResponseID = responseID
+        tutorInterventionActive = isTutorIntervention
+        return true
     }
 
-    mutating func userSpeechStarted() -> VoiceTutorUserSpeechStartDisposition {
-        if tutorInterventionActive && isUserSpeaking {
-            // The provider may open a continuation VAD segment immediately
-            // after the server manually commits a long utterance. It is still
-            // the same turn and must not cancel the tutor intervention.
-            return .interventionContinuation
+    func matchesActiveResponse(responseID: String?) -> Bool {
+        guard assistantResponseActive,
+              let activeResponseID,
+              let responseID else {
+            return false
         }
+        return activeResponseID == responseID
+    }
+
+    mutating func assistantAudioBegan(responseID: String?) -> Bool {
+        guard matchesActiveResponse(responseID: responseID) else {
+            return false
+        }
+        assistantResponseActive = true
+        return true
+    }
+
+    mutating func userSpeechStarted() {
         isUserSpeaking = true
-        let shouldCancel = assistantResponseActive
-        assistantResponseActive = false
-        tutorInterventionActive = false
-        return .bargeIn(cancelResponse: shouldCancel)
     }
 
     mutating func userSpeechStopped() {
         isUserSpeaking = false
     }
 
-    mutating func responseFinished() {
+    mutating func responseFinished(responseID: String) -> Bool {
+        if let activeResponseID, activeResponseID != responseID {
+            return false
+        }
         assistantResponseActive = false
+        activeResponseID = nil
         tutorInterventionActive = false
+        return true
     }
 
     mutating func reset() {
@@ -149,7 +142,6 @@ final class VoiceTutorViewModel: ObservableObject {
     private var hardEndsAt: Date?
     private var isFinalizing = false
     private var duplexPlaybackState = VoiceTutorDuplexPlaybackState()
-    private var interruptedItemID: String?
 
     init(
         appState: AppState,
@@ -175,7 +167,6 @@ final class VoiceTutorViewModel: ObservableObject {
         captions = []
         assistantTranscriptDraft = ""
         duplexPlaybackState.reset()
-        interruptedItemID = nil
         phase = .requestingPermission
 
         guard await VoiceTutorAudioEngine.requestMicrophonePermission() else {
@@ -213,6 +204,11 @@ final class VoiceTutorViewModel: ObservableObject {
             try await audioEngine.start(
                 onAudioChunk: { audio in
                     audioSendContinuation.yield(audio)
+                },
+                onPlaybackCompleted: { [weak self] responseID in
+                    Task { @MainActor [weak self] in
+                        await self?.handleTutorPlaybackCompleted(responseID: responseID)
+                    }
                 },
                 onInterruption: { [weak self] in
                     Task { @MainActor [weak self] in
@@ -511,64 +507,60 @@ final class VoiceTutorViewModel: ObservableObject {
             phase = .failed
             await stop(shouldNotifyServerOverSocket: false)
         case .audioDelta(let delta):
-            if !duplexPlaybackState.permitsAssistantAudio(
-                itemID: delta.itemID,
-                interruptedItemID: interruptedItemID
-            ) {
+            guard duplexPlaybackState.assistantAudioBegan(responseID: delta.responseID) else {
                 break
             }
-            if let interruptedItemID, delta.itemID != interruptedItemID {
-                self.interruptedItemID = nil
-            }
-            duplexPlaybackState.assistantAudioBegan()
             try? audioEngine.playPCM24(delta)
             phase = .speaking
-        case .assistantTranscriptDelta(let delta):
+        case .assistantTranscriptDelta(let responseID, let delta):
+            guard duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
+                break
+            }
             assistantTranscriptDraft = VoiceTutorLiveTextBounds.appending(
                 delta: delta,
                 to: assistantTranscriptDraft
             )
-        case .assistantTranscriptDone(let transcript):
+        case .assistantTranscriptDone(let responseID, let transcript):
+            guard duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
+                break
+            }
             commitAssistantTranscript(transcript)
         case .userTranscript(let transcript):
             appendCaption(speaker: .learner, text: transcript)
         case .userSpeechStarted:
-            let disposition = duplexPlaybackState.userSpeechStarted()
-            if disposition == .interventionContinuation {
-                break
+            duplexPlaybackState.userSpeechStarted()
+            if !duplexPlaybackState.assistantResponseActive {
+                phase = .listening
             }
-            let truncation = audioEngine.interruptPlayback()
-            interruptedItemID = truncation?.itemID
-            let shouldCancelResponse: Bool
-            if case .bargeIn(let cancelResponse) = disposition {
-                shouldCancelResponse = cancelResponse
-            } else {
-                shouldCancelResponse = false
-            }
-            if shouldCancelResponse || truncation != nil {
-                try? await transport.sendBargeIn(
-                    cancelResponse: shouldCancelResponse,
-                    truncation: truncation
-                )
-            }
-            phase = .listening
         case .userSpeechStopped:
             duplexPlaybackState.userSpeechStopped()
-        case .responseStarted(let isTutorIntervention):
-            let shouldCancelRacingResponse = duplexPlaybackState.responseStarted(
+        case .responseStarted(let responseID, let isTutorIntervention):
+            duplexPlaybackState.responseStarted(
+                responseID: responseID,
                 isTutorIntervention: isTutorIntervention
             )
-            if shouldCancelRacingResponse {
-                try? await transport.sendBargeIn(cancelResponse: true, truncation: nil)
+        case .responseFinished(let responseID):
+            guard duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
+                break
             }
-        case .responseFinished:
-            duplexPlaybackState.responseFinished()
-            interruptedItemID = nil
             commitAssistantTranscript(nil)
-            phase = .listening
+            if let responseID {
+                audioEngine.finishResponseAudio(responseID: responseID)
+            }
         case .ignored:
             break
         }
+    }
+
+    private func handleTutorPlaybackCompleted(responseID: String) async {
+        guard phase.isLive else {
+            return
+        }
+        try? await transport.sendPlaybackCompleted(responseID: responseID)
+        guard duplexPlaybackState.responseFinished(responseID: responseID) else {
+            return
+        }
+        phase = .listening
     }
 
     private func finishFromServer(_ ended: VoiceTutorRealtimeEnded) async {
@@ -607,7 +599,6 @@ final class VoiceTutorViewModel: ObservableObject {
         await appState.refreshVoiceTutorStatus()
         await appState.loadVoiceTutorSessions(reset: true)
         duplexPlaybackState.reset()
-        interruptedItemID = nil
         isFinalizing = false
         phase = .ended
     }

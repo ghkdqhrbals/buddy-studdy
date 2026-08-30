@@ -884,14 +884,17 @@ Sec-WebSocket-Protocol: buddystudy.voice.v1
 ```
 
 WebSocket messages are JSON text frames. The relay accepts the OpenAI Realtime
-client event types `input_audio_buffer.append`, `input_audio_buffer.commit`,
-`input_audio_buffer.clear`, `response.cancel`, and
-`conversation.item.truncate`. `response.create` is server-owned and is never
-accepted from the client. When the learner speaks over current tutor audio,
-iOS stops queued playback immediately and sends `buddystudy.voice.barge-in`
-with `cancelResponse` plus the rendered `itemId`, `contentIndex`, and
-`audioEndMs`; the relay creates the ordered provider `response.cancel` and
-`conversation.item.truncate` events. Sending `buddystudy.voice.heartbeat`
+client event types `input_audio_buffer.append` and `input_audio_buffer.commit`.
+`input_audio_buffer.clear`, `response.create`, `response.cancel`,
+`conversation.item.truncate`, and the legacy `buddystudy.voice.barge-in` event
+are never accepted from the client. When the learner speaks over current tutor
+audio, iOS keeps the current tutor sentence queued for uninterrupted playback
+while continuing to stream microphone input. After OpenAI marks the complete
+response done and the final PCM buffer is actually rendered, iOS sends the
+local `buddystudy.voice.playback.completed` event with that `responseId`. The
+relay validates and consumes this acknowledgement without forwarding it to
+OpenAI; a response-audio-duration-based bounded fallback prevents a lost
+acknowledgement from wedging the session. Sending `buddystudy.voice.heartbeat`
 returns a rate-coalesced acknowledgement; a server-owned two-second control
 pulse, not this advisory client event, refreshes the active relay lease and
 revalidates the authenticated user/device session. Sending
@@ -902,14 +905,20 @@ than forwarded raw; audio and transcript deltas are size-bounded before relay,
 and OpenAI credentials remain server-only.
 
 Server VAD remains active while tutor audio plays, so learner-to-tutor
-interruption is full duplex. Automatic provider response creation and automatic
-provider interruption are disabled: the backend creates one response only
-after a committed ordinary learner turn. A configurable, bounded continuous
-speech timer (default 12 seconds) may manually commit and request one brief
-tutor intervention for a long monologue; the following continuation VAD edge is
-suppressed so it cannot immediately cancel that intervention, and the matching
-stop/commit cannot create a duplicate response. The tutor prompt limits this to
-long monologues or important misconceptions rather than ordinary pauses.
+overlap is full duplex. Automatic provider response creation and automatic
+provider interruption are disabled. Trusted tutor instructions constrain every
+spoken response to one short, complete sentence. A learner turn committed while
+that sentence is active remains queued; the backend creates one normal response
+only after the provider response is done, the matching sentence audio has
+finished playback on iOS, and the learner is no longer speaking.
+Multiple committed segments that arrive during the same overlap are coalesced
+into that next response. A configurable, bounded continuous-speech timer
+(default 12 seconds) may request one separate, one-sentence tutor intervention
+for a long monologue without committing or clearing the learner's live input
+buffer. That captured turn commits naturally after the learner stops. The tutor
+prompt limits intervention to long monologues or important misconceptions
+rather than ordinary pauses. A configurable response watchdog defaults to 60
+seconds and terminates a provider response that never reaches `response.done`.
 Ending through either REST or WebSocket flushes accepted-audio accounting,
 commits any final buffered input, and waits up to two seconds for its transcript
 and active response completion before terminal settlement.

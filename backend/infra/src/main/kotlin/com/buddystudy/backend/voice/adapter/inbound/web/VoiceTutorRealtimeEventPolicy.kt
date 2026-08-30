@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.Base64
-import java.util.UUID
 
 internal class VoiceTutorRealtimeEventPolicy(
     private val mapper: ObjectMapper = JsonMapperProvider.mapper,
@@ -26,76 +25,11 @@ internal class VoiceTutorRealtimeEventPolicy(
         if (node.path("event_id").asText().startsWith(INTERNAL_CONTROL_EVENT_PREFIX)) {
             throw VoiceTutorClientProtocolException("Voice Tutor client event id is reserved.")
         }
-        if (type == "conversation.item.truncate") {
-            validateTruncation(node)
+        if (type == VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT) {
+            validatePlaybackCompletion(node)
         }
         return type in ALLOWED_CLIENT_EVENTS
     }
-
-    fun providerEventsForBargeIn(raw: String): List<String> {
-        if (raw.length > MAX_CLIENT_EVENT_CHARACTERS) {
-            throw VoiceTutorClientProtocolException("Voice Tutor client event exceeds the allowed size.")
-        }
-        val node = clientEvent(raw)
-        if (node.path("type").asText() != CLIENT_BARGE_IN_EVENT) {
-            throw VoiceTutorClientProtocolException("Unsupported Voice Tutor client event.")
-        }
-        val cancelNode = node.path("cancelResponse")
-        if (!cancelNode.isBoolean) {
-            throw VoiceTutorClientProtocolException("Voice Tutor barge-in cancellation flag is required.")
-        }
-        val cancelResponse = cancelNode.booleanValue()
-        val hasTruncation = !node.path("itemId").isMissingNode ||
-            !node.path("contentIndex").isMissingNode ||
-            !node.path("audioEndMs").isMissingNode
-        val truncation = if (hasTruncation) {
-            val normalized = mapper.createObjectNode().apply {
-                put("item_id", node.path("itemId").asText())
-                set<JsonNode>("content_index", node.path("contentIndex"))
-                set<JsonNode>("audio_end_ms", node.path("audioEndMs"))
-            }
-            validateTruncation(normalized)
-            normalized
-        } else {
-            null
-        }
-        if (!cancelResponse && truncation == null) {
-            throw VoiceTutorClientProtocolException("Voice Tutor barge-in requires a provider action.")
-        }
-
-        return buildList {
-            if (cancelResponse) {
-                add(
-                    mapper.writeValueAsString(
-                        linkedMapOf(
-                            "event_id" to internalEventId("cancel"),
-                            "type" to "response.cancel",
-                        ),
-                    ),
-                )
-            }
-            truncation?.let {
-                add(
-                    mapper.writeValueAsString(
-                        linkedMapOf(
-                            "event_id" to internalEventId("truncate"),
-                            "type" to "conversation.item.truncate",
-                            "item_id" to it.path("item_id").asText(),
-                            "content_index" to it.path("content_index").intValue(),
-                            "audio_end_ms" to it.path("audio_end_ms").intValue(),
-                        ),
-                    ),
-                )
-            }
-        }
-    }
-
-    fun internalResponseCancelEvent(action: String): String = mapper.writeValueAsString(
-        linkedMapOf(
-            "event_id" to internalEventId(action.take(32).ifBlank { "cancel" }),
-            "type" to "response.cancel",
-        ),
-    )
 
     fun providerDecision(raw: String, sessionId: String, serverTime: Instant): ProviderEventDecision {
         val node = runCatching { mapper.readTree(raw) }.getOrNull()
@@ -111,14 +45,35 @@ internal class VoiceTutorRealtimeEventPolicy(
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
-            in TRANSCRIPT_DELTA_PROVIDER_EVENTS -> if (
+            "response.output_audio.done" -> if (validProviderResponseId(node.path("response_id"))) {
+                ProviderEventDecision(raw)
+            } else {
+                providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+            }
+            in TUTOR_TRANSCRIPT_DELTA_PROVIDER_EVENTS -> if (
+                validProviderResponseId(node.path("response_id")) &&
                 validProviderText(node, "delta", MAX_TRANSCRIPT_DELTA_CHARACTERS)
             ) {
                 ProviderEventDecision(raw)
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
-            in TRANSCRIPT_DONE_PROVIDER_EVENTS -> if (
+            in TUTOR_TRANSCRIPT_DONE_PROVIDER_EVENTS -> if (
+                validProviderResponseId(node.path("response_id")) &&
+                validProviderText(node, "transcript", MAX_TRANSCRIPT_CHARACTERS)
+            ) {
+                ProviderEventDecision(raw)
+            } else {
+                providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+            }
+            in USER_TRANSCRIPT_DELTA_PROVIDER_EVENTS -> if (
+                validProviderText(node, "delta", MAX_TRANSCRIPT_DELTA_CHARACTERS)
+            ) {
+                ProviderEventDecision(raw)
+            } else {
+                providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+            }
+            in USER_TRANSCRIPT_DONE_PROVIDER_EVENTS -> if (
                 validProviderText(node, "transcript", MAX_TRANSCRIPT_CHARACTERS)
             ) {
                 ProviderEventDecision(raw)
@@ -126,25 +81,44 @@ internal class VoiceTutorRealtimeEventPolicy(
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
             in PASSTHROUGH_PROVIDER_EVENTS -> ProviderEventDecision(raw)
-            "response.created", "response.done" -> ProviderEventDecision(
-                mapper.writeValueAsString(
-                    linkedMapOf(
-                        "type" to type,
-                        "response" to linkedMapOf(
-                            "id" to node.path("response").path("id").asText(),
-                            "status" to node.path("response").path("status").asText(),
-                        ),
-                        VoiceTutorRealtimeContract.TUTOR_INTERVENTION_FIELD to (
-                            type == "response.created" &&
-                                node.path("response").path("metadata")
-                                    .path(VoiceTutorRealtimeContract.TURN_METADATA_KEY).asText() ==
-                                VoiceTutorRealtimeContract.CONTINUOUS_INTERVENTION_TURN
-                            ),
-                    ),
-                ),
-            )
+            "response.created", "response.done" -> responseDecision(node, type, sessionId, serverTime)
             else -> ProviderEventDecision(payload = null)
         }
+    }
+
+    private fun responseDecision(
+        node: JsonNode,
+        type: String,
+        sessionId: String,
+        serverTime: Instant,
+    ): ProviderEventDecision {
+        val response = node.path("response")
+        if (!validProviderResponseId(response.path("id"))) {
+            return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+        }
+        val status = response.path("status").asText()
+        if (type == "response.done" && status !in RESPONSE_DONE_STATUSES) {
+            return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+        }
+        if (type == "response.done" && status == "failed") {
+            return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_ERROR")
+        }
+        return ProviderEventDecision(
+            mapper.writeValueAsString(
+                linkedMapOf(
+                    "type" to type,
+                    "response" to linkedMapOf(
+                        "id" to response.path("id").asText(),
+                        "status" to status,
+                    ),
+                    VoiceTutorRealtimeContract.TUTOR_INTERVENTION_FIELD to (
+                        type == "response.created" &&
+                            response.path("metadata").path(VoiceTutorRealtimeContract.TURN_METADATA_KEY).asText() ==
+                            VoiceTutorRealtimeContract.CONTINUOUS_INTERVENTION_TURN
+                        ),
+                ),
+            ),
+        )
     }
 
     private fun providerFailure(sessionId: String, serverTime: Instant, code: String) = ProviderEventDecision(
@@ -170,26 +144,21 @@ internal class VoiceTutorRealtimeEventPolicy(
         return node
     }
 
-    private fun validateTruncation(node: JsonNode) {
-        val itemIdNode = node.path("item_id")
-        val itemId = itemIdNode.asText()
-        if (!itemIdNode.isTextual || !ITEM_ID_PATTERN.matches(itemId)) {
-            throw VoiceTutorClientProtocolException("Voice Tutor truncation item id is invalid.")
-        }
-        val contentIndex = node.path("content_index")
-        if (!contentIndex.isIntegralNumber || contentIndex.longValue() !in 0L..MAX_CONTENT_INDEX.toLong()) {
-            throw VoiceTutorClientProtocolException("Voice Tutor truncation content index is invalid.")
-        }
-        val audioEndMs = node.path("audio_end_ms")
-        if (!audioEndMs.isIntegralNumber || audioEndMs.longValue() !in 0L..MAX_AUDIO_END_MILLISECONDS) {
-            throw VoiceTutorClientProtocolException("Voice Tutor truncation audio position is invalid.")
+    private fun validatePlaybackCompletion(node: JsonNode) {
+        val responseId = node.path("responseId")
+        if (!responseId.isTextual || !PROVIDER_ID_PATTERN.matches(responseId.asText())) {
+            throw VoiceTutorClientProtocolException("Voice Tutor playback response id is invalid.")
         }
     }
 
-    private fun isExpectedInternalControlError(node: JsonNode): Boolean =
-        node.path("error").path("event_id").asText().startsWith(INTERNAL_CONTROL_EVENT_PREFIX)
+    private fun isExpectedInternalControlError(node: JsonNode): Boolean {
+        val eventId = node.path("error").path("event_id").asText()
+        return eventId.startsWith("${INTERNAL_CONTROL_EVENT_PREFIX}drain-") ||
+            eventId.startsWith("${INTERNAL_CONTROL_EVENT_PREFIX}relay-terminal-")
+    }
 
     private fun validProviderAudioDelta(node: JsonNode): Boolean {
+        if (!validProviderResponseId(node.path("response_id"))) return false
         val delta = node.path("delta")
         if (!delta.isTextual || delta.asText().isEmpty()) return false
         return try {
@@ -199,13 +168,13 @@ internal class VoiceTutorRealtimeEventPolicy(
         }
     }
 
+    private fun validProviderResponseId(node: JsonNode): Boolean =
+        node.isTextual && PROVIDER_ID_PATTERN.matches(node.asText())
+
     private fun validProviderText(node: JsonNode, field: String, maxCharacters: Int): Boolean {
         val value = node.path(field)
         return value.isTextual && value.asText().length <= maxCharacters
     }
-
-    private fun internalEventId(action: String): String =
-        "$INTERNAL_CONTROL_EVENT_PREFIX$action-${UUID.randomUUID()}"
 
     data class ProviderEventDecision(
         val payload: String?,
@@ -215,36 +184,38 @@ internal class VoiceTutorRealtimeEventPolicy(
     companion object {
         const val CLIENT_END_EVENT = "buddystudy.voice.session.end"
         const val CLIENT_HEARTBEAT_EVENT = "buddystudy.voice.heartbeat"
-        const val CLIENT_BARGE_IN_EVENT = "buddystudy.voice.barge-in"
         const val INTERNAL_CONTROL_EVENT_PREFIX = "buddystudy-internal-"
         const val MAX_CLIENT_EVENT_CHARACTERS = 65_536
-        private const val MAX_CONTENT_INDEX = 64
-        private const val MAX_AUDIO_END_MILLISECONDS = 3_600_000L
         private const val MAX_PROVIDER_AUDIO_DELTA_BYTES = 32_768
         private const val MAX_TRANSCRIPT_DELTA_CHARACTERS = 4_096
         private const val MAX_TRANSCRIPT_CHARACTERS = 32_000
-        private val ITEM_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,191}")
+        private val PROVIDER_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,191}")
         private val ALLOWED_CLIENT_EVENTS = setOf(
             "input_audio_buffer.append",
             "input_audio_buffer.commit",
-            "input_audio_buffer.clear",
-            "response.cancel",
-            "conversation.item.truncate",
         )
-        private val LOCAL_CLIENT_EVENTS = setOf(CLIENT_END_EVENT, CLIENT_HEARTBEAT_EVENT, CLIENT_BARGE_IN_EVENT)
-        private val TRANSCRIPT_DELTA_PROVIDER_EVENTS = setOf(
+        private val LOCAL_CLIENT_EVENTS = setOf(
+            CLIENT_END_EVENT,
+            CLIENT_HEARTBEAT_EVENT,
+            VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT,
+        )
+        private val TUTOR_TRANSCRIPT_DELTA_PROVIDER_EVENTS = setOf(
             "response.output_audio_transcript.delta",
+        )
+        private val USER_TRANSCRIPT_DELTA_PROVIDER_EVENTS = setOf(
             "conversation.item.input_audio_transcription.delta",
         )
-        private val TRANSCRIPT_DONE_PROVIDER_EVENTS = setOf(
+        private val TUTOR_TRANSCRIPT_DONE_PROVIDER_EVENTS = setOf(
             "response.output_audio_transcript.done",
+        )
+        private val USER_TRANSCRIPT_DONE_PROVIDER_EVENTS = setOf(
             "conversation.item.input_audio_transcription.completed",
         )
         private val PASSTHROUGH_PROVIDER_EVENTS = setOf(
-            "response.output_audio.done",
             "input_audio_buffer.speech_started",
             "input_audio_buffer.speech_stopped",
         )
+        private val RESPONSE_DONE_STATUSES = setOf("completed", "cancelled", "incomplete", "failed")
     }
 }
 
@@ -337,11 +308,8 @@ internal class VoiceTutorClientTrafficGuard(
         const val MAX_CONTROL_EVENTS_PER_SECOND = 8.0
         const val MAX_CONTROL_EVENT_BURST = 8
         val RATE_LIMITED_CONTROL_EVENTS = setOf(
-            VoiceTutorRealtimeEventPolicy.CLIENT_BARGE_IN_EVENT,
+            VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT,
             "input_audio_buffer.commit",
-            "input_audio_buffer.clear",
-            "response.cancel",
-            "conversation.item.truncate",
         )
     }
 }

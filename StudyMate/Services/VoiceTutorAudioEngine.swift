@@ -99,67 +99,42 @@ private final class VoiceTutorInputConverter: @unchecked Sendable {
     }
 }
 
-struct VoiceTutorPlaybackTimeline {
-    private struct Segment {
-        var startSampleTime: Int64
-        var frameCount: Int64
+struct VoiceTutorPlaybackCompletionState {
+    private var pendingBufferCounts: [String: Int] = [:]
+    private var sealedResponseIDs: Set<String> = []
+
+    mutating func recordScheduled(responseID: String) {
+        pendingBufferCounts[responseID, default: 0] += 1
     }
 
-    private var itemID: String?
-    private var contentIndex = 0
-    private var segments: [Segment] = []
-    private var scheduledEndSampleTime: Int64?
-
-    mutating func recordScheduled(
-        itemID: String?,
-        contentIndex: Int,
-        frameCount: Int64,
-        currentSampleTime: Int64?
-    ) {
-        guard frameCount > 0 else {
-            return
+    mutating func recordPlayed(responseID: String) -> Bool {
+        guard let pending = pendingBufferCounts[responseID], pending > 0 else {
+            return false
         }
-        let playhead = max(0, currentSampleTime ?? scheduledEndSampleTime ?? 0)
-        let start = max(playhead, scheduledEndSampleTime ?? playhead)
-        if self.itemID != itemID || self.contentIndex != contentIndex {
-            self.itemID = itemID
-            self.contentIndex = contentIndex
-            segments = []
+        if pending == 1 {
+            pendingBufferCounts.removeValue(forKey: responseID)
+        } else {
+            pendingBufferCounts[responseID] = pending - 1
         }
-        segments.append(Segment(startSampleTime: start, frameCount: frameCount))
-        scheduledEndSampleTime = start + frameCount
+        return completeIfReady(responseID: responseID)
     }
 
-    func truncation(
-        at currentSampleTime: Int64?,
-        sampleRate: Double
-    ) -> VoiceTutorPlaybackTruncation? {
-        guard let itemID, !segments.isEmpty, sampleRate > 0 else {
-            return nil
-        }
-        let playhead = max(0, currentSampleTime ?? 0)
-        let playedFrames = segments.reduce(Int64(0)) { total, segment in
-            let consumed = min(
-                max(playhead - segment.startSampleTime, 0),
-                segment.frameCount
-            )
-            return total + consumed
-        }
-        let milliseconds = Int(
-            floor((Double(playedFrames) * 1_000) / sampleRate)
-        )
-        return VoiceTutorPlaybackTruncation(
-            itemID: itemID,
-            contentIndex: contentIndex,
-            audioEndMilliseconds: max(0, milliseconds)
-        )
+    mutating func seal(responseID: String) -> Bool {
+        sealedResponseIDs.insert(responseID)
+        return completeIfReady(responseID: responseID)
     }
 
     mutating func reset() {
-        itemID = nil
-        contentIndex = 0
-        segments = []
-        scheduledEndSampleTime = nil
+        pendingBufferCounts.removeAll()
+        sealedResponseIDs.removeAll()
+    }
+
+    private mutating func completeIfReady(responseID: String) -> Bool {
+        guard sealedResponseIDs.contains(responseID), pendingBufferCounts[responseID] == nil else {
+            return false
+        }
+        sealedResponseIDs.remove(responseID)
+        return true
     }
 }
 
@@ -181,7 +156,8 @@ final class VoiceTutorAudioEngine {
     private var inputConverter: VoiceTutorInputConverter?
     private var inputTapInstalled = false
     private var interruptionObserver: NSObjectProtocol?
-    private var playbackTimeline = VoiceTutorPlaybackTimeline()
+    private var playbackCompletionState = VoiceTutorPlaybackCompletionState()
+    private var onPlaybackCompleted: (@Sendable (String) -> Void)?
     private(set) var isRunning = false
     private(set) var isMuted = false
 
@@ -214,6 +190,7 @@ final class VoiceTutorAudioEngine {
 
     func start(
         onAudioChunk: @escaping @Sendable (Data) -> Void,
+        onPlaybackCompleted: @escaping @Sendable (String) -> Void,
         onInterruption: @escaping @Sendable () -> Void
     ) async throws {
         guard !isRunning else {
@@ -222,6 +199,8 @@ final class VoiceTutorAudioEngine {
         guard await Self.requestMicrophonePermission() else {
             throw AudioError.microphonePermissionDenied
         }
+        playbackCompletionState.reset()
+        self.onPlaybackCompleted = onPlaybackCompleted
 
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(
@@ -298,38 +277,31 @@ final class VoiceTutorAudioEngine {
         }
         data.copyBytes(to: destination.assumingMemoryBound(to: UInt8.self), count: data.count)
         buffer.mutableAudioBufferList.pointee.mBuffers.mDataByteSize = UInt32(data.count)
-        playerNode.scheduleBuffer(buffer)
-        playbackTimeline.recordScheduled(
-            itemID: delta.itemID,
-            contentIndex: delta.contentIndex,
-            frameCount: Int64(frameCount),
-            currentSampleTime: currentPlayerSampleTime()
-        )
+        if let responseID = delta.responseID {
+            playbackCompletionState.recordScheduled(responseID: responseID)
+            playerNode.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.recordPlayedBuffer(responseID: responseID)
+                }
+            }
+        } else {
+            playerNode.scheduleBuffer(buffer)
+        }
         if !playerNode.isPlaying {
             playerNode.play()
         }
     }
 
-    func interruptPlayback() -> VoiceTutorPlaybackTruncation? {
-        let truncation = playbackTimeline.truncation(
-            at: currentPlayerSampleTime(),
-            sampleRate: Self.sampleRate
-        )
-        playerNode.stop()
-        playerNode.reset()
-        playbackTimeline.reset()
-        if isRunning {
-            playerNode.play()
+    func finishResponseAudio(responseID: String) {
+        if playbackCompletionState.seal(responseID: responseID) {
+            onPlaybackCompleted?(responseID)
         }
-        return truncation
     }
 
-    private func currentPlayerSampleTime() -> Int64? {
-        guard let nodeTime = playerNode.lastRenderTime,
-              let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
-            return nil
+    private func recordPlayedBuffer(responseID: String) {
+        if playbackCompletionState.recordPlayed(responseID: responseID) {
+            onPlaybackCompleted?(responseID)
         }
-        return playerTime.sampleTime
     }
 
     func stop() {
@@ -342,7 +314,8 @@ final class VoiceTutorAudioEngine {
             inputTapInstalled = false
         }
         playerNode.stop()
-        playbackTimeline.reset()
+        playbackCompletionState.reset()
+        onPlaybackCompleted = nil
         engine.stop()
         inputConverter = nil
         isRunning = false

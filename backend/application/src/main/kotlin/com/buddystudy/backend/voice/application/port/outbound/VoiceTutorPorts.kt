@@ -135,6 +135,10 @@ data class VoiceTutorRealtimeRequest(
     val instructions: String,
 )
 
+data class VoiceTutorRelayTermination(
+    val cancelActiveResponse: Boolean,
+)
+
 /**
  * Server-to-server realtime provider boundary. The caller owns client framing and
  * persistence; the adapter owns provider credentials, transport, and protocol setup.
@@ -143,6 +147,11 @@ interface VoiceTutorRealtimePort {
     suspend fun relay(
         request: VoiceTutorRealtimeRequest,
         clientEvents: Flow<String>,
-        onProviderEvent: suspend (String) -> Unit,
+        terminalEvents: Flow<VoiceTutorRelayTermination>,
+        onProviderEvent: suspend (
+            raw: String,
+            persist: Boolean,
+            forwardToClient: Boolean,
+        ) -> Unit,
     )
 }

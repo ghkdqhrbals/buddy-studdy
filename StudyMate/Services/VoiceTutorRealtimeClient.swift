@@ -20,14 +20,9 @@ struct VoiceTutorRealtimeEnded: Equatable, Sendable {
 
 struct VoiceTutorRealtimeAudioDelta: Equatable, Sendable {
     var audio: Data
+    var responseID: String?
     var itemID: String?
     var contentIndex: Int
-}
-
-struct VoiceTutorPlaybackTruncation: Equatable, Sendable {
-    var itemID: String
-    var contentIndex: Int
-    var audioEndMilliseconds: Int
 }
 
 enum VoiceTutorRealtimeEvent: Equatable, Sendable {
@@ -39,13 +34,13 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case heartbeatAcknowledged
     case serviceError(code: String?, message: String, retryable: Bool)
     case audioDelta(VoiceTutorRealtimeAudioDelta)
-    case assistantTranscriptDelta(String)
-    case assistantTranscriptDone(String?)
+    case assistantTranscriptDelta(responseID: String?, delta: String)
+    case assistantTranscriptDone(responseID: String?, transcript: String?)
     case userTranscript(String)
     case userSpeechStarted
     case userSpeechStopped
-    case responseStarted(isTutorIntervention: Bool)
-    case responseFinished
+    case responseStarted(responseID: String?, isTutorIntervention: Bool)
+    case responseFinished(responseID: String?)
     case ignored(type: String)
 }
 
@@ -123,14 +118,23 @@ enum VoiceTutorRealtimeEventParser {
             return .audioDelta(
                 VoiceTutorRealtimeAudioDelta(
                     audio: audio,
+                    responseID: string("response_id", in: object),
                     itemID: string("item_id", in: object),
                     contentIndex: max(0, integer("content_index", in: object) ?? 0)
                 )
             )
+        case "response.output_audio.done", "response.audio.done":
+            return .ignored(type: type)
         case "response.output_audio_transcript.delta", "response.audio_transcript.delta":
-            return .assistantTranscriptDelta(string("delta", in: object) ?? "")
+            return .assistantTranscriptDelta(
+                responseID: string("response_id", in: object),
+                delta: string("delta", in: object) ?? ""
+            )
         case "response.output_audio_transcript.done", "response.audio_transcript.done":
-            return .assistantTranscriptDone(string("transcript", in: object))
+            return .assistantTranscriptDone(
+                responseID: string("response_id", in: object),
+                transcript: string("transcript", in: object)
+            )
         case "conversation.item.input_audio_transcription.completed":
             return .userTranscript(string("transcript", in: object) ?? "")
         case "input_audio_buffer.speech_started":
@@ -138,11 +142,14 @@ enum VoiceTutorRealtimeEventParser {
         case "input_audio_buffer.speech_stopped":
             return .userSpeechStopped
         case "response.created":
+            let response = object["response"] as? [String: Any]
             return .responseStarted(
+                responseID: response.flatMap { string("id", in: $0) },
                 isTutorIntervention: boolean("buddystudyTutorIntervention", in: object) ?? false
             )
         case "response.done", "response.completed":
-            return .responseFinished
+            let response = object["response"] as? [String: Any]
+            return .responseFinished(responseID: response.flatMap { string("id", in: $0) })
         case "error":
             let nestedError = object["error"] as? [String: Any]
             return .serviceError(
@@ -194,31 +201,6 @@ enum VoiceTutorRealtimeEventParser {
             return date
         }
         return ISO8601DateFormatter().date(from: value)
-    }
-}
-
-enum VoiceTutorRealtimeBargeInPayload {
-    static func text(
-        cancelResponse: Bool,
-        truncation: VoiceTutorPlaybackTruncation?
-    ) throws -> String? {
-        guard cancelResponse || truncation != nil else {
-            return nil
-        }
-        var object: [String: Any] = [
-            "type": "buddystudy.voice.barge-in",
-            "cancelResponse": cancelResponse
-        ]
-        if let truncation {
-            object["itemId"] = truncation.itemID
-            object["contentIndex"] = truncation.contentIndex
-            object["audioEndMs"] = truncation.audioEndMilliseconds
-        }
-        let payload = try JSONSerialization.data(withJSONObject: object)
-        guard let text = String(data: payload, encoding: .utf8) else {
-            throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8
-        }
-        return text
     }
 }
 
@@ -275,18 +257,18 @@ actor VoiceTutorWebSocketTransport {
         try await socketTask.send(.string(#"{"type":"buddystudy.voice.heartbeat"}"#))
     }
 
-    func sendBargeIn(
-        cancelResponse: Bool,
-        truncation: VoiceTutorPlaybackTruncation?
-    ) async throws {
-        guard let text = try VoiceTutorRealtimeBargeInPayload.text(
-            cancelResponse: cancelResponse,
-            truncation: truncation
-        ) else {
-            return
-        }
+    func sendPlaybackCompleted(responseID: String) async throws {
         guard let socketTask else {
             throw TransportError.notConnected
+        }
+        let payload = try JSONSerialization.data(
+            withJSONObject: [
+                "type": "buddystudy.voice.playback.completed",
+                "responseId": responseID
+            ]
+        )
+        guard let text = String(data: payload, encoding: .utf8) else {
+            throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8
         }
         try await socketTask.send(.string(text))
     }
@@ -304,7 +286,12 @@ actor VoiceTutorWebSocketTransport {
                 return try VoiceTutorRealtimeEventParser.parse(data: data)
             }
             return .audioDelta(
-                VoiceTutorRealtimeAudioDelta(audio: data, itemID: nil, contentIndex: 0)
+                VoiceTutorRealtimeAudioDelta(
+                    audio: data,
+                    responseID: nil,
+                    itemID: nil,
+                    contentIndex: 0
+                )
             )
         @unknown default:
             return .ignored(type: "unknown")

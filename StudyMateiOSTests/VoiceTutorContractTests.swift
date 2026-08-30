@@ -187,17 +187,43 @@ final class VoiceTutorContractTests: XCTestCase {
 
         let audioBytes = Data([0, 1, 2, 3])
         let audio = try VoiceTutorRealtimeEventParser.parse(
-            text: #"{"type":"response.output_audio.delta","item_id":"item_assistant_1","content_index":2,"delta":"AAECAw=="}"#
+            text: #"{"type":"response.output_audio.delta","response_id":"response-1","item_id":"item_assistant_1","content_index":2,"delta":"AAECAw=="}"#
         )
         XCTAssertEqual(
             audio,
             .audioDelta(
                 VoiceTutorRealtimeAudioDelta(
                     audio: audioBytes,
+                    responseID: "response-1",
                     itemID: "item_assistant_1",
                     contentIndex: 2
                 )
             )
+        )
+
+        XCTAssertEqual(
+            try VoiceTutorRealtimeEventParser.parse(
+                text: #"{"type":"response.output_audio.done","response_id":"response-1","item_id":"item_assistant_1"}"#
+            ),
+            .ignored(type: "response.output_audio.done")
+        )
+        XCTAssertEqual(
+            try VoiceTutorRealtimeEventParser.parse(
+                text: #"{"type":"response.done","response":{"id":"response-1","status":"completed"}}"#
+            ),
+            .responseFinished(responseID: "response-1")
+        )
+        XCTAssertEqual(
+            try VoiceTutorRealtimeEventParser.parse(
+                text: #"{"type":"response.output_audio_transcript.delta","response_id":"response-1","delta":"문장"}"#
+            ),
+            .assistantTranscriptDelta(responseID: "response-1", delta: "문장")
+        )
+        XCTAssertEqual(
+            try VoiceTutorRealtimeEventParser.parse(
+                text: #"{"type":"response.output_audio_transcript.done","response_id":"response-1","transcript":"문장입니다."}"#
+            ),
+            .assistantTranscriptDone(responseID: "response-1", transcript: "문장입니다.")
         )
 
         let transcript = try VoiceTutorRealtimeEventParser.parse(
@@ -213,82 +239,102 @@ final class VoiceTutorContractTests: XCTestCase {
         let intervention = try VoiceTutorRealtimeEventParser.parse(
             text: #"{"type":"response.created","response":{"id":"response-1"},"buddystudyTutorIntervention":true}"#
         )
-        XCTAssertEqual(intervention, .responseStarted(isTutorIntervention: true))
-    }
-
-    func testBargeInPayloadUsesValidatedPlaybackPositionContract() throws {
-        let text = try XCTUnwrap(
-            VoiceTutorRealtimeBargeInPayload.text(
-                cancelResponse: true,
-                truncation: VoiceTutorPlaybackTruncation(
-                    itemID: "item_assistant_1",
-                    contentIndex: 2,
-                    audioEndMilliseconds: 1_250
-                )
-            )
-        )
-        let object = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
-        )
-
-        XCTAssertEqual(object["type"] as? String, "buddystudy.voice.barge-in")
-        XCTAssertEqual(object["cancelResponse"] as? Bool, true)
-        XCTAssertEqual(object["itemId"] as? String, "item_assistant_1")
-        XCTAssertEqual(object["contentIndex"] as? Int, 2)
-        XCTAssertEqual(object["audioEndMs"] as? Int, 1_250)
-    }
-
-    func testPlaybackTimelineCountsOnlyRenderedPCMFrames() {
-        var timeline = VoiceTutorPlaybackTimeline()
-        timeline.recordScheduled(
-            itemID: "item_assistant_1",
-            contentIndex: 0,
-            frameCount: 2_400,
-            currentSampleTime: 1_000
-        )
-        timeline.recordScheduled(
-            itemID: "item_assistant_1",
-            contentIndex: 0,
-            frameCount: 2_400,
-            currentSampleTime: 2_000
-        )
-
         XCTAssertEqual(
-            timeline.truncation(at: 4_000, sampleRate: 24_000),
-            VoiceTutorPlaybackTruncation(
-                itemID: "item_assistant_1",
-                contentIndex: 0,
-                audioEndMilliseconds: 125
-            )
+            intervention,
+            .responseStarted(responseID: "response-1", isTutorIntervention: true)
         )
-
-        timeline.reset()
-        XCTAssertNil(timeline.truncation(at: 4_000, sampleRate: 24_000))
     }
 
-    func testMarkedTutorInterventionOwnsFloorDuringContinuousLearnerSpeech() {
+    func testLearnerOverlapKeepsCurrentTutorSentenceActive() {
         var state = VoiceTutorDuplexPlaybackState()
 
-        XCTAssertEqual(state.userSpeechStarted(), .bargeIn(cancelResponse: false))
-        XCTAssertFalse(state.responseStarted(isTutorIntervention: true))
-        XCTAssertTrue(
-            state.permitsAssistantAudio(itemID: "item-intervention", interruptedItemID: nil)
-        )
-        XCTAssertEqual(state.userSpeechStarted(), .interventionContinuation)
+        state.responseStarted(responseID: "response-1", isTutorIntervention: false)
+        state.assistantAudioBegan(responseID: "response-1")
+        state.userSpeechStarted()
 
-        state.assistantAudioBegan()
+        XCTAssertTrue(state.isUserSpeaking)
+        XCTAssertTrue(state.assistantResponseActive)
+        XCTAssertFalse(state.tutorInterventionActive)
+
         state.userSpeechStopped()
-        XCTAssertEqual(state.userSpeechStarted(), .bargeIn(cancelResponse: true))
+        XCTAssertTrue(state.assistantResponseActive)
+
+        XCTAssertTrue(state.responseFinished(responseID: "response-1"))
+        XCTAssertFalse(state.assistantResponseActive)
     }
 
-    func testUnmarkedResponseRacingWithLearnerSpeechIsCancelledAndMuted() {
+    func testTutorCanTakeTheFloorWhileLearnerIsSpeaking() {
         var state = VoiceTutorDuplexPlaybackState()
-        _ = state.userSpeechStarted()
+        state.userSpeechStarted()
+        state.responseStarted(responseID: "response-1", isTutorIntervention: true)
 
-        XCTAssertTrue(state.responseStarted(isTutorIntervention: false))
-        XCTAssertFalse(
-            state.permitsAssistantAudio(itemID: "item-racing", interruptedItemID: nil)
-        )
+        XCTAssertTrue(state.isUserSpeaking)
+        XCTAssertTrue(state.assistantResponseActive)
+        XCTAssertTrue(state.tutorInterventionActive)
+    }
+
+    func testStalePlaybackCompletionCannotClearTheCurrentTutorResponse() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.responseStarted(responseID: "response-new", isTutorIntervention: false)
+
+        XCTAssertFalse(state.responseFinished(responseID: "response-old"))
+        XCTAssertTrue(state.assistantResponseActive)
+        XCTAssertEqual(state.activeResponseID, "response-new")
+
+        XCTAssertTrue(state.responseFinished(responseID: "response-new"))
+        XCTAssertFalse(state.assistantResponseActive)
+    }
+
+    func testAssistantEventsMustMatchTheServerOwnedResponseGeneration() {
+        var state = VoiceTutorDuplexPlaybackState()
+        XCTAssertTrue(state.responseStarted(responseID: "response-new", isTutorIntervention: false))
+
+        XCTAssertFalse(state.assistantAudioBegan(responseID: "response-old"))
+        XCTAssertFalse(state.matchesActiveResponse(responseID: "response-old"))
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "response-new"))
+        XCTAssertTrue(state.matchesActiveResponse(responseID: "response-new"))
+
+        XCTAssertTrue(state.responseStarted(responseID: "response-next", isTutorIntervention: true))
+        XCTAssertEqual(state.activeResponseID, "response-next")
+        XCTAssertTrue(state.tutorInterventionActive)
+        XCTAssertFalse(state.assistantAudioBegan(responseID: "response-new"))
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "response-next"))
+    }
+
+    func testPlaybackCompletionRequiresProviderSealAndLastRenderedBuffer() {
+        var state = VoiceTutorPlaybackCompletionState()
+        state.recordScheduled(responseID: "response-1")
+        state.recordScheduled(responseID: "response-1")
+
+        XCTAssertFalse(state.recordPlayed(responseID: "response-1"))
+        XCTAssertFalse(state.seal(responseID: "response-1"))
+        XCTAssertTrue(state.recordPlayed(responseID: "response-1"))
+        XCTAssertFalse(state.recordPlayed(responseID: "response-1"))
+
+        state.recordScheduled(responseID: "response-2")
+        XCTAssertFalse(state.recordPlayed(responseID: "response-2"))
+        XCTAssertTrue(state.seal(responseID: "response-2"))
+    }
+
+    func testLearnerOverlapContractHasNoClientCancelOrTruncationPath() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sources = try [
+            "StudyMate/Services/VoiceTutorAudioEngine.swift",
+            "StudyMate/Services/VoiceTutorRealtimeClient.swift",
+            "StudyMate/ViewModels/VoiceTutorViewModel.swift"
+        ].map {
+            try String(contentsOf: root.appendingPathComponent($0), encoding: .utf8)
+        }.joined(separator: "\n")
+
+        XCTAssertFalse(sources.contains("interruptPlayback"))
+        XCTAssertFalse(sources.contains("sendBargeIn"))
+        XCTAssertFalse(sources.contains("buddystudy.voice.barge-in"))
+        XCTAssertFalse(sources.contains("conversation.item.truncate"))
+        XCTAssertFalse(sources.contains("response.cancel"))
+        XCTAssertTrue(sources.contains("completionCallbackType: .dataPlayedBack"))
+        XCTAssertTrue(sources.contains("sendPlaybackCompleted"))
     }
 
     func testAudioSessionInterruptionOnlyEndsOnBeganNotification() {

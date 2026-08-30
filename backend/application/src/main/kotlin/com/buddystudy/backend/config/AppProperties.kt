@@ -187,6 +187,7 @@ data class BuddyStudyProperties(
         var voice: String = "marin",
         var maxSessionSeconds: Int = 3_600,
         var connectTimeoutSeconds: Long = 15,
+        var responseTimeoutSeconds: Long = 60,
         var heartbeatLeaseSeconds: Long = 60,
         var continuousSpeechInterventionSeconds: Long = 12,
         var sessionRecoveryPollMs: Long = 5_000,

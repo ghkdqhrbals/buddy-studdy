@@ -13,40 +13,22 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
-    fun `barge in becomes ordered cancel and exact provider truncation events`() {
-        val events = policy.providerEventsForBargeIn(
-            """{"type":"buddystudy.voice.barge-in","cancelResponse":true,"itemId":"item_123","contentIndex":2,"audioEndMs":1250}""",
-        )
-
-        assertThat(events).hasSize(2)
-        val cancel = mapper.readTree(events[0])
-        assertThat(cancel.path("type").asText()).isEqualTo("response.cancel")
-        assertThat(cancel.path("event_id").asText())
-            .startsWith(VoiceTutorRealtimeEventPolicy.INTERNAL_CONTROL_EVENT_PREFIX)
-        val truncate = mapper.readTree(events[1])
-        assertThat(truncate.path("type").asText()).isEqualTo("conversation.item.truncate")
-        assertThat(truncate.path("item_id").asText()).isEqualTo("item_123")
-        assertThat(truncate.path("content_index").asInt()).isEqualTo(2)
-        assertThat(truncate.path("audio_end_ms").asInt()).isEqualTo(1_250)
+    fun `client cannot cancel or truncate the current tutor sentence`() {
+        listOf(
+            """{"type":"buddystudy.voice.barge-in","cancelResponse":true}""",
+            """{"type":"response.cancel"}""",
+            """{"type":"conversation.item.truncate","item_id":"item_123","content_index":0,"audio_end_ms":1250}""",
+        ).forEach { raw ->
+            assertThatThrownBy { policy.shouldForwardClientEvent(raw) }
+                .isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        }
     }
 
     @Test
-    fun `truncate rejects malformed fields and client cannot spoof internal ids`() {
+    fun `client cannot spoof internal ids or create provider responses`() {
         assertThatThrownBy {
             policy.shouldForwardClientEvent(
-                """{"type":"conversation.item.truncate","item_id":"bad item","content_index":0,"audio_end_ms":10}""",
-            )
-        }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
-
-        assertThatThrownBy {
-            policy.shouldForwardClientEvent(
-                """{"type":"conversation.item.truncate","item_id":"item_1","content_index":-1,"audio_end_ms":10}""",
-            )
-        }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
-
-        assertThatThrownBy {
-            policy.shouldForwardClientEvent(
-                """{"type":"response.cancel","event_id":"buddystudy-internal-forged"}""",
+                """{"type":"input_audio_buffer.clear","event_id":"buddystudy-internal-forged"}""",
             )
         }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
 
@@ -56,23 +38,51 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
-    fun `only errors linked to server generated control events are nonfatal`() {
-        val expectedRace = policy.providerDecision(
-            """{"type":"error","error":{"event_id":"buddystudy-internal-drain-1"}}""",
-            "session-1",
-            Instant.EPOCH,
+    fun `playback completion is validated and kept local`() {
+        val completion = policy.shouldForwardClientEvent(
+            """{"type":"buddystudy.voice.playback.completed","responseId":"response_123"}""",
         )
-        assertThat(expectedRace.terminate).isFalse()
-        assertThat(expectedRace.payload).isNull()
+        assertThat(completion).isFalse()
 
-        val providerFailure = policy.providerDecision(
-            """{"type":"error","error":{"event_id":"client-event-1"}}""",
-            "session-1",
-            Instant.EPOCH,
-        )
-        assertThat(providerFailure.terminate).isTrue()
-        assertThat(mapper.readTree(providerFailure.payload).path("code").asText())
-            .isEqualTo("VOICE_TUTOR_PROVIDER_ERROR")
+        listOf("", "response/123", "x".repeat(192)).forEach { responseId ->
+            assertThatThrownBy {
+                policy.shouldForwardClientEvent(
+                    mapper.writeValueAsString(
+                        mapOf(
+                            "type" to "buddystudy.voice.playback.completed",
+                            "responseId" to responseId,
+                        ),
+                    ),
+                )
+            }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        }
+    }
+
+    @Test
+    fun `only drain and relay terminal cancel races are nonfatal provider errors`() {
+        listOf(
+            "buddystudy-internal-drain-1",
+            "buddystudy-internal-relay-terminal-1",
+        ).forEach { eventId ->
+            val expectedRace = policy.providerDecision(
+                """{"type":"error","error":{"event_id":"$eventId"}}""",
+                "session-1",
+                Instant.EPOCH,
+            )
+            assertThat(expectedRace.terminate).isFalse()
+            assertThat(expectedRace.payload).isNull()
+        }
+
+        listOf("client-event-1", "buddystudy-internal-duplex-turn-response-1").forEach { eventId ->
+            val providerFailure = policy.providerDecision(
+                """{"type":"error","error":{"event_id":"$eventId"}}""",
+                "session-1",
+                Instant.EPOCH,
+            )
+            assertThat(providerFailure.terminate).isTrue()
+            assertThat(mapper.readTree(providerFailure.payload).path("code").asText())
+                .isEqualTo("VOICE_TUTOR_PROVIDER_ERROR")
+        }
     }
 
     @Test
@@ -80,7 +90,7 @@ class VoiceTutorRealtimeEventPolicyTest {
         val validAudio = Base64.getEncoder().encodeToString(ByteArray(32_768))
         assertThat(
             policy.providerDecision(
-                """{"type":"response.output_audio.delta","delta":"$validAudio"}""",
+                """{"type":"response.output_audio.delta","response_id":"response-1","delta":"$validAudio"}""",
                 "session-1",
                 Instant.EPOCH,
             ).terminate,
@@ -88,7 +98,7 @@ class VoiceTutorRealtimeEventPolicyTest {
 
         val oversizedAudio = Base64.getEncoder().encodeToString(ByteArray(32_769))
         val oversizedDecision = policy.providerDecision(
-            """{"type":"response.output_audio.delta","delta":"$oversizedAudio"}""",
+            """{"type":"response.output_audio.delta","response_id":"response-1","delta":"$oversizedAudio"}""",
             "session-1",
             Instant.EPOCH,
         )
@@ -98,7 +108,7 @@ class VoiceTutorRealtimeEventPolicyTest {
 
         assertThat(
             policy.providerDecision(
-                """{"type":"response.output_audio.delta","delta":"%%%"}""",
+                """{"type":"response.output_audio.delta","response_id":"response-1","delta":"%%%"}""",
                 "session-1",
                 Instant.EPOCH,
             ).terminate,
@@ -108,7 +118,11 @@ class VoiceTutorRealtimeEventPolicyTest {
         assertThat(
             policy.providerDecision(
                 mapper.writeValueAsString(
-                    mapOf("type" to "response.output_audio_transcript.delta", "delta" to oversizedDelta),
+                    mapOf(
+                        "type" to "response.output_audio_transcript.delta",
+                        "response_id" to "response-1",
+                        "delta" to oversizedDelta,
+                    ),
                 ),
                 "session-1",
                 Instant.EPOCH,
@@ -119,12 +133,44 @@ class VoiceTutorRealtimeEventPolicyTest {
         assertThat(
             policy.providerDecision(
                 mapper.writeValueAsString(
-                    mapOf("type" to "response.output_audio_transcript.done", "transcript" to oversizedTranscript),
+                    mapOf(
+                        "type" to "response.output_audio_transcript.done",
+                        "response_id" to "response-1",
+                        "transcript" to oversizedTranscript,
+                    ),
                 ),
                 "session-1",
                 Instant.EPOCH,
             ).terminate,
         ).isTrue()
+    }
+
+    @Test
+    fun `provider response correlated events require a valid response id`() {
+        listOf(
+            """{"type":"response.output_audio.delta","delta":"AA=="}""",
+            """{"type":"response.output_audio.done"}""",
+            """{"type":"response.output_audio_transcript.delta","delta":"hello"}""",
+            """{"type":"response.output_audio_transcript.done","transcript":"hello"}""",
+        ).forEach { raw ->
+            val decision = policy.providerDecision(raw, "session-1", Instant.EPOCH)
+            assertThat(decision.terminate).isTrue()
+            assertThat(mapper.readTree(decision.payload).path("code").asText())
+                .isEqualTo("VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+        }
+    }
+
+    @Test
+    fun `failed provider response terminates without being relayed`() {
+        val decision = policy.providerDecision(
+            """{"type":"response.done","response":{"id":"response-1","status":"failed"}}""",
+            "session-1",
+            Instant.EPOCH,
+        )
+
+        assertThat(decision.terminate).isTrue()
+        assertThat(mapper.readTree(decision.payload).path("code").asText())
+            .isEqualTo("VOICE_TUTOR_PROVIDER_ERROR")
     }
 
     @Test
@@ -188,9 +234,9 @@ class VoiceTutorRealtimeEventPolicyTest {
         val guard = VoiceTutorClientTrafficGuard(policy, maxSessionSeconds = 60, nanoTime = { 0 })
 
         repeat(8) {
-            assertThat(guard.inspect("""{"type":"response.cancel"}""").forward).isTrue()
+            assertThat(guard.inspect("""{"type":"input_audio_buffer.commit"}""").forward).isTrue()
         }
-        assertThatThrownBy { guard.inspect("""{"type":"response.cancel"}""") }
+        assertThatThrownBy { guard.inspect("""{"type":"input_audio_buffer.commit"}""") }
             .isInstanceOf(VoiceTutorClientProtocolException::class.java)
     }
 

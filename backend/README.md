@@ -16,7 +16,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores APNs device tokens.
 - Stores per-device study settings and schedule.
 - Stores study records, answer drafts, skipped/deleted states, and grading results.
-- Relays foreground-only Pro Voice Tutor audio through a server-owned OpenAI Realtime connection, accounts for monthly time in seconds, and stores bounded transcript turns plus a separate private learning result without retaining original audio.
+- Relays foreground-only Pro Voice Tutor audio through a server-owned OpenAI Realtime connection, keeps overlapping learner audio without cancelling the tutor's current one-sentence response, waits for response-scoped device playback completion before replying, accounts for monthly time in seconds, and stores bounded transcript turns plus a separate private learning result without retaining original audio.
 - Stores optional community profiles for Google-signed-in users.
 - Stores community question reports and can forward them by email when SMTP is configured.
 - Exposes an authenticated, stateless MCP server for private learning context, studies, questions, grading, Voice Tutor quota/history/results, and topic statistics when enabled.
@@ -71,6 +71,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS`: upstream realtime connection timeout; defaults to `15`.
 - `VOICE_TUTOR_HEARTBEAT_LEASE_SECONDS`: stale active-relay lease; defaults to `60`. A server-owned two-second control pulse refreshes the lease and revalidates the authenticated device session; client heartbeats are rate-coalesced acknowledgement requests only.
 - `VOICE_TUTOR_CONTINUOUS_SPEECH_INTERVENTION_SECONDS`: bounded full-duplex long-monologue intervention threshold; defaults to `12` seconds and is clamped to 5–30 seconds.
+- `VOICE_TUTOR_RESPONSE_TIMEOUT_SECONDS`: maximum wait for one provider response to reach `response.done`; defaults to `60` seconds and is clamped to 10–120 seconds.
 - `VOICE_TUTOR_SESSION_RECOVERY_POLL_MS`, `VOICE_TUTOR_SESSION_RECOVERY_INITIAL_DELAY_MS`, `VOICE_TUTOR_SESSION_RECOVERY_BATCH_SIZE`: bounded stale-session recovery controls; defaults to `5000`, `5000`, and `100`.
 - `VOICE_TUTOR_SUMMARY_MODEL`: model used to derive the private Tutor Learning Result; defaults to `OPENAI_MODEL`, whose current default is `gpt-5.4`.
 - `VOICE_TUTOR_SUMMARY_PROMPT_VERSION`: persisted/result audit version for the summary contract; defaults to `voice-tutor-summary-v1`.
