@@ -6377,6 +6377,16 @@ private struct MobileProfilePage: View {
             if appState.isCommunitySessionActive {
                 Section(strings.membershipAndBilling) {
                     NavigationLink {
+                        VoiceTutorView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.voiceTutorTitle,
+                            subtitle: voiceTutorProfileSubtitle,
+                            systemImage: "waveform.and.mic"
+                        )
+                    }
+
+                    NavigationLink {
                         MobileReferralView()
                     } label: {
                         profileDestinationLabel(
@@ -6465,7 +6475,8 @@ private struct MobileProfilePage: View {
             if appState.isCommunitySessionActive {
                 async let billingRefresh: Void = appState.refreshBilling()
                 async let profileRefresh: Void = appState.loadCommunityProfile()
-                _ = await (billingRefresh, profileRefresh)
+                async let voiceTutorRefresh: Void = appState.refreshVoiceTutorStatus()
+                _ = await (billingRefresh, profileRefresh, voiceTutorRefresh)
             }
         }
         .sheet(isPresented: $isMembershipManagementPresented) {
@@ -6488,6 +6499,23 @@ private struct MobileProfilePage: View {
             return
         }
         appState.unlockDeveloperAccessFromVersionGesture()
+    }
+
+    private var voiceTutorProfileSubtitle: String {
+        if let status = appState.voiceTutorStatus {
+            if status.eligible || status.reason?.uppercased() == "QUOTA_EXHAUSTED" {
+                return strings.voiceTutorRemainingTime(status.quota.remainingSeconds)
+            }
+            if status.reason?.uppercased() == "UNAVAILABLE" {
+                return strings.serviceTemporarilyUnavailable
+            }
+        }
+        if let voiceTutor = appState.billingStatus?.voiceTutor,
+           voiceTutor.enabled,
+           let quota = voiceTutor.quota {
+            return strings.voiceTutorRemainingTime(quota.remainingSeconds)
+        }
+        return strings.voiceTutorProRequired
     }
 
     private func profileDestinationLabel(
@@ -6838,7 +6866,7 @@ private struct MonthlyQuestionQuotaSummary: View {
     }
 }
 
-private struct MobileMembershipManagementView: View {
+struct MobileMembershipManagementView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var billingStore = AppleBillingStore()
     @State private var billingNotice: String?
@@ -7115,6 +7143,11 @@ private struct MobileMembershipManagementView: View {
                                 .font(.headline)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(strings.monthlyQuestionAllowanceText(quota.monthlyLimit))
+                                if appState.billingStatus?.voiceTutor?.enabled == true,
+                                   let voiceSeconds = appState.billingStatus?.voiceTutor?.quota?.limitSeconds,
+                                   voiceSeconds > 0 {
+                                    Text(strings.voiceTutorMonthlyAllowance(voiceSeconds))
+                                }
                                 if appState.billingStatus?.adFree == true {
                                     Text(strings.adFreePublicFeedBenefit)
                                 }
@@ -7236,6 +7269,9 @@ private struct MobileMembershipManagementView: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(strings.monthlyQuestionAllowanceText(group.monthlyQuestionLimit))
+                    if group.monthlyVoiceSecondsLimit > 0 {
+                        Text(strings.voiceTutorMonthlyAllowance(group.monthlyVoiceSecondsLimit))
+                    }
                     if group.adFree {
                         Text(strings.adFreePublicFeedBenefit)
                     }
@@ -7269,6 +7305,7 @@ private struct MobileMembershipManagementView: View {
                     tierCode: tierCode,
                     adFree: products.first?.tier.adFree ?? false,
                     monthlyQuestionLimit: products.first?.tier.monthlyQuestionLimit ?? 0,
+                    monthlyVoiceSecondsLimit: products.first?.tier.monthlyVoiceSecondsLimit ?? 0,
                     products: products.sorted { $0.tier.sortOrder < $1.tier.sortOrder }
                 )
             }
@@ -7454,6 +7491,7 @@ private struct MembershipProductGroup: Identifiable {
     var tierCode: String
     var adFree: Bool
     var monthlyQuestionLimit: Int
+    var monthlyVoiceSecondsLimit: Int
     var products: [AppleBillingStore.TierProduct]
 
     var id: String { tierCode }

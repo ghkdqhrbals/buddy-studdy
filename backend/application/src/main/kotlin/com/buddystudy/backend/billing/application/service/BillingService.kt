@@ -14,6 +14,7 @@ import com.buddystudy.backend.billing.application.model.BillingStatusResponse
 import com.buddystudy.backend.billing.application.model.BillingQuotaStatus
 import com.buddystudy.backend.billing.application.model.BillingPlanTransition
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
+import com.buddystudy.backend.billing.application.model.BillingVoiceTutorStatus
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.ConfirmRevenueCatTransactionCommand
 import com.buddystudy.backend.billing.application.model.ApplyVerifiedBillingPaymentCommand
@@ -33,6 +34,10 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorQuotaQueryPort
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorAvailabilityPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorAvailabilityPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuotaQueryPort
 import com.buddystudy.billing.domain.BillingEventSource
 import com.buddystudy.billing.domain.EntitlementSource
 import com.buddystudy.billing.domain.SubscriptionAccessStatus
@@ -53,6 +58,8 @@ class BillingService(
     private val ledger: BillingLedgerPort,
     private val memberships: QuestionMembershipPort,
     private val clock: Clock = Clock.systemUTC(),
+    private val voiceQuotas: VoiceTutorQuotaQueryPort = UnavailableVoiceTutorQuotaQueryPort,
+    private val voiceTutorAvailability: VoiceTutorAvailabilityPort = UnavailableVoiceTutorAvailabilityPort,
 ) : BillingUseCase, AppleBillingNotificationUseCase, BillingRecoveryUseCase {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -63,6 +70,7 @@ class BillingService(
             ?.takeUnless { it.isExpiredAt(now) }
         val quota = memberships.quotaStatusForUser(principal.userId, now)
             ?: throw billingError(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Question quota was not found.")
+        val voiceQuota = if (voiceTutorAvailability.isEnabled()) voiceQuotas.quota(principal.userId, now) else null
         // Quota resolution includes temporary grants such as referral rewards. Keeping the
         // highest candidate also prevents a briefly stale quota projection from downgrading
         // a verified App Store entitlement in the response.
@@ -122,6 +130,17 @@ class BillingService(
                 remainingCount = (quota.monthlyQuestionLimit - quota.usedCount - quota.reservedCount).coerceAtLeast(0),
                 policyVersion = quota.policyVersion,
             ),
+            voiceTutor = voiceQuota?.let {
+                BillingVoiceTutorStatus(
+                    enabled = it.planEligible && it.baseSeconds > 0,
+                    periodStartedAt = it.periodStartedAt,
+                    resetAt = it.periodEndsAt,
+                    limitSeconds = it.baseSeconds,
+                    usedSeconds = it.usedSeconds,
+                    reservedSeconds = it.reservedSeconds,
+                    remainingSeconds = it.remainingSeconds,
+                )
+            } ?: BillingVoiceTutorStatus.disabled(),
         )
     }
 
@@ -151,7 +170,12 @@ class BillingService(
         val now = clock.instant()
         return BillingCatalog(
             appAccountToken = ledger.findOrCreateAppAccountToken(principal.userId, now),
-            products = ledger.enabledTierProducts().filter { it.isSellable() },
+            products = ledger.enabledTierProducts()
+                .filter { it.isSellable() }
+                .map { product ->
+                    if (voiceTutorAvailability.isEnabled()) product
+                    else product.copy(monthlyVoiceSecondsLimit = 0)
+                },
         )
     }
 

@@ -214,6 +214,143 @@ struct TermsUseCase {
 }
 
 @MainActor
+protocol VoiceTutorRepository {
+    func status(registration: RemotePushRegistration) async throws -> BackendVoiceTutorStatus
+    func createSession(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage,
+        voice: String?,
+        idempotencyKey: String
+    ) async throws -> BackendVoiceTutorSessionStart
+    func endSession(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail
+    func sessions(
+        registration: RemotePushRegistration,
+        limit: Int,
+        cursor: String?
+    ) async throws -> BackendVoiceTutorSessionPage
+    func session(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail
+}
+
+@MainActor
+struct RemoteVoiceTutorRepository: VoiceTutorRepository {
+    private let backendClient: RemotePushBackendClientProtocol
+
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
+    }
+
+    func status(registration: RemotePushRegistration) async throws -> BackendVoiceTutorStatus {
+        try await backendClient.fetchVoiceTutorStatus(registration: registration)
+    }
+
+    func createSession(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage,
+        voice: String?,
+        idempotencyKey: String
+    ) async throws -> BackendVoiceTutorSessionStart {
+        try await backendClient.createVoiceTutorSession(
+            registration: registration,
+            studyID: studyID,
+            language: language,
+            voice: voice,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func endSession(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail {
+        try await backendClient.endVoiceTutorSession(
+            registration: registration,
+            sessionID: sessionID
+        )
+    }
+
+    func sessions(
+        registration: RemotePushRegistration,
+        limit: Int,
+        cursor: String?
+    ) async throws -> BackendVoiceTutorSessionPage {
+        try await backendClient.fetchVoiceTutorSessions(
+            registration: registration,
+            limit: limit,
+            cursor: cursor
+        )
+    }
+
+    func session(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail {
+        try await backendClient.fetchVoiceTutorSession(
+            registration: registration,
+            sessionID: sessionID
+        )
+    }
+}
+
+@MainActor
+struct VoiceTutorUseCase {
+    private let repository: VoiceTutorRepository
+
+    init(repository: VoiceTutorRepository) {
+        self.repository = repository
+    }
+
+    func status(registration: RemotePushRegistration) async throws -> BackendVoiceTutorStatus {
+        try await repository.status(registration: registration)
+    }
+
+    func createSession(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage,
+        voice: String? = nil,
+        idempotencyKey: String
+    ) async throws -> BackendVoiceTutorSessionStart {
+        try await repository.createSession(
+            registration: registration,
+            studyID: studyID,
+            language: language,
+            voice: voice,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func endSession(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail {
+        try await repository.endSession(registration: registration, sessionID: sessionID)
+    }
+
+    func sessions(
+        registration: RemotePushRegistration,
+        limit: Int = 30,
+        cursor: String? = nil
+    ) async throws -> BackendVoiceTutorSessionPage {
+        try await repository.sessions(registration: registration, limit: limit, cursor: cursor)
+    }
+
+    func session(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail {
+        try await repository.session(registration: registration, sessionID: sessionID)
+    }
+}
+
+@MainActor
 protocol BillingRepository {
     func status(registration: RemotePushRegistration) async throws -> BackendBillingStatus
     func reconcileSubscription(registration: RemotePushRegistration) async throws -> BackendBillingStatus
@@ -473,6 +610,7 @@ struct AppUseCases {
     let settings: SettingsUseCase
     let terms: TermsUseCase
     let community: CommunityUseCase
+    let voiceTutor: VoiceTutorUseCase
     let billing: BillingUseCase
     let referral: ReferralUseCase
 
@@ -487,6 +625,7 @@ struct AppUseCases {
         let notificationsRepository = RemoteNotificationsRepository(backendClient: backendClient)
         let settingsRepository = RemoteSettingsRepository(backendClient: backendClient)
         let termsRepository = RemoteTermsRepository(backendClient: backendClient)
+        let voiceTutorRepository = RemoteVoiceTutorRepository(backendClient: backendClient)
         let billingRepository = RemoteBillingRepository(backendClient: backendClient)
         let referralRepository = RemoteReferralRepository(backendClient: backendClient)
         appUpdate = AppUpdateUseCase(repository: appUpdateRepository)
@@ -499,6 +638,7 @@ struct AppUseCases {
         settings = SettingsUseCase(repository: settingsRepository)
         terms = TermsUseCase(repository: termsRepository)
         community = CommunityUseCase(repository: communityRepository)
+        voiceTutor = VoiceTutorUseCase(repository: voiceTutorRepository)
         billing = BillingUseCase(repository: billingRepository)
         referral = ReferralUseCase(repository: referralRepository)
     }

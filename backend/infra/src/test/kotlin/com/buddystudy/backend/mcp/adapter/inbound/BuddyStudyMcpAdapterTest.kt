@@ -19,13 +19,22 @@ import java.lang.reflect.Proxy
 
 class BuddyStudyMcpAdapterTest {
     @Test
+    fun `publishes voice tutor session and quota resources`() {
+        assertThat(adapter().resources().map { it.resource().uri() })
+            .contains(
+                "buddystudy://voice-tutor/sessions/recent",
+                "buddystudy://voice-tutor/quota",
+            )
+    }
+
+    @Test
     fun `publishes exactly the supported tools with their schemas and safety hints`() {
         val tools = adapter().tools()
         val expected = expectedToolContracts()
 
         assertThat(tools.map { it.tool().name() })
             .containsExactlyElementsOf(expected.map(ToolContract::name))
-        assertThat(tools).hasSize(16)
+        assertThat(tools).hasSize(19)
 
         tools.zip(expected).forEach { (specification, contract) ->
             val tool = specification.tool()
@@ -380,6 +389,31 @@ class BuddyStudyMcpAdapterTest {
                     "end_at" to instantProperty("Optional exclusive UTC end timestamp."),
                 ),
             ),
+            readOnly = true,
+        ),
+        ToolContract(
+            name = "list_voice_tutor_sessions",
+            schema = objectSchema(
+                properties = linkedMapOf(
+                    "limit" to integerProperty("Maximum sessions to return.", 1, 100, 30),
+                    "cursor" to stringProperty("Opaque cursor returned by the previous page.", maxLength = 512),
+                ),
+            ),
+            readOnly = true,
+        ),
+        ToolContract(
+            name = "get_voice_tutor_session",
+            schema = objectSchema(
+                properties = linkedMapOf(
+                    "session_id" to stringProperty("Owned Voice Tutor session UUID.", minLength = 36, maxLength = 36),
+                ),
+                required = listOf("session_id"),
+            ),
+            readOnly = true,
+        ),
+        ToolContract(
+            name = "get_voice_tutor_quota",
+            schema = objectSchema(),
             readOnly = true,
         ),
     )

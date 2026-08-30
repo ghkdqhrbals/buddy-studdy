@@ -16,6 +16,9 @@ import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
+import com.buddystudy.backend.voice.application.model.VoiceTutorSessionsPageResponse
+import com.buddystudy.backend.voice.application.model.VoiceTutorStatusResponse
 import java.time.Instant
 
 interface BuddyStudyMcpUseCase {
@@ -91,4 +94,7 @@ interface BuddyStudyMcpUseCase {
     ): StatsResponse
 
     suspend fun getStudyGrowth(principal: Principal, startAt: Instant?, endAt: Instant?): StudyGrowthResponse
+    suspend fun listVoiceTutorSessions(principal: Principal, limit: Int, cursor: String?): VoiceTutorSessionsPageResponse
+    suspend fun getVoiceTutorSession(principal: Principal, sessionId: String): VoiceTutorSessionDetailResponse
+    suspend fun getVoiceTutorQuota(principal: Principal): VoiceTutorStatusResponse
 }

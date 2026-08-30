@@ -97,6 +97,30 @@ enum class ApiErrorCode(
         "error.billing.application_failed",
         "The verified payment could not be applied to the membership.",
     ),
+    VOICE_TUTOR_PRO_REQUIRED(
+        HttpStatus.FORBIDDEN,
+        511,
+        "error.voice_tutor.pro_required",
+        "A Pro membership is required for Voice Tutor.",
+    ),
+    VOICE_TUTOR_QUOTA_EXCEEDED(
+        HttpStatus.FORBIDDEN,
+        512,
+        "error.voice_tutor.quota_exceeded",
+        "The monthly Voice Tutor allowance is exhausted.",
+    ),
+    VOICE_TUTOR_SESSION_CONFLICT(
+        HttpStatus.CONFLICT,
+        513,
+        "error.voice_tutor.session_conflict",
+        "Another Voice Tutor session is already active.",
+    ),
+    VOICE_TUTOR_PROVIDER_UNAVAILABLE(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        514,
+        "error.voice_tutor.provider_unavailable",
+        "Voice Tutor is temporarily unavailable.",
+    ),
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),

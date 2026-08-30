@@ -118,6 +118,11 @@ class AccountDeletionPersistenceAdapter(
             "update payments set user_id = null where user_id = :userId",
             "update invoices set user_id = null where user_id = :userId",
             "update billing_accounts set user_id = null, status = 'ANONYMIZED', anonymized_subject_hash = sha2(concat(app_account_token, ':', :userId), 256), anonymized_at = coalesce(anonymized_at, :withdrawnAt), updated_at = :withdrawnAt where user_id = :userId",
+            // Explicitly erase private Voice Tutor transcripts/results before deleting the
+            // account row. Child rows cascade from sessions, but cleanup must not depend on
+            // the final user delete succeeding in the same attempt.
+            "delete from voice_tutor_sessions where user_id = :userId",
+            "delete from user_voice_quota where user_id = :userId",
             "delete from user_monthly_question_usage where user_id = :userId",
             "delete from user_memberships where user_id = :userId",
             "delete from user_avatar_items where user_id = :userId",

@@ -21,6 +21,7 @@ data class BuddyStudyProperties(
     var quota: Quota = Quota(),
     var mcp: Mcp = Mcp(),
     var referral: Referral = Referral(),
+    var voiceTutor: VoiceTutor = VoiceTutor(),
 ) {
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
     data class Crypto(var masterKey: String = "")
@@ -179,6 +180,27 @@ data class BuddyStudyProperties(
             "127.0.0.1:*",
         ),
         var requestTimeoutSeconds: Long = 30,
+    )
+    data class VoiceTutor(
+        var enabled: Boolean = false,
+        var model: String = "gpt-realtime-2.1",
+        var voice: String = "marin",
+        var maxSessionSeconds: Int = 3_600,
+        var connectTimeoutSeconds: Long = 15,
+        var heartbeatLeaseSeconds: Long = 60,
+        var continuousSpeechInterventionSeconds: Long = 12,
+        var sessionRecoveryPollMs: Long = 5_000,
+        var sessionRecoveryInitialDelayMs: Long = 5_000,
+        var sessionRecoveryBatchSize: Int = 100,
+        var summaryModel: String = "gpt-5.4",
+        var summaryPromptVersion: String = "voice-tutor-summary-v1",
+        var summaryRecoveryPollMs: Long = 5_000,
+        var summaryRecoveryInitialDelayMs: Long = 5_000,
+        var summaryRecoveryBatchSize: Int = 10,
+        var summaryProcessingLeaseSeconds: Long = 300,
+        var transcriptMaxCharacters: Int = 100_000,
+        var transcriptMaxTurns: Int = 2_000,
+        var publicBaseUrl: String = "",
     )
     data class Referral(
         var publicBaseUrl: String = "https://api.ghkdqhrbals.org",

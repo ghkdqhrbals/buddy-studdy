@@ -225,7 +225,7 @@ class DatabasePermissionEvaluator(
             }
         }
 
-        if (permission.requiresActiveAccount && currentStatus in FORBIDDEN_WRITE_STATUSES) {
+        if (permission.requiresActiveAccount && currentStatus != ACTIVE_ACCOUNT_STATUS) {
             return PermissionEvaluationResult.denied(
                 permissionCode = permissionCode,
                 failureCode = ApiErrorCode.ACCOUNT_FORBIDDEN,
@@ -237,7 +237,7 @@ class DatabasePermissionEvaluator(
     }
 
     private companion object {
-        private val FORBIDDEN_WRITE_STATUSES = setOf("SUSPENDED", "WITHDRAWN")
+        const val ACTIVE_ACCOUNT_STATUS = "ACTIVE"
     }
 }
 

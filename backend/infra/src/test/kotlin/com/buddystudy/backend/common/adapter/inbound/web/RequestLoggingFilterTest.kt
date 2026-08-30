@@ -170,7 +170,7 @@ class RequestLoggingFilterTest {
         assertThat(output.out).doesNotContain("requestId")
         assertThat(output.out).doesNotContain("clientIp")
         assertThat(output.out).doesNotContain("userId")
-        assertThat(output.out).doesNotContain("203.0.113.10")
+        assertThat(output.out).contains("\"CF-Connecting-IP\":\"203.0.113.10\"")
         assertThat(output.out).doesNotContain("secret-token")
     }
 
@@ -227,6 +227,39 @@ class RequestLoggingFilterTest {
         assertThat(output.out).contains("\"responseBody\":\"\"")
         assertThat(output.out).doesNotContain("matrix-private-resume")
         assertThat(output.out).doesNotContain("matrix-private-feedback")
+    }
+
+    @Test
+    fun `voice tutor paths never capture transcript or summary bodies`(output: CapturedOutput) = runBlocking<Unit> {
+        val requestBody = """{"transcript":"private learner speech"}"""
+        val responseBody = """{"summaryMarkdown":"private learning summary"}"""
+        val exchange = execute(
+            MockServerHttpRequest.post("/api/v1/voice-tutor/sessions/session-id/end")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(requestBody),
+        ) { current ->
+            readBody(current).flatMap { body ->
+                assertThat(body).isEqualTo(requestBody)
+                writeJson(current, responseBody)
+            }
+        }
+
+        assertThat(exchange.response.bodyAsString.block()).isEqualTo(responseBody)
+        assertThat(output.out).contains("\"path\":\"/api/v1/voice-tutor/sessions/session-id/end\"")
+        assertThat(output.out).contains("\"requestBody\":\"\"")
+        assertThat(output.out).contains("\"responseBody\":\"\"")
+        assertThat(output.out).doesNotContain("private learner speech")
+        assertThat(output.out).doesNotContain("private learning summary")
+    }
+
+    @Test
+    fun `voice tutor matrix parameter cannot bypass body suppression`(output: CapturedOutput) = runBlocking<Unit> {
+        execute(
+            MockServerHttpRequest.get("/api/v1/voice-tutor;mode=pro/sessions/session-id").build(),
+        ) { current -> writeJson(current, """{"transcript":"matrix-private-speech"}""") }
+
+        assertThat(output.out).contains("\"responseBody\":\"\"")
+        assertThat(output.out).doesNotContain("matrix-private-speech")
     }
 
     @Test

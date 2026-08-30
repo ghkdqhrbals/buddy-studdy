@@ -1,6 +1,6 @@
 # BuddyStudy Backend
 
-Spring Boot Kotlin backend for BuddyStudy study settings, records, grading, statistics source data, and scheduled APNs question delivery.
+Spring Boot Kotlin backend for BuddyStudy study settings, records, grading, Voice Tutor, statistics source data, and scheduled APNs question delivery.
 
 This backend is the operational source of truth for the iOS app. The app may cache data locally for UI responsiveness, but production reads and writes should go through this MySQL-backed service.
 
@@ -16,9 +16,10 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores APNs device tokens.
 - Stores per-device study settings and schedule.
 - Stores study records, answer drafts, skipped/deleted states, and grading results.
+- Relays foreground-only Pro Voice Tutor audio through a server-owned OpenAI Realtime connection, accounts for monthly time in seconds, and stores bounded transcript turns plus a separate private learning result without retaining original audio.
 - Stores optional community profiles for Google-signed-in users.
 - Stores community question reports and can forward them by email when SMTP is configured.
-- Exposes an authenticated, stateless MCP server for private learning context, studies, questions, grading, and topic statistics when enabled.
+- Exposes an authenticated, stateless MCP server for private learning context, studies, questions, grading, Voice Tutor quota/history/results, and topic statistics when enabled.
 - Uses database-generated autoincrement `id` primary keys for aggregate and event tables; strict one-to-one state tables may use their owner key.
 - Uses Spring Data R2DBC with suspending repository/service transaction boundaries.
 - Runs Flyway through a startup-only JDBC connection in the `dev` profile.
@@ -62,11 +63,38 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `BUDDYSTUDY_STREAMS_ENABLED`: global Redis Stream listener switch. Keep it enabled in normal local and production runtimes; disabling it pauses generation, grading, translation, push, notification, account-withdrawal, and community-event consumers together.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
 - `OPENAI_API_KEY_SYSTEM`: system-workload key used only for post-study child-topic suggestions.
-- `OPENAI_API_KEY_USER`: user-content workload key used for question generation, embeddings, translation, answer feedback, and grading. It must be a different OpenAI key from `OPENAI_API_KEY_SYSTEM`. `OPENAI_USER_CONTENT_API_KEY` and `OPENAI_API_KEY` remain compatibility fallbacks for this value only and never supply the system client; `OPENAI_SYSTEM_API_KEY` remains a compatibility fallback for the system value.
+- `OPENAI_API_KEY_USER`: regular user-content workload key used for question generation, embeddings, translation, answer feedback, grading, the Voice Tutor realtime relay, and Tutor Learning Result summaries. It remains server-only for realtime work and is never returned to iOS or MCP clients. It must be a different OpenAI key from `OPENAI_API_KEY_SYSTEM`; a third Voice Tutor-specific key type is not supported. `OPENAI_USER_CONTENT_API_KEY` and `OPENAI_API_KEY` remain compatibility fallbacks for this value only and never supply the system client; `OPENAI_SYSTEM_API_KEY` remains a compatibility fallback for the system value.
+- `VOICE_TUTOR_ENABLED`: enables authenticated Pro Voice Tutor REST/WebSocket registration; defaults to `false` in every environment until the Voice Tutor legal release checklist is approved. An approved deployment must opt in explicitly. Disabling it rejects new live sessions without changing stored entitlement or history, stale-session settlement, or pending-result recovery.
+- `OPENAI_REALTIME_MODEL`: realtime voice model; defaults to `gpt-realtime-2.1`.
+- `OPENAI_REALTIME_VOICE`: realtime output voice; defaults to `marin`.
+- `VOICE_TUTOR_MAX_SESSION_SECONDS`: operational maximum reservation for one session; defaults to `3600` and is hard-clamped to 60 minutes to match the provider session limit. The actual reservation is also bounded by the user's server-owned remaining monthly seconds.
+- `VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS`: upstream realtime connection timeout; defaults to `15`.
+- `VOICE_TUTOR_HEARTBEAT_LEASE_SECONDS`: stale active-relay lease; defaults to `60`. A server-owned two-second control pulse refreshes the lease and revalidates the authenticated device session; client heartbeats are rate-coalesced acknowledgement requests only.
+- `VOICE_TUTOR_CONTINUOUS_SPEECH_INTERVENTION_SECONDS`: bounded full-duplex long-monologue intervention threshold; defaults to `12` seconds and is clamped to 5–30 seconds.
+- `VOICE_TUTOR_SESSION_RECOVERY_POLL_MS`, `VOICE_TUTOR_SESSION_RECOVERY_INITIAL_DELAY_MS`, `VOICE_TUTOR_SESSION_RECOVERY_BATCH_SIZE`: bounded stale-session recovery controls; defaults to `5000`, `5000`, and `100`.
+- `VOICE_TUTOR_SUMMARY_MODEL`: model used to derive the private Tutor Learning Result; defaults to `OPENAI_MODEL`, whose current default is `gpt-5.4`.
+- `VOICE_TUTOR_SUMMARY_PROMPT_VERSION`: persisted/result audit version for the summary contract; defaults to `voice-tutor-summary-v1`.
+- `VOICE_TUTOR_SUMMARY_RECOVERY_POLL_MS`, `VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS`, `VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE`, `VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS`: bounded result-generation recovery controls; defaults to `5000`, `5000`, `10`, and `300`.
+- `VOICE_TUTOR_TRANSCRIPT_MAX_CHARS`: maximum bounded transcript text accepted for one session; defaults to `100000`. Original microphone and model audio is never persisted.
+- `VOICE_TUTOR_TRANSCRIPT_MAX_TURNS`: maximum persisted transcript turns per session; defaults to `2000`.
+- `VOICE_TUTOR_PUBLIC_BASE_URL`: optional public BuddyStudy `wss` base URL used to construct the returned session URL. When empty, the backend returns an owner-authenticated relative WebSocket path and iOS resolves it against its configured backend origin.
 - `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. Local `dev` imports `buddystudy/dev` with a `local-secret.` prefix and maps `OPENAI_API_KEY_USER`, `OPENAI_API_KEY_SYSTEM`, their compatibility fallbacks, SMTP, APNs, RevenueCat, and Firebase Remote Config values, so database and Redis values in that secret cannot override local services. Explicit non-empty environment variables override the corresponding AWS values. Use the `dev-aws` profile to import the entire development secret; `prod` imports `buddystudy/prod`. Store APNs as `APNS_AUTH_KEY_BASE64`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, and `APNS_ENV`; store RevenueCat server verification credentials as `REVENUECAT_PROJECT_ID`, `REVENUECAT_APP_ID`, and `REVENUECAT_SERVER_API_KEY`; store Firebase publication credentials as `FIREBASE_PROJECT_ID` and `FIREBASE_SERVICE_ACCOUNT_JSON_BASE64`. Other keys use the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `OPENAI_API_KEY_USER`, `OPENAI_API_KEY_SYSTEM`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
   Spring property keys are also supported by Spring Cloud AWS, for example `spring.r2dbc.url`, `spring.r2dbc.username`, `spring.r2dbc.password`, and the separate `spring.flyway.*` keys. Keep runtime R2DBC and Flyway JDBC URLs in their respective formats.
 
 The settings API may retain a user's OpenAI API key encrypted at rest for backward compatibility. Backend system and user-content workloads do not route through that stored key.
+
+The monthly Voice Tutor entitlement is not an environment-variable counter.
+`user_membership_tiers.monthly_voice_seconds_limit` is authoritative and defaults
+to zero for TIER1 and 18,000 seconds for TIER2/TIER3. The authenticated
+membership-tier admin API can change `monthlyVoiceSecondsLimit`. The dedicated
+user admin voice-limit API stores a nullable, persistent personal cap: the
+override takes precedence over the tier default, can lower a paid allowance to
+zero, and survives monthly rollover; sending `null` restores the tier default.
+It never grants Voice Tutor entitlement to TIER1. Environment configuration
+controls feature/provider behavior and the per-session ceiling only. The voice
+quota uses its own account-created monthly anchor and advances an overdue period
+lazily on authenticated Voice Tutor access; it is not handled by the question
+quota's managed rollover job.
 
 ## Local Run
 

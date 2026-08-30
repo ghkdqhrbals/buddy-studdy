@@ -24,6 +24,7 @@ data class BillingTierProduct(
     val billingPeriod: String?,
     val sortOrder: Int,
     val adFree: Boolean = false,
+    val monthlyVoiceSecondsLimit: Int = 0,
 )
 
 data class BillingCatalog(
@@ -70,7 +71,22 @@ data class BillingStatusResponse(
     val planTransition: BillingPlanTransition?,
     val synchronizedAt: Instant,
     val quota: BillingQuotaStatus,
+    val voiceTutor: BillingVoiceTutorStatus = BillingVoiceTutorStatus.disabled(),
 )
+
+data class BillingVoiceTutorStatus(
+    val enabled: Boolean,
+    val periodStartedAt: Instant?,
+    val resetAt: Instant?,
+    val limitSeconds: Int,
+    val usedSeconds: Int,
+    val reservedSeconds: Int,
+    val remainingSeconds: Int,
+) {
+    companion object {
+        fun disabled() = BillingVoiceTutorStatus(false, null, null, 0, 0, 0, 0)
+    }
+}
 
 data class BillingPlanTransition(
     val currentTierCode: String,

@@ -2963,6 +2963,169 @@ struct AppStrings {
     }
     var monthlyQuestionQuota: String { text("월간 질문", "Monthly questions") }
     var monthlyQuotaReached: String { text("이번 달 질문 한도에 도달했습니다.", "You have reached this month's question limit.") }
+    var voiceTutorTitle: String { text("AI 음성 튜터", "AI Voice Tutor", "AI音声チューター") }
+    var voiceTutorSubtitle: String {
+        text(
+            "선택한 주제로 말하며 배우고, 학습 요약을 기록하세요.",
+            "Learn by speaking about a topic and keep a summary of each session.",
+            "選んだトピックについて話しながら学び、学習要約を記録します。"
+        )
+    }
+    var voiceTutorSelectTopic: String { text("대화할 주제", "Conversation topic", "会話するトピック") }
+    var voiceTutorNoTopics: String {
+        text(
+            "먼저 학습 주제를 만들어 주세요.",
+            "Create a study topic first.",
+            "まず学習トピックを作成してください。"
+        )
+    }
+    var voiceTutorStart: String { text("음성 학습 시작", "Start voice session", "音声学習を開始") }
+    var voiceTutorRecentSessions: String { text("최근 음성 학습", "Recent voice sessions", "最近の音声学習") }
+    var voiceTutorNoSessions: String {
+        text(
+            "아직 저장된 음성 학습이 없습니다.",
+            "No voice sessions have been saved yet.",
+            "保存された音声学習はまだありません。"
+        )
+    }
+    var voiceTutorProRequired: String { text("Pro 전용 기능", "Available with Pro", "Pro限定機能") }
+    var voiceTutorProRequiredMessage: String {
+        text(
+            "Pro에서 AI 선생님과 음성으로 대화하고 학습 결과를 기록할 수 있습니다.",
+            "With Pro, you can talk with your AI tutor and save the learning result.",
+            "ProではAIチューターと音声で会話し、学習結果を保存できます。"
+        )
+    }
+    var voiceTutorUpgrade: String { text("Pro 살펴보기", "Explore Pro", "Proを見る") }
+    var voiceTutorMonthlyUsage: String { text("월간 음성 시간", "Monthly voice time", "月間音声時間") }
+    var voiceTutorQuotaReached: String {
+        text(
+            "이번 달 음성 학습 시간을 모두 사용했습니다.",
+            "You have used all voice time for this month.",
+            "今月の音声学習時間をすべて使用しました。"
+        )
+    }
+    var voiceTutorActiveSessionPending: String {
+        text(
+            "기존 음성 학습을 정리하고 있습니다. 잠시 후 새로고침해 주세요.",
+            "A previous voice session is being finalized. Refresh again shortly.",
+            "前回の音声学習を終了処理中です。しばらくしてから更新してください。"
+        )
+    }
+    var voiceTutorConnecting: String { text("선생님과 연결하는 중", "Connecting to your tutor", "チューターに接続中") }
+    var voiceTutorListening: String { text("듣고 있어요", "Listening", "聞いています") }
+    var voiceTutorSpeaking: String { text("선생님이 말하고 있어요", "Tutor is speaking", "チューターが話しています") }
+    var voiceTutorEnding: String { text("학습을 정리하는 중", "Wrapping up the session", "学習をまとめています") }
+    var voiceTutorEnded: String { text("음성 학습 완료", "Voice session complete", "音声学習が完了しました") }
+    var voiceTutorLiveCaptions: String { text("실시간 대화", "Live conversation", "リアルタイム会話") }
+    var voiceTutorYou: String { text("나", "You", "自分") }
+    var voiceTutorTeacher: String { text("선생님", "Tutor", "チューター") }
+    var voiceTutorMute: String { text("음소거", "Mute", "ミュート") }
+    var voiceTutorUnmute: String { text("음소거 해제", "Unmute", "ミュート解除") }
+    var voiceTutorEndSession: String { text("학습 종료", "End session", "学習を終了") }
+    var voiceTutorMicrophoneDenied: String {
+        text(
+            "음성 학습을 시작하려면 설정에서 마이크 접근을 허용해 주세요.",
+            "Allow microphone access in Settings to start a voice session.",
+            "音声学習を始めるには、設定でマイクへのアクセスを許可してください。"
+        )
+    }
+    var voiceTutorForegroundOnly: String {
+        text(
+            "앱을 벗어나거나 화면을 잠그면 현재 통화가 안전하게 종료됩니다.",
+            "Leaving the app or locking the screen safely ends the current call.",
+            "アプリを離れるか画面をロックすると、現在の通話は安全に終了します。"
+        )
+    }
+    var voiceTutorSignInRequired: String {
+        text("음성 튜터를 사용하려면 로그인해 주세요.", "Sign in to use Voice Tutor.", "音声チューターを使用するにはログインしてください。")
+    }
+    var voiceTutorAccountNotReady: String {
+        text(
+            "계정 연결을 준비하지 못했습니다. 다시 시도해 주세요.",
+            "The account connection is not ready. Please try again.",
+            "アカウント接続の準備ができていません。もう一度お試しください。"
+        )
+    }
+    var voiceTutorInvalidConnection: String {
+        text(
+            "음성 연결 주소를 확인할 수 없습니다.",
+            "The voice connection address is invalid.",
+            "音声接続先を確認できません。"
+        )
+    }
+    var voiceTutorConnectionFailed: String {
+        text(
+            "음성 연결이 끊겼습니다. 다시 시도해 주세요.",
+            "The voice connection was interrupted. Please try again.",
+            "音声接続が中断されました。もう一度お試しください。"
+        )
+    }
+    var voiceTutorAudioInterrupted: String {
+        text(
+            "전화나 다른 오디오 사용으로 음성 학습을 안전하게 종료했습니다.",
+            "The voice session ended safely because another call or audio session interrupted it.",
+            "通話または別のオーディオにより、音声学習を安全に終了しました。"
+        )
+    }
+    var voiceTutorLearningSummary: String { text("학습 요약", "Learning summary", "学習要約") }
+    var voiceTutorStrengths: String { text("잘 이해한 점", "Strengths", "よく理解できた点") }
+    var voiceTutorImprovements: String { text("보완할 점", "Areas to improve", "改善する点") }
+    var voiceTutorNextSteps: String { text("다음 학습", "Next steps", "次の学習") }
+    var voiceTutorSummaryPending: String {
+        text(
+            "대화를 분석해 학습 요약을 만들고 있습니다.",
+            "Your conversation is being analyzed into a learning summary.",
+            "会話を分析して学習要約を作成しています。"
+        )
+    }
+    var voiceTutorSummaryFailed: String {
+        text(
+            "이번 대화의 학습 요약을 만들지 못했습니다. 통화 기록은 그대로 저장되었습니다.",
+            "The learning summary could not be created. Your session record is still saved.",
+            "今回の会話の学習要約を作成できませんでした。通話記録は保存されています。"
+        )
+    }
+    func voiceTutorRemainingTime(_ seconds: Int) -> String {
+        let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: true)
+        return text("\(duration) 남음", "\(duration) remaining", "残り\(duration)")
+    }
+    func voiceTutorUsedTime(_ seconds: Int) -> String {
+        let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: false)
+        return text("\(duration) 사용", "\(duration) used", "\(duration)使用")
+    }
+    func voiceTutorSessionLimit(_ seconds: Int) -> String {
+        let duration = voiceTutorDuration(seconds)
+        return text("한 번에 최대 \(duration)", "Up to \(duration) per session", "1回最大\(duration)")
+    }
+    func voiceTutorSessionRemaining(_ seconds: Int) -> String {
+        let duration = voiceTutorDuration(seconds)
+        return text("통화 \(duration) 남음", "Call ends in \(duration)", "通話残り\(duration)")
+    }
+    func voiceTutorMonthlyAllowance(_ seconds: Int) -> String {
+        let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: false)
+        return text("매월 음성 \(duration)", "\(duration) of voice each month", "毎月音声\(duration)")
+    }
+    private func voiceTutorMonthlyMinutes(_ seconds: Int, roundsUp: Bool) -> String {
+        let safeSeconds = max(0, seconds)
+        let minutes = roundsUp
+            ? Int(ceil(Double(safeSeconds) / 60.0))
+            : safeSeconds / 60
+        return text("\(minutes)분", "\(minutes) min", "\(minutes)分")
+    }
+    func voiceTutorDuration(_ seconds: Int) -> String {
+        let safeSeconds = max(0, seconds)
+        let hours = safeSeconds / 3_600
+        let minutes = (safeSeconds % 3_600) / 60
+        let remainingSeconds = safeSeconds % 60
+        if hours > 0 {
+            return text("\(hours)시간 \(minutes)분", "\(hours) hr \(minutes) min", "\(hours)時間\(minutes)分")
+        }
+        if minutes > 0 {
+            return text("\(minutes)분", "\(minutes) min", "\(minutes)分")
+        }
+        return text("\(remainingSeconds)초", "\(remainingSeconds) sec", "\(remainingSeconds)秒")
+    }
     var membershipAndBilling: String { text("멤버십과 결제", "Membership & billing", "メンバーシップと支払い") }
     var membershipManagement: String { text("멤버십 관리", "Manage membership", "メンバーシップ管理") }
     var membershipPlans: String { text("멤버십", "Membership", "メンバーシップ") }

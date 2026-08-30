@@ -1,6 +1,6 @@
 # BuddyStudy Backend API
 
-The backend is the source of truth for iOS study settings, scheduled question delivery, records, answer drafts, and grading results. It is a Spring Boot Kotlin service backed by MySQL and Spring Data JPA.
+The backend is the source of truth for iOS study settings, scheduled question delivery, records, answer drafts, grading results, and Pro Voice Tutor sessions/results. It is a Spring Boot Kotlin service backed by MySQL and Spring Data JPA.
 
 ## Base URL
 
@@ -47,7 +47,7 @@ Content-Type: application/json
 Accept: application/json, text/event-stream
 ```
 
-It exposes private profile/resume/interests, owned studies, asynchronous question and grading operations, records, feedback, scores, and topic statistics. It never accepts a `userId` argument. Production is disabled unless `MCP_SERVER_ENABLED=true`; connection, tool, privacy, and rollout details are documented in [MCP_SERVER.md](../docs/MCP_SERVER.md).
+It exposes private profile/resume/interests, owned studies, asynchronous question and grading operations, records, feedback, scores, topic statistics, and the read-only Voice Tutor quota/history/result surface. It never accepts a `userId` argument. Production is disabled unless `MCP_SERVER_ENABLED=true`; connection, tool, privacy, and rollout details are documented in [MCP_SERVER.md](../docs/MCP_SERVER.md).
 
 ## Endpoints
 
@@ -207,6 +207,44 @@ an explicit notification tap. Other supported destinations route to Home, My
 Studies, Records, Statistics, Settings/Profile, or Public Questions. APNs uses
 a parser-derived plain-text preview while the notification inbox retains the
 original Markdown.
+
+### Admin Voice Tutor Limits
+
+The membership-tier default and a user's persistent monthly Voice Tutor cap are
+managed independently:
+
+```http
+PATCH /api/v1/admin/membership-tiers/{tierCode}
+Authorization: Bearer <BACKEND_API_TOKEN>
+Content-Type: application/json
+
+{
+  "monthlyVoiceSecondsLimit": 18000
+}
+```
+
+`monthlyQuestionLimit` and `monthlyVoiceSecondsLimit` are independently
+optional, but at least one must be provided. Updating only the voice limit does
+not change the question limit.
+
+```http
+PATCH /api/v1/admin/users/{userId}/voice-limit
+Authorization: Bearer <BACKEND_API_TOKEN>
+Content-Type: application/json
+
+{
+  "monthlyVoiceSecondsLimitOverride": 900
+}
+```
+
+The user override is `0..31536000`, takes precedence over the tier default, and
+survives monthly rollover. Send `null` to restore the tier default. Lowering a
+limit preserves already used/reserved seconds and clamps remaining seconds at
+zero. A positive override never grants Voice Tutor entitlement to TIER1; a paid
+tier with an effective zero-second cap remains entitled but quota-exhausted.
+Admin user responses add the effective, override, and tier-default limits plus
+`voiceUsedSeconds`, `voiceReservedSeconds`, `voiceRemainingSeconds`,
+`voicePeriodStartedAt`, and `voiceResetAt`.
 
 ### Register Device
 
@@ -750,6 +788,173 @@ Response:
 ```
 
 `source` is `CATALOG`, `GENERATED`, `MIXED`, or `DEPTH_LIMIT`.
+
+### Pro Voice Tutor
+
+Every Voice Tutor REST call and WebSocket handshake requires a registered
+user's bearer token. Session reads, finalization, and the stream are scoped to
+the authenticated owner; a client cannot supply another `userId`. The default
+plan catalog grants voice seconds to TIER2 and TIER3, while the server-owned
+quota projection and plan catalog remain authoritative.
+
+Status does not reserve time:
+
+```http
+GET /api/v1/voice-tutor/status
+Authorization: Bearer <accessToken>
+```
+
+```json
+{
+  "eligible": true,
+  "reason": null,
+  "tierCode": "TIER2",
+  "quota": {
+    "tierCode": "TIER2",
+    "periodStartedAt": "2026-08-15T09:00:00Z",
+    "resetAt": "2026-09-15T09:00:00Z",
+    "limitSeconds": 18000,
+    "usedSeconds": 900,
+    "reservedSeconds": 0,
+    "remainingSeconds": 17100
+  },
+  "maxSessionSeconds": 3600,
+  "activeSession": null
+}
+```
+
+Create one session with a stable caller-generated idempotency key:
+
+```http
+POST /api/v1/voice-tutor/sessions
+Authorization: Bearer <accessToken>
+Idempotency-Key: ios-voice-<uuid>
+Content-Type: application/json
+
+{"studyId":42,"language":"ko","voice":"marin"}
+```
+
+`Idempotency-Key` must contain 1–191 characters and is scoped to the
+authenticated user. Retrying the same key returns the same session and does not
+reserve seconds twice. Only one non-terminal session is allowed per user. The
+optional `voice` falls back to the server configuration. A successful new
+reservation returns `201` with `sessionId`, `state=READY`, `websocketUrl`,
+`websocketProtocol=buddystudy.voice.v1`, `createdAt`, `hardEndsAt`, and the
+post-reservation quota. The server reserves at most the minimum of remaining
+monthly seconds, the configured per-session ceiling, and time until reset.
+
+History uses an opaque newest-first cursor:
+
+```http
+GET /api/v1/voice-tutor/sessions?limit=30&cursor=<opaqueCursor>
+GET /api/v1/voice-tutor/sessions/{sessionId}
+Authorization: Bearer <accessToken>
+```
+
+`limit` defaults to 30 and is clamped to 1–100. The page is
+`{"sessions":[...],"nextCursor":"..."}`; `nextCursor=null` is terminal.
+Clients must return the cursor unchanged rather than parsing or synthesizing
+it. Detail includes the session, authoritative quota, bounded ordered
+`transcriptTurns`, and the private Tutor Learning Result when available.
+
+Both explicit REST finalization and the WebSocket control event are supported:
+
+```http
+POST /api/v1/voice-tutor/sessions/{sessionId}/end
+Authorization: Bearer <accessToken>
+```
+
+The request has no body. For a reserved session it finalizes immediately. For
+an active relay it requests `ENDING`; the owning WebSocket performs the one
+terminal settlement after a bounded transcript drain. The transaction charges
+the greater of rounded-up server-observed connected seconds and rounded-up
+accepted 24 kHz mono PCM duration, releases unused reservation, and is
+idempotent, so a repeated request returns the same terminal result without
+charging again.
+
+Connect to the fixed stream path on the same authenticated BuddyStudy backend
+origin. `websocketUrl` is an informational same-origin URL (relative by
+default); clients must derive or validate the final origin and must never send
+the bearer token to a server-provided cross-origin URL:
+
+```http
+GET /api/v1/voice-tutor/sessions/{sessionId}/stream
+Authorization: Bearer <accessToken>
+Sec-WebSocket-Protocol: buddystudy.voice.v1
+```
+
+WebSocket messages are JSON text frames. The relay accepts the OpenAI Realtime
+client event types `input_audio_buffer.append`, `input_audio_buffer.commit`,
+`input_audio_buffer.clear`, `response.cancel`, and
+`conversation.item.truncate`. `response.create` is server-owned and is never
+accepted from the client. When the learner speaks over current tutor audio,
+iOS stops queued playback immediately and sends `buddystudy.voice.barge-in`
+with `cancelResponse` plus the rendered `itemId`, `contentIndex`, and
+`audioEndMs`; the relay creates the ordered provider `response.cancel` and
+`conversation.item.truncate` events. Sending `buddystudy.voice.heartbeat`
+returns a rate-coalesced acknowledgement; a server-owned two-second control
+pulse, not this advisory client event, refreshes the active relay lease and
+revalidates the authenticated user/device session. Sending
+`buddystudy.voice.session.end` requests idempotent `USER_ENDED` finalization;
+local control events are never forwarded upstream. Provider events are
+allowlisted and provider errors are mapped to a safe BuddyStudy error rather
+than forwarded raw; audio and transcript deltas are size-bounded before relay,
+and OpenAI credentials remain server-only.
+
+Server VAD remains active while tutor audio plays, so learner-to-tutor
+interruption is full duplex. Automatic provider response creation and automatic
+provider interruption are disabled: the backend creates one response only
+after a committed ordinary learner turn. A configurable, bounded continuous
+speech timer (default 12 seconds) may manually commit and request one brief
+tutor intervention for a long monologue; the following continuation VAD edge is
+suppressed so it cannot immediately cancel that intervention, and the matching
+stop/commit cannot create a duplicate response. The tutor prompt limits this to
+long monologues or important misconceptions rather than ordinary pauses.
+Ending through either REST or WebSocket flushes accepted-audio accounting,
+commits any final buffered input, and waits up to two seconds for its transcript
+and active response completion before terminal settlement.
+
+BuddyStudy also emits synthetic server events. Every synthetic event includes
+`type`, `sessionId`, and `serverTime`:
+
+| Type | Additional fields and meaning |
+| --- | --- |
+| `buddystudy.voice.session.ready` | `hardEndsAt`, `quotaRemainingSeconds`; the upstream relay is ready |
+| `buddystudy.voice.heartbeat.ack` | `state`; the validated advisory heartbeat was acknowledged |
+| `buddystudy.voice.quota.updated` | `limitSeconds`, `usedSeconds`, `reservedSeconds`, `remainingSeconds`, `chargedSeconds` |
+| `buddystudy.voice.session.ending` | `reason`, `hardEndsAt`; the server deadline is closing the stream |
+| `buddystudy.voice.session.ended` | `reason`, `endedAt`, `durationSeconds`, `chargedSeconds`, `resultStatus`, `pollAfterMs` |
+| `buddystudy.voice.result.ready` | `resultStatus=COMPLETED`; the private lesson result can be read |
+| `buddystudy.voice.error` | Safe `code`, `message`, and `retryable` finalization status |
+
+When `resultStatus=PROCESSING`, clients wait `pollAfterMs` and refresh the
+detail endpoint. Session states are `READY`, `ACTIVE`, `ENDING`, `COMPLETED`, or
+`FAILED`; result states are `PENDING`, `PROCESSING`, `COMPLETED`, or `FAILED`.
+
+When MCP is enabled, its Voice Tutor contract is owner-scoped and read-only:
+
+- `list_voice_tutor_sessions(limit, cursor?)` returns `sessions` and an opaque
+  `nextCursor`;
+- `get_voice_tutor_session(session_id)` returns bounded transcript/result detail;
+- `get_voice_tutor_quota()` returns the server-owned seconds projection;
+- `buddystudy://voice-tutor/sessions/recent` and
+  `buddystudy://voice-tutor/quota` expose snapshot resources.
+
+These MCP operations use the dedicated `voice-tutor:read` permission and cannot
+create, extend, explicitly end, or stream a live session. Before returning an
+authoritative snapshot, the shared read use case may settle an expired session
+or lazily advance an overdue monthly period; this server housekeeping does not
+grant MCP a live-session mutation tool.
+
+BuddyStudy does not persist original microphone or model audio. Voice REST
+bodies and WebSocket frames are excluded from API body logs, provider-history
+bodies, analytics, and error attachments. Only bounded transcript text,
+session/accounting metadata, and the derived private result are stored.
+
+Common Voice Tutor failures are `VOICE_TUTOR_PRO_REQUIRED` (`403`),
+`VOICE_TUTOR_QUOTA_EXCEEDED` (`403`), `VOICE_TUTOR_SESSION_CONFLICT` (`409`),
+and `VOICE_TUTOR_PROVIDER_UNAVAILABLE` (`503`). Invalid request fields, session
+IDs, or cursors use the standard validation error shape.
 
 ### Records
 

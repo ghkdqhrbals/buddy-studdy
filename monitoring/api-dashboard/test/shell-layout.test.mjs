@@ -271,6 +271,12 @@ test("user administration is searchable, paginated, and supports period quota op
   assert.match(page, /Remaining/);
   assert.match(page, /Apply bonus until reset/);
   assert.match(page, /LIMIT_PRESETS/);
+  assert.match(page, /\/voice-limit/);
+  assert.match(page, /monthlyVoiceSecondsLimitOverride/);
+  assert.match(page, /Persistent user cap/);
+  assert.match(page, /Use plan/);
+  assert.match(page, /VOICE_LIMIT_PRESETS/);
+  assert.match(page, /monthlyVoiceSecondsLimit/);
   assert.match(adminApi, /sessionStorage/);
   assert.match(adminApi, /Authorization: `Bearer \$\{session\.token\}`/);
 });

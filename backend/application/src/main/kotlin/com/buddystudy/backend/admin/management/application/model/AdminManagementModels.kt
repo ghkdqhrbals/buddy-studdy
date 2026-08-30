@@ -27,6 +27,15 @@ data class AdminUserSummary(
     val appVersion: String? = null,
     val appBuild: String? = null,
     val appVersionSeenAt: Instant? = null,
+    /** Effective monthly Voice Tutor cap after applying the persistent user override. */
+    val monthlyVoiceSecondsLimit: Int = 0,
+    val monthlyVoiceSecondsLimitOverride: Int? = null,
+    val tierMonthlyVoiceSecondsLimit: Int = 0,
+    val voiceUsedSeconds: Int = 0,
+    val voiceReservedSeconds: Int = 0,
+    val voiceRemainingSeconds: Int = 0,
+    val voicePeriodStartedAt: Instant = periodStartedAt,
+    val voiceResetAt: Instant = resetAt,
 )
 
 data class AdminUserPageResponse(
@@ -40,6 +49,7 @@ data class AdminMembershipTierResponse(
     val tierCode: String,
     val monthlyQuestionLimit: Int,
     val description: String,
+    val monthlyVoiceSecondsLimit: Int = 0,
 )
 
 data class AssignUserPlanCommand(

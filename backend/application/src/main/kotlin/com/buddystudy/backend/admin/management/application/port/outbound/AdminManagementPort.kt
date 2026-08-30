@@ -13,8 +13,25 @@ interface AdminManagementPort {
     suspend fun user(userId: Long): AdminUserSummary?
     suspend fun tiers(): List<AdminMembershipTierResponse>
     suspend fun updateTier(tierCode: String, monthlyQuestionLimit: Int): AdminMembershipTierResponse?
+    suspend fun updateTierVoiceSecondsLimit(tierCode: String, monthlyVoiceSecondsLimit: Int): AdminMembershipTierResponse? =
+        tiers().firstOrNull { it.tierCode == tierCode }
+    suspend fun updateTierLimits(
+        tierCode: String,
+        monthlyQuestionLimit: Int?,
+        monthlyVoiceSecondsLimit: Int?,
+    ): AdminMembershipTierResponse? {
+        var updated: AdminMembershipTierResponse? = null
+        if (monthlyQuestionLimit != null) {
+            updated = updateTier(tierCode, monthlyQuestionLimit) ?: return null
+        }
+        if (monthlyVoiceSecondsLimit != null) {
+            updated = updateTierVoiceSecondsLimit(tierCode, monthlyVoiceSecondsLimit) ?: return null
+        }
+        return updated
+    }
     suspend fun assignPlan(userId: Long, command: AssignUserPlanCommand): AdminUserSummary?
     suspend fun setCurrentPeriodQuestionLimit(userId: Long, questionLimitOverride: Int?): AdminUserSummary?
+    suspend fun setVoiceLimit(userId: Long, monthlyVoiceSecondsLimitOverride: Int?): AdminUserSummary? = user(userId)
 }
 
 interface AdminFeedbackPort {

@@ -434,6 +434,34 @@ protocol RemotePushBackendClientProtocol {
         invoiceID: Int64
     ) async throws -> BackendBillingInvoice
 
+    func fetchVoiceTutorStatus(
+        registration: RemotePushRegistration
+    ) async throws -> BackendVoiceTutorStatus
+
+    func createVoiceTutorSession(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage,
+        voice: String?,
+        idempotencyKey: String
+    ) async throws -> BackendVoiceTutorSessionStart
+
+    func endVoiceTutorSession(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail
+
+    func fetchVoiceTutorSessions(
+        registration: RemotePushRegistration,
+        limit: Int,
+        cursor: String?
+    ) async throws -> BackendVoiceTutorSessionPage
+
+    func fetchVoiceTutorSession(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail
+
     func fetchReferralSummary(
         registration: RemotePushRegistration
     ) async throws -> BackendReferralSummary
@@ -801,6 +829,44 @@ extension RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         invoiceID: Int64
     ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchVoiceTutorStatus(
+        registration: RemotePushRegistration
+    ) async throws -> BackendVoiceTutorStatus {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func createVoiceTutorSession(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage,
+        voice: String?,
+        idempotencyKey: String
+    ) async throws -> BackendVoiceTutorSessionStart {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func endVoiceTutorSession(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchVoiceTutorSessions(
+        registration: RemotePushRegistration,
+        limit: Int,
+        cursor: String?
+    ) async throws -> BackendVoiceTutorSessionPage {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchVoiceTutorSession(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail {
         throw RemotePushBackendError.invalidResponse
     }
 
@@ -1470,6 +1536,92 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         let data = try await perform(request)
         return try decoder.decode(BackendBillingInvoiceDetail.self, from: data).invoice
+    }
+
+    func fetchVoiceTutorStatus(
+        registration: RemotePushRegistration
+    ) async throws -> BackendVoiceTutorStatus {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "voice-tutor", "status")
+        )
+        let data = try await perform(request, logsBodyContents: false)
+        return try decoder.decode(BackendVoiceTutorStatus.self, from: data)
+    }
+
+    func createVoiceTutorSession(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage,
+        voice: String?,
+        idempotencyKey: String
+    ) async throws -> BackendVoiceTutorSessionStart {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "voice-tutor", "sessions")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = try encoder.encode(
+            VoiceTutorSessionCreateRequest(
+                studyId: studyID,
+                language: language.backendCode,
+                voice: voice
+            )
+        )
+        let data = try await perform(request, logsBodyContents: false)
+        return try decoder.decode(BackendVoiceTutorSessionStart.self, from: data)
+    }
+
+    func endVoiceTutorSession(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "voice-tutor", "sessions", sessionID, "end")
+        )
+        request.httpMethod = "POST"
+        let data = try await perform(request, logsBodyContents: false)
+        return try decoder.decode(BackendVoiceTutorSessionDetail.self, from: data)
+    }
+
+    func fetchVoiceTutorSessions(
+        registration: RemotePushRegistration,
+        limit: Int,
+        cursor: String?
+    ) async throws -> BackendVoiceTutorSessionPage {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "voice-tutor", "sessions"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems = [
+            URLQueryItem(name: "limit", value: String(max(1, min(limit, 100))))
+        ]
+        if let cursor = cursor?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !cursor.isEmpty {
+            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
+        }
+        components?.queryItems = queryItems
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+        let request = authenticatedRequest(registration: registration, url: url)
+        let data = try await perform(request, logsBodyContents: false)
+        return try decoder.decode(BackendVoiceTutorSessionPage.self, from: data)
+    }
+
+    func fetchVoiceTutorSession(
+        registration: RemotePushRegistration,
+        sessionID: String
+    ) async throws -> BackendVoiceTutorSessionDetail {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "voice-tutor", "sessions", sessionID)
+        )
+        let data = try await perform(request, logsBodyContents: false)
+        return try decoder.decode(BackendVoiceTutorSessionDetail.self, from: data)
     }
 
     func fetchReferralSummary(
@@ -2476,16 +2628,20 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private func perform(
         _ request: URLRequest,
-        ignoresHTTPStatus: Bool = false
+        ignoresHTTPStatus: Bool = false,
+        logsBodyContents: Bool = true
     ) async throws -> Data {
         var request = request
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let startedAt = Date()
+        let redactedBodyDescription = logsBodyContents ? "" : "[REDACTED]"
         let requestLog = APITrafficLogEntry(
             method: request.httpMethod ?? "GET",
             url: request.url?.absoluteString ?? "<unknown>",
             requestHeaders: Self.safeHeaderLog(for: request),
-            requestBody: Self.safeBodyLog(data: request.httpBody)
+            requestBody: logsBodyContents
+                ? Self.safeBodyLog(data: request.httpBody)
+                : redactedBodyDescription
         )
         var didPostTrafficLog = false
 
@@ -2525,7 +2681,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     durationMS: durationMS,
                     requestHeaders: requestLog.requestHeaders,
                     requestBody: requestLog.requestBody,
-                    responseBody: Self.safeResponseBody(responseBodyText),
+                    responseBody: logsBodyContents
+                        ? Self.safeResponseBody(responseBodyText)
+                        : redactedBodyDescription,
                     isError: false
                 )
                 NotificationCenter.default.post(
@@ -2547,7 +2705,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     durationMS: durationMS,
                     requestHeaders: requestLog.requestHeaders,
                     requestBody: requestLog.requestBody,
-                    responseBody: Self.safeResponseBody(responseBodyText),
+                    responseBody: logsBodyContents
+                        ? Self.safeResponseBody(responseBodyText)
+                        : redactedBodyDescription,
                     error: backendError?.message ?? "HTTP \(statusCode)",
                     isError: true
                 )
@@ -2574,7 +2734,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                 durationMS: durationMS,
                 requestHeaders: requestLog.requestHeaders,
                 requestBody: requestLog.requestBody,
-                responseBody: Self.safeResponseBody(responseBodyText),
+                responseBody: logsBodyContents
+                    ? Self.safeResponseBody(responseBodyText)
+                    : redactedBodyDescription,
                 isError: false
             )
             NotificationCenter.default.post(
@@ -2618,7 +2780,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         }
 
         var safeHeaders = headers
-        for sensitiveKey in ["X-Client-Secret"] {
+        for sensitiveKey in ["Authorization", "X-Client-Secret"] {
             if safeHeaders[sensitiveKey] != nil {
                 safeHeaders[sensitiveKey] = "[REDACTED]"
             }
@@ -2959,6 +3121,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var reason: String?
     }
 
+    private struct VoiceTutorSessionCreateRequest: Encodable {
+        var studyId: Int
+        var language: String
+        var voice: String?
+    }
+
     private struct ReferralRedemptionRequest: Encodable {
         var code: String
     }
@@ -3207,6 +3375,7 @@ struct BackendBillingStatus: Decodable, Equatable {
     var planTransition: BackendBillingPlanTransition?
     var synchronizedAt: Date
     var quota: BackendBillingQuotaStatus
+    var voiceTutor: BackendBillingVoiceTutorStatus?
 
     var isEntitlementActive: Bool {
         accessStatus == "ACTIVE" || accessStatus == "GRACE_PERIOD"
@@ -3226,6 +3395,9 @@ struct BackendBillingStatus: Decodable, Equatable {
         case planTransition
         case synchronizedAt
         case quota
+        case voiceTutor
+        case voiceTutorEnabled
+        case voiceQuota
     }
 
     init(from decoder: Decoder) throws {
@@ -3244,6 +3416,65 @@ struct BackendBillingStatus: Decodable, Equatable {
         planTransition = try values.decodeIfPresent(BackendBillingPlanTransition.self, forKey: .planTransition)
         synchronizedAt = try values.decode(Date.self, forKey: .synchronizedAt)
         quota = try values.decode(BackendBillingQuotaStatus.self, forKey: .quota)
+        if let nestedVoiceTutor = try values.decodeIfPresent(
+            BackendBillingVoiceTutorStatus.self,
+            forKey: .voiceTutor
+        ) {
+            voiceTutor = nestedVoiceTutor
+        } else if values.contains(.voiceTutorEnabled) || values.contains(.voiceQuota) {
+            voiceTutor = BackendBillingVoiceTutorStatus(
+                enabled: try values.decodeIfPresent(Bool.self, forKey: .voiceTutorEnabled) ?? false,
+                quota: try values.decodeIfPresent(BackendVoiceTutorQuota.self, forKey: .voiceQuota)
+            )
+        } else {
+            voiceTutor = nil
+        }
+    }
+}
+
+struct BackendBillingVoiceTutorStatus: Decodable, Equatable, Sendable {
+    var enabled: Bool
+    var quota: BackendVoiceTutorQuota?
+
+    init(enabled: Bool, quota: BackendVoiceTutorQuota?) {
+        self.enabled = enabled
+        self.quota = quota
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled
+        case eligible
+        case quota
+        case periodStartedAt
+        case resetAt
+        case limitSeconds
+        case usedSeconds
+        case reservedSeconds
+        case remainingSeconds
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled)
+            ?? values.decodeIfPresent(Bool.self, forKey: .eligible)
+            ?? false
+        if let nestedQuota = try values.decodeIfPresent(BackendVoiceTutorQuota.self, forKey: .quota) {
+            quota = nestedQuota
+        } else if values.contains(.limitSeconds)
+                    || values.contains(.usedSeconds)
+                    || values.contains(.reservedSeconds)
+                    || values.contains(.remainingSeconds) {
+            quota = BackendVoiceTutorQuota(
+                periodStartedAt: try values.decodeIfPresent(Date.self, forKey: .periodStartedAt),
+                resetAt: try values.decodeIfPresent(Date.self, forKey: .resetAt),
+                limitSeconds: try values.decodeIfPresent(Int.self, forKey: .limitSeconds) ?? 0,
+                usedSeconds: try values.decodeIfPresent(Int.self, forKey: .usedSeconds) ?? 0,
+                reservedSeconds: try values.decodeIfPresent(Int.self, forKey: .reservedSeconds) ?? 0,
+                remainingSeconds: try values.decodeIfPresent(Int.self, forKey: .remainingSeconds) ?? 0
+            )
+        } else {
+            quota = nil
+        }
     }
 }
 
@@ -3336,6 +3567,7 @@ struct BackendBillingTierProduct: Decodable, Equatable, Identifiable {
     var adFree: Bool
     var description: String
     var monthlyQuestionLimit: Int
+    var monthlyVoiceSecondsLimit: Int
     var productId: String
     var productType: String
     var billingPeriod: String?
@@ -3348,6 +3580,7 @@ struct BackendBillingTierProduct: Decodable, Equatable, Identifiable {
         adFree: Bool? = nil,
         description: String,
         monthlyQuestionLimit: Int,
+        monthlyVoiceSecondsLimit: Int = 0,
         productId: String,
         productType: String,
         billingPeriod: String?,
@@ -3357,6 +3590,7 @@ struct BackendBillingTierProduct: Decodable, Equatable, Identifiable {
         self.adFree = adFree ?? (tierCode.caseInsensitiveCompare("TIER1") != .orderedSame)
         self.description = description
         self.monthlyQuestionLimit = monthlyQuestionLimit
+        self.monthlyVoiceSecondsLimit = max(0, monthlyVoiceSecondsLimit)
         self.productId = productId
         self.productType = productType
         self.billingPeriod = billingPeriod
@@ -3368,6 +3602,9 @@ struct BackendBillingTierProduct: Decodable, Equatable, Identifiable {
         case adFree
         case description
         case monthlyQuestionLimit
+        case monthlyVoiceSecondsLimit
+        case monthlyVoiceSeconds
+        case monthlyVoiceMinuteLimit
         case productId
         case productType
         case billingPeriod
@@ -3382,11 +3619,419 @@ struct BackendBillingTierProduct: Decodable, Equatable, Identifiable {
             adFree: try values.decodeIfPresent(Bool.self, forKey: .adFree),
             description: try values.decode(String.self, forKey: .description),
             monthlyQuestionLimit: try values.decode(Int.self, forKey: .monthlyQuestionLimit),
+            monthlyVoiceSecondsLimit: try values.decodeIfPresent(Int.self, forKey: .monthlyVoiceSecondsLimit)
+                ?? values.decodeIfPresent(Int.self, forKey: .monthlyVoiceSeconds)
+                ?? ((try values.decodeIfPresent(Int.self, forKey: .monthlyVoiceMinuteLimit)) ?? 0) * 60,
             productId: try values.decode(String.self, forKey: .productId),
             productType: try values.decode(String.self, forKey: .productType),
             billingPeriod: try values.decodeIfPresent(String.self, forKey: .billingPeriod),
             sortOrder: try values.decode(Int.self, forKey: .sortOrder)
         )
+    }
+}
+
+struct BackendVoiceTutorQuota: Decodable, Equatable, Sendable {
+    var periodStartedAt: Date?
+    var resetAt: Date?
+    var limitSeconds: Int
+    var usedSeconds: Int
+    var reservedSeconds: Int
+    var remainingSeconds: Int
+
+    init(
+        periodStartedAt: Date? = nil,
+        resetAt: Date? = nil,
+        limitSeconds: Int,
+        usedSeconds: Int,
+        reservedSeconds: Int,
+        remainingSeconds: Int
+    ) {
+        self.periodStartedAt = periodStartedAt
+        self.resetAt = resetAt
+        self.limitSeconds = max(0, limitSeconds)
+        self.usedSeconds = max(0, usedSeconds)
+        self.reservedSeconds = max(0, reservedSeconds)
+        self.remainingSeconds = max(0, remainingSeconds)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case periodStartedAt
+        case resetAt
+        case limitSeconds
+        case baseLimitSeconds
+        case bonusLimitSeconds
+        case usedSeconds
+        case reservedSeconds
+        case remainingSeconds
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        periodStartedAt = try values.decodeIfPresent(Date.self, forKey: .periodStartedAt)
+        resetAt = try values.decodeIfPresent(Date.self, forKey: .resetAt)
+        let base = try values.decodeIfPresent(Int.self, forKey: .baseLimitSeconds) ?? 0
+        let bonus = try values.decodeIfPresent(Int.self, forKey: .bonusLimitSeconds) ?? 0
+        limitSeconds = max(
+            0,
+            try values.decodeIfPresent(Int.self, forKey: .limitSeconds) ?? (base + bonus)
+        )
+        usedSeconds = max(0, try values.decodeIfPresent(Int.self, forKey: .usedSeconds) ?? 0)
+        reservedSeconds = max(0, try values.decodeIfPresent(Int.self, forKey: .reservedSeconds) ?? 0)
+        remainingSeconds = max(
+            0,
+            try values.decodeIfPresent(Int.self, forKey: .remainingSeconds)
+                ?? max(0, limitSeconds - usedSeconds - reservedSeconds)
+        )
+    }
+}
+
+struct BackendVoiceTutorActiveSession: Decodable, Equatable, Sendable, Identifiable {
+    var sessionId: String
+    var studyId: Int?
+    var state: String
+    var startedAt: Date?
+    var hardEndsAt: Date?
+
+    var id: String { sessionId }
+}
+
+struct BackendVoiceTutorStatus: Decodable, Equatable, Sendable {
+    var eligible: Bool
+    var reason: String?
+    var tierCode: String
+    var quota: BackendVoiceTutorQuota
+    var activeSession: BackendVoiceTutorActiveSession?
+    var maxSessionSeconds: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case eligible
+        case enabled
+        case reason
+        case tierCode
+        case quota
+        case activeSession
+        case maxSessionSeconds
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        eligible = try values.decodeIfPresent(Bool.self, forKey: .eligible)
+            ?? values.decodeIfPresent(Bool.self, forKey: .enabled)
+            ?? false
+        reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        tierCode = try values.decodeIfPresent(String.self, forKey: .tierCode) ?? "TIER1"
+        quota = try values.decodeIfPresent(BackendVoiceTutorQuota.self, forKey: .quota)
+            ?? BackendVoiceTutorQuota(
+                limitSeconds: 0,
+                usedSeconds: 0,
+                reservedSeconds: 0,
+                remainingSeconds: 0
+            )
+        activeSession = try values.decodeIfPresent(BackendVoiceTutorActiveSession.self, forKey: .activeSession)
+        maxSessionSeconds = max(
+            0,
+            try values.decodeIfPresent(Int.self, forKey: .maxSessionSeconds) ?? 0
+        )
+    }
+}
+
+struct BackendVoiceTutorSessionStart: Decodable, Equatable, Sendable {
+    var sessionId: String
+    var state: String
+    var webSocketURL: URL?
+    var webSocketProtocol: String
+    var createdAt: Date?
+    var hardEndsAt: Date?
+    var quota: BackendVoiceTutorQuota
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId
+        case state
+        case websocketUrl
+        case webSocketUrl
+        case websocketProtocol
+        case webSocketProtocol
+        case createdAt
+        case startedAt
+        case hardEndsAt
+        case quota
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try values.decode(String.self, forKey: .sessionId)
+        state = try values.decodeIfPresent(String.self, forKey: .state) ?? "READY"
+        let urlString = try values.decodeIfPresent(String.self, forKey: .websocketUrl)
+            ?? values.decodeIfPresent(String.self, forKey: .webSocketUrl)
+        webSocketURL = urlString.flatMap(URL.init(string:))
+        webSocketProtocol = try values.decodeIfPresent(String.self, forKey: .websocketProtocol)
+            ?? values.decodeIfPresent(String.self, forKey: .webSocketProtocol)
+            ?? "buddystudy.voice.v1"
+        createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt)
+            ?? values.decodeIfPresent(Date.self, forKey: .startedAt)
+        hardEndsAt = try values.decodeIfPresent(Date.self, forKey: .hardEndsAt)
+        quota = try values.decodeIfPresent(BackendVoiceTutorQuota.self, forKey: .quota)
+            ?? BackendVoiceTutorQuota(
+                limitSeconds: 0,
+                usedSeconds: 0,
+                reservedSeconds: 0,
+                remainingSeconds: 0
+            )
+    }
+}
+
+struct BackendVoiceTutorSessionListItem: Decodable, Equatable, Sendable, Identifiable {
+    var sessionId: String
+    var studyId: Int?
+    var topic: String
+    var difficultyLevel: Int?
+    var language: String?
+    var state: String
+    var startedAt: Date?
+    var endedAt: Date?
+    var durationSeconds: Int
+    var chargedSeconds: Int
+    var resultStatus: String?
+    var summaryPreview: String?
+
+    var id: String { sessionId }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId
+        case id
+        case studyId
+        case topic
+        case difficulty
+        case difficultyLevel
+        case language
+        case state
+        case startedAt
+        case createdAt
+        case endedAt
+        case durationSeconds
+        case chargedSeconds
+        case resultStatus
+        case summaryPreview
+        case summaryMarkdown
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try values.decodeIfPresent(String.self, forKey: .sessionId)
+            ?? values.decode(String.self, forKey: .id)
+        studyId = try values.decodeIfPresent(Int.self, forKey: .studyId)
+        topic = try values.decodeIfPresent(String.self, forKey: .topic) ?? ""
+        difficultyLevel = try values.decodeIfPresent(Int.self, forKey: .difficultyLevel)
+            ?? values.decodeIfPresent(Int.self, forKey: .difficulty)
+        language = try values.decodeIfPresent(String.self, forKey: .language)
+        state = try values.decodeIfPresent(String.self, forKey: .state) ?? "UNKNOWN"
+        startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
+            ?? values.decodeIfPresent(Date.self, forKey: .createdAt)
+        endedAt = try values.decodeIfPresent(Date.self, forKey: .endedAt)
+        durationSeconds = max(0, try values.decodeIfPresent(Int.self, forKey: .durationSeconds) ?? 0)
+        chargedSeconds = max(0, try values.decodeIfPresent(Int.self, forKey: .chargedSeconds) ?? 0)
+        resultStatus = try values.decodeIfPresent(String.self, forKey: .resultStatus)
+        summaryPreview = try values.decodeIfPresent(String.self, forKey: .summaryPreview)
+            ?? values.decodeIfPresent(String.self, forKey: .summaryMarkdown)
+    }
+}
+
+struct BackendVoiceTutorSessionPage: Decodable, Equatable, Sendable {
+    var sessions: [BackendVoiceTutorSessionListItem]
+    var nextCursor: String?
+    var totalCount: Int?
+    var limit: Int
+    var offset: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case sessions
+        case items
+        case nextCursor
+        case totalCount
+        case total
+        case limit
+        case offset
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sessions = try values.decodeIfPresent([BackendVoiceTutorSessionListItem].self, forKey: .sessions)
+            ?? values.decodeIfPresent([BackendVoiceTutorSessionListItem].self, forKey: .items)
+            ?? []
+        totalCount = try values.decodeIfPresent(Int.self, forKey: .totalCount)
+            ?? values.decodeIfPresent(Int.self, forKey: .total)
+        limit = max(1, try values.decodeIfPresent(Int.self, forKey: .limit) ?? max(sessions.count, 1))
+        offset = max(0, try values.decodeIfPresent(Int.self, forKey: .offset) ?? 0)
+        if let decodedCursor = try values.decodeIfPresent(String.self, forKey: .nextCursor) {
+            nextCursor = decodedCursor
+        } else if let totalCount, offset + sessions.count < totalCount {
+            nextCursor = String(offset + sessions.count)
+        } else {
+            nextCursor = nil
+        }
+    }
+}
+
+struct BackendVoiceTutorSessionResult: Decodable, Equatable, Sendable {
+    var status: String?
+    var summaryMarkdown: String
+    var strengths: [String]
+    var improvements: [String]
+    var nextSteps: [String]
+    var model: String?
+    var promptVersion: String?
+    var errorMessage: String?
+    var createdAt: Date?
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case summaryMarkdown
+        case summary
+        case strengths
+        case improvements
+        case nextSteps
+        case model
+        case promptVersion
+        case errorMessage
+        case createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        status = try values.decodeIfPresent(String.self, forKey: .status)
+        summaryMarkdown = try values.decodeIfPresent(String.self, forKey: .summaryMarkdown)
+            ?? values.decodeIfPresent(String.self, forKey: .summary)
+            ?? ""
+        strengths = try values.decodeIfPresent([String].self, forKey: .strengths) ?? []
+        improvements = try values.decodeIfPresent([String].self, forKey: .improvements) ?? []
+        nextSteps = try values.decodeIfPresent([String].self, forKey: .nextSteps) ?? []
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        promptVersion = try values.decodeIfPresent(String.self, forKey: .promptVersion)
+        errorMessage = try values.decodeIfPresent(String.self, forKey: .errorMessage)
+        createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt)
+    }
+}
+
+struct BackendVoiceTutorTranscriptTurn: Decodable, Equatable, Sendable, Identifiable {
+    var id: String
+    var role: String
+    var text: String
+    var createdAt: Date?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case role
+        case text
+        case transcript
+        case createdAt
+        case occurredAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        if let stringID = try? values.decode(String.self, forKey: .id) {
+            id = stringID
+        } else if let numericID = try? values.decode(Int64.self, forKey: .id) {
+            id = String(numericID)
+        } else {
+            id = UUID().uuidString
+        }
+        role = try values.decodeIfPresent(String.self, forKey: .role) ?? "unknown"
+        text = try values.decodeIfPresent(String.self, forKey: .text)
+            ?? values.decodeIfPresent(String.self, forKey: .transcript)
+            ?? ""
+        createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt)
+            ?? values.decodeIfPresent(Date.self, forKey: .occurredAt)
+    }
+}
+
+struct BackendVoiceTutorSessionDetail: Decodable, Equatable, Sendable, Identifiable {
+    var sessionId: String
+    var studyId: Int?
+    var topic: String
+    var difficultyLevel: Int?
+    var language: String?
+    var state: String
+    var startedAt: Date?
+    var endedAt: Date?
+    var hardEndsAt: Date?
+    var durationSeconds: Int
+    var chargedSeconds: Int
+    var resultStatus: String?
+    var result: BackendVoiceTutorSessionResult?
+    var transcriptTurns: [BackendVoiceTutorTranscriptTurn]
+    var pollAfterMilliseconds: Int?
+    var quota: BackendVoiceTutorQuota?
+
+    var id: String { sessionId }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId
+        case id
+        case studyId
+        case topic
+        case difficulty
+        case difficultyLevel
+        case language
+        case state
+        case startedAt
+        case createdAt
+        case endedAt
+        case hardEndsAt
+        case durationSeconds
+        case chargedSeconds
+        case resultStatus
+        case result
+        case transcriptTurns
+        case pollAfterMs
+        case pollAfterMilliseconds
+        case quota
+        case session
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        if values.contains(.session) {
+            var nested = try values.decode(BackendVoiceTutorSessionDetail.self, forKey: .session)
+            nested.result = try values.decodeIfPresent(
+                BackendVoiceTutorSessionResult.self,
+                forKey: .result
+            ) ?? nested.result
+            nested.transcriptTurns = try values.decodeIfPresent(
+                [BackendVoiceTutorTranscriptTurn].self,
+                forKey: .transcriptTurns
+            ) ?? nested.transcriptTurns
+            nested.pollAfterMilliseconds = try values.decodeIfPresent(Int.self, forKey: .pollAfterMs)
+                ?? values.decodeIfPresent(Int.self, forKey: .pollAfterMilliseconds)
+                ?? nested.pollAfterMilliseconds
+            nested.quota = try values.decodeIfPresent(BackendVoiceTutorQuota.self, forKey: .quota)
+                ?? nested.quota
+            self = nested
+            return
+        }
+        sessionId = try values.decodeIfPresent(String.self, forKey: .sessionId)
+            ?? values.decode(String.self, forKey: .id)
+        studyId = try values.decodeIfPresent(Int.self, forKey: .studyId)
+        topic = try values.decodeIfPresent(String.self, forKey: .topic) ?? ""
+        difficultyLevel = try values.decodeIfPresent(Int.self, forKey: .difficultyLevel)
+            ?? values.decodeIfPresent(Int.self, forKey: .difficulty)
+        language = try values.decodeIfPresent(String.self, forKey: .language)
+        state = try values.decodeIfPresent(String.self, forKey: .state) ?? "UNKNOWN"
+        startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
+            ?? values.decodeIfPresent(Date.self, forKey: .createdAt)
+        endedAt = try values.decodeIfPresent(Date.self, forKey: .endedAt)
+        hardEndsAt = try values.decodeIfPresent(Date.self, forKey: .hardEndsAt)
+        durationSeconds = max(0, try values.decodeIfPresent(Int.self, forKey: .durationSeconds) ?? 0)
+        chargedSeconds = max(0, try values.decodeIfPresent(Int.self, forKey: .chargedSeconds) ?? 0)
+        resultStatus = try values.decodeIfPresent(String.self, forKey: .resultStatus)
+        result = try values.decodeIfPresent(BackendVoiceTutorSessionResult.self, forKey: .result)
+        transcriptTurns = try values.decodeIfPresent(
+            [BackendVoiceTutorTranscriptTurn].self,
+            forKey: .transcriptTurns
+        ) ?? []
+        pollAfterMilliseconds = try values.decodeIfPresent(Int.self, forKey: .pollAfterMs)
+            ?? values.decodeIfPresent(Int.self, forKey: .pollAfterMilliseconds)
+        quota = try values.decodeIfPresent(BackendVoiceTutorQuota.self, forKey: .quota)
     }
 }
 

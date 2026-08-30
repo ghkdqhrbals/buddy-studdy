@@ -122,6 +122,8 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>AI 음성 튜터와 대화하려면 마이크 접근이 필요합니다. Microphone access is required to talk with your AI voice tutor.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

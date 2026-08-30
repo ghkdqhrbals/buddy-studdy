@@ -12,9 +12,14 @@ import com.buddystudy.backend.admin.management.application.model.AssignUserPlanC
 interface AdminManagementUseCase {
     suspend fun users(query: String?, limit: Int, offset: Int): AdminUserPageResponse
     suspend fun tiers(): List<AdminMembershipTierResponse>
-    suspend fun updateTier(tierCode: String, monthlyQuestionLimit: Int): AdminMembershipTierResponse
+    suspend fun updateTier(
+        tierCode: String,
+        monthlyQuestionLimit: Int? = null,
+        monthlyVoiceSecondsLimit: Int? = null,
+    ): AdminMembershipTierResponse
     suspend fun assignPlan(userId: Long, command: AssignUserPlanCommand): AdminUserSummary
     suspend fun setCurrentPeriodQuestionLimit(userId: Long, questionLimitOverride: Int?): AdminUserSummary
+    suspend fun setVoiceLimit(userId: Long, monthlyVoiceSecondsLimitOverride: Int?): AdminUserSummary
 }
 
 interface AdminFeedbackUseCase {

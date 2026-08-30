@@ -14,6 +14,11 @@
 		C80000000000000000000001 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = C80000000000000000000002 /* RevenueCat */; };
 		E50000000000000000000003 /* SentryMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50000000000000000000004 /* SentryMonitoring.swift */; };
 		B10000000000000000000002 /* AppleBillingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* AppleBillingStore.swift */; };
+		F81000000000000000000001 /* VoiceTutorRealtimeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000002 /* VoiceTutorRealtimeClient.swift */; };
+		F81000000000000000000003 /* VoiceTutorAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000004 /* VoiceTutorAudioEngine.swift */; };
+		F81000000000000000000005 /* VoiceTutorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000006 /* VoiceTutorViewModel.swift */; };
+		F81000000000000000000007 /* VoiceTutorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000008 /* VoiceTutorView.swift */; };
+		F81000000000000000000009 /* VoiceTutorContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8100000000000000000000A /* VoiceTutorContractTests.swift */; };
 		B90000000000000000000002 /* StudyMateDev.storekit in Resources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000001 /* StudyMateDev.storekit */; };
 		110000000000000000000101 /* StudyMateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000001 /* StudyMateApp.swift */; };
 		110000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
@@ -367,6 +372,10 @@
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		110000000000000000000019 /* RemotePushBackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePushBackendClient.swift; sourceTree = "<group>"; };
 		B10000000000000000000001 /* AppleBillingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleBillingStore.swift; sourceTree = "<group>"; };
+		F81000000000000000000002 /* VoiceTutorRealtimeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorRealtimeClient.swift; sourceTree = "<group>"; };
+		F81000000000000000000004 /* VoiceTutorAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorAudioEngine.swift; sourceTree = "<group>"; };
+		F81000000000000000000006 /* VoiceTutorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorViewModel.swift; sourceTree = "<group>"; };
+		F81000000000000000000008 /* VoiceTutorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorView.swift; sourceTree = "<group>"; };
 		110000000000000000000180 /* NotificationLandingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationLandingCoordinator.swift; sourceTree = "<group>"; };
 		11000000000000000000001A /* KeyboardDoneToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDoneToolbar.swift; sourceTree = "<group>"; };
 		11000000000000000000001B /* GoogleOAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuthService.swift; sourceTree = "<group>"; };
@@ -421,6 +430,7 @@
 		120000000000000000000204 /* PageAccessPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageAccessPolicyTests.swift; sourceTree = "<group>"; };
 		120000000000000000000206 /* AvatarBuilderAssetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarBuilderAssetTests.swift; sourceTree = "<group>"; };
 		120000000000000000000208 /* QuestionGenerationFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionGenerationFlowTests.swift; sourceTree = "<group>"; };
+		F8100000000000000000000A /* VoiceTutorContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorContractTests.swift; sourceTree = "<group>"; };
 		B90000000000000000000001 /* StudyMateDev.storekit */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StudyMateDev.storekit; sourceTree = "<group>"; };
 		F70000000000000000000020 /* AppControlPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppControlPolicyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -840,6 +850,8 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000004 /* AdMobNativeAdvertising.swift */,
+				F81000000000000000000004 /* VoiceTutorAudioEngine.swift */,
+				F81000000000000000000002 /* VoiceTutorRealtimeClient.swift */,
 				110000000000000000000004 /* SettingsStore.swift */,
 				110000000000000000000005 /* OpenAIClient.swift */,
 				110000000000000000000006 /* NotificationService.swift */,
@@ -861,6 +873,7 @@
 			isa = PBXGroup;
 			children = (
 				110000000000000000000007 /* AppState.swift */,
+				F81000000000000000000006 /* VoiceTutorViewModel.swift */,
 				11000000000000000000001F /* StudyRoomStateStore.swift */,
 				110000000000000000000022 /* RecordsStateStore.swift */,
 				110000000000000000000023 /* SearchStateStore.swift */,
@@ -891,6 +904,7 @@
 				120000000000000000000204 /* PageAccessPolicyTests.swift */,
 				120000000000000000000206 /* AvatarBuilderAssetTests.swift */,
 				120000000000000000000208 /* QuestionGenerationFlowTests.swift */,
+				F8100000000000000000000A /* VoiceTutorContractTests.swift */,
 			);
 			path = StudyMateiOSTests;
 			sourceTree = "<group>";
@@ -905,6 +919,7 @@
 				11000000000000000000000F /* StatisticsView.swift */,
 				11000000000000000000000A /* SettingsView.swift */,
 				120000000000000000000003 /* MobileRootView.swift */,
+				F81000000000000000000008 /* VoiceTutorView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -1331,6 +1346,7 @@
 				120000000000000000000205 /* PageAccessPolicyTests.swift in Sources */,
 				120000000000000000000207 /* AvatarBuilderAssetTests.swift in Sources */,
 				120000000000000000000209 /* QuestionGenerationFlowTests.swift in Sources */,
+				F81000000000000000000009 /* VoiceTutorContractTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1350,6 +1366,8 @@
 				120000000000000000000106 /* NotificationService.swift in Sources */,
 				120000000000000000000122 /* NotificationLandingCoordinator.swift in Sources */,
 				120000000000000000000113 /* RemotePushBackendClient.swift in Sources */,
+				F81000000000000000000001 /* VoiceTutorRealtimeClient.swift in Sources */,
+				F81000000000000000000003 /* VoiceTutorAudioEngine.swift in Sources */,
 				B10000000000000000000002 /* AppleBillingStore.swift in Sources */,
 				120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */,
 				120000000000000000000128 /* AppErrorHandlingPolicy.swift in Sources */,
@@ -1410,6 +1428,7 @@
 					12000000000000000000017A /* CloudSyncStateUseCase.swift in Sources */,
 					120000000000000000000115 /* GoogleOAuthService.swift in Sources */,
 				120000000000000000000107 /* AppState.swift in Sources */,
+				F81000000000000000000005 /* VoiceTutorViewModel.swift in Sources */,
 				120000000000000000000119 /* StudyRoomStateStore.swift in Sources */,
 				12000000000000000000011A /* RecordsStateStore.swift in Sources */,
 				12000000000000000000011B /* SearchStateStore.swift in Sources */,
@@ -1442,6 +1461,7 @@
 				12000000000000000000016F /* CloudSyncStateRepository.swift in Sources */,
 				120000000000000000000171 /* SettingsStoreCloudSyncStateRepository.swift in Sources */,
 				120000000000000000000111 /* MobileRootView.swift in Sources */,
+				F81000000000000000000007 /* VoiceTutorView.swift in Sources */,
 				120000000000000000000300 /* AppDebugControls.swift in Sources */,
 					120000000000000000000112 /* SwipeRevealRow.swift in Sources */,
 					120000000000000000000114 /* KeyboardDoneToolbar.swift in Sources */,

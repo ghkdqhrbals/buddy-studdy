@@ -24,11 +24,22 @@ class AdminManagementService(
     override suspend fun tiers(): List<AdminMembershipTierResponse> = management.tiers()
 
     @Transactional
-    override suspend fun updateTier(tierCode: String, monthlyQuestionLimit: Int): AdminMembershipTierResponse {
-        if (monthlyQuestionLimit !in 0..1_000_000) {
+    override suspend fun updateTier(
+        tierCode: String,
+        monthlyQuestionLimit: Int?,
+        monthlyVoiceSecondsLimit: Int?,
+    ): AdminMembershipTierResponse {
+        if (monthlyQuestionLimit == null && monthlyVoiceSecondsLimit == null) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "At least one membership tier limit is required.")
+        }
+        if (monthlyQuestionLimit?.let { it !in 0..1_000_000 } == true) {
             throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Monthly question limit is invalid.")
         }
-        return management.updateTier(tierCode.trim(), monthlyQuestionLimit)
+        if (monthlyVoiceSecondsLimit?.let { it !in 0..31_536_000 } == true) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Monthly voice limit is invalid.")
+        }
+        val normalizedTierCode = tierCode.trim()
+        return management.updateTierLimits(normalizedTierCode, monthlyQuestionLimit, monthlyVoiceSecondsLimit)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Membership tier not found.")
     }
 
@@ -54,6 +65,22 @@ class AdminManagementService(
             )
         }
         return management.setCurrentPeriodQuestionLimit(userId, questionLimitOverride)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "User not found.")
+    }
+
+    @Transactional
+    override suspend fun setVoiceLimit(
+        userId: Long,
+        monthlyVoiceSecondsLimitOverride: Int?,
+    ): AdminUserSummary {
+        if (monthlyVoiceSecondsLimitOverride?.let { it !in 0..31_536_000 } == true) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Monthly Voice Tutor limit override is invalid.",
+            )
+        }
+        return management.setVoiceLimit(userId, monthlyVoiceSecondsLimitOverride)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "User not found.")
     }
 }

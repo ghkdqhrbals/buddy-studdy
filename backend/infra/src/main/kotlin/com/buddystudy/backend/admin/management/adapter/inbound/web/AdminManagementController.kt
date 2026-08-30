@@ -54,6 +54,14 @@ class AdminManagementController(
     ): AdminMembershipTierResponse =
         management.updateTier(authorization.bearerToken(), tierCode, request)
 
+    @PatchMapping("/users/{userId}/voice-limit")
+    suspend fun setVoiceLimit(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable userId: Long,
+        @Valid @RequestBody request: UpdateUserVoiceLimitRequest,
+    ): AdminUserSummary =
+        management.setVoiceLimit(authorization.bearerToken(), userId, request)
+
     @GetMapping("/feedback")
     suspend fun feedback(
         @RequestHeader("Authorization") authorization: String?,
@@ -90,7 +98,9 @@ class AdminManagementController(
 
 data class UpdateMembershipTierRequest(
     @field:Min(0) @field:Max(1_000_000)
-    var monthlyQuestionLimit: Int = 0,
+    var monthlyQuestionLimit: Int? = null,
+    @field:Min(0) @field:Max(31_536_000)
+    var monthlyVoiceSecondsLimit: Int? = null,
 )
 
 data class AssignUserPlanRequest(
@@ -103,6 +113,11 @@ data class AssignUserPlanRequest(
 data class UpdateCurrentPeriodQuestionLimitRequest(
     @field:Min(0) @field:Max(1_000_000)
     var questionLimitOverride: Int? = null,
+)
+
+data class UpdateUserVoiceLimitRequest(
+    @field:Min(0) @field:Max(31_536_000)
+    var monthlyVoiceSecondsLimitOverride: Int? = null,
 )
 
 data class AdminNotificationRequest(
@@ -130,6 +145,11 @@ interface AdminManagementWebPort {
         adminToken: String,
         userId: Long,
         request: UpdateCurrentPeriodQuestionLimitRequest,
+    ): AdminUserSummary
+    suspend fun setVoiceLimit(
+        adminToken: String,
+        userId: Long,
+        request: UpdateUserVoiceLimitRequest,
     ): AdminUserSummary
     suspend fun feedback(
         adminToken: String,
@@ -179,7 +199,7 @@ class AdminManagementWebAdapter(
         request: UpdateMembershipTierRequest,
     ): AdminMembershipTierResponse {
         authentication.validate(adminToken)
-        return management.updateTier(tierCode, request.monthlyQuestionLimit)
+        return management.updateTier(tierCode, request.monthlyQuestionLimit, request.monthlyVoiceSecondsLimit)
     }
 
     override suspend fun assignPlan(
@@ -201,6 +221,15 @@ class AdminManagementWebAdapter(
     ): AdminUserSummary {
         authentication.validate(adminToken)
         return management.setCurrentPeriodQuestionLimit(userId, request.questionLimitOverride)
+    }
+
+    override suspend fun setVoiceLimit(
+        adminToken: String,
+        userId: Long,
+        request: UpdateUserVoiceLimitRequest,
+    ): AdminUserSummary {
+        authentication.validate(adminToken)
+        return management.setVoiceLimit(userId, request.monthlyVoiceSecondsLimitOverride)
     }
 
     override suspend fun feedback(

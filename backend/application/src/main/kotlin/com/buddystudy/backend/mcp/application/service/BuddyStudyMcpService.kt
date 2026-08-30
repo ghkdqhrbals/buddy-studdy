@@ -22,6 +22,7 @@ import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerati
 import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
+import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Instant
@@ -38,6 +39,7 @@ class BuddyStudyMcpService(
     private val gradingProcesses: GetAnswerGradingProcessUseCase,
     private val stats: GetStudyStatsUseCase,
     private val growth: GetStudyGrowthUseCase,
+    private val voiceTutor: VoiceTutorUseCase,
 ) : BuddyStudyMcpUseCase {
     @RequirePermission(Permissions.PROFILE_READ)
     override suspend fun getMyContext(principal: Principal): McpUserContextResponse {
@@ -185,6 +187,18 @@ class BuddyStudyMcpService(
     @RequirePermission(Permissions.STATS_READ)
     override suspend fun getStudyGrowth(principal: Principal, startAt: Instant?, endAt: Instant?) =
         growth.growth(registered(principal), startAt, endAt)
+
+    @RequirePermission(Permissions.VOICE_TUTOR_READ)
+    override suspend fun listVoiceTutorSessions(principal: Principal, limit: Int, cursor: String?) =
+        voiceTutor.sessions(registered(principal), boundedLimit(limit, MAX_RECORD_PAGE_SIZE), cursor)
+
+    @RequirePermission(Permissions.VOICE_TUTOR_READ)
+    override suspend fun getVoiceTutorSession(principal: Principal, sessionId: String) =
+        voiceTutor.session(registered(principal), requiredText(sessionId, "session_id"))
+
+    @RequirePermission(Permissions.VOICE_TUTOR_READ)
+    override suspend fun getVoiceTutorQuota(principal: Principal) =
+        voiceTutor.status(registered(principal))
 
     private fun registered(principal: Principal): Principal {
         requireRegistered(principal)

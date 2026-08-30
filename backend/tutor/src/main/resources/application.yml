@@ -72,6 +72,26 @@ buddystudy:
     allowed-origins: ${MCP_ALLOWED_ORIGINS:}
     allowed-hosts: ${MCP_ALLOWED_HOSTS:api.ghkdqhrbals.org,api.lowfidev.cloud,lowfidev.cloud,localhost:*,127.0.0.1:*}
     request-timeout-seconds: ${MCP_REQUEST_TIMEOUT_SECONDS:30}
+  voice-tutor:
+    enabled: ${VOICE_TUTOR_ENABLED:false}
+    model: ${OPENAI_REALTIME_MODEL:gpt-realtime-2.1}
+    voice: ${OPENAI_REALTIME_VOICE:marin}
+    max-session-seconds: ${VOICE_TUTOR_MAX_SESSION_SECONDS:3600}
+    connect-timeout-seconds: ${VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS:15}
+    heartbeat-lease-seconds: ${VOICE_TUTOR_HEARTBEAT_LEASE_SECONDS:60}
+    continuous-speech-intervention-seconds: ${VOICE_TUTOR_CONTINUOUS_SPEECH_INTERVENTION_SECONDS:12}
+    session-recovery-poll-ms: ${VOICE_TUTOR_SESSION_RECOVERY_POLL_MS:5000}
+    session-recovery-initial-delay-ms: ${VOICE_TUTOR_SESSION_RECOVERY_INITIAL_DELAY_MS:5000}
+    session-recovery-batch-size: ${VOICE_TUTOR_SESSION_RECOVERY_BATCH_SIZE:100}
+    summary-model: ${VOICE_TUTOR_SUMMARY_MODEL:${OPENAI_MODEL:gpt-5.4}}
+    summary-prompt-version: ${VOICE_TUTOR_SUMMARY_PROMPT_VERSION:voice-tutor-summary-v1}
+    summary-recovery-poll-ms: ${VOICE_TUTOR_SUMMARY_RECOVERY_POLL_MS:5000}
+    summary-recovery-initial-delay-ms: ${VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS:5000}
+    summary-recovery-batch-size: ${VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE:10}
+    summary-processing-lease-seconds: ${VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS:300}
+    transcript-max-characters: ${VOICE_TUTOR_TRANSCRIPT_MAX_CHARS:100000}
+    transcript-max-turns: ${VOICE_TUTOR_TRANSCRIPT_MAX_TURNS:2000}
+    public-base-url: ${VOICE_TUTOR_PUBLIC_BASE_URL:}
   logging:
     api:
       detail: ${API_LOG_DETAIL:detailed}

@@ -63,6 +63,7 @@ dependencies {
     jooqCodegen("org.jooq:jooq-meta-extensions:3.21.6")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("io.projectreactor:reactor-test")
     testImplementation("io.r2dbc:r2dbc-h2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

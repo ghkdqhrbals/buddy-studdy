@@ -23,9 +23,17 @@ import { formatDateTime, statusTone } from "../lib/format.js";
 
 const PAGE_SIZE = 20;
 const LIMIT_PRESETS = [10, 50, 100];
+const VOICE_LIMIT_PRESETS = [3_600, 18_000, 36_000];
 
 function formatQuestionCount(value) {
   return Number(value || 0).toLocaleString();
+}
+
+function formatVoiceTime(value) {
+  const seconds = Math.max(0, Number(value) || 0);
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes.toLocaleString()}m ${remainder}s` : `${minutes.toLocaleString()}m`;
 }
 
 function quotaUsagePercent(user) {
@@ -33,6 +41,121 @@ function quotaUsagePercent(user) {
   const used = (Number(user.usedCount) || 0) + (Number(user.reservedCount) || 0);
   if (limit <= 0) return used > 0 ? 100 : 0;
   return Math.min(100, Math.round((used / limit) * 100));
+}
+
+function voiceQuotaUsagePercent(user) {
+  const limit = Number(user.monthlyVoiceSecondsLimit) || 0;
+  const used = (Number(user.voiceUsedSeconds) || 0) + (Number(user.voiceReservedSeconds) || 0);
+  if (limit <= 0) return used > 0 ? 100 : 0;
+  return Math.min(100, Math.round((used / limit) * 100));
+}
+
+function VoiceQuotaEditor({ user, onSaved }) {
+  const hasOverride = user.monthlyVoiceSecondsLimitOverride !== null
+    && user.monthlyVoiceSecondsLimitOverride !== undefined;
+  const [overrideSeconds, setOverrideSeconds] = useState(
+    hasOverride ? String(user.monthlyVoiceSecondsLimitOverride) : "",
+  );
+  const parsedOverride = overrideSeconds.trim() === "" ? null : Number(overrideSeconds);
+  const isValidOverride = parsedOverride === null
+    || (Number.isInteger(parsedOverride) && parsedOverride >= 0 && parsedOverride <= 31_536_000);
+  const mutation = useMutation({
+    mutationFn: () => adminFetch(`/users/${user.id}/voice-limit`, {
+      method: "PATCH",
+      body: JSON.stringify({ monthlyVoiceSecondsLimitOverride: parsedOverride }),
+    }),
+    onSuccess: onSaved,
+  });
+
+  return (
+    <section className="drawer-section quota-manager">
+      <div className="quota-manager-heading">
+        <div>
+          <span className="quota-eyebrow">Voice Tutor allowance</span>
+          <h3>Voice time in this quota period</h3>
+        </div>
+        <StatusBadge tone={user.voiceRemainingSeconds > 0 ? "success" : "warning"}>{user.tierCode}</StatusBadge>
+      </div>
+
+      <div className="quota-stat-grid">
+        <div>
+          <span>Current limit</span>
+          <strong>{formatVoiceTime(user.monthlyVoiceSecondsLimit)}</strong>
+          <small>{hasOverride ? "user override" : `${formatVoiceTime(user.tierMonthlyVoiceSecondsLimit)} plan default`}</small>
+        </div>
+        <div>
+          <span>Used</span>
+          <strong>{formatVoiceTime(user.voiceUsedSeconds)}</strong>
+          <small>{formatVoiceTime(user.voiceReservedSeconds)} reserved</small>
+        </div>
+        <div>
+          <span>Remaining</span>
+          <strong>{formatVoiceTime(user.voiceRemainingSeconds)}</strong>
+          <small>available now</small>
+        </div>
+      </div>
+      <div
+        className="quota-progress"
+        role="progressbar"
+        aria-label="Voice Tutor quota used"
+        aria-valuemin="0"
+        aria-valuemax={Number(user.monthlyVoiceSecondsLimit) || 0}
+        aria-valuenow={Math.min(
+          (Number(user.voiceUsedSeconds) || 0) + (Number(user.voiceReservedSeconds) || 0),
+          Number(user.monthlyVoiceSecondsLimit) || 0,
+        )}
+      >
+        <span style={{ width: `${voiceQuotaUsagePercent(user)}%` }} />
+      </div>
+
+      <p className="section-description">{formatDateTime(user.voicePeriodStartedAt)} → {formatDateTime(user.voiceResetAt)}</p>
+
+      <div className="quota-target-editor">
+        <div>
+          <h4>Persistent user cap</h4>
+          <p>Set a monthly cap in seconds. Leave it blank to follow the user's plan default after every reset.</p>
+        </div>
+        <label className="field quota-limit-field">
+          <span>Voice limit override</span>
+          <div className="quota-number-input">
+            <input
+              type="number"
+              min="0"
+              max="31536000"
+              step="1"
+              value={overrideSeconds}
+              placeholder="Plan default"
+              onChange={(event) => setOverrideSeconds(event.target.value)}
+            />
+            <span>seconds</span>
+          </div>
+        </label>
+        <div className="quota-presets" aria-label="Quick Voice Tutor limit overrides">
+          {VOICE_LIMIT_PRESETS.map((seconds) => (
+            <button type="button" key={seconds} onClick={() => setOverrideSeconds(String(seconds))}>
+              {formatVoiceTime(seconds)}
+            </button>
+          ))}
+          <button type="button" onClick={() => setOverrideSeconds("")}>Use plan</button>
+        </div>
+      </div>
+
+      {!isValidOverride ? (
+        <InlineNotice tone="warning" compact>Enter 0–31,536,000 whole seconds, or leave blank to use the plan default.</InlineNotice>
+      ) : null}
+      <div className="drawer-form-actions">
+        {mutation.error ? <InlineNotice tone="danger" compact>{mutation.error.message}</InlineNotice> : null}
+        <Button
+          icon={Save}
+          busy={mutation.isPending}
+          disabled={!isValidOverride}
+          onClick={() => mutation.mutate()}
+        >
+          Save Voice Tutor limit
+        </Button>
+      </div>
+    </section>
+  );
 }
 
 function CurrentPeriodQuotaEditor({ user, onSaved }) {
@@ -179,10 +302,14 @@ function BillingLifecycle({ userId }) {
 
 function TierRow({ tier, onSaved }) {
   const [limit, setLimit] = useState(tier.monthlyQuestionLimit);
+  const [voiceLimit, setVoiceLimit] = useState(tier.monthlyVoiceSecondsLimit || 0);
   const mutation = useMutation({
     mutationFn: () => adminFetch(`/membership-tiers/${encodeURIComponent(tier.tierCode)}`, {
       method: "PATCH",
-      body: JSON.stringify({ monthlyQuestionLimit: Number(limit) }),
+      body: JSON.stringify({
+        monthlyQuestionLimit: Number(limit),
+        monthlyVoiceSecondsLimit: Number(voiceLimit),
+      }),
     }),
     onSuccess: onSaved,
   });
@@ -193,6 +320,12 @@ function TierRow({ tier, onSaved }) {
         <label className="compact-input">
           <input type="number" min="0" max="1000000" value={limit} onChange={(event) => setLimit(event.target.value)} />
           <span>questions / month</span>
+        </label>
+      </td>
+      <td>
+        <label className="compact-input">
+          <input type="number" min="0" max="31536000" value={voiceLimit} onChange={(event) => setVoiceLimit(event.target.value)} />
+          <span>voice seconds / month</span>
         </label>
       </td>
       <td className="action-cell">
@@ -243,12 +376,23 @@ function UsersWorkspace() {
     { key: "status", label: "Status", render: (user) => <StatusBadge tone={statusTone(user.status)}>{user.status}</StatusBadge> },
     {
       key: "usage",
-      label: "Usage",
+      label: "Questions",
       render: (user) => (
         <span className="usage-cell quota-table-usage">
           <span><strong>{formatQuestionCount(user.usedCount)}</strong> of {formatQuestionCount(user.monthlyLimit)}</span>
           <span className="quota-table-progress"><i style={{ width: `${quotaUsagePercent(user)}%` }} /></span>
           <small>{formatQuestionCount(user.remainingCount)} remaining</small>
+        </span>
+      ),
+    },
+    {
+      key: "voiceUsage",
+      label: "Voice",
+      render: (user) => (
+        <span className="usage-cell quota-table-usage">
+          <span><strong>{formatVoiceTime(user.voiceUsedSeconds)}</strong> of {formatVoiceTime(user.monthlyVoiceSecondsLimit)}</span>
+          <span className="quota-table-progress"><i style={{ width: `${voiceQuotaUsagePercent(user)}%` }} /></span>
+          <small>{formatVoiceTime(user.voiceRemainingSeconds)} remaining</small>
         </span>
       ),
     },
@@ -272,7 +416,7 @@ function UsersWorkspace() {
         </div>
         <div className="table-frame compact-table">
           <table className="data-table">
-            <thead><tr><th>Plan</th><th>Monthly capacity</th><th>Action</th></tr></thead>
+            <thead><tr><th>Plan</th><th>Question capacity</th><th>Voice capacity</th><th>Action</th></tr></thead>
             <tbody>{tiers.map((tier) => <TierRow key={tier.tierCode} tier={tier} onSaved={refresh} />)}</tbody>
           </table>
           {!tiersQuery.isLoading && tiers.length === 0 ? <div className="table-state">No membership tiers configured.</div> : null}
@@ -322,6 +466,14 @@ function UsersWorkspace() {
                 refresh();
               }}
             />
+            <VoiceQuotaEditor
+              key={`${selected.id}-${selected.monthlyVoiceSecondsLimitOverride}-${selected.voiceUsedSeconds}-${selected.voiceReservedSeconds}-${selected.voiceResetAt}`}
+              user={selected}
+              onSaved={(updated) => {
+                setSelected(updated);
+                refresh();
+              }}
+            />
             <div className="detail-summary user-account-summary">
               <div><span>Status</span><StatusBadge tone={statusTone(selected.status)}>{selected.status}</StatusBadge></div>
               <div><span>Provider</span><strong>{selected.provider}</strong></div>
@@ -350,7 +502,7 @@ export function UsersPage() {
       <PageHeader
         eyebrow="Manage"
         title="Users & quotas"
-        description="Search accounts, manage question capacity, and send a direct push to a selected user."
+        description="Search accounts, manage question and Voice Tutor capacity, and send a direct push to a selected user."
       />
       <UsersWorkspace />
     </>

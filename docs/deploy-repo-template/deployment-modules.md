@@ -7,7 +7,7 @@ one workflow run just because they share a host.
 
 | Module | Workflow | Trigger | Runner | Owns |
 | --- | --- | --- | --- | --- |
-| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Docker Swarm backend service rollout, backend env including the MCP feature flag and Host allowlist, fixed backend nginx route, standard application/runtime metrics, backend-log multiline collection |
+| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Docker Swarm backend service rollout, backend env including MCP and Voice Tutor runtime settings, fixed backend nginx route, standard application/runtime metrics, backend-log multiline collection |
 | Translation server | `Deploy BuddyStudy Translation Server` | manual | EC2 self-hosted | Internal LibreTranslate runtime and persisted `ko`, `en`, `ja` model cache |
 | Backend network | `Configure BuddyStudy Backend Network` | manual | EC2 self-hosted | Redis administrator ingress on the backend security group |
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
@@ -395,12 +395,47 @@ deployment.
   The Firebase service account must be limited to reading and updating Remote
   Config templates. The two OpenAI keys must be present and different:
   post-study topic suggestions use only the system key, while question
-  generation, embeddings, translation, answer feedback, and grading use only
-  the user-content key. Required values must be validated before writing the
+  generation, embeddings, translation, answer feedback, grading, Voice Tutor
+  realtime relay, and Tutor Learning Result summaries use only the regular
+  user-content key. No third Voice Tutor-specific OpenAI key is supported.
+  Required values must be validated before writing the
   container env file so an optional Spring config import cannot silently start
   a partially configured backend. SMTP values are also injected explicitly so
   email signup cannot deploy with an empty sender. APNs and SMTP credentials
   must not be duplicated in GitHub Actions Secrets.
+- Voice Tutor runtime configuration belongs to the Backend API module. Its
+  additive settings are `VOICE_TUTOR_ENABLED`, `OPENAI_REALTIME_MODEL`,
+  `OPENAI_REALTIME_VOICE`, `VOICE_TUTOR_MAX_SESSION_SECONDS`,
+  `VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS`, `VOICE_TUTOR_HEARTBEAT_LEASE_SECONDS`,
+  `VOICE_TUTOR_CONTINUOUS_SPEECH_INTERVENTION_SECONDS`,
+  `VOICE_TUTOR_SESSION_RECOVERY_POLL_MS`,
+  `VOICE_TUTOR_SESSION_RECOVERY_INITIAL_DELAY_MS`,
+  `VOICE_TUTOR_SESSION_RECOVERY_BATCH_SIZE`,
+  `VOICE_TUTOR_SUMMARY_MODEL`, `VOICE_TUTOR_SUMMARY_PROMPT_VERSION`,
+  `VOICE_TUTOR_SUMMARY_RECOVERY_POLL_MS`,
+  `VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS`,
+  `VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE`,
+  `VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS`,
+  `VOICE_TUTOR_TRANSCRIPT_MAX_CHARS`, `VOICE_TUTOR_TRANSCRIPT_MAX_TURNS`, and optional
+  `VOICE_TUTOR_PUBLIC_BASE_URL`. `deploy-backend.yml` reads each as an
+  optional GitHub Actions repository variable and writes the resolved value to
+  the generated runtime `.env`. The deployment template deliberately defaults
+  `VOICE_TUTOR_ENABLED` to `false` until the legal release checklist is
+  complete; after legal approval, set the repository variable explicitly to
+  `true`. The remaining deployment defaults mirror the application contract:
+  `gpt-realtime-2.1`, `marin`, `3600`, `15`, `60`, `12`, `5000`, `5000`, `100`,
+  `gpt-5.4`, `voice-tutor-summary-v1`, `5000`, `5000`, `10`, `300`,
+  `100000`, `2000`, and an
+  empty public base URL, in that order. The 3,600-second call ceiling follows
+  the provider's 60-minute Realtime session limit; the independently
+  configurable plan allowance remains 18,000 seconds (300 minutes) by
+  default. The generated Nginx route performs an authenticated WebSocket
+  upgrade, disables proxy buffering, and keeps a 4,000-second idle ceiling.
+  The regular server-only `OPENAI_API_KEY_USER` from the existing AWS
+  application secret serves both realtime relay and result summarization; no
+  Voice Tutor key or third OpenAI key is created. This feature adds no
+  container, monitoring module, deployment workflow, or runtime health-check
+  gate. Monthly per-tier seconds remain database/admin-owned.
 - MySQL credentials and connection URLs are owned by the
   `buddystudy/prod/mysql` secret. It contains `dbname`, `username`,
   `password`, `jdbcUrl`, and `r2dbcUrl`; the deploy workflow reads both JDBC

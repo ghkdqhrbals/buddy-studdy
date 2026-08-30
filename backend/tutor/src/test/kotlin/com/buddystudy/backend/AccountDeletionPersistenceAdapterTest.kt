@@ -27,6 +27,24 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var client: DatabaseClient
 
     @Test
+    fun `voice tutor read permission remains active-account-only after runtime seed reconciliation`(): Unit = runBlocking {
+        assertThat(
+            longValue("select requires_active_account from permissions where code = 'voice-tutor:read'"),
+        ).isEqualTo(1)
+        assertThat(
+            longValue(
+                """
+                select count(*)
+                from role_permissions rp
+                join roles r on r.id = rp.role_id
+                join permissions p on p.id = rp.permission_id
+                where p.code = 'voice-tutor:read' and r.code in ('REGISTERED_USER', 'ADMIN')
+                """.trimIndent(),
+            ),
+        ).isEqualTo(2)
+    }
+
+    @Test
     fun `withdrawal revokes access and async cleanup is idempotent without deleting new device data`(): Unit = runBlocking {
         val suffix = UUID.randomUUID().toString()
         val deviceId = "withdrawal-device-$suffix"
@@ -40,6 +58,7 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         insertNotification("old-$suffix", deviceId, withdrawnAt.minusSeconds(1))
         insertUserBlock(userId, peerUserId, withdrawnAt.minusSeconds(30))
         insertUserBlock(peerUserId, userId, withdrawnAt.minusSeconds(20))
+        val voiceSessionId = insertVoiceTutorData(userId, withdrawnAt.minusSeconds(30))
 
         val snapshot = accountDeletion.beginWithdrawal(userId, withdrawnAt)
 
@@ -59,6 +78,10 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(longValue("select count(*) from user_devices where user_id = $userId")).isZero()
         assertThat(longValue("select count(*) from app_notifications where event_id = 'old-$suffix'")).isZero()
         assertThat(longValue("select count(*) from app_notifications where event_id = 'new-$suffix'")).isEqualTo(1)
+        assertThat(longValue("select count(*) from user_voice_quota where user_id = $userId")).isZero()
+        assertThat(longValue("select count(*) from voice_tutor_sessions where id = '$voiceSessionId'")).isZero()
+        assertThat(longValue("select count(*) from voice_tutor_transcript_turns where session_id = '$voiceSessionId'")).isZero()
+        assertThat(longValue("select count(*) from voice_tutor_results where session_id = '$voiceSessionId'")).isZero()
     }
 
     private suspend fun insertBillingAccount(userId: Long, token: String, createdAt: Instant) {
@@ -161,6 +184,66 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             .fetch()
             .rowsUpdated()
             .awaitSingle()
+    }
+
+    private suspend fun insertVoiceTutorData(userId: Long, createdAt: Instant): String {
+        val sessionId = UUID.randomUUID().toString()
+        client.sql(
+            """
+            insert into user_voice_quota (
+                user_id, tier_code, anchor_at, period_started_at, period_ends_at,
+                base_seconds, used_seconds, reserved_seconds, version, created_at, updated_at
+            ) values (
+                :userId, 'TIER2', :createdAt, :createdAt, :periodEndsAt,
+                18000, 60, 0, 1, :createdAt, :createdAt
+            )
+            """.trimIndent(),
+        ).bind("userId", userId).bind("createdAt", createdAt).bind("periodEndsAt", createdAt.plusSeconds(31L * 86_400))
+            .fetch().rowsUpdated().awaitSingle()
+        client.sql(
+            """
+            insert into voice_tutor_sessions (
+                id, user_id, study_id, idempotency_key, provider_session_id,
+                status, result_status, language, model, voice, topic_snapshot, difficulty_snapshot,
+                period_started_at, period_ends_at, reserved_seconds, charged_seconds,
+                max_session_seconds, hard_ends_at, connected_at, ended_at, finalized_at,
+                finalization_key, end_reason, created_at, updated_at
+            ) values (
+                :id, :userId, null, :idempotencyKey, :providerSessionId,
+                'COMPLETED', 'COMPLETED', 'ko', 'gpt-realtime-2.1', 'marin', 'Private topic', 5,
+                :createdAt, :periodEndsAt, 60, 60,
+                60, :endedAt, :createdAt, :endedAt, :endedAt,
+                :finalizationKey, 'USER_ENDED', :createdAt, :endedAt
+            )
+            """.trimIndent(),
+        ).bind("id", sessionId).bind("userId", userId)
+            .bind("idempotencyKey", "withdrawal-voice-$sessionId")
+            .bind("providerSessionId", "provider-$sessionId")
+            .bind("createdAt", createdAt).bind("endedAt", createdAt.plusSeconds(60))
+            .bind("periodEndsAt", createdAt.plusSeconds(31L * 86_400))
+            .bind("finalizationKey", "voice-session:$sessionId:finalize")
+            .fetch().rowsUpdated().awaitSingle()
+        client.sql(
+            """
+            insert into voice_tutor_transcript_turns (
+                session_id, provider_item_id, role, transcript, sequence_number, occurred_at, created_at
+            ) values (:sessionId, 'private-item', 'USER', 'private transcript', 1, :createdAt, :createdAt)
+            """.trimIndent(),
+        ).bind("sessionId", sessionId).bind("createdAt", createdAt)
+            .fetch().rowsUpdated().awaitSingle()
+        client.sql(
+            """
+            insert into voice_tutor_results (
+                session_id, status, summary_markdown, strengths_json, improvements_json,
+                next_steps_json, model, prompt_version, created_at, updated_at
+            ) values (
+                :sessionId, 'COMPLETED', 'private summary', '[]', '[]', '[]',
+                'gpt-5.4', 'voice-tutor-summary-v1', :createdAt, :createdAt
+            )
+            """.trimIndent(),
+        ).bind("sessionId", sessionId).bind("createdAt", createdAt)
+            .fetch().rowsUpdated().awaitSingle()
+        return sessionId
     }
 
     private suspend fun longValue(sql: String): Long =

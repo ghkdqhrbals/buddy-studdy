@@ -71,7 +71,7 @@ class AdminManagementPersistenceAdapter(
     override suspend fun tiers(): List<AdminMembershipTierResponse> =
         database.sql(
             """
-            select tier_code, monthly_question_limit, description
+            select tier_code, monthly_question_limit, monthly_voice_seconds_limit, description
             from user_membership_tiers
             order by monthly_question_limit, tier_code
             """.trimIndent(),
@@ -80,6 +80,7 @@ class AdminManagementPersistenceAdapter(
                 tierCode = row.string("tier_code"),
                 monthlyQuestionLimit = row.int("monthly_question_limit"),
                 description = row.string("description"),
+                monthlyVoiceSecondsLimit = row.int("monthly_voice_seconds_limit"),
             )
         }.all().collectList().awaitSingle()
 
@@ -180,6 +181,32 @@ class AdminManagementPersistenceAdapter(
                 .bind("nextVersion", nextVersion).bind("now", now)
                 .fetch().rowsUpdated().awaitSingle()
         }
+        return tiers().firstOrNull { it.tierCode == tierCode }
+    }
+
+    @Transactional
+    override suspend fun updateTierVoiceSecondsLimit(
+        tierCode: String,
+        monthlyVoiceSecondsLimit: Int,
+    ): AdminMembershipTierResponse? {
+        val previousLimit = database.sql(
+            "select monthly_voice_seconds_limit from user_membership_tiers where tier_code = :tierCode for update",
+        ).bind("tierCode", tierCode)
+            .map { row, _ -> row.int("monthly_voice_seconds_limit") }
+            .one().awaitSingleOrNull() ?: return null
+        if (previousLimit == monthlyVoiceSecondsLimit) {
+            return tiers().firstOrNull { it.tierCode == tierCode }
+        }
+        database.sql(
+            """
+            update user_membership_tiers
+            set monthly_voice_seconds_limit = :limit, updated_at = :now
+            where tier_code = :tierCode
+            """.trimIndent(),
+        ).bind("limit", monthlyVoiceSecondsLimit)
+            .bind("now", Instant.now())
+            .bind("tierCode", tierCode)
+            .fetch().rowsUpdated().awaitSingle()
         return tiers().firstOrNull { it.tierCode == tierCode }
     }
 
@@ -300,6 +327,78 @@ class AdminManagementPersistenceAdapter(
                 .bind("reason", "Administrator changed the current-period quota bonus")
                 .bind("nextVersion", nextVersion).bind("now", now)
                 .fetch().rowsUpdated().awaitSingle()
+        }
+        return user(userId)
+    }
+
+    @Transactional
+    override suspend fun setVoiceLimit(
+        userId: Long,
+        monthlyVoiceSecondsLimitOverride: Int?,
+    ): AdminUserSummary? {
+        val now = Instant.now()
+        val createdAt = database.sql(
+            "select created_at from users where id = :userId and status <> 'ANONYMOUS' for update",
+        ).bind("userId", userId)
+            .map { row, _ -> row.instant("created_at") }
+            .one().awaitSingleOrNull() ?: return null
+        val plan = effectiveVoicePlan(userId, now)
+        val effectiveLimit = monthlyVoiceSecondsLimitOverride ?: plan.monthlyVoiceSecondsLimit
+        val existing = database.sql(
+            """
+            select period_started_at, period_ends_at, reserved_seconds
+            from user_voice_quota
+            where user_id = :userId
+            for update
+            """.trimIndent(),
+        ).bind("userId", userId).map { row, _ ->
+            ExistingVoiceQuota(
+                periodStartedAt = row.instant("period_started_at"),
+                periodEndsAt = row.instant("period_ends_at"),
+                reservedSeconds = row.int("reserved_seconds"),
+            )
+        }.one().awaitSingleOrNull()
+        val currentPeriod = MonthlyQuotaWindow.periodAt(createdAt, now)
+        if (existing == null) {
+            var insert = database.sql(
+                """
+                insert into user_voice_quota (
+                    user_id, tier_code, anchor_at, period_started_at, period_ends_at,
+                    limit_override_seconds, base_seconds, used_seconds, reserved_seconds,
+                    version, created_at, updated_at
+                ) values (
+                    :userId, :tierCode, :anchorAt, :periodStartedAt, :periodEndsAt,
+                    :overrideSeconds, :baseSeconds, 0, 0, 0, :now, :now
+                )
+                """.trimIndent(),
+            ).bind("userId", userId).bind("tierCode", plan.tierCode)
+                .bind("anchorAt", createdAt).bind("periodStartedAt", currentPeriod.startedAt)
+                .bind("periodEndsAt", currentPeriod.resetAt).bind("baseSeconds", effectiveLimit)
+                .bind("now", now)
+            insert = insert.bindNullableInt("overrideSeconds", monthlyVoiceSecondsLimitOverride)
+            insert.fetch().rowsUpdated().awaitSingle()
+        } else {
+            val resetPeriod = existing.reservedSeconds == 0 &&
+                (!now.isBefore(existing.periodEndsAt) || now.isBefore(existing.periodStartedAt))
+            var update = database.sql(
+                """
+                update user_voice_quota
+                set tier_code = :tierCode,
+                    limit_override_seconds = :overrideSeconds,
+                    base_seconds = :baseSeconds,
+                    period_started_at = if(:resetPeriod, :periodStartedAt, period_started_at),
+                    period_ends_at = if(:resetPeriod, :periodEndsAt, period_ends_at),
+                    used_seconds = if(:resetPeriod, 0, used_seconds),
+                    reserved_seconds = if(:resetPeriod, 0, reserved_seconds),
+                    version = version + 1,
+                    updated_at = :now
+                where user_id = :userId
+                """.trimIndent(),
+            ).bind("tierCode", plan.tierCode).bind("baseSeconds", effectiveLimit)
+                .bind("resetPeriod", resetPeriod).bind("periodStartedAt", currentPeriod.startedAt)
+                .bind("periodEndsAt", currentPeriod.resetAt).bind("now", now).bind("userId", userId)
+            update = update.bindNullableInt("overrideSeconds", monthlyVoiceSecondsLimitOverride)
+            update.fetch().rowsUpdated().awaitSingle()
         }
         return user(userId)
     }
@@ -458,18 +557,68 @@ class AdminManagementPersistenceAdapter(
             u.provider,
             u.status,
             u.created_at,
-            coalesce(uq.tier_code, e.tier_code, 'TIER1') as tier_code,
+            coalesce(effective_voice.tier_code, 'TIER1') as tier_code,
             coalesce(t.description, fallback_tier.description, '') as tier_description,
             coalesce(uq.base_limit, t.monthly_question_limit, fallback_tier.monthly_question_limit, 30) as monthly_limit,
             coalesce(uq.anchor_at, u.created_at) as quota_anchor_at,
             coalesce(uq.policy_version, ${MonthlyQuestionQuotaPolicy.VERSION}) as quota_policy_version,
+            case
+                when vq.limit_override_seconds is not null then vq.limit_override_seconds
+                else coalesce(voice_tier.monthly_voice_seconds_limit, fallback_tier.monthly_voice_seconds_limit, 0)
+            end as monthly_voice_seconds_limit,
+            vq.limit_override_seconds as monthly_voice_seconds_limit_override,
+            coalesce(voice_tier.monthly_voice_seconds_limit, fallback_tier.monthly_voice_seconds_limit, 0)
+                as tier_monthly_voice_seconds_limit,
+            coalesce(vq.used_seconds, 0) as voice_used_seconds,
+            coalesce(vq.reserved_seconds, 0) as voice_reserved_seconds,
+            greatest(
+                0,
+                case
+                    when vq.limit_override_seconds is not null then vq.limit_override_seconds
+                    else coalesce(voice_tier.monthly_voice_seconds_limit, fallback_tier.monthly_voice_seconds_limit, 0)
+                end - coalesce(vq.used_seconds, 0) - coalesce(vq.reserved_seconds, 0)
+            ) as voice_remaining_seconds,
+            vq.period_started_at as voice_period_started_at,
+            vq.period_ends_at as voice_period_ends_at,
             d.app_version,
             d.app_build,
             d.app_version_seen_at
         from users u
         left join user_entitlement_projection e on e.user_id = u.id
         left join user_quota uq on uq.user_id = u.id
-        left join user_membership_tiers t on t.tier_code = coalesce(uq.tier_code, e.tier_code, 'TIER1')
+        left join user_voice_quota vq on vq.user_id = u.id
+        left join (
+            select voice_candidates.user_id,
+                   case max(voice_candidates.tier_rank)
+                       when 3 then 'TIER3'
+                       when 2 then 'TIER2'
+                       else 'TIER1'
+                   end as tier_code
+            from (
+                select entitlement.user_id,
+                       case entitlement.tier_code
+                           when 'TIER3' then 3 when 'TIER2' then 2 when 'TIER1' then 1 else 0
+                       end as tier_rank
+                from user_entitlement_projection entitlement
+                where entitlement.source = 'FREE'
+                   or entitlement.access_status = 'GRACE_PERIOD'
+                   or (entitlement.access_status = 'ACTIVE'
+                       and (entitlement.expires_at is null or entitlement.expires_at > utc_timestamp(6)))
+                union all
+                select membership.user_id,
+                       case membership.tier
+                           when 'TIER3' then 3 when 'TIER2' then 2 when 'TIER1' then 1 else 0
+                       end as tier_rank
+                from user_memberships membership
+                where membership.status = 'ACTIVE'
+                  and membership.started_at <= utc_timestamp(6)
+                  and (membership.expires_at is null or membership.expires_at > utc_timestamp(6))
+            ) voice_candidates
+            group by voice_candidates.user_id
+        ) effective_voice on effective_voice.user_id = u.id
+        left join user_membership_tiers t on t.tier_code = coalesce(effective_voice.tier_code, 'TIER1')
+        left join user_membership_tiers voice_tier on voice_tier.tier_code =
+            coalesce(effective_voice.tier_code, 'TIER1')
         left join user_membership_tiers fallback_tier on fallback_tier.tier_code = 'TIER1'
         left join devices d on d.id = (
             select latest_device.id
@@ -530,6 +679,14 @@ class AdminManagementPersistenceAdapter(
             monthlyLimit = int("monthly_limit"),
             quotaAnchorAt = instant("quota_anchor_at"),
             quotaPolicyVersion = int("quota_policy_version"),
+            monthlyVoiceSecondsLimit = int("monthly_voice_seconds_limit"),
+            monthlyVoiceSecondsLimitOverride = nullableInt("monthly_voice_seconds_limit_override"),
+            tierMonthlyVoiceSecondsLimit = int("tier_monthly_voice_seconds_limit"),
+            voiceUsedSeconds = int("voice_used_seconds"),
+            voiceReservedSeconds = int("voice_reserved_seconds"),
+            voiceRemainingSeconds = int("voice_remaining_seconds"),
+            voicePeriodStartedAt = nullableInstant("voice_period_started_at"),
+            voicePeriodEndsAt = nullableInstant("voice_period_ends_at"),
             createdAt = instant("created_at"),
             appVersion = get("app_version", String::class.java),
             appBuild = get("app_build", String::class.java),
@@ -538,6 +695,8 @@ class AdminManagementPersistenceAdapter(
 
     private fun AdminUserRow.toAdminUser(usage: CurrentPeriodUsage, now: Instant): AdminUserSummary {
         val period = MonthlyQuotaWindow.periodAt(quotaAnchorAt, now)
+        val voicePeriodStartedAt = voicePeriodStartedAt ?: period.startedAt
+        val voiceResetAt = voicePeriodEndsAt ?: period.resetAt
         val effectiveLimit = (monthlyLimit + usage.bonusCount).coerceAtLeast(0)
         return AdminUserSummary(
             id = id,
@@ -562,6 +721,14 @@ class AdminManagementPersistenceAdapter(
             appVersion = appVersion,
             appBuild = appBuild,
             appVersionSeenAt = appVersionSeenAt,
+            monthlyVoiceSecondsLimit = monthlyVoiceSecondsLimit,
+            monthlyVoiceSecondsLimitOverride = monthlyVoiceSecondsLimitOverride,
+            tierMonthlyVoiceSecondsLimit = tierMonthlyVoiceSecondsLimit,
+            voiceUsedSeconds = voiceUsedSeconds,
+            voiceReservedSeconds = voiceReservedSeconds,
+            voiceRemainingSeconds = voiceRemainingSeconds,
+            voicePeriodStartedAt = voicePeriodStartedAt,
+            voiceResetAt = voiceResetAt,
         )
     }
 
@@ -576,6 +743,14 @@ class AdminManagementPersistenceAdapter(
         val monthlyLimit: Int,
         val quotaAnchorAt: Instant,
         val quotaPolicyVersion: Int,
+        val monthlyVoiceSecondsLimit: Int,
+        val monthlyVoiceSecondsLimitOverride: Int?,
+        val tierMonthlyVoiceSecondsLimit: Int,
+        val voiceUsedSeconds: Int,
+        val voiceReservedSeconds: Int,
+        val voiceRemainingSeconds: Int,
+        val voicePeriodStartedAt: Instant?,
+        val voicePeriodEndsAt: Instant?,
         val createdAt: Instant,
         val appVersion: String?,
         val appBuild: String?,
@@ -600,11 +775,60 @@ class AdminManagementPersistenceAdapter(
         val version: Long,
     )
 
+    private data class ExistingVoiceQuota(
+        val periodStartedAt: Instant,
+        val periodEndsAt: Instant,
+        val reservedSeconds: Int,
+    )
+
+    private data class AdminVoicePlan(
+        val tierCode: String,
+        val monthlyVoiceSecondsLimit: Int,
+    )
+
+    private suspend fun effectiveVoicePlan(userId: Long, at: Instant): AdminVoicePlan = database.sql(
+        """
+        select candidates.tier_code, candidates.monthly_voice_seconds_limit
+        from (
+            select entitlement.tier_code, tier.monthly_voice_seconds_limit,
+                   case entitlement.tier_code when 'TIER3' then 3 when 'TIER2' then 2 when 'TIER1' then 1 else 0 end tier_rank,
+                   entitlement.projected_at changed_at
+            from user_entitlement_projection entitlement
+            join user_membership_tiers tier on tier.tier_code = entitlement.tier_code
+            where entitlement.user_id = :userId
+              and (entitlement.source = 'FREE' or entitlement.access_status = 'GRACE_PERIOD'
+                   or (entitlement.access_status = 'ACTIVE' and (entitlement.expires_at is null or entitlement.expires_at > :at)))
+            union all
+            select membership.tier, tier.monthly_voice_seconds_limit,
+                   case membership.tier when 'TIER3' then 3 when 'TIER2' then 2 when 'TIER1' then 1 else 0 end tier_rank,
+                   membership.updated_at changed_at
+            from user_memberships membership
+            join user_membership_tiers tier on tier.tier_code = membership.tier
+            where membership.user_id = :userId and membership.status = 'ACTIVE'
+              and membership.started_at <= :at and (membership.expires_at is null or membership.expires_at > :at)
+        ) candidates
+        order by candidates.tier_rank desc, candidates.monthly_voice_seconds_limit desc, candidates.changed_at desc
+        limit 1
+        """.trimIndent(),
+    ).bind("userId", userId).bind("at", at)
+        .map { row, _ -> AdminVoicePlan(row.string("tier_code"), row.int("monthly_voice_seconds_limit")) }
+        .one().awaitSingleOrNull() ?: database.sql(
+        "select tier_code, monthly_voice_seconds_limit from user_membership_tiers where tier_code = 'TIER1'",
+    ).map { row, _ -> AdminVoicePlan(row.string("tier_code"), row.int("monthly_voice_seconds_limit")) }
+        .one().awaitSingle()
+
     private fun Row.string(name: String): String = get(name, String::class.java).orEmpty()
     private fun Row.int(name: String): Int = get(name, java.lang.Integer::class.java)?.toInt() ?: 0
+    private fun Row.nullableInt(name: String): Int? = get(name, java.lang.Integer::class.java)?.toInt()
     private fun Row.long(name: String): Long = get(name, java.lang.Long::class.java)?.toLong() ?: 0L
     private fun Row.instant(name: String): Instant =
         nullableInstant(name) ?: Instant.EPOCH
     private fun Row.nullableInstant(name: String): Instant? =
         get(name, LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)
+
+    private fun DatabaseClient.GenericExecuteSpec.bindNullableInt(
+        name: String,
+        value: Int?,
+    ): DatabaseClient.GenericExecuteSpec =
+        if (value == null) bindNull(name, Integer::class.java) else bind(name, value)
 }

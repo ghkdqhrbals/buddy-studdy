@@ -5,7 +5,8 @@
 BuddyStudy exposes a private, stateless Model Context Protocol endpoint at
 `POST /api/v1/mcp`. An authenticated LLM client can read the current user's
 profile, resume, interests, studies, questions, grading feedback, scores, and
-topic-level statistics. It can also update the private learning context, create
+topic-level statistics, plus private Voice Tutor quota, session history, and
+Tutor Learning Results. It can also update the private learning context, create
 root studies or child topics, request questions, submit answers, and delete a
 confirmed study subtree.
 
@@ -30,6 +31,7 @@ In scope:
 - asynchronous question request and process polling;
 - asynchronous answer submission and grading polling;
 - grading score, feedback, explanation, and rubric details;
+- read-only Voice Tutor quota, bounded session history, transcript/result detail;
 - topic-first statistics and study-tree growth;
 - MCP resources for compact, stable context reads.
 
@@ -38,6 +40,7 @@ Out of scope for this release:
 - public or anonymous MCP data access;
 - MCP sampling, elicitation, prompts, subscriptions, or server-side sessions;
 - direct synchronous OpenAI generation from an MCP request;
+- starting, streaming, reconnecting, ending, extending, or deleting a Voice Tutor session;
 - a second record store or direct `UserDefaults`/client persistence path;
 - MCP OAuth 2.1 discovery, dynamic client registration, or scoped MCP tokens;
 - automatic production activation or deployment.
@@ -52,7 +55,7 @@ MCP host
   -> WebFluxStatelessServerTransport
   -> BuddyStudyMcpPort / BuddyStudyMcpAdapter
   -> BuddyStudyMcpUseCase / BuddyStudyMcpService
-  -> existing Profile, Study, Record, Question, Grading, and Stats UseCases
+  -> existing Profile, Study, Record, Question, Grading, Stats, and Voice Tutor read UseCases
   -> existing outbound ports and MySQL/Redis adapters
 
 Private learning context
@@ -113,6 +116,9 @@ receive. Never put it in prompts, logs, repository files, or browser code.
 | `get_grading_process` | Read | `record:update` | Cursor uses `after_event_id`; poll until terminal |
 | `list_records` | Read | `record:read` | Bounded page with score/feedback when ready |
 | `get_record` | Read | `record:read` | Full score, feedback, explanation, and rubric |
+| `list_voice_tutor_sessions` | Read | `voice-tutor:read` | Owner-scoped opaque-cursor page; returns `sessions` and `nextCursor` without live-session mutation |
+| `get_voice_tutor_session` | Read | `voice-tutor:read` | Owned session, bounded transcript turns, and private learning result |
+| `get_voice_tutor_quota` | Read | `voice-tutor:read` | Server-owned seconds, remaining time, and reset boundary |
 | `get_topic_stats` | Read | `stats:read` | Topic-first, bounded statistics |
 | `get_study_growth` | Read | `stats:read` | Optional UTC interval |
 
@@ -128,6 +134,8 @@ only the operation name and exception type, never tool arguments.
 | `buddystudy://me/context` | Private profile, resume, and interests |
 | `buddystudy://studies` | First 200 owned study nodes |
 | `buddystudy://records/recent` | 30 recent completed records with grading results |
+| `buddystudy://voice-tutor/sessions/recent` | Recent owned Voice Tutor session summaries; use `get_voice_tutor_session` for transcript/result detail |
+| `buddystudy://voice-tutor/quota` | Current server-owned Voice Tutor seconds and reset boundary |
 
 Resources reuse the same authenticated use cases and permission checks as
 tools. They are snapshots, not subscriptions.
@@ -174,6 +182,23 @@ submit_answer(record_id, authored_answer)
   -> get_record(record_id) for final score and feedback
 ```
 
+Voice Tutor history:
+
+```text
+get_voice_tutor_quota()
+  -> effective TIER2/TIER3 entitlement + current user_voice_quota projection
+list_voice_tutor_sessions(limit, cursor?)
+  -> bounded owner-scoped {sessions, nextCursor}; no realtime allocation
+get_voice_tutor_session(session_id)
+  -> owned session + bounded transcript turns + private Tutor Learning Result
+```
+
+These reads never call the OpenAI Realtime provider, reserve a new session, or
+read or mutate an answer draft. The shared server read use case may settle a
+stale/expired session and lazily advance an overdue quota period before
+returning the authoritative snapshot. That housekeeping is owner-scoped and
+does not let MCP explicitly end, extend, or stream a live session.
+
 Study deletion:
 
 ```text
@@ -200,6 +225,10 @@ explicit user confirmation
 - Page sizes, string lengths, arrays, timestamps, enums, and unknown arguments
   are constrained by JSON Schema and application validation.
 - The server never accepts a caller-supplied user ID or token passthrough.
+- Voice Tutor transcript turns and results remain private owner-scoped content.
+  Tool arguments and returned content are never copied into API exchange logs,
+  provider-history bodies, analytics, or error messages; original session audio
+  is not stored and is therefore never available through MCP.
 
 ## Configuration
 
@@ -222,7 +251,7 @@ backend HTTPS origin.
 - Existing R2DBC pool limits and domain transaction boundaries apply.
 - Long-running AI work remains in the existing Redis Stream/Outbox workers;
   MCP calls enqueue and poll instead of holding an HTTP connection.
-- Record, study, pending-question, and statistics reads are bounded.
+- Record, study, pending-question, Voice Tutor, and statistics reads are bounded.
 - API logs retain request ID, user ID, method, path, status, and duration while
   suppressing MCP bodies.
 - Existing Grafana/Loki alerts own runtime outage detection. GitHub Actions
@@ -233,8 +262,9 @@ backend HTTPS origin.
 Before enabling production:
 
 1. Publish and register an immutable KO/EN/JA privacy-policy version that
-   explicitly covers optional resume/interests and user-authorized MCP/LLM
-   disclosure; collect any required re-agreement.
+   explicitly covers optional resume/interests, Voice Tutor transcript/result
+   storage, and user-authorized MCP/LLM disclosure; collect any required
+   re-agreement.
 2. Prefer a short-lived, revocable, audience-bound MCP token with read/write
    scopes and OAuth 2.1 protected-resource metadata over the normal app token.
 3. Define and enforce transaction-safe per-account study-tree write budgets,

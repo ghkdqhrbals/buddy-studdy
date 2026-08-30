@@ -106,7 +106,8 @@ class BillingLedgerPersistenceAdapter(
     override suspend fun enabledTierProducts(): List<BillingTierProduct> =
         database.sql(
             """
-            select p.tier_code, t.description, t.monthly_question_limit, t.ad_free, p.product_id,
+            select p.tier_code, t.description, t.monthly_question_limit,
+                   t.monthly_voice_seconds_limit, t.ad_free, p.product_id,
                    p.product_type, p.billing_period, p.sort_order
             from membership_tier_products p
             join user_membership_tiers t on t.tier_code = p.tier_code
@@ -127,7 +128,8 @@ class BillingLedgerPersistenceAdapter(
     private suspend fun tierProduct(productId: String, enabledOnly: Boolean): BillingTierProduct? =
         database.sql(
             """
-            select p.tier_code, t.description, t.monthly_question_limit, t.ad_free, p.product_id,
+            select p.tier_code, t.description, t.monthly_question_limit,
+                   t.monthly_voice_seconds_limit, t.ad_free, p.product_id,
                    p.product_type, p.billing_period, p.sort_order
             from membership_tier_products p
             join user_membership_tiers t on t.tier_code = p.tier_code
@@ -3481,6 +3483,7 @@ class BillingLedgerPersistenceAdapter(
         billingPeriod = nullableString("billing_period"),
         sortOrder = int("sort_order"),
         adFree = boolean("ad_free"),
+        monthlyVoiceSecondsLimit = int("monthly_voice_seconds_limit"),
     )
 
     private fun Row.invoiceSummary() = BillingInvoiceSummary(

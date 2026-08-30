@@ -18,7 +18,9 @@ projection failure is durable retry work and never rewrites a completed charge
 as a failed payment.
 
 The membership screen uses `GET /api/v1/billing/status` as its only entitlement
-and quota authority. RevenueCat `CustomerInfo` is used by the SDK only for
+and plan-benefit authority, while `GET /api/v1/voice-tutor/status` is the
+authoritative live view of reservable Voice Tutor seconds. RevenueCat
+`CustomerInfo` is used by the SDK only for
 products, purchase, restore, and Customer Center. Selecting another product in
 the same App Store subscription group supports upgrades, crossgrades, and
 downgrades. A verified higher-tier transaction changes the server-owned tier
@@ -48,18 +50,18 @@ follows the same rules.
 product mappings remain disabled so historical renewals, refunds, and invoices
 can still be reconciled without exposing those products for a new checkout.
 
-| Tier | Monthly allowance | Public-feed ads | Product | Period | Korea price |
-| --- | ---: | --- | --- | --- | ---: |
-| TIER1 | 30 | Eligible | Free | — | Free |
-| TIER2 | 300 | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier2.monthly` | P1M | ₩7,900 |
-| TIER3 | 1,000 | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier3.monthly` | P1M | ₩17,900 |
+| Tier | Monthly questions | Monthly Voice Tutor | Public-feed ads | Product | Period | Korea price |
+| --- | ---: | ---: | --- | --- | --- | ---: |
+| TIER1 | 30 | 0 | Eligible | Free | — | Free |
+| TIER2 | 300 | 18,000 seconds (300 minutes) | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier2.monthly` | P1M | ₩7,900 |
+| TIER3 | 1,000 | 18,000 seconds (300 minutes) | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier3.monthly` | P1M | ₩17,900 |
 
 The mapping is server-owned. A client-supplied product that is absent, disabled,
 or has a different product type is rejected before an invoice is written.
 
 Before the iOS app offers the purchase action, the membership screen shows the
 selected tier name, StoreKit-localized monthly price, one-month duration, exact
-monthly question allowance, the ad-free public-feed benefit for paid tiers,
+monthly question and Voice Tutor allowances, the ad-free public-feed benefit for paid tiers,
 automatic-renewal disclosure, and localized links
 to the Terms of Use and Privacy Policy. Purchase, restore, and management remain
 separate user actions on the same screen.
@@ -83,7 +85,9 @@ idempotent and prevent a one-sided reward.
 A referral reward is a server-owned temporary membership, not an App Store
 purchase. It creates no invoice, payment, subscription, or RevenueCat
 entitlement. `GET /api/v1/billing/status` remains the client authority for the
-resulting effective tier and quota.
+resulting effective tier and plan benefits; `GET /api/v1/voice-tutor/status`
+projects the rewarded member's current Voice Tutor seconds from that effective
+tier.
 
 ## Ledger and state
 
@@ -311,7 +315,7 @@ arbitrary price, tier, currency, or allowance.
 | Edge | Call and transferred values | Result and guarantee |
 | --- | --- | --- |
 | E1 | `GET /api/v1/billing/catalog`; no query or body; common authenticated headers | Requests the server-owned product mapping for the signed-in user. |
-| E2 | `{"appAccountToken":"<uuid>","products":[{"tierCode":"TIER2","description":"...","monthlyQuestionLimit":300,"productId":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","productType":"AUTO_RENEWABLE_SUBSCRIPTION","billingPeriod":"P1M","sortOrder":20}]}` | `appAccountToken` is the stable BuddyStudy billing identity and RevenueCat App User ID. Product price is still displayed from StoreKit/RevenueCat, not trusted from the client. |
+| E2 | `{"appAccountToken":"<uuid>","products":[{"tierCode":"TIER2","description":"...","monthlyQuestionLimit":300,"monthlyVoiceSecondsLimit":18000,"productId":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","productType":"AUTO_RENEWABLE_SUBSCRIPTION","billingPeriod":"P1M","sortOrder":20}]}` | `appAccountToken` is the stable BuddyStudy billing identity and RevenueCat App User ID. Product price is still displayed from StoreKit/RevenueCat, and neither price nor either allowance is trusted from the client. |
 | E3 | `POST /api/v1/billing/checkouts` with `{"productId":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","idempotencyKey":"ios-checkout-<uuid>"}` | `productId`: 1–191 characters, `[A-Za-z0-9._-]+`. `idempotencyKey`: 8–191 characters, `[A-Za-z0-9._:-]+`, scoped to the authenticated user. |
 | E4 | Internal transaction writes `INVOICE_CREATED`, invoice type `NORMAL`, status `WAITING`, authenticated `userId`, selected `tierCode/productId`, generated `invoiceNumber`, aggregate sequence and event ID. | Invoice and first event commit together. Replaying the same user-scoped idempotency key returns the existing checkout rather than creating another order. |
 | E5 | `BillingInvoiceSummary`: `id`, `invoiceNumber`, `type`, `tierCode`, `productId`, `status`, `version`, payment/transaction fields, timestamps, `fulfilledAt`, `latestEventType`. At creation, payment fields and `fulfilledAt` are `null`. | The app retains both numeric `id` and UUID `invoiceNumber`: `invoiceNumber` correlates the JWS submission; `id` is used for bounded invoice reads. |
@@ -321,11 +325,11 @@ arbitrary price, tier, currency, or allowance.
 | E10 | `POST /api/v1/billing/invoices/{invoiceNumber}/confirm` with `{"transactionId":"200000000000001"}` or `{"transactionId":null}`. | The authenticated user must own the prepared invoice. A supplied transaction ID is 1–191 safe provider characters. A missing ID never skips confirmation. |
 | E11-E12 | With an ID, the backend searches RevenueCat API v2 by the exact store transaction identifier. Without one, it reads the authenticated user's stable `appAccountToken`, the prepared invoice's exact `productId`, and selects the newest access-granting App Store transaction. It then fetches the oldest transaction for Apple's original transaction identity. | The backend accepts only the configured app, matching UUID customer, exact invoice product, valid environment, and access-granting status. A not-yet-indexed result is retryable, not a fabricated failure. Existing transaction/invoice uniqueness constraints prevent a historical purchase from being granted twice. |
 | E13 | A transaction commits payment evidence, `PAYMENT_VERIFIED`, and a durable fulfillment job. Response phase is `VERIFIED`. | Apple `transactionId` is the payment deduplication key. A transaction already attached to another invoice is a conflict even when user and product match. |
-| E14-E15 | A separate fulfillment transaction applies invoice, subscription, entitlement, and quota. Success contains `phase=FULFILLED`, `status=COMPLETED`, `paymentStatus=SETTLED`, and non-null `fulfilledAt`. | 2xx means membership application completed. Failure preserves verified evidence and returns `BILLING_APPLICATION_FAILED`; retry resumes the same invoice. |
+| E14-E15 | A separate fulfillment transaction applies invoice, subscription, entitlement, and question quota. Success contains `phase=FULFILLED`, `status=COMPLETED`, `paymentStatus=SETTLED`, and non-null `fulfilledAt`. Voice Tutor derives its tier/base projection from that committed effective entitlement on the next voice access. | 2xx means membership application completed. Failure preserves verified evidence and returns `BILLING_APPLICATION_FAILED`; retry resumes the same invoice. |
 | E16-E17 | RevenueCat webhook carries signature plus the exact raw event body. A separate receipt transaction stores provider `eventId`, raw-body SHA-256, transaction IDs, account/product, and processing state. | Delivery is at-least-once. Event ID deduplicates webhook delivery; transaction ID deduplicates payment and makes webhook/direct arrival order irrelevant. |
 | E18-E19 | Worker claims due receipts in batches of at most 100 and invokes the same `VerifiedBillingPaymentUseCase` used by E10. | Failed processing retries up to three times; abandoned leases are reclaimable. Provider event ordering prevents stale lifecycle state from replacing newer state. |
 | E20-E21 | `GET /api/v1/billing/invoices/{invoiceId}` returns the prepared invoice by its numeric ID. iOS retries after 1, 2, and 4 seconds only after retryable confirm errors. | Bounded polling is user feedback, not the durable mechanism. It accepts only `FULFILLED`; leaving the screen does not stop webhook recovery. |
-| E22-E23 | `GET /api/v1/billing/status` returns tier, entitlement, transition, and quota. | This remains the only client authority for effective membership after purchase, restore, renewal, cancellation, or product change. |
+| E22-E23 | `GET /api/v1/billing/status` returns tier, entitlement, transition, question quota, and the tier's Voice Tutor allowance; `GET /api/v1/voice-tutor/status` returns the live seconds projection. | Billing status remains the only client authority for effective membership after purchase, restore, renewal, cancellation, or product change. Voice Tutor status cannot grant a tier and only projects that effective membership. |
 
 #### Server-side failure state policy
 
@@ -358,7 +362,7 @@ own Spring `@Transactional` boundary.
 | `createPendingInvoice` | Locks the user's billing account, then inserts the `NORMAL/WAITING` invoice and `INVOICE_CREATED` event together | `(userId, idempotencyKey)` returns the original invoice under concurrent retries. No StoreKit sheet is shown before this commit. |
 | `failPendingInvoiceValidation` | Locks the invoice and any payment for that invoice, then appends `PAYMENT_VALIDATION_FAILED` | It applies only to unpaid `NORMAL/WAITING` invoices. The event ID `invoice-payment-validation-failed:{invoiceNumber}` is unique. Repeats return the existing `FAILED` projection; an invoice with payment evidence is returned unchanged. |
 | `recordVerifiedPayment` | Locks the billing account, resolves and locks the explicit or recoverable invoice, inserts the payment/history, appends `PAYMENT_VERIFIED`, upserts the subscription ledger, and inserts a fulfillment job | `(provider, transactionId)`, one-payment-per-invoice, and invoice-event IDs are unique. Client confirmation and webhook delivery therefore converge on one payment and one invoice. This transaction commits before membership fulfillment. |
-| `fulfill` | Locks the invoice, verified payment, subscription projection, and `user_quota`, then applies entitlement, the idempotent plan-limit history event, payment settlement, `FULFILLED`, and fulfillment-job completion | All membership projections commit together or roll back together. Retrying the same invoice cannot change the quota row twice, and a tier change never clears current-period counters. A failure cannot erase committed payment evidence. |
+| `fulfill` | Locks the invoice, verified payment, subscription projection, and `user_quota`, then applies entitlement, the idempotent question plan limit, payment settlement, `FULFILLED`, and fulfillment-job completion | Financial, entitlement, and question-quota projections commit together or roll back together. Retrying the same invoice cannot change the question quota twice. Voice Tutor does not participate in this lock set; its next authenticated access reconciles `user_voice_quota` from the committed effective entitlement without clearing voice usage or reservations. A failure cannot erase committed payment evidence. |
 | RevenueCat webhook receipt | Stores the signed raw event receipt and SHA-256 before asynchronous projection | Provider `eventId` deduplicates deliveries. A worker lease permits retry after process death; projection calls the same verified-payment use case as direct confirmation. |
 | Unpaid checkout expiration | Selects old unpaid `WAITING` invoices with `FOR UPDATE SKIP LOCKED` and appends `CANCELLED` | Multiple scheduler instances cannot expire the same invoice twice. Invoices with a payment row are excluded. |
 
@@ -642,9 +646,75 @@ race between the job and a request cannot expose or reset an allowance twice.
 Administrative bonuses remain current-period history events and expire only at
 this natural rollover.
 
+### Monthly Pro Voice Tutor policy
+
+Voice Tutor time is a separate entitlement projection from question generation.
+It never reads or mutates `user_quota`, `quota_reservations`, question counters,
+or answer drafts. The plan catalog stores the authoritative monthly allowance in
+`user_membership_tiers.monthly_voice_seconds_limit`:
+
+- TIER1 defaults to `0` seconds and cannot start a Voice Tutor session.
+- TIER2 and TIER3 default to `18,000` seconds, displayed as 300 minutes.
+- The existing authenticated membership-tier administration boundary accepts an
+  additive `monthlyVoiceSecondsLimit`, so operators can change a tier allowance
+  without an app release. The database value, not an iOS constant or RevenueCat
+  metadata, is authoritative.
+- `VOICE_TUTOR_MAX_SESSION_SECONDS` is an independent environment-configured
+  ceiling for one session. Its default is `3,600` and the application hard-clamps
+  it to the provider's 60-minute Realtime session limit; the reservable duration
+  is the smaller of that ceiling and the member's current remaining seconds.
+  The 18,000-second plan allowance is therefore available across up to five
+  full 60-minute sessions rather than one continuous 300-minute provider session.
+
+`user_voice_quota` owns the current monthly seconds projection. Its fixed anchor
+is the account creation time, independent from the question quota's optional
+first-paid-purchase anchor change. It keeps its own effective tier, base, used,
+reserved, remaining, period, and row version.
+`voice_tutor_sessions` is the exactly-once reservation and settlement identity.
+`voice_tutor_transcript_turns` and `voice_tutor_results` hold the separate private
+lesson history; they are not billing counters and never enter graded-question
+statistics.
+
+Session accounting follows these rules:
+
+1. `POST /api/v1/voice-tutor/sessions` locks or atomically updates the current
+   voice quota after applying any overdue rollover. It rejects an ineffective
+   TIER1 entitlement or zero remaining time and reserves at most
+   `min(remaining_seconds, VOICE_TUTOR_MAX_SESSION_SECONDS)`.
+2. The backend, not iOS, timestamps accepted connection activity, counts decoded
+   24 kHz mono PCM bytes admitted by the relay, and enforces the deadline.
+   Client-provided elapsed time is never authoritative.
+3. Explicit end, foreground loss, provider failure, stream disconnect, quota
+   deadline, and abandoned-session recovery converge on one terminal settlement.
+   The transaction charges the greater of rounded-up backend-observed connected
+   seconds and rounded-up accepted PCM duration, bounded by the reservation,
+   then releases the unused reservation. Replayed end requests return the
+   settled session without changing counters again.
+4. A session accepted before a monthly boundary retains that period identity.
+   Late settlement completes the old reservation without subtracting from or
+   releasing seconds into the new current period.
+5. Remaining seconds are `max(0, base_seconds - used_seconds -
+   reserved_seconds)`. Concurrent starts cannot reserve the same capacity twice,
+   and no failure path may produce negative remaining or reserved seconds.
+
+Tier lifecycle behavior matches the financial entitlement boundary without
+granting a fresh voice allowance mid-period. An immediate paid upgrade or active
+TIER2 referral grant makes the winning tier's voice base effective while
+preserving used and reserved seconds. A scheduled downgrade retains the higher
+tier through `currentPlanEndsAt`; when the lower tier becomes effective, it
+changes only the base and preserves the period and counters. Same-tier renewal,
+cancellation, expiration, refund, and resubscription do not reset voice usage.
+The natural account-anchored monthly rollover is the only ordinary reset
+boundary. Unlike question quota, Voice Tutor has no managed rollover batch in
+this release. Status, history/detail, and session-start access reconcile an
+expired session first, then transactionally advance an overdue voice quota to
+the window containing the current UTC instant. An idle materialized row may be
+past its stored boundary until that access, but no client can reserve or observe
+stale capacity.
+
 Every five minutes the backend records `billing_lifecycle_metrics` for webhook
-lag, entitlement mismatch, exhausted reconciliation, stale reservations,
-negative counters, duplicate active subscriptions, and ownership conflicts.
+lag, entitlement mismatch, exhausted reconciliation, stale question
+reservations, negative counters, duplicate active subscriptions, and ownership conflicts.
 An anomalous snapshot is emitted as `billing_lifecycle_anomaly` at ERROR; the
 existing Grafana/Loki operational-error rule owns Slack notification. The
 backend never calls Slack directly.
@@ -655,6 +725,7 @@ User endpoints:
 
 - `GET /api/v1/billing/catalog`
 - `GET /api/v1/billing/status`
+- `GET /api/v1/voice-tutor/status` (effective Voice Tutor entitlement and current seconds projection)
 - `POST /api/v1/billing/checkouts`
 - `POST /api/v1/billing/checkouts/{invoiceNumber}/abandon`
 - `POST /api/v1/billing/apple/transactions`
@@ -691,6 +762,8 @@ webhooks eventually reconcile the payment and invoice projections.
 
 Admin endpoints:
 
+- `GET /api/v1/admin/membership-tiers`
+- `PATCH /api/v1/admin/membership-tiers/{tierCode}` (additive `monthlyVoiceSecondsLimit`)
 - `GET /api/v1/admin/billing/invoices`
 - `GET /api/v1/admin/billing/invoices/{invoiceId}`
 - `POST /api/v1/admin/billing/invoices/{invoiceId}/refund-requests`

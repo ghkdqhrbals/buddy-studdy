@@ -16,6 +16,7 @@ import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerati
 import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
+import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -34,6 +35,7 @@ class BuddyStudyMcpServiceTest {
     private val gradingProcesses = Mockito.mock(GetAnswerGradingProcessUseCase::class.java)
     private val stats = Mockito.mock(GetStudyStatsUseCase::class.java)
     private val growth = Mockito.mock(GetStudyGrowthUseCase::class.java)
+    private val voiceTutor = Mockito.mock(VoiceTutorUseCase::class.java)
     private val service = BuddyStudyMcpService(
         profiles,
         learningContexts,
@@ -45,6 +47,7 @@ class BuddyStudyMcpServiceTest {
         gradingProcesses,
         stats,
         growth,
+        voiceTutor,
     )
     private val principal = Principal(7, "device-7", 70, anonymous = false)
 
@@ -87,6 +90,10 @@ class BuddyStudyMcpServiceTest {
         assertThat(operations.getValue("getQuestionProcess"))
             .describedAs("polling an accepted question must remain available after question quota is exhausted")
             .containsExactly(Permissions.RECORD_READ)
+        assertThat(
+            listOf("listVoiceTutorSessions", "getVoiceTutorSession", "getVoiceTutorQuota")
+                .map(operations::getValue),
+        ).allSatisfy { permissions -> assertThat(permissions).containsExactly(Permissions.VOICE_TUTOR_READ) }
     }
 
     private companion object {
@@ -107,6 +114,9 @@ class BuddyStudyMcpServiceTest {
             "getRecord",
             "getTopicStats",
             "getStudyGrowth",
+            "listVoiceTutorSessions",
+            "getVoiceTutorSession",
+            "getVoiceTutorQuota",
         )
     }
 }

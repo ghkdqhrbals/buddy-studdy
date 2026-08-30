@@ -64,6 +64,17 @@ enum BackendStudyLoadState: Equatable {
     case failed
 }
 
+struct VoiceTutorLiveConnection: Sendable {
+    var session: BackendVoiceTutorSessionStart
+    var request: URLRequest
+}
+
+enum VoiceTutorPreparationError: Error {
+    case signInRequired
+    case missingRegistration
+    case invalidWebSocketURL
+}
+
 @MainActor
 final class AppState: ObservableObject {
     static let developerLogPageSize = 50
@@ -129,6 +140,13 @@ final class AppState: ObservableObject {
     @Published private(set) var billingInvoices: [BackendBillingInvoice] = []
     @Published private(set) var isLoadingBilling = false
     @Published private(set) var billingErrorMessage: String?
+    @Published private(set) var voiceTutorStatus: BackendVoiceTutorStatus?
+    @Published private(set) var voiceTutorSessions: [BackendVoiceTutorSessionListItem] = []
+    @Published private(set) var voiceTutorSessionDetails: [String: BackendVoiceTutorSessionDetail] = [:]
+    @Published private(set) var voiceTutorNextCursor: String?
+    @Published private(set) var isLoadingVoiceTutorStatus = false
+    @Published private(set) var isLoadingVoiceTutorSessions = false
+    @Published private(set) var voiceTutorErrorMessage: String?
     @Published private(set) var referralSummary: BackendReferralSummary?
     @Published private(set) var isLoadingReferral = false
     @Published private(set) var referralErrorMessage: String?
@@ -630,6 +648,7 @@ final class AppState: ObservableObject {
     private var settingsUseCase: SettingsUseCase { appUseCases.settings }
     private var termsUseCase: TermsUseCase { appUseCases.terms }
     private var communityUseCase: CommunityUseCase { appUseCases.community }
+    private var voiceTutorUseCase: VoiceTutorUseCase { appUseCases.voiceTutor }
     private var billingUseCase: BillingUseCase { appUseCases.billing }
     private var referralUseCase: ReferralUseCase { appUseCases.referral }
     private let actionRunner = AppActionRunner()
@@ -757,6 +776,26 @@ final class AppState: ObservableObject {
 
     var isCommunitySignedIn: Bool {
         communitySessionState.isSignedIn
+    }
+
+    var isVoiceTutorEligible: Bool {
+        if let voiceTutorStatus {
+            return voiceTutorStatus.eligible && voiceTutorStatus.quota.remainingSeconds > 0
+        }
+        return billingStatus?.isEntitlementActive == true
+            && billingStatus?.voiceTutor?.enabled == true
+            && (billingStatus?.voiceTutor?.quota?.remainingSeconds ?? 0) > 0
+    }
+
+    var voiceTutorStudies: [BackendStudyRoom] {
+        backendStudyRooms
+            .filter { $0.enabled }
+            .sorted {
+                if $0.sortOrder == $1.sortOrder {
+                    return $0.topic.localizedStandardCompare($1.topic) == .orderedAscending
+                }
+                return $0.sortOrder < $1.sortOrder
+            }
     }
 
     var statusTitle: String {
@@ -1447,6 +1486,11 @@ final class AppState: ObservableObject {
             billingInvoices = []
             questionQuota = nil
             billingErrorMessage = nil
+            voiceTutorStatus = nil
+            voiceTutorSessions = []
+            voiceTutorSessionDetails = [:]
+            voiceTutorNextCursor = nil
+            voiceTutorErrorMessage = nil
             referralSummary = nil
             referralErrorMessage = nil
             isLoadingReferral = false
@@ -5054,6 +5098,13 @@ final class AppState: ObservableObject {
         billingInvoices = []
         billingErrorMessage = nil
         isLoadingBilling = false
+        voiceTutorStatus = nil
+        voiceTutorSessions = []
+        voiceTutorSessionDetails = [:]
+        voiceTutorNextCursor = nil
+        voiceTutorErrorMessage = nil
+        isLoadingVoiceTutorStatus = false
+        isLoadingVoiceTutorSessions = false
         referralSummary = nil
         referralErrorMessage = nil
         isLoadingReferral = false
@@ -7375,6 +7426,315 @@ final class AppState: ObservableObject {
             anchorType: resolvedStatus.quota.anchorType,
             policyVersion: resolvedStatus.quota.policyVersion
         )
+    }
+
+    func refreshVoiceTutorStatus() async {
+        guard !isLoadingVoiceTutorStatus else {
+            return
+        }
+        let clientGeneration = backendClientGeneration
+        let currentVoiceTutorUseCase = voiceTutorUseCase
+        guard isCommunitySessionActive,
+              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "voice-tutor-status"
+              ) else {
+            voiceTutorStatus = nil
+            voiceTutorErrorMessage = nil
+            return
+        }
+
+        isLoadingVoiceTutorStatus = true
+        defer { isLoadingVoiceTutorStatus = false }
+        do {
+            let status = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "voice-tutor-status",
+                operation: { recoveredRegistration in
+                    try await currentVoiceTutorUseCase.status(registration: recoveredRegistration)
+                }
+            )
+            guard clientGeneration == backendClientGeneration,
+                  isCommunitySessionActive else {
+                return
+            }
+            voiceTutorStatus = status
+            voiceTutorErrorMessage = nil
+        } catch where !Self.isCancellationLikeError(error) {
+            guard clientGeneration == backendClientGeneration else {
+                return
+            }
+            voiceTutorErrorMessage = voiceTutorDisplayMessage(for: error)
+            log(.warning, "음성 튜터 이용 상태를 동기화하지 못했습니다: \(error.localizedDescription)")
+        } catch {
+            return
+        }
+    }
+
+    func loadVoiceTutorSessions(reset: Bool = true) async {
+        guard !isLoadingVoiceTutorSessions else {
+            return
+        }
+        let cursor = reset ? nil : voiceTutorNextCursor
+        if !reset, cursor == nil {
+            return
+        }
+        let clientGeneration = backendClientGeneration
+        let currentVoiceTutorUseCase = voiceTutorUseCase
+        guard isCommunitySessionActive,
+              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "voice-tutor-sessions"
+              ) else {
+            if reset {
+                voiceTutorSessions = []
+                voiceTutorNextCursor = nil
+            }
+            return
+        }
+
+        isLoadingVoiceTutorSessions = true
+        defer { isLoadingVoiceTutorSessions = false }
+        do {
+            let page = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "voice-tutor-sessions",
+                operation: { recoveredRegistration in
+                    try await currentVoiceTutorUseCase.sessions(
+                        registration: recoveredRegistration,
+                        limit: Self.recordPageSize,
+                        cursor: cursor
+                    )
+                }
+            )
+            guard clientGeneration == backendClientGeneration,
+                  isCommunitySessionActive else {
+                return
+            }
+            if reset {
+                voiceTutorSessions = page.sessions
+            } else {
+                var seen = Set(voiceTutorSessions.map(\.sessionId))
+                voiceTutorSessions.append(contentsOf: page.sessions.filter { seen.insert($0.sessionId).inserted })
+            }
+            voiceTutorNextCursor = page.nextCursor
+            voiceTutorErrorMessage = nil
+        } catch where !Self.isCancellationLikeError(error) {
+            guard clientGeneration == backendClientGeneration else {
+                return
+            }
+            voiceTutorErrorMessage = voiceTutorDisplayMessage(for: error)
+            log(.warning, "음성 튜터 기록을 동기화하지 못했습니다: \(error.localizedDescription)")
+        } catch {
+            return
+        }
+    }
+
+    @discardableResult
+    func loadVoiceTutorSessionDetail(sessionID: String) async -> BackendVoiceTutorSessionDetail? {
+        let clientGeneration = backendClientGeneration
+        let currentVoiceTutorUseCase = voiceTutorUseCase
+        guard isCommunitySessionActive,
+              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "voice-tutor-session-detail"
+              ) else {
+            return nil
+        }
+
+        do {
+            let detail = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "voice-tutor-session-detail",
+                operation: { recoveredRegistration in
+                    try await currentVoiceTutorUseCase.session(
+                        registration: recoveredRegistration,
+                        sessionID: sessionID
+                    )
+                }
+            )
+            guard clientGeneration == backendClientGeneration,
+                  isCommunitySessionActive else {
+                return nil
+            }
+            voiceTutorSessionDetails[sessionID] = detail
+            voiceTutorErrorMessage = nil
+            return detail
+        } catch where !Self.isCancellationLikeError(error) {
+            guard clientGeneration == backendClientGeneration else {
+                return nil
+            }
+            voiceTutorErrorMessage = voiceTutorDisplayMessage(for: error)
+            log(.warning, "음성 튜터 상세 기록을 동기화하지 못했습니다: \(error.localizedDescription)")
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
+    func createVoiceTutorConnection(
+        studyID: Int,
+        voice: String? = nil
+    ) async throws -> VoiceTutorLiveConnection {
+        guard isCommunitySessionActive else {
+            throw VoiceTutorPreparationError.signInRequired
+        }
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "voice-tutor-session-create"
+              ) else {
+            throw VoiceTutorPreparationError.missingRegistration
+        }
+
+        let currentVoiceTutorUseCase = voiceTutorUseCase
+        let session = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "voice-tutor-session-create",
+            operation: { recoveredRegistration in
+                try await currentVoiceTutorUseCase.createSession(
+                    registration: recoveredRegistration,
+                    studyID: studyID,
+                    language: self.settings.appLanguage,
+                    voice: voice,
+                    idempotencyKey: self.appIdentifierProvider.makeIdentifier()
+                )
+            }
+        )
+        guard let activeRegistration = storedBackendIdentityUseCase.loadRegistration() else {
+            throw VoiceTutorPreparationError.missingRegistration
+        }
+        guard let request = makeVoiceTutorWebSocketRequest(
+            session: session,
+            registration: activeRegistration
+        ) else {
+            throw VoiceTutorPreparationError.invalidWebSocketURL
+        }
+        applyVoiceTutorQuota(session.quota)
+        return VoiceTutorLiveConnection(session: session, request: request)
+    }
+
+    @discardableResult
+    func endVoiceTutorSession(sessionID: String) async throws -> BackendVoiceTutorSessionDetail {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "voice-tutor-session-end"
+              ) else {
+            throw VoiceTutorPreparationError.missingRegistration
+        }
+        let detail = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "voice-tutor-session-end",
+            operation: { recoveredRegistration in
+                try await self.voiceTutorUseCase.endSession(
+                    registration: recoveredRegistration,
+                    sessionID: sessionID
+                )
+            }
+        )
+        voiceTutorSessionDetails[sessionID] = detail
+        return detail
+    }
+
+    func applyVoiceTutorQuota(_ quota: BackendVoiceTutorQuota) {
+        guard var status = voiceTutorStatus else {
+            return
+        }
+        status.quota = quota
+        voiceTutorStatus = status
+    }
+
+    private func voiceTutorDisplayMessage(for error: Error) -> String {
+        if let preparationError = error as? VoiceTutorPreparationError {
+            switch preparationError {
+            case .signInRequired:
+                return strings.voiceTutorSignInRequired
+            case .missingRegistration:
+                return strings.voiceTutorAccountNotReady
+            case .invalidWebSocketURL:
+                return strings.voiceTutorInvalidConnection
+            }
+        }
+        if let backendError = error as? RemotePushBackendError {
+            switch backendError.backendCode?.uppercased() {
+            case "VOICE_TUTOR_PRO_REQUIRED":
+                return strings.voiceTutorProRequiredMessage
+            case "VOICE_TUTOR_QUOTA_EXCEEDED":
+                return strings.voiceTutorQuotaReached
+            case "VOICE_TUTOR_PROVIDER_UNAVAILABLE":
+                return strings.serviceTemporarilyUnavailable
+            default:
+                break
+            }
+        }
+        return strings.serviceTemporarilyUnavailable
+    }
+
+    private func makeVoiceTutorWebSocketRequest(
+        session: BackendVoiceTutorSessionStart,
+        registration: RemotePushRegistration
+    ) -> URLRequest? {
+        // The bearer token must never follow a server-provided absolute URL to
+        // another origin. Voice Tutor is routed on the same BuddyStudy origin as
+        // REST, so derive the fixed owner-scoped path locally.
+        guard session.sessionId.count == 36,
+              UUID(uuidString: session.sessionId) != nil,
+              let baseURL = URL(string: configuredBackendBaseURLDescription),
+              let baseComponents = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              let baseScheme = baseComponents.scheme?.lowercased(),
+              let baseHost = baseComponents.host?.lowercased(),
+              baseComponents.user == nil,
+              baseComponents.password == nil,
+              baseComponents.query == nil,
+              baseComponents.fragment == nil,
+              baseScheme == "https" || (isDebuggingEnabled && baseScheme == "http") else {
+            return nil
+        }
+        let providedURL = [
+            "api", "v1", "voice-tutor", "sessions", session.sessionId, "stream"
+        ].reduce(baseURL) { partialURL, component in
+            partialURL.appendingPathComponent(component)
+        }
+        guard var components = URLComponents(url: providedURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        switch components.scheme?.lowercased() {
+        case "https":
+            components.scheme = "wss"
+        case "http" where isDebuggingEnabled:
+            components.scheme = "ws"
+        default:
+            return nil
+        }
+        let effectivePort: (URLComponents, String) -> Int? = { urlComponents, scheme in
+            if let port = urlComponents.port {
+                return port
+            }
+            switch scheme {
+            case "https", "wss": return 443
+            case "http", "ws": return 80
+            default: return nil
+            }
+        }
+        guard let webSocketScheme = components.scheme?.lowercased(),
+              components.host?.lowercased() == baseHost,
+              effectivePort(components, webSocketScheme) == effectivePort(baseComponents, baseScheme),
+              let webSocketURL = components.url else {
+            return nil
+        }
+
+        var request = URLRequest(url: webSocketURL)
+        request.timeoutInterval = 30
+        if let accessToken = registration.accessToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !accessToken.isEmpty {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+        request.setValue("buddystudy.voice.v1", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        return request
     }
 
     @discardableResult

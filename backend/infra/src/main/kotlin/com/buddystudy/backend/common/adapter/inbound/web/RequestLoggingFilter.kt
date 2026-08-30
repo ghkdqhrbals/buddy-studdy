@@ -35,7 +35,9 @@ class RequestLoggingFilter(
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val requestId = UUID.randomUUID().toString()
-        val capturesBodies = loggingPolicy.capturesBodies && !isMcpEndpoint(exchange)
+        val capturesBodies = loggingPolicy.capturesBodies &&
+            !isMcpEndpoint(exchange) &&
+            !isVoiceTutorEndpoint(exchange)
         val requestCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
         val responseCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
         val started = System.nanoTime()
@@ -90,6 +92,12 @@ class RequestLoggingFilter(
         exchange.request.path.pathWithinApplication().elements()
             .filterIsInstance<PathContainer.PathSegment>()
             .map { it.valueToMatch() } == MCP_ENDPOINT_SEGMENTS
+
+    private fun isVoiceTutorEndpoint(exchange: ServerWebExchange): Boolean =
+        exchange.request.path.pathWithinApplication().elements()
+            .filterIsInstance<PathContainer.PathSegment>()
+            .map { it.valueToMatch() }
+            .take(3) == VOICE_TUTOR_ENDPOINT_PREFIX
 
     private fun logExchange(
         requestId: String,
@@ -179,6 +187,7 @@ class RequestLoggingFilter(
         const val REQUEST_ID_HEADER = "X-Request-Id"
         const val ANONYMOUS_USER_ID = "-"
         private val MCP_ENDPOINT_SEGMENTS = listOf("api", "v1", "mcp")
+        private val VOICE_TUTOR_ENDPOINT_PREFIX = listOf("api", "v1", "voice-tutor")
         private const val MAX_BODY_BYTES = 8_192
     }
 }

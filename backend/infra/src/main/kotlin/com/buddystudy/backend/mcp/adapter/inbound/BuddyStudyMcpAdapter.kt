@@ -349,6 +349,47 @@ class BuddyStudyMcpAdapter(
             ) { principal, args ->
                 buddyStudy.getStudyGrowth(principal, args.optionalInstant("start_at"), args.optionalInstant("end_at"))
             },
+            tool(
+                name = "list_voice_tutor_sessions",
+                title = "List my Voice Tutor sessions",
+                description = "Return a cursor-paginated list of the authenticated user's persisted Voice Tutor learning sessions.",
+                schema = objectSchema(
+                    properties = linkedMapOf(
+                        "limit" to integerProperty("Maximum sessions to return.", 1, 100, 30),
+                        "cursor" to stringProperty("Opaque cursor returned by the previous page.", maxLength = 512),
+                    ),
+                ),
+                readOnly = true,
+            ) { principal, args ->
+                buddyStudy.listVoiceTutorSessions(
+                    principal,
+                    args.int("limit", 30),
+                    args.optionalString("cursor"),
+                )
+            },
+            tool(
+                name = "get_voice_tutor_session",
+                title = "Get one Voice Tutor learning result",
+                description = "Return one owned Voice Tutor session with transcript turns, metered duration, and its generated learning summary.",
+                schema = objectSchema(
+                    properties = linkedMapOf(
+                        "session_id" to stringProperty("Owned Voice Tutor session UUID.", minLength = 36, maxLength = 36),
+                    ),
+                    required = listOf("session_id"),
+                ),
+                readOnly = true,
+            ) { principal, args ->
+                buddyStudy.getVoiceTutorSession(principal, args.string("session_id"))
+            },
+            tool(
+                name = "get_voice_tutor_quota",
+                title = "Get my Voice Tutor quota",
+                description = "Return server-authoritative Voice Tutor eligibility, monthly seconds, reset time, and any active session.",
+                schema = objectSchema(),
+                readOnly = true,
+            ) { principal, _ ->
+                buddyStudy.getVoiceTutorQuota(principal)
+            },
         )
     }
 
@@ -372,6 +413,18 @@ class BuddyStudyMcpAdapter(
                 title = "My recent study records",
                 description = "The 30 most recent completed records with grading feedback and scores.",
             ) { principal -> buddyStudy.listRecords(principal, 30, 0, null, null, "ko", "localized") },
+            resource(
+                uri = "buddystudy://voice-tutor/sessions/recent",
+                name = "my-recent-voice-tutor-sessions",
+                title = "My recent Voice Tutor sessions",
+                description = "The 30 most recent persisted Voice Tutor sessions and their result status.",
+            ) { principal -> buddyStudy.listVoiceTutorSessions(principal, 30, null) },
+            resource(
+                uri = "buddystudy://voice-tutor/quota",
+                name = "my-voice-tutor-quota",
+                title = "My Voice Tutor quota",
+                description = "Server-authoritative Voice Tutor eligibility and current monthly usage.",
+            ) { principal -> buddyStudy.getVoiceTutorQuota(principal) },
         )
     }
 

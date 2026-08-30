@@ -14,7 +14,7 @@ and administrator-message destinations are documented in
 
 ## Overview
 
-BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The app keeps lightweight local state for settings, drafts, and recoverability, but production question generation, answer grading, API-key validation, scheduled delivery, settings, records, and statistics are owned by the Spring Boot Kotlin backend. Study records are not persisted in a local SQLite database; they are held as an in-memory view cache and refetched from the backend. The app never calls OpenAI directly; OpenAI requests are made only from the backend through workload-scoped clients and credentials. iCloud/CloudKit state sync is no longer exposed or enabled; backend persistence is the active source of truth. Internal target names, bundle identifiers, background task identifiers, and legacy CloudKit record types retain `StudyMate` to avoid breaking existing installs.
+BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The app keeps lightweight local state for settings, drafts, and recoverability, but production question generation, answer grading, Voice Tutor realtime relay and summarization, API-key validation, scheduled delivery, settings, records, and statistics are owned by the Spring Boot Kotlin backend. Study records and separate Voice Tutor learning results are not persisted in a local SQLite database; they are held as bounded in-memory view caches and refetched from the backend. The app never calls OpenAI directly; OpenAI requests and realtime connections are made only from the backend through workload-scoped clients and credentials. Original Voice Tutor microphone and model audio is relayed while a foreground session is active and is never persisted by BuddyStudy. iCloud/CloudKit state sync is no longer exposed or enabled; backend persistence is the active source of truth. Internal target names, bundle identifiers, background task identifiers, and legacy CloudKit record types retain `StudyMate` to avoid breaking existing installs.
 
 The backend has one source tree and one container contract with two selectable
 runtime artifacts: GraalVM Native Image (`native`, the production default) and
@@ -67,12 +67,20 @@ runtime comparison or rollback does not fork application behavior.
   - `ReferralUseCase` centralizes referral summary and fallback attribution recovery. Manual code redemption is restricted to the server-defined short sign-up eligibility window, and link capture plus new-account eligibility remain separate from ordinary existing-account sign-in.
   - `AppState` may still orchestrate state application and recovery, but it should not grow new direct backend action logic when a use-case boundary exists.
 
+- `VoiceTutorView`, `VoiceTutorSessionView`, and `VoiceTutorViewModel`
+  - Present Pro eligibility, server-owned remaining time, bounded session history, the live foreground lesson, and the derived Tutor Learning Result.
+  - Use `BackendVoiceTutorStatus`, `BackendVoiceTutorQuota`, `BackendVoiceTutorSessionStart`, `BackendVoiceTutorSessionListItem`, `BackendVoiceTutorSessionPage`, `BackendVoiceTutorSessionDetail`, `BackendVoiceTutorSessionResult`, and `BackendVoiceTutorTranscriptTurn` as additive backend contracts.
+  - Open only the authenticated BuddyStudy WebSocket with subprotocol `buddystudy.voice.v1`; the iOS process never receives the server's OpenAI Realtime credential.
+  - Own microphone/audio-route and interruption state only while the lesson screen is active. Backgrounding, locking, dismissal, logout, or account replacement closes the stream and requests idempotent session finalization.
+  - Never calls an answer-draft, answer-submission, question-generation, or question-quota API.
+
 - `Services/SettingsStore.swift`
   - Local persistence facade.
   - Stores settings, API keys, draft state, backend metadata, and exposes an in-memory record cache for the current session.
   - Does not trim records as a retention policy. The backend owns durable record history, while the app incrementally fills its in-memory cache from paginated responses.
   - Stores backend device registration and a stable installation identifier in the iOS Keychain. The registration request sends the identifier over TLS, request logs redact it, and the backend persists only its SHA-256 hash so repeated registration is idempotent.
   - Keeps a pending referral code across app launch, authentication, and the required-terms gate until the backend returns a terminal attribution result. The value is short-lived account-onboarding state, not proof that a reward is due; the backend owns the sign-up eligibility window.
+  - Voice Tutor session pages and results remain bounded view state backed by the server. They do not create a second local durable record store and cannot share keys or mutations with the record-ID-keyed answer draft repository.
 
 - `Services/OpenAIClient.swift`
   - Contains shared prompt/body/parsing helpers only.
@@ -119,8 +127,11 @@ runtime comparison or rollback does not fork application behavior.
     `OPENAI_API_KEY_SYSTEM` serve only post-study child-topic suggestions.
     `OpenAIClient` and `OPENAI_API_KEY_USER` serve question generation,
     embeddings, translation, user-answer feedback, grading, and grading
-    previews. Production startup and deployment reject missing or identical
-    workload keys.
+    previews, plus the Pro Voice Tutor realtime relay and lesson summary. The
+    same regular user-content key remains server-only for realtime work and is
+    never returned to iOS or MCP clients; no third OpenAI key type is supported.
+    Production startup and deployment validate the enabled workloads and their
+    required credentials.
   - Answer submission and AI grading are separated by a transactional outbox. `POST /api/v1/records/{id}/answer` stores the immutable submitted answer, changes the question projection from `UNGRADED` to `GRADING`, appends the first durable `question_grading_events` event, stores its ID as `grading_last_event_id`, and writes the `ANSWER_GRADING_REQUESTED` outbox row in one transaction. It returns `202 Accepted` with `questionStatus`, `correlationId`, and `gradingLastEventId`, and never waits for OpenAI.
   - `AnswerGradingStreamListener` consumes the typed Redis domain event and runs evidence analysis, criticism, judging, and optional adjudication through `AnswerGradingService`. Each transition is persisted before it is exposed to clients; completion stores the AI decision and statistics dirty key atomically.
   - `question_grading_events` is the append-only grading lifecycle event store. Every row records both the detailed grading stage and the resulting question lifecycle state; `questions.status` and `questions.grading_last_event_id` are the current read projection updated in the same transaction. `GET /api/v1/answer-processes/{correlationId}` exposes request-scoped progress as a one-shot polling response. The iOS app sends the last durable event ID as `after`, receives all newer stages without gaps, and polls at the fixed three-second product interval while `questionStatus=GRADING` and the grading status is non-terminal. Leaving the screen cancels only status polling; an already-sent answer request is allowed to finish and persist its accepted state.
@@ -241,6 +252,20 @@ Terminal generation/translation failure
 ```
 
 ```text
+User opens Pro Voice Tutor for a study topic
+-> GET /api/v1/voice-tutor/status returns effective entitlement, quota, reset time, and the configured per-session ceiling
+-> POST /api/v1/voice-tutor/sessions atomically rolls over and reserves seconds in user_voice_quota
+-> backend returns the owned session identity and authenticated WebSocket path
+-> iOS opens /api/v1/voice-tutor/sessions/{id}/stream with subprotocol buddystudy.voice.v1
+-> backend relays foreground microphone/model audio to and from OpenAI Realtime without persisting original audio
+-> transcript turns are bounded and persisted outside request, provider-history, analytics, and error-log bodies
+-> explicit end, backgrounding, interruption, quota deadline, or terminal disconnect settles the greater of server-observed connected time and accepted PCM duration exactly once
+-> unused reserved seconds are released and the backend derives one private voice_tutor_result
+-> GET /api/v1/voice-tutor/sessions and /sessions/{id} return paginated history and detail
+-> no step creates a question, consumes question quota, or reads or mutates the active answer draft
+```
+
+```text
 User answer
 -> AppState saves answer draft
 -> AppState.gradeCurrentAnswer or gradeRecord
@@ -349,16 +374,31 @@ Public community feed
 -> an explicit tap routes to the validated app destination; home/message presents the full Markdown popup
 ```
 
+## Pro Voice Tutor
+
+- The first release is an authenticated, iOS foreground-only voice surface. The iOS peer connects to BuddyStudy REST and WebSocket endpoints, while the backend owns the OpenAI Realtime connection, model instructions, API-key HMAC-pseudonymized safety identifier, credential, quota clock, and provider failure mapping. There is no iOS-to-OpenAI credential or transport path.
+- `GET /api/v1/voice-tutor/status` is the compact authority for effective tier, availability, current monthly quota, reset time, and the configured per-session ceiling. `POST /api/v1/voice-tutor/sessions` derives the actual reservation from the current quota and creates one owned session, `POST /api/v1/voice-tutor/sessions/{id}/end` finalizes it idempotently, `GET /api/v1/voice-tutor/sessions` returns bounded pages, and `GET /api/v1/voice-tutor/sessions/{id}` returns transcript/result detail.
+- `/api/v1/voice-tutor/sessions/{id}/stream` accepts only the same authenticated owner and a successfully negotiated `buddystudy.voice.v1` subprotocol. A reserved session has one relay claim; a disconnect is finalized and a later conversation starts a new reservation, preventing two provider sockets from sharing one active session. A server-owned two-second control pulse revalidates the captured user/device authentication and renews the short active-relay lease even when no client heartbeat is sent; client heartbeats are validated, rate-coalesced advisory acknowledgements only. Revocation closes the provider relay and settles immediately, while missing server pulses make abandoned sessions recoverable.
+- Audio capture remains full duplex while tutor audio plays. Server VAD uses `create_response=false` and `interrupt_response=false`, and a backend turn controller exclusively owns `response.create`. Learner speech over tutor output is forwarded to iOS, which clears scheduled playback and returns one validated server-local barge-in command; the backend sends ordered `response.cancel` and exact `conversation.item.truncate` provider events. A configurable bounded continuous-speech timer may manually commit once and request a brief tutor interruption after a long learner monologue. Its state machine suppresses the immediate post-commit continuation VAD edge and matching duplicate response while preserving later ordinary turns. Both REST `ENDING` and WebSocket end follow the same bounded final-audio commit and two-second transcript/response drain before settlement.
+- `user_membership_tiers.monthly_voice_seconds_limit` owns the plan allowance. Defaults are zero for TIER1 and 18,000 seconds for both TIER2 and TIER3. The existing membership-tier administration boundary can change `monthlyVoiceSecondsLimit` without an app release. `VOICE_TUTOR_MAX_SESSION_SECONDS` is a separate operational ceiling, defaults to 3,600 seconds, and is hard-clamped to the provider's 60-minute session limit. A new reservation is at most `min(remaining_seconds, max_session_seconds)`, so the default 300 monthly minutes span up to five full calls.
+- `user_voice_quota` is independent from question `user_quota`. It owns a fixed account-created anchor plus voice base, used, reserved, remaining, and current-period seconds; it does not adopt the question quota's optional first-purchase anchor change. Voice status, history/detail, and session-start access first reconcile any expired session and lazily advance an overdue voice period. Session start then reserves atomically; terminal settlement charges the greater of rounded-up backend-observed connected seconds and accepted PCM duration, then releases the unused reservation. Duplicate end, disconnect, timeout, and recovery work converge on the same session identity without negative remaining time.
+- `voice_tutor_sessions` owns session lifecycle, topic context, duration, and timestamps; `voice_tutor_transcript_turns` stores bounded ordered text turns; and `voice_tutor_results` owns the one-to-one private learning result with a transcript-derived summary, strengths, gaps or misconceptions, and recommended next steps. The combined session detail is a separate record domain and is excluded from public-question publication and graded-question statistics.
+- The voice session never calls the question-generation, answer-draft, answer-submission, grading, or question-quota use cases. The record-ID-keyed answer draft remains editable and unchanged before, during, and after a voice lesson, including when result synchronization or an incoming question refresh races with the session.
+- BuddyStudy does not persist original microphone or model audio. Transcript storage is bounded by `VOICE_TUTOR_TRANSCRIPT_MAX_CHARS`; original audio frames, WebSocket payloads, transcripts, summaries, realtime credentials, and provider request bodies are excluded from API exchange logs, external API history bodies, analytics, and Sentry. Operational logs retain only safe identifiers, lifecycle state, durations, byte/count metrics, and redacted provider error classification.
+- Realtime behavior is configured by `VOICE_TUTOR_ENABLED`, `OPENAI_REALTIME_MODEL`, `OPENAI_REALTIME_VOICE`, `VOICE_TUTOR_MAX_SESSION_SECONDS`, `VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS`, `VOICE_TUTOR_HEARTBEAT_LEASE_SECONDS`, `VOICE_TUTOR_CONTINUOUS_SPEECH_INTERVENTION_SECONDS` (default 12, runtime-clamped to 5–30), result-recovery settings, `VOICE_TUTOR_SUMMARY_MODEL`, `VOICE_TUTOR_SUMMARY_PROMPT_VERSION`, `VOICE_TUTOR_TRANSCRIPT_MAX_CHARS`, and optional `VOICE_TUTOR_PUBLIC_BASE_URL`. The relay reuses the existing server-only regular user-content `OPENAI_API_KEY_USER`; no Voice Tutor-specific API key is accepted. Plan quota remains database/admin-owned rather than environment-owned.
+- MCP adds owner-scoped read-only `list_voice_tutor_sessions`, `get_voice_tutor_session`, and `get_voice_tutor_quota` tools and snapshot resources `buddystudy://voice-tutor/sessions/recent` and `buddystudy://voice-tutor/quota`. MCP reuses the application read use cases; it cannot open the realtime stream or start, reconnect, end, extend, or delete a session.
+
 ## Sync Model
 
-- Backend sync stores settings, records, answer drafts, generated questions, grading results, and topic statistics.
+- Backend sync stores settings, question records, separate Voice Tutor sessions/results, answer drafts, generated questions, grading results, and topic statistics.
 - Backend record rows are retained without a per-user maximum. `GET /api/v1/records` and its search variant are bounded offset pages; iOS requests the next 30 rows only when the last loaded row approaches the viewport.
+- Voice Tutor history uses its own bounded `GET /api/v1/voice-tutor/sessions` pages. A session detail read may include bounded transcript turns and its derived result, but it never populates or mutates a `StudyRecord.answer` or the answer-draft repository.
 - `GET /api/v1/records?studyId={nodeId}` applies the node filter in MySQL before counting and paging. Statistics node detail uses this additive filter so deep study trees never require downloading or client-filtering the user's full record history.
 - API key backend sync is supported for the regular OpenAI key; admin keys are not supported.
 - Backend settings sync uploads the regular OpenAI API key only when it changes or when backend settings need to be initialized.
 - A backend device registration can be created without an APNs token so manual question generation, grading, settings, records, and stats can work before notification permission/token delivery.
 - When APNs token registration later succeeds, the existing backend device is updated instead of creating a separate backend identity.
-- If a local ungraded current question has an answer draft, remote current questions do not replace the active answer page.
+- If a local ungraded current question has an answer draft, remote current questions, Voice Tutor lifecycle updates, and Tutor Learning Result synchronization do not replace the active answer page.
 
 ## Push Model
 
@@ -412,9 +452,9 @@ Public community feed
 - `billing_accounts` retains one `appAccountToken` owner. Account deletion anonymizes the record and prevents that purchase chain being restored to another BuddyStudy account.
 - `subscription_events` is append-only and idempotent. `subscriptions` projects access and renewal independently per original transaction, and `user_entitlement_projection` chooses the highest valid tier without adding duplicate subscription limits.
 - `user_memberships` carries non-StoreKit grants such as the one-month referral reward. Effective access resolves the highest active tier across the paid entitlement projection and these grants; a referral never creates an invoice, payment, or auto-renewing subscription.
-- `user_membership_tiers` is the plan catalog and owns the base monthly limit.
-- The default monthly allowance is 30 questions for TIER1, 300 for TIER2, and 1,000 for TIER3. TIER2 and TIER3 each expose one monthly Apple auto-renewable subscription. Disabled legacy product mappings remain readable only for billing reconciliation.
-- The iOS membership screen renders the StoreKit-localized title/price context together with the server-owned monthly allowance, monthly duration, automatic-renewal disclosure, and localized Terms of Use and Privacy Policy links before the purchase action.
+- `user_membership_tiers` is the plan catalog and owns separate base monthly question and Voice Tutor limits.
+- The default question allowance is 30 for TIER1, 300 for TIER2, and 1,000 for TIER3. The default Voice Tutor allowance is zero seconds for TIER1 and 18,000 seconds (300 minutes) for both TIER2 and TIER3. TIER2 and TIER3 each expose one monthly Apple auto-renewable subscription. Disabled legacy product mappings remain readable only for billing reconciliation.
+- The iOS membership screen renders the StoreKit-localized title/price context together with the server-owned monthly question allowance, Voice Tutor allowance, monthly duration, automatic-renewal disclosure, and localized Terms of Use and Privacy Policy links before the purchase action.
 - App Store Connect subscription metadata is tracked in `app-store/billing/subscriptions.json`. Korean prices are the base prices and Apple equalized prices are configured for every available storefront.
 - A user-initiated purchase creates an `INVOICE_CREATED` event and `NORMAL/WAITING` invoice (`phase=PREPARED`) before the StoreKit sheet opens. RevenueCat returns the completed StoreKit transaction identifier; iOS confirms it against that exact invoice through `POST /api/v1/billing/invoices/{invoiceNumber}/confirm`.
 - The backend verifies the transaction through RevenueCat API v2 and advances the derived phase `PREPARED -> VERIFIED -> FULFILLED`. The confirmation request returns 2xx only after payment settlement, `fulfilled_at`, entitlement, and quota are readable. A failure preserves verified financial evidence for idempotent recovery.
@@ -425,11 +465,12 @@ Public community feed
 - `user_quota` is the single current-state quota projection per user. It owns the anchor, current period boundaries, effective tier and base limit, current-period bonus, committed and reserved counters, derived remaining capacity, policy version, and optimistic version.
 - `user_quota_history` is append-only. The current-row update and its history entry commit in one transaction for period rollover, reserve, commit, release, bonus, migration, and effective plan changes. A unique event ID and resulting-version chain make replays harmless and provide an auditable counter and plan-change trail; `user_quota` remains the authoritative full current snapshot.
 - `quota_reservations` remains the exactly-once identity for question-generation Sagas. It snapshots the period in which the reservation was accepted, so a commit or release delivered after a natural rollover completes the old-period history without corrupting the new current row.
-- Month-end anchors use the target month's last valid day without drift. For example, a January 31 anchor resets on February 28 (or 29) and then March 31.
-- The first verified paid purchase may replace the account-created anchor with the immutable earliest `purchasedAt`, but it carries the existing counters into the recalculated window. Later upgrades, downgrades, renewals, cancellations, expirations, refunds, and resubscriptions do not move that anchor.
-- Remaining capacity is `max(0, base + current-period bonus - committed - reserved)`. A paid upgrade immediately raises the base limit and preserves committed usage, bonus, and active reservations. A requested downgrade keeps the current higher tier unchanged until its renewal boundary; the effective lower-tier renewal preserves those counters, lowers the base limit, and therefore returns zero remaining when the preserved total already reaches the lower limit. A unique invoice-scoped plan-change history event makes confirmation, webhook, reconciliation, and replay converge idempotently; a deferred downgrade emits no quota mutation.
-- An active referral grant makes Pro (`TIER2`) effective unless a higher valid tier already wins. Grant activation and expiration update only the effective tier and base limit; they preserve the current quota period, committed usage, bonus, and active reservations.
-- The managed `user-quota-rollover` job selects due `user_quota` rows every minute with bounded locking and advances each directly to the window containing the current UTC instant. It resets committed, reserved, and bonus counters only for that natural monthly rollover and appends one idempotent `PERIOD_RESET` history entry. Quota status reads, permission checks, reservations, and bonus writes run the same rollover transaction when they encounter an overdue row, so scheduler delay or downtime cannot expose the prior period's allowance. Legacy membership/usage and policy-v4 quota tables are migration inputs only and are not a read authority.
+- `user_voice_quota` is the independent current-state seconds projection for Voice Tutor. `voice_tutor_sessions` supplies its reservation/settlement identity, so concurrent starts, duplicate end requests, disconnect recovery, and an old-period terminal settlement cannot charge or release the current period twice.
+- Month-end anchors use the target month's last valid day without drift. For example, a January 31 anchor resets on February 28 (or 29) and then March 31. Question and Voice Tutor quotas apply this calendar rule independently.
+- The first verified paid purchase may replace the question quota's account-created anchor with the immutable earliest `purchasedAt`, carrying its existing counters into the recalculated window. The Voice Tutor anchor remains the account creation time. Later upgrades, downgrades, renewals, cancellations, expirations, refunds, and resubscriptions move neither established anchor.
+- Question remaining capacity is `max(0, base + current-period bonus - committed - reserved)`; Voice Tutor remaining capacity is `max(0, base - used - reserved)`. Billing fulfillment applies the question limit and its invoice-scoped history event transactionally. Voice Tutor instead reconciles the effective tier and plan-catalog base on the next voice access while preserving its used and reserved seconds. A requested downgrade keeps the higher entitlement until its renewal boundary, and either domain clamps remaining capacity to zero when preserved usage meets the later lower base.
+- An active referral grant makes Pro (`TIER2`) effective unless a higher valid tier already wins. Question quota applies that effective tier through its existing fulfillment boundary; Voice Tutor observes it through the same lazy tier/base reconciliation. Both preserve current-period usage and active reservations.
+- The managed `user-quota-rollover` job remains question-only and advances due `user_quota` rows every minute with bounded locking. Voice Tutor has no separate rollover batch in this release: status, history/detail, and session-start paths reconcile expired sessions and lazily advance `user_voice_quota` to the account-anchored window containing the current UTC instant. Both domains retain request-time correctness during scheduler delay or process downtime. Legacy membership/usage and policy-v4 question quota tables are migration inputs only and are not a read authority.
 - The monitoring Users & Quotas page proxies admin APIs through the authenticated monitoring origin. It does not persist backend admin tokens outside the browser session.
 - User search is bounded to 100 rows per API call and the UI uses 20-row pages.
 

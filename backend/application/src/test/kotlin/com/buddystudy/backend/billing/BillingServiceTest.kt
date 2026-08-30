@@ -32,6 +32,9 @@ import com.buddystudy.backend.billing.application.service.VerifiedBillingPayment
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
+import com.buddystudy.backend.voice.application.model.VoiceTutorQuotaSnapshot
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorAvailabilityPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuotaQueryPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
@@ -263,6 +266,60 @@ class BillingServiceTest {
         val catalog = service(FakeLedger(token, product)).catalog(principal())
 
         assertEquals(true, catalog.products.single().adFree)
+    }
+
+    @Test
+    fun `disabled voice tutor feature does not advertise database tier seconds`() = runBlocking {
+        val voiceProduct = product.copy(monthlyVoiceSecondsLimit = 18_000)
+        val quota = VoiceTutorQuotaSnapshot(
+            tierCode = "TIER2",
+            periodStartedAt = now.minusSeconds(60),
+            periodEndsAt = now.plusSeconds(2_592_000),
+            baseSeconds = 18_000,
+            usedSeconds = 0,
+            reservedSeconds = 0,
+        )
+        val service = service(FakeLedger(token, voiceProduct), voiceEnabled = false, voiceQuota = quota)
+
+        val catalog = service.catalog(principal())
+        val status = service.status(principal())
+
+        assertEquals(0, catalog.products.single().monthlyVoiceSecondsLimit)
+        assertEquals(false, status.voiceTutor.enabled)
+        assertEquals(0, status.voiceTutor.limitSeconds)
+    }
+
+    @Test
+    fun `enabled voice tutor feature exposes configured tier seconds`() = runBlocking {
+        val voiceProduct = product.copy(monthlyVoiceSecondsLimit = 18_000)
+
+        val catalog = service(FakeLedger(token, voiceProduct), voiceEnabled = true).catalog(principal())
+
+        assertEquals(18_000, catalog.products.single().monthlyVoiceSecondsLimit)
+    }
+
+    @Test
+    fun `billing voice status requires both paid entitlement and a positive effective allowance`() = runBlocking {
+        val freeOverride = VoiceTutorQuotaSnapshot(
+            tierCode = "TIER1",
+            periodStartedAt = now.minusSeconds(60),
+            periodEndsAt = now.plusSeconds(2_592_000),
+            baseSeconds = 900,
+            usedSeconds = 0,
+            reservedSeconds = 0,
+        )
+        val paidZero = freeOverride.copy(tierCode = "TIER2", baseSeconds = 0)
+
+        assertEquals(
+            false,
+            service(FakeLedger(token, product), voiceEnabled = true, voiceQuota = freeOverride)
+                .status(principal()).voiceTutor.enabled,
+        )
+        assertEquals(
+            false,
+            service(FakeLedger(token, product), voiceEnabled = true, voiceQuota = paidZero)
+                .status(principal()).voiceTutor.enabled,
+        )
     }
 
     @Test
@@ -712,6 +769,8 @@ class BillingServiceTest {
         monthlyLimit: Int = 300,
         verifiedTransaction: VerifiedAppleTransaction = transaction,
         revenueCatVerifier: RevenueCatTransactionVerificationPort = RecordingRevenueCatVerifier(verifiedTransaction),
+        voiceEnabled: Boolean = false,
+        voiceQuota: VoiceTutorQuotaSnapshot? = null,
     ) = object {
         val membership = object : QuestionMembershipPort {
             override suspend fun activePlanForUser(userId: Long) = QuestionMembershipPlan(membershipTierCode, monthlyLimit)
@@ -747,6 +806,12 @@ class BillingServiceTest {
             ledger = ledger,
             memberships = membership,
             clock = Clock.fixed(now, ZoneOffset.UTC),
+            voiceQuotas = object : VoiceTutorQuotaQueryPort {
+                override suspend fun quota(userId: Long, now: Instant) = voiceQuota
+            },
+            voiceTutorAvailability = object : VoiceTutorAvailabilityPort {
+                override fun isEnabled() = voiceEnabled
+            },
         )
     }.service
 

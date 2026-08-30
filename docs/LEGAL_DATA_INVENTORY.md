@@ -3,7 +3,7 @@
 This document is the engineering source of truth used when updating BuddyStudy's
 Terms of Service, Privacy Policy, and Marketing Information Consent.
 
-Last reviewed: 2026-08-25
+Last reviewed: 2026-08-30
 
 ## Published Documents
 
@@ -23,6 +23,13 @@ the AdMob-capable build is public and older builds are force-updated. Agreement
 requests bind the exact server-provided version and content hash, preventing an
 older client from recording agreement to a document it did not display.
 
+The published privacy copies above do not yet approve Pro Voice Tutor data
+processing. This inventory records the engineering behavior for legal review;
+it does not itself publish a new policy version or authorize production
+activation. No Voice Tutor privacy HTML or `terms` Flyway migration may be
+created until legal approves the processing, retention, provider disclosure,
+localized wording, effective date, and any re-agreement requirement.
+
 ## Data and Systems
 
 | Data or processing | Current implementation | Retention or deletion |
@@ -34,8 +41,10 @@ older client from recording agreement to a document it did not display.
 | Studies and questions | MySQL: study tree, scheduled/generated questions, answers, grading, feedback, statistics | Until item or account deletion |
 | Public community data | MySQL: public questions, public profile fields, likes, comments, views, reports, and user-to-user block relationships | Until item deletion, moderation, unblock, or account deletion |
 | Advertising delivery | MySQL: server slot/campaign selection, placement and position, provider, delivery/impression/click/open time, user/device ownership, and campaign suppression | Until account deletion; aggregate campaign and placement reporting uses a 30-day window |
-| AI processing | Server-managed OpenAI account for question generation, grading, feedback, recommendations, and fallback translation | Provider processing applies when the function is used |
-| User-authorized MCP access | Stateless HTTPS tools/resources expose the authenticated user's private profile, learning context, studies, questions, grading, and topic statistics to the MCP client selected by that user | No server-side MCP session; stored source data follows its normal retention |
+| AI processing | Server-managed OpenAI account for question generation, grading, feedback, recommendations, fallback translation, and Voice Tutor result summarization | Provider processing applies when the function is used |
+| Pro Voice Tutor realtime audio | During an authenticated foreground lesson, the backend relays microphone audio to OpenAI Realtime and relays generated model audio back to the app. OpenAI performs realtime speech processing; the existing server-only regular user-content API key is used. BuddyStudy does not persist original microphone or model audio | Original audio exists in BuddyStudy only for the live relay and is not written to MySQL, object storage, logs, analytics, Sentry, MCP, or backups. Provider processing follows the approved provider terms and configuration |
+| Voice Tutor lesson history | MySQL: owned session/accounting metadata, bounded ordered transcript text, and a separate private result containing summary, strengths, improvements, and next steps | Stored until account deletion. Deleting the account removes voice quota, sessions, transcript turns, and results through the owned relational cascade |
+| User-authorized MCP access | Stateless HTTPS tools/resources expose the authenticated user's private profile, learning context, studies, questions, grading, topic statistics, and read-only Voice Tutor quota/session/result data to the MCP client selected by that user | No server-side MCP session; stored source data follows its normal retention. MCP cannot start, extend, explicitly end, or stream a Voice Tutor session |
 | Translation | Self-hosted LibreTranslate first; OpenAI fallback | Translation results are stored with content localizations |
 | Notifications | APNs device token, notification preferences, notification and read state | Until device unregister, invalidation, or account deletion |
 | Terms agreements | Immutable MySQL action history with version, source, time, app version, IP and user agent | Until account deletion unless required for a legal dispute |
@@ -43,7 +52,7 @@ older client from recording agreement to a document it did not display.
 | App control | Firebase Remote Config: app, device, and configuration request metadata | Google project retention settings |
 | Product analytics | Google Analytics for Firebase in release builds; coarse screen and feature events | Firebase project retention settings |
 | Error diagnostics | Sentry error and fatal events; error-session replay with all text and images masked | Sentry project retention settings |
-| API and operation logs | Loki; credentials and tokens are redacted | 7 days |
+| API and operation logs | Loki; credentials and tokens are redacted. MCP and Voice Tutor REST bodies plus Voice Tutor WebSocket frames are excluded; only safe request/session metadata and redacted failure classifications may be logged | 7 days |
 | Database backups | Encrypted operational backup | Up to 14 days |
 | Local app data | Settings, drafts, logs and cache on the device | App reset, deletion, or cache lifecycle |
 
@@ -57,7 +66,7 @@ registration numbers, health data, biometrics, or other sensitive information.
 | --- | --- | --- |
 | Amazon Web Services | API, MySQL, Redis, secrets and backups | Seoul region |
 | Cloudflare | DNS, TLS proxy and network security | Global edge network |
-| OpenAI | AI question, grading, feedback, recommendation and fallback translation | Provider operating countries |
+| OpenAI | AI question, grading, feedback, recommendation, fallback translation, Voice Tutor realtime speech exchange/transcription, and private lesson-result summarization | Provider operating countries |
 | Apple | Sign in with Apple, App Store subscriptions, StoreKit transactions, purchase management, and APNs push delivery | Provider operating countries |
 | RevenueCat, Inc. | Product lookup, purchase/restore, Customer Center, subscription state, and webhook delivery | Provider operating countries |
 | Google | Login, SMTP email verification, Firebase Analytics, Remote Config, UMP privacy choices, and non-personalized AdMob native advertising | Provider operating countries |
@@ -89,6 +98,21 @@ advertising. TIER2 and TIER3 do not receive an ad slot.
   logs because they can contain resume text, interests, answers, feedback, and
   scores. The authenticated principal may be copied into tool context, but the
   raw bearer token must not be copied or forwarded.
+- Request and response bodies under `/api/v1/voice-tutor`, WebSocket handshake
+  payloads, and every frame on `/api/v1/voice-tutor/sessions/{id}/stream` must
+  never be captured in API exchange logs or external-provider history bodies.
+  Transcript text, derived summaries, audio payloads, provider credentials, and
+  realtime request bodies must not appear in analytics, Sentry attachments, or
+  operational error messages.
+- Original Voice Tutor microphone and model audio must remain ephemeral relay
+  data. BuddyStudy must not write it to MySQL, files, object storage, caches,
+  backups, MCP resources, or diagnostic tooling. Persisted lesson evidence is
+  limited to bounded text transcript turns, safe session/accounting metadata,
+  and the private derived result.
+- Voice Tutor sessions, transcripts, and results are private owner-scoped data.
+  Account withdrawal must remove them along with `user_voice_quota`; they must
+  never enter public-question payloads, graded-question statistics, advertising
+  requests, or another user's MCP/REST response.
 - Resume and interests remain private and must not appear in community profile
   responses, public questions, Firebase Analytics, Sentry attachments, or
   prompts sent to a provider unless the user explicitly invokes a function
@@ -105,18 +129,33 @@ advertising. TIER2 and TIER3 do not receive an ad slot.
 
 ## Update Checklist
 
-1. Review actual data fields, SDK configuration, providers, retention, account
-   deletion, public-content behavior, and notification behavior.
-2. Publish immutable Korean, English, and Japanese copies with the same version
-   date and equivalent meaning.
-3. Compute SHA-256 for each Korean fixed copy and register the values in a new
-   Flyway migration.
-4. Keep required and mutable flags aligned with product behavior.
-5. Update `AppLegalLinks` and the current-document redirects.
-6. Do not overwrite or delete previous documents or agreement history.
-7. Run the Flyway integration test, iOS build, and local link validation.
-8. Deploy the documentation and backend migration through their GitHub Actions
-   workflows.
+1. Obtain legal approval for realtime microphone/model audio processing by
+   OpenAI, provider/cross-border disclosure, bounded transcript/result storage,
+   retention through account deletion, MCP disclosure, and the no-raw-audio
+   storage boundary. Record whether existing users must re-agree.
+2. Until that approval is recorded, keep production
+   `VOICE_TUTOR_ENABLED=false`; the backend deployment template uses this safe
+   default, and the application itself also fails closed when the setting is
+   omitted. After approval, set the deployment repository variable explicitly
+   to `true`.
+   Do not create or stage a Voice Tutor privacy HTML file or `terms` migration
+   as a substitute for approval.
+3. After approval, publish immutable Korean, English, and Japanese privacy
+   copies with the same version date and equivalent meaning. Preserve all prior
+   documents and agreement history.
+4. Compute SHA-256 for each approved Korean fixed copy and register the exact
+   version, effective time, required/mutable flags, and hash in a new additive
+   Flyway migration. Update `AppLegalLinks` and current-document redirects only
+   to that approved version.
+5. Verify with automated tests that Voice Tutor REST bodies and WebSocket frames
+   are excluded from logs, original audio is never persisted, MCP remains
+   owner-scoped/read-only, and account deletion removes quota, session,
+   transcript, and result rows.
+6. Review the remaining data fields, SDK configuration, providers, retention,
+   account deletion, public-content behavior, and notification behavior.
+7. Run the Flyway integration test, iOS build, and local legal-link validation.
+8. Deploy the approved documentation and backend migration through their
+   GitHub Actions workflows before enabling the feature flag.
 
 ## Legal Reference Points
 

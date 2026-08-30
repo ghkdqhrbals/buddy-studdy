@@ -52,6 +52,27 @@ class AdminManagementServiceTest {
     }
 
     @Test
+    fun `voice only tier patch preserves the existing question limit`() = runBlocking {
+        val port = FakeAdminManagementPort()
+        val service = AdminManagementService(port)
+
+        val result = service.updateTier("TIER2", monthlyQuestionLimit = null, monthlyVoiceSecondsLimit = 18_000)
+
+        assertThat(port.lastTierQuestionLimit).isNull()
+        assertThat(port.lastTierVoiceLimit).isEqualTo(18_000)
+        assertThat(result.monthlyQuestionLimit).isEqualTo(30)
+        assertThat(result.monthlyVoiceSecondsLimit).isEqualTo(18_000)
+    }
+
+    @Test
+    fun `empty tier patch is rejected`() {
+        val service = AdminManagementService(FakeAdminManagementPort())
+
+        assertThatThrownBy { runBlocking { service.updateTier("TIER2", null, null) } }
+            .isInstanceOf(ApiException::class.java)
+    }
+
+    @Test
     fun `administrator can override only the current quota period`() = runBlocking {
         val port = FakeAdminManagementPort()
         val service = AdminManagementService(port)
@@ -63,12 +84,33 @@ class AdminManagementServiceTest {
         assertThat(result.monthlyLimit).isEqualTo(45)
     }
 
+    @Test
+    fun `administrator can lower a paid users persistent voice cap and restore the tier default`() = runBlocking {
+        val port = FakeAdminManagementPort()
+        val service = AdminManagementService(port)
+
+        val capped = service.setVoiceLimit(userId = 7, monthlyVoiceSecondsLimitOverride = 900)
+        assertThat(port.lastVoiceLimit).isEqualTo(900)
+        assertThat(capped.monthlyVoiceSecondsLimit).isEqualTo(900)
+        assertThat(capped.monthlyVoiceSecondsLimitOverride).isEqualTo(900)
+
+        val restored = service.setVoiceLimit(userId = 7, monthlyVoiceSecondsLimitOverride = null)
+        assertThat(port.voiceLimitWasSet).isTrue()
+        assertThat(port.lastVoiceLimit).isNull()
+        assertThat(restored.monthlyVoiceSecondsLimit).isEqualTo(18_000)
+        assertThat(restored.monthlyVoiceSecondsLimitOverride).isNull()
+    }
+
     private class FakeAdminManagementPort : AdminManagementPort {
         var lastQuery: String? = null
         var lastLimit = 0
         var lastOffset = 0
         var lastAssignment: AssignUserPlanCommand? = null
         var lastCurrentPeriodLimit: Int? = null
+        var lastTierQuestionLimit: Int? = null
+        var lastTierVoiceLimit: Int? = null
+        var lastVoiceLimit: Int? = null
+        var voiceLimitWasSet = false
 
         override suspend fun users(query: String?, limit: Int, offset: Int): AdminUserPageResponse {
             lastQuery = query
@@ -85,7 +127,18 @@ class AdminManagementServiceTest {
         override suspend fun updateTier(
             tierCode: String,
             monthlyQuestionLimit: Int,
-        ): AdminMembershipTierResponse = AdminMembershipTierResponse(tierCode, monthlyQuestionLimit, "Updated")
+        ): AdminMembershipTierResponse {
+            lastTierQuestionLimit = monthlyQuestionLimit
+            return AdminMembershipTierResponse(tierCode, monthlyQuestionLimit, "Updated")
+        }
+
+        override suspend fun updateTierVoiceSecondsLimit(
+            tierCode: String,
+            monthlyVoiceSecondsLimit: Int,
+        ): AdminMembershipTierResponse {
+            lastTierVoiceLimit = monthlyVoiceSecondsLimit
+            return AdminMembershipTierResponse(tierCode, 30, "Updated", monthlyVoiceSecondsLimit)
+        }
 
         override suspend fun assignPlan(
             userId: Long,
@@ -106,9 +159,24 @@ class AdminManagementServiceTest {
             )
         }
 
+        override suspend fun setVoiceLimit(
+            userId: Long,
+            monthlyVoiceSecondsLimitOverride: Int?,
+        ): AdminUserSummary {
+            lastVoiceLimit = monthlyVoiceSecondsLimitOverride
+            voiceLimitWasSet = true
+            val limit = monthlyVoiceSecondsLimitOverride ?: 18_000
+            return summary(
+                monthlyVoiceSecondsLimit = limit,
+                monthlyVoiceSecondsLimitOverride = monthlyVoiceSecondsLimitOverride,
+            )
+        }
+
         private fun summary(
             monthlyLimit: Int = 30,
             currentPeriodQuestionLimitOverride: Int? = null,
+            monthlyVoiceSecondsLimit: Int = 0,
+            monthlyVoiceSecondsLimitOverride: Int? = null,
         ) = AdminUserSummary(
             id = 7,
             email = "user@example.com",
@@ -125,6 +193,8 @@ class AdminManagementServiceTest {
             periodStartedAt = Instant.parse("2026-07-01T00:00:00Z"),
             resetAt = Instant.parse("2026-08-01T00:00:00Z"),
             createdAt = Instant.parse("2026-07-01T00:00:00Z"),
+            monthlyVoiceSecondsLimit = monthlyVoiceSecondsLimit,
+            monthlyVoiceSecondsLimitOverride = monthlyVoiceSecondsLimitOverride,
         )
     }
 }

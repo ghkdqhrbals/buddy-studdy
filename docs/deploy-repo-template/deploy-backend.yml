@@ -40,6 +40,25 @@ jobs:
       BACKEND_DOMAIN: api.ghkdqhrbals.org
       PROMOTE_SWARM: ${{ inputs.promote_swarm || 'false' }}
       MCP_SERVER_ENABLED: ${{ vars.MCP_SERVER_ENABLED || 'false' }}
+      VOICE_TUTOR_ENABLED: ${{ vars.VOICE_TUTOR_ENABLED || 'false' }}
+      OPENAI_REALTIME_MODEL: ${{ vars.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1' }}
+      OPENAI_REALTIME_VOICE: ${{ vars.OPENAI_REALTIME_VOICE || 'marin' }}
+      VOICE_TUTOR_MAX_SESSION_SECONDS: ${{ vars.VOICE_TUTOR_MAX_SESSION_SECONDS || '3600' }}
+      VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS: ${{ vars.VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS || '15' }}
+      VOICE_TUTOR_HEARTBEAT_LEASE_SECONDS: ${{ vars.VOICE_TUTOR_HEARTBEAT_LEASE_SECONDS || '60' }}
+      VOICE_TUTOR_CONTINUOUS_SPEECH_INTERVENTION_SECONDS: ${{ vars.VOICE_TUTOR_CONTINUOUS_SPEECH_INTERVENTION_SECONDS || '12' }}
+      VOICE_TUTOR_SESSION_RECOVERY_POLL_MS: ${{ vars.VOICE_TUTOR_SESSION_RECOVERY_POLL_MS || '5000' }}
+      VOICE_TUTOR_SESSION_RECOVERY_INITIAL_DELAY_MS: ${{ vars.VOICE_TUTOR_SESSION_RECOVERY_INITIAL_DELAY_MS || '5000' }}
+      VOICE_TUTOR_SESSION_RECOVERY_BATCH_SIZE: ${{ vars.VOICE_TUTOR_SESSION_RECOVERY_BATCH_SIZE || '100' }}
+      VOICE_TUTOR_SUMMARY_MODEL: ${{ vars.VOICE_TUTOR_SUMMARY_MODEL || 'gpt-5.4' }}
+      VOICE_TUTOR_SUMMARY_PROMPT_VERSION: ${{ vars.VOICE_TUTOR_SUMMARY_PROMPT_VERSION || 'voice-tutor-summary-v1' }}
+      VOICE_TUTOR_SUMMARY_RECOVERY_POLL_MS: ${{ vars.VOICE_TUTOR_SUMMARY_RECOVERY_POLL_MS || '5000' }}
+      VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS: ${{ vars.VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS || '5000' }}
+      VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE: ${{ vars.VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE || '10' }}
+      VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS: ${{ vars.VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS || '300' }}
+      VOICE_TUTOR_TRANSCRIPT_MAX_CHARS: ${{ vars.VOICE_TUTOR_TRANSCRIPT_MAX_CHARS || '100000' }}
+      VOICE_TUTOR_TRANSCRIPT_MAX_TURNS: ${{ vars.VOICE_TUTOR_TRANSCRIPT_MAX_TURNS || '2000' }}
+      VOICE_TUTOR_PUBLIC_BASE_URL: ${{ vars.VOICE_TUTOR_PUBLIC_BASE_URL || '' }}
 
     steps:
       - name: Checkout deployment configuration
@@ -284,6 +303,25 @@ jobs:
           OPENAI_API_KEY_SYSTEM=${OPENAI_API_KEY_SYSTEM}
           OPENAI_MODEL=gpt-5.4
           OPENAI_SYSTEM_MODEL=gpt-5.4
+          VOICE_TUTOR_ENABLED=${VOICE_TUTOR_ENABLED}
+          OPENAI_REALTIME_MODEL=${OPENAI_REALTIME_MODEL}
+          OPENAI_REALTIME_VOICE=${OPENAI_REALTIME_VOICE}
+          VOICE_TUTOR_MAX_SESSION_SECONDS=${VOICE_TUTOR_MAX_SESSION_SECONDS}
+          VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS=${VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS}
+          VOICE_TUTOR_HEARTBEAT_LEASE_SECONDS=${VOICE_TUTOR_HEARTBEAT_LEASE_SECONDS}
+          VOICE_TUTOR_CONTINUOUS_SPEECH_INTERVENTION_SECONDS=${VOICE_TUTOR_CONTINUOUS_SPEECH_INTERVENTION_SECONDS}
+          VOICE_TUTOR_SESSION_RECOVERY_POLL_MS=${VOICE_TUTOR_SESSION_RECOVERY_POLL_MS}
+          VOICE_TUTOR_SESSION_RECOVERY_INITIAL_DELAY_MS=${VOICE_TUTOR_SESSION_RECOVERY_INITIAL_DELAY_MS}
+          VOICE_TUTOR_SESSION_RECOVERY_BATCH_SIZE=${VOICE_TUTOR_SESSION_RECOVERY_BATCH_SIZE}
+          VOICE_TUTOR_SUMMARY_MODEL=${VOICE_TUTOR_SUMMARY_MODEL}
+          VOICE_TUTOR_SUMMARY_PROMPT_VERSION=${VOICE_TUTOR_SUMMARY_PROMPT_VERSION}
+          VOICE_TUTOR_SUMMARY_RECOVERY_POLL_MS=${VOICE_TUTOR_SUMMARY_RECOVERY_POLL_MS}
+          VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS=${VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS}
+          VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE=${VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE}
+          VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS=${VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS}
+          VOICE_TUTOR_TRANSCRIPT_MAX_CHARS=${VOICE_TUTOR_TRANSCRIPT_MAX_CHARS}
+          VOICE_TUTOR_TRANSCRIPT_MAX_TURNS=${VOICE_TUTOR_TRANSCRIPT_MAX_TURNS}
+          VOICE_TUTOR_PUBLIC_BASE_URL=${VOICE_TUTOR_PUBLIC_BASE_URL}
           MCP_SERVER_ENABLED=${MCP_SERVER_ENABLED}
           MCP_ALLOWED_HOSTS=${BACKEND_DOMAIN}
           MCP_ALLOWED_ORIGINS=
@@ -672,6 +710,24 @@ jobs:
               ssl_certificate_key ${SSL_CERTIFICATE_KEY};
 
               client_max_body_size 1m;
+
+              location ~ "^/api/v1/voice-tutor/sessions/[0-9A-Fa-f-]{36}/stream$" {
+                set \$backend http://buddystudy_backend:8080;
+                proxy_pass \$backend;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade \$http_upgrade;
+                proxy_set_header Connection \$connection_upgrade;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_buffering off;
+                # OpenAI Realtime caps one provider session at 60 minutes. Keep
+                # a quiet tutor socket routable beyond that ceiling without
+                # weakening normal HTTP request timeouts.
+                proxy_read_timeout 4000s;
+                proxy_send_timeout 4000s;
+              }
 
               location / {
                 set \$backend http://buddystudy_backend:8080;

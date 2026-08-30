@@ -67,6 +67,17 @@ class DatabasePermissionEvaluatorTest {
     }
 
     @Test
+    fun `private voice tutor permission rejects an account pending terms`() = runBlocking {
+        permissions.rows += UserPermissionProjection(Permissions.VOICE_TUTOR_READ, requiresActiveAccount = true)
+        users.statusByUser[7] = "PENDING_TERMS"
+
+        val result = evaluator.evaluate(principal(status = "PENDING_TERMS"), Permissions.VOICE_TUTOR_READ)
+
+        assertThat(result.granted).isFalse()
+        assertThat(result.failureCode).isEqualTo(ApiErrorCode.ACCOUNT_FORBIDDEN)
+    }
+
+    @Test
     fun `latest terms agreement failure includes terms content hash`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"

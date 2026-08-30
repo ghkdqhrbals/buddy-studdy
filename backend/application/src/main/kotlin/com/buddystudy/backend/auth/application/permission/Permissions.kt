@@ -18,6 +18,7 @@ object Permissions {
     const val RECORD_UPDATE = "record:update"
     const val RECORD_DELETE = "record:delete"
     const val RECORD_PUBLISH = "record:publish"
+    const val VOICE_TUTOR_READ = "voice-tutor:read"
     const val NOTIFICATION_READ = "notification:read"
     const val NOTIFICATION_DELETE = "notification:delete"
     const val NOTIFICATION_RECEIVE_INFO = "notification:receive-info"
