@@ -325,6 +325,13 @@ actor VoiceTutorWebSocketTransport {
         }
     }
 
+    // Read before local teardown. A missing close frame is unknown, not an
+    // invented remote close code; closeReason is deliberately never exposed.
+    func diagnosticCloseCode() -> Int? {
+        guard let socketTask, socketTask.closeCode != .invalid else { return nil }
+        return socketTask.closeCode.rawValue
+    }
+
     func disconnect(closeCode: URLSessionWebSocketTask.CloseCode = .normalClosure) {
         socketTask?.cancel(with: closeCode, reason: nil)
         socketTask = nil

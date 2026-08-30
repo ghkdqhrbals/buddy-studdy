@@ -11449,6 +11449,12 @@ final class AppState: ObservableObject {
         log(isError ? .error : .info, "billing_trace \(message)")
     }
 
+    // Voice diagnostics contain only connection/playout states and counters.
+    // Never pass transcripts, PCM, SDP, credentials, device names, or raw errors.
+    func logVoiceTutorEvent(_ message: String, isWarning: Bool = false) {
+        log(isWarning ? .warning : .info, "voice_tutor_trace \(message)")
+    }
+
     func loadAppLogPage(_ page: Int) {
         let logPage = appLogUseCase.loadLogs(page: page, pageSize: Self.developerLogPageSize)
         var nextState = developerState

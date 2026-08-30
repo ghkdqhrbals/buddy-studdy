@@ -660,6 +660,131 @@ final class VoiceTutorContractTests: XCTestCase {
         )
     }
 
+    func testWebRTCPlayoutDrainIgnoresContinuousSilentBuffersAfterStop() throws {
+        var fixture = VoiceTutorContractRenderFixture()
+        fixture.drain.responseStarted("response-1")
+        fixture.render(try makeRenderBuffer([0, 1, 0, 0]), at: 10)
+        fixture.drain.markResponseDone("response-1")
+        fixture.drain.markOutputBufferStopped("response-1", at: 10.1)
+        let initial = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
+        let silence = try makeRenderBuffer(Array(repeating: 0, count: 480))
+
+        // Exercise the actual renderer callback path, not just a fabricated
+        // state input. Continuous 10ms NetEq silence must not starve the ACK.
+        for tick in 1...200 {
+            fixture.render(silence, at: 10.1 + Double(tick) * 0.01)
+        }
+
+        let drained = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
+        XCTAssertEqual(fixture.callbackCount, 1)
+        XCTAssertEqual(drained.generation, initial.generation)
+        XCTAssertEqual(drained.deadline, 10.17, accuracy: 0.0001)
+        XCTAssertTrue(fixture.drain.markDrainDispatched(
+            responseID: drained.responseID,
+            generation: drained.generation,
+            renderedThrough: drained.renderedThrough
+        ))
+    }
+
+    func testWebRTCPlayoutDrainPreservesLateQuietAudioAfterSilentBuffers() throws {
+        var fixture = VoiceTutorContractRenderFixture()
+        fixture.drain.responseStarted("response-1")
+        fixture.render(try makeRenderBuffer([100, 0]), at: 10)
+        fixture.drain.markResponseDone("response-1")
+        fixture.drain.markOutputBufferStopped("response-1", at: 10.1)
+        let earlier = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
+
+        fixture.render(try makeRenderBuffer([0, 0]), at: 10.12)
+        fixture.render(try makeRenderBuffer([0, -1]), at: 10.16)
+        XCTAssertFalse(fixture.drain.markDrainDispatched(
+            responseID: earlier.responseID,
+            generation: earlier.generation,
+            renderedThrough: earlier.renderedThrough
+        ))
+        fixture.render(try makeRenderBuffer([0, 0]), at: 10.20)
+        let extended = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
+        XCTAssertEqual(fixture.callbackCount, 2)
+        XCTAssertEqual(extended.deadline, 10.23, accuracy: 0.0001)
+        XCTAssertEqual(extended.renderedThrough, 10.16, accuracy: 0.0001)
+    }
+
+    func testWebRTCInitialSilenceCannotSeedAnUnrenderedResponse() throws {
+        var fixture = VoiceTutorContractRenderFixture()
+        fixture.render(try makeRenderBuffer([0, 0]), at: 10)
+        fixture.drain.responseStarted("response-1")
+        fixture.drain.markOutputBufferStopped("response-1", at: 11)
+        fixture.drain.markResponseDone("response-1")
+        fixture.render(try makeRenderBuffer([0, 0]), at: 12)
+
+        XCTAssertNil(fixture.drain.drainDeadline(additionalLatency: 0.07))
+        XCTAssertEqual(fixture.phase, .listening)
+        fixture.render(try makeRenderBuffer([1, 0]), at: 13)
+        let drain = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
+        XCTAssertEqual(drain.deadline, 13.07, accuracy: 0.0001)
+        XCTAssertEqual(fixture.phase, .speaking)
+    }
+
+    func testWebRTCRealRenderBeforeResponseCreatedSurvivesOutOfOrderSignals() throws {
+        var fixture = VoiceTutorContractRenderFixture()
+        fixture.phase = .connecting
+        fixture.render(try makeRenderBuffer([0, 1]), at: 10)
+        fixture.render(try makeRenderBuffer([0, 0]), at: 10.5)
+        XCTAssertEqual(fixture.phase, .connecting, "Early media must not break the startup phase guard")
+        fixture.drain.responseStarted("response-1")
+        fixture.drain.markOutputBufferStopped("response-1", at: 11)
+        fixture.drain.markResponseDone("response-1")
+
+        let drain = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
+        XCTAssertEqual(drain.deadline, 11.07, accuracy: 0.0001)
+        XCTAssertEqual(drain.renderedThrough, 10, accuracy: 0.0001)
+    }
+
+    func testWebRTCRendererPreservesQuietSamplesInEveryStereoChannelLayout() throws {
+        for interleaved in [true, false] {
+            let silence = try makeRenderBuffer([0, 0, 0, 0], channels: 2, interleaved: interleaved)
+            XCTAssertFalse(VoiceTutorRemoteAudioRenderer.containsNonzeroSamples(silence))
+            for quietSample in [Int16(-1), Int16(1)] {
+                let audio = try makeRenderBuffer([0, 0, 0, quietSample], channels: 2, interleaved: interleaved)
+                XCTAssertTrue(VoiceTutorRemoteAudioRenderer.containsNonzeroSamples(audio))
+            }
+        }
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false
+        ))
+        let floatBuffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 2))
+        floatBuffer.frameLength = 2
+        let channels = try XCTUnwrap(floatBuffer.floatChannelData)
+        for channel in 0..<2 {
+            for sample in 0..<2 { channels[channel][sample] = 0 }
+        }
+        XCTAssertFalse(VoiceTutorRemoteAudioRenderer.containsNonzeroSamples(floatBuffer))
+        channels[1][1] = Float.leastNonzeroMagnitude
+        XCTAssertTrue(VoiceTutorRemoteAudioRenderer.containsNonzeroSamples(floatBuffer))
+    }
+
+    func testWebRTCRenderedAudioOnlyChangesAnActiveListeningIndication() {
+        XCTAssertEqual(VoiceTutorSessionPhase.listening.afterRenderedTutorAudio(assistantResponseActive: true), .speaking)
+        XCTAssertEqual(VoiceTutorSessionPhase.listening.afterRenderedTutorAudio(assistantResponseActive: false), .listening)
+        for phase in [VoiceTutorSessionPhase.idle, .requestingPermission, .connecting, .speaking, .ending, .ended, .failed] {
+            XCTAssertEqual(phase.afterRenderedTutorAudio(assistantResponseActive: true), phase)
+        }
+    }
+
+    func testVoiceTutorErrorDiagnosticsExcludeDescriptionsAndUntrustedDomains() {
+        let error = NSError(
+            domain: "private-transcript-or-address",
+            code: 42,
+            userInfo: [NSLocalizedDescriptionKey: "private speech and secret URL"]
+        )
+        let fields = VoiceTutorDiagnosticError.fields(for: error)
+        XCTAssertTrue(fields.contains("errorDomain=other"))
+        XCTAssertTrue(fields.contains("errorCode=42"))
+        XCTAssertFalse(fields.contains("private"))
+        XCTAssertFalse(fields.contains("secret"))
+        XCTAssertTrue(VoiceTutorDiagnosticError.fields(for: URLError(.networkConnectionLost)).contains("errorDomain=NSURLErrorDomain"))
+        XCTAssertTrue(VoiceTutorDiagnosticError.fields(for: VoiceTutorRealtimeEventParser.ParseError.invalidJSON).contains("parser.invalidJSON"))
+    }
+
     func testWebRTCPlayoutDrainKeepsPCMThatArrivesBeforeResponseCreated() throws {
         var state = VoiceTutorWebRTCPlayoutDrainState()
 
@@ -1398,6 +1523,28 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(fixture.store.loadRemotePushRegistration(), registrationB)
     }
 
+    private func makeRenderBuffer(
+        _ samples: [Int16],
+        channels: AVAudioChannelCount = 1,
+        interleaved: Bool = true
+    ) throws -> AVAudioPCMBuffer {
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatInt16, sampleRate: 48_000, channels: channels, interleaved: interleaved
+        ))
+        let frames = samples.count / Int(channels)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)))
+        buffer.frameLength = AVAudioFrameCount(frames)
+        let data = try XCTUnwrap(buffer.int16ChannelData)
+        for frame in 0..<frames {
+            for channel in 0..<Int(channels) {
+                let sample = frame * Int(channels) + channel
+                if interleaved { data[0][sample] = samples[sample] }
+                else { data[channel][frame] = samples[sample] }
+            }
+        }
+        return buffer
+    }
+
     @MainActor
     private func assertInvalidWebRTCOriginEndsRecoveredSession(invalidField: String) async throws {
         let original = try VoiceTutorContractAppFixture.registration(ownerUserID: 7, tokenID: "original-a")
@@ -1478,6 +1625,46 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(endRequest.value(forHTTPHeaderField: "X-Client-Secret"), recovered.clientSecret)
         XCTAssertEqual(fixture.store.loadRemotePushRegistration()?.accessToken, recovered.accessToken)
         XCTAssertTrue(fixture.appState.voiceTutorSessionDetails.isEmpty)
+    }
+}
+
+private struct VoiceTutorContractRenderFixture {
+    var drain = VoiceTutorWebRTCPlayoutDrainState()
+    var phase = VoiceTutorSessionPhase.listening
+    private let renderer = VoiceTutorRemoteAudioRenderer()
+    private let callbacks = VoiceTutorContractRenderCounter()
+
+    var callbackCount: Int { callbacks.count }
+
+    init() {
+        let callbacks = self.callbacks
+        renderer.onRenderedPCM = { _ in callbacks.increment() }
+    }
+
+    mutating func render(_ buffer: AVAudioPCMBuffer, at uptime: TimeInterval) {
+        let previous = callbacks.count
+        renderer.render(pcmBuffer: buffer)
+        if callbacks.count > previous {
+            drain.rendered(at: uptime)
+            phase = phase.afterRenderedTutorAudio(assistantResponseActive: drain.responseID != nil)
+        }
+    }
+}
+
+private final class VoiceTutorContractRenderCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func increment() {
+        lock.lock()
+        value += 1
+        lock.unlock()
     }
 }
 

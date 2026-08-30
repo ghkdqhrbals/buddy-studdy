@@ -67,10 +67,46 @@ final class VoiceTutorAudioProcessingTap: NSObject, LKRTCAudioCustomProcessingDe
 
 final class VoiceTutorRemoteAudioRenderer: NSObject, LKRTCAudioRenderer, @unchecked Sendable {
     var onRenderedPCM: (@Sendable (TimeInterval) -> Void)?
+    var onRenderedBuffer: (@Sendable (Int, Bool, TimeInterval) -> Void)?
 
     func render(pcmBuffer: AVAudioPCMBuffer) {
         guard pcmBuffer.frameLength > 0 else { return }
-        onRenderedPCM?(ProcessInfo.processInfo.systemUptime)
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let containsAudio = Self.containsNonzeroSamples(pcmBuffer)
+        onRenderedBuffer?(Int(pcmBuffer.frameLength), containsAudio, uptime)
+        // WebRTC also renders NetEq's digital silence after the last RTP
+        // audio. Those callbacks must not perpetually move the drain deadline.
+        guard containsAudio else { return }
+        onRenderedPCM?(uptime)
+    }
+
+    static func containsNonzeroSamples(_ buffer: AVAudioPCMBuffer) -> Bool {
+        let frames = Int(buffer.frameLength)
+        let channels = Int(buffer.format.channelCount)
+        guard frames > 0, channels > 0 else { return false }
+        let interleaved = buffer.format.isInterleaved
+        func containsAudio<Sample: Numeric>(
+            _ channelData: UnsafePointer<UnsafeMutablePointer<Sample>>?
+        ) -> Bool {
+            // Preserve uninspectable audio rather than treating it as silence.
+            guard let channelData else { return true }
+            let bufferCount = interleaved ? 1 : channels
+            let samplesPerBuffer = frames * (interleaved ? channels : 1)
+            for channel in 0..<bufferCount {
+                for sample in 0..<samplesPerBuffer where channelData[channel][sample] != 0 {
+                    return true
+                }
+            }
+            return false
+        }
+        // Use exact digital zero, not a loudness threshold: even a +/-1 Int16
+        // sample can be a genuine quiet tail and must postpone acknowledgement.
+        switch buffer.format.commonFormat {
+        case .pcmFormatInt16: return containsAudio(buffer.int16ChannelData)
+        case .pcmFormatInt32: return containsAudio(buffer.int32ChannelData)
+        case .pcmFormatFloat32: return containsAudio(buffer.floatChannelData)
+        default: return true
+        }
     }
 }
 
@@ -80,8 +116,15 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     }
     var onInterruption: (@Sendable () -> Void)?
     var onConnectionFailure: (@Sendable () -> Void)?
+    var onDiagnostic: (@Sendable (String) -> Void)?
 
     private let networkSession: URLSession
+    private let diagnosticQueue = DispatchQueue(label: "com.buddystudy.voice.media-diagnostics")
+    private let diagnosticLock = NSLock()
+    private let createdUptime = ProcessInfo.processInfo.systemUptime
+    private var renderedBufferCount = 0
+    private var renderedFrameCount = 0
+    private var nonzeroBufferCount = 0
     private let audioSessionOwnerID = UUID()
     private let remoteRenderer = VoiceTutorRemoteAudioRenderer()
     private var captureTap: VoiceTutorAudioProcessingTap?
@@ -106,6 +149,9 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         super.init()
         remoteRenderer.onRenderedPCM = { [weak self] uptime in
             self?.onRenderedPCM?(uptime)
+        }
+        remoteRenderer.onRenderedBuffer = { [weak self] frames, containsAudio, uptime in
+            self?.recordRenderedBuffer(frames: frames, containsAudio: containsAudio, uptime: uptime)
         }
     }
 
@@ -202,6 +248,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         // socket only after ICE + DTLS are connected so its opening tutor turn
         // cannot run ahead of the iPhone's media path.
         try await waitForMediaConnection(peer: peer)
+        emitMediaDiagnostic("media_connected")
     }
 
     func setMuted(_ muted: Bool) {
@@ -220,6 +267,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     }
 
     func close() {
+        emitMediaDiagnostic("media_close_requested")
         let remoteTrack: LKRTCAudioTrack?
         let peer: LKRTCPeerConnection?
         let localTrack: LKRTCAudioTrack?
@@ -421,8 +469,10 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
                 try ensureOpen()
                 return
             case .failed:
+                emitMediaDiagnostic("media_connection_failed")
                 throw VoiceTutorWebRTCError.mediaConnectionFailed
             case .timedOut:
+                emitMediaDiagnostic("media_connection_timed_out")
                 throw VoiceTutorWebRTCError.mediaConnectionTimedOut
             case .waiting:
                 // Cancellation wakes immediately; close() is observed within
@@ -498,6 +548,66 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         }
     }
 
+    private func recordRenderedBuffer(frames: Int, containsAudio: Bool, uptime: TimeInterval) {
+        diagnosticLock.lock()
+        renderedBufferCount += 1
+        renderedFrameCount += frames
+        if containsAudio { nonzeroBufferCount += 1 }
+        let firstBuffer = renderedBufferCount == 1
+        let firstNonzero = containsAudio && nonzeroBufferCount == 1
+        diagnosticLock.unlock()
+        guard firstBuffer || firstNonzero else { return }
+        // Track removal may wait for this callback while holding stateLock.
+        // Keep even snapshot collection off the render thread to avoid inversion.
+        diagnosticQueue.async { [weak self] in
+            if firstBuffer { self?.emitMediaDiagnostic("first_rendered_buffer", uptime: uptime) }
+            if firstNonzero { self?.emitMediaDiagnostic("first_nonzero_render", uptime: uptime) }
+        }
+    }
+
+    private func emitMediaDiagnostic(
+        _ event: String,
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        stateLock.lock()
+        guard !isClosed, let callback = onDiagnostic else {
+            stateLock.unlock()
+            return
+        }
+        diagnosticLock.lock()
+        let context = VoiceTutorUncheckedSendable(value: (
+            factory: factory,
+            track: remoteAudioTrack,
+            buffers: renderedBufferCount,
+            frames: renderedFrameCount,
+            nonzero: nonzeroBufferCount
+        ))
+        diagnosticLock.unlock()
+        stateLock.unlock()
+        let elapsedMs = Int(max(0, uptime - createdUptime) * 1_000)
+        let session = AVAudioSession.sharedInstance()
+        let category = session.category.rawValue
+        let mode = session.mode.rawValue
+        let ports = session.currentRoute.outputs.map { $0.portType.rawValue }.sorted().joined(separator: ",")
+        let zeroVolume = session.outputVolume == 0
+        // ADM getters synchronously visit WebRTC's worker thread. Never call
+        // them from its realtime render callback or while holding stateLock.
+        diagnosticQueue.async {
+            let snapshot = context.value
+            let device = snapshot.factory?.audioDeviceModule
+            func flag(_ value: Bool?) -> String { value.map { $0 ? "1" : "0" } ?? "unknown" }
+            callback([
+                "event=\(event)", "elapsedMs=\(elapsedMs)",
+                "buffers=\(snapshot.buffers)", "frames=\(snapshot.frames)", "nonzeroBuffers=\(snapshot.nonzero)",
+                "admSnapshot=async", "playoutInitialized=\(flag(device?.isPlayoutInitialized))",
+                "playing=\(flag(device?.isPlaying))", "engineRunning=\(flag(device?.isEngineRunning))",
+                "remoteEnabled=\(flag(snapshot.track?.isEnabled))",
+                "category=\(category)", "mode=\(mode)",
+                "ports=\(ports.isEmpty ? "none" : ports)", "zeroVolume=\(zeroVolume ? 1 : 0)"
+            ].joined(separator: " "))
+        }
+    }
+
 }
 
 extension VoiceTutorWebRTCTransport: LKRTCPeerConnectionDelegate {
@@ -527,6 +637,7 @@ extension VoiceTutorWebRTCTransport: LKRTCPeerConnectionDelegate {
         let closed = isClosed
         stateLock.unlock()
         if !closed, newState == .failed {
+            emitMediaDiagnostic("ice_failed")
             onConnectionFailure?()
         }
     }

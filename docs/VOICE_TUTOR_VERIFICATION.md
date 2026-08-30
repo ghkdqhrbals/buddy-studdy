@@ -165,6 +165,31 @@ xcodebuild -project StudyMate.xcodeproj -scheme StudyMateiOS \
 - These diagnostics and the failure classification are not proof that the
   live disconnect or acoustic failure is fixed. The actual iPhone media and
   playout path remains an end-to-end verification requirement.
+- The iOS renderer previously moved the drain deadline for every nonempty
+  buffer, including digital silence continuously delivered after speech. It
+  now ignores only all-zero buffers for that deadline, retaining every nonzero
+  sample and the existing same-response/server-stop/device-latency fences.
+  There is no loudness threshold that discards quiet speech. Nonzero comfort
+  noise remains a conservative limitation to verify during live calls.
+- The WebRTC speaking label now requires local audio for an active response.
+  The existing bounded app-log path exposes first-frame/nonzero-frame counts,
+  audio-device and route-type/zero-volume states, safe receive error metadata,
+  and the first stop source. Actual PCM, close reasons, device identities,
+  error descriptions, and conversation contents stay out of those diagnostics.
+- The dev API was updated to `e277e9dd` using the existing `backend` Compose
+  project, port 8080, `dev` profile, and AWS Secret configuration. Both local
+  dependency and readiness checks returned HTTP 200. Database, Redis,
+  translation, and backup container IDs were unchanged. No Routingflare change,
+  new database/Redis stack, or Docker image build was performed.
+- The required generic `StudyMateiOS` Debug build passed, followed by 33
+  non-mutating contract tests on the physical iPhone 16 Pro with zero failures.
+  Seven new cases exercise real renderer callbacks with synthetic buffers:
+  continuous digital silence, late one-unit audio, initial silence, out-of-order
+  media/control, stereo/float layouts, active-response speaking state, and
+  diagnostic privacy. No provider call, recording purge, or quota mutation was
+  triggered by these tests. Existing DerivedData was reused. Logs:
+  `build/iOSVoicePlayoutGenericBuild.log` and
+  `build/iOSVoicePlayoutDeviceTests.log`.
 
 ## Release gates
 
