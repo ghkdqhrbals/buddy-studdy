@@ -137,6 +137,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
         }
 
         sidebandClient.execute(providerUri, headers) { providerSession ->
+            val diagnostics = VoiceTutorSidebandDiagnostics(validatedCallId)
             val turnController = VoiceTutorDuplexTurnController(
                 mapper = mapper,
                 continuousSpeechLimit = Duration.ofSeconds(
@@ -149,10 +150,16 @@ class OpenAIVoiceTutorWebRtcAdapter(
             )
             val terminal = terminalEvents.asFlux()
                 .next()
-                .doOnNext { turnController.close() }
+                .doOnNext { termination ->
+                    diagnostics.markLocalTerminal(termination)
+                    turnController.close()
+                }
                 .cache()
             val observedClientEvents = clientEvents.asFlux()
-                .doOnNext(turnController::observeClientEvent)
+                .doOnNext { raw ->
+                    diagnostics.observeClientEvent(raw)
+                    turnController.observeClientEvent(raw)
+                }
                 .ignoreElements()
                 .thenMany(Flux.empty<String>())
                 .doFinally { turnController.close() }
@@ -172,6 +179,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 .filter { it.type == WebSocketMessage.Type.TEXT }
                 .map { it.payloadAsText }
                 .concatMap { raw ->
+                    diagnostics.observeProviderEvent(raw)
                     val observed = runCatching { turnController.observeProviderEvent(raw) }
                     val observationFailure = observed.exceptionOrNull()
                     if (
@@ -206,7 +214,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
             // Subscribe both provider directions before telling the mobile peer to
             // enable its microphone. The ready branch intentionally never completes
             // after its callback, so it cannot win and tear down the relay.
-            webRtcSidebandLifecycle(receive, send, ready)
+            webRtcSidebandLifecycle(receive, send, ready, diagnostics, providerSession.closeStatus())
                 .then(Mono.defer { providerSession.close() })
                 .doFinally { turnController.close() }
         }.awaitSingleOrNull()
@@ -292,15 +300,6 @@ internal fun validateWebRtcSdp(sdp: String): String {
         throw VoiceTutorWebRtcSdpException()
     }
     return sdp
-}
-
-internal fun webRtcSidebandLifecycle(
-    receive: Mono<Void>,
-    send: Mono<Void>,
-    ready: Mono<Void>,
-): Mono<Void> {
-    val readyAfterRelaySubscription = ready.then(Mono.never<Void>())
-    return Mono.firstWithSignal(receive, send, readyAfterRelaySubscription)
 }
 
 internal fun callIdFromLocation(location: String?): String {

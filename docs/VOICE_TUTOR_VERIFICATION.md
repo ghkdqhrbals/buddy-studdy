@@ -132,6 +132,40 @@ xcodebuild -project StudyMate.xcodeproj -scheme StudyMateiOS \
   a live call; the unauthenticated probe, device contracts, and app launch are
   not an acoustic end-to-end pass.
 
+## Mid-call disconnect and silent-audio follow-up
+
+- After the user's forwarding repair, the supplied Routingflare logs show
+  authenticated HTTP 101 upgrades for both reported calls. Database metadata
+  shows those calls ended after approximately 3 and 9 seconds. The old
+  `COMPLETED / PROVIDER_CLOSED` fallback did not retain the winning relay branch
+  or WebSocket close code and cannot attribute those incidents to Routingflare
+  or OpenAI.
+- A later silent-audio call remained connected for approximately 67 seconds;
+  its server log records `VoiceTutorProviderPlayoutTimeoutException`. This
+  establishes an unmet post-response playout gate, not an upgrade failure.
+  Whether the missing condition is provider-buffer stop, device audio render,
+  or device-drain acknowledgement must be distinguished rather than inferred
+  from the UI's provider-driven speaking label.
+- The sideband now treats unexpected receive/send completion as failure,
+  including a peer close code of 1000. Explicit user/server termination remains
+  successful. Diagnostics snapshot the winning branch before loser cancellation
+  can synthesize a local close status; the close-status observer never extends
+  connection lifetime. The control bridge records its own first terminal source
+  and numeric close status, correlated through a hashed provider call reference.
+- Event counters have a fixed allowlist plus one `other` bucket. Logs exclude
+  raw event bodies, close reasons, exception messages, provider IDs, SDP, audio,
+  transcripts, and credentials. No Routingflare route, authentication, AWS
+  secret, infrastructure, quota, or response/playout timeout has been changed.
+- Backend verification passed 63 focused tests: 13 lifecycle/loopback cases,
+  34 realtime turn-controller tests, 12 WebRTC adapter tests, and 4 control
+  handler tests. Real loopback cases include close 1000/1011, raw TCP EOF,
+  outbound-only completion, explicit local endings, cancellation, and privacy
+  assertions. The JVM JAR build also passed. Log:
+  `build/voiceDisconnectDiagnosticsBackend.log`.
+- These diagnostics and the failure classification are not proof that the
+  live disconnect or acoustic failure is fixed. The actual iPhone media and
+  playout path remains an end-to-end verification requirement.
+
 ## Release gates
 
 `VOICE_TUTOR_ENABLED` and `VOICE_TUTOR_RECORDING_ENABLED` remain default-off.

@@ -192,7 +192,8 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
             readyEmitted = true
         }.then()
 
-        val relay = webRtcSidebandLifecycle(receive, send, ready).subscribe()
+        val diagnostics = VoiceTutorSidebandDiagnostics("rtc_ready")
+        val relay = webRtcSidebandLifecycle(receive, send, ready, diagnostics).subscribe()
 
         assertThat(readyEmitted).isTrue()
         assertThat(relay.isDisposed).isFalse()
@@ -223,7 +224,8 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
             controller.startOpeningResponse()
         }.then()
 
-        val relay = webRtcSidebandLifecycle(receive, send, ready).subscribe()
+        val diagnostics = VoiceTutorSidebandDiagnostics("rtc_opening")
+        val relay = webRtcSidebandLifecycle(receive, send, ready, diagnostics).subscribe()
 
         assertThat(sent).hasSize(1)
         assertThat(mapper.readTree(sent.single()).path("type").asText()).isEqualTo("response.create")

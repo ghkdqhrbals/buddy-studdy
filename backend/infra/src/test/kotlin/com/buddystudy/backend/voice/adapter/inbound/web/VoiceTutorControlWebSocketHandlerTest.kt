@@ -1,5 +1,8 @@
 package com.buddystudy.backend.voice.adapter.inbound.web
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.voice.application.model.VoiceTutorQuotaResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingResponse
@@ -15,9 +18,11 @@ import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.reactivestreams.Publisher
+import org.slf4j.LoggerFactory
 import org.springframework.core.io.buffer.DefaultDataBufferFactory
 import org.springframework.http.HttpHeaders
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
@@ -35,6 +40,65 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceTutorControlWebSocketHandlerTest {
+    @Test
+    fun `unexpected provider error is failed and diagnostics omit raw call IDs and exception messages`() {
+        withControlLogs { logs ->
+            val result = runControlScenario(
+                provider = { _, _ -> throw IllegalStateException("PRIVATE_TRANSCRIPT_AND_TOKEN") },
+                closeStatus = Mono.just(CloseStatus(1011, "PRIVATE_CLOSE_REASON")),
+            )
+
+            assertThat(result.failed).isTrue()
+            assertThat(result.reason).isEqualTo("PROVIDER_ERROR")
+            assertThat(result.closeObserverDisposed.get()).isTrue()
+            val messages = logs.list.map { it.formattedMessage }
+            assertThat(messages).anySatisfy {
+                assertThat(it).contains("voice_tutor_control_terminal", "source=PROVIDER_RELAY_ERROR")
+            }
+            assertThat(messages).anySatisfy {
+                assertThat(it).contains("voice_tutor_control_closed", "closeCode=1011")
+            }
+            assertThat(messages.joinToString("\n"))
+                .contains("sessionId=$SESSION_ID", "callRef=", "errorType=IllegalStateException")
+                .doesNotContain("rtc_call-1", "PRIVATE_TRANSCRIPT_AND_TOKEN", "PRIVATE_CLOSE_REASON")
+            assertThat(logs.list).allSatisfy { assertThat(it.throwableProxy).isNull() }
+        }
+    }
+
+    @Test
+    fun `client end is first terminal source and a missing close frame cannot delay finalization`() {
+        withControlLogs { logs ->
+            val result = runControlScenario(
+                clientPayload = """{"type":"buddystudy.voice.session.end"}""",
+                provider = { _, terminal -> terminal.first() },
+                closeStatus = Mono.never(),
+            )
+
+            assertThat(result.failed).isFalse()
+            assertThat(result.reason).isEqualTo("USER_ENDED")
+            assertThat(result.closeObserverDisposed.get()).isTrue()
+            val terminals = logs.list.map { it.formattedMessage }
+                .filter { it.startsWith("voice_tutor_control_terminal ") }
+            assertThat(terminals).hasSize(1)
+            assertThat(terminals.single()).contains("source=CLIENT_END", "reason=USER_ENDED")
+        }
+    }
+
+    @Test
+    fun `client receive completion is distinguishable from provider completion`() {
+        withControlLogs { logs ->
+            val result = runControlScenario(
+                clientCompletes = true,
+                provider = { _, terminal -> terminal.first() },
+            )
+
+            assertThat(result.reason).isEqualTo("CLIENT_DISCONNECTED")
+            assertThat(logs.list.map { it.formattedMessage }).anySatisfy {
+                assertThat(it).contains("voice_tutor_control_terminal", "source=CLIENT_RECEIVE_COMPLETE")
+            }
+        }
+    }
+
     @Test
     fun `provider close delegates one durable WebRTC hangup and finalization operation`() {
         val now = Instant.now()
@@ -113,6 +177,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         principal: Principal,
         receive: Flux<WebSocketMessage>,
         sent: MutableList<String>,
+        closeStatus: Mono<CloseStatus> = Mono.empty(),
     ): WebSocketSession {
         val buffers = DefaultDataBufferFactory.sharedInstance
         val authentication = UsernamePasswordAuthenticationToken.authenticated(principal, "", emptyList())
@@ -138,7 +203,7 @@ class VoiceTutorControlWebSocketHandlerTest {
                     .then()
                 "isOpen" -> true
                 "close" -> Mono.empty<Void>()
-                "closeStatus" -> Mono.empty<CloseStatus>()
+                "closeStatus" -> closeStatus
                 "textMessage" -> WebSocketMessage(
                     WebSocketMessage.Type.TEXT,
                     buffers.wrap((arguments!![0] as String).toByteArray()),
@@ -149,6 +214,87 @@ class VoiceTutorControlWebSocketHandlerTest {
                 else -> error("Unexpected WebSocketSession call: ${method.name}")
             }
         } as WebSocketSession
+    }
+
+    private class ControlResult {
+        var reason: String? = null
+        var failed: Boolean? = null
+        val closeObserverDisposed = AtomicBoolean()
+    }
+
+    private fun runControlScenario(
+        clientPayload: String? = null,
+        clientCompletes: Boolean = false,
+        closeStatus: Mono<CloseStatus> = Mono.empty(),
+        provider: suspend (Flow<String>, Flow<VoiceTutorRelayTermination>) -> Unit,
+    ): ControlResult {
+        val now = Instant.now()
+        val principal = Principal(7, "device-7", 70, anonymous = false)
+        val session = activeSession(now)
+        val result = ControlResult()
+        val webRtc = object : VoiceTutorWebRtcUseCase {
+            override suspend fun negotiate(
+                principal: Principal,
+                sessionId: String,
+                offerSdp: String,
+            ): VoiceTutorWebRtcAnswer = error("Unexpected negotiation.")
+
+            override suspend fun claimControl(
+                principal: Principal,
+                sessionId: String,
+                connectionId: String,
+            ) = VoiceTutorWebRtcControlContext(session, "rtc_call-1")
+
+            override suspend fun relaySideband(
+                callId: String,
+                clientEvents: Flow<String>,
+                terminalEvents: Flow<VoiceTutorRelayTermination>,
+                onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
+            ) = provider(clientEvents, terminalEvents)
+
+            override suspend fun hangup(callId: String) = error("Finalization owns hangup.")
+        }
+        val relay = proxy<VoiceTutorRelayUseCase> { method, arguments ->
+            when (method) {
+                "finishWebRtc" -> {
+                    result.reason = arguments[3] as String
+                    result.failed = arguments[4] as Boolean
+                    detail(session, now)
+                }
+                else -> error("Unexpected VoiceTutorRelayUseCase call: $method")
+            }
+        }
+        val voiceTutor = proxy<VoiceTutorUseCase> { method, _ ->
+            error("Unexpected VoiceTutorUseCase call: $method")
+        }
+        val messages = clientPayload?.let {
+            Flux.just(
+                WebSocketMessage(
+                    WebSocketMessage.Type.TEXT,
+                    DefaultDataBufferFactory.sharedInstance.wrap(it.toByteArray()),
+                ),
+            ).concatWith(Flux.never())
+        } ?: if (clientCompletes) Flux.empty() else Flux.never()
+        val socket = webSocket(
+            principal, messages, mutableListOf(),
+            closeStatus.doFinally { result.closeObserverDisposed.set(true) },
+        )
+        VoiceTutorControlWebSocketHandler(
+            webRtc, relay, voiceTutor, VoiceTutorRealtimeMetrics(SimpleMeterRegistry()),
+        ).handle(socket).block(Duration.ofSeconds(2))
+        return result
+    }
+
+    private fun withControlLogs(test: (ListAppender<ILoggingEvent>) -> Unit) {
+        val logger = LoggerFactory.getLogger(VoiceTutorControlWebSocketHandler::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().also { it.start() }
+        logger.addAppender(appender)
+        try {
+            test(appender)
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
     }
 
     private fun activeSession(now: Instant) = VoiceTutorSession(
