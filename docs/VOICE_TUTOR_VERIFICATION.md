@@ -215,6 +215,13 @@ xcodebuild -project StudyMate.xcodeproj -scheme StudyMateiOS \
   missing or incorrectly typed flags, cancellation, timeout, an early queued
   learner turn, and full sentence drain remain covered without calling the
   provider. Log: `build/voiceTutorConfigurationHandshakeBackend.log`.
+- The existing dev API was then refreshed to `781c9ae3`; both local dependency
+  and readiness checks returned HTTP 200. All original environment values
+  were preserved exactly, including the dev AWS Secret setup. The same four
+  infrastructure container IDs and the Routingflare route were retained. The
+  installed iPhone build includes the silence/drain fixes at `19a1ef1a`.
+  A new live call is still required to confirm audible output and the actual
+  provider-policy acknowledgement together.
 
 ## Release gates
 
