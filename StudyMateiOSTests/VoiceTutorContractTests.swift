@@ -2,6 +2,9 @@ import Foundation
 import Combine
 import XCTest
 import AVFoundation
+import SwiftUI
+import UIKit
+import QuartzCore
 @testable import StudyMate
 
 final class VoiceTutorContractTests: XCTestCase {
@@ -880,6 +883,279 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(sources.contains("buddystudy.voice.playout.drained"))
     }
 
+    func testCompactVoiceCallUsesTheReservedSessionCountdownWhileLive() {
+        for phase in [VoiceTutorSessionPhase.requestingPermission, .connecting, .listening, .speaking] {
+            var presentation = VoiceTutorCallPresentation(
+                phase: phase,
+                sessionSecondsRemaining: 3_596,
+                quotaRemainingSeconds: 0,
+                quotaReservedSeconds: 3_600,
+                quotaLimitSeconds: 3_600
+            )
+            XCTAssertEqual(presentation.remainingTime, .call(3_596), "\(phase)")
+            presentation.sessionSecondsRemaining = -1
+            XCTAssertEqual(presentation.remainingTime, .call(0), "\(phase)")
+        }
+    }
+
+    func testCompactVoiceCallDoesNotInventTimeBeforeTheServerCountdownArrives() {
+        for phase in [VoiceTutorSessionPhase.requestingPermission, .connecting, .listening, .speaking] {
+            let presentation = VoiceTutorCallPresentation(
+                phase: phase,
+                sessionSecondsRemaining: nil,
+                quotaRemainingSeconds: 2_400,
+                quotaReservedSeconds: 1_200,
+                quotaLimitSeconds: 3_600
+            )
+            XCTAssertNil(presentation.remainingTime, "Monthly availability is not the active call timer: \(phase)")
+        }
+    }
+
+    func testCompactVoiceCallTerminalTimeUsesOnlySettledMonthlyQuota() {
+        for phase in [VoiceTutorSessionPhase.ended, .failed] {
+            var presentation = VoiceTutorCallPresentation(
+                phase: phase,
+                sessionSecondsRemaining: 3_596,
+                quotaRemainingSeconds: 3_472,
+                quotaReservedSeconds: 0,
+                quotaLimitSeconds: 3_600
+            )
+            XCTAssertEqual(presentation.remainingTime, .monthly(3_472), "Ignore the stale call countdown")
+            presentation.quotaReservedSeconds = 3_600
+            XCTAssertNil(presentation.remainingTime, "Do not expose an unsettled reservation as exhausted time")
+            presentation.quotaReservedSeconds = 0
+            presentation.quotaRemainingSeconds = -1
+            XCTAssertEqual(presentation.remainingTime, .monthly(0))
+            presentation.quotaLimitSeconds = 0
+            XCTAssertNil(presentation.remainingTime)
+        }
+        for phase in [VoiceTutorSessionPhase.idle, .ending] {
+            let presentation = VoiceTutorCallPresentation(
+                phase: phase,
+                sessionSecondsRemaining: 3_596,
+                quotaRemainingSeconds: 3_472,
+                quotaLimitSeconds: 3_600
+            )
+            XCTAssertNil(presentation.remainingTime)
+        }
+    }
+
+    func testCompactVoiceCallActionsMuteAndStatusFollowTheConnectionPhase() {
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            let cases: [(VoiceTutorSessionPhase, Bool, VoiceTutorCallPresentation.PrimaryAction, String)] = [
+                (.idle, false, .wait, strings.voiceTutorCallConnecting),
+                (.requestingPermission, false, .end, strings.voiceTutorCallConnecting),
+                (.connecting, false, .end, strings.voiceTutorCallConnecting),
+                (.listening, true, .end, strings.voiceTutorCallListening),
+                (.speaking, true, .end, strings.voiceTutorCallSpeaking),
+                (.ending, false, .wait, strings.voiceTutorCallEnding),
+                (.ended, false, .dismiss, strings.voiceTutorCallEnded),
+                (.failed, false, .retry, strings.voiceTutorCallFailed)
+            ]
+            for (phase, canMute, action, text) in cases {
+                var presentation = VoiceTutorCallPresentation(phase: phase)
+                XCTAssertEqual(presentation.canMute, canMute, "\(language): \(phase)")
+                XCTAssertEqual(presentation.primaryAction, action, "\(language): \(phase)")
+                XCTAssertEqual(presentation.statusText(strings), text, "\(language): \(phase)")
+                presentation.isMuted = true
+                XCTAssertEqual(presentation.canMute, canMute)
+                XCTAssertEqual(presentation.primaryAction, action)
+                XCTAssertEqual(
+                    presentation.statusText(strings),
+                    phase == .listening ? strings.voiceTutorCallMuted : text
+                )
+            }
+        }
+    }
+
+    @MainActor
+    func testCompactVoiceCallDoesNotInferSpeakingFromCaptionsOrTranscriptDraft() {
+        let strings = AppStrings(language: .korean)
+        let screen = VoiceTutorCallScreen(
+            topic: "Redis",
+            presentation: VoiceTutorCallPresentation(phase: .listening),
+            strings: strings,
+            captions: [VoiceTutorCaption(speaker: .tutor, text: "합성 테스트 대화입니다.")],
+            assistantTranscriptDraft: "텍스트가 도착해도 아직 음성이 재생되지 않았습니다.",
+            showsTranscript: .constant(true),
+            showsSummary: .constant(false)
+        )
+        XCTAssertEqual(screen.presentation.phase, .listening)
+        XCTAssertEqual(screen.presentation.statusText(strings), strings.voiceTutorCallListening)
+        XCTAssertNotEqual(screen.presentation.statusText(strings), strings.voiceTutorCallSpeaking)
+
+        let speaking = VoiceTutorCallPresentation(phase: .speaking, isMuted: true)
+        XCTAssertEqual(speaking.statusText(strings), strings.voiceTutorCallSpeaking)
+    }
+
+    func testCompactVoiceCallFailureSurvivesACompletedLearningResult() throws {
+        let strings = AppStrings(language: .korean)
+        var detail = try makeCompactCallDetail(
+            resultStatus: "COMPLETED",
+            result: ["status": "COMPLETED", "summaryMarkdown": "합성 학습 기록입니다."]
+        )
+        detail.state = "COMPLETED"
+        let presentation = VoiceTutorCallPresentation(phase: .failed, detail: detail)
+        XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorCallFailed)
+        XCTAssertNotEqual(presentation.statusText(strings), strings.voiceTutorCallEnded)
+        XCTAssertEqual(presentation.primaryAction, .retry)
+        XCTAssertEqual(presentation.summaryState, .ready)
+        XCTAssertFalse(presentation.canMute)
+    }
+
+    func testCompactVoiceCallShowsDisconnectionWhileFailureSettlementIsStillPending() {
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            let presentation = VoiceTutorCallPresentation(phase: .ending)
+            let failure = " \n\(strings.voiceTutorConnectionFailed) \n"
+            XCTAssertTrue(presentation.showsConnectionFailure(strings, errorMessage: failure))
+            XCTAssertEqual(presentation.statusText(strings, errorMessage: failure), strings.voiceTutorCallFailed)
+            XCTAssertNil(presentation.supplementaryError(strings, errorMessage: failure))
+            XCTAssertFalse(presentation.canMute)
+            XCTAssertEqual(presentation.primaryAction, .wait, "Retry must wait for the original call to settle")
+            XCTAssertFalse(presentation.showsConnectionFailure(strings, errorMessage: nil))
+            XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorCallEnding)
+        }
+    }
+
+    func testCompactVoiceCallKeepsActionableErrorsAndSuppressesOnlyDuplicateDisconnectText() {
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            let presentation = VoiceTutorCallPresentation(phase: .failed)
+            XCTAssertTrue(presentation.showsConnectionFailure(strings, errorMessage: nil))
+            XCTAssertNil(presentation.supplementaryError(strings, errorMessage: strings.voiceTutorConnectionFailed))
+            XCTAssertNil(presentation.supplementaryError(strings, errorMessage: nil))
+            XCTAssertNil(presentation.supplementaryError(strings, errorMessage: " \n\t "))
+            for actionableError in [
+                strings.voiceTutorMicrophoneDenied, strings.voiceTutorProRequiredMessage,
+                strings.voiceTutorQuotaReached, strings.voiceTutorSignInRequired
+            ] {
+                XCTAssertEqual(
+                    presentation.supplementaryError(strings, errorMessage: " \n\(actionableError) \n"),
+                    actionableError
+                )
+            }
+            let connecting = VoiceTutorCallPresentation(phase: .connecting)
+            XCTAssertFalse(connecting.showsConnectionFailure(strings, errorMessage: strings.voiceTutorConnectionFailed))
+            XCTAssertEqual(
+                connecting.supplementaryError(strings, errorMessage: strings.voiceTutorConnectionFailed),
+                strings.voiceTutorConnectionFailed,
+                "Never hide an error unless the compact status already communicates it"
+            )
+        }
+    }
+
+    func testCompactVoiceCallSummaryStatesDistinguishPendingFailedReadyAndAbsentContent() throws {
+        typealias State = VoiceTutorCallPresentation.SummaryState
+        let content: [String: Any] = ["status": "COMPLETED", "summaryMarkdown": "합성 요약"]
+        let cases: [(String?, [String: Any]?, State)] = [
+            (nil, nil, .hidden),
+            ("PENDING", nil, .pending),
+            ("processing", nil, .pending),
+            ("FAILED", nil, .failed),
+            ("COMPLETED", nil, .hidden),
+            ("COMPLETED", [:], .hidden),
+            ("COMPLETED", ["summaryMarkdown": " \n\t ", "strengths": [], "improvements": [], "nextSteps": []], .hidden),
+            ("COMPLETED", ["summaryMarkdown": " ", "strengths": [" \n"], "improvements": [""], "nextSteps": ["\t"]], .hidden),
+            ("COMPLETED", content, .ready),
+            (nil, content, .ready),
+            (nil, ["status": "pending"], .pending),
+            (nil, ["status": "PROCESSING"], .pending),
+            (nil, ["status": "FAILED"], .failed),
+            ("FAILED", content, .failed),
+            ("PENDING", content, .pending),
+            ("COMPLETED", ["status": "FAILED", "summaryMarkdown": "불완전한 합성 요약"], .failed),
+            ("COMPLETED", ["status": "PROCESSING", "summaryMarkdown": "불완전한 합성 요약"], .pending),
+            ("UNKNOWN", ["summaryMarkdown": "아직 완료되지 않은 합성 요약"], .hidden),
+            (nil, ["summaryMarkdown": "완료 상태가 없는 합성 요약"], .hidden)
+        ]
+        for (index, entry) in cases.enumerated() {
+            let detail = try makeCompactCallDetail(resultStatus: entry.0, result: entry.1)
+            for phase in [VoiceTutorSessionPhase.ended, .failed] {
+                let presentation = VoiceTutorCallPresentation(phase: phase, detail: detail)
+                XCTAssertEqual(presentation.summaryState, entry.2, "Case \(index), \(phase)")
+            }
+        }
+
+        let completedDetail = try makeCompactCallDetail(resultStatus: "COMPLETED", result: content)
+        for phase in [VoiceTutorSessionPhase.idle, .requestingPermission, .connecting, .listening, .speaking, .ending] {
+            XCTAssertEqual(VoiceTutorCallPresentation(phase: phase, detail: completedDetail).summaryState, .hidden)
+        }
+        XCTAssertEqual(VoiceTutorCallPresentation(phase: .ended).summaryState, .hidden)
+        XCTAssertEqual(VoiceTutorCallPresentation(phase: .failed).summaryState, .hidden)
+    }
+
+    func testCompactVoiceCallCompletedSummaryAcceptsEachSupportedContentSection() throws {
+        let supportedContent: [[String: Any]] = [
+            ["summaryMarkdown": "합성 요약"],
+            ["strengths": ["합성 강점"]],
+            ["improvements": ["합성 보완점"]],
+            ["nextSteps": ["합성 다음 학습"]]
+        ]
+        for content in supportedContent {
+            let detail = try makeCompactCallDetail(resultStatus: "completed", result: content)
+            XCTAssertEqual(VoiceTutorCallPresentation(phase: .ended, detail: detail).summaryState, .ready)
+        }
+    }
+
+    func testCompactVoiceCallClockKeepsSecondsAndHandlesBoundsInEveryLanguage() {
+        let cases: [(Int, String)] = [
+            (Int.min, "00:00"), (-1, "00:00"), (0, "00:00"),
+            (1, "00:01"), (59, "00:59"), (60, "01:00"), (61, "01:01"),
+            (3_600, "60:00"), (Int.max, "153722867280912930:07")
+        ]
+        for (seconds, clock) in cases {
+            let korean = AppStrings(language: .korean)
+            XCTAssertEqual(korean.voiceTutorCallRemaining(seconds), "\(clock) 남음")
+            XCTAssertEqual(korean.voiceTutorCallMonthlyRemaining(seconds), "이번 달 \(clock) 남음")
+            let english = AppStrings(language: .english)
+            XCTAssertEqual(english.voiceTutorCallRemaining(seconds), "\(clock) left")
+            XCTAssertEqual(english.voiceTutorCallMonthlyRemaining(seconds), "\(clock) left this month")
+            let japanese = AppStrings(language: .japanese)
+            XCTAssertEqual(japanese.voiceTutorCallRemaining(seconds), "残り\(clock)")
+            XCTAssertEqual(japanese.voiceTutorCallMonthlyRemaining(seconds), "今月の残り\(clock)")
+        }
+    }
+
+    @MainActor
+    func testCompactVoiceCallScreensRenderWithoutCreatingARealSession() async throws {
+        let pending = try makeCompactCallDetail(resultStatus: "PROCESSING")
+        let completed = try makeCompactCallDetail(
+            resultStatus: "COMPLETED",
+            result: ["summaryMarkdown": "Redis의 만료 시간과 캐시 갱신을 복습했습니다."]
+        )
+        let fixtures: [VoiceTutorCompactCallSnapshot] = [
+            .init(name: "01-connecting", phase: .connecting, seconds: nil),
+            .init(name: "02-listening", phase: .listening, seconds: 3_596),
+            .init(name: "03-speaking-recording", phase: .speaking, isRecording: true),
+            .init(name: "04-failed-with-saved-summary", phase: .failed, detail: completed),
+            .init(name: "05-ended-summary-pending", phase: .ended, detail: pending),
+            .init(name: "06-expanded-conversation", phase: .speaking, showsTranscript: true),
+            .init(
+                name: "07-narrow-accessibility-english", phase: .listening,
+                showsTranscript: true, language: .english,
+                topic: "Redis caching and concurrent updates",
+                size: CGSize(width: 320, height: 696), dynamicType: .accessibility3
+            )
+        ]
+        var capturedPNGs = Set<Data>()
+        for fixture in fixtures {
+            let image = try await renderCompactCallSnapshot(fixture)
+            XCTAssertEqual(image.size, fixture.size, fixture.name)
+            let png = try XCTUnwrap(image.pngData(), fixture.name)
+            XCTAssertGreaterThan(png.count, 2_000, "A blank or unrendered snapshot is not useful: \(fixture.name)")
+            capturedPNGs.insert(png)
+            // Freeze the already encoded bitmap while this fixture owns its
+            // render resources; do not defer UIImage encoding across fixtures.
+            let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+            attachment.name = "compact-call-\(fixture.name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        XCTAssertEqual(capturedPNGs.count, fixtures.count, "Each state must produce a distinct rendered screen")
+    }
+
     func testRecordingFailureCleanupRemovesEveryUnfinalizedSensitiveFile() throws {
         let sessionID = UUID().uuidString
         let directory = try VoiceTutorRecordingStore.recordingsDirectory()
@@ -1523,6 +1799,120 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(fixture.store.loadRemotePushRegistration(), registrationB)
     }
 
+    private func makeCompactCallDetail(
+        resultStatus: String? = nil,
+        result: [String: Any]? = nil
+    ) throws -> BackendVoiceTutorSessionDetail {
+        var payload: [String: Any] = [
+            "sessionId": "compact-call-synthetic-fixture",
+            "state": "ENDED", "topic": "Redis", "durationSeconds": 60,
+            "chargedSeconds": 60, "transcriptTurns": []
+        ]
+        if let resultStatus { payload["resultStatus"] = resultStatus }
+        if let result { payload["result"] = result }
+        return try decoder.decode(
+            BackendVoiceTutorSessionDetail.self,
+            from: JSONSerialization.data(withJSONObject: payload)
+        )
+    }
+
+    @MainActor
+    private func renderCompactCallSnapshot(_ fixture: VoiceTutorCompactCallSnapshot) async throws -> UIImage {
+        let strings = AppStrings(language: fixture.language)
+        let captions = fixture.language == .english
+            ? [VoiceTutorCaption(speaker: .learner, text: "How does a cache expire?"),
+               VoiceTutorCaption(speaker: .tutor, text: "A time to live lets Redis remove a value when its deadline passes.")]
+            : [VoiceTutorCaption(speaker: .learner, text: "Redis에서 캐시 만료는 어떻게 정하나요?"),
+               VoiceTutorCaption(speaker: .tutor, text: "데이터가 얼마나 자주 바뀌는지에 맞춰 만료 시간을 정하면 돼요.")]
+        let root = NavigationStack {
+            VoiceTutorCallScreen(
+                topic: fixture.topic,
+                presentation: VoiceTutorCallPresentation(
+                    phase: fixture.phase,
+                    isRecording: fixture.isRecording,
+                    sessionSecondsRemaining: fixture.seconds,
+                    quotaRemainingSeconds: fixture.phase.isLive ? 0 : 3_540,
+                    quotaReservedSeconds: fixture.phase.isLive ? 3_600 : 0,
+                    quotaLimitSeconds: 3_600,
+                    detail: fixture.detail
+                ),
+                strings: strings,
+                captions: fixture.showsTranscript ? captions : [],
+                errorMessage: fixture.phase == .failed ? strings.voiceTutorConnectionFailed : nil,
+                showsTranscript: .constant(fixture.showsTranscript),
+                showsSummary: .constant(false),
+                onMute: { XCTFail("A visual fixture must never change the microphone") },
+                onEnd: { XCTFail("A visual fixture must never end a real call") },
+                onRetry: { XCTFail("A visual fixture must never start a real call") },
+                onDismiss: { XCTFail("A visual fixture must never dismiss the real call screen") }
+            )
+            .navigationTitle(strings.voiceTutorCallTitle)
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .id(fixture.name)
+        .environment(\.colorScheme, .dark)
+        .environment(\.locale, Locale(identifier: fixture.language == .english ? "en_US" : "ko_KR"))
+        .dynamicTypeSize(fixture.dynamicType)
+        let controller = UIHostingController(rootView: root)
+        controller.overrideUserInterfaceStyle = .dark
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        let previousKeyWindow = scene?.windows.first { $0.isKeyWindow }
+        let window: UIWindow
+        if let scene {
+            window = UIWindow(windowScene: scene)
+        } else {
+            window = UIWindow(frame: CGRect(origin: .zero, size: fixture.size))
+        }
+        window.frame = CGRect(origin: .zero, size: fixture.size)
+        window.overrideUserInterfaceStyle = .dark
+        window.rootViewController = controller
+        // Consecutive non-key captures on iOS 26 omitted unchanged title and
+        // control layers. Give this synthetic screen a fully presented window and
+        // capture that entire window, then restore the original key window even
+        // if the test is cancelled. Never replace the real window's controller.
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            previousKeyWindow?.makeKey()
+        }
+        window.makeKeyAndVisible()
+        controller.loadViewIfNeeded()
+        let bounds = CGRect(origin: .zero, size: fixture.size)
+        window.frame = bounds
+        controller.view.frame = bounds
+        UIView.performWithoutAnimation {
+            window.setNeedsLayout()
+            window.layoutIfNeeded()
+            controller.view.setNeedsLayout()
+            controller.view.layoutIfNeeded()
+        }
+        CATransaction.flush()
+        await Task.yield()
+        try await Task.sleep(for: .milliseconds(250))
+
+        // Invalidate every presented UIView, not only the latest SwiftUI state
+        // delta. A second committed frame includes shared title/control layers.
+        @MainActor func invalidateDisplay(_ view: UIView) {
+            view.setNeedsDisplay()
+            for subview in view.subviews { invalidateDisplay(subview) }
+        }
+        invalidateDisplay(window)
+        window.layoutIfNeeded()
+        CATransaction.flush()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(window.isKeyWindow, "The synthetic snapshot window must be fully presented")
+        XCTAssertEqual(window.bounds.size, fixture.size, fixture.name)
+        XCTAssertEqual(controller.view.bounds.size, fixture.size, fixture.name)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(size: fixture.size, format: format).image { context in
+            window.layer.render(in: context.cgContext)
+        }
+        return image
+    }
+
     private func makeRenderBuffer(
         _ samples: [Int16],
         channels: AVAudioChannelCount = 1,
@@ -1626,6 +2016,19 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(fixture.store.loadRemotePushRegistration()?.accessToken, recovered.accessToken)
         XCTAssertTrue(fixture.appState.voiceTutorSessionDetails.isEmpty)
     }
+}
+
+private struct VoiceTutorCompactCallSnapshot {
+    var name: String
+    var phase: VoiceTutorSessionPhase
+    var seconds: Int? = 1_852
+    var isRecording = false
+    var detail: BackendVoiceTutorSessionDetail?
+    var showsTranscript = false
+    var language: AppLanguage = .korean
+    var topic = "Redis"
+    var size = CGSize(width: 402, height: 874)
+    var dynamicType = DynamicTypeSize.large
 }
 
 private struct VoiceTutorContractRenderFixture {

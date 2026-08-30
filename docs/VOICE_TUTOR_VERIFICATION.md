@@ -223,6 +223,49 @@ xcodebuild -project StudyMate.xcodeproj -scheme StudyMateiOS \
   A new live call is still required to confirm audible output and the actual
   provider-policy acknowledgement together.
 
+## Compact iOS call surface
+
+- Replaced the oversized call/status/quota cards with a small topic identity,
+  one connection-state line, a minutes:seconds countdown, and mute,
+  conversation, and end-call controls. Conversation and completed learning
+  details expand in the same destination; the app tab bar is hidden during
+  that destination. Recording remains explicit, and permission/quota errors
+  retain their actionable text and full details.
+- The display-only presentation distinguishes the authoritative live
+  countdown from monthly quota after settlement. A zero free quota caused by
+  the current reservation cannot become a zero call timer. Failure stays a
+  failure even when a learning result completes, including the period before
+  failure settlement finishes. Empty/unknown results do not invent a pending
+  summary. The entry destination survives removal of the quota-dependent
+  start button, and captures the selected study and per-call consent.
+- The required generic iOS Debug build passed with `StudyMateiOS`,
+  `generic/platform=iOS`, and `CODE_SIGNING_ALLOWED=NO`.
+  Log: `build/iOSCompactVoiceCallGenericBuild.log`.
+- The signed app/test host passed 45 selected non-mutating contract tests on
+  the physical iPhone 16 Pro with zero failures. Twelve new cases cover call
+  time and reservation boundaries, phase/actions/mute, actual-speaking state,
+  failure settlement, actionable errors, result content/status combinations,
+  Korean/English/Japanese clocks, and synthetic native UI rendering.
+  Log: `build/iOSCompactVoiceCallDeviceTests.log`.
+- The native rendering test was rerun successfully after its capture-helper
+  adjustments and exports seven synthetic states without creating an
+  `AppState`, microphone, or provider session. The normal listening and
+  expanded-conversation layouts and the narrow, large Dynamic Type English
+  control layout were visually inspected. Large accessibility text uses
+  horizontal icon/label rows instead of cramped three-column labels. Some
+  offscreen captures omit shared navigation/control text, so these artifacts
+  are not a complete seven-state visual acceptance or an interactive
+  accessibility pass. Result: `build/iOSCompactVoiceCallScreensVerified.xcresult`;
+  log: `build/iOSCompactVoiceCallScreens.log`.
+- Existing `build/iOSDeviceDerivedData` was reused. Recording purge tests,
+  real provider calls, and quota mutations were excluded. Backend, Docker
+  infrastructure, AWS Secret configuration, Routingflare, and the full-sentence
+  audio/turn policy were not changed for this UI follow-up. This UI verification
+  does not establish an acoustic end-to-end fix.
+- After confirming there were no active dev call sessions, the updated signed
+  app was explicitly launched on the iPhone with `devicectl`. No call was
+  started automatically.
+
 ## Release gates
 
 `VOICE_TUTOR_ENABLED` and `VOICE_TUTOR_RECORDING_ENABLED` remain default-off.

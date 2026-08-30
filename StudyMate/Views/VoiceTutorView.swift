@@ -7,6 +7,9 @@ struct VoiceTutorView: View {
     @State private var selectedStudyID: Int?
     @State private var showsMembership = false
     @State private var recordingConsent = false
+    @State private var callStudy: BackendStudyRoom?
+    @State private var callRecordingConsent = false
+    @State private var showsCall = false
 
     private var strings: AppStrings { appState.strings }
 
@@ -27,20 +30,6 @@ struct VoiceTutorView: View {
 
     var body: some View {
         List {
-            Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label(strings.voiceTutorTitle, systemImage: "waveform.and.mic")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.primary)
-
-                    Text(strings.voiceTutorSubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, 4)
-            }
-
             voiceAccessSection
 
             if status?.activeSession != nil
@@ -101,17 +90,14 @@ struct VoiceTutorView: View {
                         }
 
                         if let selectedStudy {
-                            NavigationLink {
-                                VoiceTutorSessionView(
-                                    appState: appState,
-                                    study: selectedStudy,
-                                    recordingConsent: recordingConsent,
-                                    onRecordingConsentConsumed: {
-                                        recordingConsent = false
-                                    }
-                                )
+                            Button {
+                                // The destination must outlive quota reservation:
+                                // reserving the allowance removes this start row.
+                                callStudy = selectedStudy
+                                callRecordingConsent = recordingConsent
+                                showsCall = true
                             } label: {
-                                Label(strings.voiceTutorStart, systemImage: "mic.circle.fill")
+                                Label(strings.voiceTutorCallStart, systemImage: "phone.fill")
                                     .fontWeight(.semibold)
                             }
                             .disabled(!canStart)
@@ -171,6 +157,16 @@ struct VoiceTutorView: View {
         }
         .navigationTitle(strings.voiceTutorTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $showsCall) {
+            if let callStudy {
+                VoiceTutorSessionView(
+                    appState: appState,
+                    study: callStudy,
+                    recordingConsent: callRecordingConsent,
+                    onRecordingConsentConsumed: { recordingConsent = false }
+                )
+            }
+        }
         .task {
             recordingConsent = false
             await appState.retryPendingVoiceTutorRecordingUploads()
@@ -288,46 +284,49 @@ private struct VoiceTutorQuotaView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
+                ProgressView(value: progress)
+
+                HStack {
+                    Text(strings.voiceTutorUsedTime(usedSeconds))
+                    Spacer()
+                    if let resetAt = status.quota.resetAt {
+                        Text(strings.monthlyQuotaReset(resetAt))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if status.quota.reservedSeconds > 0 {
+                    Text(strings.voiceTutorReservedTime(status.quota.reservedSeconds))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if status.maxSessionSeconds > 0 {
+                    Text(strings.voiceTutorSessionLimit(status.maxSessionSeconds))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if status.quota.remainingSeconds == 0 && status.quota.reservedSeconds == 0 {
+                    Text(strings.voiceTutorQuotaReached)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding(.vertical, 6)
+        } label: {
             HStack(alignment: .firstTextBaseline) {
                 Text(status.quota.reservedSeconds > 0
                     ? strings.voiceTutorUnreservedTime(status.quota.remainingSeconds)
                     : strings.voiceTutorRemainingTime(status.quota.remainingSeconds))
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(strings.membershipTierName(status.tierCode))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tint)
-            }
-
-            ProgressView(value: progress)
-
-            HStack {
-                Text(strings.voiceTutorUsedTime(usedSeconds))
-                Spacer()
-                if let resetAt = status.quota.resetAt {
-                    Text(strings.monthlyQuotaReset(resetAt))
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            if status.quota.reservedSeconds > 0 {
-                Text(strings.voiceTutorReservedTime(status.quota.reservedSeconds))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if status.maxSessionSeconds > 0 {
-                Text(strings.voiceTutorSessionLimit(status.maxSessionSeconds))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if status.quota.remainingSeconds == 0 && status.quota.reservedSeconds == 0 {
-                Text(strings.voiceTutorQuotaReached)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.orange)
             }
         }
         .padding(.vertical, 2)
@@ -376,6 +375,8 @@ struct VoiceTutorSessionView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: VoiceTutorViewModel
+    @State private var showsTranscript = false
+    @State private var showsSummary = false
     private let strings: AppStrings
     private let onRecordingConsentConsumed: () -> Void
 
@@ -397,41 +398,35 @@ struct VoiceTutorSessionView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                sessionStatus
-                quotaSummary
-                captionPanel
-
-                if let errorMessage = viewModel.errorMessage, !errorMessage.isEmpty {
-                    Text(errorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                }
-
-                if viewModel.phase == .ended || (viewModel.phase == .failed && viewModel.detail != nil) {
-                    VoiceTutorResultSections(detail: viewModel.detail, strings: strings)
-                }
-
-                Text(strings.voiceTutorForegroundOnly)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-            .padding(16)
-        }
-        .safeAreaInset(edge: .bottom) {
-            controls
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial)
-        }
-        .navigationTitle(viewModel.study.topic)
+        VoiceTutorCallScreen(
+            topic: viewModel.study.topic,
+            presentation: VoiceTutorCallPresentation(
+                phase: viewModel.phase,
+                isMuted: viewModel.isMuted,
+                isRecording: viewModel.isRecording,
+                sessionSecondsRemaining: viewModel.sessionSecondsRemaining,
+                quotaRemainingSeconds: viewModel.quotaRemainingSeconds,
+                quotaReservedSeconds: viewModel.quotaReservedSeconds,
+                quotaLimitSeconds: viewModel.quotaLimitSeconds,
+                detail: viewModel.detail
+            ),
+            strings: strings,
+            captions: viewModel.captions,
+            assistantTranscriptDraft: viewModel.assistantTranscriptDraft,
+            errorMessage: viewModel.errorMessage,
+            showsTranscript: $showsTranscript,
+            showsSummary: $showsSummary,
+            onMute: { viewModel.toggleMute() },
+            onEnd: { Task { await viewModel.stopForUser() } },
+            onRetry: {
+                showsSummary = false
+                Task { await viewModel.start() }
+            },
+            onDismiss: { dismiss() }
+        )
+        .navigationTitle(strings.voiceTutorCallTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .task {
             onRecordingConsentConsumed()
             await viewModel.start()
@@ -450,183 +445,423 @@ struct VoiceTutorSessionView: View {
             }
         }
     }
+}
 
-    private var sessionStatus: some View {
-        VStack(spacing: 10) {
-            Image(systemName: statusSymbol)
-                .font(.system(size: 46, weight: .semibold))
-                .foregroundStyle(statusColor)
-                .symbolEffect(.pulse, options: .repeating, isActive: viewModel.phase.isLive)
+/// Display-only state. Time and connection truth still belong to the existing
+/// session model; UI expansion never starts, stops, or replaces a call.
+struct VoiceTutorCallPresentation {
+    enum RemainingTime: Equatable {
+        case call(Int)
+        case monthly(Int)
+    }
 
-            Text(statusText)
-                .font(.title3.weight(.semibold))
+    enum SummaryState: Equatable {
+        case hidden, pending, ready, failed
+    }
 
-            if viewModel.isRecording {
-                Label(strings.voiceTutorRecordingActive, systemImage: "record.circle.fill")
-                    .font(.caption.weight(.bold))
+    enum PrimaryAction: Equatable {
+        case end, retry, dismiss, wait
+    }
+
+    var phase: VoiceTutorSessionPhase
+    var isMuted = false
+    var isRecording = false
+    var sessionSecondsRemaining: Int?
+    var quotaRemainingSeconds = 0
+    var quotaReservedSeconds = 0
+    var quotaLimitSeconds = 0
+    var detail: BackendVoiceTutorSessionDetail?
+
+    var canMute: Bool { phase == .listening || phase == .speaking }
+
+    var remainingTime: RemainingTime? {
+        if phase.isLive {
+            // Monthly availability excludes the current reservation and can be
+            // zero during a healthy call. Never substitute it for the countdown.
+            return sessionSecondsRemaining.map { .call(max(0, $0)) }
+        }
+        guard phase == .ended || phase == .failed,
+              quotaLimitSeconds > 0, quotaReservedSeconds == 0 else { return nil }
+        return .monthly(max(0, quotaRemainingSeconds))
+    }
+
+    var primaryAction: PrimaryAction {
+        if phase.isLive { return .end }
+        switch phase {
+        case .failed: return .retry
+        case .ended: return .dismiss
+        default: return .wait
+        }
+    }
+
+    var summaryState: SummaryState {
+        guard phase == .ended || phase == .failed, let detail else { return .hidden }
+        let statuses = [detail.resultStatus, detail.result?.status].compactMap { $0?.uppercased() }
+        if statuses.contains("FAILED") { return .failed }
+        if statuses.contains("PENDING") || statuses.contains("PROCESSING") { return .pending }
+        guard let result = detail.result else { return .hidden }
+        let hasContent = !result.summaryMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || [result.strengths, result.improvements, result.nextSteps].joined().contains {
+                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        return hasContent && statuses.contains("COMPLETED") ? .ready : .hidden
+    }
+
+    func showsConnectionFailure(_ strings: AppStrings, errorMessage: String?) -> Bool {
+        phase == .failed || (phase == .ending
+            && errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines) == strings.voiceTutorConnectionFailed)
+    }
+
+    func statusText(_ strings: AppStrings, errorMessage: String? = nil) -> String {
+        if showsConnectionFailure(strings, errorMessage: errorMessage) {
+            return strings.voiceTutorCallFailed
+        }
+        switch phase {
+        case .idle, .requestingPermission, .connecting: return strings.voiceTutorCallConnecting
+        case .listening: return isMuted ? strings.voiceTutorCallMuted : strings.voiceTutorCallListening
+        case .speaking: return strings.voiceTutorCallSpeaking
+        case .ending: return strings.voiceTutorCallEnding
+        case .ended: return strings.voiceTutorCallEnded
+        case .failed: return strings.voiceTutorCallFailed
+        }
+    }
+
+    func supplementaryError(_ strings: AppStrings, errorMessage: String?) -> String? {
+        guard let error = errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !error.isEmpty else { return nil }
+        if showsConnectionFailure(strings, errorMessage: error),
+           error == strings.voiceTutorConnectionFailed { return nil }
+        return error
+    }
+}
+
+/// The same non-networking surface is rendered by device visual tests.
+struct VoiceTutorCallScreen: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var showsInformation = false
+    let topic: String
+    let presentation: VoiceTutorCallPresentation
+    let strings: AppStrings
+    var captions: [VoiceTutorCaption] = []
+    var assistantTranscriptDraft = ""
+    var errorMessage: String?
+    @Binding var showsTranscript: Bool
+    @Binding var showsSummary: Bool
+    var onMute: () -> Void = {}
+    var onEnd: () -> Void = {}
+    var onRetry: () -> Void = {}
+    var onDismiss: () -> Void = {}
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 22) {
+                    timeAndRecording
+                    Spacer(minLength: 12)
+                    callIdentity
+
+                    if showsTranscript {
+                        transcriptPanel
+                            .frame(height: min(260, geometry.size.height * 0.43))
+                            .transition(.opacity)
+                    }
+
+                    summaryRow
+                    if showsSummary && presentation.summaryState == .ready {
+                        VoiceTutorResultSections(detail: presentation.detail, strings: strings)
+                    }
+                    Spacer(minLength: 12)
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .background(Color(uiColor: .systemBackground))
+        .safeAreaInset(edge: .bottom) {
+            controls
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+                .padding(.bottom, 20)
+                .background(Color(uiColor: .systemBackground))
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showsInformation = true
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .accessibilityLabel(strings.voiceTutorCallDetails)
+            }
+        }
+        .alert(strings.voiceTutorCallDetails, isPresented: $showsInformation) {
+            Button(strings.done, role: .cancel) {}
+        } message: {
+            Text(informationText)
+        }
+    }
+
+    private var timeAndRecording: some View {
+        VStack(spacing: 8) {
+            Group {
+                switch presentation.remainingTime {
+                case .call(let seconds):
+                    Label(strings.voiceTutorCallRemaining(seconds), systemImage: "clock")
+                case .monthly(let seconds):
+                    Label(strings.voiceTutorCallMonthlyRemaining(seconds), systemImage: "clock")
+                case nil:
+                    Color.clear.frame(height: 16).accessibilityHidden(true)
+                }
+            }
+            .font(.subheadline.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("voiceCall.remainingTime")
+
+            if presentation.isRecording {
+                Label(strings.voiceTutorCallRecording, systemImage: "record.circle.fill")
+                    .font(.caption)
                     .foregroundStyle(.red)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(.red.opacity(0.1), in: Capsule())
-                    .accessibilityAddTraits(.updatesFrequently)
+                    .accessibilityIdentifier("voiceCall.recording")
+            }
+        }
+    }
+
+    private var callIdentity: some View {
+        VStack(spacing: 12) {
+            if !showsTranscript && !dynamicTypeSize.isAccessibilitySize {
+                Image(systemName: presentation.phase == .speaking ? "waveform" : "person.fill")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(presentation.phase == .speaking ? Color.accentColor : .secondary)
+                    .frame(width: 60, height: 60)
+                    .background(Color.secondary.opacity(0.08), in: Circle())
+                    .symbolEffect(.pulse, options: .repeating, isActive: presentation.phase == .speaking && !reduceMotion)
+                    .accessibilityHidden(true)
             }
 
-            if viewModel.phase.isLive, let sessionSecondsRemaining = viewModel.sessionSecondsRemaining {
-                Text(strings.voiceTutorSessionRemaining(sessionSecondsRemaining))
+            Text(topic)
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                if !showsConnectionFailure
+                    && [.idle, .requestingPermission, .connecting, .ending].contains(presentation.phase) {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: statusSymbol)
+                        .foregroundStyle(statusColor)
+                }
+                Text(presentation.statusText(strings, errorMessage: errorMessage))
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("voiceCall.status")
+
+            // Preserve actionable permission/quota errors without repeating the
+            // generic disconnect sentence already represented by the status.
+            if let error = presentation.supplementaryError(strings, errorMessage: errorMessage) {
+                Text(error)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(strings.voiceTutorTeacher)
     }
 
-    private var quotaSummary: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label(
-                    viewModel.quotaReservedSeconds > 0
-                        ? strings.voiceTutorUnreservedTime(viewModel.quotaRemainingSeconds)
-                        : strings.voiceTutorRemainingTime(viewModel.quotaRemainingSeconds),
-                    systemImage: "clock"
-                )
-                .font(.subheadline.weight(.medium))
-                Spacer()
-                if viewModel.quotaLimitSeconds > 0 {
-                    Text(strings.voiceTutorMonthlyAllowance(viewModel.quotaLimitSeconds))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if viewModel.quotaReservedSeconds > 0 {
-                Text(strings.voiceTutorReservedTime(viewModel.quotaReservedSeconds))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(13)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private var captionPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(strings.voiceTutorLiveCaptions)
-                .font(.headline)
-
-            if viewModel.captions.isEmpty && viewModel.assistantTranscriptDraft.isEmpty {
-                Text(viewModel.phase.isLive ? strings.voiceTutorListening : strings.voiceTutorNoTranscript)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 100, alignment: .center)
-            } else {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    ForEach(viewModel.captions) { caption in
+    private var transcriptPanel: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if captions.isEmpty && assistantTranscriptDraft.isEmpty {
+                        Text(strings.voiceTutorCallNoCaptions)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    ForEach(captions) { caption in
                         VoiceTutorCaptionBubble(caption: caption, strings: strings)
                     }
-                    if !viewModel.assistantTranscriptDraft.isEmpty {
+                    if !assistantTranscriptDraft.isEmpty {
                         VoiceTutorCaptionBubble(
-                            caption: VoiceTutorCaption(
-                                speaker: .tutor,
-                                text: viewModel.assistantTranscriptDraft
-                            ),
+                            caption: VoiceTutorCaption(speaker: .tutor, text: assistantTranscriptDraft),
                             strings: strings
                         )
                     }
+                    Color.clear.frame(height: 1).id("voiceCall.latestCaption")
                 }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 14)
+            }
+            .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+            .onAppear { proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom) }
+            .onChange(of: captions.last?.id) { _, _ in
+                proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom)
+            }
+            .onChange(of: assistantTranscriptDraft) { _, _ in
+                proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityIdentifier("voiceCall.transcript")
+    }
+
+    @ViewBuilder
+    private var summaryRow: some View {
+        switch presentation.summaryState {
+        case .hidden:
+            EmptyView()
+        case .pending:
+            HStack(spacing: 7) {
+                ProgressView().controlSize(.mini)
+                Text(strings.voiceTutorCallSummaryPending)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        case .failed:
+            Label(strings.voiceTutorCallSummaryFailed, systemImage: "exclamationmark.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .ready:
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                    showsSummary.toggle()
+                }
+            } label: {
+                Label(
+                    strings.voiceTutorCallSummaryReady,
+                    systemImage: showsSummary ? "chevron.up" : "chevron.down"
+                )
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .font(.subheadline)
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
+            .accessibilityIdentifier("voiceCall.summary")
+        }
     }
 
     private var controls: some View {
-        HStack(spacing: 14) {
-            if viewModel.phase.isLive {
-                Button {
-                    viewModel.toggleMute()
-                } label: {
-                    Label(
-                        viewModel.isMuted ? strings.voiceTutorUnmute : strings.voiceTutorMute,
-                        systemImage: viewModel.isMuted ? "mic.slash.fill" : "mic.fill"
-                    )
-                    .frame(maxWidth: .infinity)
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 18))
+        return layout {
+            callButton(
+                title: presentation.isMuted ? strings.voiceTutorUnmute : strings.voiceTutorMute,
+                symbol: presentation.isMuted ? "mic.slash.fill" : "mic.fill",
+                selected: presentation.isMuted,
+                enabled: presentation.canMute,
+                identifier: "voiceCall.mute",
+                action: onMute
+            )
+            callButton(
+                title: strings.voiceTutorCallTranscript,
+                symbol: showsTranscript ? "captions.bubble.fill" : "captions.bubble",
+                selected: showsTranscript,
+                identifier: "voiceCall.captions"
+            ) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                    showsTranscript.toggle()
                 }
-                .buttonStyle(.bordered)
-
-                Button(role: .destructive) {
-                    Task {
-                        await viewModel.stopForUser()
-                    }
-                } label: {
-                    Label(strings.voiceTutorEndSession, systemImage: "phone.down.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-            } else if viewModel.phase == .failed {
-                Button(strings.retry) {
-                    Task {
-                        await viewModel.start()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-            } else if viewModel.phase == .ended {
-                Button(strings.done) {
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-            } else {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
+            }
+            switch presentation.primaryAction {
+            case .end:
+                callButton(title: strings.voiceTutorCallEnd, symbol: "phone.down.fill", tint: .red,
+                           identifier: "voiceCall.end", action: onEnd)
+            case .retry:
+                callButton(title: strings.voiceTutorCallRetry, symbol: "phone.fill", tint: .green,
+                           identifier: "voiceCall.retry", action: onRetry)
+            case .dismiss:
+                callButton(title: strings.done, symbol: "checkmark", tint: .accentColor,
+                           identifier: "voiceCall.done", action: onDismiss)
+            case .wait:
+                callButton(title: strings.voiceTutorCallEnd, symbol: "phone.down.fill", enabled: false,
+                           identifier: "voiceCall.ending", action: {})
             }
         }
     }
 
-    private var statusText: String {
-        switch viewModel.phase {
-        case .idle, .requestingPermission, .connecting:
-            return strings.voiceTutorConnecting
-        case .listening:
-            return strings.voiceTutorListening
-        case .speaking:
-            return strings.voiceTutorSpeaking
-        case .ending:
-            return strings.voiceTutorEnding
-        case .ended:
-            return strings.voiceTutorEnded
-        case .failed:
-            return strings.voiceTutorConnectionFailed
+    private func callButton(
+        title: String,
+        symbol: String,
+        tint: Color? = nil,
+        selected: Bool = false,
+        enabled: Bool = true,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(HStackLayout(alignment: .center, spacing: 14))
+            : AnyLayout(VStackLayout(alignment: .center, spacing: 8))
+        return Button(action: action) {
+            layout {
+                Image(systemName: symbol)
+                    .font(.system(size: 21, weight: .medium))
+                    .foregroundStyle(tint == nil ? Color.primary : .white)
+                    .frame(width: 54, height: 54)
+                    .background(
+                        tint ?? Color.secondary.opacity(selected ? 0.22 : 0.09),
+                        in: Circle()
+                    )
+                Text(title)
+                    .font(.caption)
+                    .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(
+                maxWidth: .infinity,
+                minHeight: dynamicTypeSize.isAccessibilitySize ? 54 : 82,
+                alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .top
+            )
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
     }
 
     private var statusSymbol: String {
-        switch viewModel.phase {
-        case .speaking:
-            return "waveform.circle.fill"
-        case .listening:
-            return "ear.fill"
-        case .ended:
-            return "checkmark.circle.fill"
-        case .ending:
-            return "hourglass"
-        case .failed:
-            return "exclamationmark.triangle.fill"
-        case .idle, .requestingPermission, .connecting:
-            return "ellipsis.circle.fill"
+        if showsConnectionFailure { return "wifi.exclamationmark" }
+        switch presentation.phase {
+        case .speaking: return "waveform"
+        case .listening: return presentation.isMuted ? "mic.slash" : "phone.fill"
+        case .failed: return "wifi.exclamationmark"
+        case .ended: return "phone.down"
+        default: return "phone"
         }
     }
 
     private var statusColor: Color {
-        switch viewModel.phase {
-        case .failed:
-            return .red
-        case .ended:
-            return .green
-        default:
-            return .accentColor
+        if showsConnectionFailure { return .red }
+        switch presentation.phase {
+        case .failed: return .red
+        case .speaking: return .accentColor
+        case .listening: return presentation.isMuted ? .secondary : .green
+        default: return .secondary
         }
+    }
+
+    private var showsConnectionFailure: Bool {
+        presentation.showsConnectionFailure(strings, errorMessage: errorMessage)
+    }
+
+    private var informationText: String {
+        var parts: [String] = []
+        if let errorMessage, !errorMessage.isEmpty { parts.append(errorMessage) }
+        if presentation.summaryState == .failed { parts.append(strings.voiceTutorSummaryFailed) }
+        parts.append(strings.voiceTutorForegroundOnly)
+        return parts.joined(separator: "\n\n")
     }
 }
 

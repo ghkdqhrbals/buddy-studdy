@@ -3062,6 +3062,26 @@ struct AppStrings {
     var voiceTutorMute: String { text("음소거", "Mute", "ミュート") }
     var voiceTutorUnmute: String { text("음소거 해제", "Unmute", "ミュート解除") }
     var voiceTutorEndSession: String { text("학습 종료", "End session", "学習を終了") }
+    var voiceTutorCallTitle: String { text("음성 통화", "Voice call", "音声通話") }
+    var voiceTutorCallStart: String { text("통화하기", "Call", "通話する") }
+    var voiceTutorCallConnecting: String { text("연결 중", "Connecting", "接続中") }
+    var voiceTutorCallListening: String { text("듣는 중", "Listening", "聞いています") }
+    var voiceTutorCallSpeaking: String { text("답변 중", "Speaking", "応答中") }
+    var voiceTutorCallEnding: String { text("통화 마치는 중", "Ending call", "通話を終了中") }
+    var voiceTutorCallEnded: String { text("통화 종료", "Call ended", "通話終了") }
+    var voiceTutorCallFailed: String { text("연결 끊김", "Disconnected", "接続切断") }
+    var voiceTutorCallMuted: String { text("마이크 꺼짐", "Mic off", "マイクオフ") }
+    var voiceTutorCallTranscript: String { text("대화 내용", "Conversation", "会話内容") }
+    var voiceTutorCallRetry: String { text("다시 통화", "Call again", "かけ直す") }
+    var voiceTutorCallEnd: String { text("종료", "End", "終了") }
+    var voiceTutorCallDetails: String { text("통화 정보", "Call details", "通話情報") }
+    var voiceTutorCallSummaryPending: String { text("학습 정리 중", "Summarizing", "学習を整理中") }
+    var voiceTutorCallSummaryReady: String { text("학습 기록 보기", "View learning record", "学習記録を見る") }
+    var voiceTutorCallSummaryFailed: String { text("학습 정리 실패", "Summary failed", "学習の整理に失敗") }
+    var voiceTutorCallNoCaptions: String {
+        text("대화가 여기에 표시돼요", "Your conversation appears here", "会話がここに表示されます")
+    }
+    var voiceTutorCallRecording: String { text("녹음 중", "Recording", "録音中") }
     var voiceTutorRecordingConsentTitle: String {
         text(
             "통화 녹음 및 저장에 동의",
@@ -3164,6 +3184,22 @@ struct AppStrings {
             "The learning summary could not be created. Your session record is still saved.",
             "今回の会話の学習要約を作成できませんでした。通話記録は保存されています。"
         )
+    }
+    func voiceTutorCallRemaining(_ seconds: Int) -> String {
+        let duration = voiceTutorCallClock(seconds)
+        return text("\(duration) 남음", "\(duration) left", "残り\(duration)")
+    }
+    func voiceTutorCallMonthlyRemaining(_ seconds: Int) -> String {
+        let duration = voiceTutorCallClock(seconds)
+        return text("이번 달 \(duration) 남음", "\(duration) left this month", "今月の残り\(duration)")
+    }
+    private func voiceTutorCallClock(_ seconds: Int) -> String {
+        let safeSeconds = max(0, seconds)
+        let minutes = safeSeconds / 60
+        let remainingSeconds = safeSeconds % 60
+        let minuteText = minutes < 10 ? "0\(minutes)" : "\(minutes)"
+        let secondText = remainingSeconds < 10 ? "0\(remainingSeconds)" : "\(remainingSeconds)"
+        return "\(minuteText):\(secondText)"
     }
     func voiceTutorRemainingTime(_ seconds: Int) -> String {
         let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: true)
