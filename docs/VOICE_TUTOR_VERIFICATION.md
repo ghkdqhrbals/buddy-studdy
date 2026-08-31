@@ -3,6 +3,14 @@
 Verification date: 2026-08-31. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
+Latest checkpoint: response-continuation fix `c33f0fe4` is running in the existing
+8080 dev API and on the physical iPhone. The selected native three-turn test
+[passed after network approval](#physical-native-three-turn-verification-after-network-approval).
+The earlier checks below are historical; they do not all describe the current
+implementation. A regex-free meaningful-input gate remains **unimplemented**:
+the [tested OSS candidates](#additional-meaningful-input-model-probes) did not
+reliably separate hesitation from short meaningful Korean answers.
+
 ## Contract
 
 - Direct iPhone/OpenAI WebRTC media, with authenticated backend-owned control;
@@ -528,3 +536,143 @@ The earlier test results remain historical evidence, not the current turn gate.
   example thresholds, timing environment, and model licenses are recorded
   with those local research artifacts. No user audio or provider call was used
   in that experiment.
+
+### Local rollout and device-network follow-up
+
+- Commit `c33f0fe4` was installed in the existing `backend` Compose API service
+  on `127.0.0.1:8080`. The `dev` profile, AWS dev-secret configuration, original
+  environment values, mounts, resource limits, and network were preserved.
+  The database, Redis, translation, and backup container identities and start
+  times were unchanged. Only the API was refreshed; no Docker image was built
+  and no additional infrastructure stack or route was created.
+- The JAR SHA-256 is
+  `ee156104cfe927fcb8c2930f97f2bcbc2cad8835fad93a202e156f32dba81800`.
+  The previous JAR remains available for local rollback. No active voice
+  session was present before the refresh. Manual local health and readiness
+  requests both returned HTTP 200; no GitHub Actions runtime check was added.
+- The normal signed `StudyMateiOS` app rebuilt successfully, was installed on
+  the physical iPhone, and launched with the existing public dev base URL.
+  The normal build removed the test-only injected frameworks and plug-ins.
+  Logs: `build/voiceResponseContinuationSignedBuild.log`,
+  `build/voiceResponseContinuationDeviceInstall.log`, and
+  `build/voiceResponseContinuationDeviceLaunch.log`.
+- After the user enabled iPhone local-network access, the native three-turn
+  test no longer reported `Local network prohibited`. Its requests to the
+  temporary Mac fixture instead timed out with `NSURLErrorDomain -1001`.
+  No provider call or answer was observed, and the temporary fixture exited.
+  Log: `build/voiceResponseContinuationNativeConversationAllowed.log`.
+  This is still not a passing three-turn/native-audio test.
+- Read-only checks confirmed the Mac LAN address and the phone's CoreDevice
+  local-network connection. The Mac firewall is enabled; the actual Homebrew
+  Python executable is ad-hoc-signed and not listed as an approved application.
+  The user was asked to approve Python's incoming connections. This is a
+  candidate cause of the LAN timeout, not a proven packet-drop attribution.
+  No firewall setting or routing rule was changed to bypass it.
+
+### Additional meaningful-input model probes
+
+- Namo Turn Detector v1 Korean was evaluated using the author's exact
+  single-transcript input, quantized ONNX model, and unmodified argmax decision.
+  Its documented complete/incomplete examples passed. However, it classified
+  short meaningful Korean replies such as readiness confirmations, requests,
+  and affirmative/negative answers as incomplete. Some fillers scored higher
+  than meaningful replies, so tuning one threshold is not a justified fix.
+  It was not installed as a production input gate. Fixed revision:
+  `8a7c88d5daab243a0220cf7a6c70060a583ba77b` (Apache-2.0).
+  Artifacts: `build/namoTurnModelProbe.py` and
+  `build/voiceTurnModelAssets/namo/probe-results.json`.
+- A separate contextual probe used official Qwen2.5-0.5B-Instruct Q8_0 with
+  `de.kherud:llama:4.2.0`, one frozen prompt, six in-prompt examples, and 36
+  held-out synthetic teacher/learner pairs. It preserved all 25 meaningful
+  inputs but incorrectly admitted 10 of the 11 hesitation/noise cases.
+  Overall accuracy (26/36) was only one case better than always admitting
+  input. It was not adopted. CPU inference was about 455 ms median on this
+  Mac, with about 943 MiB peak process RSS; these are not server/iPhone latency
+  or memory measurements. The isolated probe also required explicit process
+  termination after results were saved because a JNI-attached thread prevented
+  natural JVM exit. No application process was terminated by that cleanup.
+  Artifacts: `build/QwenTurnModelProbe.java` and
+  `build/qwenTurnModelProbe/RESULTS.md`.
+- Qwen3-0.6B was also checked with a pinned quantized ONNX conversion and the
+  same frozen 36 held-out contextual cases. The canonical non-thinking chat
+  template and first-token two-label logit selection rejected 12 of the 25
+  meaningful inputs and admitted 5 of the 11 noise/hesitation inputs (19/36
+  correct). It was not adopted. This is a limited probe of this model,
+  conversion, prompt, and decision method, not a claim that all open models
+  cannot classify Korean turns. Median inference was approximately 1.21 s,
+  with 2.30 GiB peak Python process RSS on this Mac, not on the iPhone or dev
+  JVM. ARM64 libraries were found in the ONNX Runtime Java artifact indexes;
+  that packaging check is not a native Java load or deployment test.
+  Conversion revision: `da1453100cf3ff33ef56d17983fc7a8648706db6`, linked
+  upstream Qwen revision `c1899de289a04d12100db370d81485cdf75e47ca`
+  (Apache-2.0). Artifacts: `build/qwen3OnnxTurnModelProbe.py` and
+  `build/voiceTurnModelAssets/qwen3/summary.json`.
+- One bounded follow-up reused those same Qwen3 weights with a single Korean
+  zero-shot prompt and 24 new cases frozen before inference. It accepted all
+  12 meaningful inputs, but also accepted all 12 hesitation/noise/empty inputs
+  (12/24 correct). The original 36 cases were counted only as diagnostics, not
+  fresh held-out data; 10 of their 11 negative cases were admitted, and one
+  meaningful input was dropped. No further prompt/threshold tuning was done.
+  This also failed admission requirements. The run finished in 46.38 seconds,
+  with approximately 748 ms median per new case and 2.20 GiB peak process RSS.
+  Artifacts: `build/qwen3OnnxKoreanTurnModelProbe.py` and
+  `build/voiceTurnModelAssets/qwen3/koreanFollowup/summary.json`.
+- No regex, filler word exclusion list, or unvalidated semantic gate has been
+  added to production code. Speech detection, turn completion, and meaningful
+  input are separate decisions; passing one is not evidence of the others.
+- After the probes stopped, only the three downloaded, rejected Namo/Qwen
+  weight files were removed (approximately 1.43 GB total). Frozen cases,
+  results, scripts, model revisions, licenses, and SHA-256 metadata remain for
+  reproducibility and explicit re-download. No application data, existing
+  Docker volume, user recording, or unrelated Xcode artifact was removed.
+
+### Physical native three-turn verification after network approval
+
+- Read-only firewall state subsequently showed the actual Homebrew Python
+  executable allowed to accept incoming connections. The user-approved network
+  path then reached the temporary fixture. The selected physical-iPhone test
+  passed in 30.65 seconds with zero failures; the fixture observed one provider
+  allocation, completed all three teacher responses, accepted both fixed text
+  learner messages, and received HTTP 200 for provider hangup before exiting.
+  Log: `build/voiceResponseContinuationNativeConversationFirewallAllowed.log`.
+- The metadata-only XCTest attachment recorded new native nonzero buffers for
+  every turn (726, 845, 808), with new inbound RTP bytes for every turn
+  (62,009, 69,328, 70,699). The receiver, track, SSRC, codec, and transport stayed
+  the same. Across 118 inbound statistics samples, RTP timestamps moved forward
+  115 times and backward zero times; byte/packet counters remained monotonic.
+- The available native counters observed 13 CNG frames and 3 PLC frames, zero
+  jitter-buffer flushes after the first turn, and 344 nonzero callbacks after
+  response completion. Thus this run actually exercised continuing native
+  non-silent output without depending on a client drain acknowledgement.
+  Provider clears, truncations, and errors were all zero. No local recording,
+  capture buffers, input events, microphone permission, or app-quota request was
+  involved. The final state was listening, with native playout still enabled.
+- This is evidence for repeated native receive/playout and stream continuity,
+  not a microphone/ASR test, full app-control/backend integration call, listening
+  judgement of acoustic quality, or a sample-accurate guarantee about the last
+  audible syllable. The synthetic fixture uses the production renderer and
+  response-state types; backend turn scheduling is verified separately above.
+- Result bundle:
+  `build/iOSDeviceDerivedData/Logs/Test/Test-StudyMateiOS-2026.08.31_17-34-22-+0900.xcresult`.
+  Exported attachment directory:
+  `build/voiceResponseContinuationNativeConversationPassedAttachments`.
+  A reusable, explicitly opt-in fixture and manual instructions are provided in
+  [the native conversation probe guide](../scripts/voice-tutor-native-conversation.md).
+  No paid call or runtime check was added to CI.
+- After the selected test, a normal signed app build passed, the iPhone install
+  completed, and only then was the normal app launched with the unchanged dev
+  base URL. This removed test-injected frameworks and plug-ins again. No active
+  BuddyStudy voice session existed before reinstalling. Logs:
+  `build/voiceResponseContinuationAfterNativeSignedBuild.log`,
+  `build/voiceResponseContinuationAfterNativeDeviceInstall.log`, and
+  `build/voiceResponseContinuationAfterNativeDeviceLaunch.log`.
+- The reusable host was extracted from the local fixture after the passing
+  native run and then hardened for canceled/in-flight allocation cleanup. Its
+  17 no-network regression tests passed: admission closes immediately on stop,
+  one concurrent offer owns allocation, cleanup recovers a delayed call ID
+  within the original negotiation deadline, and uncertain allocation/hangup
+  cannot report success. HTTP/websocket operations are in-memory fakes and real
+  client/listener construction is forbidden in these tests. No additional paid
+  provider call was made for this host-only hardening. Root verification log:
+  `build/voiceNativeHostOfflineRegression.log`.
+  Reproduce using the [offline host checks](../scripts/voice-tutor-native-conversation.md#no-network-host-regression-checks).
