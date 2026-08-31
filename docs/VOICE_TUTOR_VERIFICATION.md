@@ -1668,3 +1668,30 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   measurement**. Actual provider acknowledgement and short Korean speech in a
   new call remain live acceptance checks; prior misrecognized words cannot be
   reconstructed from the screenshot alone.
+
+### Existing dev rollout
+
+- Implementation commit: `ea795302a1fd11e3312bd4bc895edbb0550273b2` on
+  `feature/2.0`. With zero active calls before staging and restart, only the
+  existing 8080 `backend-backend-1` API was refreshed. Its `dev` profile, AWS
+  secret selection, environment, network and mounts are unchanged; DB, Redis,
+  LibreTranslate and backup container IDs/start times are unchanged. No new
+  persistent infrastructure was created. Log: `build/voiceInputLanguageDevRefresh.log`.
+- Every mounted migration hash is unchanged. Startup confirmed schema V105 is
+  already current and applied zero migrations. The exact previous V105-compatible
+  JAR is retained at `/app/buddystudy-backend.previous-e3ad31dc.jar`; this does not
+  authorize restoring an older pre-V105 binary. The prior protected database
+  backup remains retained; no user transcript or record was manually rewritten.
+- Source/embedded/mounted V105 and JAR hashes match. Startup observed zero ERROR
+  entries or projection failures; local and public dev health requests returned
+  200. Read-only aggregate checks still find five canonical voice records,
+  five owned extensions, ten READY translations and no orphan mappings. Log:
+  `build/voiceInputLanguageDevRuntimeVerification.log`.
+- At verification time there were zero live transcription acknowledgements and
+  zero rejected acknowledgements. Health and JSON contract tests therefore do
+  **not** claim that a new provider call or spoken recognition has been exercised.
+- The normal signed app, without injected test artifacts, was reinstalled and
+  launched on the paired iPhone using `https://lowfidev.cloud`; both steps checked
+  zero active calls. Logs: `build/voiceInputLanguageDeviceInstall.log` and
+  `build/voiceInputLanguageDeviceLaunch.log`. The server-side language fix applies
+  when the next call is configured; existing transcript text remains unchanged.
