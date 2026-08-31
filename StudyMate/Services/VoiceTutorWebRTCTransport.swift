@@ -544,6 +544,103 @@ final class VoiceTutorRemoteAudioRenderer: NSObject, LKRTCAudioRenderer, @unchec
     }
 }
 
+/// Identifies one server-completed response without treating the remote RTP
+/// track's continuous comfort-noise callbacks as response boundaries.
+struct VoiceTutorLocalPlayoutTailToken: Equatable, Sendable {
+    let responseID: String
+    let generation: UInt64
+    let providerStoppedAtUptime: TimeInterval
+}
+
+/// A small deterministic state machine around the native renderer. The provider
+/// can say its output buffer stopped before NetEq/Core Audio has rendered the
+/// last packet on this device. There is no public WebRTC "speaker drained" API,
+/// and silence is not usable because the RTP track emits concealment/comfort
+/// noise. Instead, preserve the exact response generation for a bounded grace
+/// after the first renderer evidence at (or immediately before) provider stop.
+struct VoiceTutorLocalPlayoutTailState: Equatable {
+    static let recentRenderToleranceSeconds: TimeInterval = 0.05
+    static let renderTailGraceSeconds: TimeInterval = 0.45
+    static let maximumWaitSeconds: TimeInterval = 1.25
+
+    private(set) var generation: UInt64 = 0
+    private(set) var activeResponseID: String?
+    private(set) var sealedToken: VoiceTutorLocalPlayoutTailToken?
+    private(set) var firstTailRenderUptime: TimeInterval?
+    private(set) var lastRenderUptime: TimeInterval?
+
+    mutating func responseStarted(_ responseID: String?) {
+        guard let responseID, !responseID.isEmpty, activeResponseID != responseID else { return }
+        generation &+= 1
+        activeResponseID = responseID
+        sealedToken = nil
+        firstTailRenderUptime = nil
+    }
+
+    mutating func rendered(at uptime: TimeInterval) {
+        guard uptime.isFinite, uptime >= 0 else { return }
+        lastRenderUptime = uptime
+        if let token = sealedToken,
+           token.generation == generation,
+           uptime >= token.providerStoppedAtUptime,
+           firstTailRenderUptime == nil {
+            firstTailRenderUptime = uptime
+        }
+    }
+
+    mutating func responseCompleted(
+        _ responseID: String,
+        at uptime: TimeInterval
+    ) -> VoiceTutorLocalPlayoutTailToken? {
+        guard !responseID.isEmpty, uptime.isFinite, uptime >= 0,
+              activeResponseID == responseID else { return nil }
+        let token = VoiceTutorLocalPlayoutTailToken(
+            responseID: responseID,
+            generation: generation,
+            providerStoppedAtUptime: uptime
+        )
+        activeResponseID = nil
+        sealedToken = token
+        if let lastRenderUptime,
+           lastRenderUptime <= uptime,
+           uptime - lastRenderUptime <= Self.recentRenderToleranceSeconds {
+            firstTailRenderUptime = lastRenderUptime
+        } else {
+            firstTailRenderUptime = nil
+        }
+        return token
+    }
+
+    /// Returns nil when the exact generation is drained, superseded, or its
+    /// bounded fallback has elapsed. A positive value is safe to sleep/poll.
+    func remainingWait(
+        for token: VoiceTutorLocalPlayoutTailToken,
+        now: TimeInterval
+    ) -> TimeInterval? {
+        guard now.isFinite,
+              sealedToken == token,
+              generation == token.generation else { return nil }
+        let deadline = token.providerStoppedAtUptime + Self.maximumWaitSeconds
+        guard now < deadline else { return nil }
+        guard let firstTailRenderUptime else {
+            return max(0, deadline - now)
+        }
+        let renderDeadline = min(
+            deadline,
+            max(token.providerStoppedAtUptime, firstTailRenderUptime)
+                + Self.renderTailGraceSeconds
+        )
+        return now < renderDeadline ? max(0, renderDeadline - now) : nil
+    }
+
+    mutating func invalidate() {
+        generation &+= 1
+        activeResponseID = nil
+        sealedToken = nil
+        firstTailRenderUptime = nil
+    }
+}
+
 final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     var onRenderedPCM: (@Sendable (TimeInterval) -> Void)? {
         didSet { remoteRenderer.onRenderedPCM = onRenderedPCM }
@@ -560,6 +657,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private var renderedBufferCount = 0
     private var renderedFrameCount = 0
     private var nonzeroBufferCount = 0
+    private var localPlayoutTailState = VoiceTutorLocalPlayoutTailState()
     private let audioSessionOwnerID = UUID()
     private let remoteRenderer = VoiceTutorRemoteAudioRenderer()
     private var captureTap: VoiceTutorLocalSpeechCaptureTap?
@@ -748,6 +846,52 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         track?.isEnabled = true
     }
 
+    /// Binds native renderer evidence to the exact provider response generation.
+    /// These calls never mute, stop, clear, or truncate the continuous RTP track.
+    func beginLocalPlayoutResponse(responseID: String?) {
+        diagnosticLock.lock()
+        localPlayoutTailState.responseStarted(responseID)
+        diagnosticLock.unlock()
+    }
+
+    func sealLocalPlayoutResponse(responseID: String) -> VoiceTutorLocalPlayoutTailToken? {
+        diagnosticLock.lock()
+        let token = localPlayoutTailState.responseCompleted(
+            responseID,
+            at: ProcessInfo.processInfo.systemUptime
+        )
+        diagnosticLock.unlock()
+        return token
+    }
+
+    /// Keeps native playout alive for an exact, already server-completed response.
+    /// A new response, transport close, task cancellation, or the hard bound ends
+    /// the wait. No audio content or energy threshold participates in the fence.
+    func waitForLocalPlayoutTail(_ token: VoiceTutorLocalPlayoutTailToken) async {
+        while !Task.isCancelled {
+            let now = ProcessInfo.processInfo.systemUptime
+            let remaining = localPlayoutTailRemainingWait(for: token, now: now)
+            guard let remaining, remaining > 0 else { return }
+            let sleepSeconds = min(remaining, 0.02)
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64((sleepSeconds * 1_000_000_000).rounded(.up))
+                )
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func localPlayoutTailRemainingWait(
+        for token: VoiceTutorLocalPlayoutTailToken,
+        now: TimeInterval
+    ) -> TimeInterval? {
+        diagnosticLock.lock()
+        defer { diagnosticLock.unlock() }
+        return localPlayoutTailState.remainingWait(for: token, now: now)
+    }
+
     func close() {
         emitMediaDiagnostic("media_close_requested")
         let remoteTrack: LKRTCAudioTrack?
@@ -759,6 +903,10 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         let nextRenderTap: VoiceTutorAudioProcessingTap?
         let observer: NSObjectProtocol?
         let shouldDeactivateAudioSession: Bool
+
+        diagnosticLock.lock()
+        localPlayoutTailState.invalidate()
+        diagnosticLock.unlock()
 
         Self.audioSessionOwnershipLock.lock()
         stateLock.lock()
@@ -1040,6 +1188,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         renderedBufferCount += 1
         renderedFrameCount += frames
         if containsAudio { nonzeroBufferCount += 1 }
+        localPlayoutTailState.rendered(at: uptime)
         let firstBuffer = renderedBufferCount == 1
         let firstNonzero = containsAudio && nonzeroBufferCount == 1
         diagnosticLock.unlock()

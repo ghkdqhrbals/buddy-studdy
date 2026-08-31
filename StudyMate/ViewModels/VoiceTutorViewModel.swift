@@ -32,6 +32,14 @@ enum VoiceTutorSessionPhase: Equatable {
         // Do not interrupt startup's connecting guard or revive terminal UI.
         self == .listening && assistantResponseActive ? .speaking : self
     }
+
+    func maySealServerResponse(isFinalizing: Bool) -> Bool {
+        !isFinalizing && (isLive || self == .ending)
+    }
+
+    func shouldCloseFinalizingMediaForBackground(isFinalizing: Bool) -> Bool {
+        isFinalizing && self == .ending
+    }
 }
 
 private enum VoiceTutorStopSource: String {
@@ -246,6 +254,39 @@ struct VoiceTutorWebRTCResponseState: Equatable {
     }
 }
 
+enum VoiceTutorServerEndPlayoutPolicy {
+    static func permitsTail(reason: String?, usesWebRTC: Bool) -> Bool {
+        usesWebRTC && reason?.uppercased() == "USER_ENDED"
+    }
+
+    /// Only an unsolicited, server-verified learner end can use this path.
+    /// Explicit UI end is already finalizing inside stop() and never calls it.
+    static func spokenEndToken(
+        reason: String?,
+        usesWebRTC: Bool,
+        pending: VoiceTutorLocalPlayoutTailToken?
+    ) -> VoiceTutorLocalPlayoutTailToken? {
+        guard permitsTail(reason: reason, usesWebRTC: usesWebRTC) else { return nil }
+        return pending
+    }
+
+    /// The backend emits its spoken-end lifecycle only after the exact active
+    /// response reached both provider completion boundaries. That lifecycle can
+    /// race ahead of the second raw provider event on the control socket. In that
+    /// ordering, the still-active response ID is the exact boundary attested by
+    /// the server and may be sealed locally before transport teardown.
+    static func serverVerifiedFallbackResponseID(
+        reason: String?,
+        usesWebRTC: Bool,
+        pending: VoiceTutorLocalPlayoutTailToken?,
+        activeResponseID: String?
+    ) -> String? {
+        guard permitsTail(reason: reason, usesWebRTC: usesWebRTC), pending == nil,
+              let activeResponseID, !activeResponseID.isEmpty else { return nil }
+        return activeResponseID
+    }
+}
+
 @MainActor
 final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var phase: VoiceTutorSessionPhase = .idle
@@ -289,6 +330,7 @@ final class VoiceTutorViewModel: ObservableObject {
     private var isFinalizing = false
     private var duplexPlaybackState = VoiceTutorDuplexPlaybackState()
     private var webRTCResponseState = VoiceTutorWebRTCResponseState()
+    private var pendingSpokenEndPlayoutTail: VoiceTutorLocalPlayoutTailToken?
     private var connectionAttemptFence = VoiceTutorConnectionAttemptFence()
     private var summaryRequestID = UUID()
     private var summaryContextValidity: (@MainActor @Sendable () -> Bool)?
@@ -331,6 +373,7 @@ final class VoiceTutorViewModel: ObservableObject {
         assistantTranscriptDraft = ""
         duplexPlaybackState.reset()
         webRTCResponseState.reset()
+        pendingSpokenEndPlayoutTail = nil
         usesWebRTC = false
         isRecording = false
         phase = .requestingPermission
@@ -587,6 +630,18 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     func stopForBackground() async {
+        if phase.shouldCloseFinalizingMediaForBackground(isFinalizing: isFinalizing) {
+            // A server-spoken-end tail may be awaiting its short local render
+            // fence. Lock/dismiss wins immediately: invalidate playout while the
+            // already-running control/REST settlement continues on its own.
+            recorder?.stopAcceptingFrames()
+            audioEngine.stop()
+            webRTCTransport?.close()
+            webRTCTransport = nil
+            stopAudioSendPump()
+            stopLocalSpeechEventPump()
+            return
+        }
         guard phase.isLive || phase == .ending, !isFinalizing else {
             return
         }
@@ -1112,12 +1167,14 @@ final class VoiceTutorViewModel: ObservableObject {
             duplexPlaybackState.userSpeechStopped()
         case .responseStarted(let responseID, let isTutorIntervention):
             if !duplexPlaybackState.matchesActiveResponse(responseID: responseID) {
+                pendingSpokenEndPlayoutTail = nil
                 duplexPlaybackState.responseStarted(
                     responseID: responseID,
                     isTutorIntervention: isTutorIntervention
                 )
                 if usesWebRTC {
                     webRTCResponseState.responseStarted(responseID)
+                    webRTCTransport?.beginLocalPlayoutResponse(responseID: responseID)
                 }
             }
         case .responseFinished(let responseID):
@@ -1178,13 +1235,16 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     private func finishWebRTCResponseIfReady(_ responseID: String?) {
-        guard let responseID, phase.isLive,
+        guard let responseID, phase.maySealServerResponse(isFinalizing: isFinalizing),
               duplexPlaybackState.responseFinished(responseID: responseID) else { return }
+        pendingSpokenEndPlayoutTail = webRTCTransport?.sealLocalPlayoutResponse(
+            responseID: responseID
+        )
         // This ends only the UI's server-streaming state. Never stop/mute/clear
         // the remote track: its remaining RTP samples play before the next
         // response on the same continuous stream, even after these controls.
         logDiagnostic("event=provider_response_stream_finished")
-        phase = .listening
+        if phase.isLive { phase = .listening }
     }
 
     private func finishFromServer(_ ended: VoiceTutorRealtimeEnded) async {
@@ -1196,16 +1256,43 @@ final class VoiceTutorViewModel: ObservableObject {
             errorMessage = appState.strings.voiceTutorPauseFailed
         }
         logDiagnostic("event=server_ended")
-        recorder?.stopAcceptingFrames()
         isFinalizing = true
         phase = .ending
+        stopLocalSpeechEventPump()
+        stopHeartbeat()
+        clearSessionCountdown()
+        if usesWebRTC {
+            // Server-verified spoken end reaches this path without a local stop
+            // request. Keep the exact completed response's native output path
+            // alive briefly so NetEq/Core Audio can render its tail. The red
+            // button goes through stop() and intentionally never awaits this.
+            webRTCTransport?.setMuted(true)
+            var token = VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
+                reason: ended.reason,
+                usesWebRTC: usesWebRTC,
+                pending: pendingSpokenEndPlayoutTail
+            )
+            if token == nil,
+               let responseID = VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
+                   reason: ended.reason,
+                   usesWebRTC: usesWebRTC,
+                   pending: pendingSpokenEndPlayoutTail,
+                   activeResponseID: webRTCResponseState.responseID
+               ) {
+                token = webRTCTransport?.sealLocalPlayoutResponse(responseID: responseID)
+            }
+            pendingSpokenEndPlayoutTail = token
+            if let token, let webRTCTransport {
+                logDiagnostic("event=spoken_end_local_playout_tail_started")
+                await webRTCTransport.waitForLocalPlayoutTail(token)
+                logDiagnostic("event=spoken_end_local_playout_tail_finished")
+            }
+        }
+        recorder?.stopAcceptingFrames()
         audioEngine.stop()
         webRTCTransport?.close()
         webRTCTransport = nil
         stopAudioSendPump()
-        stopLocalSpeechEventPump()
-        stopHeartbeat()
-        clearSessionCountdown()
         // This method runs inside receiveTask. Cancelling it here would also cancel
         // the result polling and leave the completed learning summary unloaded.
         receiveTask = nil
@@ -1283,6 +1370,7 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         duplexPlaybackState.reset()
         webRTCResponseState.reset()
+        pendingSpokenEndPlayoutTail = nil
         pauseState = VoiceTutorCallPauseState()
         usesWebRTC = false
         isFinalizing = false

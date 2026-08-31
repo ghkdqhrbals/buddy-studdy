@@ -583,6 +583,101 @@ struct VoiceTutorCallTranscriptGesture {
         if !isExpanded, translation.height > 0 { return .reveal }
         return nil
     }
+
+    /// Expanded calls install one simultaneous gesture over the whole surface.
+    /// Transcript drags stay with the nested `ScrollView` until it is already
+    /// at the latest edge; only a further intentional upward swipe may collapse.
+    /// Failing closed while layout is unresolved prevents an early transcript
+    /// scroll from accidentally dismissing the conversation.
+    static func expandedSurfaceAction(
+        translation: CGSize,
+        startLocation: CGPoint,
+        transcriptFrame: CGRect,
+        transcriptWasAtLatestAtStart: Bool,
+        expandedScrollWasAtLatestAtStart: Bool
+    ) -> Action? {
+        guard transcriptFrame.isUsableForGestureRouting else { return nil }
+        // Large Dynamic Type can make the expanded call itself scrollable. Let
+        // that outer ScrollView reach its controls before an upward overscroll
+        // becomes the collapse command.
+        guard expandedScrollWasAtLatestAtStart else { return nil }
+        if transcriptFrame.contains(startLocation), !transcriptWasAtLatestAtStart {
+            return nil
+        }
+        return action(translation: translation, isExpanded: true)
+    }
+
+    static func transcriptIsAtLatest(
+        contentFrame: CGRect,
+        viewportHeight: CGFloat,
+        tolerance: CGFloat = 8
+    ) -> Bool {
+        guard contentFrame.isUsableForGestureRouting,
+              viewportHeight.isFinite, viewportHeight > 0,
+              tolerance.isFinite, tolerance >= 0 else { return false }
+        return contentFrame.maxY <= viewportHeight + tolerance
+    }
+}
+
+private extension CGRect {
+    var isUsableForGestureRouting: Bool {
+        !isNull && !isInfinite && width > 0 && height > 0
+    }
+}
+
+private struct VoiceTutorTranscriptFramePreferenceKey: PreferenceKey {
+    static let defaultValue = CGRect.null
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next.isUsableForGestureRouting {
+            value = next
+        }
+    }
+}
+
+private struct VoiceTutorTranscriptContentFramePreferenceKey: PreferenceKey {
+    static let defaultValue = CGRect.null
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next.isUsableForGestureRouting {
+            value = next
+        }
+    }
+}
+
+private struct VoiceTutorTranscriptViewportHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next.isFinite, next > 0 {
+            value = next
+        }
+    }
+}
+
+private struct VoiceTutorExpandedContentFramePreferenceKey: PreferenceKey {
+    static let defaultValue = CGRect.null
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next.isUsableForGestureRouting {
+            value = next
+        }
+    }
+}
+
+private struct VoiceTutorExpandedViewportHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next.isFinite, next > 0 {
+            value = next
+        }
+    }
 }
 
 /// The same non-networking surface is rendered by device visual tests.
@@ -592,6 +687,15 @@ struct VoiceTutorCallScreen: View {
     @ScaledMetric(relativeTo: .largeTitle) private var preferredOrbDiameter: CGFloat = 196
     @ScaledMetric(relativeTo: .title) private var preferredExpandedOrbDiameter: CGFloat = 88
     @State private var orbPulseExpanded = false
+    @State private var transcriptFrame = CGRect.null
+    @State private var transcriptContentFrame = CGRect.null
+    @State private var transcriptViewportHeight: CGFloat = 0
+    @State private var expandedContentFrame = CGRect.null
+    @State private var expandedViewportHeight: CGFloat = 0
+    @State private var expandedDragHasStarted = false
+    @State private var transcriptWasAtLatestWhenExpandedDragStarted = false
+    @State private var expandedScrollWasAtLatestWhenDragStarted = false
+    @GestureState private var expandedDragIsActive = false
     let topic: String
     var discoveryPrompt: String? = nil
     let presentation: VoiceTutorCallPresentation
@@ -633,6 +737,27 @@ struct VoiceTutorCallScreen: View {
         .onChange(of: reduceMotion) { _, _ in
             updateOrbAnimation()
         }
+        .onChange(of: showsTranscript) { _, _ in
+            // A new expansion must wait for its own layout measurements rather
+            // than route a gesture using frames retained from an earlier one.
+            transcriptFrame = .null
+            transcriptContentFrame = .null
+            transcriptViewportHeight = 0
+            expandedContentFrame = .null
+            expandedViewportHeight = 0
+            expandedDragHasStarted = false
+            transcriptWasAtLatestWhenExpandedDragStarted = false
+            expandedScrollWasAtLatestWhenDragStarted = false
+        }
+        .onChange(of: expandedDragIsActive) { wasActive, isActive in
+            guard wasActive, !isActive else { return }
+            // `DragGesture` has no cancellation callback. GestureState resets
+            // on both completion and cancellation, so no stale edge snapshot
+            // can leak into the next swipe.
+            expandedDragHasStarted = false
+            transcriptWasAtLatestWhenExpandedDragStarted = false
+            expandedScrollWasAtLatestWhenDragStarted = false
+        }
         .accessibilityAction(
             named: Text(showsTranscript ? strings.voiceTutorCallCollapseConversation : strings.voiceTutorCallRevealConversation)
         ) {
@@ -645,24 +770,11 @@ struct VoiceTutorCallScreen: View {
             VStack(spacing: 16) {
                 Spacer(minLength: max(12, geometry.size.height * 0.08))
 
-                Text(topic)
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("voiceCall.topic")
-
-                if let discoveryPrompt {
-                    Text(discoveryPrompt)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("voiceCall.discoveryPrompt")
-                }
-
                 callOrb(diameter: compactOrbDiameter(in: geometry))
 
+                // The normal collapsed call is intentionally only the orb.
+                // Connection, recording, pause and failure notices remain
+                // visible because hiding those states would be misleading.
                 callNotices
                 summaryRow
                 if showsSummary && presentation.summaryState == .ready {
@@ -671,9 +783,6 @@ struct VoiceTutorCallScreen: View {
                 terminalControls
 
                 Spacer(minLength: 12)
-                if canRevealTranscript {
-                    transcriptAffordance(expanded: false)
-                }
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
@@ -700,10 +809,17 @@ struct VoiceTutorCallScreen: View {
                 }
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
-                .gesture(transcriptDragGesture(isExpanded: true))
 
                 transcriptPanel
                     .frame(height: transcriptHeight(in: geometry))
+                    .background {
+                        GeometryReader { transcriptGeometry in
+                            Color.clear.preference(
+                                key: VoiceTutorTranscriptFramePreferenceKey.self,
+                                value: transcriptGeometry.frame(in: .named(expandedCallCoordinateSpace))
+                            )
+                        }
+                    }
 
                 summaryRow
                 if showsSummary && presentation.summaryState == .ready {
@@ -714,8 +830,35 @@ struct VoiceTutorCallScreen: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            .background {
+                GeometryReader { contentGeometry in
+                    Color.clear.preference(
+                        key: VoiceTutorExpandedContentFramePreferenceKey.self,
+                        value: contentGeometry.frame(in: .named(expandedCallCoordinateSpace))
+                    )
+                }
+            }
         }
         .scrollBounceBehavior(.basedOnSize)
+        .background {
+            GeometryReader { viewportGeometry in
+                Color.clear.preference(
+                    key: VoiceTutorExpandedViewportHeightPreferenceKey.self,
+                    value: viewportGeometry.size.height
+                )
+            }
+        }
+        .coordinateSpace(name: expandedCallCoordinateSpace)
+        .onPreferenceChange(VoiceTutorTranscriptFramePreferenceKey.self) { frame in
+            transcriptFrame = frame
+        }
+        .onPreferenceChange(VoiceTutorExpandedContentFramePreferenceKey.self) { frame in
+            expandedContentFrame = frame
+        }
+        .onPreferenceChange(VoiceTutorExpandedViewportHeightPreferenceKey.self) { height in
+            expandedViewportHeight = height
+        }
+        .simultaneousGesture(expandedTranscriptDragGesture, including: .all)
     }
 
     @ViewBuilder
@@ -879,6 +1022,23 @@ struct VoiceTutorCallScreen: View {
                 }
                 .padding(.vertical, 12)
                 .padding(.horizontal, 14)
+                .background {
+                    GeometryReader { contentGeometry in
+                        Color.clear.preference(
+                            key: VoiceTutorTranscriptContentFramePreferenceKey.self,
+                            value: contentGeometry.frame(in: .named(transcriptScrollCoordinateSpace))
+                        )
+                    }
+                }
+            }
+            .coordinateSpace(name: transcriptScrollCoordinateSpace)
+            .background {
+                GeometryReader { viewportGeometry in
+                    Color.clear.preference(
+                        key: VoiceTutorTranscriptViewportHeightPreferenceKey.self,
+                        value: viewportGeometry.size.height
+                    )
+                }
             }
             .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
             .onAppear { proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom) }
@@ -888,6 +1048,12 @@ struct VoiceTutorCallScreen: View {
             .onChange(of: assistantTranscriptDraft) { _, _ in
                 proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom)
             }
+        }
+        .onPreferenceChange(VoiceTutorTranscriptContentFramePreferenceKey.self) { frame in
+            transcriptContentFrame = frame
+        }
+        .onPreferenceChange(VoiceTutorTranscriptViewportHeightPreferenceKey.self) { height in
+            transcriptViewportHeight = height
         }
         .accessibilityIdentifier("voiceCall.transcript")
     }
@@ -1038,10 +1204,76 @@ struct VoiceTutorCallScreen: View {
             }
     }
 
+    private var expandedTranscriptDragGesture: some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .named(expandedCallCoordinateSpace))
+            .updating($expandedDragIsActive) { _, isActive, _ in
+                isActive = true
+            }
+            .onChanged { _ in
+                guard !expandedDragHasStarted else { return }
+                expandedDragHasStarted = true
+                transcriptWasAtLatestWhenExpandedDragStarted = transcriptIsAtLatest
+                expandedScrollWasAtLatestWhenDragStarted = expandedScrollIsAtLatest
+            }
+            .onEnded { value in
+                let transcriptWasAtLatestAtStart = expandedDragHasStarted
+                    ? transcriptWasAtLatestWhenExpandedDragStarted
+                    : transcriptIsAtLatest
+                let expandedScrollWasAtLatestAtStart = expandedDragHasStarted
+                    ? expandedScrollWasAtLatestWhenDragStarted
+                    : expandedScrollIsAtLatest
+                expandedDragHasStarted = false
+                transcriptWasAtLatestWhenExpandedDragStarted = false
+                expandedScrollWasAtLatestWhenDragStarted = false
+                guard VoiceTutorCallTranscriptGesture.expandedSurfaceAction(
+                    translation: value.translation,
+                    startLocation: value.startLocation,
+                    transcriptFrame: transcriptFrame,
+                    transcriptWasAtLatestAtStart: transcriptWasAtLatestAtStart,
+                    expandedScrollWasAtLatestAtStart: expandedScrollWasAtLatestAtStart
+                ) == .collapse else { return }
+                setTranscriptExpanded(false)
+            }
+    }
+
+    private var expandedCallCoordinateSpace: String {
+        "voiceTutorCall.expanded"
+    }
+
+    private var transcriptScrollCoordinateSpace: String {
+        "voiceTutorCall.transcriptScroll"
+    }
+
+    private var transcriptIsAtLatest: Bool {
+        VoiceTutorCallTranscriptGesture.transcriptIsAtLatest(
+            contentFrame: transcriptContentFrame,
+            viewportHeight: transcriptViewportHeight
+        )
+    }
+
+    private var expandedScrollIsAtLatest: Bool {
+        VoiceTutorCallTranscriptGesture.transcriptIsAtLatest(
+            contentFrame: expandedContentFrame,
+            viewportHeight: expandedViewportHeight
+        )
+    }
+
     private func setTranscriptExpanded(_ expanded: Bool) {
+        resetExpandedGestureRouting()
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
             showsTranscript = expanded
         }
+    }
+
+    private func resetExpandedGestureRouting() {
+        expandedDragHasStarted = false
+        transcriptWasAtLatestWhenExpandedDragStarted = false
+        expandedScrollWasAtLatestWhenDragStarted = false
+        transcriptFrame = .null
+        transcriptContentFrame = .null
+        transcriptViewportHeight = 0
+        expandedContentFrame = .null
+        expandedViewportHeight = 0
     }
 
     private func compactOrbDiameter(in geometry: GeometryProxy) -> CGFloat {
@@ -1056,10 +1288,6 @@ struct VoiceTutorCallScreen: View {
     private func transcriptHeight(in geometry: GeometryProxy) -> CGFloat {
         let fraction = dynamicTypeSize.isAccessibilitySize ? 0.48 : 0.52
         return min(360, max(190, geometry.size.height * fraction))
-    }
-
-    private var canRevealTranscript: Bool {
-        presentation.phase.isLive || !captions.isEmpty || !assistantTranscriptDraft.isEmpty
     }
 
     private var orbScale: CGFloat {
@@ -1102,7 +1330,11 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var orbAccessibilityValue: String {
-        var parts = [presentation.statusText(strings, errorMessage: errorMessage)]
+        var parts = [topic, presentation.statusText(strings, errorMessage: errorMessage)]
+        if let discoveryPrompt,
+           !discoveryPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parts.append(discoveryPrompt)
+        }
         switch presentation.remainingTime {
         case .call(let seconds): parts.append(strings.voiceTutorCallRemaining(seconds))
         case .monthly(let seconds): parts.append(strings.voiceTutorCallMonthlyRemaining(seconds))

@@ -692,6 +692,193 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
+    func testSpokenEndLocalPlayoutTailIsBoundToTheExactCompletedResponseGeneration() throws {
+        var state = VoiceTutorLocalPlayoutTailState()
+        state.responseStarted("response-1")
+        XCTAssertNil(state.responseCompleted("response-stale", at: 10))
+        state.rendered(at: 9.98)
+        let token = try XCTUnwrap(state.responseCompleted("response-1", at: 10))
+
+        XCTAssertEqual(token.responseID, "response-1")
+        let recentRenderWait: TimeInterval = try XCTUnwrap(
+            state.remainingWait(for: token, now: 10)
+        )
+        XCTAssertEqual(
+            recentRenderWait,
+            VoiceTutorLocalPlayoutTailState.renderTailGraceSeconds,
+            accuracy: 0.000_001
+        )
+        XCTAssertNotNil(state.remainingWait(for: token, now: 10.449))
+        XCTAssertNil(state.remainingWait(for: token, now: 10.45))
+
+        state.responseStarted("response-2")
+        XCTAssertNil(
+            state.remainingWait(for: token, now: 10.1),
+            "A newer response generation must invalidate an old spoken-end tail"
+        )
+    }
+
+    func testSpokenEndLocalPlayoutTailUsesPostStopRenderEvidenceWithoutFollowingComfortNoiseForever() throws {
+        var state = VoiceTutorLocalPlayoutTailState()
+        state.responseStarted("response-1")
+        let token = try XCTUnwrap(state.responseCompleted("response-1", at: 20))
+        let boundedWait: TimeInterval = try XCTUnwrap(
+            state.remainingWait(for: token, now: 20)
+        )
+        XCTAssertEqual(
+            boundedWait,
+            VoiceTutorLocalPlayoutTailState.maximumWaitSeconds,
+            accuracy: 0.000_001
+        )
+
+        state.rendered(at: 20.2)
+        state.rendered(at: 20.6) // continuous comfort noise cannot move the first evidence
+        let expectedDeadline = 20.2 + VoiceTutorLocalPlayoutTailState.renderTailGraceSeconds
+        XCTAssertNotNil(state.remainingWait(for: token, now: expectedDeadline - 0.001))
+        XCTAssertNil(state.remainingWait(for: token, now: expectedDeadline))
+    }
+
+    func testSpokenEndLocalPlayoutTailIsBoundedAndAbsentWithoutAnActiveResponse() throws {
+        var state = VoiceTutorLocalPlayoutTailState()
+        XCTAssertNil(state.responseCompleted("response-1", at: 30))
+        state.responseStarted(nil)
+        XCTAssertNil(state.responseCompleted("response-1", at: 30))
+
+        state.responseStarted("response-1")
+        let token = try XCTUnwrap(state.responseCompleted("response-1", at: 30))
+        XCTAssertNotNil(
+            state.remainingWait(
+                for: token,
+                now: 30 + VoiceTutorLocalPlayoutTailState.maximumWaitSeconds - 0.001
+            )
+        )
+        XCTAssertNil(
+            state.remainingWait(
+                for: token,
+                now: 30 + VoiceTutorLocalPlayoutTailState.maximumWaitSeconds
+            )
+        )
+
+        XCTAssertEqual(
+            VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
+                reason: "user_ended", usesWebRTC: true, pending: token
+            ),
+            token
+        )
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
+            reason: "TIME_LIMIT", usesWebRTC: true, pending: token
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
+            reason: "USER_ENDED", usesWebRTC: false, pending: token
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
+            reason: "USER_ENDED", usesWebRTC: true, pending: nil
+        ))
+        XCTAssertEqual(
+            VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
+                reason: "USER_ENDED",
+                usesWebRTC: true,
+                pending: nil,
+                activeResponseID: "response-1"
+            ),
+            "response-1"
+        )
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
+            reason: "USER_ENDED",
+            usesWebRTC: true,
+            pending: token,
+            activeResponseID: "response-1"
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
+            reason: "TIME_LIMIT",
+            usesWebRTC: true,
+            pending: nil,
+            activeResponseID: "response-1"
+        ))
+    }
+
+    func testServerEndingCanStillSealTheExactResponseButExplicitStopCannot() {
+        XCTAssertTrue(VoiceTutorSessionPhase.listening.maySealServerResponse(isFinalizing: false))
+        XCTAssertTrue(
+            VoiceTutorSessionPhase.ending.maySealServerResponse(isFinalizing: false),
+            "session.ending may arrive before response.done/output_audio_buffer.stopped"
+        )
+        XCTAssertFalse(
+            VoiceTutorSessionPhase.ending.maySealServerResponse(isFinalizing: true),
+            "The red-button stop is already finalizing and must not enter spoken-end playout waiting"
+        )
+        XCTAssertFalse(VoiceTutorSessionPhase.ended.maySealServerResponse(isFinalizing: false))
+        XCTAssertFalse(VoiceTutorSessionPhase.failed.maySealServerResponse(isFinalizing: false))
+        XCTAssertTrue(
+            VoiceTutorSessionPhase.ending
+                .shouldCloseFinalizingMediaForBackground(isFinalizing: true),
+            "Lock/dismiss must abort a pending local playout tail without waiting"
+        )
+        XCTAssertFalse(
+            VoiceTutorSessionPhase.ending
+                .shouldCloseFinalizingMediaForBackground(isFinalizing: false)
+        )
+        XCTAssertFalse(
+            VoiceTutorSessionPhase.listening
+                .shouldCloseFinalizingMediaForBackground(isFinalizing: true)
+        )
+    }
+
+    func testSpokenEndTailSealsWhetherSessionEndingArrivesBeforeOrAfterProviderCompletion() throws {
+        for sessionEndingFirst in [false, true] {
+            var phase = VoiceTutorSessionPhase.speaking
+            var response = VoiceTutorWebRTCResponseState()
+            var playout = VoiceTutorLocalPlayoutTailState()
+            response.responseStarted("response-1")
+            playout.responseStarted("response-1")
+
+            if sessionEndingFirst { phase = .ending }
+            XCTAssertNil(response.markResponseDone("response-1"))
+            let completedID = try XCTUnwrap(response.markOutputBufferStopped("response-1"))
+            XCTAssertTrue(phase.maySealServerResponse(isFinalizing: false))
+            let token = try XCTUnwrap(playout.responseCompleted(completedID, at: 40))
+            if !sessionEndingFirst { phase = .ending }
+
+            XCTAssertEqual(token.responseID, "response-1")
+            XCTAssertEqual(phase, .ending)
+            XCTAssertEqual(
+                VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
+                    reason: "USER_ENDED", usesWebRTC: true, pending: token
+                ),
+                token
+            )
+        }
+    }
+
+    func testSpokenEndTailCanSealFromServerAttestationWhenSecondProviderBoundaryIsNotRelayed() throws {
+        var response = VoiceTutorWebRTCResponseState()
+        var playout = VoiceTutorLocalPlayoutTailState()
+        response.responseStarted("response-1")
+        playout.responseStarted("response-1")
+        XCTAssertNil(response.markResponseDone("response-1"))
+
+        // The backend's USER_ENDED lifecycle is emitted only after it has seen
+        // both exact boundaries, but terminal ownership can suppress forwarding
+        // the second raw provider event to iOS. Preserve that exact active ID.
+        let fallbackID = try XCTUnwrap(
+            VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
+                reason: "USER_ENDED",
+                usesWebRTC: true,
+                pending: nil,
+                activeResponseID: response.responseID
+            )
+        )
+        playout.rendered(at: 49.98)
+        let token = try XCTUnwrap(playout.responseCompleted(fallbackID, at: 50))
+
+        XCTAssertEqual(token.responseID, "response-1")
+        XCTAssertEqual(
+            try XCTUnwrap(playout.remainingWait(for: token, now: 50)),
+            VoiceTutorLocalPlayoutTailState.renderTailGraceSeconds,
+            accuracy: 0.000_001
+        )
+    }
+
     func testWebRTCResponseIsNotBlockedByContinuousNonzeroComfortNoise() throws {
         var fixture = VoiceTutorContractRenderFixture()
         fixture.response.responseStarted("response-1")
@@ -1139,6 +1326,134 @@ final class VoiceTutorContractTests: XCTestCase {
             Gesture.action(translation: CGSize(width: 20, height: 80), isExpanded: false),
             .reveal
         )
+    }
+
+    func testExpandedTranscriptGestureCollapsesFromChromeButPreservesTranscriptScrolling() {
+        typealias Gesture = VoiceTutorCallTranscriptGesture
+        let transcriptFrame = CGRect(x: 20, y: 210, width: 362, height: 360)
+        let upwardSwipe = CGSize(width: 2, height: -72)
+
+        XCTAssertEqual(
+            Gesture.expandedSurfaceAction(
+                translation: upwardSwipe,
+                startLocation: CGPoint(x: 201, y: 120),
+                transcriptFrame: transcriptFrame,
+                transcriptWasAtLatestAtStart: false,
+                expandedScrollWasAtLatestAtStart: true
+            ),
+            .collapse,
+            "An intentional upward swipe on the expanded call chrome should restore the orb"
+        )
+        XCTAssertEqual(
+            Gesture.expandedSurfaceAction(
+                translation: upwardSwipe,
+                startLocation: CGPoint(x: 201, y: 650),
+                transcriptFrame: transcriptFrame,
+                transcriptWasAtLatestAtStart: false,
+                expandedScrollWasAtLatestAtStart: true
+            ),
+            .collapse,
+            "Controls and empty call chrome below the transcript should support the same collapse gesture"
+        )
+        XCTAssertNil(
+            Gesture.expandedSurfaceAction(
+                translation: upwardSwipe,
+                startLocation: CGPoint(x: 201, y: 390),
+                transcriptFrame: transcriptFrame,
+                transcriptWasAtLatestAtStart: false,
+                expandedScrollWasAtLatestAtStart: true
+            ),
+            "A normal upward transcript scroll must remain owned by the nested transcript ScrollView"
+        )
+        XCTAssertEqual(
+            Gesture.expandedSurfaceAction(
+                translation: upwardSwipe,
+                startLocation: CGPoint(x: 201, y: 390),
+                transcriptFrame: transcriptFrame,
+                transcriptWasAtLatestAtStart: true,
+                expandedScrollWasAtLatestAtStart: true
+            ),
+            .collapse,
+            "Once already at the latest transcript edge, an intentional upward overscroll should restore the orb"
+        )
+        XCTAssertNil(
+            Gesture.expandedSurfaceAction(
+                translation: CGSize(width: 0, height: -43),
+                startLocation: CGPoint(x: 201, y: 120),
+                transcriptFrame: transcriptFrame,
+                transcriptWasAtLatestAtStart: true,
+                expandedScrollWasAtLatestAtStart: true
+            )
+        )
+        XCTAssertNil(
+            Gesture.expandedSurfaceAction(
+                translation: upwardSwipe,
+                startLocation: CGPoint(x: 201, y: 120),
+                transcriptFrame: .null,
+                transcriptWasAtLatestAtStart: true,
+                expandedScrollWasAtLatestAtStart: true
+            ),
+            "Gesture routing must fail closed until the transcript has a measured frame"
+        )
+        XCTAssertNil(
+            Gesture.expandedSurfaceAction(
+                translation: upwardSwipe,
+                startLocation: CGPoint(x: 201, y: 120),
+                transcriptFrame: transcriptFrame,
+                transcriptWasAtLatestAtStart: true,
+                expandedScrollWasAtLatestAtStart: false
+            ),
+            "Large Dynamic Type must scroll the outer call to its controls before overscroll collapses it"
+        )
+    }
+
+    func testExpandedTranscriptLatestEdgeDetectionIsBoundedAndFailsClosed() {
+        typealias Gesture = VoiceTutorCallTranscriptGesture
+        XCTAssertTrue(Gesture.transcriptIsAtLatest(
+            contentFrame: CGRect(x: 0, y: -250, width: 360, height: 610),
+            viewportHeight: 360
+        ))
+        XCTAssertTrue(Gesture.transcriptIsAtLatest(
+            contentFrame: CGRect(x: 0, y: 0, width: 360, height: 180),
+            viewportHeight: 360
+        ), "Short transcripts are already at their latest edge")
+        XCTAssertTrue(Gesture.transcriptIsAtLatest(
+            contentFrame: CGRect(x: 0, y: -242, width: 360, height: 610),
+            viewportHeight: 360
+        ), "Small bounce/layout differences stay inside the fixed edge tolerance")
+        XCTAssertFalse(Gesture.transcriptIsAtLatest(
+            contentFrame: CGRect(x: 0, y: -200, width: 360, height: 610),
+            viewportHeight: 360
+        ), "A learner who has scrolled up must retain normal transcript scrolling")
+        XCTAssertFalse(Gesture.transcriptIsAtLatest(
+            contentFrame: .null,
+            viewportHeight: 360
+        ))
+        XCTAssertFalse(Gesture.transcriptIsAtLatest(
+            contentFrame: CGRect(x: 0, y: 0, width: 360, height: 180),
+            viewportHeight: 0
+        ))
+    }
+
+    func testCollapsedLiveCallKeepsTopicTranscriptAndControlsBehindInteraction() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = root.appendingPathComponent("StudyMate/Views/VoiceTutorView.swift")
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw XCTSkip("Source-contract check requires the local repository; render tests run on iPhone.")
+        }
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let compactStart = try XCTUnwrap(source.range(of: "private func compactCall(in geometry:"))
+        let expandedStart = try XCTUnwrap(source.range(of: "private func expandedCall(in geometry:"))
+        let compact = String(source[compactStart.lowerBound..<expandedStart.lowerBound])
+
+        XCTAssertTrue(compact.contains("callOrb(diameter:"))
+        XCTAssertFalse(compact.contains("Text(topic)"))
+        XCTAssertFalse(compact.contains("Text(discoveryPrompt)"))
+        XCTAssertFalse(compact.contains("transcriptAffordance"))
+        XCTAssertFalse(compact.contains("expandedTime"))
+        XCTAssertFalse(compact.contains("expandedControls"))
     }
 
     @MainActor
