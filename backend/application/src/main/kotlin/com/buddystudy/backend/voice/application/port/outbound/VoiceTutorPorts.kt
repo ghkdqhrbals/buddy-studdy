@@ -102,6 +102,7 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
         occurredAt: Instant,
         maxSessionCharacters: Int,
         maxSessionTurns: Int,
+        lessonRevision: Long = 0,
     ): Boolean
 
     suspend fun transcript(userId: Long, sessionId: String, maxCharacters: Int): List<VoiceTutorTranscriptTurn>
@@ -336,6 +337,7 @@ data class VoiceTutorRelayTermination(
 /**
  * Server-to-server realtime provider boundary. The caller owns client framing and
  * persistence; the adapter owns provider credentials, transport, and protocol setup.
+ * The callback returns true only when this exact transcript was newly persisted.
  */
 interface VoiceTutorRealtimePort {
     suspend fun relay(
@@ -346,6 +348,6 @@ interface VoiceTutorRealtimePort {
             raw: String,
             persist: Boolean,
             forwardToClient: Boolean,
-        ) -> Unit,
+        ) -> Boolean,
     )
 }

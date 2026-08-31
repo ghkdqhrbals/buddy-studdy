@@ -265,7 +265,7 @@ final class VoiceTutorViewModel: ObservableObject {
     var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
     var quotaReservedSeconds: Int { sessionQuota.reservedSeconds }
 
-    let study: BackendStudyRoom
+    @Published private(set) var study: BackendStudyRoom
 
     private let appState: AppState
     private let audioEngine: VoiceTutorAudioEngine
@@ -1023,7 +1023,7 @@ final class VoiceTutorViewModel: ObservableObject {
             // This is not a disconnected call. Keep native capture/output alive
             // and show a small retry hint after the tutor finishes speaking.
             inputNeedsRepeat = true
-        case .studyTreeChanged(let studyID):
+        case .studyTreeChanged(let studyID), .studyTreeUpdated(let studyID):
             // A confirmed server-side MCP write refreshes only that node's
             // metadata. Keep the socket receive/audio path non-blocking and
             // never replace a learner's current question or answer draft.
@@ -1037,7 +1037,17 @@ final class VoiceTutorViewModel: ObservableObject {
                             connection.isCurrent() && self?.phase.isLive == true && self?.isFinalizing == false
                     }
                 )
+                if self.connectionAttemptFence.isCurrent(attemptID), connection.isCurrent(), self.phase.isLive,
+                   self.study.id == studyID, let updated = self.appState.backendStudyRoom(id: studyID) {
+                    self.study = VoiceTutorCreatedStudyMetadata.merging(updated, with: self.study)
+                }
             }
+        case .studyTreeDeleted(let studyIDs):
+            guard phase.isLive, connectionAttemptFence.isCurrent(attemptID),
+                  connection.isCurrent(), !isFinalizing else { break }
+            // Apply the tombstone immediately, before an older metadata fetch can
+            // return. This is not a hang-up or a request to discard an answer draft.
+            appState.applyVoiceTutorDeletedStudies(studyIDs: studyIDs)
         case .serviceError(let code, _, _):
             switch code?.uppercased() {
             case "VOICE_TUTOR_PRO_REQUIRED":

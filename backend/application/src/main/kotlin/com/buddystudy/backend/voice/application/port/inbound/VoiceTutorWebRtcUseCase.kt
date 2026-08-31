@@ -27,7 +27,7 @@ interface VoiceTutorWebRtcUseCase {
             raw: String,
             persist: Boolean,
             forwardToClient: Boolean,
-        ) -> Unit,
+        ) -> Boolean,
     )
 
     suspend fun hangup(callId: String)

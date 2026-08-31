@@ -16,6 +16,7 @@ import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.voice.domain.VoiceStudyLearningRecord
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import com.buddystudy.voice.domain.VoiceTutorExploration
+import com.buddystudy.voice.domain.VoiceTutorStudyRevisionLimits
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
@@ -48,9 +49,9 @@ class VoiceStudyLearningRecordPersistenceAdapter(
     ) {
         // Same session-first lock order as result completion; retries never overwrite existing evidence.
         val header = database.sql(
-            "select id, user_id, study_id, language from voice_tutor_sessions where id = :sessionId and user_id = :userId and ended_at is not null for update",
+            "select id, user_id, accepted_study_id, language from voice_tutor_sessions where id = :sessionId and user_id = :userId and ended_at is not null for update",
         ).bind("sessionId", sessionId).bind("userId", userId).map { row, _ ->
-            Triple(row.get("id", String::class.java)!!, (row.get("study_id") as? Number)?.toLong(), row.get("language", String::class.java)!!)
+            Triple(row.get("id", String::class.java)!!, (row.get("accepted_study_id") as? Number)?.toLong(), row.get("language", String::class.java)!!)
         }.one().awaitSingleOrNull() ?: return
         val result = database.sql(
             "select learning_records_projected_at from voice_tutor_results where session_id = :sessionId and status = 'COMPLETED'",
@@ -64,11 +65,11 @@ class VoiceStudyLearningRecordPersistenceAdapter(
         val snapshots = snapshots(userId, sessionId)
         val ownedStudyIds = if (snapshots.isEmpty()) emptySet() else {
             database.sql("select id from studies where user_id = :userId and id in (:ids)")
-                .bind("userId", userId).bind("ids", snapshots.map { it.studyId })
+                .bind("userId", userId).bind("ids", snapshots.map { it.studyId }.distinct())
                 .map { row, _ -> (row.get("id") as Number).toLong() }.all().collectList().awaitSingle().toSet()
         }
         val records = VoiceStudyLearningRecordProjector.project(
-            userId = userId, sessionId = header.first, selectedStudyId = header.second, language = header.third,
+            userId = userId, sessionId = header.first, acceptedStudyId = header.second, language = header.third,
             explorations = explorations, transcript = transcript(sessionId), snapshots = snapshots,
             ownedStudyIds = ownedStudyIds, detectLanguage = languageDetector::detect,
         )
@@ -218,12 +219,19 @@ class VoiceStudyLearningRecordPersistenceAdapter(
 
     private suspend fun snapshots(userId: Long, sessionId: String): List<VoiceTutorStudySnapshot> = database.sql(
         """
-        select v.study_id, v.parent_study_id, v.topic, v.difficulty from voice_tutor_study_snapshots v
+        select v.study_id, v.parent_study_id, v.topic, v.difficulty, v.revision from (
+            select session_id, study_id, parent_study_id, topic, difficulty, captured_at, 0 as revision
+            from voice_tutor_study_snapshots where session_id = :sessionId
+            union all
+            select session_id, study_id, parent_study_id, topic, difficulty, captured_at, revision
+            from voice_tutor_study_revisions where session_id = :sessionId
+        ) v
         join voice_tutor_sessions s on s.id = v.session_id
-        where s.id = :sessionId and s.user_id = :userId order by v.captured_at, v.study_id limit 64
+        where s.id = :sessionId and s.user_id = :userId
+        order by v.revision, v.captured_at, v.study_id limit ${VoiceTutorStudyRevisionLimits.MAX_HISTORY_SNAPSHOTS}
         """.trimIndent(),
     ).bind("sessionId", sessionId).bind("userId", userId).map { row, _ ->
-        VoiceTutorStudySnapshot(row.long("study_id"), (row.get("parent_study_id") as? Number)?.toLong(), row.string("topic"), row.int("difficulty"))
+        VoiceTutorStudySnapshot(row.long("study_id"), (row.get("parent_study_id") as? Number)?.toLong(), row.string("topic"), row.int("difficulty"), row.long("revision"))
     }.all().collectList().awaitSingle()
 
     private suspend fun transcript(sessionId: String): List<VoiceTutorTranscriptTurn> = database.sql(
@@ -232,7 +240,7 @@ class VoiceStudyLearningRecordPersistenceAdapter(
         VoiceTutorTranscriptTurn(
             row.long("id"), row.string("session_id"), row.string("provider_item_id"),
             VoiceTutorTranscriptRole.valueOf(row.string("role")), row.string("transcript"),
-            row.long("sequence_number"), row.instant("occurred_at"),
+            row.long("sequence_number"), row.instant("occurred_at"), row.long("lesson_revision"),
         )
     }.all().collectList().awaitSingle()
 

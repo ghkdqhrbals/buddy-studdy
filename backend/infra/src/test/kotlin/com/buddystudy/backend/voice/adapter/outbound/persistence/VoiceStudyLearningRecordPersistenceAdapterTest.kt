@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Independent H2/MySQL-mode contracts, not an execution of MySQL Flyway DDL or its locking engine.
- * JSON uses CLOB; relevant V97/V102/V103 unique/check/cascade constraints are mirrored explicitly.
+ * JSON uses CLOB; relevant V97/V102/V103/V104 unique/check/cascade constraints are mirrored explicitly.
  * The fake outbox writes real SQL through the same transaction context. No containers, sockets,
  * accounts, model calls, ordinary question tables or quota tables participate.
  */
@@ -75,10 +75,12 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         """.trimIndent())
         executeSchema("""
             create table voice_tutor_sessions (
-                id varchar(36) primary key, user_id bigint not null, study_id bigint,
+                id varchar(36) primary key, user_id bigint not null, study_id bigint, accepted_study_id bigint,
                 language varchar(8) not null, ended_at timestamp(6), result_status varchar(24) not null,
                 updated_at timestamp(6) not null,
-                foreign key (user_id) references users(id) on delete cascade
+                foreign key (user_id) references users(id) on delete cascade,
+                foreign key (study_id) references studies(id) on delete set null,
+                check (accepted_study_id is null or accepted_study_id > 0)
             )
         """.trimIndent())
         executeSchema("""
@@ -100,13 +102,23 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
             )
         """.trimIndent())
         executeSchema("""
+            create table voice_tutor_study_revisions (
+                session_id varchar(36) not null, revision bigint not null,
+                study_id bigint not null, parent_study_id bigint,
+                topic varchar(255) not null, difficulty int not null, captured_at timestamp(6) not null,
+                primary key (session_id, revision),
+                foreign key (session_id) references voice_tutor_sessions(id) on delete cascade,
+                check (study_id > 0), check (revision > 0), check (difficulty between 1 and 10)
+            )
+        """.trimIndent())
+        executeSchema("""
             create table voice_tutor_transcript_turns (
                 id bigint primary key, session_id varchar(36) not null, provider_item_id varchar(191) not null,
                 role varchar(16) not null, transcript clob not null, sequence_number bigint not null,
-                occurred_at timestamp(6) not null,
+                occurred_at timestamp(6) not null, lesson_revision bigint not null default 0,
                 unique (session_id, provider_item_id, role), unique (session_id, sequence_number),
                 foreign key (session_id) references voice_tutor_sessions(id) on delete cascade,
-                check (role in ('USER', 'TUTOR'))
+                check (role in ('USER', 'TUTOR')), check (lesson_revision >= -1)
             )
         """.trimIndent())
         executeSchema("""
@@ -504,6 +516,78 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         }
     }
 
+    @Test
+    fun `versioned transcript persistence projects old pending answer and new question at their own captured levels`(): Unit = runBlocking {
+        seed()
+        val revised = fixture.snapshots().last().copy(topic = "Renamed eviction", difficulty = 8, revision = 1)
+        seedRevision(revised)
+        execute("update studies set topic = 'Renamed eviction', difficulty_level = 8 where id = 11")
+        // The first tutor question was created at epoch zero; every subsequent event is newer.
+        execute("update voice_tutor_transcript_turns set lesson_revision = 1 where id >= 2")
+        val merged = fixture.exploration().copy(topic = revised.topic, exchanges = listOf(fixture.exchange(), fixture.learnerQuestion()))
+        append(listOf(merged))
+        val ids = database.sql("select id from voice_study_learning_records order by question_turn_id")
+            .map { row, _ -> (row.get("id") as Number).toLong() }.all().collectList().awaitSingle()
+        val records = adapter.findAllOwned(7, ids).sortedBy { it.questionTurnId }
+        assertThat(records).hasSize(2)
+        assertThat(records.map { it.questionTurnId }).containsExactly(1, 5)
+        assertThat(records.map { it.topic }).containsExactly(fixture.TOPIC, revised.topic)
+        assertThat(records.map { it.difficulty }).containsExactly(3, 8)
+        assertThat(records.first().question).isEqualTo(fixture.turns()[0].transcript)
+        assertThat(records.first().answer).isEqualTo(fixture.turns()[1].transcript + "\n" + fixture.turns()[2].transcript)
+        assertThat(records.first().score).isEqualTo(85)
+        assertThat(records.last().score).isNull()
+        assertThat(outbox.events()).hasSize(4)
+        append(listOf(merged))
+        assertThat(adapter.findAllOwned(7, ids).sortedBy { it.questionTurnId }).isEqualTo(records)
+        assertThat(count("voice_tutor_study_snapshots")).isEqualTo(3)
+        assertThat(count("voice_tutor_study_revisions")).isEqualTo(1)
+        assertThat(outbox.events()).hasSize(4)
+    }
+
+    @Test
+    fun `deleting selected study nulls only its live FK and preserves root anchoring for a surviving sibling`(): Unit = runBlocking {
+        seed()
+        val sibling = VoiceTutorStudySnapshot(12, 1, "Queues", 4)
+        seedStudy(sibling)
+        seedSnapshot(sibling)
+        execute("delete from studies where id in (10, 11)")
+        val anchor = database.sql("select study_id, accepted_study_id from voice_tutor_sessions")
+            .map { row, _ -> (row.get("study_id") as? Number)?.toLong() to (row.get("accepted_study_id") as? Number)?.toLong() }
+            .one().awaitSingle()
+        assertThat(anchor.first).isNull()
+        assertThat(anchor.second).isEqualTo(10)
+        append(listOf(fixture.exploration().copy(studyId = 12, topic = sibling.topic)))
+        assertThat(onlyRecord().studyId).isEqualTo(12)
+        assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
+        assertThat(count("voice_tutor_study_snapshots")).isEqualTo(4)
+    }
+
+    @Test
+    fun `unknown and future persisted question epochs leave private source in session without enqueueing node translations`(): Unit = runBlocking {
+        seed()
+        for (revision in listOf(-1L, 1L)) {
+            execute("update voice_tutor_transcript_turns set lesson_revision = $revision where id = 1")
+            clearProjectionMarker()
+            append()
+            assertThat(count("voice_study_learning_records")).isZero()
+            assertThat(outbox.events()).isEmpty()
+            assertThat(projected()).isTrue()
+            assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
+        }
+    }
+
+    @Test
+    fun `a legacy missing accepted anchor is not reconstructed from mutable or matching live metadata`(): Unit = runBlocking {
+        seed()
+        execute("update voice_tutor_sessions set accepted_study_id = null")
+        append()
+        assertThat(count("voice_study_learning_records")).isZero()
+        assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
+        assertThat(projected()).isTrue()
+        assertThat(outbox.events()).isEmpty()
+    }
+
     private suspend fun seed(resultStatus: String = "COMPLETED") {
         execute("insert into users(id, status) values (7, 'ACTIVE')")
         for (snapshot in fixture.snapshots()) seedStudy(snapshot)
@@ -511,11 +595,11 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         for (snapshot in fixture.snapshots()) seedSnapshot(snapshot)
         for (turn in fixture.turns()) {
             database.sql("""
-                insert into voice_tutor_transcript_turns(id, session_id, provider_item_id, role, transcript, sequence_number, occurred_at)
-                values (:id, :sessionId, :provider, :role, :text, :sequence, :occurred)
+                insert into voice_tutor_transcript_turns(id, session_id, provider_item_id, role, transcript, sequence_number, occurred_at, lesson_revision)
+                values (:id, :sessionId, :provider, :role, :text, :sequence, :occurred, :revision)
             """.trimIndent()).bind("id", turn.id).bind("sessionId", fixture.SESSION_ID).bind("provider", turn.providerItemId)
                 .bind("role", turn.role.name).bind("text", turn.transcript).bind("sequence", turn.sequenceNumber)
-                .bind("occurred", turn.occurredAt.utc()).fetch().rowsUpdated().awaitSingle()
+                .bind("occurred", turn.occurredAt.utc()).bind("revision", turn.lessonRevision).fetch().rowsUpdated().awaitSingle()
         }
     }
 
@@ -526,8 +610,8 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         userId: Long = 7,
     ) {
         var sessionInsert = database.sql("""
-            insert into voice_tutor_sessions(id, user_id, study_id, language, ended_at, result_status, updated_at)
-            values (:id, :userId, 10, 'ko', :ended, :status, :now)
+            insert into voice_tutor_sessions(id, user_id, study_id, accepted_study_id, language, ended_at, result_status, updated_at)
+            values (:id, :userId, 10, 10, 'ko', :ended, :status, :now)
         """.trimIndent()).bind("id", sessionId).bind("userId", userId).bind("status", resultStatus).bind("now", now.utc())
         sessionInsert = if (ended) sessionInsert.bind("ended", now.utc()) else sessionInsert.bindNull("ended", LocalDateTime::class.java)
         sessionInsert.fetch().rowsUpdated().awaitSingle()
@@ -555,6 +639,16 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
             values (:sessionId, :id, :parent, :topic, :difficulty, :now)
         """.trimIndent()).bind("sessionId", fixture.SESSION_ID).bind("id", snapshot.studyId)
             .bind("topic", snapshot.topic).bind("difficulty", snapshot.difficulty).bind("now", now.minusSeconds(60).utc())
+        query = snapshot.parentStudyId?.let { query.bind("parent", it) } ?: query.bindNull("parent", Long::class.javaObjectType)
+        query.fetch().rowsUpdated().awaitSingle()
+    }
+
+    private suspend fun seedRevision(snapshot: VoiceTutorStudySnapshot) {
+        var query = database.sql("""
+            insert into voice_tutor_study_revisions(session_id, revision, study_id, parent_study_id, topic, difficulty, captured_at)
+            values (:sessionId, :revision, :id, :parent, :topic, :difficulty, :now)
+        """.trimIndent()).bind("sessionId", fixture.SESSION_ID).bind("revision", snapshot.revision).bind("id", snapshot.studyId)
+            .bind("topic", snapshot.topic).bind("difficulty", snapshot.difficulty).bind("now", now.minusSeconds(10).utc())
         query = snapshot.parentStudyId?.let { query.bind("parent", it) } ?: query.bindNull("parent", Long::class.javaObjectType)
         query.fetch().rowsUpdated().awaitSingle()
     }

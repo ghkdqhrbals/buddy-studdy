@@ -5,6 +5,7 @@ import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyChangeKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.reactor.mono
@@ -25,7 +26,9 @@ internal fun voiceTutorMcpToolRelay(
             toolError("INVALID_ARGUMENTS", "Tool arguments must be a bounded JSON object.")
         } else {
             try {
-                withTimeout(executionTimeoutMillis) { tools.execute(context, call.name, call.arguments) }
+                withTimeout(executionTimeoutMillis) {
+                    tools.execute(context.copy(dialogueBoundary = controller.mutationDialogueBoundary()), call.name, call.arguments)
+                }
             } catch (_: TimeoutCancellationException) {
                 // A timed-out write may have committed. Never automatically
                 // replay it or tell the learner it definitely failed/succeeded.
@@ -37,11 +40,19 @@ internal fun voiceTutorMcpToolRelay(
             }
         }
         if (!controller.completeToolExecution(call.callId, result)) return@mono
-        val studyId = result.createdStudyId?.takeIf { it > 0 }
-        if (!result.isError && result.studyTreeChanged && studyId != null && controller.acceptsInputEvents()) {
+        val studyId = (result.changedStudyId ?: result.createdStudyId)?.takeIf { it > 0 }
+        val kind = result.changeKind ?: result.createdStudyId?.let { VoiceTutorStudyChangeKind.CREATED }
+        val validDeletion = kind != VoiceTutorStudyChangeKind.DELETED ||
+            (result.deletedStudyIds.size in 1..128 && studyId in result.deletedStudyIds &&
+                result.deletedStudyIds.all { it > 0 } && result.deletedStudyIds.distinct().size == result.deletedStudyIds.size)
+        if (!result.isError && result.studyTreeChanged && studyId != null && kind != null && validDeletion && controller.acceptsInputEvents()) {
             onProviderEvent(
                 JsonMapperProvider.mapper.writeValueAsString(
-                    mapOf("type" to VoiceTutorRealtimeContract.STUDY_TREE_CHANGED_EVENT, "studyId" to studyId),
+                    mapOf(
+                        "type" to VoiceTutorRealtimeContract.STUDY_TREE_CHANGED_EVENT,
+                        "studyId" to studyId, "change" to kind.name.lowercase(),
+                        "deletedStudyIds" to result.deletedStudyIds,
+                    ),
                 ),
                 false,
                 true,

@@ -6,6 +6,7 @@ import com.buddystudy.backend.learningcontext.application.model.LearningContextP
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
@@ -115,6 +116,31 @@ class BuddyStudyMcpAdapter(
                 buddyStudy.getStudy(principal, args.long("study_id"), args.string("language", "ko"))
             },
             tool(
+                name = "update_study",
+                title = "Update a study name or level",
+                description = "Patch only the name and/or configured difficulty of one existing owned study node after the user asks to change it. Include at least one of topic or difficulty_level; omitted fields stay unchanged and null is not accepted. The node ID, parent, schedule, activation, model, notification preferences and existing question/answer or voice history are never replaced. This does not create a study, generate a question, grade an answer or consume question quota.",
+                schema = objectSchema(
+                    properties = linkedMapOf(
+                        "study_id" to idProperty("Exact owned study node ID to update; never identify a target by name alone."),
+                        "topic" to stringProperty("New study topic. Omit to preserve the current name.", minLength = 1, maxLength = 255),
+                        "difficulty_level" to integerProperty("New configured difficulty from 1 to 10. Omit to preserve the current level.", 1, 10),
+                    ),
+                    required = listOf("study_id"),
+                ).toMutableMap().apply { put("minProperties", 2) },
+                readOnly = false,
+                destructive = true,
+                idempotent = true,
+            ) { principal, args ->
+                buddyStudy.updateStudy(
+                    principal,
+                    args.long("study_id"),
+                    UpdateStudyCommand(
+                        topic = args.optionalString("topic"),
+                        difficultyLevel = args.optionalInt("difficulty_level"),
+                    ),
+                )
+            },
+            tool(
                 name = "create_study",
                 title = "Create a root study",
                 description = "Create or update a root study. This never creates a question and never consumes question quota.",
@@ -176,11 +202,19 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "delete_study",
                 title = "Delete a study subtree",
-                description = "Permanently delete an owned study and every descendant topic. Existing question records are retained without a study link. Set confirm=true only after explicit user confirmation.",
+                description = "Permanently delete an owned study and every descendant topic. Existing question records are retained without a study link and original voice learning history is retained. Set confirm=true only after explicit user confirmation. Optionally pass the exact confirmed subtree IDs in expected_study_ids; if the subtree has changed, nothing is deleted and fresh confirmation is required.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "study_id" to idProperty("Root of the subtree to delete."),
                         "confirm" to booleanProperty("Must be true after explicit user confirmation."),
+                        "expected_study_ids" to arrayProperty(
+                            "Exact confirmed subtree IDs including study_id. A mismatch prevents deletion.",
+                            idProperty("Confirmed study node ID."),
+                            maxItems = 128,
+                        ).toMutableMap().apply {
+                            put("minItems", 1)
+                            put("uniqueItems", true)
+                        },
                     ),
                     required = listOf("study_id", "confirm"),
                 ),
@@ -188,7 +222,7 @@ class BuddyStudyMcpAdapter(
                 destructive = true,
                 idempotent = true,
             ) { principal, args ->
-                buddyStudy.deleteStudy(principal, args.long("study_id"), args.boolean("confirm"))
+                buddyStudy.deleteStudy(principal, args.long("study_id"), args.boolean("confirm"), args.optionalLongList("expected_study_ids"))
             },
             tool(
                 name = "list_pending_questions",
@@ -613,6 +647,16 @@ class BuddyStudyMcpAdapter(
 
         fun int(name: String, default: Int): Int = optionalNumber(name)?.toInt() ?: default
 
+        fun optionalInt(name: String): Int? = optionalNumber(name)?.let { value ->
+            try {
+                java.math.BigDecimal(value.toString()).intValueExact()
+            } catch (_: IllegalArgumentException) {
+                throw McpArgumentException("$name must be an integer.")
+            } catch (_: ArithmeticException) {
+                throw McpArgumentException("$name must be an integer.")
+            }
+        }
+
         fun long(name: String): Long =
             optionalNumber(name)?.toLong() ?: throw McpArgumentException("$name is required.")
 
@@ -631,6 +675,21 @@ class BuddyStudyMcpAdapter(
                 item as? String ?: throw McpArgumentException("$name[$index] must be a string.")
             }
             else -> throw McpArgumentException("$name must be an array of strings.")
+        }
+
+        fun optionalLongList(name: String): List<Long>? = when (val value = values[name]) {
+            null -> if (values.containsKey(name)) throw McpArgumentException("$name must be an array of integers.") else null
+            is List<*> -> value.mapIndexed { index, item ->
+                val number = item as? Number ?: throw McpArgumentException("$name[$index] must be an integer.")
+                try {
+                    java.math.BigDecimal(number.toString()).longValueExact()
+                } catch (_: IllegalArgumentException) {
+                    throw McpArgumentException("$name[$index] must be an integer.")
+                } catch (_: ArithmeticException) {
+                    throw McpArgumentException("$name[$index] must be an integer.")
+                }
+            }
+            else -> throw McpArgumentException("$name must be an array of integers.")
         }
 
         fun optionalInstant(name: String): Instant? = optionalString(name)?.let { value ->

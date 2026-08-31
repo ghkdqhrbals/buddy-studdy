@@ -4,6 +4,7 @@ import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import com.buddystudy.voice.domain.VoiceTutorExploration
 import com.buddystudy.voice.domain.VoiceTutorLearningExchange
 import com.buddystudy.voice.domain.VoiceTutorSession
+import com.buddystudy.voice.domain.VoiceTutorStudyRevisionIndex
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
@@ -28,29 +29,34 @@ internal object VoiceTutorExplorationEvidence {
             .groupBy(VoiceTutorTranscriptTurn::id)
             .filterValues { it.size == 1 }
             .mapValues { it.value.single() }
-        val snapshots = studies.filter { it.studyId > 0 && it.difficulty in 1..10 && it.topic.isNotBlank() }
-            .groupBy(VoiceTutorStudySnapshot::studyId)
-            .filterValues { it.distinct().size == 1 }
-            .mapValues { it.value.first() }
+        val snapshots = VoiceTutorStudyRevisionIndex(studies)
         val seenQuestions = mutableSetOf<Long>()
-        return explorations.mapNotNull { exploration ->
+        return explorations.flatMap { exploration ->
             val exchanges = exploration.exchanges.mapNotNull { exchange ->
                 verifyExchange(exchange, turns)?.takeIf { seenQuestions.add(it.questionTurnId) }
             }
-            if (exchanges.isEmpty()) return@mapNotNull null
+            if (exchanges.isEmpty()) return@flatMap emptyList()
             val topic = plain(exploration.topic)
             val depth = plain(exploration.depthSummary)
-            if (topic.isBlank() || depth.isBlank()) return@mapNotNull null
-            val snapshot = exploration.studyId?.let(snapshots::get)
-                ?.takeIf { plain(it.topic) == topic }
-            exploration.copy(
-                topic = topic,
-                // A discussed but unsaved topic is valid; a guessed study identity/level is not.
-                studyId = snapshot?.studyId,
-                difficulty = snapshot?.difficulty,
-                depthSummary = depth,
-                exchanges = exchanges,
-            )
+            if (topic.isBlank() || depth.isBlank()) return@flatMap emptyList()
+            // A model may collect two levels of the same saved node into one topic group. Validate
+            // the identity/name against captured metadata, then let EACH QUESTION's server epoch
+            // choose the version. A later answer, feedback, rename or ASR arrival is not an epoch.
+            val knownStudyId = exploration.studyId?.takeIf { id ->
+                snapshots.knownVersions(id).any { plain(it.topic) == topic }
+            }
+            exchanges.groupBy { exchange ->
+                knownStudyId?.let { snapshots.resolve(it, requireNotNull(turns[exchange.questionTurnId]).lessonRevision) }
+            }.map { (snapshot, versionExchanges) ->
+                exploration.copy(
+                    topic = snapshot?.let { plain(it.topic) } ?: topic,
+                    // Unsaved/uncertain identity remains in the session but never invents a node level.
+                    studyId = snapshot?.studyId,
+                    difficulty = snapshot?.difficulty,
+                    depthSummary = depth,
+                    exchanges = versionExchanges,
+                )
+            }
         }
     }
 

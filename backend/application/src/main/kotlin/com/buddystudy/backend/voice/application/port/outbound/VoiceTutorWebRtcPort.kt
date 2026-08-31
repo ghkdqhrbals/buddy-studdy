@@ -27,6 +27,7 @@ interface VoiceTutorWebRtcPort {
         onProviderCallCreated: suspend (callId: String) -> Unit,
     ): VoiceTutorWebRtcAnswer
 
+    /** Callback true means this exact transcript was newly persisted, not merely forwarded. */
     suspend fun relaySideband(
         context: VoiceTutorWebRtcControlContext,
         clientEvents: Flow<String>,
@@ -35,7 +36,7 @@ interface VoiceTutorWebRtcPort {
             raw: String,
             persist: Boolean,
             forwardToClient: Boolean,
-        ) -> Unit,
+        ) -> Boolean,
     )
 
     suspend fun hangup(callId: String)
@@ -54,7 +55,7 @@ object UnavailableVoiceTutorWebRtcPort : VoiceTutorWebRtcPort {
         context: VoiceTutorWebRtcControlContext,
         clientEvents: Flow<String>,
         terminalEvents: Flow<VoiceTutorRelayTermination>,
-        onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
+        onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
     ) = unavailable()
 
     override suspend fun hangup(callId: String) = Unit

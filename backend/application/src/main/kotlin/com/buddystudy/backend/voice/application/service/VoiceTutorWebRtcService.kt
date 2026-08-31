@@ -13,6 +13,8 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorControlC
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcAnswer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcCleanupPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcPort
@@ -36,6 +38,7 @@ class VoiceTutorWebRtcService(
     private val cleanup: VoiceTutorWebRtcCleanupPort,
     private val properties: BuddyStudyProperties,
     private val clock: Clock = Clock.systemUTC(),
+    private val studyContexts: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
 ) : VoiceTutorWebRtcUseCase {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -158,15 +161,19 @@ class VoiceTutorWebRtcService(
         if (session.status != VoiceTutorSessionStatus.ACTIVE) throw conflict()
         val callId = session.providerSessionId?.takeIf(PROVIDER_CALL_ID::matches) ?: throw conflict()
         if (!now.isBefore(session.hardEndsAt)) throw conflict()
+        // Resolve before acquiring the claim: failed context storage must not
+        // leave behind an otherwise attachable control connection reservation.
+        val lessonRevision = studyContexts.currentRevision(registered.userId, id)
+        check(lessonRevision >= 0) { "Voice Tutor lesson revision was invalid." }
         if (!controlClaims.claim(registered.userId, id, normalizedConnectionId, now)) throw conflict()
-        return VoiceTutorWebRtcControlContext(session, callId, registered)
+        return VoiceTutorWebRtcControlContext(session, callId, registered, lessonRevision)
     }
 
     override suspend fun relaySideband(
         context: VoiceTutorWebRtcControlContext,
         clientEvents: Flow<String>,
         terminalEvents: Flow<VoiceTutorRelayTermination>,
-        onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
+        onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
     ) = realtime.relaySideband(context, clientEvents, terminalEvents, onProviderEvent)
 
     override suspend fun hangup(callId: String) {

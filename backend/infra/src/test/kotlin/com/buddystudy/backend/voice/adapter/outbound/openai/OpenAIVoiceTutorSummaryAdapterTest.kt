@@ -248,6 +248,83 @@ class OpenAIVoiceTutorSummaryAdapterTest {
         assertThat(source!!.path("transcriptTruncated").booleanValue()).isTrue()
     }
 
+    @Test
+    fun `summary keeps old pending question and next question separate after rename and level change even when live FK is gone`() = runBlocking<Unit> {
+        val old = VoiceTutorStudySnapshot(43, 42, "Redis eviction", 7)
+        val revised = old.copy(topic = "Advanced eviction", difficulty = 9, revision = 1)
+        val history = listOf(VoiceTutorStudySnapshot(42, null, "Accepted root", 3), old, revised)
+        val raw = mapper.readTree(lessonResult()) as com.fasterxml.jackson.databind.node.ObjectNode
+        val topic = raw.path("explorations")[0] as com.fasterxml.jackson.databind.node.ObjectNode
+        topic.put("topic", revised.topic)
+        topic.put("difficulty", 9)
+        val exchanges = topic.path("exchanges") as com.fasterxml.jackson.databind.node.ArrayNode
+        val next = (exchanges[0] as com.fasterxml.jackson.databind.node.ObjectNode).deepCopy()
+        next.put("questionTurnId", 4)
+        next.putArray("answerTurnIds").add(5)
+        next.putArray("feedbackTurnIds").add(6)
+        exchanges.add(next)
+        val transcript = lessonTurns().map { if (it.id == 1L) it else it.copy(lessonRevision = 1) } +
+            lessonTurns().map { it.copy(id = it.id + 3, providerItemId = "second-${it.providerItemId}", sequenceNumber = it.sequenceNumber + 3, lessonRevision = 1) }
+        var source: JsonNode? = null
+        val properties = properties()
+        val provider = OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties, ExchangeFunction { request ->
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map {
+                    source = mapper.readTree(mapper.readTree(it).path("messages").last().path("content").textValue())
+                    response(envelope(raw.toString()))
+                }
+            })
+        }, immutableContext(history))
+
+        val result = provider.summarize(session().copy(studyId = null), transcript)
+
+        assertThat(result.explorations.map { it.topic }).containsExactly(old.topic, revised.topic)
+        assertThat(result.explorations.map { it.difficulty }).containsExactly(7, 9)
+        assertThat(result.explorations.map { it.exchanges.single().questionTurnId }).containsExactly(1, 4)
+        assertThat(result.explorations.flatMap { it.exchanges }.map { it.score }).containsExactly(85, 85)
+        assertThat(source!!.path("knownTopics").map { it.path("studyId").longValue() }).containsExactly(42, 43, 43)
+        assertThat(source!!.path("knownTopics").map { it.path("revision").longValue() }).containsExactly(0, 0, 1)
+        assertThat(source!!.path("transcriptTurns").map { it.path("lessonRevision").longValue() }).containsExactly(0, 1, 1, 1, 1, 1)
+    }
+
+    @Test
+    fun `all sixty four baselines and thirty two captured changes reach the summary instead of dropping revisions after row sixty four`() = runBlocking<Unit> {
+        val bases = (300L..363L).map { VoiceTutorStudySnapshot(it, null, "Synthetic topic $it", 3) }
+        val revisions = (1L..32L).map { bases.first().copy(topic = "Explicit version $it", revision = it) }
+        var source: JsonNode? = null
+        val properties = properties()
+        val provider = OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties, ExchangeFunction { request ->
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map {
+                    source = mapper.readTree(mapper.readTree(it).path("messages").last().path("content").textValue())
+                    response(envelope(result()))
+                }
+            })
+        }, immutableContext(bases + revisions))
+
+        provider.summarize(session().copy(studyId = 300, acceptedStudyId = 300), transcript())
+
+        assertThat(source!!.path("knownTopics").size()).isEqualTo(96)
+        assertThat(source!!.path("knownTopics").filter { it.path("revision").longValue() > 0 }.map { it.path("revision").longValue() })
+            .containsExactlyElementsOf((1L..32L).toList())
+    }
+
+    @Test
+    fun `unknown response epoch keeps a valid session summary but never adopts a model guessed study or level`() = runBlocking<Unit> {
+        val properties = properties()
+        val provider = OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties,
+            ExchangeFunction { Mono.just(response(envelope(lessonResult()))) },
+            immutableContext(listOf(VoiceTutorStudySnapshot(43, 42, "Redis eviction", 7))),
+        )
+        val result = provider.summarize(session(), lessonTurns().map { if (it.id == 1L) it.copy(lessonRevision = -1) else it })
+        assertThat(result.summaryMarkdown).isEqualTo("합성 학습 요약")
+        assertThat(result.explorations.single().studyId).isNull()
+        assertThat(result.explorations.single().difficulty).isNull()
+        assertThat(result.explorations.single().exchanges.single().questionTurnId).isEqualTo(1)
+    }
+
     private fun assertProviderFailure(error: Throwable?) {
         assertThat(error).isInstanceOf(ApiException::class.java)
         assertThat((error as ApiException).code).isEqualTo(ApiErrorCode.VOICE_TUTOR_PROVIDER_UNAVAILABLE)
@@ -256,6 +333,12 @@ class OpenAIVoiceTutorSummaryAdapterTest {
 
     private fun adapter(properties: BuddyStudyProperties = properties(), exchange: ExchangeFunction) =
         OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties, exchange)
+
+    private fun immutableContext(studies: List<VoiceTutorStudySnapshot>) = object : VoiceTutorStudyContextPort {
+        override suspend fun list(userId: Long, sessionId: String): List<VoiceTutorStudySnapshot> = studies
+        override suspend fun prepare(session: VoiceTutorSession): List<VoiceTutorStudySnapshot> = error("Summary must not recapture current metadata")
+        override suspend fun remember(userId: Long, sessionId: String, studyIds: List<Long>): List<VoiceTutorStudySnapshot> = error("Summary is read-only")
+    }
 
     private fun properties() = BuddyStudyProperties().apply {
         openai.userContentApiKey = "private-test-regular-key"

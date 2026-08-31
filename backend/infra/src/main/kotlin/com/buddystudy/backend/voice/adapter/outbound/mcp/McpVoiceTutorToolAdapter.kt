@@ -12,6 +12,9 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersiste
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAuthorizationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyChangeKind
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMutationConfirmationPort
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMutationConfirmationPort
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.fasterxml.jackson.databind.JsonNode
@@ -38,9 +41,11 @@ class McpVoiceTutorToolAdapter(
     private val objectMapper: ObjectMapper,
     private val clock: Clock = Clock.systemUTC(),
     private val studyContexts: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
+    private val confirmations: VoiceTutorMutationConfirmationPort = UnavailableVoiceTutorMutationConfirmationPort,
 ) : VoiceTutorMcpToolPort {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val validator by lazy { McpJsonSchemaValidatorProvider.create() }
+    private val deletionConfirmations = VoiceTutorDeletionConfirmations(clock)
     private val specifications by lazy {
         mcp.tools().filter { it.tool().name() in ALLOWED_TOOLS }.associateBy { it.tool().name() }
     }
@@ -51,10 +56,12 @@ class McpVoiceTutorToolAdapter(
             name = tool.name(),
             description = tool.description().orEmpty() + when (tool.name()) {
                 CREATE_TOPIC -> " In a voice call, the parent must be the current call's study or one of its descendants."
+                UPDATE_STUDY -> " In a voice call, update only the explicitly requested saved node in this call's verified tree; unspecified fields and past question levels are preserved."
+                DELETE_STUDY -> " In a voice call, first call with confirm=false to preview the exact subtree; ask the learner to confirm its name and descendant count, then wait for a new affirmative spoken turn before calling with confirm=true and the returned confirmation_token. Never skip the preview or reuse a token."
                 in LEARNING_HISTORY_TOOLS -> " In a voice call, read only nodes in the current call's verified study tree; history never changes the agreed lesson focus."
                 else -> ""
             },
-            parameters = tool.inputSchema().toMap(),
+            parameters = if (tool.name() == DELETE_STUDY) voiceDeletionSchema(tool.inputSchema().toMap()) else tool.inputSchema().toMap(),
         )
     }
 
@@ -72,10 +79,32 @@ class McpVoiceTutorToolAdapter(
             }
             // Use the SDK's existing validator, not its logging wrapper: validation errors
             // can contain private argument values and must never enter application logs.
-            if (!validator.validate(specification.tool().inputSchema(), arguments).valid()) {
+            if (toolName == DELETE_STUDY && (arguments.keys.any { it !in DELETE_ARGUMENTS } ||
+                    ("confirmation_token" in arguments && (arguments["confirmation_token"] !is String ||
+                        (arguments["confirmation_token"] as String).length !in 1..100)))
+            ) return failure("INVALID_ARGUMENTS", "Deletion requires the exact preview's confirmation token.")
+            val mcpArguments = if (toolName == DELETE_STUDY) arguments - "confirmation_token" else arguments
+            if (!validator.validate(specification.tool().inputSchema(), mcpArguments).valid()) {
                 return failure("INVALID_ARGUMENTS", "Arguments do not match this tool's input schema.")
             }
             if (!isAuthorized(context)) return inactiveCall()
+            if (toolName == UPDATE_STUDY || toolName == DELETE_STUDY) {
+                val studyId = (arguments.getValue("study_id") as Number).toLong()
+                if (!studyIsWithinCallTree(context, studyId)) {
+                    return if (!isAuthorized(context)) inactiveCall() else failure(
+                        "STUDY_SCOPE_DENIED", "Change only an exact owned node in this call's verified study tree; no change was made.",
+                    )
+                }
+                if (!isAuthorized(context)) return inactiveCall()
+                if (toolName == DELETE_STUDY) return deleteStudy(context, specification, arguments, studyId)
+                // Capture the pre-edit level first. Never overwrite the evidence for a
+                // question that is already awaiting an answer, even when its ASR is late.
+                val prepared = studyContexts.remember(context.session.userId, context.session.id, listOf(studyId))
+                if (prepared.none { it.studyId == studyId } || studyContexts.currentRevision(context.session.userId, context.session.id) >= 32) {
+                    return failure("LESSON_CONTEXT_UNAVAILABLE", "The change could not be safely prepared in this call. No study update was made; try in a later call or in study settings.")
+                }
+                if (!isAuthorized(context)) return inactiveCall()
+            }
             if (toolName == LIST_LEARNING_RECORDS) {
                 val studyId = (arguments.getValue("study_id") as Number).toLong()
                 if (!studyIsWithinCallTree(context, studyId)) {
@@ -93,10 +122,16 @@ class McpVoiceTutorToolAdapter(
                     )
                 }
                 // Ancestry may involve several suspended reads. Recheck immediately before
-                // the only permitted mutation, including logout/end events during those reads.
+                // a mutation, including logout/end events during those reads.
                 if (!isAuthorized(context)) return inactiveCall()
             }
             val result = invoke(context.principal!!, specification, arguments)
+            if (toolName == UPDATE_STUDY && result.isError() != true) {
+                val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
+                if (payload == null || positiveId(payload.path("id")) != (arguments["study_id"] as Number).toLong()) {
+                    return failure("UPDATE_RESULT_UNCONFIRMED", "The saved change's identity cannot be verified. Read saved studies before any retry; do not repeat the write automatically.")
+                }
+            }
             if (toolName in LEARNING_HISTORY_TOOLS) {
                 // Reads can suspend too: never return private history after the call or
                 // device authorization expired while the existing use case was running.
@@ -142,13 +177,17 @@ class McpVoiceTutorToolAdapter(
         ) return false
         val current = persistence.findSession(principal.userId, snapshot.id) ?: return false
         return current.id == snapshot.id && current.userId == principal.userId &&
-            current.status == VoiceTutorSessionStatus.ACTIVE && current.studyId == snapshot.studyId &&
+            current.status == VoiceTutorSessionStatus.ACTIVE && current.acceptedStudyId == snapshot.acceptedStudyId &&
+            (current.studyId == null || current.studyId == snapshot.acceptedStudyId) &&
             current.providerSessionId == context.callId && clock.instant().isBefore(current.hardEndsAt)
     }
 
     private suspend fun parentIsWithinCallStudy(context: VoiceTutorWebRtcControlContext, parentStudyId: Long): Boolean {
-        val callStudyId = context.session.studyId ?: return false
+        val callStudyId = context.session.acceptedStudyId ?: return false
         if (callStudyId <= 0) return false
+        // A selected study deleted during this call keeps an immutable lesson anchor,
+        // but that anchor must never authorize a new child under a nonexistent parent.
+        if (persistence.findSession(context.session.userId, context.session.id)?.studyId == null) return false
         val readStudy = specifications["get_study"] ?: return false
         var candidate = parentStudyId
         val visited = mutableSetOf<Long>()
@@ -173,7 +212,7 @@ class McpVoiceTutorToolAdapter(
     }
 
     private suspend fun studyIsWithinCallTree(context: VoiceTutorWebRtcControlContext, studyId: Long): Boolean {
-        val selectedId = context.session.studyId?.takeIf { it > 0 } ?: return false
+        val selectedId = context.session.acceptedStudyId?.takeIf { it > 0 } ?: return false
         val readStudy = specifications["get_study"] ?: return false
         // Per-operation only: every node comes from an owned read in this authorization
         // generation. Shared ancestors are not fetched twice, and no session snapshot is
@@ -205,7 +244,16 @@ class McpVoiceTutorToolAdapter(
             }
             return null
         }
-        val selectedRoot = rootOf(selectedId) ?: return false
+        var selectedRoot = rootOf(selectedId)
+        if (selectedRoot == null && persistence.findSession(context.session.userId, context.session.id)?.studyId == null) {
+            // Deleting the live selection must not revoke the call or grant another
+            // tree. Its captured parent path may identify a still-owned surviving root.
+            val saved = studyContexts.list(context.session.userId, context.session.id)
+            val tree = VoiceTutorLessonTreeContext.metadata(selectedId, currentSnapshots(saved))
+            val rootId = (tree["selectedRootStudyId"] as? Number)?.toLong()
+            if (tree["selectedPathComplete"] == true && rootId != null && rootOf(rootId) == rootId) selectedRoot = rootId
+        }
+        selectedRoot ?: return false
         return rootOf(studyId) == selectedRoot
     }
 
@@ -225,11 +273,121 @@ class McpVoiceTutorToolAdapter(
         return specification.callHandler().apply(transportContext, request).awaitSingle()
     }
 
+    private fun voiceDeletionSchema(original: Map<String, Any?>): Map<String, Any?> {
+        val properties = original["properties"] as? Map<*, *> ?: emptyMap<Any, Any>()
+        return original + mapOf(
+            "properties" to linkedMapOf(
+                "study_id" to properties["study_id"],
+                "confirm" to mapOf("type" to "boolean", "description" to "false previews only; true requires the learner's new explicit confirmation after hearing the preview."),
+                "confirmation_token" to mapOf("type" to "string", "minLength" to 1, "maxLength" to 100, "description" to "Exact token returned by this call's delete preview; omit when confirm=false."),
+            ),
+        )
+    }
+
+    private suspend fun deleteStudy(
+        context: VoiceTutorWebRtcControlContext,
+        specification: McpStatelessServerFeatures.AsyncToolSpecification,
+        arguments: Map<String, Any>,
+        studyId: Long,
+    ): VoiceTutorMcpToolResult {
+        if (arguments["confirm"] != true) {
+            val preview = deletionPreview(context, studyId) ?: return failure(
+                "DELETE_PREVIEW_UNAVAILABLE", "The complete owned subtree could not be verified within the 128-node voice limit. No deletion occurred; use the study-tree screen for this operation.",
+            )
+            if (!isAuthorized(context)) return inactiveCall()
+            val learnerTurn = confirmations.latestLearnerTurnId(context.session.userId, context.session.id)
+                ?: return failure("CONFIRMATION_REQUIRED", "Wait for the learner's explicit spoken deletion request before preparing a deletion.")
+            val ticket = deletionConfirmations.prepare(context, studyId, preview.ids, learnerTurn)
+                ?: return failure("CONFIRMATION_UNAVAILABLE", "Deletion confirmation is not available; no data was deleted.")
+            return VoiceTutorMcpToolResult(objectMapper.writeValueAsString(linkedMapOf(
+                "deleted" to false, "requiresConfirmation" to true, "studyId" to studyId,
+                "topic" to preview.topic, "descendantCount" to preview.ids.size - 1,
+                "totalStudyCount" to preview.ids.size, "confirmation_token" to ticket.token,
+                "expiresInSeconds" to 120,
+                "notice" to "Ask whether to delete this named study and ALL its counted descendant topics, then wait for a NEW explicit affirmative learner reply. Existing question/answer and voice session history are retained. This is only a preview; nothing was deleted. Never read the token aloud.",
+            )), isError = false)
+        }
+        val token = arguments["confirmation_token"] as? String
+            ?: return failure("CONFIRMATION_REQUIRED", "First preview with confirm=false, explain the exact subtree, and wait for a new explicit affirmative learner reply.")
+        val ticket = deletionConfirmations.consume(
+            context, studyId, token,
+            confirmations.latestLearnerTurnId(context.session.userId, context.session.id),
+        ) ?: return failure("CONFIRMATION_REQUIRED", "The preview is missing, expired, consumed, or lacks a new learner reply after the tutor's confirmation question. Do not delete; ask again with a fresh preview if needed.")
+        if (!isAuthorized(context)) return inactiveCall()
+        // The common MCP use case locks this owner and compares the complete set in
+        // the SAME transaction as deletion. Added children require a new preview.
+        val result = invoke(context.principal!!, specification, mapOf(
+            "study_id" to studyId, "confirm" to true, "expected_study_ids" to ticket.studyIds,
+        ))
+        if (result.isError() == true) return boundedResult(result, DELETE_STUDY)
+        val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
+        if (payload?.path("deleted")?.asBoolean() != true || positiveId(payload.path("studyId")) != studyId) {
+            return failure("DELETE_RESULT_UNCONFIRMED", "The delete result cannot be verified. Read saved studies before any retry; do not repeat the write automatically.")
+        }
+        return VoiceTutorMcpToolResult(
+            output = objectMapper.writeValueAsString(linkedMapOf(
+                "deleted" to true, "studyId" to studyId, "deletedStudyIds" to ticket.studyIds,
+                "voiceLessonDeletedStudyIds" to ticket.studyIds,
+                "voiceLessonSelectionDeleted" to (context.session.acceptedStudyId in ticket.studyIds),
+                "notice" to "The confirmed subtree was deleted. Keep existing transcripts and prior answers; stop asking or scoring new questions on deleted nodes. The call is still connected. Briefly acknowledge, then wait; only continue teaching after the learner chooses a verified surviving saved topic.",
+            )),
+            isError = false, studyTreeChanged = true, changedStudyId = studyId,
+            changeKind = VoiceTutorStudyChangeKind.DELETED, deletedStudyIds = ticket.studyIds,
+        )
+    }
+
+    private suspend fun deletionPreview(context: VoiceTutorWebRtcControlContext, studyId: Long): DeletionPreview? {
+        val readStudy = specifications["get_study"] ?: return null
+        val listStudies = specifications["list_studies"] ?: return null
+        val rootResult = invoke(context.principal!!, readStudy, mapOf("study_id" to studyId, "language" to context.session.language))
+        if (rootResult.isError() == true) return null
+        val root = rootResult.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) } ?: return null
+        if (positiveId(root.path("id")) != studyId || !root.path("topic").isTextual) return null
+        val ids = linkedSetOf(studyId)
+        val queue = ArrayDeque<Long>().apply { add(studyId) }
+        while (queue.isNotEmpty()) {
+            if (!isAuthorized(context)) return null
+            val parent = queue.removeFirst()
+            val result = invoke(context.principal!!, listStudies, mapOf(
+                "parent_study_id" to parent, "limit" to 129, "offset" to 0, "language" to context.session.language,
+            ))
+            if (result.isError() == true) return null
+            val page = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) } ?: return null
+            val children = page.path("studies")
+            val count = page.path("totalCount")
+            if (!children.isArray || !count.isIntegralNumber || !count.canConvertToLong() ||
+                count.longValue() != children.size().toLong() || children.size() + ids.size > 128 ||
+                !page.path("offset").isIntegralNumber || page.path("offset").asLong() != 0L
+            ) return null
+            for (child in children) {
+                val id = positiveId(child.path("id")) ?: return null
+                if (positiveId(child.path("parentStudyId")) != parent || !ids.add(id)) return null
+                queue.add(id)
+            }
+        }
+        return DeletionPreview(root.path("topic").asText().take(255), ids.toList())
+    }
+
+    private fun mutationResult(output: String, isError: Boolean, changed: Boolean, id: Long?, toolName: String) =
+        VoiceTutorMcpToolResult(
+            output, isError, changed, createdStudyId = id.takeIf { toolName == CREATE_TOPIC }, changedStudyId = id,
+            changeKind = if (!changed || id == null) null else if (toolName == UPDATE_STUDY) VoiceTutorStudyChangeKind.UPDATED else VoiceTutorStudyChangeKind.CREATED,
+        )
+
+    private fun currentSnapshots(snapshots: List<VoiceTutorStudySnapshot>) = snapshots.groupBy { it.studyId }
+        .values.map { versions -> versions.maxBy { it.revision } }
+
+    private fun positiveId(node: JsonNode): Long? = node.takeIf {
+        it.isIntegralNumber && it.canConvertToLong() && it.longValue() > 0
+    }?.longValue()
+
+    private data class DeletionPreview(val topic: String, val ids: List<Long>)
+
     private fun boundedResult(result: McpSchema.CallToolResult, toolName: String): VoiceTutorMcpToolResult {
         val isError = result.isError() == true
-        val changed = !isError && toolName == CREATE_TOPIC
+        val changed = !isError && toolName in setOf(CREATE_TOPIC, UPDATE_STUDY)
         val payload = result.structuredContent() ?: mapOf("content" to result.content())
-        val createdStudyId = if (changed) {
+        val changedStudyId = if (changed) {
             objectMapper.valueToTree<JsonNode>(payload).path("id")
                 .takeIf { it.isIntegralNumber && it.canConvertToLong() && it.longValue() > 0 }
                 ?.longValue()
@@ -238,7 +396,7 @@ class McpVoiceTutorToolAdapter(
         }
         val bytes = objectMapper.writeValueAsBytes(payload)
         if (bytes.size <= MAX_OUTPUT_BYTES) {
-            return VoiceTutorMcpToolResult(String(bytes, Charsets.UTF_8), isError, changed, createdStudyId)
+            return mutationResult(String(bytes, Charsets.UTF_8), isError, changed, changedStudyId, toolName)
         }
         if (changed) {
             // An existing child can carry a large inherited prompt. Keep the verified
@@ -249,17 +407,17 @@ class McpVoiceTutorToolAdapter(
                 source.get(field)?.let { compact.set<JsonNode>(field, it) }
             }
             compact.put("truncated", true)
-            compact.put("notice", "Topic creation succeeded. Only study-tree fields are included in this voice result.")
+            compact.put("notice", "The study change succeeded. Only study-tree fields are included in this voice result.")
             val compactBytes = objectMapper.writeValueAsBytes(compact)
             if (compactBytes.size <= MAX_OUTPUT_BYTES) {
-                return VoiceTutorMcpToolResult(String(compactBytes, Charsets.UTF_8), false, true, createdStudyId)
+                return mutationResult(String(compactBytes, Charsets.UTF_8), false, true, changedStudyId, toolName)
             }
         }
         return failure(
             "RESULT_TOO_LARGE",
             "The result exceeds the voice tool limit. Request a smaller page or a more specific study/topic filter. " +
                 "The result was not cut into partial JSON.",
-        ).copy(studyTreeChanged = changed, createdStudyId = createdStudyId)
+        ).copy(studyTreeChanged = changed, createdStudyId = changedStudyId.takeIf { toolName == CREATE_TOPIC }, changedStudyId = changedStudyId)
     }
 
     private suspend fun withLessonContext(
@@ -278,17 +436,23 @@ class McpVoiceTutorToolAdapter(
         var snapshots = emptyList<VoiceTutorStudySnapshot>()
         var savedTree = emptyList<VoiceTutorStudySnapshot>()
         try {
-            snapshots = studyContexts.remember(context.session.userId, context.session.id, ids)
-            savedTree = studyContexts.list(context.session.userId, context.session.id)
+            snapshots = if (toolName == UPDATE_STUDY) {
+                studyContexts.revise(context.session.userId, context.session.id, ids.single()).filter { it.studyId in ids }
+            } else studyContexts.remember(context.session.userId, context.session.id, ids)
+            savedTree = currentSnapshots(studyContexts.list(context.session.userId, context.session.id))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            // A study creation already committed. Do not turn metadata-cache failure into
-            // a false failed write that encourages the model to create the topic twice.
+            // The study write already committed. Never turn context-capture failure
+            // into a false failed write or replay a possibly successful mutation.
             logger.warn("voice_tutor_study_context_capture_failed errorType={}", error.javaClass.simpleName)
         }
         val frozenIds = snapshots.mapTo(mutableSetOf()) { it.studyId }
         payload.put("voiceLessonContextReady", nodes.size <= 32 && ids.all { it in frozenIds })
+        if (toolName == UPDATE_STUDY) {
+            payload.put("voiceLessonChangeApplies", if (ids.all { it in frozenIds }) "NEXT_QUESTION" else "NOT_PREPARED")
+            payload.put("notice", "Study settings were saved; completed and pending questions keep their original title and level. If lesson context is not ready, do not ask another question on this node or repeat the write.")
+        }
         payload.set<JsonNode>(
             "voiceLessonTopics",
             objectMapper.valueToTree(snapshots.map { snapshot ->
@@ -297,35 +461,38 @@ class McpVoiceTutorToolAdapter(
                     "parentStudyId" to snapshot.parentStudyId,
                     "topic" to snapshot.topic,
                     "difficulty" to snapshot.difficulty,
+                    "revision" to snapshot.revision,
                 )
             }),
         )
         payload.set<JsonNode>(
             "voiceLessonTree",
             objectMapper.valueToTree(VoiceTutorLessonTreeContext.metadata(
-                context.session.studyId, savedTree + snapshots, ids,
+                context.session.acceptedStudyId, currentSnapshots(savedTree + snapshots), ids,
             )),
         )
         val enriched = objectMapper.writeValueAsBytes(payload)
-        if (enriched.size <= MAX_OUTPUT_BYTES) return result.copy(output = String(enriched, Charsets.UTF_8))
+        val revisedResult = result.copy(lessonRevision = if (toolName == UPDATE_STUDY && ids.all { it in frozenIds })
+            (savedTree + snapshots).maxOfOrNull { it.revision } else null)
+        if (enriched.size <= MAX_OUTPUT_BYTES) return revisedResult.copy(output = String(enriched, Charsets.UTF_8))
         if (result.studyTreeChanged) {
             val compact = objectMapper.createObjectNode()
-            for (field in CREATED_TOPIC_FIELDS + listOf("voiceLessonTopics", "voiceLessonContextReady", "voiceLessonTree")) {
+            for (field in CREATED_TOPIC_FIELDS + listOf("voiceLessonTopics", "voiceLessonContextReady", "voiceLessonTree", "voiceLessonChangeApplies")) {
                 payload.get(field)?.let { compact.set<JsonNode>(field, it) }
             }
             compact.put("truncated", true)
-            compact.put("notice", "Topic creation succeeded. Only study-tree and lesson metadata are included.")
+            compact.put("notice", "Study change succeeded; prior questions keep their original level. Only study-tree and lesson metadata are included.")
             val compactBytes = objectMapper.writeValueAsBytes(compact)
-            if (compactBytes.size <= MAX_OUTPUT_BYTES) return result.copy(output = String(compactBytes, Charsets.UTF_8))
+            if (compactBytes.size <= MAX_OUTPUT_BYTES) return revisedResult.copy(output = String(compactBytes, Charsets.UTF_8))
             // Even an unusually large metadata capture must not imply that a
             // successful creation failed or that mutable live levels are frozen.
             return result.copy(output = objectMapper.writeValueAsString(mapOf(
-                "id" to result.createdStudyId,
+                "id" to result.changedStudyId,
                 "voiceLessonTopics" to emptyList<Any>(),
                 "voiceLessonContextReady" to false,
-                "voiceLessonTree" to VoiceTutorLessonTreeContext.metadata(context.session.studyId, emptyList()),
+                "voiceLessonTree" to VoiceTutorLessonTreeContext.metadata(context.session.acceptedStudyId, emptyList()),
                 "truncated" to true,
-                "notice" to "Topic creation succeeded; lesson metadata is not ready. Do not repeat creation.",
+                "notice" to "Study change succeeded; lesson metadata is not ready. Do not repeat the write or start a new question on this node.",
             )))
         }
         return failure("RESULT_TOO_LARGE", "Request a smaller study page to receive its lesson topic and difficulty metadata.")
@@ -340,6 +507,8 @@ class McpVoiceTutorToolAdapter(
 
     private companion object {
         const val CREATE_TOPIC = "create_study_topic"
+        const val UPDATE_STUDY = "update_study"
+        const val DELETE_STUDY = "delete_study"
         const val LIST_LEARNING_RECORDS = "list_study_learning_records"
         const val GET_VOICE_LEARNING_RECORD = "get_voice_learning_record"
         const val MAX_ARGUMENT_BYTES = 16 * 1_024
@@ -347,12 +516,13 @@ class McpVoiceTutorToolAdapter(
         const val MAX_OUTPUT_BYTES = 16 * 1_024
         const val MAX_ANCESTOR_READS = 32
         val ALLOWED_TOOLS = setOf(
-            "list_studies", "get_study", CREATE_TOPIC,
+            "list_studies", "get_study", CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY,
             "list_records", "get_record", LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD,
             "get_topic_stats", "get_study_growth",
         )
         val LEARNING_HISTORY_TOOLS = setOf(LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD)
-        val STUDY_CONTEXT_TOOLS = setOf("list_studies", "get_study", CREATE_TOPIC)
+        val STUDY_CONTEXT_TOOLS = setOf("list_studies", "get_study", CREATE_TOPIC, UPDATE_STUDY)
+        val DELETE_ARGUMENTS = setOf("study_id", "confirm", "confirmation_token")
         val CREATED_TOPIC_FIELDS = listOf(
             "id", "parentStudyId", "topic", "sortOrder", "difficultyLevel", "activeForQuestions", "enabled",
         )

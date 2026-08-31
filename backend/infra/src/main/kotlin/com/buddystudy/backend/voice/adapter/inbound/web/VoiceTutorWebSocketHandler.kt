@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.inbound.web
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
+import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata
 import com.buddystudy.backend.voice.application.model.VoiceTutorCreateSessionResponse
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorRelayUseCase
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
@@ -253,12 +254,11 @@ class VoiceTutorWebSocketHandler(
                     signalTerminal()
                     throw VoiceTutorProviderReportedException()
                 }
-                if (persist) {
-                    inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull()
-                }
+                val persisted = persist && inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull() == true
                 if (forwardToClient) {
                     decision.payload?.let(::emitProviderPayload)
                 }
+                persisted
             }
         }.then(audioAccounting.flush())
             .onErrorResume { error ->
@@ -340,13 +340,13 @@ class VoiceTutorWebSocketHandler(
             .onErrorResume { clientSession.close() }
     }
 
-    private fun inspectProviderEvent(principal: Principal, sessionId: String, raw: String): Mono<Void> {
-        val node = runCatching { mapper.readTree(raw) }.getOrNull() ?: return Mono.empty()
+    private fun inspectProviderEvent(principal: Principal, sessionId: String, raw: String): Mono<Boolean> {
+        val node = runCatching { mapper.readTree(raw) }.getOrNull() ?: return Mono.just(false)
         return when (node.path("type").asText()) {
             "session.created" -> {
                 val providerSessionId = node.path("session").path("id").asText()
-                if (providerSessionId.isBlank()) Mono.empty()
-                else mono { relay.attachProviderSession(principal, sessionId, providerSessionId) }.then()
+                if (providerSessionId.isBlank()) Mono.just(false)
+                else mono { relay.attachProviderSession(principal, sessionId, providerSessionId) }.thenReturn(false)
             }
             "conversation.item.input_audio_transcription.completed" -> appendTranscript(
                 principal,
@@ -354,6 +354,7 @@ class VoiceTutorWebSocketHandler(
                 node.path("item_id").asText(),
                 VoiceTutorTranscriptRole.USER,
                 node.path("transcript").asText(),
+                VoiceTutorTranscriptMetadata.lessonRevision(node),
             )
             "response.output_audio_transcript.done" -> appendTranscript(
                 principal,
@@ -361,8 +362,9 @@ class VoiceTutorWebSocketHandler(
                 node.path("item_id").asText().ifBlank { node.path("response_id").asText() },
                 VoiceTutorTranscriptRole.TUTOR,
                 node.path("transcript").asText(),
+                VoiceTutorTranscriptMetadata.lessonRevision(node),
             )
-            else -> Mono.empty()
+            else -> Mono.just(false)
         }
     }
 
@@ -372,12 +374,13 @@ class VoiceTutorWebSocketHandler(
         providerItemId: String,
         role: VoiceTutorTranscriptRole,
         transcript: String,
-    ): Mono<Void> = if (transcript.isBlank()) {
-        Mono.empty()
+        lessonRevision: Long,
+    ): Mono<Boolean> = if (transcript.isBlank()) {
+        Mono.just(false)
     } else {
         mono {
-            relay.appendTranscript(principal, sessionId, providerItemId, role, transcript, Instant.now())
-        }.then()
+            relay.appendTranscript(principal, sessionId, providerItemId, role, transcript, Instant.now(), lessonRevision)
+        }
     }
 
     private fun synthetic(type: String, sessionId: String, fields: Map<String, Any?>): String =

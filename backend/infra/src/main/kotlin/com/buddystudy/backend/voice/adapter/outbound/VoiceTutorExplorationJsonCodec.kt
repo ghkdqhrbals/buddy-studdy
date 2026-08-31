@@ -9,7 +9,7 @@ import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 
-/** The same bounded JSON shape crosses provider validation and durable result storage. */
+/** Provider groups stay small; the same shape can be split into bounded question epochs for storage. */
 internal object VoiceTutorExplorationJsonCodec {
     private val mapper = JsonMapperProvider.mapper.copy()
         .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
@@ -24,11 +24,13 @@ internal object VoiceTutorExplorationJsonCodec {
             invalid("EXPLORATIONS_JSON")
         }
         if (node == null || node.isNull) return emptyList()
-        return decodeNode(node)
+        return decodeNode(node, VoiceTutorExplorationLimits.MAX_STORED_EXPLORATIONS)
     }
 
-    fun decodeNode(node: JsonNode): List<VoiceTutorExploration> {
-        requireValid(node.isArray && node.size() <= VoiceTutorExplorationLimits.MAX_EXPLORATIONS, "EXPLORATIONS_SHAPE")
+    fun decodeNode(node: JsonNode): List<VoiceTutorExploration> = decodeNode(node, VoiceTutorExplorationLimits.MAX_EXPLORATIONS)
+
+    private fun decodeNode(node: JsonNode, maxExplorations: Int): List<VoiceTutorExploration> {
+        requireValid(node.isArray && node.size() <= maxExplorations, "EXPLORATIONS_SHAPE")
         checkSize(node.toString())
         var exchangeCount = 0
         return node.map { exploration ->
@@ -97,7 +99,7 @@ internal object VoiceTutorExplorationJsonCodec {
                 },
             )
         })
-        decode(json) // Enforce the same limits even for non-provider callers.
+        decode(json) // Enforce the storage bounds even for non-provider callers.
         return json
     }
 

@@ -132,7 +132,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
             raw: String,
             persist: Boolean,
             forwardToClient: Boolean,
-        ) -> Unit,
+        ) -> Boolean,
     ) {
         val validatedCallId = validateWebRtcCallId(context.callId)
         val providerUri = UriComponentsBuilder.fromUriString(OPENAI_REALTIME_SIDEBAND_URL)
@@ -161,6 +161,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
                 inputCoordinator = VoiceTutorInputTurnCoordinator(limits = inputAssessmentProperties),
                 toolsEnabled = mcpTools.definitions().isNotEmpty(),
+                initialLessonRevision = context.initialLessonRevision,
             )
             val terminal = terminalEvents.asFlux()
                 .next()
@@ -214,7 +215,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                     if (!disposition.persist && !disposition.forwardToClient) return@concatMap Mono.empty<Void>()
                     mono {
                         onProviderEvent(
-                            raw,
+                            turnController.providerEventForRelay(raw),
                             disposition.persist,
                             disposition.forwardToClient,
                         )
@@ -231,7 +232,10 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 assessment = inputAssessment,
                 onProviderEvent = onProviderEvent,
             )
-            val toolWork = voiceTutorMcpToolRelay(turnController, context, mcpTools, onProviderEvent)
+            val toolWork = voiceTutorMcpToolRelay(turnController, context, mcpTools, { raw, persist, forward ->
+                onProviderEvent(raw, persist, forward)
+                Unit
+            })
             val clientControls = turnController.clientEvents().concatMap { raw ->
                 mono { onProviderEvent(raw, false, true) }.then()
             }.then()

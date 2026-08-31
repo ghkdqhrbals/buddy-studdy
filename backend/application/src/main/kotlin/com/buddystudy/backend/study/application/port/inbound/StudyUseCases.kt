@@ -95,7 +95,9 @@ interface StudySyncUseCase {
         parentStudyId: Long,
         command: CreateStudyTopicCommand,
     ): StudyRoomResponse
-    suspend fun deleteStudy(principal: Principal, studyId: Long)
+    suspend fun updateStudy(principal: Principal, studyId: Long, command: UpdateStudyCommand): StudyRoomResponse =
+        throw UnsupportedOperationException("Metadata-only study updates are not supported.")
+    suspend fun deleteStudy(principal: Principal, studyId: Long, expectedStudyIds: List<Long>? = null)
 }
 
 interface StudyTreeUseCase {

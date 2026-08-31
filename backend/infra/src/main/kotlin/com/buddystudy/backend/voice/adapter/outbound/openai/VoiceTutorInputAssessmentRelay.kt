@@ -18,7 +18,7 @@ internal fun voiceTutorInputAssessmentRelay(
     userId: Long,
     language: String,
     assessment: VoiceTutorInputAssessmentUseCase,
-    onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
+    onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
 ): Mono<Void> = controller.inputActions().concatMap { action ->
     mono {
         when (action) {
@@ -48,8 +48,8 @@ internal fun voiceTutorInputAssessmentRelay(
                 // The exact accepted ASR is persisted before it can release a
                 // tutor response. Never rephrase it or replay a rejected item.
                 if (controller.canPublishInput(action.itemId)) {
-                    onProviderEvent(action.rawEvent, true, true)
-                    controller.confirmInputPublished(action.itemId)
+                    val persisted = onProviderEvent(controller.providerEventForRelay(action.rawEvent), true, true)
+                    controller.confirmInputPublished(action.itemId, persisted)
                 }
             }
             is VoiceTutorInputTurnCoordinator.Action.Retry -> {

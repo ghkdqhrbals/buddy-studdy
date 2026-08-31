@@ -121,6 +121,12 @@ enum class ApiErrorCode(
         "error.voice_tutor.provider_unavailable",
         "Voice Tutor is temporarily unavailable.",
     ),
+    STUDY_TREE_CHANGED(
+        HttpStatus.CONFLICT,
+        515,
+        "error.study.tree_changed",
+        "The study subtree changed. Review its current nodes and confirm again before deleting.",
+    ),
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),

@@ -6,12 +6,15 @@ import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpPort
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAuthorizationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMutationConfirmationPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyChangeKind
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
@@ -204,16 +207,19 @@ class McpVoiceTutorToolAdapterTest {
         val definitions = fixture.adapter.definitions()
 
         assertThat(definitions.map { it.name }).containsExactly(
-            "list_studies", "get_study", "create_study_topic",
+            "list_studies", "get_study", "update_study", "create_study_topic", "delete_study",
             "list_records", "get_record", "list_study_learning_records", "get_voice_learning_record",
             "get_topic_stats", "get_study_growth",
         )
         for (definition in definitions) {
             val original = fixture.catalog.single { it.tool().name() == definition.name }.tool()
-            assertThat(definition.parameters).isEqualTo(original.inputSchema())
+            if (definition.name != "delete_study") assertThat(definition.parameters).isEqualTo(original.inputSchema())
             assertThat(definition.description).startsWith(original.description())
         }
         assertThat(definitions.single { it.name == "create_study_topic" }.description).contains("descendants")
+        val deletion = mapper.valueToTree<JsonNode>(definitions.single { it.name == "delete_study" }.parameters)
+        assertThat(deletion.path("properties").has("confirmation_token")).isTrue()
+        assertThat(deletion.path("properties").has("expected_study_ids")).isFalse()
         assertThat(definitions.filter { it.name in setOf("list_study_learning_records", "get_voice_learning_record") })
             .allSatisfy { assertThat(it.description).contains("verified study tree") }
         fixture.adapter.definitions()
@@ -224,7 +230,7 @@ class McpVoiceTutorToolAdapterTest {
     @Test
     fun `node history and voice detail preserve source evidence and allow verified same tree siblings`(): Unit = runBlocking {
         val contextStore = ContextStore()
-        val fixture = Fixture(studyContexts = contextStore).apply { persistedSession = session().copy(studyId = 201L) }
+        val fixture = Fixture(studyContexts = contextStore).apply { persistedSession = session().copy(studyId = 201L, acceptedStudyId = 201L) }
         val page = mapOf(
             "items" to listOf(mapOf("id" to "voice:91", "source" to "VOICE_TUTOR", "studyId" to 202L,
                 "voiceRecord" to learningRecordPayload(202L))),
@@ -287,7 +293,7 @@ class McpVoiceTutorToolAdapterTest {
             assertThat(fixture.calls).hasSizeLessThanOrEqualTo(33)
             assertThat(fixture.calls.map { it.name }).containsOnly("get_study")
         }
-        val noStudy = Fixture().apply { persistedSession = session().copy(studyId = null) }
+        val noStudy = Fixture().apply { persistedSession = session().copy(studyId = null, acceptedStudyId = null) }
         assertCode(noStudy.adapter.execute(context().copy(session = noStudy.persistedSession!!), "list_study_learning_records", mapOf("study_id" to 101L)), "STUDY_SCOPE_DENIED")
         assertThat(noStudy.calls).isEmpty()
     }
@@ -443,6 +449,7 @@ class McpVoiceTutorToolAdapterTest {
             session().copy(id = "different-session"),
             session().copy(userId = 99L),
             session().copy(studyId = 999L),
+            session().copy(acceptedStudyId = 999L),
             session().copy(providerSessionId = "rtc_different"),
             session().copy(hardEndsAt = now),
         )
@@ -457,7 +464,7 @@ class McpVoiceTutorToolAdapterTest {
 
     @Test
     fun `all other existing MCP mutations remain unavailable in voice calls`(): Unit = runBlocking {
-        for (name in listOf("create_study", "delete_study", "request_question", "submit_answer", "update_my_learning_context", "unknown")) {
+        for (name in listOf("create_study", "request_question", "submit_answer", "update_my_learning_context", "unknown")) {
             val fixture = Fixture()
             assertCode(fixture.adapter.execute(context(), name, emptyMap()), "TOOL_NOT_ALLOWED")
             assertThat(fixture.catalogReads).isZero()
@@ -575,7 +582,7 @@ class McpVoiceTutorToolAdapterTest {
 
     @Test
     fun `a call with no study cannot create topics`(): Unit = runBlocking {
-        val fixture = Fixture().apply { persistedSession = session().copy(studyId = null) }
+        val fixture = Fixture().apply { persistedSession = session().copy(studyId = null, acceptedStudyId = null) }
         val result = fixture.adapter.execute(context().copy(session = fixture.persistedSession!!), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Streams"))
         assertCode(result, "STUDY_SCOPE_DENIED")
         assertThat(fixture.calls).isEmpty()
@@ -699,6 +706,203 @@ class McpVoiceTutorToolAdapterTest {
         }.isInstanceOf(CancellationException::class.java)
     }
 
+    @Test
+    fun `explicit update keeps node identity and captures a new question level after the saved write`(): Unit = runBlocking {
+        val contexts = ContextStore()
+        val fixture = mutationFixture(contexts)
+        val result = fixture.adapter.execute(context(), "update_study", mapOf("study_id" to 102L, "difficulty_level" to 6))
+        assertThat(result.isError).isFalse()
+        assertThat(result.changeKind).isEqualTo(VoiceTutorStudyChangeKind.UPDATED)
+        assertThat(result.createdStudyId).isNull()
+        assertThat(result.changedStudyId).isEqualTo(102)
+        assertThat(result.lessonRevision).isEqualTo(1)
+        assertThat(contexts.remembered).containsExactly(listOf(102L))
+        assertThat(contexts.revised).containsExactly(102)
+        assertThat(json(result).path("voiceLessonChangeApplies").asText()).isEqualTo("NEXT_QUESTION")
+        assertThat(json(result).path("voiceLessonTopics")[0].path("difficulty").asInt()).isEqualTo(6)
+        assertThat(fixture.calls.single { it.name == "update_study" }.arguments)
+            .isEqualTo(mapOf("study_id" to 102L, "difficulty_level" to 6))
+    }
+
+    @Test
+    fun `metadata capture failure keeps a confirmed update distinct from an unprepared lesson`(): Unit = runBlocking {
+        val contexts = ContextStore().apply { failRevision = true }
+        val fixture = mutationFixture(contexts)
+        val result = fixture.adapter.execute(context(), "update_study", mapOf("study_id" to 102L, "topic" to "Renamed cache"))
+        assertThat(result.isError).isFalse()
+        assertThat(result.studyTreeChanged).isTrue()
+        assertThat(result.changeKind).isEqualTo(VoiceTutorStudyChangeKind.UPDATED)
+        assertThat(result.lessonRevision).isNull()
+        assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
+        assertThat(json(result).path("voiceLessonChangeApplies").asText()).isEqualTo("NOT_PREPARED")
+        assertThat(result.output).doesNotContain("private-revision-detail")
+        assertThat(fixture.calls.count { it.name == "update_study" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `unprepared and revision capped calls cannot change settings`(): Unit = runBlocking {
+        for (contexts in listOf(UnavailableVoiceTutorStudyContextPort, ContextStore().apply { revision = 32 })) {
+            val fixture = mutationFixture(contexts)
+            assertCode(fixture.adapter.execute(context(), "update_study", mapOf("study_id" to 102L, "difficulty_level" to 6)), "LESSON_CONTEXT_UNAVAILABLE")
+            assertThat(fixture.calls.none { it.name == "update_study" }).isTrue()
+        }
+    }
+
+    @Test
+    fun `mutations cannot escape the verified owned call tree`(): Unit = runBlocking {
+        val fixture = mutationFixture()
+        for (name in listOf("update_study", "delete_study")) {
+            val arguments = if (name == "update_study") mapOf("study_id" to 900L, "difficulty_level" to 6)
+                else mapOf("study_id" to 900L, "confirm" to false)
+            assertCode(fixture.adapter.execute(context(), name, arguments), "STUDY_SCOPE_DENIED")
+        }
+        assertThat(fixture.calls.none { it.name in listOf("update_study", "delete_study") }).isTrue()
+    }
+
+    @Test
+    fun `delete requires a spoken preview and a newer learner confirmation then executes exactly once`(): Unit = runBlocking {
+        val fixture = mutationFixture()
+        assertCode(fixture.adapter.execute(context(), "delete_study", mapOf("study_id" to 101L, "confirm" to true)), "CONFIRMATION_REQUIRED")
+        val preview = fixture.adapter.execute(context(), "delete_study", mapOf("study_id" to 101L, "confirm" to false))
+        assertThat(preview.isError).isFalse()
+        assertThat(preview.studyTreeChanged).isFalse()
+        assertThat(json(preview).path("deleted").asBoolean()).isFalse()
+        assertThat(json(preview).path("descendantCount").asInt()).isEqualTo(2)
+        val arguments = mapOf("study_id" to 101L, "confirm" to true, "confirmation_token" to json(preview).path("confirmation_token").asText())
+        assertCode(fixture.adapter.execute(context(), "delete_study", arguments), "CONFIRMATION_REQUIRED")
+        fixture.learnerTurnId = 12 // A new utterance BEFORE a spoken preview is still not confirmation.
+        assertCode(fixture.adapter.execute(context(), "delete_study", arguments), "CONFIRMATION_REQUIRED")
+        fixture.tutorTurnId = 13
+        fixture.learnerTurnId = 14
+        val deleted = fixture.adapter.execute(confirmedContext(), "delete_study", arguments)
+        assertThat(deleted.isError).isFalse()
+        assertThat(deleted.changeKind).isEqualTo(VoiceTutorStudyChangeKind.DELETED)
+        assertThat(deleted.deletedStudyIds).containsExactly(101, 102, 103)
+        assertThat(deleted.changedStudyId).isEqualTo(101)
+        assertThat(json(deleted).path("voiceLessonSelectionDeleted").asBoolean()).isTrue()
+        assertThat(fixture.calls.single { it.name == "delete_study" }.arguments)
+            .containsEntry("expected_study_ids", listOf(101L, 102L, 103L))
+            .doesNotContainKey("confirmation_token")
+        assertCode(fixture.adapter.execute(confirmedContext(), "delete_study", arguments), "CONFIRMATION_REQUIRED")
+        assertThat(fixture.calls.count { it.name == "delete_study" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `changed deletion scope consumes the preview without falsely announcing success or replaying`(): Unit = runBlocking {
+        val fixture = mutationFixture()
+        val preview = fixture.adapter.execute(context(), "delete_study", mapOf("study_id" to 101L, "confirm" to false))
+        fixture.tutorTurnId = 13
+        fixture.learnerTurnId = 14
+        val ordinary = fixture.handler
+        fixture.handler = { name, args -> if (name == "delete_study") failure("STUDY_TREE_CHANGED") else ordinary(name, args) }
+        val arguments = mapOf("study_id" to 101L, "confirm" to true, "confirmation_token" to json(preview).path("confirmation_token").asText())
+        val result = fixture.adapter.execute(confirmedContext(), "delete_study", arguments)
+        assertCode(result, "STUDY_TREE_CHANGED")
+        assertThat(result.studyTreeChanged).isFalse()
+        assertCode(fixture.adapter.execute(confirmedContext(), "delete_study", arguments), "CONFIRMATION_REQUIRED")
+        assertThat(fixture.calls.count { it.name == "delete_study" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `incomplete cyclic malformed or oversized subtree cannot create a deletion preview`(): Unit = runBlocking {
+        for (page in listOf(
+            mapOf("studies" to emptyList<Any>(), "totalCount" to 1, "offset" to 0),
+            mapOf("studies" to listOf(mapOf("id" to 101L, "parentStudyId" to 101L)), "totalCount" to 1, "offset" to 0),
+            mapOf("studies" to listOf(mapOf("id" to 102L, "parentStudyId" to 999L)), "totalCount" to 1, "offset" to 0),
+            mapOf("studies" to (102L..230L).map { mapOf("id" to it, "parentStudyId" to 101L) }, "totalCount" to 129, "offset" to 0),
+        )) {
+            val fixture = mutationFixture()
+            val ordinary = fixture.handler
+            fixture.handler = { name, args -> if (name == "list_studies") success(page) else ordinary(name, args) }
+            assertCode(fixture.adapter.execute(context(), "delete_study", mapOf("study_id" to 101L, "confirm" to false)), "DELETE_PREVIEW_UNAVAILABLE")
+            assertThat(fixture.calls.none { it.name == "delete_study" }).isTrue()
+        }
+    }
+
+    @Test
+    fun `model supplied scope manifests and malformed confirmation tokens are rejected`(): Unit = runBlocking {
+        val fixture = mutationFixture()
+        for (extra in listOf(mapOf("expected_study_ids" to listOf(101L)), mapOf("confirmation_token" to 23), mapOf("confirmation_token" to "x".repeat(101)))) {
+            assertCode(fixture.adapter.execute(context(), "delete_study", mapOf("study_id" to 101L, "confirm" to true) + extra), "INVALID_ARGUMENTS")
+        }
+        assertThat(fixture.calls).isEmpty()
+    }
+
+    @Test
+    fun `deleting the selected live node preserves call authorization without granting a missing parent`(): Unit = runBlocking {
+        val fixture = mutationFixture().apply { persistedSession = session().copy(studyId = null, acceptedStudyId = 101L) }
+        val read = fixture.adapter.execute(context(), "list_studies", emptyMap())
+        assertThat(read.isError).isFalse()
+        assertCode(fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "New")), "STUDY_SCOPE_DENIED")
+        assertThat(fixture.calls.none { it.name == "create_study_topic" }).isTrue()
+    }
+
+    @Test
+    fun `deletion confirmation is bound to identity target fresh dialogue and expiry`() {
+        var instant = now
+        val clock = object : Clock() {
+            override fun getZone() = ZoneOffset.UTC
+            override fun withZone(zone: java.time.ZoneId) = this
+            override fun instant() = instant
+        }
+        val tickets = VoiceTutorDeletionConfirmations(clock)
+        val ticket = tickets.prepare(context(), 101, listOf(101, 102), 11)!!
+        assertThat(tickets.consume(confirmedContext(), 102, ticket.token, 14)).isNull()
+        assertThat(tickets.consume(confirmedContext().copy(callId = "another-call"), 101, ticket.token, 14)).isNull()
+        assertThat(tickets.consume(confirmedContext(), 101, ticket.token, 11)).isNull()
+        assertThat(tickets.consume(context(), 101, ticket.token, 14)).isNull()
+        instant = now.plusSeconds(120)
+        assertThat(tickets.consume(confirmedContext(), 101, ticket.token, 14)).isNull()
+        instant = now
+        val second = tickets.prepare(context(), 101, listOf(101), 11)!!
+        assertThat(tickets.consume(confirmedContext(), 101, second.token, 14)).isNotNull()
+        assertThat(tickets.consume(confirmedContext(), 101, second.token, 15)).isNull()
+    }
+
+    @Test
+    fun `late accepted ASR from speech before the confirmation question is not new consent`() {
+        val tickets = VoiceTutorDeletionConfirmations(Clock.fixed(now, ZoneOffset.UTC))
+        val ticket = tickets.prepare(context(), 101, listOf(101), 11)!!
+        val latePublication = confirmedContext().copy(dialogueBoundary = VoiceTutorDialogueBoundary(
+            responseGeneration = 4, latestAcceptedLearnerSpeechStartedOrder = 4,
+            precedingTutorSpeechStoppedOrder = 6, precedingSpokenResponseGeneration = 3,
+        ))
+        // The database assigns U14 AFTER T13, but its real speech began BEFORE
+        // the confirmation prompt finished. Later unapproved noise cannot change this order.
+        assertThat(tickets.consume(latePublication, 101, ticket.token, 14)).isNull()
+        val oldMixedAudio = confirmedContext().copy(dialogueBoundary = VoiceTutorDialogueBoundary(
+            responseGeneration = 4, latestAcceptedLearnerSpeechStartedOrder = 7,
+            precedingTutorSpeechStoppedOrder = 6, precedingSpokenResponseGeneration = 2,
+        ))
+        assertThat(tickets.consume(oldMixedAudio, 101, ticket.token, 14)).isNull()
+        assertThat(tickets.consume(confirmedContext(), 101, ticket.token, 15)).isNotNull()
+    }
+
+    private fun confirmedContext() = context().copy(dialogueBoundary = VoiceTutorDialogueBoundary(
+        responseGeneration = 4, latestAcceptedLearnerSpeechStartedOrder = 7,
+        precedingTutorSpeechStoppedOrder = 6, precedingSpokenResponseGeneration = 3,
+    ))
+
+    private fun mutationFixture(studyContexts: VoiceTutorStudyContextPort = ContextStore()) = Fixture(studyContexts = studyContexts).apply {
+        handler = { name, args ->
+            when (name) {
+                "get_study" -> {
+                    val id = (args.getValue("study_id") as Number).toLong()
+                    success(mapOf("id" to id, "parentStudyId" to if (id in 102L..103L) 101L else null,
+                        "topic" to "Cache", "difficultyLevel" to 3))
+                }
+                "list_studies" -> {
+                    val children = if (args["parent_study_id"] == 101L) listOf(102L, 103L) else emptyList()
+                    success(mapOf("studies" to children.map { mapOf("id" to it, "parentStudyId" to 101L) }, "totalCount" to children.size, "offset" to 0))
+                }
+                "update_study" -> success(mapOf("id" to args["study_id"], "topic" to (args["topic"] ?: "Cache"),
+                    "difficultyLevel" to (args["difficulty_level"] ?: 3), "parentStudyId" to 101L))
+                "delete_study" -> success(mapOf("deleted" to true, "studyId" to args["study_id"]))
+                else -> failure("UNEXPECTED_TOOL")
+            }
+        }
+    }
+
     private class Fixture(
         actualMcp: BuddyStudyMcpPort? = null,
         studyContexts: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
@@ -708,6 +912,8 @@ class McpVoiceTutorToolAdapterTest {
         var authorizationCalls = 0
         var persistenceCalls = 0
         var catalogReads = 0
+        var learnerTurnId: Long? = 11
+        var tutorTurnId: Long? = 10
         val calls = mutableListOf<Call>()
         var handler: (String, Map<String, Any>) -> McpSchema.CallToolResult = { _, _ -> success(mapOf("ok" to true)) }
         val catalog = BuddyStudyMcpAdapter(proxy<BuddyStudyMcpUseCase> { method, _ -> error("Unexpected direct call: $method") }, mapper).tools()
@@ -749,6 +955,10 @@ class McpVoiceTutorToolAdapterTest {
             objectMapper = mapper,
             clock = Clock.fixed(now, ZoneOffset.UTC),
             studyContexts = studyContexts,
+            confirmations = object : VoiceTutorMutationConfirmationPort {
+                override suspend fun latestLearnerTurnId(userId: Long, sessionId: String) = learnerTurnId
+                override suspend fun latestTutorTurnId(userId: Long, sessionId: String) = tutorTurnId
+            },
         )
     }
 
@@ -758,6 +968,17 @@ class McpVoiceTutorToolAdapterTest {
         var fail = false
         var failList = false
         var listReads = 0
+        var revision = 0L
+        var failRevision = false
+        val revised = mutableListOf<Long>()
+        override suspend fun currentRevision(userId: Long, sessionId: String) = revision
+        override suspend fun revise(userId: Long, sessionId: String, studyId: Long): List<VoiceTutorStudySnapshot> {
+            if (failRevision) throw IllegalStateException("private-revision-detail")
+            revised += studyId
+            val next = saved.getValue(studyId).copy(difficulty = 6, revision = ++revision)
+            saved[studyId] = next
+            return listOf(next)
+        }
         override suspend fun prepare(session: VoiceTutorSession) = emptyList<VoiceTutorStudySnapshot>()
         override suspend fun list(userId: Long, sessionId: String): List<VoiceTutorStudySnapshot> {
             assertThat(userId).isEqualTo(principal.userId)
@@ -792,7 +1013,13 @@ class McpVoiceTutorToolAdapterTest {
         val principal = Principal(userId = 7L, deviceId = "synthetic-device", sessionId = 11L, anonymous = false)
         val mapper = jacksonObjectMapper().findAndRegisterModules()
 
-        fun context() = VoiceTutorWebRtcControlContext(session(), "rtc_synthetic_call", principal)
+        fun context() = VoiceTutorWebRtcControlContext(
+            session(), "rtc_synthetic_call", principal,
+            dialogueBoundary = VoiceTutorDialogueBoundary(
+                responseGeneration = 2, latestAcceptedLearnerSpeechStartedOrder = 3,
+                precedingTutorSpeechStoppedOrder = 2, precedingSpokenResponseGeneration = 1,
+            ),
+        )
 
         fun session() = VoiceTutorSession(
             id = "00000000-0000-0000-0000-000000000007", userId = principal.userId, studyId = 101L,

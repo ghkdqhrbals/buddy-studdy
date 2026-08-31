@@ -36,6 +36,7 @@ enum StudyRoomDisplayPolicy {
 
 struct StudyRoomStateStore {
     private(set) var rooms: [BackendStudyRoom] = []
+    private var voiceDeletedStudyIDs = Set<Int>()
 
     var hasRooms: Bool {
         !rooms.isEmpty
@@ -46,7 +47,16 @@ struct StudyRoomStateStore {
     }
 
     mutating func replace(with rooms: [BackendStudyRoom]) {
-        self.rooms = rooms
+        self.rooms = rooms.filter { !voiceDeletedStudyIDs.contains($0.id) }
+    }
+
+    mutating func markVoiceDeleted(studyIDs: Set<Int>) {
+        voiceDeletedStudyIDs.formUnion(studyIDs.filter { $0 > 0 })
+        rooms.removeAll { voiceDeletedStudyIDs.contains($0.id) }
+    }
+
+    mutating func resetVoiceDeletionFence() {
+        voiceDeletedStudyIDs.removeAll()
     }
 
     func pendingQuestionCount(for category: StudyCategory) -> Int? {
@@ -123,6 +133,7 @@ struct StudyRoomStateStore {
     }
 
     mutating func upsertStudy(_ study: BackendStudyRoom) {
+        guard !voiceDeletedStudyIDs.contains(study.id) else { return }
         if let index = rooms.firstIndex(where: { $0.id == study.id }) {
             rooms[index] = study
         } else {

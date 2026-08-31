@@ -93,6 +93,8 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case userSpeechStopped
     case inputRetry
     case studyTreeChanged(studyID: Int)
+    case studyTreeUpdated(studyID: Int)
+    case studyTreeDeleted(studyIDs: Set<Int>)
     case responseStarted(responseID: String?, isTutorIntervention: Bool)
     case responseFinished(responseID: String?)
     case outputAudioBufferStarted(responseID: String?)
@@ -179,7 +181,24 @@ enum VoiceTutorRealtimeEventParser {
                   let studyID = Int(number.stringValue), studyID > 0 else {
                 return .ignored(type: type)
             }
-            return .studyTreeChanged(studyID: studyID)
+            if object["change"] == nil { return .studyTreeChanged(studyID: studyID) }
+            switch object["change"] as? String {
+            case "created": return .studyTreeChanged(studyID: studyID)
+            case "updated": return .studyTreeUpdated(studyID: studyID)
+            case "deleted":
+                guard let values = object["deletedStudyIds"] as? [Any],
+                      !values.isEmpty, values.count <= 128 else { return .ignored(type: type) }
+                var ids = Set<Int>()
+                for value in values {
+                    guard let number = value as? NSNumber,
+                          CFGetTypeID(number) != CFBooleanGetTypeID(),
+                          let id = Int(number.stringValue), id > 0,
+                          ids.insert(id).inserted else { return .ignored(type: type) }
+                }
+                guard ids.contains(studyID) else { return .ignored(type: type) }
+                return .studyTreeDeleted(studyIDs: ids)
+            default: return .ignored(type: type)
+            }
         case "buddystudy.voice.error":
             return .serviceError(
                 code: string("code", in: object),

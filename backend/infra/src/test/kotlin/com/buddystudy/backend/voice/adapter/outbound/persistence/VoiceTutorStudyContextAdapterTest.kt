@@ -67,6 +67,7 @@ class VoiceTutorStudyContextAdapterTest {
                 id varchar(36) primary key,
                 user_id bigint not null,
                 study_id bigint,
+                accepted_study_id bigint,
                 topic_snapshot varchar(255) not null,
                 difficulty_snapshot int not null,
                 status varchar(20) not null,
@@ -89,6 +90,22 @@ class VoiceTutorStudyContextAdapterTest {
                     references voice_tutor_sessions(id) on delete cascade,
                 constraint chk_voice_tutor_study_snapshot_id check (study_id > 0),
                 constraint chk_voice_tutor_study_snapshot_level check (difficulty between 1 and 10)
+            )
+            """.trimIndent(),
+        )
+        execute(
+            """
+            create table voice_tutor_study_revisions (
+                session_id varchar(36) not null,
+                revision bigint not null,
+                study_id bigint not null,
+                parent_study_id bigint,
+                topic varchar(255) not null,
+                difficulty int not null,
+                captured_at timestamp(6) not null,
+                primary key (session_id, revision),
+                foreign key (session_id) references voice_tutor_sessions(id) on delete cascade,
+                check (revision > 0), check (study_id > 0), check (difficulty between 1 and 10)
             )
             """.trimIndent(),
         )
@@ -448,10 +465,189 @@ class VoiceTutorStudyContextAdapterTest {
 
     @Test
     fun `production write entrypoints declare a transaction for the shared session lock`() {
-        for (name in listOf("prepare", "remember")) {
+        for (name in listOf("prepare", "remember", "revise")) {
             val method = VoiceTutorStudyContextAdapter::class.java.declaredMethods.single { it.name == name }
             assertThat(method.getAnnotation(Transactional::class.java)).describedAs(name).isNotNull()
         }
+    }
+
+    @Test
+    fun `explicit revision appends owned metadata and ordinary reads return its current view without rewriting baseline`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(10, topic = "Accepted Redis", difficulty = 6)
+        insertStudy(11, parentId = 10, topic = "First child", difficulty = 3)
+        val original = transaction { adapter.prepare(accepted) }
+        execute("update studies set topic = 'Renamed child', difficulty_level = 8 where id = 11")
+
+        val current = transaction { adapter.revise(7, accepted.id, 11) }
+
+        val revised = VoiceTutorStudySnapshot(11, 10, "Renamed child", 8, revision = 1)
+        assertThat(current.single { it.studyId == 11L }).isEqualTo(revised)
+        assertThat(adapter.list(7, accepted.id)).containsExactlyElementsOf(original + revised)
+        assertThat(transaction { adapter.remember(7, accepted.id, listOf(11)) }).containsExactly(revised)
+        assertThat(transaction { adapter.prepare(accepted) }).isEqualTo(current)
+        assertThat(adapter.currentRevision(7, accepted.id)).isEqualTo(1)
+        assertThat(adapter.currentRevision(99, accepted.id)).isZero()
+        assertThat(adapter.currentRevision(7, "missing")).isZero()
+        assertThat(snapshotCount()).isEqualTo(2)
+        assertThat(revisionCount()).isEqualTo(1)
+    }
+
+    @Test
+    fun `replayed unchanged revision is a no-op and later external changes are not adopted by remember`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(11, topic = "Original child", difficulty = 3)
+        transaction { adapter.remember(7, accepted.id, listOf(11)) }
+        assertThat(transaction { adapter.revise(7, accepted.id, 11) }.single().revision).isZero()
+        execute("update studies set difficulty_level = 8 where id = 11")
+        val first = transaction { adapter.revise(7, accepted.id, 11) }
+        assertThat(transaction { adapter.revise(7, accepted.id, 11) }).isEqualTo(first)
+        execute("update studies set difficulty_level = 9 where id = 11")
+        assertThat(transaction { adapter.remember(7, accepted.id, listOf(11)) }).isEqualTo(first)
+        assertThat(revisionCount()).isEqualTo(1)
+        assertThat(transaction { adapter.revise(7, accepted.id, 11) }.single().revision).isEqualTo(2)
+    }
+
+    @Test
+    fun `revision requires prior baseline and an active owned live node without fabricating first seen history`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(11)
+        insertStudy(12, userId = 99)
+        for (id in listOf(11L, 12L, 999L)) {
+            assertThat(runCatching { transaction { adapter.revise(7, accepted.id, id) } }.exceptionOrNull())
+                .isInstanceOf(IllegalStateException::class.java)
+        }
+        assertThat(snapshotCount()).isZero()
+        transaction { adapter.remember(7, accepted.id, listOf(11)) }
+        assertThat(runCatching { transaction { adapter.revise(99, accepted.id, 11) } }.exceptionOrNull())
+            .isInstanceOf(IllegalStateException::class.java)
+        execute("update studies set user_id = 99 where id = 11")
+        assertThat(runCatching { transaction { adapter.revise(7, accepted.id, 11) } }.exceptionOrNull())
+            .isInstanceOf(IllegalStateException::class.java)
+        execute("delete from studies where id = 11")
+        assertThat(runCatching { transaction { adapter.revise(7, accepted.id, 11) } }.exceptionOrNull())
+            .isInstanceOf(IllegalStateException::class.java)
+        execute("update voice_tutor_sessions set status = 'ENDING'")
+        assertThat(runCatching { transaction { adapter.revise(7, accepted.id, 11) } }.exceptionOrNull())
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(revisionCount()).isZero()
+        assertThat(adapter.list(7, accepted.id)).hasSize(1)
+    }
+
+    @Test
+    fun `all sixty four baselines and thirty two changes are retained while extra revisions fail explicitly`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        for (id in 100L..163L) insertStudy(id)
+        transaction { adapter.remember(7, accepted.id, (100L..131L).toList()) }
+        transaction { adapter.remember(7, accepted.id, (132L..163L).toList()) }
+        for (revision in 1..32) {
+            execute("update studies set topic = 'Revision $revision' where id = 100")
+            assertThat(transaction { adapter.revise(7, accepted.id, 100) }.single { it.studyId == 100L }.revision)
+                .isEqualTo(revision.toLong())
+        }
+        val current = transaction { adapter.revise(7, accepted.id, 100) }
+        assertThat(current).hasSize(64)
+        assertThat(adapter.list(7, accepted.id)).hasSize(96)
+        assertThat(snapshotCount()).isEqualTo(64)
+        assertThat(revisionCount()).isEqualTo(32)
+        execute("update studies set topic = 'Uncaptured over-limit change' where id = 100")
+        assertThat(runCatching { transaction { adapter.revise(7, accepted.id, 100) } }.exceptionOrNull())
+            .isInstanceOf(IllegalStateException::class.java).hasMessageContaining("limit")
+        assertThat(transaction { adapter.remember(7, accepted.id, listOf(100)) }.single().topic).isEqualTo("Revision 32")
+        assertThat(revisionCount()).isEqualTo(32)
+        assertThat(adapter.list(7, accepted.id).first { it.studyId == 100L }.topic).isEqualTo("Synthetic topic 100")
+    }
+
+    @Test
+    fun `revision checks the hard lease again after reading metadata including unchanged no-op attempts`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(11)
+        transaction { adapter.remember(7, accepted.id, listOf(11)) }
+        var readings = 0
+        val expiringClock = object : Clock() {
+            override fun getZone(): ZoneId = ZoneOffset.UTC
+            override fun withZone(zone: ZoneId): Clock = this
+            override fun instant(): Instant = if (readings++ == 0) now else accepted.hardEndsAt
+        }
+        val expiring = VoiceTutorStudyContextAdapter(database, expiringClock)
+        assertThat(runCatching { transaction { expiring.revise(7, accepted.id, 11) } }.exceptionOrNull())
+            .isInstanceOf(IllegalStateException::class.java).hasMessageContaining("expired")
+        assertThat(revisionCount()).isZero()
+    }
+
+    @Test
+    fun `nullable live study FK cannot erase accepted context and deleting a call cascades its revision ledger`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(10, topic = "Accepted Redis", difficulty = 6)
+        transaction { adapter.prepare(accepted) }
+        execute("update studies set difficulty_level = 8 where id = 10")
+        val changed = transaction { adapter.revise(7, accepted.id, 10) }
+        execute("delete from studies where id = 10")
+        execute("update voice_tutor_sessions set study_id = null")
+        assertThat(transaction { adapter.prepare(accepted.copy(studyId = null)) }).isEqualTo(changed)
+        assertThat(adapter.list(7, accepted.id)).hasSize(2)
+        execute("delete from voice_tutor_sessions")
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+    }
+
+    @Test
+    fun `a transaction rollback removes appended revisions but never touches first-seen snapshots`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(11, difficulty = 3)
+        val original = transaction { adapter.remember(7, accepted.id, listOf(11)) }
+        execute("update studies set difficulty_level = 8 where id = 11")
+        val failure = runCatching {
+            transaction {
+                adapter.revise(7, accepted.id, 11)
+                error("synthetic rollback")
+            }
+        }.exceptionOrNull()
+        assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+        assertThat(adapter.list(7, accepted.id)).isEqualTo(original)
+        assertThat(adapter.currentRevision(7, accepted.id)).isZero()
+    }
+
+    @Test
+    fun `concurrent node revisions share one monotonically increasing session epoch`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(11, difficulty = 3)
+        insertStudy(12, difficulty = 4)
+        transaction { adapter.remember(7, accepted.id, listOf(11, 12)) }
+        execute("update studies set difficulty_level = 8 where id in (11, 12)")
+        val inserted = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val first = async(Dispatchers.Default) {
+            transaction {
+                val result = adapter.revise(7, accepted.id, 11)
+                inserted.complete(Unit)
+                release.await()
+                result
+            }
+        }
+        try {
+            withTimeout(5_000) { inserted.await() }
+            val entered = CompletableDeferred<Unit>()
+            val second = async(Dispatchers.Default) {
+                transaction { entered.complete(Unit); adapter.revise(7, accepted.id, 12) }
+            }
+            withTimeout(5_000) { entered.await() }
+            assertThat(withTimeoutOrNull(100) { second.await() }).isNull()
+            release.complete(Unit)
+            assertThat(withTimeout(5_000) { first.await() }.single { it.studyId == 11L }.revision).isEqualTo(1)
+            assertThat(withTimeout(5_000) { second.await() }.single { it.studyId == 12L }.revision).isEqualTo(2)
+        } finally {
+            release.complete(Unit)
+        }
+        assertThat(adapter.list(7, accepted.id).map { it.revision }).containsExactly(0, 0, 1, 2)
     }
 
     private suspend fun <T : Any> transaction(block: suspend () -> T): T =
@@ -464,6 +660,9 @@ class VoiceTutorStudyContextAdapterTest {
     private fun Instant.utc(): LocalDateTime = LocalDateTime.ofInstant(this, ZoneOffset.UTC)
 
     private suspend fun snapshotCount(): Long = database.sql("select count(*) as count from voice_tutor_study_snapshots")
+        .map { row, _ -> (row.get("count") as Number).toLong() }.one().awaitSingle()
+
+    private suspend fun revisionCount(): Long = database.sql("select count(*) as count from voice_tutor_study_revisions")
         .map { row, _ -> (row.get("count") as Number).toLong() }.one().awaitSingle()
 
     private suspend fun insertStudy(
@@ -490,14 +689,16 @@ class VoiceTutorStudyContextAdapterTest {
         var insert = database.sql(
             """
             insert into voice_tutor_sessions
-                (id, user_id, study_id, topic_snapshot, difficulty_snapshot, status, hard_ends_at, ended_at)
-            values (:id, :userId, :studyId, :topic, :difficulty, :status, :hardEndsAt, :endedAt)
+                (id, user_id, study_id, accepted_study_id, topic_snapshot, difficulty_snapshot, status, hard_ends_at, ended_at)
+            values (:id, :userId, :studyId, :acceptedStudyId, :topic, :difficulty, :status, :hardEndsAt, :endedAt)
             """.trimIndent(),
         ).bind("id", session.id).bind("userId", session.userId).bind("topic", session.topic)
             .bind("difficulty", session.difficulty).bind("status", session.status.name)
             .bind("hardEndsAt", session.hardEndsAt.utc())
         insert = session.studyId?.let { insert.bind("studyId", it) }
             ?: insert.bindNull("studyId", java.lang.Long::class.java)
+        insert = session.acceptedStudyId?.let { insert.bind("acceptedStudyId", it) }
+            ?: insert.bindNull("acceptedStudyId", java.lang.Long::class.java)
         insert = session.endedAt?.let { insert.bind("endedAt", it.utc()) }
             ?: insert.bindNull("endedAt", LocalDateTime::class.java)
         insert.fetch().rowsUpdated().awaitSingle()

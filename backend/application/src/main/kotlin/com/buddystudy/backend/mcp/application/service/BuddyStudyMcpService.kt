@@ -23,6 +23,7 @@ import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerati
 import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
+import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -92,6 +93,10 @@ class BuddyStudyMcpService(
     override suspend fun getStudy(principal: Principal, studyId: Long, language: String) =
         studies.study(registered(principal), positiveId(studyId, "study_id"), language)
 
+    @RequirePermission(Permissions.STUDY_UPDATE)
+    override suspend fun updateStudy(principal: Principal, studyId: Long, command: UpdateStudyCommand) =
+        studies.updateStudy(registered(principal), positiveId(studyId, "study_id"), command)
+
     @RequirePermission(Permissions.STUDY_CREATE)
     override suspend fun createStudy(principal: Principal, command: CreateStudyCommand) =
         studies.createStudy(registered(principal), command)
@@ -104,13 +109,18 @@ class BuddyStudyMcpService(
     ) = studies.createStudyTopic(registered(principal), positiveId(parentStudyId, "parent_study_id"), command)
 
     @RequirePermission(Permissions.STUDY_DELETE)
-    override suspend fun deleteStudy(principal: Principal, studyId: Long, confirmed: Boolean): McpDeletionResponse {
+    override suspend fun deleteStudy(
+        principal: Principal,
+        studyId: Long,
+        confirmed: Boolean,
+        expectedStudyIds: List<Long>?,
+    ): McpDeletionResponse {
         requireRegistered(principal)
         if (!confirmed) {
             throw validation("confirm must be true before deleting a study subtree.")
         }
         val validatedStudyId = positiveId(studyId, "study_id")
-        studies.deleteStudy(principal, validatedStudyId)
+        studies.deleteStudy(principal, validatedStudyId, expectedStudyIds)
         return McpDeletionResponse(deleted = true, studyId = validatedStudyId)
     }
 

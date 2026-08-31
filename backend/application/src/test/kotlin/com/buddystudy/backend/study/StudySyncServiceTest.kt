@@ -7,6 +7,7 @@ import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
@@ -359,6 +360,178 @@ class StudySyncServiceTest {
         assertThat(questions.softDeletedQuestionIds).isEmpty()
     }
 
+    @Test
+    fun `topic and level patches preserve every unrelated setting and never touch question state`(): Unit = runBlocking {
+        val row = study(11, "Redis").apply {
+            parentStudyId = 10
+            sortOrder = 8
+            difficultyLevel = 3
+            intervalMinutes = 47
+            enabled = false
+            activeForQuestions = false
+            notificationSound = "bell.caf"
+            customPrompt = "Keep the existing instruction"
+            openaiModel = "fixture-model"
+            maxHistoryCount = 231
+            nextDueAt = Instant.parse("2026-09-01T10:01:00Z")
+            scheduleClaimedUntil = nextDueAt!!.plusSeconds(35)
+            lastSentAt = nextDueAt!!.minusSeconds(600)
+            lastError = "Existing scheduling state"
+        }
+        studies.rows += row
+        val original = unrelatedMetadata(row)
+        questions.pendingRows += pendingQuestion(111, 11, "Redis").apply { answer = "Unsubmitted draft" }
+        questions.completedRows += pendingQuestion(112, 11, "Redis").apply { answer = "Original answer"; score = 85 }
+
+        val renamed = service.updateStudy(principal, 11, UpdateStudyCommand(topic = "  Redis Streams  "))
+        assertThat(renamed.topic).isEqualTo("Redis Streams")
+        assertThat(renamed.difficultyLevel).isEqualTo(3)
+        val levelChanged = service.updateStudy(principal, 11, UpdateStudyCommand(difficultyLevel = 7))
+
+        assertThat(levelChanged.id).isEqualTo(11)
+        assertThat(levelChanged.topic).isEqualTo("Redis Streams")
+        assertThat(levelChanged.difficultyLevel).isEqualTo(7)
+        assertThat(unrelatedMetadata(row)).isEqualTo(original)
+        assertThat(studies.saveCalls).isZero()
+        assertThat(studies.metadataUpdateCalls).isEqualTo(2)
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
+        assertThat(questions.findLatestCompletedCalls).isZero()
+        assertThat(questionStats.findAllByIdsCalls).isZero()
+        assertThat(questions.pendingRows.single().answer).isEqualTo("Unsubmitted draft")
+        assertThat(questions.completedRows.single().topic).isEqualTo("Redis")
+        assertThat(questions.completedRows.single().score).isEqualTo(85)
+        assertThat(questions.softDeletedQuestionIds).isEmpty()
+    }
+
+    @Test
+    fun `metadata patch rejects invalid boundaries and reuses normalized owned topic uniqueness`(): Unit = runBlocking {
+        studies.rows += study(11, "Kotlin")
+        studies.rows += study(12, "Redis Streams")
+        studies.rows += study(99, "Foreign name").apply { userId = 99 }
+        val invalid = listOf(
+            0L to UpdateStudyCommand(topic = "Name"), 11L to UpdateStudyCommand(),
+            11L to UpdateStudyCommand(topic = "  \t"), 11L to UpdateStudyCommand(topic = "x".repeat(256)),
+            11L to UpdateStudyCommand(difficultyLevel = 0), 11L to UpdateStudyCommand(difficultyLevel = 11),
+        )
+        invalid.forEach { (id, command) ->
+            val error = runCatching { service.updateStudy(principal, id, command) }.exceptionOrNull() as ApiException
+            assertThat(error.code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        }
+        assertThat(studies.events).isEmpty()
+        val duplicate = runCatching {
+            service.updateStudy(principal, 11, UpdateStudyCommand(topic = "  REDIS \n STREAMS "))
+        }.exceptionOrNull() as ApiException
+        assertThat(duplicate.status).isEqualTo(HttpStatus.CONFLICT)
+        assertThat(studies.metadataUpdateCalls).isZero()
+        assertThat(service.updateStudy(principal, 11, UpdateStudyCommand(topic = "kotlin")).topic).isEqualTo("kotlin")
+        assertThat(service.updateStudy(principal, 11, UpdateStudyCommand(topic = "Foreign name")).id).isEqualTo(11)
+        val foreign = runCatching { service.updateStudy(principal, 99, UpdateStudyCommand(difficultyLevel = 4)) }
+            .exceptionOrNull() as ApiException
+        assertThat(foreign.code).isEqualTo(ApiErrorCode.STUDY_SETTINGS_MISSING)
+        assertThat(studies.rows.single { it.id == 99L }.difficultyLevel).isEqualTo(5)
+    }
+
+    @Test
+    fun `metadata patch returns the current partial update and rejects a disappeared node`(): Unit = runBlocking {
+        val row = study(11, "Redis")
+        studies.rows += row
+        studies.beforeMetadataUpdate = { row.customPrompt = "Concurrent preference"; row.intervalMinutes = 91 }
+
+        val result = service.updateStudy(principal, 11, UpdateStudyCommand(difficultyLevel = 4))
+
+        assertThat(result.customPrompt).isEqualTo("Concurrent preference")
+        assertThat(result.intervalMinutes).isEqualTo(91)
+        assertThat(result.difficultyLevel).isEqualTo(4)
+        assertThat(studies.saveCalls).isZero()
+        studies.beforeMetadataUpdate = { studies.rows.remove(row) }
+        val disappeared = runCatching { service.updateStudy(principal, 11, UpdateStudyCommand(topic = "New name")) }
+            .exceptionOrNull() as ApiException
+        assertThat(disappeared.status).isEqualTo(HttpStatus.NOT_FOUND)
+        assertThat(studies.rows).isEmpty()
+    }
+
+    @Test
+    fun `create child update and delete acquire the same owner fence before any study read`(): Unit = runBlocking {
+        val root = service.createStudy(principal, CreateStudyCommand(topic = "Root"))
+        assertThat(studies.events.first()).isEqualTo("lock:7")
+        studies.events.clear()
+        val child = service.createStudyTopic(principal, root.id, CreateStudyTopicCommand(topic = "Child"))
+        assertThat(studies.events.first()).isEqualTo("lock:7")
+        studies.events.clear()
+        service.updateStudy(principal, child.id, UpdateStudyCommand(topic = "Renamed"))
+        assertThat(studies.events.first()).isEqualTo("lock:7")
+        studies.events.clear()
+        service.deleteStudy(principal, child.id)
+        assertThat(studies.events.first()).isEqualTo("lock:7")
+        studies.events.clear()
+        studies.ownerAvailable = false
+        val failure = runCatching { service.updateStudy(principal, root.id, UpdateStudyCommand(difficultyLevel = 6)) }
+            .exceptionOrNull() as ApiException
+        assertThat(failure.code).isEqualTo(ApiErrorCode.ACCOUNT_FORBIDDEN)
+        assertThat(studies.events).containsExactly("lock:7")
+    }
+
+    @Test
+    fun `guarded deletion compares the complete subtree as a set and preserves existing records`(): Unit = runBlocking {
+        studies.rows += study(10, "Root")
+        studies.rows += study(11, "Child").apply { parentStudyId = 10 }
+        studies.rows += study(12, "Grandchild").apply { parentStudyId = 11 }
+        studies.rows += study(13, "Unrelated")
+        questions.completedRows += pendingQuestion(101, 11, "Child").apply { answer = "Prior answer"; score = 85 }
+
+        service.deleteStudy(principal, 10, expectedStudyIds = listOf(12L, 10L, 11L))
+
+        assertThat(studies.rows.map { it.id }).containsExactly(13L)
+        assertThat(studies.deleteCalls).isEqualTo(1)
+        assertThat(studies.events.first()).isEqualTo("lock:7")
+        assertThat(studies.subtreeLimit).isEqualTo(129)
+        assertThat(questions.completedRows.single().answer).isEqualTo("Prior answer")
+        assertThat(questions.completedRows.single().score).isEqualTo(85)
+        assertThat(questions.softDeletedQuestionIds).isEmpty()
+    }
+
+    @Test
+    fun `new descendant overflow cycle or foreign descendant prevents a guarded delete`(): Unit = runBlocking {
+        studies.rows += study(10, "Root")
+        studies.rows += study(11, "Child").apply { parentStudyId = 10 }
+        val changed = runCatching { service.deleteStudy(principal, 10, listOf(10L)) }.exceptionOrNull() as ApiException
+        assertThat(changed.code).isEqualTo(ApiErrorCode.STUDY_TREE_CHANGED)
+        studies.rows.single { it.id == 10L }.parentStudyId = 11
+        val cyclic = runCatching { service.deleteStudy(principal, 10, listOf(10L, 11L)) }.exceptionOrNull() as ApiException
+        assertThat(cyclic.code).isEqualTo(ApiErrorCode.STUDY_TREE_CHANGED)
+        studies.rows.single { it.id == 10L }.parentStudyId = null
+        studies.rows.single { it.id == 11L }.userId = 99
+        val foreign = runCatching { service.deleteStudy(principal, 10, listOf(10L)) }.exceptionOrNull() as ApiException
+        assertThat(foreign.code).isEqualTo(ApiErrorCode.STUDY_TREE_CHANGED)
+        studies.rows.clear()
+        studies.rows += study(1, "Big root")
+        (2L..129L).forEach { id -> studies.rows += study(id, "Child $id").apply { parentStudyId = 1 } }
+        val overflow = runCatching { service.deleteStudy(principal, 1, (1L..128L).toList()) }.exceptionOrNull() as ApiException
+        assertThat(overflow.code).isEqualTo(ApiErrorCode.STUDY_TREE_CHANGED)
+        assertThat(studies.deleteCalls).isZero()
+        assertThat(studies.rows).hasSize(129)
+    }
+
+    @Test
+    fun `guarded deletion rejects malformed confirmations before locking and reports a zero-row deletion`(): Unit = runBlocking {
+        studies.rows += study(10, "Root")
+        listOf(emptyList(), listOf(10L, 10L), listOf(0L, 10L), listOf(11L), (1L..129L).toList()).forEach { expected ->
+            val invalid = runCatching { service.deleteStudy(principal, 10, expected) }.exceptionOrNull() as ApiException
+            assertThat(invalid.code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        }
+        assertThat(studies.events).isEmpty()
+        studies.forceDeleteZero = true
+        val vanished = runCatching { service.deleteStudy(principal, 10, listOf(10L)) }.exceptionOrNull() as ApiException
+        assertThat(vanished.code).isEqualTo(ApiErrorCode.STUDY_SETTINGS_MISSING)
+        assertThat(questions.softDeletedQuestionIds).isEmpty()
+    }
+
+    private fun unrelatedMetadata(row: StudyEntity): List<Any?> = listOf(
+        row.id, row.deviceId, row.userId, row.parentStudyId, row.sortOrder, row.intervalMinutes,
+        row.enabled, row.activeForQuestions, row.notificationSound, row.customPrompt, row.openaiModel,
+        row.maxHistoryCount, row.nextDueAt, row.scheduleClaimedUntil, row.lastSentAt, row.lastError, row.createdAt,
+    )
+
     private fun study(id: Long, topic: String) = StudyEntity(
         id = id,
         deviceId = principal.deviceId,
@@ -386,6 +559,13 @@ class StudySyncServiceTest {
 
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
+        val events = mutableListOf<String>()
+        var ownerAvailable = true
+        var beforeMetadataUpdate: (() -> Unit)? = null
+        var metadataUpdateCalls = 0
+        var deleteCalls = 0
+        var forceDeleteZero = false
+        var subtreeLimit: Int? = null
         var findByParentCalls = 0
         var findByUserCalls = 0
         var findByUserAndQueryCalls = 0
@@ -393,6 +573,7 @@ class StudySyncServiceTest {
         var lastChildQuery: String? = null
         var lastChildPageable: Pageable? = null
         override suspend fun save(entity: StudyEntity): StudyEntity {
+            events += "save"
             saveCalls += 1
             if (entity.id == 0L) {
                 entity.id = (rows.maxOfOrNull { it.id } ?: 0L) + 1
@@ -400,9 +581,48 @@ class StudySyncServiceTest {
             }
             return entity
         }
-        override suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long = rows.removeAll { it.id == id && it.userId == userId }.let { if (it) 1 else 0 }
+        override suspend fun lockMutationOwner(userId: Long): Boolean {
+            events += "lock:$userId"
+            return ownerAvailable
+        }
+        override suspend fun updateTopicMetadata(id: Long, userId: Long, topic: String?, difficultyLevel: Int?, now: Instant): StudyEntity? {
+            events += "patch"
+            metadataUpdateCalls += 1
+            beforeMetadataUpdate?.invoke()
+            return rows.firstOrNull { it.id == id && it.userId == userId }?.also {
+                topic?.let { value -> it.topic = value }
+                difficultyLevel?.let { value -> it.difficultyLevel = value }
+                it.updatedAt = now
+            }
+        }
+        override suspend fun findSubtreeIdsForMutation(userId: Long, studyId: Long, limit: Int): List<Long>? {
+            subtreeLimit = limit
+            events += "subtree"
+            if (rows.none { it.id == studyId && it.userId == userId }) return emptyList()
+            val seen = linkedSetOf(studyId)
+            val queue = ArrayDeque<Long>().also { it.add(studyId) }
+            while (queue.isNotEmpty() && seen.size < limit) {
+                val parent = queue.removeFirst()
+                for (child in rows.filter { it.parentStudyId == parent }.take(limit - seen.size)) {
+                    if (child.userId != userId || !seen.add(child.id)) return null
+                    queue.add(child.id)
+                }
+            }
+            return seen.toList()
+        }
+        override suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long {
+            events += "delete"
+            deleteCalls += 1
+            if (forceDeleteZero || rows.none { it.id == id && it.userId == userId }) return 0L
+            val descendants = findSubtreeIdsForMutation(userId, id, 129).orEmpty().toSet()
+            rows.removeAll { it.id in descendants && it.userId == userId }
+            return 1L
+        }
         override suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
-        override suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
+        override suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? {
+            events += "owned-read"
+            return rows.firstOrNull { it.id == id && it.userId == userId }
+        }
         override suspend fun findByUserIdAndParentStudyIdAndTopic(
             userId: Long,
             parentStudyId: Long?,
@@ -414,6 +634,7 @@ class StudySyncServiceTest {
         override suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
             rows.filter { it.userId == userId && it.topic in topics }
         override suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> {
+            events += "owner-list"
             findByUserCalls += 1
             return PageImpl(rows.filter { it.userId == userId }, pageable, rows.count { it.userId == userId }.toLong())
         }

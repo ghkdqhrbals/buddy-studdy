@@ -11,6 +11,23 @@ import java.time.Instant
 
 interface StudyPort {
     suspend fun save(entity: StudyEntity): StudyEntity
+    /** Held by the caller's transaction before any create/rename reads; serializes per-owner topic uniqueness. */
+    suspend fun lockMutationOwner(userId: Long): Boolean =
+        throw UnsupportedOperationException("Serialized study mutations are not supported.")
+    /** Updates only provided metadata plus updatedAt, never a previously read whole entity. */
+    suspend fun updateTopicMetadata(
+        id: Long,
+        userId: Long,
+        topic: String?,
+        difficultyLevel: Int?,
+        now: Instant,
+    ): StudyEntity? = throw UnsupportedOperationException("Metadata-only study updates are not supported.")
+    /**
+     * Includes the root and at most [limit] IDs. Callers request one overflow ID.
+     * Requires the owner mutation lock; null rejects cycles or mixed-owner descendants.
+     */
+    suspend fun findSubtreeIdsForMutation(userId: Long, studyId: Long, limit: Int): List<Long>? =
+        throw UnsupportedOperationException("Bounded study subtree mutations are not supported.")
     suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long
     suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity?
     suspend fun findFirstRootByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? =

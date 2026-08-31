@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.inbound.web
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
+import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata
 import com.buddystudy.backend.voice.adapter.outbound.openai.voiceTutorCallReference
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorRelayUseCase
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
@@ -298,7 +299,7 @@ class VoiceTutorControlWebSocketHandler(
                     if (firstReady) {
                         emitReady(principal, context.session, ::emitProviderPayload).awaitSingleOrNull()
                     }
-                    return@relaySideband
+                    return@relaySideband false
                 }
                 latency.observeProviderEvent(raw)
                 val decision = providerPolicy.providerDecision(
@@ -319,10 +320,11 @@ class VoiceTutorControlWebSocketHandler(
                     )
                     throw error
                 }
-                if (persist) inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull()
+                val persisted = persist && inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull() == true
                 if (forwardToClient && type !in WEBRTC_MEDIA_EVENTS) {
                     decision.payload?.let(::emitProviderPayload)
                 }
+                persisted
             }
         }.then()
 
@@ -491,8 +493,8 @@ class VoiceTutorControlWebSocketHandler(
         principal: Principal,
         sessionId: String,
         raw: String,
-    ): Mono<Void> {
-        val node = runCatching { mapper.readTree(raw) }.getOrNull() ?: return Mono.empty()
+    ): Mono<Boolean> {
+        val node = runCatching { mapper.readTree(raw) }.getOrNull() ?: return Mono.just(false)
         return when (node.path("type").asText()) {
             "conversation.item.input_audio_transcription.completed" -> appendTranscript(
                 principal,
@@ -500,6 +502,7 @@ class VoiceTutorControlWebSocketHandler(
                 node.path("item_id").asText(),
                 VoiceTutorTranscriptRole.USER,
                 node.path("transcript").asText(),
+                VoiceTutorTranscriptMetadata.lessonRevision(node),
             )
             "response.output_audio_transcript.done" -> appendTranscript(
                 principal,
@@ -507,8 +510,9 @@ class VoiceTutorControlWebSocketHandler(
                 node.path("item_id").asText().ifBlank { node.path("response_id").asText() },
                 VoiceTutorTranscriptRole.TUTOR,
                 node.path("transcript").asText(),
+                VoiceTutorTranscriptMetadata.lessonRevision(node),
             )
-            else -> Mono.empty()
+            else -> Mono.just(false)
         }
     }
 
@@ -518,12 +522,13 @@ class VoiceTutorControlWebSocketHandler(
         providerItemId: String,
         role: VoiceTutorTranscriptRole,
         transcript: String,
-    ): Mono<Void> = if (transcript.isBlank()) {
-        Mono.empty()
+        lessonRevision: Long,
+    ): Mono<Boolean> = if (transcript.isBlank()) {
+        Mono.just(false)
     } else {
         mono {
-            relay.appendTranscript(principal, sessionId, providerItemId, role, transcript, Instant.now())
-        }.then()
+            relay.appendTranscript(principal, sessionId, providerItemId, role, transcript, Instant.now(), lessonRevision)
+        }
     }
 
     private fun synthetic(type: String, sessionId: String, fields: Map<String, Any?>): String =

@@ -189,6 +189,7 @@ data class BuddyStudyProperties(
         var connectTimeoutSeconds: Long = 15,
         var responseTimeoutSeconds: Long = 60,
         var heartbeatLeaseSeconds: Long = 60,
+        /** Legacy configuration name: transcription checkpoint interval only; never an interruption deadline. */
         var continuousSpeechInterventionSeconds: Long = 12,
         var sessionRecoveryPollMs: Long = 5_000,
         var sessionRecoveryInitialDelayMs: Long = 5_000,

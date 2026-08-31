@@ -21,3 +21,9 @@ data class CreateStudyTopicCommand(
 data class UpdateStudyTopicActivationCommand(
     val active: Boolean,
 )
+
+/** A metadata-only patch; omitted values never reset other node settings. */
+data class UpdateStudyCommand(
+    val topic: String? = null,
+    val difficultyLevel: Int? = null,
+)

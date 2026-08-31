@@ -151,6 +151,86 @@ class VoiceTutorExplorationEvidenceTest {
     }
 
     @Test
+    fun `a pending tutor question retains its original name and level when answer and feedback arrive after a change`() {
+        val revised = snapshot.copy(topic = "Renamed eviction", difficulty = 9, revision = 1)
+        val transcript = turns().map { if (it.id > 1) it.copy(lessonRevision = 1) else it }
+        val result = VoiceTutorExplorationEvidence.verified(
+            listOf(exploration().copy(topic = revised.topic, difficulty = 9)), session(), transcript, listOf(snapshot, revised),
+        ).single()
+
+        assertThat(result.topic).isEqualTo(snapshot.topic)
+        assertThat(result.difficulty).isEqualTo(7)
+        assertThat(result.exchanges.single()).isEqualTo(exchange())
+        assertThat(result.exchanges.single().score).isEqualTo(85)
+    }
+
+    @Test
+    fun `one model topic group is split by the question epoch and a new learner question uses the new level`() {
+        val revised = snapshot.copy(topic = "Eviction policies", difficulty = 9, revision = 1)
+        val deeper = exchange().copy(
+            kind = VoiceTutorExchangeKind.LEARNER_QUESTION, questionTurnId = 4, answerTurnIds = listOf(5),
+            feedbackTurnIds = emptyList(), score = null, strengths = emptyList(), improvements = emptyList(),
+        )
+        val transcript = turns().map { if (it.id >= 2) it.copy(lessonRevision = 1) else it }
+        val result = VoiceTutorExplorationEvidence.verified(
+            listOf(exploration().copy(topic = revised.topic, exchanges = listOf(exchange(), deeper))),
+            session(), transcript, listOf(snapshot, revised),
+        )
+
+        assertThat(result.map { it.studyId }).containsExactly(43, 43)
+        assertThat(result.map { it.topic }).containsExactly(snapshot.topic, revised.topic)
+        assertThat(result.map { it.difficulty }).containsExactly(7, 9)
+        assertThat(result.map { it.exchanges.single().questionTurnId }).containsExactly(1, 4)
+        // Re-verification at durable projection must not merge groups or choose the latest level.
+        assertThat(VoiceTutorExplorationEvidence.verified(result, session(), transcript, listOf(snapshot, revised))).isEqualTo(result)
+    }
+
+    @Test
+    fun `same name revisions remain separate even after difficulty returns to the original value`() {
+        val history = listOf(snapshot, snapshot.copy(difficulty = 9, revision = 1), snapshot.copy(revision = 2))
+        val futureQuestion = exchange().copy(questionTurnId = 6, answerTurnIds = emptyList(), feedbackTurnIds = emptyList())
+        val transcript = turns() + turn(6, VoiceTutorTranscriptRole.TUTOR, "다음 질문입니다.").copy(lessonRevision = 2)
+        val result = VoiceTutorExplorationEvidence.verified(
+            listOf(exploration().copy(exchanges = listOf(exchange(), futureQuestion))), session(), transcript, history,
+        )
+
+        assertThat(result).hasSize(2)
+        assertThat(result.map { it.difficulty }).containsExactly(7, 7)
+        assertThat(result.map { it.exchanges.single().questionTurnId }).containsExactly(1, 6)
+    }
+
+    @Test
+    fun `newer ambiguous snapshot cannot silently revert a changed question to the old level`() {
+        val revised = snapshot.copy(difficulty = 9, revision = 1)
+        val transcript = turns().map { it.copy(lessonRevision = 1) }
+        val result = VoiceTutorExplorationEvidence.verified(
+            listOf(exploration()), session(), transcript, listOf(snapshot, revised, revised.copy(difficulty = 8)),
+        ).single()
+        assertThat(result.studyId).isNull()
+        assertThat(result.difficulty).isNull()
+        assertThat(result.exchanges.single().questionTurnId).isEqualTo(1)
+    }
+
+    @Test
+    fun `negative question epoch retains source exchange but cannot bind any saved level`() {
+        val transcript = turns().map { if (it.id == 1L) it.copy(lessonRevision = -1) else it }
+        val result = verify(exploration(), transcript).single()
+        assertThat(result.studyId).isNull()
+        assertThat(result.difficulty).isNull()
+        assertThat(result.exchanges).hasSize(1)
+    }
+
+    @Test
+    fun `a future question epoch never falls back to the latest known level`() {
+        val revised = snapshot.copy(difficulty = 9, revision = 1)
+        val transcript = turns().map { if (it.id == 1L) it.copy(lessonRevision = 2) else it }
+        val result = VoiceTutorExplorationEvidence.verified(listOf(exploration()), session(), transcript, listOf(snapshot, revised)).single()
+        assertThat(result.studyId).isNull()
+        assertThat(result.difficulty).isNull()
+        assertThat(result.exchanges.single().questionTurnId).isEqualTo(1)
+    }
+
+    @Test
     fun `markup and remote links in generated learning fields are sanitized`() {
         val item = exploration().copy(
             depthSummary = "<img src='https://private.test'>LRU [LFU](https://private.test)",

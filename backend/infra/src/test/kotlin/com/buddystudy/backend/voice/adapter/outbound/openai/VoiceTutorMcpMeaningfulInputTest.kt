@@ -153,6 +153,7 @@ class VoiceTutorMcpMeaningfulInputTest {
                     persistenceEntered.countDown()
                     persistenceRelease.await()
                 }
+                true
             },
         ).subscribe({}, errors::add)
         private val toolResponseToken: String

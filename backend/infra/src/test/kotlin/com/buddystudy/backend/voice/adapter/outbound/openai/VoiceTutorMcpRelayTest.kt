@@ -162,7 +162,7 @@ class VoiceTutorMcpRelayTest {
     }
 
     @Test
-    fun `malformed arguments become structured tool errors without calling MCP`() = Fixture(captureCalls = false).use { f ->
+    fun `malformed arguments become structured tool errors without calling MCP`(): Unit = Fixture(captureCalls = false).use { f ->
         val invoked = CopyOnWriteArrayList<String>()
         val tools = port { name, _ -> invoked += name; success() }
         val worker = voiceTutorMcpToolRelay(f.controller, context(), tools, { _, _, _ -> }).subscribe({}, f.errors::add)
@@ -211,8 +211,10 @@ class VoiceTutorMcpRelayTest {
             assertThat(secondFinished.await(3, TimeUnit.SECONDS)).isTrue()
             assertThat(invoked).containsExactly("get_study", "create_study_topic")
             assertThat(mapper.readTree(clientEvents.single()).fieldNames().asSequence().toSet())
-                .containsExactlyInAnyOrder("type", "studyId")
+                .containsExactlyInAnyOrder("type", "studyId", "change", "deletedStudyIds")
             assertThat(mapper.readTree(clientEvents.single()).path("studyId").asLong()).isEqualTo(42)
+            assertThat(mapper.readTree(clientEvents.single()).path("change").asText()).isEqualTo("created")
+            assertThat(mapper.readTree(clientEvents.single()).path("deletedStudyIds")).isEmpty()
             f.outputs().forEach { f.ack(it) }
             assertThat(f.responses()).hasSize(2)
             f.noMediaDisruption()

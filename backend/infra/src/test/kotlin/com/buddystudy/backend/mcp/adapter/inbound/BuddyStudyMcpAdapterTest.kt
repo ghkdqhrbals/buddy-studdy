@@ -7,7 +7,10 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
+import com.buddystudy.backend.mcp.application.model.McpDeletionResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
+import com.buddystudy.backend.study.application.model.StudyRoomResponse
+import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
@@ -39,7 +42,7 @@ class BuddyStudyMcpAdapterTest {
 
         assertThat(tools.map { it.tool().name() })
             .containsExactlyElementsOf(expected.map(ToolContract::name))
-        assertThat(tools).hasSize(21)
+        assertThat(tools).hasSize(22)
 
         tools.zip(expected).forEach { (specification, contract) ->
             val tool = specification.tool()
@@ -241,6 +244,88 @@ class BuddyStudyMcpAdapterTest {
     }
 
     @Test
+    fun `metadata handler preserves omitted fields without applying creation defaults`(): Unit {
+        val calls = mutableListOf<List<Any?>>()
+        val adapter = adapter(proxyUseCase { name, arguments ->
+            assertThat(name).isEqualTo("updateStudy")
+            calls += arguments.dropLast(1)
+            studyRoom()
+        })
+        listOf(
+            mapOf("study_id" to 42L, "topic" to "Redis Streams"),
+            mapOf("study_id" to 42L, "difficulty_level" to 1),
+            mapOf("study_id" to 42L, "topic" to "Redis", "difficulty_level" to 10),
+        ).forEach { arguments ->
+            assertThat(call(adapter, "update_study", arguments, authenticatedContext).isError()).isFalse()
+        }
+        assertThat(calls).containsExactly(
+            listOf(principal, 42L, UpdateStudyCommand(topic = "Redis Streams")),
+            listOf(principal, 42L, UpdateStudyCommand(difficultyLevel = 1)),
+            listOf(principal, 42L, UpdateStudyCommand(topic = "Redis", difficultyLevel = 10)),
+        )
+    }
+
+    @Test
+    fun `SDK metadata schema rejects absent null unknown fractional and out of range patches`(): Unit {
+        val schema = adapter().tools().single { it.tool().name() == "update_study" }.tool().inputSchema()
+        val validator = McpJsonSchemaValidatorProvider.create()
+        val valid = listOf(
+            mapOf("study_id" to 42L, "topic" to "응"),
+            mapOf("study_id" to 42L, "difficulty_level" to 1),
+            mapOf("study_id" to 42L, "topic" to "x".repeat(255), "difficulty_level" to 10),
+        )
+        val invalid = listOf(
+            mapOf("study_id" to 42L), mapOf("topic" to "Name"),
+            mapOf("study_id" to 42L, "topic" to null), mapOf("study_id" to 42L, "difficulty_level" to null),
+            mapOf("study_id" to 42L, "topic" to ""), mapOf("study_id" to 42L, "topic" to "x".repeat(256)),
+            mapOf("study_id" to 42L, "difficulty_level" to 3.5), mapOf("study_id" to 42L, "difficulty_level" to 0),
+            mapOf("study_id" to 42L, "difficulty_level" to 11), mapOf("study_id" to 42L, "topic" to "Name", "enabled" to false),
+        )
+        valid.forEach { assertThat(validator.validate(schema, it).valid()).isTrue() }
+        invalid.forEach { assertThat(validator.validate(schema, it).valid()).isFalse() }
+        val fractional = call(adapter(), "update_study", mapOf("study_id" to 42L, "difficulty_level" to 3.5), authenticatedContext)
+        assertThat(errorDetails(fractional)).containsEntry("code", "VALIDATION_ERROR")
+    }
+
+    @Test
+    fun `guarded deletion forwards exact IDs and reports a changed subtree without false success`(): Unit {
+        var forwarded = emptyList<Any?>()
+        val expected = listOf(44L, 42L, 43L)
+        val guarded = adapter(proxyUseCase { method, arguments ->
+            assertThat(method).isEqualTo("deleteStudy")
+            forwarded = arguments.dropLast(1)
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.STUDY_TREE_CHANGED, "Confirm the current subtree again.")
+        })
+        val result = call(guarded, "delete_study", mapOf("study_id" to 42L, "confirm" to true, "expected_study_ids" to expected), authenticatedContext)
+        assertThat(forwarded).containsExactly(principal, 42L, true, expected)
+        assertThat(result.isError()).isTrue()
+        assertThat(errorDetails(result)).containsEntry("code", "STUDY_TREE_CHANGED").containsEntry("status", 409)
+
+        val legacy = adapter(proxyUseCase { _, arguments ->
+            assertThat(arguments.dropLast(1)).containsExactly(principal, 42L, true, null)
+            McpDeletionResponse(true, 42L)
+        })
+        assertThat(call(legacy, "delete_study", mapOf("study_id" to 42L, "confirm" to true), authenticatedContext).isError()).isFalse()
+    }
+
+    @Test
+    fun `guarded delete schema bounds unique positive IDs and mutation handlers require a principal`(): Unit {
+        val adapter = adapter()
+        val schema = adapter.tools().single { it.tool().name() == "delete_study" }.tool().inputSchema()
+        val validator = McpJsonSchemaValidatorProvider.create()
+        assertThat(validator.validate(schema, mapOf("study_id" to 42L, "confirm" to true, "expected_study_ids" to listOf(42L))).valid()).isTrue()
+        for (ids in listOf(emptyList(), listOf(42L, 42L), listOf(0L, 42L), listOf(42.5), (1L..129L).toList())) {
+            assertThat(validator.validate(schema, mapOf("study_id" to 42L, "confirm" to true, "expected_study_ids" to ids)).valid()).isFalse()
+        }
+        for ((name, arguments) in listOf(
+            "update_study" to mapOf("study_id" to 42L, "topic" to "New name"),
+            "delete_study" to mapOf("study_id" to 42L, "confirm" to true),
+        )) {
+            assertThat(errorDetails(call(adapter, name, arguments, McpTransportContext.EMPTY))).containsEntry("code", "PERMISSION_DENIED")
+        }
+    }
+
+    @Test
     fun `does not write sensitive tool arguments to logs when a call fails`() {
         val secretAnswer = "private-answer-do-not-log-7f871d1a"
         val adapter = adapter(
@@ -362,6 +447,20 @@ class BuddyStudyMcpAdapterTest {
             readOnly = true,
         ),
         ToolContract(
+            name = "update_study",
+            schema = objectSchema(
+                properties = linkedMapOf(
+                    "study_id" to idProperty("Exact owned study node ID to update; never identify a target by name alone."),
+                    "topic" to stringProperty("New study topic. Omit to preserve the current name.", minLength = 1, maxLength = 255),
+                    "difficulty_level" to integerProperty("New configured difficulty from 1 to 10. Omit to preserve the current level.", 1, 10),
+                ),
+                required = listOf("study_id"),
+            ).toMutableMap().apply { put("minProperties", 2) },
+            readOnly = false,
+            destructive = true,
+            idempotent = true,
+        ),
+        ToolContract(
             name = "create_study",
             schema = objectSchema(
                 properties = linkedMapOf(
@@ -399,6 +498,14 @@ class BuddyStudyMcpAdapterTest {
                 properties = linkedMapOf(
                     "study_id" to idProperty("Root of the subtree to delete."),
                     "confirm" to booleanProperty("Must be true after explicit user confirmation."),
+                    "expected_study_ids" to arrayProperty(
+                        "Exact confirmed subtree IDs including study_id. A mismatch prevents deletion.",
+                        idProperty("Confirmed study node ID."),
+                        maxItems = 128,
+                    ).toMutableMap().apply {
+                        put("minItems", 1)
+                        put("uniqueItems", true)
+                    },
                 ),
                 required = listOf("study_id", "confirm"),
             ),
@@ -580,6 +687,14 @@ class BuddyStudyMcpAdapterTest {
     )
 
     private companion object {
+        fun studyRoom() = StudyRoomResponse(
+            id = 42L, parentStudyId = 40L, sortOrder = 2, topic = "Redis Streams", difficultyLevel = 3,
+            intervalMinutes = 30, enabled = false, activeForQuestions = true, notificationSound = "bell.caf",
+            customPrompt = "Preserved", openaiModel = "fixture-model", maxHistoryCount = 100,
+            nextDueAt = Instant.EPOCH, lastSentAt = null, lastError = null, pendingQuestion = null,
+            createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
+        )
+
         fun voiceRecord() = VoiceStudyLearningRecordResponse(
             id = "91", sessionId = "synthetic-prior-session", studyId = 42L, parentStudyId = 40L,
             topic = "Redis", difficulty = 3, createdAt = Instant.EPOCH, kind = VoiceTutorExchangeKind.TUTOR_QUESTION,

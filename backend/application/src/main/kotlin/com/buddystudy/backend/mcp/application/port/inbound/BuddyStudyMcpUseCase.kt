@@ -18,6 +18,7 @@ import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionsPageResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorStatusResponse
@@ -48,6 +49,7 @@ interface BuddyStudyMcpUseCase {
     ): StudyPageResponse
 
     suspend fun getStudy(principal: Principal, studyId: Long, language: String): StudyRoomResponse
+    suspend fun updateStudy(principal: Principal, studyId: Long, command: UpdateStudyCommand): StudyRoomResponse
     suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
     suspend fun createStudyTopic(
         principal: Principal,
@@ -55,7 +57,12 @@ interface BuddyStudyMcpUseCase {
         command: CreateStudyTopicCommand,
     ): StudyRoomResponse
 
-    suspend fun deleteStudy(principal: Principal, studyId: Long, confirmed: Boolean): McpDeletionResponse
+    suspend fun deleteStudy(
+        principal: Principal,
+        studyId: Long,
+        confirmed: Boolean,
+        expectedStudyIds: List<Long>? = null,
+    ): McpDeletionResponse
     suspend fun listPendingQuestions(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
     suspend fun requestQuestion(
         principal: Principal,

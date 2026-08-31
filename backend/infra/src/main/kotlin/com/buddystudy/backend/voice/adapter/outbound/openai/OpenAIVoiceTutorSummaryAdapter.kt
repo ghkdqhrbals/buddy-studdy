@@ -12,6 +12,7 @@ import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTu
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSummaryPort
 import com.buddystudy.voice.domain.VoiceTutorSession
+import com.buddystudy.voice.domain.VoiceTutorStudyRevisionLimits
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
 import com.fasterxml.jackson.core.JsonParser
@@ -68,11 +69,11 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
                     true
                 }
             }
-        val selectedSnapshot = session.studyId?.takeIf { it > 0 }?.let {
+        val history = studyContext.list(session.userId, session.id).take(VoiceTutorStudyRevisionLimits.MAX_HISTORY_SNAPSHOTS)
+        val selectedSnapshot = session.acceptedStudyId?.takeIf { id -> id > 0 && history.none { it.studyId == id } }?.let {
             VoiceTutorStudySnapshot(it, null, session.topic, session.difficulty)
         }
-        val studies = (studyContext.list(session.userId, session.id).take(64) + listOfNotNull(selectedSnapshot))
-            .distinctBy(VoiceTutorStudySnapshot::studyId).take(64)
+        val studies = (history + listOfNotNull(selectedSnapshot)).distinct().take(VoiceTutorStudyRevisionLimits.MAX_HISTORY_SNAPSHOTS)
         val outputLanguage = when (session.language) {
             "ko" -> "Korean"
             "ja" -> "Japanese"
@@ -215,9 +216,17 @@ internal object VoiceTutorSummaryPromptProvider {
             "content" to """
                 Summarize the supplied AI tutoring session as a compact factual learning record in $outputLanguage.
                 This is extraction of an actual voice lesson, NOT new question generation or a new grading request.
-                Keep the overall summary brief and group the genuine learning exchanges into explorations by topic.
+                Keep the overall summary brief and group the genuine learning exchanges into explorations by topic and lesson revision.
                 For a saved topic, use only a matching studyId, topic and difficulty from knownTopics, which are
-                immutable metadata supplied to this session. For an unsaved/uncertain topic, studyId and difficulty
+                immutable versioned metadata supplied to this session. For EACH questionTurnId, select that study's
+                greatest knownTopics.revision <= the question turn's lessonRevision. Never select a newer revision
+                merely because its answer, feedback or transcription arrived later. An already asked, unanswered
+                tutor question keeps its original name and difficulty even if settings change before the answer.
+                Split the same studyId into separate explorations when question revisions use different metadata;
+                do not merge old and new levels or apply the last known level to all questions.
+                lessonRevision=-1 or any epoch absent from knownTopics is unknown (zero is the legacy baseline):
+                preserve that exchange as unlinked session history with studyId=null and difficulty=null.
+                For an unsaved/uncertain topic, studyId and difficulty
                 are null. Never guess another study ID, invent a level, or apply the parent level to a child topic.
                 TUTOR_QUESTION means a tutor's real study question followed by the learner's answer and any actual
                 tutor feedback. LEARNER_QUESTION means the learner's follow-up/deeper question and the tutor's answer;
@@ -253,11 +262,11 @@ internal object VoiceTutorSummaryPromptProvider {
                     "topic" to session.topic,
                     "difficulty" to session.difficulty,
                     "knownTopics" to studies.map { study ->
-                        mapOf("studyId" to study.studyId, "parentStudyId" to study.parentStudyId, "topic" to study.topic, "difficulty" to study.difficulty)
+                        mapOf("studyId" to study.studyId, "parentStudyId" to study.parentStudyId, "topic" to study.topic, "difficulty" to study.difficulty, "revision" to study.revision)
                     },
                     "transcriptTruncated" to transcriptTruncated,
                     "transcriptTurns" to transcript.map { turn ->
-                        mapOf("id" to turn.id, "role" to turn.role.name, "transcript" to turn.transcript)
+                        mapOf("id" to turn.id, "role" to turn.role.name, "transcript" to turn.transcript, "lessonRevision" to turn.lessonRevision)
                     },
                 ),
             ),

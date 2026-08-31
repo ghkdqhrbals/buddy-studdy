@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice.adapter.inbound.web
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
+import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.time.Instant
@@ -71,7 +72,7 @@ internal class VoiceTutorRealtimeEventPolicy(
                 validProviderResponseId(node.path("response_id")) &&
                 validProviderText(node, "delta", MAX_TRANSCRIPT_DELTA_CHARACTERS)
             ) {
-                ProviderEventDecision(raw)
+                ProviderEventDecision(withoutInternalTranscriptMetadata(node, raw))
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
@@ -79,21 +80,21 @@ internal class VoiceTutorRealtimeEventPolicy(
                 validProviderResponseId(node.path("response_id")) &&
                 validProviderText(node, "transcript", MAX_TRANSCRIPT_CHARACTERS)
             ) {
-                ProviderEventDecision(raw)
+                ProviderEventDecision(withoutInternalTranscriptMetadata(node, raw))
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
             in USER_TRANSCRIPT_DELTA_PROVIDER_EVENTS -> if (
                 validProviderText(node, "delta", MAX_TRANSCRIPT_DELTA_CHARACTERS)
             ) {
-                ProviderEventDecision(raw)
+                ProviderEventDecision(withoutInternalTranscriptMetadata(node, raw))
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
             in USER_TRANSCRIPT_DONE_PROVIDER_EVENTS -> if (
                 validProviderText(node, "transcript", MAX_TRANSCRIPT_CHARACTERS)
             ) {
-                ProviderEventDecision(raw)
+                ProviderEventDecision(withoutInternalTranscriptMetadata(node, raw))
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
@@ -186,6 +187,13 @@ internal class VoiceTutorRealtimeEventPolicy(
             )
             else -> ProviderEventDecision(payload = null)
         }
+    }
+
+    private fun withoutInternalTranscriptMetadata(node: JsonNode, raw: String): String {
+        if (!node.has(VoiceTutorTranscriptMetadata.LESSON_REVISION)) return raw
+        val publicNode = node.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
+        publicNode.remove(VoiceTutorTranscriptMetadata.LESSON_REVISION)
+        return mapper.writeValueAsString(publicNode)
     }
 
     private fun responseDecision(

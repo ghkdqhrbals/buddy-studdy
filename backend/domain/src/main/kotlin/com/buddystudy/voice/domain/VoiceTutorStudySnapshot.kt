@@ -6,4 +6,6 @@ data class VoiceTutorStudySnapshot(
     val parentStudyId: Long?,
     val topic: String,
     val difficulty: Int,
+    /** Zero is the immutable initial capture; positive revisions are explicit in-call setting changes. */
+    val revision: Long = 0,
 )

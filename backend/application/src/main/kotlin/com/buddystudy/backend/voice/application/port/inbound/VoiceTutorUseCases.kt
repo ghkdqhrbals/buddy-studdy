@@ -71,7 +71,7 @@ interface VoiceTutorRelayUseCase {
             raw: String,
             persist: Boolean,
             forwardToClient: Boolean,
-        ) -> Unit,
+        ) -> Boolean,
     )
 
     suspend fun appendTranscript(
@@ -81,7 +81,8 @@ interface VoiceTutorRelayUseCase {
         role: VoiceTutorTranscriptRole,
         transcript: String,
         occurredAt: Instant,
-    )
+        lessonRevision: Long = 0,
+    ): Boolean
 
     suspend fun finish(
         principal: Principal,

@@ -78,7 +78,7 @@ class VoiceTutorExplorationJsonCodecTest {
     @Test
     fun `topic exchange total feedback and evidence limits are enforced before persistence`() {
         val oversized = listOf(
-            List(13) { exploration() },
+            List(49) { exploration() },
             listOf(exploration().copy(exchanges = List(13) { exchange() })),
             List(5) { exploration().copy(exchanges = List(12) { exchange() }) },
             listOf(exploration().copy(topic = "a".repeat(501))),
@@ -92,6 +92,26 @@ class VoiceTutorExplorationJsonCodecTest {
         oversized.forEach { value ->
             assertThatThrownBy { VoiceTutorExplorationJsonCodec.encode(value) }.isInstanceOf(InvalidVoiceTutorExploration::class.java)
         }
+    }
+
+    @Test
+    fun `question epoch splits may persist up to forty eight groups without widening provider output groups`() {
+        val split = (1L..48L).map { id -> exploration().copy(exchanges = listOf(exchange().copy(questionTurnId = id))) }
+        val json = VoiceTutorExplorationJsonCodec.encode(split)
+        assertThat(VoiceTutorExplorationJsonCodec.decode(json)).isEqualTo(split)
+        assertThatThrownBy { VoiceTutorExplorationJsonCodec.decodeNode(mapper.readTree(json)) }
+            .isInstanceOf(InvalidVoiceTutorExploration::class.java).hasMessageContaining("EXPLORATIONS_SHAPE")
+        val providerMax = mapper.readTree(VoiceTutorExplorationJsonCodec.encode(split.take(12)))
+        assertThat(VoiceTutorExplorationJsonCodec.decodeNode(providerMax)).hasSize(12)
+    }
+
+    @Test
+    fun `extra stored groups do not weaken the original total exchange or byte budget`() {
+        val groups = List(13) { exploration().copy(exchanges = List(4) { exchange() }) }
+        assertThatThrownBy { VoiceTutorExplorationJsonCodec.encode(groups) }
+            .isInstanceOf(InvalidVoiceTutorExploration::class.java).hasMessageContaining("EXCHANGES_LIMIT")
+        assertThat(VoiceTutorExplorationLimits.MAX_JSON_BYTES).isEqualTo(256 * 1024)
+        assertThat(VoiceTutorExplorationLimits.MAX_TOTAL_EXCHANGES).isEqualTo(48)
     }
 
     @Test

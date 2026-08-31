@@ -3,7 +3,9 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
+import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
+import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
@@ -54,7 +56,7 @@ class OpenAIVoiceTutorRealtimeAdapter(
             raw: String,
             persist: Boolean,
             forwardToClient: Boolean,
-        ) -> Unit,
+        ) -> Boolean,
     ) {
         val providerUri = UriComponentsBuilder.fromUriString(OPENAI_REALTIME_URL)
             .queryParam("model", request.model)
@@ -120,7 +122,7 @@ class OpenAIVoiceTutorRealtimeAdapter(
                     val disposition = turnController.observeProviderEvent(raw)
                     mono {
                         onProviderEvent(
-                            raw,
+                            turnController.providerEventForRelay(raw),
                             disposition.persist,
                             disposition.forwardToClient,
                         )
@@ -200,7 +202,24 @@ internal class VoiceTutorDuplexTurnController(
     private val transport: VoiceTutorRealtimeTransport = VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY,
     private val inputCoordinator: VoiceTutorInputTurnCoordinator? = null,
     toolsEnabled: Boolean = false,
+    initialLessonRevision: Long = 0,
 ) {
+    init {
+        require(initialLessonRevision >= 0) { "Voice Tutor lesson revision was invalid." }
+    }
+
+    private var currentLessonRevision = initialLessonRevision
+    private var activeResponseLessonRevision = initialLessonRevision
+    private var activeSpeechLessonRevision: Long? = null
+    private val responseLessonRevisions = linkedMapOf<String, Long>()
+    private val inputLessonBindings = linkedMapOf<String, InputLessonBinding>()
+    private var activeSpeechStartedOrder = 0L
+    private var activeSpeechPrecedingTutorStopOrder = 0L
+    private var activeSpeechPrecedingSpokenGeneration = 0L
+    private var dialogueEventOrder = 0L
+    private var latestAcceptedInputBinding: InputLessonBinding? = null
+    private var lastTutorSpeechStoppedOrder = 0L
+    private var lastSpokenResponseGeneration = 0L
     private val controls = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<String>(MAX_BUFFERED_CONTROLS).get())
     private val inputWork = Sinks.many().unicast()
@@ -223,16 +242,15 @@ internal class VoiceTutorDuplexTurnController(
     private var toolAcknowledgementTimer: Disposable? = null
     private val terminalInputFailure = Sinks.one<Throwable>()
     private val pendingInputPublications = LinkedHashSet<String>()
-    private val meaningfulSpeechSequences = LinkedHashSet<Long>()
     private var inputAssessmentTimer: Disposable? = null
     private var inputCheckpointSequence: Long? = null
     private var lastInputCommitNanos: Long? = null
     private var delayedStopCommitTimer: Disposable? = null
     private var delayedStopCommit: PendingStopCommit? = null
     private val activeTutorTranscripts = linkedMapOf<String, String>()
-    private var interventionTimer: Disposable? = null
+    private var inputCheckpointTimer: Disposable? = null
+    private var inputCheckpointTimerGeneration = 0L
     private var userSpeaking = false
-    private var interventionDeliveredDuringCurrentSpeech = false
     private var responseActive = false
     private var activeResponseGeneration = 0L
     private var activeResponseCreateEventId: String? = null
@@ -257,7 +275,7 @@ internal class VoiceTutorDuplexTurnController(
     private val pendingInputCommits = ArrayDeque<PendingInputCommit>()
     private val recentCommittedItemIds = LinkedHashSet<String>()
     private var inputCommitTimer: Disposable? = null
-    private var interventionDeadlineElapsedWhileResponseActive = false
+    private var inputCheckpointDue = false
     @Volatile
     private var closed = false
 
@@ -270,6 +288,14 @@ internal class VoiceTutorDuplexTurnController(
     fun toolActions(): Flux<VoiceTutorMcpCall> = toolWork.asFlux().filter { !closed }
 
     @Synchronized
+    fun mutationDialogueBoundary(): VoiceTutorDialogueBoundary = VoiceTutorDialogueBoundary(
+        responseGeneration = activeResponseGeneration,
+        latestAcceptedLearnerSpeechStartedOrder = latestAcceptedInputBinding?.speechStartedOrder ?: 0,
+        precedingTutorSpeechStoppedOrder = latestAcceptedInputBinding?.precedingTutorSpeechStoppedOrder ?: 0,
+        precedingSpokenResponseGeneration = latestAcceptedInputBinding?.precedingSpokenResponseGeneration ?: 0,
+    )
+
+    @Synchronized
     fun beginToolExecution(callId: String): Boolean = !closed && toolCoordinator?.beginExecution(callId) == true
 
     @Synchronized
@@ -280,6 +306,13 @@ internal class VoiceTutorDuplexTurnController(
         } catch (error: Exception) {
             terminate(error)
             return false
+        }
+        if (!result.isError) {
+            // Only a matched, server-executed result advances future responses.
+            // Existing response IDs and speech/commit slots keep their old epoch.
+            result.lessonRevision?.takeIf { it >= 0 }?.let { revision ->
+                currentLessonRevision = maxOf(currentLessonRevision, revision)
+            }
         }
         emit(event)
         if (!closed && toolAcknowledgementTimer == null) {
@@ -308,6 +341,27 @@ internal class VoiceTutorDuplexTurnController(
     fun canPublishInput(itemId: String): Boolean = !closed &&
         itemId in pendingInputPublications && inputCoordinator?.isPublicationPending(itemId) == true
 
+    /** Called only after the controller accepted a final transcript for relay/persistence. */
+    @Synchronized
+    fun providerEventForRelay(raw: String): String {
+        val node = mapper.readTree(raw)
+        val revision = when (node.path("type").asText()) {
+            "response.output_audio_transcript.done" -> responseLessonRevisions[node.path("response_id").asText()]
+                ?: -1L
+            "conversation.item.input_audio_transcription.completed" ->
+                inputLessonBindings[node.path("item_id").asText()]?.lessonRevision
+                    ?: if (inputCoordinator == null && currentLessonRevision == 0L) 0L else -1L
+            else -> return raw
+        }
+        // Ignore an upstream field with this name. The response/commit mapping,
+        // not a provider payload or the later ASR completion time, is authority.
+        // Missing provenance preserves the original transcript as unassigned;
+        // it must neither terminate a call nor falsely revert a lesson to zero.
+        (node as com.fasterxml.jackson.databind.node.ObjectNode)
+            .put(VoiceTutorTranscriptMetadata.LESSON_REVISION, revision)
+        return mapper.writeValueAsString(node)
+    }
+
     @Synchronized
     fun canAssessInput(token: Long): Boolean {
         if (closed) return false
@@ -322,9 +376,20 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     @Synchronized
-    fun confirmInputPublished(itemId: String) {
+    fun confirmInputPublished(itemId: String, persisted: Boolean = false) {
         if (closed || !pendingInputPublications.remove(itemId)) return
-        withInputCoordinator { confirmPublished(itemId, nanoTime()) }
+        val binding = inputLessonBindings.remove(itemId)
+        withInputCoordinator {
+            confirmPublished(itemId, nanoTime()).also { actions ->
+                if (actions.any { it is VoiceTutorInputTurnCoordinator.Action.Ready }) {
+                    // Consume a handled input exactly once even if storage
+                    // is full or already contains it; this must not disconnect
+                    // or re-assess/re-answer the same item. Mutation consent,
+                    // however, requires a newly persisted exact USER item.
+                    latestAcceptedInputBinding = if (persisted) binding else null
+                }
+            }
+        }
     }
 
     /** All coordinator transitions, including timer completions, own this lock. */
@@ -356,10 +421,8 @@ internal class VoiceTutorDuplexTurnController(
                     ),
                 )
                 is VoiceTutorInputTurnCoordinator.Action.Ready -> {
-                    meaningfulSpeechSequences.add(action.sequence)
-                    while (meaningfulSpeechSequences.size > MAX_RECENT_COMMITTED_ITEMS) {
-                        meaningfulSpeechSequences.remove(meaningfulSpeechSequences.first())
-                    }
+                    // A meaningful checkpoint contributes context, not permission
+                    // to speak over the learner. The normal response gate owns that.
                     queuedCommittedTurn = true
                 }
                 else -> {
@@ -382,16 +445,8 @@ internal class VoiceTutorDuplexTurnController(
         } else {
             inputAssessmentTimer?.dispose()
             inputAssessmentTimer = null
-            if (userSpeaking && interventionDeadlineElapsedWhileResponseActive) {
-                if (activeClientSpeechSequence in meaningfulSpeechSequences) {
-                    fireContinuousSpeechDeadline()
-                } else if (inputCheckpointSequence == activeClientSpeechSequence) {
-                    // A long hesitation/noise checkpoint must not produce an
-                    // intervention. Keep listening and assess a later segment.
-                    inputCheckpointSequence = null
-                    interventionDeadlineElapsedWhileResponseActive = false
-                    scheduleIntervention()
-                }
+            if (userSpeaking && inputCheckpointDue) {
+                fireContinuousSpeechDeadline()
             }
             createNormalResponseIfReady()
         }
@@ -428,9 +483,8 @@ internal class VoiceTutorDuplexTurnController(
                     VoiceTutorRealtimeContract.PAUSE_REQUEST_EVENT -> {
                         applyPauseActions(pause.requestPause(sequence, nanoTime()))
                         if (pause.blocksResponses) {
-                            interventionTimer?.dispose()
-                            interventionTimer = null
-                            interventionDeadlineElapsedWhileResponseActive = false
+                            cancelInputCheckpointTimer()
+                            inputCheckpointDue = false
                         }
                     }
                     VoiceTutorRealtimeContract.PAUSE_INPUT_QUIESCED_EVENT -> pause.confirmInputQuiesced(sequence)
@@ -533,6 +587,7 @@ internal class VoiceTutorDuplexTurnController(
             "conversation.item.deleted" -> {
                 if (inputCoordinator == null) return VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
                 withInputCoordinator { confirmDeleted(node.path("item_id").asText(), nanoTime()) }
+                inputLessonBindings.remove(node.path("item_id").asText())
                 VoiceTutorProviderRelayDisposition.DROP
             }
             in VoiceTutorMcpTurnCoordinator.OUTPUT_ACK_EVENTS -> {
@@ -555,6 +610,11 @@ internal class VoiceTutorDuplexTurnController(
                     return VoiceTutorProviderRelayDisposition.DROP
                 }
                 observeSpeechStarted()
+                rememberBoundedBinding(
+                    inputLessonBindings,
+                    node.path("item_id").asText(),
+                    InputLessonBinding(activeSpeechLessonRevision ?: currentLessonRevision, activeSpeechStartedOrder),
+                )
                 VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
             }
             "input_audio_buffer.speech_stopped" -> {
@@ -573,6 +633,16 @@ internal class VoiceTutorDuplexTurnController(
                 if (pendingSpeechCommitCount > 0) {
                     pendingSpeechCommitCount = (pendingSpeechCommitCount - (commit?.speechSlots ?: 1)).coerceAtLeast(0)
                 }
+                if (commit != null) {
+                    rememberBoundedBinding(
+                        inputLessonBindings,
+                        node.path("item_id").asText(),
+                        InputLessonBinding(
+                            commit.lessonRevision, commit.speechStartedOrder,
+                            commit.precedingTutorSpeechStoppedOrder, commit.precedingSpokenResponseGeneration,
+                        ),
+                    )
+                }
                 if (inputCoordinator != null && commit != null) {
                     withInputCoordinator {
                         observeCommitted(node.path("item_id").asText(), commit.sequence, commit.checkpoint, nanoTime())
@@ -584,7 +654,7 @@ internal class VoiceTutorDuplexTurnController(
                 if (
                     transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
                     pendingInputCommits.isEmpty() && userSpeaking &&
-                    interventionDeadlineElapsedWhileResponseActive
+                    inputCheckpointDue
                 ) {
                     fireContinuousSpeechDeadline()
                 }
@@ -612,56 +682,39 @@ internal class VoiceTutorDuplexTurnController(
         }
     }
 
+    /** Compatibility hook name: elapsed speech time only checkpoints transcription, never creates a response. */
     @Synchronized
     internal fun fireContinuousSpeechDeadline() {
-        interventionTimer = null
+        cancelInputCheckpointTimer()
         if (
             closed || pauseCoordinator?.blocksResponses == true || !openingResponseRequested || openingResponsePending ||
-            !userSpeaking || interventionDeliveredDuringCurrentSpeech
+            !userSpeaking || transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND
         ) return
-        if (responseActive || pendingInputCommits.isNotEmpty() || inputCoordinator?.hasPending == true ||
-            toolCoordinator?.hasPending == true || toolCoordinator?.continuationReady == true
-        ) {
-            interventionDeadlineElapsedWhileResponseActive = true
+        val sequence = activeClientSpeechSequence ?: return
+        if (pendingInputCommits.isNotEmpty() || inputCoordinator?.hasPending == true || delayedStopCommit != null) {
+            // At most one deferred checkpoint, not a queue of timer-triggered work.
+            // Existing commit/ASR/publication/deletion deadlines remain authoritative.
+            inputCheckpointDue = true
             return
         }
-        if (inputCoordinator != null) {
-            val sequence = activeClientSpeechSequence ?: return
-            if (sequence !in meaningfulSpeechSequences) {
-                interventionDeadlineElapsedWhileResponseActive = true
-                if (inputCheckpointSequence != sequence) {
-                    inputCheckpointSequence = sequence
-                    // Commit a checkpoint without ending or muting the learner's
-                    // speech. Reserve a separate tail commit for its eventual stop.
-                    if (pendingSpeechCommitCount >= MAX_PENDING_SPEECH_COMMITS) {
-                        terminate(VoiceTutorPendingInputCommitOverflowException())
-                        return
-                    }
-                    pendingSpeechCommitCount += 1
-                    requestInputCommit(sequence, checkpoint = true)
-                }
-                return
-            }
+        val sincePreviousCommit = lastInputCommitNanos?.let { (nanoTime() - it).coerceAtLeast(0) }
+        if (sincePreviousCommit != null && sincePreviousCommit < MIN_INPUT_COMMIT_SPACING.toNanos()) {
+            inputCheckpointDue = false
+            scheduleInputCheckpoint(Duration.ofNanos(MIN_INPUT_COMMIT_SPACING.toNanos() - sincePreviousCommit))
+            return
         }
-        interventionDeliveredDuringCurrentSpeech = true
-        interventionDeadlineElapsedWhileResponseActive = false
-        val responseEventId = internalEventId("continuous-response")
-        beginResponse(responseEventId)
-        emit(
-            linkedMapOf(
-                "event_id" to responseEventId,
-                "type" to "response.create",
-                "response" to linkedMapOf(
-                    "instructions" to CONTINUOUS_SPEECH_INTERVENTION_INSTRUCTIONS,
-                    "tool_choice" to "none",
-                    "metadata" to linkedMapOf(
-                        VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
-                        VoiceTutorRealtimeContract.TURN_METADATA_KEY to
-                            VoiceTutorRealtimeContract.CONTINUOUS_INTERVENTION_TURN,
-                    ),
-                ),
-            ),
-        )
+        if (pendingSpeechCommitCount >= MAX_PENDING_SPEECH_COMMITS) {
+            terminate(VoiceTutorPendingInputCommitOverflowException())
+            return
+        }
+        inputCheckpointDue = false
+        inputCheckpointSequence = sequence
+        // Periodically commit the accumulated input for ASR without ending,
+        // muting or granting away the learner's active speech turn. Its final
+        // stop still owns a separate reserved tail slot and exact commit ACK.
+        pendingSpeechCommitCount += 1
+        requestInputCommit(sequence, checkpoint = true)
+        scheduleInputCheckpoint()
     }
 
     fun close() = terminate(null)
@@ -670,8 +723,8 @@ internal class VoiceTutorDuplexTurnController(
         synchronized(this) {
             if (closed) return
             closed = true
-            interventionTimer?.dispose()
-            interventionTimer = null
+            cancelInputCheckpointTimer()
+            inputCheckpointDue = false
             playbackTimer?.dispose()
             playbackTimer = null
             responseTimer?.dispose()
@@ -691,7 +744,6 @@ internal class VoiceTutorDuplexTurnController(
             toolCoordinator?.close()
             inputCoordinator?.close()
             pendingInputPublications.clear()
-            meaningfulSpeechSequences.clear()
             activeTutorTranscripts.clear()
             pendingInputCommits.clear()
             recentCommittedItemIds.clear()
@@ -730,12 +782,23 @@ internal class VoiceTutorDuplexTurnController(
         }
         lastClientSpeechSequence = sequence
         activeClientSpeechSequence = sequence
+        activeSpeechStartedOrder = nextDialogueEventOrder()
+        // This utterance can acknowledge only a question already finished when
+        // it began. Freeze that boundary: later mixed tool/confirmation audio
+        // must not invalidate a valid learner acknowledgement retroactively.
+        val tutorOutputCompleted = !responseActive || providerOutputBufferStopped
+        activeSpeechPrecedingTutorStopOrder = if (tutorOutputCompleted) lastTutorSpeechStoppedOrder else 0
+        activeSpeechPrecedingSpokenGeneration = if (tutorOutputCompleted) lastSpokenResponseGeneration else 0
         inputCheckpointSequence = null
         observeSpeechStarted()
     }
 
     private fun observeClientSpeechStopped(sequence: Long) {
         if (activeClientSpeechSequence != sequence) return
+        val lessonRevision = activeSpeechLessonRevision ?: currentLessonRevision
+        val speechStartedOrder = activeSpeechStartedOrder
+        val precedingTutorSpeechStoppedOrder = activeSpeechPrecedingTutorStopOrder
+        val precedingSpokenResponseGeneration = activeSpeechPrecedingSpokenGeneration
         activeClientSpeechSequence = null
         observeSpeechStopped()
         val sincePreviousCommit = lastInputCommitNanos?.let { (nanoTime() - it).coerceAtLeast(0) }
@@ -760,12 +823,22 @@ internal class VoiceTutorDuplexTurnController(
             // A speech stop immediately after a long-speech checkpoint must not
             // commit an empty tail. Keep its pending slot and flush once, shortly
             // after the checkpoint; microphone/RTP/output playback stay untouched.
-            delayedStopCommit = PendingStopCommit(sequence, sequence, 1)
+            delayedStopCommit = PendingStopCommit(
+                sequence, sequence, 1, lessonRevision, speechStartedOrder,
+                precedingTutorSpeechStoppedOrder, precedingSpokenResponseGeneration,
+            )
             delayedStopCommitTimer = Mono.delay(
                 Duration.ofNanos(MIN_INPUT_COMMIT_SPACING.toNanos() - sincePreviousCommit),
             ).subscribe { flushDelayedStopCommit(sequence) }
         } else {
-            requestInputCommit(sequence, checkpoint = false)
+            requestInputCommit(
+                sequence,
+                checkpoint = false,
+                lessonRevision = lessonRevision,
+                speechStartedOrder = speechStartedOrder,
+                precedingTutorSpeechStoppedOrder = precedingTutorSpeechStoppedOrder,
+                precedingSpokenResponseGeneration = precedingSpokenResponseGeneration,
+            )
         }
     }
 
@@ -776,16 +849,35 @@ internal class VoiceTutorDuplexTurnController(
         delayedStopCommit = null
         delayedStopCommitTimer?.dispose()
         delayedStopCommitTimer = null
-        requestInputCommit(pending.lastSequence, checkpoint = false, speechSlots = pending.speechSlots)
+        requestInputCommit(
+            pending.lastSequence,
+            checkpoint = false,
+            speechSlots = pending.speechSlots,
+            lessonRevision = pending.lessonRevision,
+            speechStartedOrder = pending.speechStartedOrder,
+            precedingTutorSpeechStoppedOrder = pending.precedingTutorSpeechStoppedOrder,
+            precedingSpokenResponseGeneration = pending.precedingSpokenResponseGeneration,
+        )
     }
 
-    private fun requestInputCommit(sequence: Long, checkpoint: Boolean, speechSlots: Int = 1) {
+    private fun requestInputCommit(
+        sequence: Long,
+        checkpoint: Boolean,
+        speechSlots: Int = 1,
+        lessonRevision: Long = activeSpeechLessonRevision ?: currentLessonRevision,
+        speechStartedOrder: Long = activeSpeechStartedOrder,
+        precedingTutorSpeechStoppedOrder: Long = activeSpeechPrecedingTutorStopOrder,
+        precedingSpokenResponseGeneration: Long = activeSpeechPrecedingSpokenGeneration,
+    ) {
         if (closed) return
         // Register before emitting: an immediate provider ACK must find the
         // outstanding commit, while a later start has its own pending count.
         val requestedAt = nanoTime()
         val eventId = internalEventId(if (checkpoint) "input-checkpoint" else "input-commit")
-        pendingInputCommits.addLast(PendingInputCommit(sequence, requestedAt, checkpoint, eventId, speechSlots))
+        pendingInputCommits.addLast(PendingInputCommit(
+            sequence, requestedAt, checkpoint, eventId, speechSlots, lessonRevision, speechStartedOrder,
+            precedingTutorSpeechStoppedOrder, precedingSpokenResponseGeneration,
+        ))
         lastInputCommitNanos = requestedAt
         scheduleInputCommitTimeout()
         emit(
@@ -798,21 +890,23 @@ internal class VoiceTutorDuplexTurnController(
 
     private fun observeSpeechStarted() {
         if (!userSpeaking) {
+            activeSpeechLessonRevision = currentLessonRevision
             pendingSpeechCommitCount = (pendingSpeechCommitCount + 1)
                 .coerceAtMost(MAX_PENDING_SPEECH_COMMITS)
-            interventionDeliveredDuringCurrentSpeech = false
         }
         userSpeaking = true
-        interventionDeadlineElapsedWhileResponseActive = false
-        scheduleIntervention()
+        inputCheckpointDue = false
+        scheduleInputCheckpoint()
     }
 
     private fun observeSpeechStopped() {
         userSpeaking = false
-        interventionTimer?.dispose()
-        interventionTimer = null
-        interventionDeliveredDuringCurrentSpeech = false
-        interventionDeadlineElapsedWhileResponseActive = false
+        activeSpeechLessonRevision = null
+        activeSpeechStartedOrder = 0
+        activeSpeechPrecedingTutorStopOrder = 0
+        activeSpeechPrecedingSpokenGeneration = 0
+        cancelInputCheckpointTimer()
+        inputCheckpointDue = false
         if (pendingSpeechCommitCount == 0) createNormalResponseIfReady()
     }
 
@@ -849,9 +943,10 @@ internal class VoiceTutorDuplexTurnController(
         pendingSpeechCommitCount = (pendingSpeechCommitCount - commit.speechSlots).coerceAtLeast(0)
         scheduleInputCommitTimeout()
         if (commit.checkpoint && activeClientSpeechSequence == commit.sequence) {
-            inputCheckpointSequence = null
-            interventionDeadlineElapsedWhileResponseActive = false
-            scheduleIntervention()
+            // An empty later checkpoint must not erase evidence of an earlier
+            // checkpoint in this same speech sequence or invalidate its tail.
+            inputCheckpointDue = false
+            scheduleInputCheckpoint()
         } else if (inputCheckpointSequence != commit.sequence) {
             val emitted = inputWork.tryEmitNext(
                 VoiceTutorInputTurnCoordinator.Action.Retry(
@@ -891,19 +986,35 @@ internal class VoiceTutorDuplexTurnController(
         terminate(VoiceTutorProviderInputCommitTimeoutException())
     }
 
-    private fun scheduleIntervention() {
+    private fun scheduleInputCheckpoint(delay: Duration = continuousSpeechLimit) {
         if (closed || pauseCoordinator?.blocksResponses == true || !openingResponseRequested ||
-            openingResponsePending || interventionDeliveredDuringCurrentSpeech
+            openingResponsePending || !userSpeaking || transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND
         ) return
-        interventionTimer?.dispose()
-        interventionTimer = Mono.delay(continuousSpeechLimit)
-            .subscribe { fireContinuousSpeechDeadline() }
+        val sequence = activeClientSpeechSequence ?: return
+        cancelInputCheckpointTimer()
+        val generation = inputCheckpointTimerGeneration
+        inputCheckpointTimer = Mono.delay(delay)
+            .subscribe { fireInputCheckpointTimer(sequence, generation) }
+    }
+
+    private fun cancelInputCheckpointTimer() {
+        inputCheckpointTimer?.dispose()
+        inputCheckpointTimer = null
+        inputCheckpointTimerGeneration += 1
+    }
+
+    @Synchronized
+    private fun fireInputCheckpointTimer(sequence: Long, generation: Long) {
+        // Disposed callbacks may race a later speech start or a newly scheduled
+        // chunk of this sequence. They must not commit the later buffer early.
+        if (closed || activeClientSpeechSequence != sequence || inputCheckpointTimerGeneration != generation) return
+        fireContinuousSpeechDeadline()
     }
 
     private fun createNormalResponseIfReady() {
         if (
             closed || pauseCoordinator?.blocksResponses == true || !openingResponseRequested || userSpeaking ||
-            pendingSpeechCommitCount > 0 || responseActive ||
+            pendingSpeechCommitCount > 0 || pendingInputCommits.isNotEmpty() || delayedStopCommit != null || responseActive ||
             inputCoordinator?.hasPending == true || toolCoordinator?.hasPending == true ||
             (!openingResponsePending && !queuedCommittedTurn && toolCoordinator?.continuationReady != true)
         ) return
@@ -1005,6 +1116,7 @@ internal class VoiceTutorDuplexTurnController(
             activeResponseGeneration + 1
         }
         responseActive = true
+        activeResponseLessonRevision = currentLessonRevision
         activeResponseCreateEventId = createEventId
         activeResponseId = null
         activeResponseAllowsTools = allowTools
@@ -1030,6 +1142,7 @@ internal class VoiceTutorDuplexTurnController(
         if (activeResponseId == null) {
             activeResponseId = responseId
         }
+        rememberBoundedBinding(responseLessonRevisions, responseId, activeResponseLessonRevision)
         return true
     }
 
@@ -1069,10 +1182,11 @@ internal class VoiceTutorDuplexTurnController(
             activeResponseId = responseId
         }
         if (response.path("output").any { it.path("type").asText() == "function_call" } && !activeResponseAllowsTools) {
-            // An opening, intervention, or exhausted tool round never has
+            // An opening or exhausted tool round never has
             // permission to execute a function, even if a provider emits one.
             throw VoiceTutorMcpProtocolException()
         }
+        rememberBoundedBinding(responseLessonRevisions, responseId, activeResponseLessonRevision)
         val toolCalls = toolCoordinator?.completedResponse(response) ?: emptyList()
         toolOnlyResponse = toolCalls.isNotEmpty() &&
             response.path("output").all { it.path("type").asText() == "function_call" } &&
@@ -1118,6 +1232,13 @@ internal class VoiceTutorDuplexTurnController(
         if (transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) return false
         val responseId = node.path("response_id").asText()
         if (!matchesKnownActiveResponse(responseId)) return false
+        if (!providerOutputBufferStopped) {
+            // Only a matching, actual server output boundary counts. A mixed
+            // tool/audio response keeps its own generation; its late tail is
+            // not evidence that a later confirmation question was spoken.
+            lastTutorSpeechStoppedOrder = nextDialogueEventOrder()
+            lastSpokenResponseGeneration = activeResponseGeneration
+        }
         providerOutputBufferStopped = true
         advancePlaybackGate()
         return true
@@ -1294,10 +1415,10 @@ internal class VoiceTutorDuplexTurnController(
         providerOutputBufferStopped = false
         if (closed) return
         if (userSpeaking) {
-            if (interventionDeadlineElapsedWhileResponseActive) {
+            if (inputCheckpointDue) {
                 fireContinuousSpeechDeadline()
-            } else if (interventionTimer == null) {
-                scheduleIntervention()
+            } else if (inputCheckpointTimer == null) {
+                scheduleInputCheckpoint()
             }
         } else {
             createNormalResponseIfReady()
@@ -1306,6 +1427,23 @@ internal class VoiceTutorDuplexTurnController(
 
     private fun internalEventId(action: String): String =
         "$DUPLEX_EVENT_PREFIX$action-${UUID.randomUUID()}"
+
+    private fun nextDialogueEventOrder(): Long {
+        // Saturating rather than wrapping preserves conservative strict-order
+        // checks even beyond any practical bounded call length.
+        if (dialogueEventOrder < Long.MAX_VALUE) dialogueEventOrder += 1
+        return dialogueEventOrder
+    }
+
+    private fun <T> rememberBoundedBinding(bindings: MutableMap<String, T>, itemId: String, value: T) {
+        if (itemId.isBlank() || itemId.length > MAX_PROVIDER_ITEM_ID_CHARACTERS) return
+        bindings[itemId] = value
+        if (bindings.size > MAX_RECENT_COMMITTED_ITEMS) {
+            val oldest = bindings.keys.iterator()
+            oldest.next()
+            oldest.remove()
+        }
+    }
 
     private fun accepted(
         accepted: Boolean,
@@ -1339,9 +1477,30 @@ internal class VoiceTutorDuplexTurnController(
         val checkpoint: Boolean = false,
         val eventId: String = UUID.randomUUID().toString(),
         val speechSlots: Int = 1,
+        val lessonRevision: Long = 0,
+        val speechStartedOrder: Long = 0,
+        val precedingTutorSpeechStoppedOrder: Long = 0,
+        val precedingSpokenResponseGeneration: Long = 0,
     )
 
-    private data class PendingStopCommit(val firstSequence: Long, val lastSequence: Long, val speechSlots: Int)
+    private data class PendingStopCommit(
+        val firstSequence: Long,
+        val lastSequence: Long,
+        val speechSlots: Int,
+        // One native buffer can merge rapid adjacent utterances. Keep its first
+        // epoch even if an MCP result arrives before the delayed tail flushes.
+        val lessonRevision: Long,
+        val speechStartedOrder: Long,
+        val precedingTutorSpeechStoppedOrder: Long,
+        val precedingSpokenResponseGeneration: Long,
+    )
+
+    private data class InputLessonBinding(
+        val lessonRevision: Long,
+        val speechStartedOrder: Long,
+        val precedingTutorSpeechStoppedOrder: Long = 0,
+        val precedingSpokenResponseGeneration: Long = 0,
+    )
 
     private companion object {
         const val MAX_BUFFERED_CONTROLS = 32
@@ -1367,9 +1526,6 @@ internal class VoiceTutorDuplexTurnController(
             "conversation.item.input_audio_transcription.completed",
         )
         val COMPLETING_RESPONSE_STATUSES = setOf("completed", "cancelled", "incomplete")
-        const val CONTINUOUS_SPEECH_INTERVENTION_INSTRUCTIONS =
-            "The learner has been speaking continuously. Use exactly one short, complete, respectful sentence " +
-                "asking them to wrap up their current point, then let them continue."
     }
 }
 

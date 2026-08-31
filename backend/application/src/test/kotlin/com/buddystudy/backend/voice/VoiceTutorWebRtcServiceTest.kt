@@ -10,6 +10,8 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorControlC
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcAnswer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcCleanupClaim
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcCleanupPort
@@ -293,8 +295,48 @@ class VoiceTutorWebRtcServiceTest {
         assertThat(context.session).isEqualTo(expected)
         assertThat(context.callId).isEqualTo("rtc_call-1")
         assertThat(context.principal).isSameAs(principal)
+        assertThat(context.initialLessonRevision).isZero()
         assertThat(calls.claim).isEqualTo(1)
         assertThat(calls.heartbeat).isZero()
+    }
+
+    @Test
+    fun `control reattachment restores only the authenticated sessions current lesson revision`(): Unit = runBlocking {
+        val calls = Calls()
+        val lookups = mutableListOf<Pair<Long, String>>()
+        val contexts = proxy<VoiceTutorStudyContextPort> { method, args ->
+            check(method == "currentRevision")
+            lookups += (args[0] as Long) to (args[1] as String)
+            7L
+        }
+
+        val context = service(calls = calls, studyContexts = contexts)
+            .claimControl(principal, SESSION_ID, CONNECTION_ID)
+
+        assertThat(context.initialLessonRevision).isEqualTo(7)
+        assertThat(lookups).containsExactly(principal.userId to SESSION_ID)
+        assertThat(calls.claim).isEqualTo(1)
+        assertThat(calls.connect).isZero()
+        assertThat(calls.heartbeat).isZero()
+    }
+
+    @Test
+    fun `a failed revision lookup does not acquire a control claim or start provider work`(): Unit = runBlocking {
+        val calls = Calls()
+        val unavailable = IllegalStateException("Synthetic metadata storage unavailable.")
+        val contexts = proxy<VoiceTutorStudyContextPort> { method, _ ->
+            check(method == "currentRevision")
+            throw unavailable
+        }
+
+        val failure = runCatching {
+            service(calls = calls, studyContexts = contexts).claimControl(principal, SESSION_ID, CONNECTION_ID)
+        }.exceptionOrNull()
+
+        assertThat(failure).isSameAs(unavailable)
+        assertThat(calls.claim).isZero()
+        assertThat(calls.connect).isZero()
+        assertThat(calls.lifecycle).isEmpty()
     }
 
     private fun service(
@@ -307,6 +349,7 @@ class VoiceTutorWebRtcServiceTest {
         negotiationFailure: Throwable? = null,
         cleanup: VoiceTutorWebRtcCleanupPort = FakeCleanup(calls),
         hangupFails: Boolean = false,
+        studyContexts: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
     ): VoiceTutorWebRtcService {
         val relay = proxy<VoiceTutorRelayUseCase> { method, _ ->
             when (method) {
@@ -357,7 +400,7 @@ class VoiceTutorWebRtcServiceTest {
                 context: com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext,
                 clientEvents: Flow<String>,
                 terminalEvents: Flow<VoiceTutorRelayTermination>,
-                onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
+                onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
             ) = error("Unexpected VoiceTutorWebRtcPort sideband relay.")
 
             override suspend fun hangup(callId: String) {
@@ -388,6 +431,7 @@ class VoiceTutorWebRtcServiceTest {
             cleanup = cleanup,
             properties = BuddyStudyProperties(),
             clock = Clock.fixed(now, ZoneOffset.UTC),
+            studyContexts = studyContexts,
         )
     }
 

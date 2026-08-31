@@ -60,6 +60,8 @@ data class VoiceTutorSession(
     val failureMessage: String?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Accepted lesson identity survives the nullable live-study FK when that node is deleted. */
+    val acceptedStudyId: Long? = studyId,
 )
 
 data class VoiceTutorRecording(
@@ -91,6 +93,8 @@ data class VoiceTutorTranscriptTurn(
     val transcript: String,
     val sequenceNumber: Long,
     val occurredAt: Instant,
+    /** Server-owned response/input epoch; legacy is zero and an explicitly unknown binding is -1. */
+    val lessonRevision: Long = 0,
 )
 
 data class VoiceTutorResult(

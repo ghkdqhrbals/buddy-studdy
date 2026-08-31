@@ -151,7 +151,7 @@ class VoiceStudyLearningRecordProjectorTest {
         assertThat(project(listOf(fixture.exploration().copy(studyId = null)))).isEmpty()
         assertThat(project(listOf(fixture.exploration().copy(studyId = 999)))).isEmpty()
         assertThat(project(listOf(fixture.exploration().copy(topic = "Invented name")))).isEmpty()
-        assertThat(project(selectedStudyId = null)).isEmpty()
+        assertThat(project(acceptedStudyId = null)).isEmpty()
         assertThat(project(snapshots = fixture.snapshots() + fixture.snapshots().last().copy(difficulty = 9))).isEmpty()
     }
 
@@ -216,16 +216,80 @@ class VoiceStudyLearningRecordProjectorTest {
         assertThat(project().single().sourceHash).isNotEqualTo(record.sourceHash)
     }
 
+    @Test
+    fun `old pending question and new question on the same node keep different captured levels and verbatim sources`() {
+        val revised = fixture.snapshots().last().copy(topic = "Renamed eviction", difficulty = 8, revision = 1)
+        val turns = fixture.turns().map { if (it.id >= 2) it.copy(lessonRevision = 1) else it }
+        val merged = fixture.exploration().copy(topic = revised.topic, exchanges = listOf(fixture.exchange(), fixture.learnerQuestion()))
+
+        val records = project(listOf(merged), turns, snapshots = fixture.snapshots() + revised)
+
+        assertThat(records).hasSize(2)
+        assertThat(records.map { it.studyId }).containsExactly(11, 11)
+        assertThat(records.map { it.topic }).containsExactly(fixture.TOPIC, revised.topic)
+        assertThat(records.map { it.difficulty }).containsExactly(3, 8)
+        assertThat(records.map { it.questionTurnId }).containsExactly(1, 5)
+        assertThat(records.first().question).isEqualTo(fixture.turns()[0].transcript)
+        assertThat(records.first().answer).isEqualTo(fixture.turns()[1].transcript + "\n" + fixture.turns()[2].transcript)
+        assertThat(records.first().score).isEqualTo(85)
+        assertThat(records.last().question).isEqualTo(fixture.turns()[4].transcript)
+        assertThat(records.last().score).isNull()
+    }
+
+    @Test
+    fun `future changes never rewrite records of a legacy revision zero question`() {
+        val original = project().single()
+        val history = fixture.snapshots() + fixture.snapshots().last().copy(topic = "Later name", difficulty = 10, revision = 1)
+        assertThat(project(snapshots = history).single()).isEqualTo(original)
+    }
+
+    @Test
+    fun `accepted historical anchor permits a surviving sibling but a deleted target remains only in the call`() {
+        val sibling = VoiceTutorStudySnapshot(12, 1, "Queues", 4)
+        val snapshots = fixture.snapshots() + sibling
+        // The selected node and its child are deleted; the live sibling of that selected branch survives.
+        val records = project(listOf(fixture.exploration().copy(studyId = 12, topic = sibling.topic)),
+            snapshots = snapshots, owned = setOf(1, 12), acceptedStudyId = 10)
+        assertThat(records.single().studyId).isEqualTo(12)
+        assertThat(project(snapshots = snapshots, owned = setOf(1, 12))).isEmpty()
+        assertThat(project(snapshots = snapshots, owned = setOf(1, 12), acceptedStudyId = null)).isEmpty()
+    }
+
+    @Test
+    fun `a reparented later node version cannot retrospectively move an earlier question into another lesson tree`() {
+        val otherRoot = VoiceTutorStudySnapshot(90, null, "Other root", 2)
+        val moved = fixture.snapshots().last().copy(parentStudyId = 90, revision = 1)
+        val history = fixture.snapshots() + listOf(otherRoot, moved)
+        assertThat(project(snapshots = history)).hasSize(1)
+        assertThat(project(turns = fixture.turns().map { it.copy(lessonRevision = 1) }, snapshots = history)).isEmpty()
+    }
+
+    @Test
+    fun `an ambiguous revision affects only questions at or after that epoch and never drops an old valid record`() {
+        val updated = fixture.snapshots().last().copy(difficulty = 8, revision = 1)
+        val history = fixture.snapshots() + listOf(updated, updated.copy(difficulty = 9))
+        assertThat(project(snapshots = history)).hasSize(1)
+        assertThat(project(turns = fixture.turns().map { it.copy(lessonRevision = 1) }, snapshots = history)).isEmpty()
+    }
+
+    @Test
+    fun `unknown and future question epochs cannot create ordinary node records`() {
+        for (revision in listOf(-1L, 1L, Long.MAX_VALUE)) {
+            assertThat(project(turns = fixture.turns().map { if (it.id == 1L) it.copy(lessonRevision = revision) else it }))
+                .describedAs("unbound epoch $revision").isEmpty()
+        }
+    }
+
     private fun project(
         explorations: List<VoiceTutorExploration> = listOf(fixture.exploration()),
         turns: List<VoiceTutorTranscriptTurn> = fixture.turns(),
         snapshots: List<VoiceTutorStudySnapshot> = fixture.snapshots(),
         owned: Set<Long> = setOf(11),
-        selectedStudyId: Long? = 10,
+        acceptedStudyId: Long? = 10,
         language: String = "ko",
         detect: (String, String) -> String = { _, fallback -> fallback },
     ) = VoiceStudyLearningRecordProjector.project(
-        fixture.USER_ID, fixture.SESSION_ID, selectedStudyId, language, explorations, turns, snapshots, owned, detect,
+        fixture.USER_ID, fixture.SESSION_ID, acceptedStudyId, language, explorations, turns, snapshots, owned, detect,
     )
 }
 

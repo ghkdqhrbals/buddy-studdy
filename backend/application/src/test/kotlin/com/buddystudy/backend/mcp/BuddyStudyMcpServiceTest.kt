@@ -11,6 +11,7 @@ import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyGrowthUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystudy.backend.study.application.model.StudyPageResponse
+import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
@@ -20,6 +21,7 @@ import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerati
 import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
+import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import kotlinx.coroutines.runBlocking
@@ -193,6 +195,54 @@ class BuddyStudyMcpServiceTest {
     }
 
     @Test
+    fun `metadata patches forward only provided fields to the existing node use case`(): Unit = runBlocking {
+        val rename = UpdateStudyCommand(topic = "Redis Streams")
+        val level = UpdateStudyCommand(difficultyLevel = 3)
+        val result = studyRoom()
+        Mockito.`when`(studies.updateStudy(principal, 42L, rename)).thenReturn(result)
+        Mockito.`when`(studies.updateStudy(principal, 42L, level)).thenReturn(result)
+
+        assertThat(service.updateStudy(principal, 42L, rename)).isSameAs(result)
+        assertThat(service.updateStudy(principal, 42L, level)).isSameAs(result)
+
+        Mockito.verify(studies).updateStudy(principal, 42L, rename)
+        Mockito.verify(studies).updateStudy(principal, 42L, level)
+        Mockito.verifyNoMoreInteractions(studies)
+        Mockito.verifyNoInteractions(questionRequests, answers, records, learningRecords, voiceTutor, profiles, learningContexts)
+    }
+
+    @Test
+    fun `metadata patch rejects anonymous and invalid targets and preserves owned not found failures`(): Unit = runBlocking {
+        val command = UpdateStudyCommand(difficultyLevel = 4)
+        val anonymous = runCatching { service.updateStudy(principal.copy(anonymous = true), 42L, command) }.exceptionOrNull() as ApiException
+        assertThat(anonymous.code).isEqualTo(ApiErrorCode.ACCOUNT_FORBIDDEN)
+        listOf(0L, -1L).forEach { id ->
+            val invalid = runCatching { service.updateStudy(principal, id, command) }.exceptionOrNull() as ApiException
+            assertThat(invalid.code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        }
+        Mockito.verifyNoInteractions(studies)
+        val missing = ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        Mockito.`when`(studies.updateStudy(principal, 42L, command)).thenThrow(missing)
+        assertThat(runCatching { service.updateStudy(principal, 42L, command) }.exceptionOrNull()).isSameAs(missing)
+        Mockito.verifyNoInteractions(questionRequests, answers, records, learningRecords)
+    }
+
+    @Test
+    fun `confirmed deletion passes the exact expected IDs and retains the legacy null contract`(): Unit = runBlocking {
+        val expected = listOf(44L, 42L, 43L)
+        val guarded = service.deleteStudy(principal, 42L, true, expected)
+        val legacy = service.deleteStudy(principal, 50L, true)
+
+        assertThat(guarded.deleted).isTrue()
+        assertThat(guarded.studyId).isEqualTo(42)
+        assertThat(legacy.deleted).isTrue()
+        Mockito.verify(studies).deleteStudy(principal, 42L, expected)
+        Mockito.verify(studies).deleteStudy(principal, 50L, null)
+        Mockito.verifyNoMoreInteractions(studies)
+        Mockito.verifyNoInteractions(questionRequests, answers, records, learningRecords, voiceTutor)
+    }
+
+    @Test
     fun `anonymous device account cannot read private mcp context`(): Unit = runBlocking {
         val anonymous = principal.copy(anonymous = true, status = "ANONYMOUS")
 
@@ -219,6 +269,7 @@ class BuddyStudyMcpServiceTest {
                 .containsExactly(Permissions.STUDY_READ)
         }
         assertThat(operations.getValue("deleteStudy")).containsExactly(Permissions.STUDY_DELETE)
+        assertThat(operations.getValue("updateStudy")).containsExactly(Permissions.STUDY_UPDATE)
         assertThat(operations.getValue("submitAnswer")).containsExactly(Permissions.RECORD_UPDATE)
         assertThat(operations.getValue("getMyContext")).containsExactly(Permissions.PROFILE_READ)
         assertThat(operations.getValue("listStudyLearningRecords"))
@@ -234,6 +285,14 @@ class BuddyStudyMcpServiceTest {
     }
 
     private companion object {
+        fun studyRoom() = StudyRoomResponse(
+            id = 42L, parentStudyId = 40L, sortOrder = 2, topic = "Redis Streams", difficultyLevel = 3,
+            intervalMinutes = 30, enabled = false, activeForQuestions = true, notificationSound = "bell.caf",
+            customPrompt = "Preserved", openaiModel = "fixture-model", maxHistoryCount = 100,
+            nextDueAt = Instant.EPOCH, lastSentAt = null, lastError = null, pendingQuestion = null,
+            createdAt = Instant.EPOCH, updatedAt = Instant.EPOCH,
+        )
+
         fun voiceRecord() = VoiceStudyLearningRecordResponse(
             id = "91", sessionId = "synthetic-prior-session", studyId = 42L, parentStudyId = 40L,
             topic = "Redis", difficulty = 3, createdAt = Instant.EPOCH, kind = VoiceTutorExchangeKind.TUTOR_QUESTION,
@@ -248,6 +307,7 @@ class BuddyStudyMcpServiceTest {
             "updateMyLearningContext",
             "listStudies",
             "getStudy",
+            "updateStudy",
             "createStudy",
             "createStudyTopic",
             "deleteStudy",

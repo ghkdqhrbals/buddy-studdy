@@ -31,6 +31,8 @@ object VoiceTutorExplorationLimits {
     const val MAX_EXPLORATIONS = 12
     const val MAX_EXCHANGES_PER_EXPLORATION = 12
     const val MAX_TOTAL_EXCHANGES = 48
+    // Verification can split one provider topic into one group per question epoch without losing evidence.
+    const val MAX_STORED_EXPLORATIONS = MAX_TOTAL_EXCHANGES
     const val MAX_TOPIC_CHARACTERS = 500
     const val MAX_DEPTH_CHARACTERS = 1_500
     const val MAX_EXCHANGE_TEXT_CHARACTERS = 4_000

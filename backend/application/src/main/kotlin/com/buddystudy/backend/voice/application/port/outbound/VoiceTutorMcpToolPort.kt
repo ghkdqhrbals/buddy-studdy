@@ -13,7 +13,25 @@ data class VoiceTutorMcpToolResult(
     val isError: Boolean,
     val studyTreeChanged: Boolean = false,
     val createdStudyId: Long? = null,
+    val changedStudyId: Long? = createdStudyId,
+    val changeKind: VoiceTutorStudyChangeKind? = if (createdStudyId != null) VoiceTutorStudyChangeKind.CREATED else null,
+    val deletedStudyIds: List<Long> = emptyList(),
+    // Server-owned context revision. A tool's JSON cannot set a response's lesson level.
+    val lessonRevision: Long? = null,
 )
+
+enum class VoiceTutorStudyChangeKind { CREATED, UPDATED, DELETED }
+
+/** Only persisted, accepted learner speech can advance a destructive-action confirmation. */
+interface VoiceTutorMutationConfirmationPort {
+    suspend fun latestLearnerTurnId(userId: Long, sessionId: String): Long?
+    suspend fun latestTutorTurnId(userId: Long, sessionId: String): Long?
+}
+
+object UnavailableVoiceTutorMutationConfirmationPort : VoiceTutorMutationConfirmationPort {
+    override suspend fun latestLearnerTurnId(userId: Long, sessionId: String): Long? = null
+    override suspend fun latestTutorTurnId(userId: Long, sessionId: String): Long? = null
+}
 
 /** Executes the existing account-scoped MCP tools without exposing account credentials. */
 interface VoiceTutorMcpToolPort {

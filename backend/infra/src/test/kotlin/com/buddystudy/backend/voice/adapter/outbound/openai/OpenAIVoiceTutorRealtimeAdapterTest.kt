@@ -537,37 +537,22 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
     }
 
     @Test
-    fun `continuous intervention leaves learner buffer for its natural commit`() {
+    fun `legacy long speech waits for its natural stop and commit without intervention`(): Unit {
         val controller = controller()
-        val interventionControl = AtomicReference<String>()
 
-        StepVerifier.create(providerEvents(controller).take(2))
+        StepVerifier.create(providerEvents(controller).take(1))
             .then {
                 controller.observeProviderEvent(event("input_audio_buffer.speech_started"))
                 controller.fireContinuousSpeechDeadline()
+                controller.fireContinuousSpeechDeadline()
             }
-            .assertNext { raw ->
-                interventionControl.set(raw)
-                val node = mapper.readTree(raw)
-                assertThat(node.path("type").asText()).isEqualTo("response.create")
-                assertThat(node.path("response").path("instructions").asText())
-                    .contains("speaking continuously")
-                    .contains("exactly one short, complete")
-                assertThat(node.path("response").path("metadata").path("buddystudy_turn").asText())
-                    .isEqualTo("continuous_intervention")
-            }
-            .then {
-                controller.observeProviderEvent(
-                    responseEvent("response.created", "response-intervention", interventionControl.get()),
-                )
-                controller.observeProviderEvent(event("input_audio_buffer.speech_stopped"))
-                controller.observeProviderEvent(event("input_audio_buffer.committed"))
-                controller.observeProviderEvent(
-                    responseEvent("response.done", "response-intervention", interventionControl.get()),
-                )
-            }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then { controller.observeProviderEvent(event("input_audio_buffer.speech_stopped")) }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then { controller.observeProviderEvent(event("input_audio_buffer.committed")) }
             .assertNext { raw ->
                 assertThat(mapper.readTree(raw).path("type").asText()).isEqualTo("response.create")
+                assertThat(raw).doesNotContain("continuous_intervention", "response.cancel", "output_audio_buffer.clear")
             }
             .verifyComplete()
 
@@ -575,7 +560,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
     }
 
     @Test
-    fun `elapsed intervention deadline resumes after current tutor sentence`() {
+    fun `legacy elapsed speech checkpoint cannot take the floor after current tutor sentence`(): Unit {
         val controller = controller()
         val activeControl = AtomicReference<String>()
 
@@ -591,11 +576,15 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
             .then {
                 controller.observeProviderEvent(responseEvent("response.done", "response-old", activeControl.get()))
             }
+            .expectNoEvent(Duration.ofMillis(10))
+            .then {
+                controller.observeProviderEvent(event("input_audio_buffer.speech_stopped"))
+                controller.observeProviderEvent(event("input_audio_buffer.committed"))
+            }
             .assertNext { raw ->
                 val node = mapper.readTree(raw)
                 assertThat(node.path("type").asText()).isEqualTo("response.create")
-                assertThat(node.path("response").path("metadata").path("buddystudy_turn").asText())
-                    .isEqualTo("continuous_intervention")
+                assertThat(raw).doesNotContain("continuous_intervention", "response.cancel", "output_audio_buffer.clear")
             }
             .verifyComplete()
 
@@ -1053,41 +1042,33 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         }
 
     @Test
-    fun `manual continuous speech permits one complete intervention without committing live audio`() {
-        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
-        val intervention = AtomicReference<String>()
+    fun `manual continuous speech only checkpoints audio and responds after natural stop`(): Unit {
+        val now = AtomicLong()
+        val controller = controller(nanoTime = now::get, transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
         try {
             StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(3))
                 .then {
                     controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
                     controller.fireContinuousSpeechDeadline()
                 }
-                .assertNext { raw ->
-                    intervention.set(raw)
-                    val response = mapper.readTree(raw)
-                    assertThat(response.path("type").asText()).isEqualTo("response.create")
-                    assertThat(response.path("response").path("metadata").path(VoiceTutorRealtimeContract.TURN_METADATA_KEY).asText())
-                        .isEqualTo(VoiceTutorRealtimeContract.CONTINUOUS_INTERVENTION_TURN)
-                    assertThat(raw).doesNotContain("input_audio_buffer.commit", "response.cancel", "output_audio_buffer.clear")
-                }
+                .assertNext(::assertServerOwnedInputCheckpoint)
                 .then {
-                    controller.observeProviderEvent(responseEvent("response.created", "intervention", intervention.get()))
+                    controller.observeProviderEvent(committedEvent("long-speech-checkpoint"))
                     controller.fireContinuousSpeechDeadline()
                     controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
                     controller.fireContinuousSpeechDeadline()
                 }
                 .expectNoEvent(Duration.ofMillis(10))
-                .then { controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1)) }
-                .assertNext(::assertServerOwnedInputCommit)
                 .then {
-                    controller.observeProviderEvent(committedEvent("wrapped-up-learner"))
-                    controller.observeProviderEvent(responseEvent("response.done", "intervention", intervention.get()))
+                    now.set(Duration.ofSeconds(1).toNanos())
+                    controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
                 }
-                .expectNoEvent(Duration.ofMillis(10))
-                .then { controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "intervention")) }
+                .assertNext(::assertServerOwnedInputCommit)
+                .then { controller.observeProviderEvent(committedEvent("finished-learner")) }
                 .assertNext { raw ->
                     assertThat(mapper.readTree(raw).path("event_id").asText())
                         .startsWith("buddystudy-internal-duplex-turn-response-")
+                    assertThat(raw).doesNotContain("continuous_intervention", "response.cancel", "output_audio_buffer.clear")
                 }
                 .verifyComplete()
         } finally {
@@ -1096,28 +1077,36 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
     }
 
     @Test
-    fun `manual pending intervention waits for the previous teacher sentence without an early commit`() {
+    fun `manual checkpoint during tutor speech cannot turn into an intervention when tutor finishes`(): Unit {
         val controller = controller(
             transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
             readyForLearnerTurns = false,
         )
         val opening = AtomicReference<String>()
         try {
-            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(2))
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(4))
                 .then { controller.startOpeningResponse() }
                 .assertNext(opening::set)
                 .then {
                     controller.observeProviderEvent(responseEvent("response.created", "opening", opening.get()))
                     controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
                     controller.fireContinuousSpeechDeadline()
+                }
+                .assertNext(::assertServerOwnedInputCheckpoint)
+                .then {
+                    controller.observeProviderEvent(committedEvent("still-speaking"))
                     controller.observeProviderEvent(responseEvent("response.done", "opening", opening.get()))
                 }
                 .expectNoEvent(Duration.ofMillis(10))
                 .then { controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "opening")) }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1)) }
+                .assertNext(::assertServerOwnedInputCommit)
+                .then { controller.observeProviderEvent(committedEvent("learner-tail")) }
                 .assertNext { raw ->
                     assertThat(mapper.readTree(raw).path("event_id").asText())
-                        .startsWith("buddystudy-internal-duplex-continuous-response-")
-                    assertThat(raw).doesNotContain("input_audio_buffer.commit", "response.cancel", "output_audio_buffer.clear")
+                        .startsWith("buddystudy-internal-duplex-turn-response-")
+                    assertThat(raw).doesNotContain("continuous_intervention", "response.cancel", "output_audio_buffer.clear")
                 }
                 .verifyComplete()
         } finally {
@@ -1126,10 +1115,11 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
     }
 
     @Test
-    fun `manual intervention waits for older committed input but never commits the new live utterance`() {
-        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+    fun `manual deferred checkpoint waits for older commit but never grants away the current floor`(): Unit {
+        val now = AtomicLong()
+        val controller = controller(nanoTime = now::get, transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
         try {
-            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(2))
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(4))
                 .then {
                     controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
                     controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
@@ -1140,11 +1130,20 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
                     controller.fireContinuousSpeechDeadline()
                 }
                 .expectNoEvent(Duration.ofMillis(10))
-                .then { controller.observeProviderEvent(committedEvent("older-learner-utterance")) }
+                .then {
+                    now.set(Duration.ofSeconds(1).toNanos())
+                    controller.observeProviderEvent(committedEvent("older-learner-utterance"))
+                }
+                .assertNext(::assertServerOwnedInputCheckpoint)
+                .then { controller.observeProviderEvent(committedEvent("current-checkpoint")) }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 2)) }
+                .assertNext(::assertServerOwnedInputCommit)
+                .then { controller.observeProviderEvent(committedEvent("current-tail")) }
                 .assertNext { raw ->
                     assertThat(mapper.readTree(raw).path("event_id").asText())
-                        .startsWith("buddystudy-internal-duplex-continuous-response-")
-                    assertThat(raw).doesNotContain("input_audio_buffer.commit", "response.cancel", "output_audio_buffer.clear")
+                        .startsWith("buddystudy-internal-duplex-turn-response-")
+                    assertThat(raw).doesNotContain("continuous_intervention", "response.cancel", "output_audio_buffer.clear")
                 }
                 .verifyComplete()
         } finally {
@@ -1520,6 +1519,13 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val commit = mapper.readTree(raw)
         assertThat(commit.path("type").asText()).isEqualTo("input_audio_buffer.commit")
         assertThat(commit.path("event_id").asText()).startsWith("buddystudy-internal-duplex-input-commit-")
+        assertThat(commit.fieldNames().asSequence().toList()).containsExactlyInAnyOrder("event_id", "type")
+    }
+
+    private fun assertServerOwnedInputCheckpoint(raw: String) {
+        val commit = mapper.readTree(raw)
+        assertThat(commit.path("type").asText()).isEqualTo("input_audio_buffer.commit")
+        assertThat(commit.path("event_id").asText()).startsWith("buddystudy-internal-duplex-input-checkpoint-")
         assertThat(commit.fieldNames().asSequence().toList()).containsExactlyInAnyOrder("event_id", "type")
     }
 

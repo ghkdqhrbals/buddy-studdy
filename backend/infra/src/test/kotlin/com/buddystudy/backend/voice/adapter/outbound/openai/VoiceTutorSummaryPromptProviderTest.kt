@@ -67,6 +67,26 @@ class VoiceTutorSummaryPromptProviderTest {
     }
 
     @Test
+    fun `question epochs and all immutable versions are data while answer arrival never chooses a level`() {
+        val original = VoiceTutorStudySnapshot(4, null, "Concurrency", 4)
+        val revised = original.copy(topic = "Advanced concurrency", difficulty = 8, revision = 2)
+        val turns = listOf(
+            turn("Original question").copy(id = 1, role = VoiceTutorTranscriptRole.TUTOR, lessonRevision = 0),
+            turn("Later answer").copy(id = 2, lessonRevision = 2),
+        )
+        val messages = VoiceTutorSummaryPromptProvider.messages(session(), turns, "English", listOf(original, revised))
+        val data = JsonMapperProvider.mapper.readTree(messages.last().getValue("content"))
+        assertThat(data.path("knownTopics").map { it.path("revision").longValue() }).containsExactly(0, 2)
+        assertThat(data.path("knownTopics").map { it.path("difficulty").intValue() }).containsExactly(4, 8)
+        assertThat(data.path("transcriptTurns").map { it.path("lessonRevision").longValue() }).containsExactly(0, 2)
+        assertThat(messages[1].getValue("content")).contains(
+            "greatest knownTopics.revision <= the question turn's lessonRevision",
+            "answer, feedback or transcription arrived later", "Split the same studyId", "original name and difficulty",
+        )
+        assertThat(messages.last().getValue("content")).doesNotContain("providerItemId", "userId")
+    }
+
+    @Test
     fun `learning result sanitizer removes remote fetch and active markup vectors`() {
         val unsafe = """
             ![private](https://attacker.example/pixel?secret=abc)

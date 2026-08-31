@@ -6,6 +6,7 @@ import com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorExploratio
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.voice.domain.VoiceStudyLearningRecord
 import com.buddystudy.voice.domain.VoiceTutorExploration
+import com.buddystudy.voice.domain.VoiceTutorStudyRevisionIndex
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
 
@@ -14,7 +15,7 @@ internal object VoiceStudyLearningRecordProjector {
     fun project(
         userId: Long,
         sessionId: String,
-        selectedStudyId: Long?,
+        acceptedStudyId: Long?,
         language: String,
         explorations: List<VoiceTutorExploration>,
         transcript: List<VoiceTutorTranscriptTurn>,
@@ -22,13 +23,8 @@ internal object VoiceStudyLearningRecordProjector {
         ownedStudyIds: Set<Long>,
         detectLanguage: (String, String) -> String,
     ): List<VoiceStudyLearningRecord> {
-        val snapshotsById = snapshots.groupBy { it.studyId }
-            .filterValues { it.distinct().size == 1 }.mapValues { it.value.first() }
-        val selectedRoot = selectedStudyId?.let { rootOf(it, snapshotsById) }
-        val treeStudyIds = snapshotsById.keys.filterTo(mutableSetOf()) { id ->
-            selectedStudyId != null && (descendsFrom(id, selectedStudyId, snapshotsById) ||
-                (selectedRoot != null && rootOf(id, snapshotsById) == selectedRoot))
-        }
+        val revisions = VoiceTutorStudyRevisionIndex(snapshots)
+        val epochViews = mutableMapOf<Long, Map<Long, VoiceTutorStudySnapshot>>()
         // An ambiguous cross-node question remains available in the session, never arbitrarily filed.
         val unambiguousQuestionIds = explorations.flatMap { exploration ->
             exploration.exchanges.map { it.questionTurnId to exploration.studyId }
@@ -44,11 +40,17 @@ internal object VoiceStudyLearningRecordProjector {
         val turns = sourceTurns.associateBy { it.id }
         val fallback = QuestionLanguage.normalize(language)
         return valid.flatMap { exploration ->
-            val snapshot = exploration.studyId?.let(snapshotsById::get)
-                ?.takeIf { it.studyId in ownedStudyIds && it.studyId in treeStudyIds }
-                ?: return@flatMap emptyList()
+            val studyId = exploration.studyId?.takeIf { it in ownedStudyIds } ?: return@flatMap emptyList()
             exploration.exchanges.mapNotNull { exchange ->
                 val questionTurn = turns[exchange.questionTurnId] ?: return@mapNotNull null
+                val snapshotsById = epochViews.getOrPut(questionTurn.lessonRevision) { revisions.viewAt(questionTurn.lessonRevision) }
+                val snapshot = snapshotsById[studyId] ?: return@mapNotNull null
+                val acceptedRoot = acceptedStudyId?.let { rootOf(it, snapshotsById) }
+                // The accepted anchor is historical and survives a nullable live-study FK. The
+                // target itself must still be currently owned; deleted targets stay session-only.
+                if (acceptedStudyId == null || !(descendsFrom(studyId, acceptedStudyId, snapshotsById) ||
+                        (acceptedRoot != null && rootOf(studyId, snapshotsById) == acceptedRoot))
+                ) return@mapNotNull null
                 val answer = exchange.answerTurnIds.mapNotNull(turns::get)
                     .joinToString("\n") { it.transcript }.takeIf(String::isNotBlank)
                 val feedback = exchange.feedbackTurnIds.mapNotNull(turns::get)

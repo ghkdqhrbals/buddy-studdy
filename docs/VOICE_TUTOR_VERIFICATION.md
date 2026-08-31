@@ -1305,3 +1305,108 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   Logs: `build/voiceTreeRecordsDeviceInstall.log` and
   `build/voiceTreeRecordsDeviceLaunch.log`. A human audible lesson and manual
   inspection of its node feed remain a separate end-to-end acceptance check.
+
+<a id="voice-study-mutations-and-long-learner-turns"></a>
+
+## 2026-09-01 — Voice study edits, confirmed deletion and long learner turns
+
+### Implemented boundaries
+
+- The old continuous-speech deadline could start a tutor response while
+  `userSpeaking` was still true after 12 seconds. It now schedules only bounded
+  transcription checkpoints, including repeated checkpoints for longer answers.
+  There is one normal response-creation gate, and it waits for the learner's
+  stop edge and meaningful-input publication, including after MCP completion.
+  This supersedes the earlier continuous-speech intervention behavior described
+  above. No response cancellation, output clearing, truncation, provider VAD
+  switch or replacement media transport was introduced.
+- The existing MCP catalog gains `update_study` (22 tools total); its voice
+  subset has 11 tools. Explicit name/level edits use an owner-scoped partial
+  update on the exact saved node, preserving identity, parent, schedule,
+  activation, preferences, question quota and prior answers. Voice mutations
+  must remain inside the call's verified owned tree; creating descendants stays
+  inside the selected subtree. Ambiguous targets require clarification.
+- Voice deletion first previews the named subtree and exact descendant count.
+  A short-lived, call/account/device-bound token plus a new meaningful learner
+  confirmation is required. The accepted utterance carries its original speech
+  start and the preceding completed tutor response, so late ASR publication,
+  intervening noise and an earlier mixed audio/tool response do not create
+  consent. The LLM must still interpret the new speech as explicit agreement.
+  Tokens are single use; a guarded delete compares the complete set of up to
+  128 owned nodes inside the mutation transaction. Scope changes fail without
+  deletion and require a new preview. No real user topic was deleted in tests.
+- V104 separates the immutable accepted lesson node from its nullable live
+  study FK and adds bounded, append-only lesson revisions. An explicit edit
+  applies to the next new question, not a completed or pending question's level.
+  Provider response/input bindings carry the server revision through delayed
+  transcript publication; unknown bindings preserve text with revision `-1`,
+  rather than guessing an old or current level or disconnecting the call.
+  Summary evidence and existing node-record projection resolve at the question
+  revision. Deleted/unresolved node evidence stays in private session history;
+  the existing translation stream and original source records are retained.
+- iOS applies verified exact-node metadata without replacing an active answer
+  draft. Confirmed deletion tombstones reject late metadata, full-tree refresh
+  and activation callbacks; account/environment changes reset these fences.
+  Only derived history pages are invalidated. Deleting the current focus is not
+  a hang-up and does not claim the lesson is complete; another question requires
+  a learner-chosen surviving saved topic.
+
+### iOS and paired iPhone verification
+
+- Generic iOS Debug build and signed build-for-testing passed using only
+  `StudyMateiOS` and the reused `build/iOSDeviceDerivedData` directory. Logs:
+  `build/voiceStudyMutationsGenericBuild-retry2.log` and
+  `build/voiceStudyMutationsDeviceTestBuild-retry2.log`.
+- **219 explicitly selected iPhone tests passed**, zero failures/skips:
+  26 node-history, 76 call contracts, 16 explorations, 15 MCP/metadata,
+  12 pause, 25 Silero/pipeline, 31 summary and 18 voice preferences. New checks
+  cover strict mutation-event decoding, late fetch/deletion fences, central
+  tree tombstones and preservation of unrelated settings and active selection.
+  Log: `build/voiceStudyMutationsDeviceTests-retry2.log`.
+- The normal signed build passed afterward without injected test plug-ins or
+  test frameworks, followed by strict deep signature verification. Log:
+  `build/voiceStudyMutationsSignedBuildFinal.log`. These checks did not open a
+  real call, use the microphone, invoke a provider, purge recordings, alter
+  account data or mutate a real study. A human audible lesson remains a separate
+  acceptance check, not an outcome implied by fixture tests or build success.
+
+### Backend regression and artifact
+
+- The final selected regression contains **798 tests in 66 suites: 796 passed,
+  zero failures/errors, two explicit opt-in provider tests skipped**. Domain:
+  six passed; application: 198 passed; infrastructure: 576 passed/two skipped;
+  tutor MCP/native-hint contracts: 16 passed. Log:
+  `build/voiceStudyMutationsBackend-tests-retry5.log`.
+- A source-to-JUnit discovery audit verified all 416 ordinary `@Test` methods
+  in the 25 changed Kotlin test classes are present in the results. Seven
+  pre-existing inferred non-Unit methods had not been discovered; explicit Unit
+  signatures restored them and all seven passed. Counts use selected XML suite
+  identities, including Gradle's abbreviated macOS result filenames, and exclude
+  unrelated historical XML. Report: `build/voiceStudyMutationsBackendAudit.json`.
+- Regression coverage includes repeated long-speech checkpoints without any
+  tutor response until the natural stop, outstanding MCP/persistence gates,
+  immutable response/input revision binding, delayed ASR, exact stored input
+  receipts, confirmation timing/identity/expiry/replay, owned partial updates,
+  changed deletion manifests, concurrent owner locks, history/translation
+  preservation and iOS deletion races. A false storage receipt (duplicate or
+  capacity limit) consumes the handled input once and lets conversation continue,
+  but clears mutation-confirmation authority rather than inventing saved consent.
+- Early runs caught a cross-module nullable smart cast, two nullable fixture
+  transaction returns and ambiguous JsonNode collection addition; these were
+  corrected without relaxing assertions. The existing wrong-live-study test also
+  caught the need to retain the live/accepted-node invariant: a live ID can be the
+  immutable accepted ID or null after deletion, never a different node.
+- Tests used isolated H2/fake providers, not Testcontainers, a real account or
+  another database/Redis stack. H2 concurrency/constraint checks are not claims
+  about MySQL execution; actual runtime verification is separate. Five test-AOT
+  tasks remained explicitly excluded.
+- Main `processAot` and `bootJar` passed with the existing build-only `aot`
+  profile. Generated bean definitions include the confirmation adapter and its
+  injection into the MCP bridge. Log: `build/voiceStudyMutationsBackend-jar.log`.
+  The verified JAR is 331,060,009 bytes, SHA-256
+  `12f29502e6b93b0155843be4f22340f9c344b686a6e351a29700fa27b62396c3`.
+  V104 is embedded in the JAR and has the same hash as source SQL:
+  `4e93aa9d5f6e88d7a819f1d337ea14844f5a7c31f0525422170255731aa7687d`.
+  The existing dev runtime uses an external Flyway directory, so refresh must
+  stage that SQL alongside the verified JAR without changing the profile or
+  creating any new persistent infrastructure.

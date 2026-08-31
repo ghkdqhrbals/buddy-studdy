@@ -11,6 +11,7 @@ import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
+import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
@@ -126,6 +127,7 @@ class StudySyncService(
     @Transactional
     @RequirePermission(Permissions.STUDY_CREATE)
     override suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse {
+        lockStudyOwner(principal.userId)
         return saveStudy(
             principal = principal,
             command = command,
@@ -143,6 +145,7 @@ class StudySyncService(
         parentStudyId: Long,
         command: CreateStudyTopicCommand,
     ): StudyRoomResponse {
+        lockStudyOwner(principal.userId)
         val parentStudy = studies.findByIdAndUserId(parentStudyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Parent study not found.")
         val allStudies = studies.findAllByUserId(principal.userId)
@@ -165,6 +168,46 @@ class StudySyncService(
             activeForQuestions = command.activeForQuestions,
             scheduleEnabled = false,
         )
+    }
+
+    @Transactional
+    @RequirePermission(Permissions.STUDY_UPDATE)
+    override suspend fun updateStudy(
+        principal: Principal,
+        studyId: Long,
+        command: UpdateStudyCommand,
+    ): StudyRoomResponse {
+        if (studyId <= 0 || (command.topic == null && command.difficultyLevel == null)) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "A study ID and at least one metadata field are required.")
+        }
+        val topic = command.topic?.trim()?.also {
+            if (it.isEmpty() || it.length > 255) {
+                throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Study topic must contain 1 to 255 characters.")
+            }
+        }
+        if (command.difficultyLevel != null && command.difficultyLevel !in 1..10) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Study difficulty must be between 1 and 10.")
+        }
+        // Creation uses this same owner lock before its reads. There is no normalized
+        // topic unique constraint, so a separate row read alone cannot reject races.
+        lockStudyOwner(principal.userId)
+        studies.findByIdAndUserId(studyId, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        if (topic != null && studies.findAllByUserId(principal.userId).any {
+                it.id != studyId && it.topic.normalizedStudyTopicKey() == topic.normalizedStudyTopicKey()
+            }
+        ) {
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A study topic with the same name already exists.")
+        }
+        val saved = studies.updateTopicMetadata(studyId, principal.userId, topic, command.difficultyLevel, Instant.now())
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        return saved.toStudyRoomResponse()
+    }
+
+    private suspend fun lockStudyOwner(userId: Long) {
+        if (!studies.lockMutationOwner(userId)) {
+            throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.ACCOUNT_FORBIDDEN, "The study owner is unavailable.")
+        }
     }
 
     private suspend fun saveStudy(
@@ -243,9 +286,25 @@ class StudySyncService(
     }
 
     @Transactional
-    override suspend fun deleteStudy(principal: Principal, studyId: Long) {
+    @RequirePermission(Permissions.STUDY_DELETE)
+    override suspend fun deleteStudy(principal: Principal, studyId: Long, expectedStudyIds: List<Long>?) {
+        if (studyId <= 0 || (expectedStudyIds != null &&
+                (expectedStudyIds.size !in 1..128 || expectedStudyIds.any { it <= 0 } ||
+                    expectedStudyIds.distinct().size != expectedStudyIds.size || studyId !in expectedStudyIds))
+        ) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "The confirmed subtree must contain 1 to 128 distinct positive IDs including study_id.")
+        }
+        lockStudyOwner(principal.userId)
         studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        if (expectedStudyIds != null) {
+            val actual = studies.findSubtreeIdsForMutation(principal.userId, studyId, 129)
+            if (actual == null || actual.size !in 1..128 || actual.distinct().size != actual.size ||
+                actual.toSet() != expectedStudyIds.toSet()
+            ) {
+                throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.STUDY_TREE_CHANGED, "The study subtree changed. Review its current nodes and confirm again before deleting.")
+            }
+        }
         val deleted = studies.deleteByIdAndUserId(studyId, principal.userId)
         if (deleted == 0L) {
             throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")

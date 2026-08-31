@@ -115,6 +115,65 @@ enum VoiceTutorCreatedStudyMetadata {
     }
 }
 
+/// Latest-request wins, with deletion tombstones for this account/environment.
+/// No question, answer, selection or record payload is part of this state.
+struct VoiceTutorStudyMetadataFence {
+    private var requests: [Int: UUID] = [:]
+    private var deleted = Set<Int>()
+
+    mutating func begin(studyID: Int) -> UUID? {
+        guard studyID > 0, !deleted.contains(studyID) else { return nil }
+        let token = UUID()
+        requests[studyID] = token
+        return token
+    }
+
+    func isCurrent(studyID: Int, token: UUID) -> Bool {
+        !deleted.contains(studyID) && requests[studyID] == token
+    }
+
+    mutating func finish(studyID: Int, token: UUID) {
+        if requests[studyID] == token { requests.removeValue(forKey: studyID) }
+    }
+
+    mutating func delete(studyIDs: Set<Int>) {
+        for id in studyIDs where id > 0 {
+            deleted.insert(id)
+            requests.removeValue(forKey: id)
+        }
+    }
+
+    func isDeleted(studyID: Int) -> Bool { deleted.contains(studyID) }
+}
+
+enum VoiceTutorStudySettingsMetadata {
+    static func applying(_ study: BackendStudyRoom, to settings: StudySettings) -> StudySettings {
+        var result = settings
+        result.studyCategories = settings.studyCategories.map { category in
+            guard category.id == String(study.id) else { return category }
+            var updated = category
+            updated.title = study.topic
+            updated.difficulty = Difficulty(level: study.difficultyLevel)
+            return updated
+        }
+        if settings.selectedStudyCategoryID == String(study.id) {
+            result.topic = study.topic
+            result.difficulty = Difficulty(level: study.difficultyLevel)
+        }
+        return result
+    }
+
+    static func removing(studyIDs: Set<Int>, from settings: StudySettings) -> StudySettings {
+        var result = settings
+        result.studyCategories.removeAll { category in
+            Int(category.id).map { studyIDs.contains($0) } ?? false
+        }
+        // Keep the active answer's selected ID and level until an explicit
+        // navigation/selection; metadata synchronization must never switch drafts.
+        return result
+    }
+}
+
 private struct VoiceTutorRequestContext: Sendable {
     var registration: RemotePushRegistration
     var identityFence: VoiceTutorConnectionIdentityFence
@@ -749,7 +808,7 @@ final class AppState: ObservableObject {
     private var membershipRefreshOrder = MembershipRefreshOrder()
     private var backendClientGeneration = 0
     #if os(iOS)
-    private let studyLearningRecordsLifetimeID = UUID()
+    private var studyLearningRecordsLifetimeID = UUID()
     #endif
     private var configuredBackendBaseURLDescription = ""
     private var billingRefreshTask: Task<Void, Never>?
@@ -779,6 +838,7 @@ final class AppState: ObservableObject {
     private var isEditingSettings = false
     private var didReceiveCloudStateWhileEditing = false
     private var locallyDeletedStudyIDs = Set<Int>()
+    private var voiceTutorStudyMetadataFence = VoiceTutorStudyMetadataFence()
     private var locallyDeletedStudyTopicKeys = Set<String>()
 
     private struct PendingAnswerDraft {
@@ -7248,22 +7308,33 @@ final class AppState: ObservableObject {
         var optimistic = current
         optimistic.activeForQuestions = active
         studyRoomState.upsertStudy(optimistic)
+        let accountGeneration = communitySessionState.generation
+        let environmentGeneration = backendClientGeneration
+        let isCurrent: @MainActor () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return self.communitySessionState.generation == accountGeneration &&
+                self.backendClientGeneration == environmentGeneration && !self.isLocallyDeletedStudy(current)
+        }
 
         Task { [weak self] in
+            guard isCurrent() else { return }
             guard let self,
                   let registration = await backendRegistrationForOpenAIRequests(reason: "study-topic-activation") else {
-                self?.studyRoomState.upsertStudy(current)
+                if isCurrent() { self?.studyRoomState.upsertStudy(current) }
                 return
             }
+            guard isCurrent() else { return }
             do {
                 let saved = try await studyRoomUseCase.updateStudyTopicActivation(
                     registration: registration,
                     studyID: studyID,
                     active: active
                 )
+                guard isCurrent() else { return }
                 studyRoomState.upsertStudy(saved)
                 log(.info, "학습 트리 질문 받기 설정을 변경했습니다. studyID=\(studyID), active=\(active)")
             } catch {
+                guard isCurrent() else { return }
                 studyRoomState.upsertStudy(current)
                 if handleAppError(
                     error,
@@ -7653,6 +7724,8 @@ final class AppState: ObservableObject {
     }
 
     private func resetVoiceTutorState() {
+        voiceTutorStudyMetadataFence = VoiceTutorStudyMetadataFence()
+        studyRoomState.resetVoiceDeletionFence()
         #if os(iOS)
         localStudyRecordUseCase.clearLearningRecordsPages()
         #endif
@@ -7907,7 +7980,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// A successful voice tool creates only a study node. Refresh that exact
+    /// A successful voice tool creates or updates a study node. Refresh that exact
     /// node's metadata without reconciling records, drafts, selection or quota.
     func refreshVoiceTutorCreatedStudy(
         studyID: Int,
@@ -7915,7 +7988,12 @@ final class AppState: ObservableObject {
     ) async {
         guard studyID > 0, !Task.isCancelled, validity(),
               let context = try? makeVoiceTutorRequestContext() else { return }
-        let isCurrent: @MainActor @Sendable () -> Bool = { context.isCurrent() && validity() }
+        guard let token = voiceTutorStudyMetadataFence.begin(studyID: studyID) else { return }
+        defer { voiceTutorStudyMetadataFence.finish(studyID: studyID, token: token) }
+        let isCurrent: @MainActor @Sendable () -> Bool = { [weak self] in
+            context.isCurrent() && validity() &&
+                self?.voiceTutorStudyMetadataFence.isCurrent(studyID: studyID, token: token) == true
+        }
         let guardedContext = VoiceTutorRequestContext(
             registration: context.registration,
             identityFence: context.identityFence,
@@ -7945,10 +8023,35 @@ final class AppState: ObservableObject {
                   !isLocallyDeletedStudy(study) else { return }
             let previous = studyRoomState.rooms.first { $0.id == studyID }
             studyRoomState.upsertStudy(VoiceTutorCreatedStudyMetadata.merging(study, with: previous))
+            settings = VoiceTutorStudySettingsMetadata.applying(study, to: settings)
+            savedSettings = VoiceTutorStudySettingsMetadata.applying(study, to: savedSettings)
+            if !isEditingSettings {
+                draftSettings = VoiceTutorStudySettingsMetadata.applying(study, to: draftSettings)
+            }
+            localStudySettingsUseCase.saveSettings(settings)
         } catch {
             guard !Self.isCancellationLikeError(error), !Task.isCancelled, isCurrent() else { return }
-            log(.warning, "음성 튜터가 추가한 하위 주제 정보를 가져오지 못했습니다.")
+            log(.warning, "음성 튜터가 변경한 주제 정보를 가져오지 못했습니다.")
         }
+    }
+
+    func applyVoiceTutorDeletedStudies(studyIDs: Set<Int>) {
+        guard isCommunitySessionActive, !studyIDs.isEmpty, studyIDs.count <= 128,
+              studyIDs.allSatisfy({ $0 > 0 }) else { return }
+        voiceTutorStudyMetadataFence.delete(studyIDs: studyIDs)
+        studyRoomState.markVoiceDeleted(studyIDs: studyIDs)
+        settings = VoiceTutorStudySettingsMetadata.removing(studyIDs: studyIDs, from: settings)
+        savedSettings = VoiceTutorStudySettingsMetadata.removing(studyIDs: studyIDs, from: savedSettings)
+        if !isEditingSettings {
+            draftSettings = VoiceTutorStudySettingsMetadata.removing(studyIDs: studyIDs, from: draftSettings)
+        }
+        localStudySettingsUseCase.saveSettings(settings)
+        #if os(iOS)
+        // Invalidate only the bounded derived page cache, not stored records,
+        // transcripts, grades, tree positions or the active unanswered draft.
+        studyLearningRecordsLifetimeID = UUID()
+        localStudyRecordUseCase.clearLearningRecordsPages()
+        #endif
     }
 
     func createVoiceTutorConnection(
@@ -9258,7 +9361,7 @@ final class AppState: ObservableObject {
     }
 
     private func isLocallyDeletedStudy(_ study: BackendStudyRoom) -> Bool {
-        locallyDeletedStudyIDs.contains(study.id) ||
+        locallyDeletedStudyIDs.contains(study.id) || voiceTutorStudyMetadataFence.isDeleted(studyID: study.id) ||
             locallyDeletedStudyTopicKeys.contains(Self.normalizedCategoryText(for: study.topic))
     }
 

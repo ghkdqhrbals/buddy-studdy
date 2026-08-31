@@ -25,6 +25,58 @@ class StudyRepository(
 ) : StudyPort {
     override suspend fun save(entity: StudyEntity): StudyEntity = template.saveEntity(entity, entity.id)
 
+    override suspend fun lockMutationOwner(userId: Long): Boolean =
+        template.databaseClient.sql("select id from users where id = :userId for update")
+            .bind("userId", userId)
+            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
+            .one().awaitSingleOrNull() != null
+
+    override suspend fun updateTopicMetadata(
+        id: Long,
+        userId: Long,
+        topic: String?,
+        difficultyLevel: Int?,
+        now: Instant,
+    ): StudyEntity? {
+        require(topic != null || difficultyLevel != null) { "A study metadata field is required." }
+        require(topic == null || (topic.isNotBlank() && topic.length <= 255)) { "Invalid study topic." }
+        require(difficultyLevel == null || difficultyLevel in 1..10) { "Invalid study difficulty." }
+        var patch = Update.update("updated_at", now)
+        topic?.let { patch = patch.set("topic", it) }
+        difficultyLevel?.let { patch = patch.set("difficulty_level", it) }
+        val changed = template.update(StudyEntity::class.java)
+            .matching(Query.query(Criteria.where("id").`is`(id).and("user_id").`is`(userId)))
+            .apply(patch).awaitSingle()
+        // Repeating a patch is idempotent. Drivers may report changed rows rather
+        // than matched rows, so still resolve the owned row after a zero count.
+        check(changed in 0L..1L) { "A metadata patch affected an unexpected number of study rows." }
+        return findByIdAndUserId(id, userId)
+    }
+
+    override suspend fun findSubtreeIdsForMutation(userId: Long, studyId: Long, limit: Int): List<Long>? {
+        require(limit in 1..129) { "A bounded study subtree limit is required." }
+        if (findByIdAndUserId(studyId, userId) == null) return emptyList()
+        val seen = linkedSetOf(studyId)
+        val parents = ArrayDeque<Long>().also { it.add(studyId) }
+        // A bounded traversal avoids materializing an arbitrary recursive tree.
+        // Read child ownership too: the FK cascade itself is not owner-filtered.
+        while (parents.isNotEmpty() && seen.size < limit) {
+            val children = template.databaseClient.sql(
+                "select id, user_id from studies where parent_study_id = :parentId order by id limit :remaining for update",
+            ).bind("parentId", parents.removeFirst())
+                .bind("remaining", limit - seen.size)
+                .map { row, _ ->
+                    row.get("id", java.lang.Long::class.java)!!.toLong() to
+                        row.get("user_id", java.lang.Long::class.java)!!.toLong()
+                }.all().collectList().awaitSingle()
+            children.forEach { (id, ownerId) ->
+                if (ownerId != userId || !seen.add(id)) return null
+                parents.add(id)
+            }
+        }
+        return seen.toList()
+    }
+
     suspend fun findById(id: Long): StudyEntity? =
         template.selectOne(Query.query(Criteria.where("id").`is`(id)), StudyEntity::class.java).awaitSingleOrNull()
 

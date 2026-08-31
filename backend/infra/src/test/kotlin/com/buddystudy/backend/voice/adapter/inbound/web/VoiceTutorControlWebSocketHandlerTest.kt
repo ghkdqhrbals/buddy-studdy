@@ -253,7 +253,7 @@ class VoiceTutorControlWebSocketHandlerTest {
                 context: VoiceTutorWebRtcControlContext,
                 clientEvents: Flow<String>,
                 terminalEvents: Flow<VoiceTutorRelayTermination>,
-                onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
+                onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
             ) {
                 providerRelays.incrementAndGet()
                 // Simulate a provider that closes normally without waiting for
@@ -392,7 +392,7 @@ class VoiceTutorControlWebSocketHandlerTest {
                 context: VoiceTutorWebRtcControlContext,
                 clientEvents: Flow<String>,
                 terminalEvents: Flow<VoiceTutorRelayTermination>,
-                onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
+                onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
             ) {
                 if (clientAfterReady.isNotEmpty()) {
                     onProviderEvent("""{"type":"${VoiceTutorRealtimeContract.SIDEBAND_READY_EVENT}"}""", false, false)

@@ -101,7 +101,7 @@ class VoiceTutorPersistenceAdapter(
         val quota = ensureQuota(userId, createdAt, now)
         val existing = sessionByIdempotency(userId, idempotencyKey)
         if (existing != null) {
-            val sameImmutableRequest = existing.studyId == studyId &&
+            val sameImmutableRequest = existing.acceptedStudyId == studyId &&
                 existing.language == language &&
                 existing.model == model &&
                 existing.voice == voice &&
@@ -149,14 +149,14 @@ class VoiceTutorPersistenceAdapter(
         var insert = database.sql(
             """
             insert into voice_tutor_sessions (
-                id, user_id, study_id, idempotency_key, provider_session_id,
+                id, user_id, study_id, accepted_study_id, idempotency_key, provider_session_id,
                 status, result_status, language, model, voice,
                 topic_snapshot, difficulty_snapshot,
                 period_started_at, period_ends_at, reserved_seconds, charged_seconds,
                 max_session_seconds, hard_ends_at, recording_consented_at, recording_consent_version,
                 created_at, updated_at
             ) values (
-                :id, :userId, :studyId, :idempotencyKey, null,
+                :id, :userId, :studyId, :acceptedStudyId, :idempotencyKey, null,
                 'READY', 'PENDING', :language, :model, :voice,
                 :topic, :difficulty,
                 :periodStartedAt, :periodEndsAt, :reservedSeconds, 0,
@@ -167,6 +167,7 @@ class VoiceTutorPersistenceAdapter(
         ).bind("id", sessionId)
             .bind("userId", userId)
             .bind("studyId", studyId)
+            .bind("acceptedStudyId", studyId)
             .bind("idempotencyKey", idempotencyKey)
             .bind("language", language)
             .bind("model", model)
@@ -429,7 +430,9 @@ class VoiceTutorPersistenceAdapter(
         occurredAt: Instant,
         maxSessionCharacters: Int,
         maxSessionTurns: Int,
+        lessonRevision: Long,
     ): Boolean {
+        require(lessonRevision >= -1) { "Voice Tutor lesson revision was invalid." }
         val owned = database.sql(
             "select id from voice_tutor_sessions where id = :sessionId and user_id = :userId and status in ('ACTIVE', 'ENDING') for update",
         ).bind("sessionId", sessionId).bind("userId", userId)
@@ -458,14 +461,15 @@ class VoiceTutorPersistenceAdapter(
         val inserted = database.sql(
             """
             insert ignore into voice_tutor_transcript_turns (
-                session_id, provider_item_id, role, transcript, sequence_number, occurred_at, created_at
+                session_id, provider_item_id, role, transcript, sequence_number, occurred_at, created_at, lesson_revision
             ) values (
-                :sessionId, :providerItemId, :role, :transcript, :sequenceNumber, :occurredAt, :occurredAt
+                :sessionId, :providerItemId, :role, :transcript, :sequenceNumber, :occurredAt, :occurredAt, :lessonRevision
             )
             """.trimIndent(),
         ).bind("sessionId", sessionId).bind("providerItemId", providerItemId)
             .bind("role", role.name).bind("transcript", boundedTranscript).bind("sequenceNumber", sequence)
             .bind("occurredAt", occurredAt.utc())
+            .bind("lessonRevision", lessonRevision)
             .fetch().rowsUpdated().awaitSingle()
         return inserted == 1L
     }
@@ -858,6 +862,7 @@ class VoiceTutorPersistenceAdapter(
         failureMessage = get("failure_message", String::class.java),
         createdAt = instant("created_at"),
         updatedAt = instant("updated_at"),
+        acceptedStudyId = nullableLong("accepted_study_id"),
     )
 
     private fun Row.turn() = VoiceTutorTranscriptTurn(
@@ -868,6 +873,7 @@ class VoiceTutorPersistenceAdapter(
         transcript = string("transcript"),
         sequenceNumber = long("sequence_number"),
         occurredAt = instant("occurred_at"),
+        lessonRevision = long("lesson_revision"),
     )
 
     private fun Row.result() = VoiceTutorResult(

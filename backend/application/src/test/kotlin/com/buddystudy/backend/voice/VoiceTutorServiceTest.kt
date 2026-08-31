@@ -157,7 +157,8 @@ class VoiceTutorServiceTest {
             .contains("distinguish this learner-led exploration from a graded answer")
             .contains("never claim an unanswered question was assessed")
             .contains("do not squeeze a long explanation plus several new questions")
-            .contains("Do not create root studies, delete data, submit answers to the standard question workflow")
+            .contains("Do not create root studies, delete anything except the explicitly confirmed study subtree")
+            .contains("submit answers to the standard question workflow")
             .contains("does not prohibit spoken lesson questions or spoken feedback and scores")
             .contains("clearly agree or explicitly ask to start before teaching")
     }
@@ -184,6 +185,27 @@ class VoiceTutorServiceTest {
             .contains("Silence, elapsed time and the completion of your explanation or feedback are not permission to continue")
             .contains("wait without repeated readiness prompts, a countdown or pressure")
             .contains("a pause is not an instruction to end the call or mark learning complete")
+    }
+
+    @Test
+    fun `voice mutations require explicit scope and fresh delete consent while new levels keep pending questions intact`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val instructions = service(persistence).connect(principal, persistence.session.id).instructions
+        assertThat(instructions)
+            .contains("use update_study with the exact owned study_id")
+            .contains("only the requested topic and/or difficulty_level (1-10)")
+            .contains("changes the level for the next NEW question")
+            .contains("pending or completed question keeps its original title, level")
+            .contains("NOT_PREPARED or voiceLessonContextReady=false")
+            .contains("call delete_study with confirm=false")
+            .contains("exact descendantCount")
+            .contains("Wait for a NEW explicit affirmative learner reply")
+            .contains("confirmation_token")
+            .contains("prior answers and call history are retained")
+            .contains("Deletion does not end the call or mark learning complete")
+            .doesNotContain("Intervene briefly only after a long monologue")
+            .contains("Never take the floor while the learner is still speaking")
+            .contains("intermediate transcription checkpoints are not a completed user turn")
     }
 
     @Test
@@ -951,6 +973,27 @@ class VoiceTutorServiceTest {
         }
     }
 
+    @Test
+    fun `transcript publication reports the exact storage result instead of treating callback completion as a saved turn`(): Unit = runBlocking {
+        for (stored in listOf(false, true)) {
+            val persistence = FakePersistence(now).apply { transcriptAppendResult = stored }
+
+            val result = service(persistence).appendTranscript(
+                principal, persistence.session.id, "meaningful-item", VoiceTutorTranscriptRole.USER,
+                "방금 설명한 항목에 대한 의미 있는 응답입니다.", now, lessonRevision = 3,
+            )
+
+            assertThat(result).isEqualTo(stored)
+            assertThat(persistence.transcriptAppendCalls).isEqualTo(1)
+            assertThat(persistence.lastTranscriptLessonRevision).isEqualTo(3)
+        }
+        val blank = FakePersistence(now)
+        assertThat(service(blank).appendTranscript(
+            principal, blank.session.id, "blank", VoiceTutorTranscriptRole.USER, " ", now,
+        )).isFalse()
+        assertThat(blank.transcriptAppendCalls).isZero()
+    }
+
     private fun service(
         persistence: FakePersistence,
         properties: BuddyStudyProperties = properties(),
@@ -978,7 +1021,7 @@ class VoiceTutorServiceTest {
                     raw: String,
                     persist: Boolean,
                     forwardToClient: Boolean,
-                ) -> Unit,
+                ) -> Boolean,
             ) = Unit
         },
         relayAuthorization = relayAuthorization,
@@ -1032,7 +1075,7 @@ class VoiceTutorServiceTest {
             context: com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext,
             clientEvents: Flow<String>,
             terminalEvents: Flow<VoiceTutorRelayTermination>,
-            onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
+            onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
         ) = Unit
 
         override suspend fun hangup(callId: String) {
@@ -1099,6 +1142,9 @@ class VoiceTutorServiceTest {
         var completedResult: VoiceTutorGeneratedResult? = null
         var completeResultError: Exception? = null
         var failedResultCalls = 0
+        var transcriptAppendResult = true
+        var transcriptAppendCalls = 0
+        var lastTranscriptLessonRevision: Long? = null
         var reserveOverride: ReserveVoiceTutorSessionResult? = null
         var reserveCalls = 0
         var finalizeCalls = 0
@@ -1267,7 +1313,12 @@ class VoiceTutorServiceTest {
             occurredAt: Instant,
             maxSessionCharacters: Int,
             maxSessionTurns: Int,
-        ) = true
+            lessonRevision: Long,
+        ): Boolean {
+            transcriptAppendCalls += 1
+            lastTranscriptLessonRevision = lessonRevision
+            return transcriptAppendResult
+        }
 
         override suspend fun transcript(userId: Long, sessionId: String, maxCharacters: Int) = turns
 

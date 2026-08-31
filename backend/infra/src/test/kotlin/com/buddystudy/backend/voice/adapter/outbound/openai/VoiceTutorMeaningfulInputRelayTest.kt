@@ -89,7 +89,7 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
-    fun `ASR arriving before its commit ACK waits for exact authenticated commit correlation`() = fixture().use { f ->
+    fun `ASR arriving before its commit ACK waits for exact authenticated commit correlation`(): Unit = fixture().use { f ->
         f.start(1)
         f.stop(1)
         f.transcript("early", "아니")
@@ -160,7 +160,7 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
-    fun `meaningful long speech permits one complete intervention after assessment is persisted`() = fixture().use { f ->
+    fun `meaningful long speech stays listening after persisted checkpoints until its natural stop`(): Unit = fixture().use { f ->
         f.start(1)
         f.controller.fireContinuousSpeechDeadline()
         f.commit("long-idea")
@@ -168,12 +168,23 @@ class VoiceTutorMeaningfulInputRelayTest {
         f.assess(VoiceTutorInputDecision.MEANINGFUL)
         assertThat(f.responses()).hasSize(1)
         f.publishAll()
-        val intervention = f.responses().last().path("response")
-        assertThat(f.responses()).hasSize(2)
-        assertThat(intervention.path("metadata").path(VoiceTutorRealtimeContract.TURN_METADATA_KEY).asText())
-            .isEqualTo(VoiceTutorRealtimeContract.CONTINUOUS_INTERVENTION_TURN)
+        assertThat(f.responses()).hasSize(1)
+        f.now.addAndGet(Duration.ofSeconds(12).toNanos())
         f.controller.fireContinuousSpeechDeadline()
+        assertThat(f.inputCommits()).hasSize(2)
+        f.commit("more-of-the-same-idea")
+        f.transcript("more-of-the-same-idea", "변경이 잦으면 무효화 방식의 비용도 비교해 보고 싶어요")
+        f.assess(VoiceTutorInputDecision.MEANINGFUL)
+        f.publishAll()
+        assertThat(f.responses()).hasSize(1)
+        f.stop(1)
+        f.commit("final-tail")
+        f.transcript("final-tail", "어느 쪽이 더 적절한가요?")
+        f.assess(VoiceTutorInputDecision.MEANINGFUL)
+        assertThat(f.responses()).hasSize(1)
+        f.publishAll()
         assertThat(f.responses()).hasSize(2)
+        assertThat(f.responses().last().path("response").path("metadata").has(VoiceTutorRealtimeContract.TURN_METADATA_KEY)).isFalse()
         f.assertNoAudioDisruption()
     }
 
@@ -244,7 +255,7 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
-    fun `expired assessment and terminal cleanup failure cannot start late paid work`() = fixture().use { f ->
+    fun `expired assessment and terminal cleanup failure cannot start late paid work`(): Unit = fixture().use { f ->
         f.utterance(1, "learner", "저는 준비됐어요")
         val batch = f.assessments().single()
         f.now.addAndGet(Duration.ofSeconds(5).toNanos())
@@ -278,7 +289,7 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
-    fun `missing ASR has finite retry and cannot approve a late transcript`() = fixture().use { f ->
+    fun `missing ASR has finite retry and cannot approve a late transcript`(): Unit = fixture().use { f ->
         f.start(1)
         f.stop(1)
         f.commit("missing-asr")
@@ -293,7 +304,7 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
-    fun `missing provider delete ACK fails finitely rather than hanging a silent call`() = fixture().use { f ->
+    fun `missing provider delete ACK fails finitely rather than hanging a silent call`(): Unit = fixture().use { f ->
         f.utterance(1, "filler", "음")
         f.assess(VoiceTutorInputDecision.NON_COMMUNICATIVE)
         f.now.addAndGet(Duration.ofSeconds(5).toNanos())
@@ -303,7 +314,7 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
-    fun `cleanup failure reaches lifecycle even when outbound controls have no demand`() = fixture(controlDemand = 2).use { f ->
+    fun `cleanup failure reaches lifecycle even when outbound controls have no demand`(): Unit = fixture(controlDemand = 2).use { f ->
         val observedFailure = AtomicReference<Throwable>()
         val failureArrived = CountDownLatch(1)
         val failureSubscription = f.controller.inputFailure().subscribe({}, {
@@ -329,7 +340,7 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
-    fun `terminal fencing drops unassessed late transcript and assessment callback`() = fixture().use { f ->
+    fun `terminal fencing drops unassessed late transcript and assessment callback`(): Unit = fixture().use { f ->
         f.utterance(1, "learner", "준비됐어")
         val batch = f.assessments().single()
         f.controller.close()
@@ -377,6 +388,7 @@ class VoiceTutorMeaningfulInputRelayTest {
                 assertThat(forward).isTrue()
                 publishEntered.countDown()
                 persistenceRelease.await()
+                true
             }.subscribe({}, workerErrors::add)
             try {
                 f.utterance(1, "learner", "응")
@@ -400,6 +412,49 @@ class VoiceTutorMeaningfulInputRelayTest {
                 worker.dispose()
                 classifierRelease.cancel()
                 persistenceRelease.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun `the production input worker consumes a false persistence receipt without promoting consent or replaying input`(): Unit {
+        val publishedItems = CopyOnWriteArrayList<String>()
+        val workerErrors = CopyOnWriteArrayList<Throwable>()
+        fixture(captureInputActions = false).use { f ->
+            val worker = voiceTutorInputAssessmentRelay(
+                f.controller, userId = 42, language = "ko",
+                assessment = object : VoiceTutorInputAssessmentUseCase {
+                    override suspend fun assess(input: VoiceTutorInputAssessmentRequest): VoiceTutorInputAssessmentResult =
+                        VoiceTutorInputAssessmentResult(input.utterances.map {
+                            VoiceTutorInputItemAssessment(it.itemId, VoiceTutorInputDecision.MEANINGFUL)
+                        })
+                },
+            ) { raw, persist, forward ->
+                assertThat(persist).isTrue()
+                assertThat(forward).isTrue()
+                publishedItems += mapper.readTree(raw).path("item_id").asText()
+                false // Full or already stored: handled, but no new durable USER evidence.
+            }.subscribe({}, workerErrors::add)
+            try {
+                f.utterance(1, "handled-once", "학습에 관한 의미 있는 설명이에요.")
+                assertThat(f.nextResponse.await(2, TimeUnit.SECONDS)).isTrue()
+                assertThat(f.responses()).hasSize(2)
+                val boundary = f.controller.mutationDialogueBoundary()
+                assertThat(boundary.latestAcceptedLearnerSpeechStartedOrder).isZero()
+                assertThat(boundary.precedingTutorSpeechStoppedOrder).isZero()
+                assertThat(boundary.precedingSpokenResponseGeneration).isZero()
+
+                f.transcript("handled-once", "중복 전사")
+                f.commit("handled-once")
+                f.controller.confirmInputPublished("handled-once", persisted = true)
+                assertThat(publishedItems).containsExactly("handled-once")
+                assertThat(f.responses()).hasSize(2)
+                assertThat(f.controller.mutationDialogueBoundary().latestAcceptedLearnerSpeechStartedOrder).isZero()
+                assertThat(f.controller.acceptsInputEvents()).isTrue()
+                assertThat(workerErrors).isEmpty()
+                f.assertNoAudioDisruption()
+            } finally {
+                worker.dispose()
             }
         }
     }
