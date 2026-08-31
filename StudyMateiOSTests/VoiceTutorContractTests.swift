@@ -5,6 +5,7 @@ import AVFoundation
 import SwiftUI
 import UIKit
 import QuartzCore
+import LiveKitWebRTC
 @testable import StudyMate
 
 final class VoiceTutorContractTests: XCTestCase {
@@ -1567,6 +1568,175 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(newEvents, [started, stopped])
     }
 
+    func testNativeVoiceModuleConstructorDelegateLossCannotPassProductionValidation() {
+        let capture = VoiceTutorContractNativeAudioDelegate()
+        let render = VoiceTutorContractNativeAudioDelegate()
+        let module = LKRTCDefaultAudioProcessingModule(
+            config: nil,
+            capturePostProcessingDelegate: capture,
+            renderPreProcessingDelegate: render
+        )
+        // This negative control exercises the pinned native SDK, not a mock.
+        // 144.7559.14 discards constructor delegates. If that SDK defect is
+        // fixed in a future upgrade, update this fixture deliberately.
+        withExtendedLifetime((capture, render, module)) {
+            XCTAssertNil(module.capturePostProcessingDelegate)
+            XCTAssertNil(module.renderPreProcessingDelegate)
+            assertNativeVoiceDelegateInstallationFails {
+                try VoiceTutorAudioProcessingModuleFactory.validate(
+                    module, captureDelegate: capture, renderDelegate: render
+                )
+            }
+        }
+    }
+
+    func testNativeVoiceModuleFactoryInstallsExplicitCaptureAndRenderDelegateIdentities() throws {
+        let capture = VoiceTutorContractNativeAudioDelegate()
+        let render = VoiceTutorContractNativeAudioDelegate()
+        let module = try VoiceTutorAudioProcessingModuleFactory.make(
+            captureDelegate: capture, renderDelegate: render
+        )
+        try withExtendedLifetime((capture, render, module)) {
+            XCTAssertTrue(module.capturePostProcessingDelegate === capture)
+            XCTAssertTrue(module.renderPreProcessingDelegate === render)
+            XCTAssertNoThrow(try VoiceTutorAudioProcessingModuleFactory.validate(
+                module, captureDelegate: capture, renderDelegate: render
+            ))
+        }
+    }
+
+    func testNativeVoiceModuleWithoutRecordingStillInstallsTheProductionSpeechCaptureTap() throws {
+        let tap = VoiceTutorLocalSpeechCaptureTap(recordingTap: nil, onActivity: { _ in })
+        defer { tap.close() }
+        let module = try VoiceTutorAudioProcessingModuleFactory.make(captureDelegate: tap)
+        XCTAssertTrue(module.capturePostProcessingDelegate === tap,
+                      "Speech detection must not depend on recording consent")
+        XCTAssertNil(module.renderPreProcessingDelegate,
+                     "No render recording delegate should be installed without consent")
+        XCTAssertNoThrow(try VoiceTutorAudioProcessingModuleFactory.validate(module, captureDelegate: tap))
+        XCTAssertFalse(tap.snapshot().gateEnabled)
+        XCTAssertFalse(tap.snapshot().isClosed)
+        withExtendedLifetime((tap, module)) {}
+    }
+
+    func testNativeVoiceModuleValidationRejectsMissingSubstitutedAndUnexpectedDelegates() throws {
+        let capture = VoiceTutorContractNativeAudioDelegate()
+        let render = VoiceTutorContractNativeAudioDelegate()
+        let other = VoiceTutorContractNativeAudioDelegate()
+        let module = try VoiceTutorAudioProcessingModuleFactory.make(
+            captureDelegate: capture, renderDelegate: render
+        )
+        module.capturePostProcessingDelegate = nil
+        assertNativeVoiceDelegateInstallationFails {
+            try VoiceTutorAudioProcessingModuleFactory.validate(
+                module, captureDelegate: capture, renderDelegate: render
+            )
+        }
+        module.capturePostProcessingDelegate = other
+        assertNativeVoiceDelegateInstallationFails {
+            try VoiceTutorAudioProcessingModuleFactory.validate(
+                module, captureDelegate: capture, renderDelegate: render
+            )
+        }
+        module.capturePostProcessingDelegate = capture
+        module.renderPreProcessingDelegate = nil
+        assertNativeVoiceDelegateInstallationFails {
+            try VoiceTutorAudioProcessingModuleFactory.validate(
+                module, captureDelegate: capture, renderDelegate: render
+            )
+        }
+        module.renderPreProcessingDelegate = other
+        assertNativeVoiceDelegateInstallationFails {
+            try VoiceTutorAudioProcessingModuleFactory.validate(
+                module, captureDelegate: capture, renderDelegate: render
+            )
+        }
+        module.renderPreProcessingDelegate = render
+        assertNativeVoiceDelegateInstallationFails {
+            try VoiceTutorAudioProcessingModuleFactory.validate(module, captureDelegate: capture)
+        }
+        XCTAssertNoThrow(try VoiceTutorAudioProcessingModuleFactory.validate(
+            module, captureDelegate: capture, renderDelegate: render
+        ))
+        withExtendedLifetime((capture, render, other, module)) {}
+    }
+
+    func testNativeVoiceCaptureDiagnosticsAreBoundedAndClosedTapsCannotRevive() {
+        let diagnostics = VoiceTutorContractCaptureDiagnostics()
+        let tap = VoiceTutorLocalSpeechCaptureTap(
+            recordingTap: nil,
+            onActivity: { _ in diagnostics.observeActivity() },
+            onDiagnostic: { kind, snapshot in diagnostics.observe(kind, snapshot: snapshot) }
+        )
+        tap.audioProcessingInitialize(sampleRate: 0, channels: 1)
+        tap.audioProcessingInitialize(sampleRate: -1, channels: 1)
+        XCTAssertEqual(diagnostics.snapshot().initializationEvents, 0)
+        for _ in 0..<100 { tap.audioProcessingInitialize(sampleRate: 48_000, channels: 1) }
+        let initialized = tap.snapshot()
+        XCTAssertEqual(initialized.initializationCount, 102)
+        XCTAssertEqual(initialized.sampleRate, 48_000)
+        XCTAssertEqual(initialized.processedBufferCount, 0)
+        XCTAssertEqual(initialized.validInputBufferCount, 0)
+        XCTAssertEqual(diagnostics.snapshot().initializationEvents, 1)
+        XCTAssertEqual(diagnostics.snapshot().firstInputEvents, 0)
+        // The diagnostic preserves the native callback-time snapshot, before
+        // later initialization calls or teardown can replace its metadata.
+        XCTAssertEqual(diagnostics.snapshot().initialized?.initializationCount, 3)
+        XCTAssertEqual(diagnostics.snapshot().initialized?.sampleRate, 48_000)
+        tap.updateGate(mediaReady: true, muted: false)
+        XCTAssertTrue(tap.snapshot().gateEnabled)
+        tap.close()
+        let closed = tap.snapshot()
+        XCTAssertTrue(closed.isClosed)
+        XCTAssertFalse(closed.gateEnabled)
+        XCTAssertEqual(closed.sampleRate, 0)
+        XCTAssertEqual(closed.initializationCount, initialized.initializationCount)
+        for _ in 0..<10 {
+            tap.audioProcessingInitialize(sampleRate: 44_100, channels: 2)
+            tap.updateGate(mediaReady: true, muted: false)
+        }
+        tap.audioProcessingRelease()
+        XCTAssertEqual(tap.snapshot(), closed)
+        XCTAssertEqual(diagnostics.snapshot().initializationEvents, 1)
+        XCTAssertEqual(diagnostics.snapshot().activityEvents, 0)
+    }
+
+    func testNativeVoiceRecordingSamplesNormalizeFloatS16WithoutMutatingTheNativeInput() throws {
+        let native: [Float] = [-32_768, -16_384, -1, -0.5, 0, 0.5, 1, 16_384, 32_767, 32_768]
+        let original = native
+        let expected: [Float] = [-1, -0.5, -1 / 32_768, -0.5 / 32_768, 0,
+                                 0.5 / 32_768, 1 / 32_768, 0.5, 32_767 / 32_768, 1]
+        let copied = try XCTUnwrap(VoiceTutorAudioProcessingTap.normalizedRecordingSamples(native))
+        XCTAssertEqual(copied.count, expected.count)
+        for (sample, value) in zip(copied, expected) {
+            XCTAssertEqual(sample, value, accuracy: 0.000_000_1)
+        }
+        XCTAssertEqual(native, original, "Recording conversion must never rewrite the RTP capture buffer")
+        let pointerCopy = native.withUnsafeBufferPointer {
+            VoiceTutorAudioProcessingTap.normalizedRecordingSamples($0)
+        }
+        XCTAssertEqual(pointerCopy, copied)
+        XCTAssertLessThan(abs(copied[5]), 0.0001,
+                          "A quiet native value below one is not already-normalized audio")
+    }
+
+    func testNativeVoiceRecordingSamplesClampFiniteOverflowToTheRecorderRange() throws {
+        let native: [Float] = [-.greatestFiniteMagnitude, -65_536, 65_536, .greatestFiniteMagnitude]
+        let copied = try XCTUnwrap(VoiceTutorAudioProcessingTap.normalizedRecordingSamples(native))
+        XCTAssertEqual(copied, [-1, -1, 1, 1])
+        XCTAssertTrue(copied.allSatisfy { $0.isFinite && (-1...1).contains($0) })
+    }
+
+    func testNativeVoiceRecordingSamplesRejectEmptyAndNonFiniteInput() {
+        let invalid: [[Float]] = [[], [.nan], [.infinity], [-.infinity], [0, .nan, 1], [0, .infinity, -1]]
+        for samples in invalid {
+            XCTAssertNil(VoiceTutorAudioProcessingTap.normalizedRecordingSamples(samples))
+            XCTAssertNil(samples.withUnsafeBufferPointer {
+                VoiceTutorAudioProcessingTap.normalizedRecordingSamples($0)
+            })
+        }
+    }
+
     func testRecordingFailureCleanupRemovesEveryUnfinalizedSensitiveFile() throws {
         let sessionID = UUID().uuidString
         let directory = try VoiceTutorRecordingStore.recordingsDirectory()
@@ -2210,6 +2380,192 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(fixture.store.loadRemotePushRegistration(), registrationB)
     }
 
+    /// Deliberately outside the automatically selected non-microphone tests.
+    /// Run this selector explicitly and opt in through the test-host environment.
+    @MainActor
+    func testOptInNativeVoiceCaptureDeliversFramesThroughTheProductionModuleFactory() async throws {
+        guard ProcessInfo.processInfo.environment["BUDDYSTUDY_NATIVE_VOICE_CAPTURE_TEST"] == "1" else {
+            throw XCTSkip("Native microphone probe is opt-in: set BUDDYSTUDY_NATIVE_VOICE_CAPTURE_TEST=1 and select this test explicitly.")
+        }
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Native microphone delivery must be verified on a physical iPhone.")
+        #else
+        var preflight = [nativeVoiceCapturePreflight(phase: "entry")]
+        defer {
+            // Preserve startup evidence even if permission, activation, peer
+            // creation, or native recording fails before the frame attachment.
+            XCTAssertLessThanOrEqual(preflight.count, 7)
+            let attachment = XCTAttachment(string: preflight.joined(separator: "\n\n"))
+            attachment.name = "native-voice-capture-preflight-metadata-only"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        guard AVAudioApplication.shared.recordPermission == .granted else {
+            throw XCTSkip("Microphone permission is not already granted; this probe never requests permission or displays a prompt.")
+        }
+        let foregroundDeadline = ProcessInfo.processInfo.systemUptime + 2
+        while UIApplication.shared.applicationState != .active
+                && ProcessInfo.processInfo.systemUptime < foregroundDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        guard UIApplication.shared.applicationState == .active else {
+            throw XCTSkip("The test host did not become foreground-active within 2 seconds (applicationState=\(UIApplication.shared.applicationState.rawValue)); native microphone delivery was not verified.")
+        }
+        let audioSession = AVAudioSession.sharedInstance()
+        let previousCategory = audioSession.category
+        let previousMode = audioSession.mode
+        let previousOptions = audioSession.categoryOptions
+        let previousIODuration = audioSession.preferredIOBufferDuration
+        defer {
+            try? audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
+            try? audioSession.setCategory(previousCategory, mode: previousMode, options: previousOptions)
+            try? audioSession.setPreferredIOBufferDuration(previousIODuration)
+        }
+        try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        try audioSession.setPreferredIOBufferDuration(0.01)
+        try audioSession.setActive(true)
+        preflight.append(nativeVoiceCapturePreflight(phase: "session_activated"))
+        guard audioSession.isInputAvailable else {
+            throw XCTSkip("No microphone input route is available for the native capture probe.")
+        }
+
+        let diagnostics = VoiceTutorContractCaptureDiagnostics()
+        let tap = VoiceTutorLocalSpeechCaptureTap(
+            recordingTap: nil,
+            onActivity: { _ in diagnostics.observeActivity() },
+            onDiagnostic: { kind, snapshot in diagnostics.observe(kind, snapshot: snapshot) }
+        )
+        let module = try VoiceTutorAudioProcessingModuleFactory.make(captureDelegate: tap)
+        let factory = LKRTCPeerConnectionFactory(
+            audioDeviceModuleType: .audioEngine,
+            bypassVoiceProcessing: false,
+            encoderFactory: nil,
+            decoderFactory: nil,
+            audioProcessingModule: module
+        )
+        let device = factory.audioDeviceModule
+        preflight.append(nativeVoiceCapturePreflight(phase: "factory_created", device: device))
+        let source = factory.audioSource(with: nil)
+        let track = factory.audioTrack(with: source, trackId: "synthetic-native-capture-probe")
+        var capturePeer: LKRTCPeerConnection?
+        defer {
+            tap.close()
+            _ = device.stopRecording()
+            capturePeer?.close()
+            module.capturePostProcessingDelegate = nil
+            module.renderPreProcessingDelegate = nil
+            withExtendedLifetime((factory, source, track, capturePeer, module, tap)) {}
+        }
+        // PeerConnection.Initialize acquires the first MediaEngineReference;
+        // WebRtcVoiceEngine.Init then registers ADM's audio-transport callback.
+        // A factory/source/track alone leaves that callback unregistered, so
+        // ADM can report a successful start while dropping every input frame.
+        let configuration = LKRTCConfiguration()
+        configuration.sdpSemantics = .unifiedPlan
+        configuration.iceServers = []
+        configuration.iceTransportPolicy = .none
+        configuration.iceCandidatePoolSize = 0
+        let constraints = LKRTCMediaConstraints(
+            mandatoryConstraints: ["OfferToReceiveAudio": "false", "OfferToReceiveVideo": "false"],
+            optionalConstraints: nil
+        )
+        capturePeer = factory.peerConnection(with: configuration, constraints: constraints, delegate: nil)
+        let peer = try XCTUnwrap(capturePeer, "The native capture probe must initialize WebRTC's media engine")
+        preflight.append(nativeVoiceCapturePreflight(phase: "peer_initialized", device: device))
+        // The peer is retained only for native initialization: no sender, SDP,
+        // ICE gathering, remote candidate, provider, recorder, or playout.
+        preflight.append(nativeVoiceCapturePreflight(phase: "before_native_start", device: device))
+        let startStatus = device.initAndStartRecording()
+        preflight.append(nativeVoiceCapturePreflight(phase: "after_native_start", device: device, startStatus: startStatus))
+        XCTAssertEqual(startStatus, 0, "The native microphone device failed to start")
+        guard startStatus == 0 else { return }
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        while tap.snapshot().validInputBufferCount < 5 && ProcessInfo.processInfo.systemUptime < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        preflight.append(nativeVoiceCapturePreflight(phase: "capture_complete", device: device, startStatus: startStatus))
+        let snapshot = tap.snapshot()
+        let observed = diagnostics.snapshot()
+        let attachment = XCTAttachment(string: """
+        initializationCount=\(snapshot.initializationCount)
+        processedBufferCount=\(snapshot.processedBufferCount)
+        validInputBufferCount=\(snapshot.validInputBufferCount)
+        validInputFrameCount=\(snapshot.validInputFrameCount)
+        sampleRate=\(snapshot.sampleRate)
+        gateEnabled=\(snapshot.gateEnabled)
+        initializedDiagnosticCount=\(observed.initializationEvents)
+        firstValidInputDiagnosticCount=\(observed.firstInputEvents)
+        """)
+        attachment.name = "native-voice-capture-metadata-only"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertGreaterThan(snapshot.initializationCount, 0, "The actual native APM must initialize the installed capture delegate")
+        XCTAssertGreaterThanOrEqual(snapshot.validInputBufferCount, 5,
+                                    "A started device without native capture callbacks is a failure, not a passed probe")
+        XCTAssertGreaterThan(snapshot.validInputFrameCount, 0)
+        XCTAssertGreaterThan(snapshot.sampleRate, 0)
+        XCTAssertFalse(snapshot.gateEnabled, "Native callback delivery must be observable before session-ready gating")
+        XCTAssertEqual(observed.initializationEvents, 1)
+        XCTAssertEqual(observed.firstInputEvents, 1)
+        XCTAssertEqual(observed.activityEvents, 0)
+        XCTAssertFalse(observed.firstInput?.gateEnabled ?? true)
+        XCTAssertNil(peer.localDescription)
+        XCTAssertNil(peer.remoteDescription)
+        XCTAssertTrue(peer.senders.isEmpty)
+        XCTAssertTrue(peer.receivers.isEmpty)
+        XCTAssertEqual(peer.iceGatheringState, .new, "The microphone probe must never gather ICE candidates")
+        #endif
+    }
+
+    @MainActor
+    private func nativeVoiceCapturePreflight(
+        phase: String,
+        device: LKRTCAudioDeviceModule? = nil,
+        startStatus: Int? = nil
+    ) -> String {
+        let session = AVAudioSession.sharedInstance()
+        var fields = [
+            "phase=\(phase)",
+            "applicationState=\(UIApplication.shared.applicationState.rawValue)",
+            "recordPermission=\(AVAudioApplication.shared.recordPermission.rawValue)",
+            "sampleRate=\(session.sampleRate)",
+            "isInputAvailable=\(session.isInputAvailable)",
+            "inputChannelCount=\(session.inputNumberOfChannels)",
+            "outputChannelCount=\(session.outputNumberOfChannels)",
+            "inputRouteCount=\(session.currentRoute.inputs.count)",
+            "outputRouteCount=\(session.currentRoute.outputs.count)",
+            "category=\(session.category.rawValue)",
+            "mode=\(session.mode.rawValue)",
+            "categoryOptions=\(session.categoryOptions.rawValue)",
+            "ioBufferDuration=\(session.ioBufferDuration)"
+        ]
+        if let startStatus { fields.append("nativeStartStatus=\(startStatus)") }
+        if let device {
+            let state = device.engineState
+            fields.append(contentsOf: [
+                "nativeRecordingInitialized=\(device.isRecordingInitialized)",
+                "nativeRecording=\(device.isRecording)",
+                "nativeEngineRunning=\(device.isEngineRunning)",
+                "nativeMicrophoneMuted=\(device.isMicrophoneMuted)",
+                "engineOutputEnabled=\(state.outputEnabled)",
+                "engineOutputRunning=\(state.outputRunning)",
+                "engineInputEnabled=\(state.inputEnabled)",
+                "engineInputRunning=\(state.inputRunning)",
+                "engineInputMuted=\(state.inputMuted)",
+                "engineMuteMode=\(state.muteMode.rawValue)"
+            ])
+        }
+        return fields.joined(separator: "\n")
+    }
+
+    private func assertNativeVoiceDelegateInstallationFails(_ operation: () throws -> Void) {
+        XCTAssertThrowsError(try operation()) { error in
+            guard case VoiceTutorWebRTCError.audioProcessingDelegateInstallationFailed = error else {
+                return XCTFail("Expected explicit native audio delegate installation failure")
+            }
+        }
+    }
+
     private func localSpeechEvents(
         _ detector: inout VoiceTutorLocalSpeechDetector,
         rms: Double,
@@ -2440,6 +2796,50 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(endRequest.value(forHTTPHeaderField: "X-Client-Secret"), recovered.clientSecret)
         XCTAssertEqual(fixture.store.loadRemotePushRegistration()?.accessToken, recovered.accessToken)
         XCTAssertTrue(fixture.appState.voiceTutorSessionDetails.isEmpty)
+    }
+}
+
+private final class VoiceTutorContractNativeAudioDelegate: NSObject, LKRTCAudioCustomProcessingDelegate {
+    func audioProcessingInitialize(sampleRate: Int, channels: Int) {}
+    func audioProcessingProcess(audioBuffer: LKRTCAudioBuffer) {}
+    func audioProcessingRelease() {}
+}
+
+private struct VoiceTutorContractCaptureDiagnosticCounts: Sendable {
+    var initializationEvents = 0
+    var firstInputEvents = 0
+    var activityEvents = 0
+    var initialized: VoiceTutorLocalSpeechCaptureSnapshot?
+    var firstInput: VoiceTutorLocalSpeechCaptureSnapshot?
+}
+
+private final class VoiceTutorContractCaptureDiagnostics: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts = VoiceTutorContractCaptureDiagnosticCounts()
+
+    func observe(_ kind: VoiceTutorLocalSpeechCaptureDiagnostic, snapshot: VoiceTutorLocalSpeechCaptureSnapshot) {
+        lock.lock()
+        defer { lock.unlock() }
+        switch kind {
+        case .initialized:
+            counts.initializationEvents += 1
+            counts.initialized = snapshot
+        case .firstValidInputFrame:
+            counts.firstInputEvents += 1
+            counts.firstInput = snapshot
+        }
+    }
+
+    func observeActivity() {
+        lock.lock()
+        counts.activityEvents += 1
+        lock.unlock()
+    }
+
+    func snapshot() -> VoiceTutorContractCaptureDiagnosticCounts {
+        lock.lock()
+        defer { lock.unlock() }
+        return counts
     }
 }
 

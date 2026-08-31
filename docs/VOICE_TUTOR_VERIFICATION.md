@@ -347,6 +347,80 @@ The manual-turn wire protocol follows [OpenAI's conversation guide](https://deve
 the observed interruption is distinguished from response completion using the
 [WebRTC output-buffer event contract](https://developers.openai.com/api/reference/resources/realtime/server-events#output_audio_buffer.cleared).
 
+## Missing learner replies: native capture-delegate registration
+
+- Three subsequent physical-iPhone calls completed the tutor opening and then
+  followed the local stop/end path, but emitted no local speech start/stop events.
+  The phone's allowlisted diagnostics showed ready/listening before tutor audio,
+  so neither a missing ready gate nor the later control close explained the
+  absent learner turns. No transcript or preference secrets were inspected.
+- The pinned LiveKitWebRTC 144.7559.14 iOS arm64 binary confirms that
+  `LKRTCAudioCustomProcessingAdapter.initWithDelegate:` ignores the supplied
+  delegate and initializes its weak reference to nil. The default processing
+  module initializer only calls that initializer. The delegate setter actually
+  stores the reference and replays initialization with the native sample rate.
+  This also matches the [upstream adapter implementation](https://github.com/webrtc-sdk/webrtc/blob/m144_release/sdk/objc/components/audio/RTCAudioCustomProcessingAdapter.mm).
+  The previous pure energy/stream contracts did not exercise this native boundary.
+- `VoiceTutorAudioProcessingModuleFactory` now installs both delegates explicitly
+  and verifies their native identity before any peer connection is made. A
+  missing or wrong delegate is a startup error, not a silently deaf call. The
+  existing capture tap remains strongly retained, independent of recording
+  consent. Provider detection stays null; speech thresholds, full-duplex input,
+  sentence completion, server-owned commits, quota, and routing are unchanged.
+- Restoring the optional recording callbacks also requires normalizing their
+  copied FloatS16 samples to `[-1, 1]` before the existing AAC recorder. This
+  conversion never writes into the native buffer or enables unconsented audio
+  persistence. Initialization/first-input diagnostics are each bounded to one
+  event and expose only counters, sample rate, and gate/closed flags; no audio,
+  energy measurements, user speech, or credentials are retained.
+- The generic `StudyMateiOS` build passed with the existing device DerivedData.
+  Log: `build/voiceCaptureDelegateGenericBuild.log`.
+- The signed physical iPhone passed all 74 selected non-purge contracts,
+  including eight new native-boundary cases and the existing 21 local-speech
+  cases. The real pinned SDK reproduced nil constructor delegates; the
+  production factory installed the exact capture/render objects and rejected
+  missing, substituted, or unexpected delegates. Metadata bounds, closed-tap
+  fences, no-recording capture, and copied recording normalization also passed.
+- A separate, explicit opt-in microphone probe requires a physical iPhone and
+  already-granted permission. It keeps only initialization/frame counters and
+  stops within a three-second observation window. Its first bare-ADM attempt
+  correctly failed with one initialization but zero processed buffers: without
+  a peer, WebRTC has not registered ADM's audio-transport callback. The fixture
+  now creates and retains an unnegotiated peer solely to initialize the media
+  engine, with ICE disabled and no sender, SDP, provider session, recording, or
+  playout. It keeps the original frame-receipt assertions and checks that no
+  negotiation or candidate gathering occurred. The failed attempt is retained
+  in `build/voiceCaptureDelegateNativeInitialAttachments`; it is not counted as
+  a successful microphone test.
+- Another fixture attempt reported native start `-3010` with an unavailable
+  0 Hz output format. The test now waits for an active foreground test host and
+  preserves bounded preflight metadata even when startup fails; it does not
+  retry failed starts or turn zero frames into a pass. The earlier attempt had
+  no foreground snapshot, so its exact OS activation cause is not claimed.
+- The final physical-iPhone native probe passed with no failures or skips in
+  0.543 seconds: four native initializations, six processed/valid input buffers,
+  2,880 frames at 48 kHz, and exactly one diagnostic of each kind. All seven
+  preflight snapshots showed a foreground-active app. After native startup,
+  recording and the engine were running, the microphone was unmuted, and output
+  remained disabled/stopped. The closed session-ready gate produced no speech
+  events, while native input delivery remained observable. No sample contents
+  were retained. Logs: `build/voiceCaptureDelegateNativeMicrophonePreflight.log`
+  and `build/voiceCaptureDelegateNativeVerifiedAttachments`.
+- This verifies actual microphone-to-native-capture delivery, not recognition
+  of a user's spoken reply, an acoustic end-to-end lesson, noise robustness,
+  or route changes. The ordinary iOS contract log is
+  `build/voiceCaptureDelegateDeviceTests.log`; the release gates below still
+  apply. Backend/Routingflare, the existing 8080 dev container, and its AWS
+  secret and infrastructure were not changed by this iOS-only fix.
+- The normal signed `StudyMateiOS` app was rebuilt, installed, and launched
+  on the paired iPhone with the existing `https://lowfidev.cloud` dev route.
+  Zero active dev calls were checked before installation and again before
+  replacing the test-host process. No lesson or provider call was started by
+  the launch. The same API and four infrastructure container IDs remained
+  running. Logs: `build/voiceCaptureDelegateSignedBuild.log`,
+  `build/voiceCaptureDelegateDeviceInstall.log`, and
+  `build/voiceCaptureDelegateDeviceLaunch.log`.
+
 ## Release gates
 
 `VOICE_TUTOR_ENABLED` and `VOICE_TUTOR_RECORDING_ENABLED` remain default-off.

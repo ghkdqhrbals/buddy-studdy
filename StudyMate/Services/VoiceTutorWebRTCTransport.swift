@@ -12,6 +12,7 @@ enum VoiceTutorWebRTCError: Error {
     case mediaConnectionFailed
     case mediaConnectionTimedOut
     case speechActivityUnavailable
+    case audioProcessingDelegateInstallationFailed
 }
 
 enum VoiceTutorWebRTCMediaReadiness: Equatable {
@@ -135,6 +136,38 @@ private struct VoiceTutorUncheckedSendable<Value>: @unchecked Sendable {
     var value: Value
 }
 
+enum VoiceTutorAudioProcessingModuleFactory {
+    static func make(
+        captureDelegate: any LKRTCAudioCustomProcessingDelegate,
+        renderDelegate: (any LKRTCAudioCustomProcessingDelegate)? = nil
+    ) throws -> LKRTCDefaultAudioProcessingModule {
+        let module = LKRTCDefaultAudioProcessingModule(
+            config: nil,
+            capturePostProcessingDelegate: nil,
+            renderPreProcessingDelegate: nil
+        )
+        // LiveKitWebRTC 144.7559.14's native initWithDelegate: discards its
+        // argument. The property setter installs the delegate and replays any
+        // completed initialization, including the real processing sample rate.
+        // Callers must retain these weak delegates for the module's lifetime.
+        module.capturePostProcessingDelegate = captureDelegate
+        module.renderPreProcessingDelegate = renderDelegate
+        try validate(module, captureDelegate: captureDelegate, renderDelegate: renderDelegate)
+        return module
+    }
+
+    static func validate(
+        _ module: LKRTCDefaultAudioProcessingModule,
+        captureDelegate: any LKRTCAudioCustomProcessingDelegate,
+        renderDelegate: (any LKRTCAudioCustomProcessingDelegate)? = nil
+    ) throws {
+        guard module.capturePostProcessingDelegate === captureDelegate,
+              module.renderPreProcessingDelegate === renderDelegate else {
+            throw VoiceTutorWebRTCError.audioProcessingDelegateInstallationFailed
+        }
+    }
+}
+
 final class VoiceTutorAudioProcessingTap: NSObject, LKRTCAudioCustomProcessingDelegate,
     @unchecked Sendable {
     private let participant: VoiceTutorSessionRecorder.Participant
@@ -153,14 +186,18 @@ final class VoiceTutorAudioProcessingTap: NSObject, LKRTCAudioCustomProcessingDe
     func audioProcessingProcess(audioBuffer: LKRTCAudioBuffer) {
         let frameCount = Int(audioBuffer.frames)
         let channelCount = Int(audioBuffer.channels)
-        guard frameCount > 0, channelCount > 0 else { return }
+        guard sampleRate > 0, frameCount > 0, channelCount > 0 else { return }
         var channels: [[Float]] = []
         channels.reserveCapacity(channelCount)
         for channel in 0..<channelCount {
             // LKRTCAudioBuffer is only valid during this callback. Copy every
-            // sample before returning, then hand disk work to the recorder queue.
+            // sample before returning. Its FloatS16 samples must be normalized
+            // for the recorder's AVAudioPCMBuffer; native RTP remains untouched.
             let pointer = audioBuffer.rawBuffer(forChannel: channel)
-            channels.append(Array(UnsafeBufferPointer(start: pointer, count: frameCount)))
+            guard let samples = Self.normalizedRecordingSamples(
+                UnsafeBufferPointer(start: pointer, count: frameCount)
+            ) else { return }
+            channels.append(samples)
         }
         recorder.append(
             VoiceTutorPCMFrame(
@@ -173,7 +210,38 @@ final class VoiceTutorAudioProcessingTap: NSObject, LKRTCAudioCustomProcessingDe
         )
     }
 
+    static func normalizedRecordingSamples(_ samples: [Float]) -> [Float]? {
+        samples.withUnsafeBufferPointer { normalizedRecordingSamples($0) }
+    }
+
+    static func normalizedRecordingSamples(_ samples: UnsafeBufferPointer<Float>) -> [Float]? {
+        guard !samples.isEmpty else { return nil }
+        var normalized: [Float] = []
+        normalized.reserveCapacity(samples.count)
+        for sample in samples {
+            guard sample.isFinite else { return nil }
+            normalized.append(max(-1, min(1, sample / 32_768)))
+        }
+        return normalized
+    }
+
     func audioProcessingRelease() {}
+}
+
+enum VoiceTutorLocalSpeechCaptureDiagnostic: String, Equatable, Sendable {
+    case initialized = "capture_initialized"
+    case firstValidInputFrame = "capture_first_valid_input_frame"
+}
+
+/// Metadata only: no samples, energy measurements, audio, or transcript text.
+struct VoiceTutorLocalSpeechCaptureSnapshot: Equatable, Sendable {
+    let initializationCount: Int
+    let processedBufferCount: Int
+    let validInputBufferCount: Int
+    let validInputFrameCount: Int
+    let sampleRate: Double
+    let gateEnabled: Bool
+    let isClosed: Bool
 }
 
 /// Installed for every WebRTC call, even without optional recording consent.
@@ -184,31 +252,59 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
     private let lock = NSLock()
     private var detector = VoiceTutorLocalSpeechDetector()
     private var sampleRate: Double = 0
+    private var isClosed = false
+    private var initializationCount = 0
+    private var processedBufferCount = 0
+    private var validInputBufferCount = 0
+    private var validInputFrameCount = 0
+    private var didReportInitialization = false
+    private var didReportValidInput = false
     private let recordingTap: VoiceTutorAudioProcessingTap?
     private let onActivity: @Sendable (VoiceTutorLocalSpeechEvent) -> Void
+    private let onDiagnostic: (@Sendable (
+        VoiceTutorLocalSpeechCaptureDiagnostic, VoiceTutorLocalSpeechCaptureSnapshot
+    ) -> Void)?
 
     init(
         recordingTap: VoiceTutorAudioProcessingTap?,
-        onActivity: @escaping @Sendable (VoiceTutorLocalSpeechEvent) -> Void
+        onActivity: @escaping @Sendable (VoiceTutorLocalSpeechEvent) -> Void,
+        onDiagnostic: (@Sendable (
+            VoiceTutorLocalSpeechCaptureDiagnostic, VoiceTutorLocalSpeechCaptureSnapshot
+        ) -> Void)? = nil
     ) {
         self.recordingTap = recordingTap
         self.onActivity = onActivity
+        self.onDiagnostic = onDiagnostic
     }
 
     func audioProcessingInitialize(sampleRate: Int, channels: Int) {
         lock.lock()
+        guard !isClosed else { lock.unlock(); return }
+        initializationCount += 1
         self.sampleRate = sampleRate > 0 ? Double(sampleRate) : 0
+        let firstInitialization = !didReportInitialization && sampleRate > 0 && channels > 0
+        if firstInitialization { didReportInitialization = true }
+        let initialSnapshot = firstInitialization ? snapshotLocked() : nil
         lock.unlock()
         recordingTap?.audioProcessingInitialize(sampleRate: sampleRate, channels: channels)
+        if let initialSnapshot { onDiagnostic?(.initialized, initialSnapshot) }
     }
 
     func audioProcessingProcess(audioBuffer: LKRTCAudioBuffer) {
         recordingTap?.audioProcessingProcess(audioBuffer: audioBuffer)
+        var firstInputSnapshot: VoiceTutorLocalSpeechCaptureSnapshot?
         lock.lock()
-        defer { lock.unlock() }
+        defer {
+            lock.unlock()
+            // At most one diagnostic per kind for this tap's entire lifetime.
+            // Production only enqueues this metadata onto its diagnostic queue.
+            if let firstInputSnapshot { onDiagnostic?(.firstValidInputFrame, firstInputSnapshot) }
+        }
+        guard !isClosed else { return }
+        processedBufferCount += 1
         let frames = Int(audioBuffer.frames)
         let channels = Int(audioBuffer.channels)
-        guard detector.isEnabled, sampleRate > 0, frames > 0,
+        guard sampleRate > 0, frames > 0,
               channels > 0, channels <= 32 else { return }
         let duration = Double(frames) / sampleRate
         guard duration.isFinite, duration > 0, duration <= 0.25 else { return }
@@ -221,8 +317,15 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
             // A silent secondary channel must not dilute genuine learner audio.
             rms = max(rms, level)
         }
+        validInputBufferCount += 1
+        validInputFrameCount += frames
+        if !didReportValidInput {
+            didReportValidInput = true
+            firstInputSnapshot = snapshotLocked()
+        }
+        guard detector.isEnabled else { return }
         if let event = detector.process(normalizedRMS: rms, duration: duration) {
-            // The sole callback is a nonblocking bounded-stream yield. Keep it
+            // The speech callback is a nonblocking bounded-stream yield. Keep it
             // under the gate lock so a simultaneous mute cannot reorder stop N
             // before start N. No network, actor hop, or disk work runs here.
             onActivity(event)
@@ -239,9 +342,28 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
 
     func close() {
         lock.lock()
+        isClosed = true
         detector.close()
         sampleRate = 0
         lock.unlock()
+    }
+
+    func snapshot() -> VoiceTutorLocalSpeechCaptureSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return snapshotLocked()
+    }
+
+    private func snapshotLocked() -> VoiceTutorLocalSpeechCaptureSnapshot {
+        VoiceTutorLocalSpeechCaptureSnapshot(
+            initializationCount: initializationCount,
+            processedBufferCount: processedBufferCount,
+            validInputBufferCount: validInputBufferCount,
+            validInputFrameCount: validInputFrameCount,
+            sampleRate: sampleRate,
+            gateEnabled: detector.isEnabled,
+            isClosed: isClosed
+        )
     }
 
     func audioProcessingRelease() { recordingTap?.audioProcessingRelease() }
@@ -361,15 +483,17 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
 
         let nextCaptureTap = VoiceTutorLocalSpeechCaptureTap(
             recordingTap: recorder.map { VoiceTutorAudioProcessingTap(participant: .learner, recorder: $0) },
-            onActivity: onLocalSpeechActivity
+            onActivity: onLocalSpeechActivity,
+            onDiagnostic: { [weak self] event, snapshot in
+                self?.recordCaptureDiagnostic(event, snapshot: snapshot)
+            }
         )
         let nextRenderTap = recorder.map {
             VoiceTutorAudioProcessingTap(participant: .tutor, recorder: $0)
         }
-        let processingModule = LKRTCDefaultAudioProcessingModule(
-            config: nil,
-            capturePostProcessingDelegate: nextCaptureTap,
-            renderPreProcessingDelegate: nextRenderTap
+        let processingModule = try VoiceTutorAudioProcessingModuleFactory.make(
+            captureDelegate: nextCaptureTap,
+            renderDelegate: nextRenderTap
         )
         let factory = LKRTCPeerConnectionFactory(
             audioDeviceModuleType: .audioEngine,
@@ -760,9 +884,23 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         }
     }
 
+    private func recordCaptureDiagnostic(
+        _ event: VoiceTutorLocalSpeechCaptureDiagnostic,
+        snapshot: VoiceTutorLocalSpeechCaptureSnapshot
+    ) {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        // Initialization can precede installation of the transport's resources.
+        // Preserve that callback's metadata, without taking stateLock or touching
+        // ADM getters, logging, or networking from WebRTC's processing thread.
+        diagnosticQueue.async { [weak self] in
+            self?.emitMediaDiagnostic(event.rawValue, uptime: uptime, captureSnapshot: snapshot)
+        }
+    }
+
     private func emitMediaDiagnostic(
         _ event: String,
-        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime,
+        captureSnapshot: VoiceTutorLocalSpeechCaptureSnapshot? = nil
     ) {
         stateLock.lock()
         guard !isClosed, let callback = onDiagnostic else {
@@ -775,7 +913,8 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             track: remoteAudioTrack,
             buffers: renderedBufferCount,
             frames: renderedFrameCount,
-            nonzero: nonzeroBufferCount
+            nonzero: nonzeroBufferCount,
+            capture: captureSnapshot ?? captureTap?.snapshot()
         ))
         diagnosticLock.unlock()
         stateLock.unlock()
@@ -791,7 +930,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             let snapshot = context.value
             let device = snapshot.factory?.audioDeviceModule
             func flag(_ value: Bool?) -> String { value.map { $0 ? "1" : "0" } ?? "unknown" }
-            callback([
+            var fields = [
                 "event=\(event)", "elapsedMs=\(elapsedMs)",
                 "buffers=\(snapshot.buffers)", "frames=\(snapshot.frames)", "nonzeroBuffers=\(snapshot.nonzero)",
                 "admSnapshot=async", "playoutInitialized=\(flag(device?.isPlayoutInitialized))",
@@ -799,7 +938,19 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
                 "remoteEnabled=\(flag(snapshot.track?.isEnabled))",
                 "category=\(category)", "mode=\(mode)",
                 "ports=\(ports.isEmpty ? "none" : ports)", "zeroVolume=\(zeroVolume ? 1 : 0)"
-            ].joined(separator: " "))
+            ]
+            if let capture = snapshot.capture {
+                fields += [
+                    "captureInitializations=\(capture.initializationCount)",
+                    "captureBuffers=\(capture.processedBufferCount)",
+                    "captureValidBuffers=\(capture.validInputBufferCount)",
+                    "captureFrames=\(capture.validInputFrameCount)",
+                    "captureSampleRate=\(Int(capture.sampleRate))",
+                    "captureGate=\(capture.gateEnabled ? 1 : 0)",
+                    "captureClosed=\(capture.isClosed ? 1 : 0)"
+                ]
+            }
+            callback(fields.joined(separator: " "))
         }
     }
 
