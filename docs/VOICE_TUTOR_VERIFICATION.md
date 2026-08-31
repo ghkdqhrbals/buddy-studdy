@@ -75,7 +75,7 @@ Verification completed so far:
   drain gates, schema remained V106, the new preview path appeared in OpenAPI,
   and local dependency/readiness/health plus public dev health all passed.
 - Physical iPhone verification is not yet complete. The paired iPhone 16 Pro was
-  still locked during two safe `build-for-testing` attempts and rejected the app
+  still locked during three safe `build-for-testing` attempts and rejected the app
   install for the same reason. No device test, install or launch is claimed until
   the phone is unlocked and those steps succeed.
 
