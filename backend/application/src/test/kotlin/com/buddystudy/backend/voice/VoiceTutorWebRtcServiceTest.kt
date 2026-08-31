@@ -126,6 +126,36 @@ class VoiceTutorWebRtcServiceTest {
     }
 
     @Test
+    fun `WebRTC negotiation forwards the connected session language independently of instruction language`(): Unit = runBlocking {
+        for ((language, instructions) in listOf(
+            "ko" to "Tutor instructions written in English.",
+            "en" to "한국어로 작성된 선생님 지시문입니다.",
+            "ja" to "Tutor instructions written in English.",
+        )) {
+            val calls = Calls()
+            val context = VoiceTutorRelayContext(
+                activeSession().copy(language = language, providerSessionId = null),
+                instructions,
+            )
+            val service = service(
+                calls = calls,
+                connectContext = context,
+                negotiatedAnswer = VoiceTutorWebRtcAnswer("answer-sdp", "rtc_language-$language"),
+            )
+
+            service.negotiate(principal, SESSION_ID, validSdp())
+
+            val request = requireNotNull(calls.negotiationRequest)
+            assertThat(request.language).isEqualTo(language)
+            assertThat(request.instructions).isEqualTo(instructions)
+            assertThat(request.userId).isEqualTo(principal.userId)
+            assertThat(request.model).isEqualTo(context.session.model)
+            assertThat(request.voice).isEqualTo(context.session.voice)
+            assertThat(calls.connect).isEqualTo(1)
+        }
+    }
+
+    @Test
     fun `invalid provider SDP after call creation hangs up and removes its durable marker`() = runBlocking<Unit> {
         val calls = Calls()
         val cleanup = FakeCleanup(calls)
@@ -390,6 +420,7 @@ class VoiceTutorWebRtcServiceTest {
                 onProviderCallCreated: suspend (callId: String) -> Unit,
             ): VoiceTutorWebRtcAnswer {
                 calls.lifecycle += "provider-negotiate"
+                calls.negotiationRequest = request
                 val answer = negotiatedAnswer ?: error("Unexpected VoiceTutorWebRtcPort negotiation.")
                 onProviderCallCreated(answer.callId)
                 negotiationFailure?.let { throw it }
@@ -552,6 +583,7 @@ class VoiceTutorWebRtcServiceTest {
 
     private data class Calls(
         val lifecycle: MutableList<String> = mutableListOf(),
+        var negotiationRequest: VoiceTutorRealtimeRequest? = null,
         var authorize: Int = 0,
         var connect: Int = 0,
         var finish: Int = 0,

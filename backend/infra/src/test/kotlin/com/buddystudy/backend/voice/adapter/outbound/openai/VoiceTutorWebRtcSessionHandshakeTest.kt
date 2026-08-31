@@ -5,6 +5,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.fasterxml.jackson.databind.node.ObjectNode
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.DynamicTest.dynamicTest
@@ -51,6 +52,9 @@ class VoiceTutorWebRtcSessionHandshakeTest {
         val detection = session.path("audio").path("input").path("turn_detection")
         assertThat(detection.isNull).isTrue()
         assertThat(session.path("audio").path("input").has("turn_detection")).isTrue()
+        val transcription = session.path("audio").path("input").path("transcription")
+        assertThat(transcription.path("model").asText()).isEqualTo("gpt-4o-mini-transcribe")
+        assertThat(transcription.path("language").asText()).isEqualTo("ko")
         assertThat(updates.single()).doesNotContain("response.create", "response.cancel", "output_audio_buffer.clear")
     }
 
@@ -141,6 +145,50 @@ class VoiceTutorWebRtcSessionHandshakeTest {
         assertThat(snapshot.interruptResponse).isNull()
         assertThat(snapshot.updateRequested).isTrue()
         assertThat(snapshot.verified).isTrue()
+        assertThat(snapshot.expectedTranscriptionLanguage).isEqualTo("ko")
+        assertThat(snapshot.effectiveTranscriptionLanguage).isEqualTo("ko")
+        assertThat(snapshot.transcriptionLanguageVerified).isTrue()
+    }
+
+    @TestFactory
+    fun `missing or changed transcription language cannot acknowledge an otherwise safe call`() =
+        listOf<Pair<String, (ObjectNode) -> Unit>>(
+            "missing transcription" to { input -> input.remove("transcription"); Unit },
+            "disabled transcription" to { input -> input.putNull("transcription"); Unit },
+            "missing language" to { input -> (input.path("transcription") as ObjectNode).remove("language"); Unit },
+            "automatic language" to { input -> (input.path("transcription") as ObjectNode).put("language", ""); Unit },
+            "null language" to { input -> (input.path("transcription") as ObjectNode).putNull("language"); Unit },
+            "other supported language" to { input -> (input.path("transcription") as ObjectNode).put("language", "en"); Unit },
+            "unrequested language" to { input -> (input.path("transcription") as ObjectNode).put("language", "pt"); Unit },
+            "nontext language" to { input -> (input.path("transcription") as ObjectNode).put("language", 1); Unit },
+        ).map { (description, change) ->
+            dynamicTest(description) {
+                val snapshots = mutableListOf<VoiceTutorWebRtcConfigurationSnapshot>()
+                val handshake = newHandshake(snapshots)
+                dispatch(handshake)
+                val invalid = mapper.readTree(validUpdated()) as ObjectNode
+                change(invalid.path("session").path("audio").path("input") as ObjectNode)
+
+                assertThatThrownBy { handshake.observeProviderEvent(mapper.writeValueAsString(invalid)) }
+                    .isInstanceOf(VoiceTutorWebRtcSessionConfigurationException::class.java)
+                assertThat(snapshots.single().toolsVerified).isTrue()
+                assertThat(snapshots.single().transcriptionLanguageVerified).isFalse()
+                assertThat(snapshots.single().verified).isFalse()
+            }
+        }
+
+    @Test
+    fun `later transcription language removal is detected after a verified acknowledgement`() {
+        val handshake = newHandshake()
+        dispatch(handshake)
+        handshake.observeProviderEvent(validUpdated())
+        StepVerifier.create(handshake.awaitConfirmation()).expectComplete().verify(VERIFY_TIMEOUT)
+
+        val withoutLanguage = (mapper.readTree(validUpdated()) as ObjectNode).apply {
+            (path("session").path("audio").path("input").path("transcription") as ObjectNode).remove("language")
+        }
+        assertThatThrownBy { handshake.observeProviderEvent(mapper.writeValueAsString(withoutLanguage)) }
+            .isInstanceOf(VoiceTutorWebRtcSessionConfigurationException::class.java)
     }
 
     @TestFactory
@@ -251,7 +299,7 @@ class VoiceTutorWebRtcSessionHandshakeTest {
         logger.level = Level.DEBUG
         logger.addAppender(logs)
         try {
-            val handshake = VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT)
+            val handshake = VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, transcriptionLanguage = "ko")
             dispatch(handshake)
             assertThatThrownBy { handshake.observeProviderEvent(unsafe) }
                 .isInstanceOf(VoiceTutorWebRtcSessionConfigurationException::class.java)
@@ -266,6 +314,7 @@ class VoiceTutorWebRtcSessionHandshakeTest {
                 ).joinToString(" ")
             }
             assertThat(loggedValues).contains(voiceTutorCallReference(CALL_ID))
+                .contains("expectedTranscriptionLanguage=ko", "effectiveTranscriptionLanguage=other", "transcriptionLanguageVerified=false")
                 .doesNotContain(CALL_ID, PRIVATE_PAYLOAD, PRIVATE_TYPE, PRIVATE_SECRET)
         } finally {
             logger.detachAppender(logs)
@@ -275,14 +324,16 @@ class VoiceTutorWebRtcSessionHandshakeTest {
     }
 
     private fun newHandshake(snapshots: MutableList<VoiceTutorWebRtcConfigurationSnapshot> = mutableListOf()) =
-        VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, onConfiguration = { snapshots += it })
+        VoiceTutorWebRtcSessionHandshake(
+            CALL_ID, CONFIRMATION_TIMEOUT, onConfiguration = { snapshots += it }, transcriptionLanguage = "ko",
+        )
 
     private fun dispatch(handshake: VoiceTutorWebRtcSessionHandshake) {
         StepVerifier.create(handshake.initialProviderEvents()).expectNextCount(1).expectComplete().verify(VERIFY_TIMEOUT)
     }
 
     private fun validUpdated() =
-        """{"type":"session.updated","session":{"type":"realtime","audio":{"input":{"turn_detection":null}}}}"""
+        """{"type":"session.updated","session":{"type":"realtime","audio":{"input":{"turn_detection":null,"transcription":{"model":"gpt-4o-mini-transcribe","language":"ko"}}}}}"""
 
     private fun automaticUpdated() = validUpdated().replace(
         "null", """{"type":"server_vad","create_response":false,"interrupt_response":false}""",
@@ -326,11 +377,14 @@ class VoiceTutorWebRtcSessionHandshakeTest {
                 "type" to PRIVATE_TYPE,
                 "instructions" to PRIVATE_PAYLOAD,
                 "client_secret" to mapOf("value" to PRIVATE_SECRET),
-                "audio" to mapOf("input" to mapOf("turn_detection" to mapOf(
-                    "type" to PRIVATE_TYPE,
-                    "create_response" to PRIVATE_PAYLOAD,
-                    "interrupt_response" to PRIVATE_PAYLOAD,
-                ))),
+                "audio" to mapOf("input" to mapOf(
+                    "turn_detection" to mapOf(
+                        "type" to PRIVATE_TYPE,
+                        "create_response" to PRIVATE_PAYLOAD,
+                        "interrupt_response" to PRIVATE_PAYLOAD,
+                    ),
+                    "transcription" to mapOf("model" to PRIVATE_TYPE, "language" to PRIVATE_SECRET),
+                )),
             ),
         ),
     )

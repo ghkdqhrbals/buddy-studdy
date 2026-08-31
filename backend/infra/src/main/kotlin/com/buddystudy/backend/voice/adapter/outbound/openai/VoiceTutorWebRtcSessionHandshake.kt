@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
+import com.buddystudy.study.domain.QuestionLanguage
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.NullNode
 import org.slf4j.LoggerFactory
@@ -12,17 +13,19 @@ import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Applies and verifies server-owned turn control on the already-created GA call. */
+/** Applies and verifies server-owned turn control and input language on the GA call. */
 internal class VoiceTutorWebRtcSessionHandshake(
     callId: String,
     private val confirmationTimeout: Duration,
     private val onConfiguration: (VoiceTutorWebRtcConfigurationSnapshot) -> Unit = ::logWebRtcConfiguration,
     expectedTools: List<Map<String, Any?>> = emptyList(),
+    transcriptionLanguage: String,
 ) {
     private val callRef = voiceTutorCallReference(callId)
     private val updateRequested = AtomicBoolean()
     private val confirmed = Sinks.one<Void>()
     private val tools = JsonMapperProvider.mapper.valueToTree<JsonNode>(expectedTools)
+    private val transcription = voiceTutorInputTranscription(transcriptionLanguage)
 
     init {
         val names = tools.map { it.path("name").asText() }
@@ -47,7 +50,10 @@ internal class VoiceTutorWebRtcSessionHandshake(
                             "tools" to tools,
                             "tool_choice" to "auto",
                             "audio" to mapOf(
-                                "input" to mapOf("turn_detection" to voiceTutorManualWebRtcTurnDetection()),
+                                "input" to mapOf(
+                                    "transcription" to transcription,
+                                    "turn_detection" to voiceTutorManualWebRtcTurnDetection(),
+                                ),
                             ),
                         ),
                     ),
@@ -89,9 +95,12 @@ internal class VoiceTutorWebRtcSessionHandshake(
         val interruptResponse = turnDetection.path("interrupt_response").explicitBoolean()
         val requested = updateRequested.get()
         val toolsVerified = verifiesTools(session)
+        val effectiveLanguage = audioInput.path("transcription").path("language")
+        val transcriptionLanguageVerified = effectiveLanguage.isTextual &&
+            effectiveLanguage.textValue() == transcription.getValue("language")
         val verified = requested && eventType == "session.updated" &&
             schema == VoiceTutorWebRtcConfigurationSchema.GA && sessionType == "realtime" &&
-            turnDetection.isNull && toolsVerified
+            turnDetection.isNull && toolsVerified && transcriptionLanguageVerified
 
         onConfiguration(
             VoiceTutorWebRtcConfigurationSnapshot(
@@ -100,6 +109,9 @@ internal class VoiceTutorWebRtcSessionHandshake(
                 expectedToolCount = tools.size(),
                 effectiveToolCount = session.path("tools").takeIf { it.isArray }?.size() ?: -1,
                 toolsVerified = toolsVerified,
+                expectedTranscriptionLanguage = transcription.getValue("language"),
+                effectiveTranscriptionLanguage = effectiveLanguage.safeConfigurationName(QuestionLanguage.supported),
+                transcriptionLanguageVerified = transcriptionLanguageVerified,
             ),
         )
         if (requested && eventType == "session.updated") {
@@ -183,10 +195,13 @@ internal data class VoiceTutorWebRtcConfigurationSnapshot(
     val expectedToolCount: Int = 0,
     val effectiveToolCount: Int = -1,
     val toolsVerified: Boolean = true,
+    val expectedTranscriptionLanguage: String = "none",
+    val effectiveTranscriptionLanguage: String = "none",
+    val transcriptionLanguageVerified: Boolean = false,
 )
 
 internal class VoiceTutorWebRtcSessionConfigurationException :
-    RuntimeException("Provider session did not confirm server-owned Voice Tutor turns and tools.")
+    RuntimeException("Provider session did not confirm server-owned Voice Tutor turns, tools and input language.")
 
 internal class VoiceTutorWebRtcSessionConfigurationTimeoutException :
     RuntimeException("Provider session configuration acknowledgement timed out.")
@@ -207,7 +222,8 @@ private fun logWebRtcConfiguration(configuration: VoiceTutorWebRtcConfigurationS
     configurationLogger.info(
         "voice_tutor_sideband_configuration callRef={} eventType={} sessionType={} schema={} " +
             "turnDetectionType={} createResponse={} interruptResponse={} updateRequested={} verified={} " +
-            "expectedToolCount={} effectiveToolCount={} toolsVerified={}",
+            "expectedToolCount={} effectiveToolCount={} toolsVerified={} " +
+            "expectedTranscriptionLanguage={} effectiveTranscriptionLanguage={} transcriptionLanguageVerified={}",
         configuration.callRef,
         configuration.eventType,
         configuration.sessionType,
@@ -220,5 +236,8 @@ private fun logWebRtcConfiguration(configuration: VoiceTutorWebRtcConfigurationS
         configuration.expectedToolCount,
         configuration.effectiveToolCount,
         configuration.toolsVerified,
+        configuration.expectedTranscriptionLanguage,
+        configuration.effectiveTranscriptionLanguage,
+        configuration.transcriptionLanguageVerified,
     )
 }

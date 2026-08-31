@@ -1604,3 +1604,67 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   `build/voiceCommonRecordsDeviceInstall.log` and
   `build/voiceCommonRecordsDeviceLaunch.log`. Actual user content was neither
   published nor commented on as part of verification.
+
+## 2026-09-01 — Preserve the accepted input transcription language
+
+### Confirmed gap and bounded fix
+
+- The iOS app already sends the selected `ko`/`en`/`ja` language when creating a
+  session and displays completed input transcripts without translation. The
+  provider request contract dropped that stored language: both WebRTC and PCM
+  setup configured only `gpt-4o-mini-transcribe`. A Korean tutor instruction is
+  not a substitute for an input transcription language.
+- `VoiceTutorRealtimeRequest.language` is now mandatory, with no default. Both
+  application services forward the connected session snapshot's language. A
+  shared configuration helper passes it to WebRTC creation, sideband setup and
+  PCM setup, retaining the existing transcription model. Sideband readiness
+  verifies the effective language alongside the existing turn/tool checks, and
+  rejects a later removal/change instead of silently returning to auto detection.
+- OpenAI Docs was used to verify that transcription runs separately from the
+  realtime model's native audio input, that input transcription accepts a language,
+  and that `session.updated` returns the full effective configuration. References:
+  [Realtime session configuration](https://developers.openai.com/api/reference/resources/realtime/subresources/client_secrets)
+  and [Realtime client events](https://developers.openai.com/api/reference/resources/realtime/client-events#session.update).
+- This change does not translate, rewrite or regex-filter transcripts; change the
+  model, noise reduction, Silero, meaningful-input policy or turn timing; or infer
+  what the user actually said from the screenshot. A displayed ASR error does
+  not prove the realtime model heard that same text or that it treated the text
+  as lesson-start consent. Existing records and transcripts are not modified.
+- Configuration diagnostics retain only the allowed language identifiers,
+  `none`/`other`, booleans and the existing pseudonymous call reference. Provider
+  payloads, instructions, audio, raw call IDs and credentials remain excluded.
+
+### Verification
+
+- Selected backend regression: **1,089 tests in 126 suites — 1,087 passed,
+  zero failures/errors, two opt-in provider tests skipped**. Domain: 20;
+  application: 338; infrastructure: 713 passed/two skipped; tutor: 16. Log:
+  `build/voiceInputLanguageBackend-tests.log`. The source-to-JUnit audit verified
+  all 141 ordinary `@Test` methods in seven changed classes were discovered;
+  dynamic cases are included in the suite totals. Report:
+  `build/voiceInputLanguageBackendAudit.json`.
+- New regression covers Korean/English/Japanese session-to-provider forwarding,
+  independence from the writing language of tutor instructions, all three
+  provider setup boundaries, effective language acknowledgement, eight missing
+  or mismatched language configurations, later removal and private-value log
+  suppression. Existing audio turn, pause, MCP, summary and common-record tests
+  remain selected. No real user content or live provider call was used.
+- Main `processAot` and `bootJar` passed; five test-AOT tasks remain excluded.
+  Log: `build/voiceInputLanguageBackend-jar.log`. JAR: 331,113,250 bytes,
+  SHA-256 `f0ca48132bd3850c07c250016c3055f1cfe5c5adf1ef0acb40bbcc8b6e6078bb`.
+  No SQL migration is added or changed; V105 retains SHA-256
+  `ff188021bd5cfe843640f0d4c21fd0122989b266992fdc4c29640a5c18b09b97`.
+- Two explicitly selected contracts passed on the paired iPhone, zero failures:
+  `VoiceTutorVoiceSettingsTests/testSavedVoiceTravelsThroughAppStateUseCaseRepositoryAndPOSTBody`
+  and `VoiceTutorContractTests/testRealtimeParserHandlesProviderAndBuddyStudyEvents`.
+  These use isolated settings and synthetic transport/parser input; they do not
+  create a real voice session, use the microphone, consume provider audio or
+  delete recordings. Logs: `build/voiceInputLanguageDeviceTestBuild.log` and
+  `build/voiceInputLanguageDeviceTests.log`. No iOS production source changed.
+- The normal signed app was rebuilt after the device contracts; deep, strict
+  code-signature verification passed, with no injected XCTest frameworks or
+  plug-ins remaining. Log: `build/voiceInputLanguageSignedBuildFinal.log`.
+- These are configuration and contract checks, **not a recognition-accuracy
+  measurement**. Actual provider acknowledgement and short Korean speech in a
+  new call remain live acceptance checks; prior misrecognized words cannot be
+  reconstructed from the screenshot alone.

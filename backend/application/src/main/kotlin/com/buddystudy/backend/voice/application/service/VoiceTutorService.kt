@@ -373,6 +373,7 @@ class VoiceTutorService(
                 model = context.session.model,
                 voice = context.session.voice,
                 instructions = context.instructions,
+                language = context.session.language,
             ),
             clientEvents,
             terminalEvents,

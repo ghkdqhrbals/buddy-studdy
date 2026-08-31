@@ -66,7 +66,7 @@ class VoiceTutorWebRtcMcpConfigurationTest {
         )
         assertThat(definitionReads).isZero()
         val sdpConfiguration = mapper.readTree(adapter.webRtcSessionConfiguration(
-            VoiceTutorRealtimeRequest(userId = 7L, model = "gpt-realtime-test", voice = "marin", instructions = "Finish the sentence."),
+            VoiceTutorRealtimeRequest(userId = 7L, model = "gpt-realtime-test", voice = "marin", instructions = "Finish the sentence.", language = "ko"),
         ))
         val handshake = newHandshake()
         val sideband = dispatch(handshake).path("session")
@@ -168,7 +168,7 @@ class VoiceTutorWebRtcMcpConfigurationTest {
 
     @Test
     fun `empty legacy configuration remains compatible but does not permit extra provider tools`() {
-        val handshake = VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, {})
+        val handshake = VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, {}, transcriptionLanguage = "ko")
         val sessionUpdate = dispatch(handshake).path("session")
         assertThat(sessionUpdate.path("tools").isArray).isTrue()
         assertThat(sessionUpdate.path("tools").size()).isZero()
@@ -184,14 +184,14 @@ class VoiceTutorWebRtcMcpConfigurationTest {
     @Test
     fun `expected definitions are snapshotted and duplicate or nonfunction definitions cannot initialize`() {
         val mutableTool = voiceTutorRealtimeFunctionTools(definitions).first().toMutableMap()
-        val handshake = VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, {}, listOf(mutableTool))
+        val handshake = VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, {}, listOf(mutableTool), transcriptionLanguage = "ko")
         mutableTool["name"] = "changed_after_initialization"
         assertThat(dispatch(handshake).path("session").path("tools").path(0).path("name").asText()).isEqualTo("get_study")
 
         val original = voiceTutorRealtimeFunctionTools(definitions).first()
-        assertThatThrownBy { VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, {}, listOf(original, original)) }
+        assertThatThrownBy { VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, {}, listOf(original, original), transcriptionLanguage = "ko") }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, {}, listOf(original + ("type" to "mcp"))) }
+        assertThatThrownBy { VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, {}, listOf(original + ("type" to "mcp")), transcriptionLanguage = "ko") }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 
@@ -205,6 +205,7 @@ class VoiceTutorWebRtcMcpConfigurationTest {
         try {
             val handshake = VoiceTutorWebRtcSessionHandshake(
                 CALL_ID, CONFIRMATION_TIMEOUT, expectedTools = voiceTutorRealtimeFunctionTools(definitions),
+                transcriptionLanguage = "ko",
             )
             dispatch(handshake)
             val session = validSession().apply {
@@ -228,7 +229,10 @@ class VoiceTutorWebRtcMcpConfigurationTest {
     }
 
     private fun newHandshake(snapshots: MutableList<VoiceTutorWebRtcConfigurationSnapshot> = mutableListOf()) =
-        VoiceTutorWebRtcSessionHandshake(CALL_ID, CONFIRMATION_TIMEOUT, { snapshots += it }, voiceTutorRealtimeFunctionTools(definitions))
+        VoiceTutorWebRtcSessionHandshake(
+            CALL_ID, CONFIRMATION_TIMEOUT, { snapshots += it }, voiceTutorRealtimeFunctionTools(definitions),
+            transcriptionLanguage = "ko",
+        )
 
     private fun dispatch(handshake: VoiceTutorWebRtcSessionHandshake): JsonNode {
         var event: JsonNode? = null
@@ -239,7 +243,10 @@ class VoiceTutorWebRtcMcpConfigurationTest {
 
     private fun validSession(): ObjectNode = mapper.valueToTree(
         linkedMapOf(
-            "type" to "realtime", "audio" to mapOf("input" to mapOf("turn_detection" to voiceTutorManualWebRtcTurnDetection())),
+            "type" to "realtime", "audio" to mapOf("input" to mapOf(
+                "turn_detection" to voiceTutorManualWebRtcTurnDetection(),
+                "transcription" to mapOf("model" to "gpt-4o-mini-transcribe", "language" to "ko"),
+            )),
             "tools" to voiceTutorRealtimeFunctionTools(definitions), "tool_choice" to "auto",
         ),
     )

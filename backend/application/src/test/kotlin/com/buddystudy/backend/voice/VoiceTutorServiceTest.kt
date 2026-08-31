@@ -37,6 +37,7 @@ import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
@@ -67,6 +68,32 @@ class VoiceTutorServiceTest {
             val config = properties().apply { voiceTutor.voice = "cedar" }
             service(persistence, config).createSession(principal, 42, "ko", selection, "default-voice", false, null)
             assertThat(persistence.session.voice).isEqualTo("cedar")
+        }
+    }
+
+    @Test
+    fun `provider relay forwards the accepted session language independently of instruction language`(): Unit = runBlocking {
+        for ((language, instructions) in listOf(
+            "ko" to "Tutor instructions written in English.",
+            "en" to "한국어로 작성된 선생님 지시문입니다.",
+            "ja" to "Tutor instructions written in English.",
+        )) {
+            val persistence = FakePersistence(now)
+            val requests = mutableListOf<VoiceTutorRealtimeRequest>()
+            val service = service(persistence, onRealtimeRequest = { requests += it })
+            service.createSession(principal, 42, language, "marin", "language-$language", false, null)
+            val context = service.connect(principal, persistence.session.id).copy(instructions = instructions)
+
+            service.relayProvider(principal, context, emptyFlow(), emptyFlow()) { _, _, _ -> false }
+
+            assertThat(context.session.language).isEqualTo(language)
+            assertThat(requests).hasSize(1)
+            val request = requests.single()
+            assertThat(request.language).isEqualTo(language)
+            assertThat(request.instructions).isEqualTo(instructions)
+            assertThat(request.userId).isEqualTo(principal.userId)
+            assertThat(request.model).isEqualTo(context.session.model)
+            assertThat(request.voice).isEqualTo(context.session.voice)
         }
     }
 
@@ -1005,6 +1032,7 @@ class VoiceTutorServiceTest {
         webRtc: VoiceTutorWebRtcPort = FakeWebRtc(),
         webRtcCleanup: VoiceTutorWebRtcCleanupPort = FakeWebRtcCleanup(),
         studyContexts: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
+        onRealtimeRequest: (VoiceTutorRealtimeRequest) -> Unit = {},
     ) = VoiceTutorService(
         persistence = persistence,
         personalization = object : VoiceTutorPersonalizationPort {
@@ -1022,7 +1050,9 @@ class VoiceTutorServiceTest {
                     persist: Boolean,
                     forwardToClient: Boolean,
                 ) -> Boolean,
-            ) = Unit
+            ) {
+                onRealtimeRequest(request)
+            }
         },
         relayAuthorization = relayAuthorization,
         properties = properties,

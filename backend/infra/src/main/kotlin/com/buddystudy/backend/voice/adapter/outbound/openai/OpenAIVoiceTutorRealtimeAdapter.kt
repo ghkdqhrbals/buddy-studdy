@@ -156,7 +156,7 @@ class OpenAIVoiceTutorRealtimeAdapter(
                             "type" to "audio/pcm",
                             "rate" to 24_000,
                         ),
-                        "transcription" to mapOf("model" to "gpt-4o-mini-transcribe"),
+                        "transcription" to voiceTutorInputTranscription(request.language),
                         "turn_detection" to mapOf(
                             "type" to "server_vad",
                             "create_response" to false,

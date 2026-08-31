@@ -149,6 +149,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 validatedCallId,
                 Duration.ofSeconds(properties.voiceTutor.connectTimeoutSeconds.coerceIn(5, 300)),
                 expectedTools = voiceTutorRealtimeFunctionTools(mcpTools.definitions()),
+                transcriptionLanguage = context.session.language,
             )
             val turnController = VoiceTutorDuplexTurnController(
                 mapper = mapper,
@@ -282,7 +283,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
             "tool_choice" to "auto",
             "audio" to linkedMapOf(
                 "input" to linkedMapOf(
-                    "transcription" to mapOf("model" to "gpt-4o-mini-transcribe"),
+                    "transcription" to voiceTutorInputTranscription(request.language),
                     "turn_detection" to voiceTutorManualWebRtcTurnDetection(),
                 ),
                 "output" to linkedMapOf(

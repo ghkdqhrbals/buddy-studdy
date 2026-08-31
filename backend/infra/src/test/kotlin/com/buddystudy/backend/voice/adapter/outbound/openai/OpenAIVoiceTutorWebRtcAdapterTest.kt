@@ -48,6 +48,7 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
                     model = "gpt-realtime-test",
                     voice = "marin",
                     instructions = "Use one complete sentence.",
+                    language = "ko",
                 ),
             ),
         )
@@ -215,7 +216,9 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         val subscriptions = mutableListOf<String>()
         val sent = mutableListOf<String>()
         var readyEmitted = false
-        val handshake = VoiceTutorWebRtcSessionHandshake("rtc_opening", Duration.ofSeconds(15))
+        val handshake = VoiceTutorWebRtcSessionHandshake(
+            "rtc_opening", Duration.ofSeconds(15), transcriptionLanguage = "ko",
+        )
         val providerEvents = Sinks.many().unicast().onBackpressureBuffer<String>()
         val controller = VoiceTutorDuplexTurnController(
             continuousSpeechLimit = Duration.ofSeconds(30),
@@ -252,7 +255,10 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         }
         val confirmedConfiguration = """{
             "type":"session.updated",
-            "session":{"type":"realtime","audio":{"input":{"turn_detection":null}}}
+            "session":{"type":"realtime","audio":{"input":{
+                "turn_detection":null,
+                "transcription":{"model":"gpt-4o-mini-transcribe","language":"ko"}
+            }}}
         }""".trimIndent()
         try {
             assertThat(sent).hasSize(1)

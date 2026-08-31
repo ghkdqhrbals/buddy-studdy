@@ -328,6 +328,7 @@ data class VoiceTutorRealtimeRequest(
     val model: String,
     val voice: String,
     val instructions: String,
+    val language: String,
 )
 
 data class VoiceTutorRelayTermination(

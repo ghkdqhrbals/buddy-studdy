@@ -45,6 +45,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
                     model = "gpt-realtime-test",
                     voice = "marin",
                     instructions = "Tutor safely.",
+                    language = "ko",
                 ),
             ),
         )

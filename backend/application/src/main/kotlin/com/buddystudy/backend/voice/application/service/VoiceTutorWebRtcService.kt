@@ -82,6 +82,7 @@ class VoiceTutorWebRtcService(
                     model = context.session.model,
                     voice = context.session.voice,
                     instructions = context.instructions,
+                    language = context.session.language,
                 ),
                 normalizedOffer,
                 recordProviderCall,
