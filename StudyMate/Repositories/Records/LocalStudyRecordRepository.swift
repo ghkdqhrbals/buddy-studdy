@@ -1,6 +1,11 @@
 import Foundation
 
 protocol LocalStudyRecordRepository {
+    #if os(iOS)
+    func loadLearningRecordsPage(for key: StudyLearningRecordsCacheKey) -> BackendStudyLearningRecordsPage?
+    func saveLearningRecordsPage(_ page: BackendStudyLearningRecordsPage, for key: StudyLearningRecordsCacheKey)
+    func clearLearningRecordsPages()
+    #endif
     func loadStudyRecords() -> [StudyRecord]
     func appendStudyRecord(question: QuestionItem, settings: StudySettings)
     func saveSubmittedAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool)
@@ -23,3 +28,13 @@ protocol LocalStudyRecordRepository {
     func loadStudyRecordsClearedAt() -> Date?
     func saveStudyRecordsClearedAt(_ date: Date?)
 }
+
+#if os(iOS)
+extension LocalStudyRecordRepository {
+    // Isolated repositories without a cache remain valid. The production
+    // SettingsStore adapter implements these using its existing record store.
+    func loadLearningRecordsPage(for key: StudyLearningRecordsCacheKey) -> BackendStudyLearningRecordsPage? { nil }
+    func saveLearningRecordsPage(_ page: BackendStudyLearningRecordsPage, for key: StudyLearningRecordsCacheKey) {}
+    func clearLearningRecordsPages() {}
+}
+#endif

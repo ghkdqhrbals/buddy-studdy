@@ -2,15 +2,19 @@ package com.buddystudy.backend.localization.application.service
 
 import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
+import com.buddystudy.backend.common.application.privacy.PrivateLearningContentLogScope
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.localization.application.port.ContentTranslationPort
 import com.buddystudy.backend.localization.application.port.ProcessContentTranslationUseCase
+import com.buddystudy.backend.localization.application.port.VoiceStudyLearningLocalizationPort
+import com.buddystudy.backend.localization.application.port.UnavailableVoiceStudyLearningLocalizationPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
 import com.buddystudy.study.domain.entity.QuestionEntity
+import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Duration
@@ -23,6 +27,7 @@ class ContentTranslationProcessor(
     private val localizations: ContentLocalizationPort,
     private val translator: ContentTranslationPort,
     private val inbox: StreamInboxPort,
+    private val voiceLocalizations: VoiceStudyLearningLocalizationPort = UnavailableVoiceStudyLearningLocalizationPort,
 ) : ProcessContentTranslationUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -43,11 +48,16 @@ class ContentTranslationProcessor(
                 LocalizableContentType.ANSWER -> processAnswer(event)
                 LocalizableContentType.AI_RESPONSE -> processAiResponse(event)
                 LocalizableContentType.COMMENT -> processComment(event)
+                LocalizableContentType.VOICE_STUDY_RECORD -> processVoiceStudyRecord(event)
             }
             check(inbox.markSucceeded(claim, Instant.now()))
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             val errorType = error.javaClass.name
-            val errorMessage = error.message ?: error.javaClass.simpleName
+            val errorMessage = if (event.contentType == LocalizableContentType.VOICE_STUDY_RECORD) {
+                "Voice learning record translation failed."
+            } else error.message ?: error.javaClass.simpleName
             val now = Instant.now()
             if (claim.attempt < MAX_ATTEMPTS) {
                 check(inbox.releaseForRetry(claim, errorType, errorMessage, now))
@@ -62,9 +72,17 @@ class ContentTranslationProcessor(
                     errorType,
                     errorMessage,
                 )
-                throw StreamRetryScheduledException(errorMessage, error)
+                // The shared stream dispatcher logs the cause message; never carry a private provider body to it.
+                val retryCause = if (event.contentType == LocalizableContentType.VOICE_STUDY_RECORD) {
+                    IllegalStateException("Voice learning record translation failed ($errorType).")
+                } else error
+                throw StreamRetryScheduledException(errorMessage, retryCause)
             }
-            localizations.markFailed(event, errorMessage, now)
+            if (event.contentType == LocalizableContentType.VOICE_STUDY_RECORD) {
+                voiceLocalizations.markFailed(event, errorMessage, now)
+            } else {
+                localizations.markFailed(event, errorMessage, now)
+            }
             check(inbox.markFailed(claim, errorType, errorMessage, now))
             log.error(
                 "content_translation_terminal_failure eventId={} contentType={} contentId={} targetLanguage={} attempt={} maxAttempts={} errorType={} error={}",
@@ -78,6 +96,15 @@ class ContentTranslationProcessor(
                 errorMessage,
             )
         }
+    }
+
+    private suspend fun processVoiceStudyRecord(event: ContentTranslationRequestedEvent) {
+        val record = voiceLocalizations.content(event.contentId) ?: return
+        if (record.sourceHash != event.sourceHash) return
+        val result = PrivateLearningContentLogScope.protecting {
+            translator.translate(record.translatableFields(), record.sourceLanguages, event.targetLanguage)
+        }
+        voiceLocalizations.saveReady(record, event, result, Instant.now())
     }
 
     private suspend fun processQuestion(event: ContentTranslationRequestedEvent) {

@@ -97,6 +97,18 @@ class QuestionRepository(
     override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
         findOne(Criteria.where("id").`is`(id).and("user_id").`is`(userId).and("deleted_at").isNull)
 
+    override suspend fun findOwnedRecordsByIds(userId: Long, ids: Collection<Long>): List<QuestionEntity> {
+        val keys = ids.filter { it > 0 }.distinct().take(100)
+        if (keys.isEmpty()) return emptyList()
+        return template.select(
+            Query.query(
+                Criteria.where("id").`in`(keys).and("user_id").`is`(userId)
+                    .and("deleted_at").isNull.and("skipped_at").isNull.and("score").isNotNull,
+            ),
+            QuestionEntity::class.java,
+        ).collectList().awaitSingle()
+    }
+
     override suspend fun findByGradingRequestIdAndUserIdAndDeletedAtIsNull(
         gradingRequestId: String,
         userId: Long,

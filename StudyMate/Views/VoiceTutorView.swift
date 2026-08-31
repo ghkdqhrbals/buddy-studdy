@@ -405,6 +405,7 @@ struct VoiceTutorSessionView: View {
                 isMuted: viewModel.isMuted,
                 isRecording: viewModel.isRecording,
                 inputNeedsRepeat: viewModel.inputNeedsRepeat,
+                pauseState: viewModel.pauseState,
                 sessionSecondsRemaining: viewModel.sessionSecondsRemaining,
                 quotaRemainingSeconds: viewModel.quotaRemainingSeconds,
                 quotaReservedSeconds: viewModel.quotaReservedSeconds,
@@ -419,6 +420,7 @@ struct VoiceTutorSessionView: View {
             showsTranscript: $showsTranscript,
             showsSummary: $showsSummary,
             onMute: { viewModel.toggleMute() },
+            onPause: { Task { await viewModel.togglePause() } },
             onEnd: { Task { await viewModel.stopForUser() } },
             onRetry: {
                 showsSummary = false
@@ -470,6 +472,7 @@ struct VoiceTutorCallPresentation {
     var isMuted = false
     var isRecording = false
     var inputNeedsRepeat = false
+    var pauseState = VoiceTutorCallPauseState()
     var sessionSecondsRemaining: Int?
     var quotaRemainingSeconds = 0
     var quotaReservedSeconds = 0
@@ -477,7 +480,12 @@ struct VoiceTutorCallPresentation {
     var detail: BackendVoiceTutorSessionDetail?
     var summaryRefreshState: VoiceTutorSummaryRefreshState = .idle
 
-    var canMute: Bool { phase == .listening || phase == .speaking }
+    var canMute: Bool { (phase == .listening || phase == .speaking) && !pauseState.holdsMicrophone }
+    var showsPauseControl: Bool { pauseState.isSupported && phase.isLive }
+    var canChangePause: Bool {
+        showsPauseControl && (phase == .listening || phase == .speaking) && !pauseState.isAwaitingAcknowledgement
+    }
+    var microphoneIsMuted: Bool { pauseState.effectiveMicrophoneMuted(userMuted: isMuted) }
 
     var remainingTime: RemainingTime? {
         if phase.isLive {
@@ -525,6 +533,14 @@ struct VoiceTutorCallPresentation {
         if showsConnectionFailure(strings, errorMessage: errorMessage) {
             return strings.voiceTutorCallFailed
         }
+        if phase == .listening || phase == .speaking {
+            switch pauseState.mode {
+            case .pausing: return strings.voiceTutorPausing
+            case .paused: return strings.voiceTutorPaused
+            case .resuming: return strings.voiceTutorResuming
+            case .active: break
+            }
+        }
         switch phase {
         case .idle, .requestingPermission, .connecting: return strings.voiceTutorCallConnecting
         case .listening:
@@ -560,6 +576,7 @@ struct VoiceTutorCallScreen: View {
     @Binding var showsTranscript: Bool
     @Binding var showsSummary: Bool
     var onMute: () -> Void = {}
+    var onPause: () -> Void = {}
     var onEnd: () -> Void = {}
     var onRetry: () -> Void = {}
     var onDismiss: () -> Void = {}
@@ -632,6 +649,14 @@ struct VoiceTutorCallScreen: View {
             .foregroundStyle(.secondary)
             .accessibilityIdentifier("voiceCall.remainingTime")
 
+            if presentation.phase.isLive && presentation.pauseState.holdsMicrophone {
+                Text(strings.voiceTutorPauseUsesTime)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("voiceCall.pauseUsesTime")
+            }
+
             if presentation.isRecording {
                 Label(strings.voiceTutorCallRecording, systemImage: "record.circle.fill")
                     .font(.caption)
@@ -661,7 +686,8 @@ struct VoiceTutorCallScreen: View {
 
             HStack(spacing: 6) {
                 if !showsConnectionFailure
-                    && [.idle, .requestingPermission, .connecting, .ending].contains(presentation.phase) {
+                    && ([.idle, .requestingPermission, .connecting, .ending].contains(presentation.phase)
+                        || (presentation.phase.isLive && presentation.pauseState.isAwaitingAcknowledgement)) {
                     ProgressView().controlSize(.mini)
                 } else {
                     Image(systemName: statusSymbol)
@@ -778,16 +804,27 @@ struct VoiceTutorCallScreen: View {
     private var controls: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 18))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: presentation.showsPauseControl ? 12 : 18))
         return layout {
             callButton(
-                title: presentation.isMuted ? strings.voiceTutorUnmute : strings.voiceTutorMute,
-                symbol: presentation.isMuted ? "mic.slash.fill" : "mic.fill",
-                selected: presentation.isMuted,
+                title: presentation.microphoneIsMuted ? strings.voiceTutorUnmute : strings.voiceTutorMute,
+                symbol: presentation.microphoneIsMuted ? "mic.slash.fill" : "mic.fill",
+                selected: presentation.microphoneIsMuted,
                 enabled: presentation.canMute,
                 identifier: "voiceCall.mute",
                 action: onMute
             )
+            if presentation.showsPauseControl {
+                let resume = presentation.pauseState.mode == .paused || presentation.pauseState.mode == .resuming
+                callButton(
+                    title: resume ? strings.voiceTutorResumeLesson : strings.voiceTutorTakeBreak,
+                    symbol: resume ? "play.fill" : "pause.fill",
+                    selected: presentation.pauseState.holdsMicrophone,
+                    enabled: presentation.canChangePause,
+                    identifier: "voiceCall.pause",
+                    action: onPause
+                )
+            }
             callButton(
                 title: strings.voiceTutorCallTranscript,
                 symbol: showsTranscript ? "captions.bubble.fill" : "captions.bubble",
@@ -859,6 +896,7 @@ struct VoiceTutorCallScreen: View {
 
     private var statusSymbol: String {
         if showsConnectionFailure { return "wifi.exclamationmark" }
+        if presentation.phase.isLive && presentation.pauseState.mode == .paused { return "pause.fill" }
         switch presentation.phase {
         case .speaking: return "waveform"
         case .listening: return presentation.isMuted ? "mic.slash" : "phone.fill"
@@ -870,6 +908,7 @@ struct VoiceTutorCallScreen: View {
 
     private var statusColor: Color {
         if showsConnectionFailure { return .red }
+        if presentation.phase.isLive && presentation.pauseState.holdsMicrophone { return .secondary }
         switch presentation.phase {
         case .failed: return .red
         case .speaking: return .accentColor

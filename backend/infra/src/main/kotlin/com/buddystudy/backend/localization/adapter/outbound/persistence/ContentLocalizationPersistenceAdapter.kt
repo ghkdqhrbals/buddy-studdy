@@ -267,6 +267,7 @@ class ContentLocalizationPersistenceAdapter(
                 listOf(Triple("grading_localizations", "question_id", event.sourceHash))
             LocalizableContentType.COMMENT ->
                 listOf(Triple("question_comment_localizations", "comment_id", event.sourceHash))
+            LocalizableContentType.VOICE_STUDY_RECORD -> emptyList() // Owned by the private voice localization port.
         }
         tables.forEach { (table, idColumn, sourceHash) ->
             databaseClient.sql(

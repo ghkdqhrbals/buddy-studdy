@@ -11,17 +11,22 @@ import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyGrowthUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystudy.backend.study.application.model.StudyPageResponse
+import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
+import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
+import com.buddystudy.backend.study.application.port.inbound.BrowseStudyLearningRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.GetAnswerGradingProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerationProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
+import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
+import org.springframework.http.HttpStatus
 import java.time.Instant
 import kotlin.reflect.full.declaredMemberFunctions
 import kotlin.reflect.full.findAnnotation
@@ -38,6 +43,7 @@ class BuddyStudyMcpServiceTest {
     private val stats = Mockito.mock(GetStudyStatsUseCase::class.java)
     private val growth = Mockito.mock(GetStudyGrowthUseCase::class.java)
     private val voiceTutor = Mockito.mock(VoiceTutorUseCase::class.java)
+    private val learningRecords = Mockito.mock(BrowseStudyLearningRecordsUseCase::class.java)
     private val service = BuddyStudyMcpService(
         profiles,
         learningContexts,
@@ -50,8 +56,76 @@ class BuddyStudyMcpServiceTest {
         stats,
         growth,
         voiceTutor,
+        learningRecords,
     )
     private val principal = Principal(7, "device-7", 70, anonymous = false)
+
+    @Test
+    fun `node learning history delegates cursor scope and original view without ordinary record mutations`(): Unit = runBlocking {
+        val page = StudyLearningRecordsPageResponse(emptyList(), "next-position", true, 3)
+        Mockito.`when`(learningRecords.learningRecords(principal, 42L, "subtree", 3, "opaque-position", "ja", "original"))
+            .thenReturn(page)
+
+        val result = service.listStudyLearningRecords(principal, 42L, "subtree", 3, "opaque-position", "ja", "original")
+
+        assertThat(result).isSameAs(page)
+        Mockito.verify(learningRecords).learningRecords(principal, 42L, "subtree", 3, "opaque-position", "ja", "original")
+        Mockito.verifyNoMoreInteractions(learningRecords)
+        Mockito.verifyNoInteractions(records, answers, questionRequests, voiceTutor, studies)
+    }
+
+    @Test
+    fun `voice detail preserves the original exchange score and source identity without using a question id`(): Unit = runBlocking {
+        val record = voiceRecord()
+        Mockito.`when`(learningRecords.voiceLearningRecord(principal, 91L, "ko", "original")).thenReturn(record)
+
+        val result = service.getVoiceLearningRecord(principal, 91L, "ko", "original")
+
+        assertThat(result).isSameAs(record)
+        assertThat(result.answer).isEqualTo("  오래전에 쓴 키부터요.\n")
+        assertThat(result.score).isEqualTo(85)
+        assertThat(result.questionTurnId).isEqualTo(11)
+        assertThat(result.answerTurnIds).containsExactly(12)
+        Mockito.verifyNoInteractions(records, answers, questionRequests, voiceTutor, studies)
+    }
+
+    @Test
+    fun `invalid node history boundaries are rejected before any query`(): Unit = runBlocking {
+        val invalidRequests: List<suspend () -> Any> = listOf(
+            { service.listStudyLearningRecords(principal, 0L, "node", 5, null, "ko", "original") },
+            { service.listStudyLearningRecords(principal, 42L, "all", 5, null, "ko", "original") },
+            { service.listStudyLearningRecords(principal, 42L, "node", 0, null, "ko", "original") },
+            { service.listStudyLearningRecords(principal, 42L, "node", 31, null, "ko", "original") },
+            { service.listStudyLearningRecords(principal, 42L, "node", 5, "", "ko", "original") },
+            { service.listStudyLearningRecords(principal, 42L, "node", 5, "x".repeat(513), "ko", "original") },
+            { service.listStudyLearningRecords(principal, 42L, "node", 5, null, "ko", "invalid") },
+            { service.getVoiceLearningRecord(principal, -1L, "ko", "original") },
+        )
+        for (request in invalidRequests) {
+            val failure = runCatching { request() }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(ApiException::class.java)
+            assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        }
+        Mockito.verifyNoInteractions(learningRecords, records, studies, answers, questionRequests)
+    }
+
+    @Test
+    fun `private learning history rejects anonymous callers and preserves owner not found errors`(): Unit = runBlocking {
+        for (request in listOf<suspend () -> Any>(
+            { service.listStudyLearningRecords(principal.copy(anonymous = true), 42L, "node", 5, null, "ko", "original") },
+            { service.getVoiceLearningRecord(principal.copy(anonymous = true), 91L, "ko", "original") },
+        )) {
+            val failure = runCatching { request() }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(ApiException::class.java)
+            assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.ACCOUNT_FORBIDDEN)
+        }
+        Mockito.verifyNoInteractions(learningRecords)
+        val missing = ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        Mockito.`when`(learningRecords.voiceLearningRecord(principal, 91L, "ko", "original")).thenThrow(missing)
+        assertThat(runCatching { service.getVoiceLearningRecord(principal, 91L, "ko", "original") }.exceptionOrNull())
+            .isSameAs(missing)
+        Mockito.verifyNoInteractions(records, answers, questionRequests)
+    }
 
     @Test
     fun `child list delegates the exact parent search page without question generation`(): Unit = runBlocking {
@@ -147,6 +221,9 @@ class BuddyStudyMcpServiceTest {
         assertThat(operations.getValue("deleteStudy")).containsExactly(Permissions.STUDY_DELETE)
         assertThat(operations.getValue("submitAnswer")).containsExactly(Permissions.RECORD_UPDATE)
         assertThat(operations.getValue("getMyContext")).containsExactly(Permissions.PROFILE_READ)
+        assertThat(operations.getValue("listStudyLearningRecords"))
+            .containsExactlyInAnyOrder(Permissions.STUDY_READ, Permissions.RECORD_READ, Permissions.VOICE_TUTOR_READ)
+        assertThat(operations.getValue("getVoiceLearningRecord")).containsExactly(Permissions.VOICE_TUTOR_READ)
         assertThat(operations.getValue("getQuestionProcess"))
             .describedAs("polling an accepted question must remain available after question quota is exhausted")
             .containsExactly(Permissions.RECORD_READ)
@@ -157,6 +234,15 @@ class BuddyStudyMcpServiceTest {
     }
 
     private companion object {
+        fun voiceRecord() = VoiceStudyLearningRecordResponse(
+            id = "91", sessionId = "synthetic-prior-session", studyId = 42L, parentStudyId = 40L,
+            topic = "Redis", difficulty = 3, createdAt = Instant.EPOCH, kind = VoiceTutorExchangeKind.TUTOR_QUESTION,
+            question = "어떤 키를 제거하나요?", answer = "  오래전에 쓴 키부터요.\n", score = 85,
+            strengths = listOf("최근 사용 시점을 짚음"), improvements = emptyList(), depthSummary = "LRU를 살펴봄",
+            feedback = "85점입니다.", questionTurnId = 11L, answerTurnIds = listOf(12L), feedbackTurnIds = listOf(13L),
+            sourceLanguage = "ko", requestedLanguage = "ko", displayLanguage = "ko", translationPending = false,
+        )
+
         val MCP_OPERATION_NAMES = setOf(
             "getMyContext",
             "updateMyLearningContext",
@@ -172,6 +258,8 @@ class BuddyStudyMcpServiceTest {
             "getGradingProcess",
             "listRecords",
             "getRecord",
+            "listStudyLearningRecords",
+            "getVoiceLearningRecord",
             "getTopicStats",
             "getStudyGrowth",
             "listVoiceTutorSessions",

@@ -724,14 +724,18 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         return prepared
     }
 
-    func setMuted(_ muted: Bool) {
+    @discardableResult
+    func setMuted(_ muted: Bool) -> Bool {
         stateLock.lock()
-        guard !isClosed else { stateLock.unlock(); return }
+        guard !isClosed else { stateLock.unlock(); return false }
         microphoneMuted = muted
         captureTap?.updateGate(mediaReady: sessionMediaReady, muted: muted)
         let peerFactory = factory
         stateLock.unlock()
-        _ = peerFactory?.audioDeviceModule.setMicrophoneMuted(muted)
+        guard let device = peerFactory?.audioDeviceModule else { return false }
+        // Pausing must verify the native capture state, not merely the Silero
+        // gate. Never touch the tutor track or stop the continuous output engine.
+        return device.setMicrophoneMuted(muted) == 0 && device.isMicrophoneMuted == muted
     }
 
     func setSessionMediaReady() {

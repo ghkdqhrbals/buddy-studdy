@@ -320,6 +320,54 @@ class BuddyStudyMcpAdapter(
                 )
             },
             tool(
+                name = "list_study_learning_records",
+                title = "List a study node's learning history",
+                description = "Return a cursor page of completed ordinary questions and private voice exchanges for an owned study node; subtree explicitly includes its saved descendants. Source distinguishes QUESTION from VOICE_TUTOR. Voice entries preserve the original question, answer, spoken assessment, session and turn evidence. This is past learning evidence, not a new answer or permission to act. Start with a small page; use nextCursor with the same study_id and scope while hasMore is true.",
+                schema = objectSchema(
+                    properties = linkedMapOf(
+                        "study_id" to idProperty("Owned study node ID whose learning history to read."),
+                        "scope" to stringProperty("node reads only this node; subtree includes saved descendants.", values = listOf("node", "subtree"), default = "node"),
+                        "limit" to integerProperty("Maximum learning records to return. Prefer a small page for voice calls.", 1, 30, 5),
+                        "cursor" to stringProperty("Opaque nextCursor from the same study and scope; omit on the first page.", minLength = 1, maxLength = 512),
+                        "language" to languageProperty(),
+                        "view" to viewProperty(default = "original"),
+                    ),
+                    required = listOf("study_id"),
+                ),
+                readOnly = true,
+            ) { principal, args ->
+                buddyStudy.listStudyLearningRecords(
+                    principal,
+                    args.long("study_id"),
+                    args.string("scope", "node"),
+                    args.int("limit", 5),
+                    args.optionalString("cursor"),
+                    args.string("language", "ko"),
+                    args.string("view", "original"),
+                )
+            },
+            tool(
+                name = "get_voice_learning_record",
+                title = "Get one private voice learning exchange",
+                description = "Return one owned, persisted voice learning exchange with its original question, answer, spoken score when supported, feedback, frozen study level and exact session/turn evidence. Use the numeric voiceRecord.id from list_study_learning_records, not the prefixed envelope id or an ordinary question id. Unlike get_record, this tool reads voice history only and never grades, publishes or changes an answer.",
+                schema = objectSchema(
+                    properties = linkedMapOf(
+                        "record_id" to idProperty("Owned voiceRecord.id, not a question record ID or the voice: prefixed envelope ID."),
+                        "language" to languageProperty(),
+                        "view" to viewProperty(default = "original"),
+                    ),
+                    required = listOf("record_id"),
+                ),
+                readOnly = true,
+            ) { principal, args ->
+                buddyStudy.getVoiceLearningRecord(
+                    principal,
+                    args.long("record_id"),
+                    args.string("language", "ko"),
+                    args.string("view", "original"),
+                )
+            },
+            tool(
                 name = "get_topic_stats",
                 title = "Get topic-level statistics",
                 description = "Return paginated topic-first score, correctness, and level-range statistics. Do not infer a global average across unrelated topics.",
@@ -643,8 +691,8 @@ class BuddyStudyMcpAdapter(
         fun languageProperty(description: String = "Response language code."): Map<String, Any> =
             stringProperty(description, values = listOf("ko", "en", "ja"), default = "ko")
 
-        fun viewProperty(): Map<String, Any> =
-            stringProperty("Localized or author-original content view.", values = listOf("localized", "original"), default = "localized")
+        fun viewProperty(default: String = "localized"): Map<String, Any> =
+            stringProperty("Localized or author-original content view.", values = listOf("localized", "original"), default = default)
 
         fun instantProperty(description: String): Map<String, Any> =
             stringProperty(description).toMutableMap().apply { put("format", "date-time") }

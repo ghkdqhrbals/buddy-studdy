@@ -15,6 +15,7 @@ import com.buddystudy.backend.stats.application.model.StatsQuery
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyGrowthUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
+import com.buddystudy.backend.study.application.port.inbound.BrowseStudyLearningRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.GetAnswerGradingProcessUseCase
@@ -40,6 +41,7 @@ class BuddyStudyMcpService(
     private val stats: GetStudyStatsUseCase,
     private val growth: GetStudyGrowthUseCase,
     private val voiceTutor: VoiceTutorUseCase,
+    private val learningRecords: BrowseStudyLearningRecordsUseCase,
 ) : BuddyStudyMcpUseCase {
     @RequirePermission(Permissions.PROFILE_READ)
     override suspend fun getMyContext(principal: Principal): McpUserContextResponse {
@@ -185,6 +187,37 @@ class BuddyStudyMcpService(
             validatedView(view),
         )
 
+    @RequirePermission(Permissions.STUDY_READ, Permissions.RECORD_READ, Permissions.VOICE_TUTOR_READ)
+    override suspend fun listStudyLearningRecords(
+        principal: Principal,
+        studyId: Long,
+        scope: String,
+        limit: Int,
+        cursor: String?,
+        language: String,
+        view: String,
+    ) = learningRecords.learningRecords(
+        principal = registered(principal),
+        studyId = positiveId(studyId, "study_id"),
+        scope = scope.takeIf { it == "node" || it == "subtree" }
+            ?: throw validation("scope must be node or subtree."),
+        limit = boundedLimit(limit, MAX_LEARNING_RECORD_PAGE_SIZE),
+        cursor = cursor?.also {
+            if (it.length !in 1..512) throw validation("Invalid learning-record cursor.")
+        },
+        language = language,
+        view = validatedView(view),
+    )
+
+    @RequirePermission(Permissions.VOICE_TUTOR_READ)
+    override suspend fun getVoiceLearningRecord(principal: Principal, recordId: Long, language: String, view: String) =
+        learningRecords.voiceLearningRecord(
+            registered(principal),
+            positiveId(recordId, "record_id"),
+            language,
+            validatedView(view),
+        )
+
     @RequirePermission(Permissions.STATS_READ)
     override suspend fun getTopicStats(
         principal: Principal,
@@ -268,6 +301,7 @@ class BuddyStudyMcpService(
     private companion object {
         const val MAX_STUDY_PAGE_SIZE = 500
         const val MAX_RECORD_PAGE_SIZE = 100
+        const val MAX_LEARNING_RECORD_PAGE_SIZE = 30
         const val MAX_STATS_PAGE_SIZE = 50
         const val MAX_ANSWER_LENGTH = 50_000
         val SUPPORTED_VIEWS = setOf("localized", "original")

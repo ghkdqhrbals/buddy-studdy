@@ -9,6 +9,8 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorQuotaSnapshot
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionCursor
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceStudyLearningRecordAppendPort
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceStudyLearningRecordAppendPort
 import com.buddystudy.voice.domain.VoiceTutorResult
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
@@ -33,6 +35,7 @@ import kotlin.math.min
 @Repository
 class VoiceTutorPersistenceAdapter(
     private val database: DatabaseClient,
+    private val learningRecords: VoiceStudyLearningRecordAppendPort = UnavailableVoiceStudyLearningRecordAppendPort,
 ) : VoiceTutorPersistencePort {
     private val mapper = JsonMapperProvider.mapper
 
@@ -601,6 +604,7 @@ class VoiceTutorPersistenceAdapter(
                 "update voice_tutor_sessions set result_status = 'COMPLETED', updated_at = :now where id = :sessionId and user_id = :userId",
             ).bind("now", now.utc()).bind("sessionId", sessionId).bind("userId", userId)
                 .fetch().rowsUpdated().awaitSingle()
+            learningRecords.appendCompletedSession(userId, sessionId, generated.explorations, now)
         }
     }
 

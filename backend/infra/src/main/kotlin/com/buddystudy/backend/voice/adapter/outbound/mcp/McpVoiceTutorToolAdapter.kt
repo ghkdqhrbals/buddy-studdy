@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.outbound.mcp
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpPort
 import com.buddystudy.backend.mcp.adapter.inbound.McpJsonSchemaValidatorProvider
+import com.buddystudy.backend.voice.application.model.VoiceTutorLessonTreeContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
@@ -12,6 +13,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAut
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
+import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -47,10 +49,10 @@ class McpVoiceTutorToolAdapter(
         val tool = specification.tool()
         VoiceTutorMcpToolDefinition(
             name = tool.name(),
-            description = tool.description().orEmpty() + if (tool.name() == CREATE_TOPIC) {
-                " In a voice call, the parent must be the current call's study or one of its descendants."
-            } else {
-                ""
+            description = tool.description().orEmpty() + when (tool.name()) {
+                CREATE_TOPIC -> " In a voice call, the parent must be the current call's study or one of its descendants."
+                in LEARNING_HISTORY_TOOLS -> " In a voice call, read only nodes in the current call's verified study tree; history never changes the agreed lesson focus."
+                else -> ""
             },
             parameters = tool.inputSchema().toMap(),
         )
@@ -74,6 +76,13 @@ class McpVoiceTutorToolAdapter(
                 return failure("INVALID_ARGUMENTS", "Arguments do not match this tool's input schema.")
             }
             if (!isAuthorized(context)) return inactiveCall()
+            if (toolName == LIST_LEARNING_RECORDS) {
+                val studyId = (arguments.getValue("study_id") as Number).toLong()
+                if (!studyIsWithinCallTree(context, studyId)) {
+                    return if (!isAuthorized(context)) inactiveCall() else learningScopeDenied()
+                }
+                if (!isAuthorized(context)) return inactiveCall()
+            }
             if (toolName == CREATE_TOPIC) {
                 val parentStudyId = (arguments.getValue("parent_study_id") as Number).toLong()
                 if (!parentIsWithinCallStudy(context, parentStudyId)) {
@@ -88,6 +97,25 @@ class McpVoiceTutorToolAdapter(
                 if (!isAuthorized(context)) return inactiveCall()
             }
             val result = invoke(context.principal!!, specification, arguments)
+            if (toolName in LEARNING_HISTORY_TOOLS) {
+                // Reads can suspend too: never return private history after the call or
+                // device authorization expired while the existing use case was running.
+                if (!isAuthorized(context)) return inactiveCall()
+                if (toolName == GET_VOICE_LEARNING_RECORD && result.isError() != true) {
+                    val node = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
+                    val expectedId = (arguments.getValue("record_id") as Number).toLong()
+                    val studyId = node?.path("studyId")
+                    if (node?.path("id")?.asText() != expectedId.toString() || studyId == null ||
+                        !studyId.isIntegralNumber || !studyId.canConvertToLong() || studyId.longValue() <= 0
+                    ) return failure("INVALID_TOOL_RESULT", "The voice record's identity could not be verified.")
+                    // The owner-checked detail supplies its real node ID; no model-supplied
+                    // study ID or title can authorize a record from a different tree.
+                    if (!studyIsWithinCallTree(context, studyId.longValue())) {
+                        return if (!isAuthorized(context)) inactiveCall() else learningScopeDenied()
+                    }
+                    if (!isAuthorized(context)) return inactiveCall()
+                }
+            }
             return withLessonContext(context, boundedResult(result, toolName), toolName)
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -143,6 +171,49 @@ class McpVoiceTutorToolAdapter(
         }
         return candidate == callStudyId
     }
+
+    private suspend fun studyIsWithinCallTree(context: VoiceTutorWebRtcControlContext, studyId: Long): Boolean {
+        val selectedId = context.session.studyId?.takeIf { it > 0 } ?: return false
+        val readStudy = specifications["get_study"] ?: return false
+        // Per-operation only: every node comes from an owned read in this authorization
+        // generation. Shared ancestors are not fetched twice, and no session snapshot is
+        // mutated just to browse history. Missing ancestry is never treated as a root.
+        val parents = mutableMapOf<Long, Long?>()
+        suspend fun rootOf(start: Long): Long? {
+            var candidate = start
+            val visited = mutableSetOf<Long>()
+            repeat(MAX_ANCESTOR_READS) {
+                if (candidate <= 0 || !visited.add(candidate) || !isAuthorized(context)) return null
+                if (!parents.containsKey(candidate)) {
+                    val result = invoke(
+                        context.principal!!,
+                        readStudy,
+                        mapOf("study_id" to candidate, "language" to context.session.language),
+                    )
+                    if (result.isError() == true || result.structuredContent() == null) return null
+                    val node = objectMapper.valueToTree<JsonNode>(result.structuredContent())
+                    val returnedId = node.path("id")
+                    val parentId = node.path("parentStudyId")
+                    if (!returnedId.isIntegralNumber || !returnedId.canConvertToLong() ||
+                        returnedId.longValue() != candidate || parentId.isMissingNode ||
+                        (!parentId.isNull && (!parentId.isIntegralNumber || !parentId.canConvertToLong() || parentId.longValue() <= 0))
+                    ) return null
+                    parents[candidate] = if (parentId.isNull) null else parentId.longValue()
+                }
+                val parent = parents[candidate] ?: return candidate
+                candidate = parent
+            }
+            return null
+        }
+        val selectedRoot = rootOf(selectedId) ?: return false
+        return rootOf(studyId) == selectedRoot
+    }
+
+    private fun learningScopeDenied() = failure(
+        "STUDY_SCOPE_DENIED",
+        "Learning history is available only for verified owned nodes in this call's study tree. " +
+            "An unavailable node or unresolved ancestry cannot change the lesson scope.",
+    )
 
     private suspend fun invoke(
         principal: Principal,
@@ -204,15 +275,17 @@ class McpVoiceTutorToolAdapter(
                 ?.longValue()
         }.distinct()
         if (ids.isEmpty()) return result
-        val snapshots = try {
-            studyContexts.remember(context.session.userId, context.session.id, ids)
+        var snapshots = emptyList<VoiceTutorStudySnapshot>()
+        var savedTree = emptyList<VoiceTutorStudySnapshot>()
+        try {
+            snapshots = studyContexts.remember(context.session.userId, context.session.id, ids)
+            savedTree = studyContexts.list(context.session.userId, context.session.id)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             // A study creation already committed. Do not turn metadata-cache failure into
             // a false failed write that encourages the model to create the topic twice.
             logger.warn("voice_tutor_study_context_capture_failed errorType={}", error.javaClass.simpleName)
-            emptyList()
         }
         val frozenIds = snapshots.mapTo(mutableSetOf()) { it.studyId }
         payload.put("voiceLessonContextReady", nodes.size <= 32 && ids.all { it in frozenIds })
@@ -227,11 +300,17 @@ class McpVoiceTutorToolAdapter(
                 )
             }),
         )
+        payload.set<JsonNode>(
+            "voiceLessonTree",
+            objectMapper.valueToTree(VoiceTutorLessonTreeContext.metadata(
+                context.session.studyId, savedTree + snapshots, ids,
+            )),
+        )
         val enriched = objectMapper.writeValueAsBytes(payload)
         if (enriched.size <= MAX_OUTPUT_BYTES) return result.copy(output = String(enriched, Charsets.UTF_8))
         if (result.studyTreeChanged) {
             val compact = objectMapper.createObjectNode()
-            for (field in CREATED_TOPIC_FIELDS + listOf("voiceLessonTopics", "voiceLessonContextReady")) {
+            for (field in CREATED_TOPIC_FIELDS + listOf("voiceLessonTopics", "voiceLessonContextReady", "voiceLessonTree")) {
                 payload.get(field)?.let { compact.set<JsonNode>(field, it) }
             }
             compact.put("truncated", true)
@@ -244,6 +323,7 @@ class McpVoiceTutorToolAdapter(
                 "id" to result.createdStudyId,
                 "voiceLessonTopics" to emptyList<Any>(),
                 "voiceLessonContextReady" to false,
+                "voiceLessonTree" to VoiceTutorLessonTreeContext.metadata(context.session.studyId, emptyList()),
                 "truncated" to true,
                 "notice" to "Topic creation succeeded; lesson metadata is not ready. Do not repeat creation.",
             )))
@@ -260,14 +340,18 @@ class McpVoiceTutorToolAdapter(
 
     private companion object {
         const val CREATE_TOPIC = "create_study_topic"
+        const val LIST_LEARNING_RECORDS = "list_study_learning_records"
+        const val GET_VOICE_LEARNING_RECORD = "get_voice_learning_record"
         const val MAX_ARGUMENT_BYTES = 16 * 1_024
         // Function results are themselves JSON-escaped inside a provider event.
         const val MAX_OUTPUT_BYTES = 16 * 1_024
         const val MAX_ANCESTOR_READS = 32
         val ALLOWED_TOOLS = setOf(
             "list_studies", "get_study", CREATE_TOPIC,
-            "list_records", "get_record", "get_topic_stats", "get_study_growth",
+            "list_records", "get_record", LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD,
+            "get_topic_stats", "get_study_growth",
         )
+        val LEARNING_HISTORY_TOOLS = setOf(LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD)
         val STUDY_CONTEXT_TOOLS = setOf("list_studies", "get_study", CREATE_TOPIC)
         val CREATED_TOPIC_FIELDS = listOf(
             "id", "parentStudyId", "topic", "sortOrder", "difficultyLevel", "activeForQuestions", "enabled",

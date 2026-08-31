@@ -8,6 +8,27 @@ struct RemoteRecordsRepository: RecordsRepository {
         self.backendClient = backendClient
     }
 
+    #if os(iOS)
+    func fetchStudyLearningRecords(
+        registration: RemotePushRegistration, studyID: Int, scope: StudyLearningRecordScope,
+        limit: Int, cursor: String?, language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendStudyLearningRecordsPage {
+        try await backendClient.fetchStudyLearningRecords(
+            registration: registration, studyID: studyID, scope: scope,
+            limit: limit, cursor: cursor, language: language, view: view
+        )
+    }
+
+    func fetchVoiceStudyLearningRecord(
+        registration: RemotePushRegistration, recordID: String,
+        language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendVoiceStudyLearningRecord {
+        try await backendClient.fetchVoiceStudyLearningRecord(
+            registration: registration, recordID: recordID, language: language, view: view
+        )
+    }
+    #endif
+
     func fetchRecords(
         registration: RemotePushRegistration,
         limit: Int,

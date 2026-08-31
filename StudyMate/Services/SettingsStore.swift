@@ -261,6 +261,20 @@ final class SettingsStore {
             }
     }
 
+    #if os(iOS)
+    func loadStudyLearningRecordsPage(for key: StudyLearningRecordsCacheKey) -> BackendStudyLearningRecordsPage? {
+        recordStore.learningRecordsPage(for: key)
+    }
+
+    func saveStudyLearningRecordsPage(_ page: BackendStudyLearningRecordsPage, for key: StudyLearningRecordsCacheKey) {
+        recordStore.saveLearningRecordsPage(page, for: key)
+    }
+
+    func clearStudyLearningRecordsPages() {
+        recordStore.clearLearningRecordsPages()
+    }
+    #endif
+
     func appendStudyRecord(question: QuestionItem, settings: StudySettings) {
         let record = StudyRecord(
             question: question,
@@ -1027,10 +1041,29 @@ private protocol StudyRecordStorage: AnyObject {
     func clear()
     func trim(to limit: Int)
     func replaceAll(_ records: [StudyRecord])
+
+    #if os(iOS)
+    func learningRecordsPage(for key: StudyLearningRecordsCacheKey) -> BackendStudyLearningRecordsPage?
+    func saveLearningRecordsPage(_ page: BackendStudyLearningRecordsPage, for key: StudyLearningRecordsCacheKey)
+    func clearLearningRecordsPages()
+    #endif
 }
 
 private final class InMemoryStudyRecordStore: StudyRecordStorage {
     private var records: [StudyRecord] = []
+    #if os(iOS)
+    private var learningPages = StudyLearningRecordsPageCache()
+
+    func learningRecordsPage(for key: StudyLearningRecordsCacheKey) -> BackendStudyLearningRecordsPage? {
+        learningPages.page(for: key)
+    }
+
+    func saveLearningRecordsPage(_ page: BackendStudyLearningRecordsPage, for key: StudyLearningRecordsCacheKey) {
+        learningPages.save(page, for: key)
+    }
+
+    func clearLearningRecordsPages() { learningPages.clear() }
+    #endif
 
     var count: Int {
         records.count
@@ -1074,6 +1107,9 @@ private final class InMemoryStudyRecordStore: StudyRecordStorage {
 
     func clear() {
         records = []
+        #if os(iOS)
+        clearLearningRecordsPages()
+        #endif
     }
 
     func trim(to limit: Int) {

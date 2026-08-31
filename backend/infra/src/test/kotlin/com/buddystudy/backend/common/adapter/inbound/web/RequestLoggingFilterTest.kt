@@ -22,6 +22,21 @@ class RequestLoggingFilterTest {
     private val compactFilter = RequestLoggingFilter(ApiLoggingPolicy("compact"))
 
     @Test
+    fun `node learning records and voice detail preserve response but suppress private bodies in both log modes`(output: CapturedOutput) = runBlocking {
+        val responseBody = """{"question":"private-voice-question","answer":"private-voice-answer"}"""
+        for (activeFilter in listOf(filter, compactFilter)) {
+            for (path in listOf("/api/v1/studies/12/learning-records?tl=en", "/api/v1/voice-tutor/learning-records/4?view=original")) {
+                val exchange = execute(MockServerHttpRequest.get(path).build(), activeFilter) { current ->
+                    writeJson(current, responseBody)
+                }
+                assertThat(exchange.response.bodyAsString.block()).isEqualTo(responseBody)
+            }
+        }
+        assertThat(output.out).contains("api_exchange").contains("learning-records")
+        assertThat(output.out).doesNotContain("private-voice-question", "private-voice-answer")
+    }
+
+    @Test
     fun `response body is preserved after reactive logging`(): Unit = runBlocking {
         val exchange = execute(MockServerHttpRequest.get("/api/v1/studies").build()) { current ->
             writeJson(current, """{"ok":true}""")

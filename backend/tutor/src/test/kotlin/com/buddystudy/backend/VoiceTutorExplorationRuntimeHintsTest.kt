@@ -3,6 +3,9 @@ package com.buddystudy.backend
 import com.buddystudy.backend.voice.application.model.VoiceTutorExplorationResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorLearningExchangeResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorResultResponse
+import com.buddystudy.backend.study.application.model.StudyLearningRecordResponse
+import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
+import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.aot.hint.MemberCategory
@@ -14,7 +17,10 @@ class VoiceTutorExplorationRuntimeHintsTest {
     fun `native application model scanning includes every nested voice result response`() {
         val hints = RuntimeHints()
         ApplicationRuntimeHints().registerHints(hints, javaClass.classLoader)
-        listOf(VoiceTutorResultResponse::class.java, VoiceTutorExplorationResponse::class.java, VoiceTutorLearningExchangeResponse::class.java)
+        listOf(
+            VoiceTutorResultResponse::class.java, VoiceTutorExplorationResponse::class.java, VoiceTutorLearningExchangeResponse::class.java,
+            StudyLearningRecordResponse::class.java, StudyLearningRecordsPageResponse::class.java, VoiceStudyLearningRecordResponse::class.java,
+        )
             .forEach { type ->
                 assertThat(RuntimeHintsPredicates.reflection().onType(type).withMemberCategories(
                     MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,

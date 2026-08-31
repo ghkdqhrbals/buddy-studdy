@@ -46,6 +46,13 @@ interface ProcessQuestionGenerationRollbackUseCase {
 }
 
 interface BrowseRecordsUseCase {
+    suspend fun recordsByIds(
+        principal: Principal,
+        ids: Collection<Long>,
+        language: String,
+        view: String,
+    ): List<StudyRecordResponse> = ids.distinct().take(100).map { record(principal, it, language, view) }
+
     suspend fun records(
         principal: Principal,
         limit: Int,

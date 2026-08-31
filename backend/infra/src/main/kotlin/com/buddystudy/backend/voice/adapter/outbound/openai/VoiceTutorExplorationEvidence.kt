@@ -15,9 +15,16 @@ internal object VoiceTutorExplorationEvidence {
         session: VoiceTutorSession,
         transcript: List<VoiceTutorTranscriptTurn>,
         studies: List<VoiceTutorStudySnapshot>,
+    ): List<VoiceTutorExploration> = verifiedForSession(explorations, session.id, transcript, studies)
+
+    fun verifiedForSession(
+        explorations: List<VoiceTutorExploration>,
+        sessionId: String,
+        transcript: List<VoiceTutorTranscriptTurn>,
+        studies: List<VoiceTutorStudySnapshot>,
     ): List<VoiceTutorExploration> {
         // Reject ambiguous IDs, foreign-session evidence and blank ASR instead of correlating by text.
-        val turns = transcript.filter { it.sessionId == session.id && it.id > 0 && it.transcript.isNotBlank() }
+        val turns = transcript.filter { it.sessionId == sessionId && it.id > 0 && it.transcript.isNotBlank() }
             .groupBy(VoiceTutorTranscriptTurn::id)
             .filterValues { it.size == 1 }
             .mapValues { it.value.single() }

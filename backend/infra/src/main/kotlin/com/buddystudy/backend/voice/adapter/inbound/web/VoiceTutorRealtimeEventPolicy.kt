@@ -131,6 +131,24 @@ internal class VoiceTutorRealtimeEventPolicy(
                     ProviderEventDecision(payload = null)
                 }
             }
+            VoiceTutorRealtimeContract.PAUSE_STATE_EVENT -> {
+                val sequence = node.path("sequence")
+                val paused = node.path("paused")
+                if (transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
+                    sequence.isIntegralNumber && sequence.canConvertToLong() && sequence.longValue() > 0 &&
+                    paused.isBoolean
+                ) {
+                    ProviderEventDecision(
+                        mapper.writeValueAsString(mapOf(
+                            "type" to type,
+                            "sequence" to sequence.longValue(),
+                            "paused" to paused.booleanValue(),
+                        )),
+                    )
+                } else {
+                    ProviderEventDecision(payload = null)
+                }
+            }
             in WEBRTC_OUTPUT_BUFFER_BOUNDARY_EVENTS -> if (
                 transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
                 validProviderResponseId(node.path("response_id"))
@@ -293,6 +311,9 @@ internal class VoiceTutorRealtimeEventPolicy(
             VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT,
             VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT,
             VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT,
+            VoiceTutorRealtimeContract.PAUSE_REQUEST_EVENT,
+            VoiceTutorRealtimeContract.PAUSE_INPUT_QUIESCED_EVENT,
+            VoiceTutorRealtimeContract.RESUME_REQUEST_EVENT,
         )
         private val TUTOR_TRANSCRIPT_DELTA_PROVIDER_EVENTS = setOf(
             "response.output_audio_transcript.delta",
@@ -411,6 +432,9 @@ internal class VoiceTutorClientTrafficGuard(
             VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT,
             VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT,
             VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT,
+            VoiceTutorRealtimeContract.PAUSE_REQUEST_EVENT,
+            VoiceTutorRealtimeContract.PAUSE_INPUT_QUIESCED_EVENT,
+            VoiceTutorRealtimeContract.RESUME_REQUEST_EVENT,
             "input_audio_buffer.commit",
         )
     }

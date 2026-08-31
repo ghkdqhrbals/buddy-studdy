@@ -748,6 +748,9 @@ final class AppState: ObservableObject {
     #endif
     private var membershipRefreshOrder = MembershipRefreshOrder()
     private var backendClientGeneration = 0
+    #if os(iOS)
+    private let studyLearningRecordsLifetimeID = UUID()
+    #endif
     private var configuredBackendBaseURLDescription = ""
     private var billingRefreshTask: Task<Void, Never>?
     private var nativeAdvertisingEntitlementRefresh: (
@@ -2929,6 +2932,136 @@ final class AppState: ObservableObject {
             }
         )
     }
+
+    #if os(iOS)
+    var studyLearningRecordsIdentity: StudyLearningRecordsIdentity? {
+        guard isCommunitySessionActive, let userID = communityProfile?.id, userID > 0 else { return nil }
+        return StudyLearningRecordsIdentity(
+            lifetimeID: studyLearningRecordsLifetimeID,
+            userID: userID,
+            sessionGeneration: communitySessionState.generation,
+            backendGeneration: backendClientGeneration,
+            languageCode: settings.appLanguage.backendCode
+        )
+    }
+
+    /// Read-only, exact-node/subtree history. Its identity, locale, use cases,
+    /// and credentials are captured once, never switched underneath a retry.
+    func makeStudyLearningRecordsLoader(
+        studyID: Int,
+        scope: StudyLearningRecordScope
+    ) -> StudyLearningRecordsLoader? {
+        guard studyID > 0, let identity = studyLearningRecordsIdentity,
+              let account = try? makeVoiceTutorRequestContext() else { return nil }
+        let key = StudyLearningRecordsContext(identity: identity, studyID: studyID, scope: scope)
+        let language = settings.appLanguage
+        let useCase = recordsUseCase
+        let localRecords = localStudyRecordUseCase
+        let isCurrent: @MainActor @Sendable () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return account.isCurrent() && self.studyLearningRecordsIdentity == identity
+        }
+        let guardedAccount = VoiceTutorRequestContext(
+            registration: account.registration, identityFence: account.identityFence, isCurrent: isCurrent
+        )
+        return StudyLearningRecordsLoader(
+            context: key,
+            isCurrent: isCurrent,
+            cachedPage: { cursor in
+                guard isCurrent() else { return nil }
+                return localRecords.loadLearningRecordsPage(for: StudyLearningRecordsCacheKey(
+                    context: key, cursor: cursor, view: LocalizedContentView.localized.rawValue
+                ))
+            },
+            loadPage: { [weak self] cursor in
+                guard let self, isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                let page: BackendStudyLearningRecordsPage = try await self.performStudyLearningRead(
+                    account: guardedAccount,
+                    operation: { registration in
+                        try await useCase.fetchStudyLearningRecords(
+                            registration: registration, studyID: studyID, scope: scope, limit: 30,
+                            cursor: cursor, language: language, view: .localized
+                        )
+                    }
+                )
+                guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                guard page.items.count <= 30,
+                      scope == .subtree || page.items.allSatisfy({ $0.studyID == studyID }),
+                      !page.hasMore || page.nextCursor != cursor else {
+                    throw StudyLearningRecordsError.invalidResponse
+                }
+                localRecords.saveLearningRecordsPage(page, for: StudyLearningRecordsCacheKey(
+                    context: key, cursor: cursor, view: LocalizedContentView.localized.rawValue
+                ))
+                return page
+            },
+            loadVoice: { [weak self] recordID, view in
+                guard let self, isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                let record: BackendVoiceStudyLearningRecord = try await self.performStudyLearningRead(
+                    account: guardedAccount,
+                    operation: { registration in
+                        try await useCase.fetchVoiceStudyLearningRecord(
+                            registration: registration, recordID: recordID, language: language, view: view
+                        )
+                    }
+                )
+                guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                guard record.id == recordID, scope == .subtree || record.studyID == studyID else {
+                    throw StudyLearningRecordsError.invalidResponse
+                }
+                return record
+            },
+            loadQuestion: { [weak self] recordID, view in
+                guard let self, isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                let record: StudyRecord = try await self.performStudyLearningRead(
+                    account: guardedAccount,
+                    operation: { registration in
+                        try await useCase.fetchRecord(
+                            registration: registration, recordID: recordID, language: language, view: view
+                        )
+                    }
+                )
+                guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                guard record.id == recordID else { throw StudyLearningRecordsError.invalidResponse }
+                return record
+            }
+        )
+    }
+
+    private func performStudyLearningRead<Value>(
+        account: VoiceTutorRequestContext,
+        operation: (RemotePushRegistration) async throws -> Value
+    ) async throws -> Value {
+        var caught: Error?
+        let value = await actionRunner.run(
+            operation: {
+                guard account.isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                let prepared = await registrationWithAccessToken(
+                    account.registration, reason: "study-learning-records",
+                    syncSettingsAfterRegistration: false, validity: account.isCurrent
+                )
+                guard account.isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                guard let registration = prepared else { throw StudyLearningRecordsError.unavailable }
+                let result = try await performWithBackendIdentityRecovery(
+                    registration: registration, reason: "study-learning-records", syncSettingsAfterRegistration: false,
+                    validity: account.isCurrent,
+                    operation: operation
+                )
+                guard account.isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                return result
+            },
+            onFailure: { error in
+                caught = error
+                guard account.isCurrent(), !Self.isCancellationLikeError(error), !Task.isCancelled else { return }
+                _ = handlePageAccessError(error, page: .records)
+                // The localized UI owns the retry message; never log a response
+                // body or exception description containing private lesson text.
+            }
+        )
+        guard let value else { throw caught ?? StudyLearningRecordsError.unavailable }
+        return value
+    }
+    #endif
 
     private func loadBackendRecordsPage(reset: Bool) async {
         var loadingState = recordsState
@@ -7520,6 +7653,9 @@ final class AppState: ObservableObject {
     }
 
     private func resetVoiceTutorState() {
+        #if os(iOS)
+        localStudyRecordUseCase.clearLearningRecordsPages()
+        #endif
         voiceTutorStatusRequestGeneration &+= 1
         voiceTutorSessionsRequestGeneration &+= 1
         voiceTutorStatus = nil

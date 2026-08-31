@@ -23,8 +23,13 @@ class VoiceTutorStudyContextAdapter(
     override suspend fun prepare(session: VoiceTutorSession): List<VoiceTutorStudySnapshot> {
         val accepted = lockActive(session.userId, session.id) ?: return emptyList()
         val studyId = accepted.studyId ?: return emptyList()
-        val parentId = readOwned(session.userId, listOf(studyId)).firstOrNull()?.parentStudyId
-        val selected = VoiceTutorStudySnapshot(studyId, parentId, accepted.topic, accepted.difficulty)
+        val existing = list(session.userId, session.id)
+        val selected = existing.firstOrNull { it.studyId == studyId }
+            ?: readOwned(session.userId, listOf(studyId)).firstOrNull()?.let {
+                VoiceTutorStudySnapshot(studyId, it.parentStudyId, accepted.topic, accepted.difficulty)
+            }
+            // A missing/foreign live node is not evidence that the selected node is a root.
+            ?: return existing
         val children = database.sql(
             """
             select id, parent_study_id, topic, difficulty_level
@@ -33,7 +38,10 @@ class VoiceTutorStudyContextAdapter(
             """.trimIndent(),
         ).bind("userId", session.userId).bind("studyId", studyId)
             .map { row, _ -> ownedSnapshot(row) }.all().collectList().awaitSingle()
-        append(session.userId, session.id, listOf(selected) + children)
+        val saved = append(session.id, listOf(selected) + children, existing, accepted.hardEndsAt)
+        captureAncestors(
+            session.userId, session.id, listOf(selected.studyId) + children.map { it.studyId }, saved, accepted.hardEndsAt,
+        )
         return list(session.userId, session.id)
     }
 
@@ -44,8 +52,12 @@ class VoiceTutorStudyContextAdapter(
         studyIds: List<Long>,
     ): List<VoiceTutorStudySnapshot> {
         val ids = studyIds.filter { it > 0 }.distinct().take(MAX_CAPTURE_BATCH)
-        if (ids.isEmpty() || lockActive(userId, sessionId) == null) return emptyList()
-        append(userId, sessionId, readOwned(userId, ids))
+        if (ids.isEmpty()) return emptyList()
+        val accepted = lockActive(userId, sessionId) ?: return emptyList()
+        val existing = list(userId, sessionId)
+        // Admit the actual requested nodes first; ancestry can use only the capacity left over.
+        val saved = append(sessionId, readOwned(userId, ids), existing, accepted.hardEndsAt)
+        captureAncestors(userId, sessionId, ids, saved, accepted.hardEndsAt)
         // Return immutable first-seen levels, even if live study settings changed during the call.
         return list(userId, sessionId).filter { it.studyId in ids }
     }
@@ -71,7 +83,7 @@ class VoiceTutorStudyContextAdapter(
 
     private suspend fun lockActive(userId: Long, sessionId: String): AcceptedStudy? = database.sql(
         """
-        select study_id, topic_snapshot, difficulty_snapshot
+        select study_id, topic_snapshot, difficulty_snapshot, hard_ends_at
         from voice_tutor_sessions
         where id = :sessionId and user_id = :userId and status = 'ACTIVE'
           and ended_at is null and hard_ends_at > :now
@@ -83,6 +95,7 @@ class VoiceTutorStudyContextAdapter(
                 (row.get("study_id") as? Number)?.toLong(),
                 row.get("topic_snapshot", String::class.java).orEmpty(),
                 (row.get("difficulty_snapshot") as Number).toInt(),
+                requireNotNull(row.get("hard_ends_at", LocalDateTime::class.java)),
             )
         }.one().awaitSingleOrNull()
 
@@ -98,14 +111,49 @@ class VoiceTutorStudyContextAdapter(
             .map { row, _ -> ownedSnapshot(row) }.all().collectList().awaitSingle()
     }
 
-    private suspend fun append(userId: Long, sessionId: String, candidates: List<VoiceTutorStudySnapshot>) {
-        val existing = list(userId, sessionId)
+    private suspend fun captureAncestors(
+        userId: Long,
+        sessionId: String,
+        focusStudyIds: List<Long>,
+        initial: List<VoiceTutorStudySnapshot>,
+        hardEndsAt: LocalDateTime,
+    ) {
+        var saved = initial
+        var byId = saved.associateBy { it.studyId }
+        var frontier = focusStudyIds.mapNotNull { byId[it] }
+        val visited = focusStudyIds.toMutableSet()
+        var remainingReads = MAX_SNAPSHOTS
+        repeat(MAX_PARENT_EDGES) {
+            if (saved.size >= MAX_SNAPSHOTS || !utcNow().isBefore(hardEndsAt)) return
+            val parentIds = frontier.mapNotNull { it.parentStudyId }.filter { it > 0 && visited.add(it) }
+            if (parentIds.isEmpty()) return
+            val missing = parentIds.filter { it !in byId }
+                .take(minOf(MAX_CAPTURE_BATCH, MAX_SNAPSHOTS - saved.size, remainingReads))
+            if (missing.isNotEmpty()) {
+                remainingReads -= missing.size
+                saved = append(sessionId, readOwned(userId, missing), saved, hardEndsAt)
+                byId = saved.associateBy { it.studyId }
+            }
+            // Frozen edges win even after reparenting. Missing/foreign parents end that path;
+            // no sibling discovery, name matching or invented root fills the gap.
+            frontier = parentIds.mapNotNull { byId[it] }
+        }
+    }
+
+    private suspend fun append(
+        sessionId: String,
+        candidates: List<VoiceTutorStudySnapshot>,
+        existing: List<VoiceTutorStudySnapshot>,
+        hardEndsAt: LocalDateTime,
+    ): List<VoiceTutorStudySnapshot> {
         val existingIds = existing.mapTo(mutableSetOf()) { it.studyId }
         // All writers hold the same session row lock, so the per-session bound also holds under concurrency.
         val additions = candidates.filter {
             it.studyId > 0 && it.difficulty in 1..10 && it.topic.isNotBlank() && existingIds.add(it.studyId)
         }.take((MAX_SNAPSHOTS - existing.size).coerceAtLeast(0))
+        val captured = mutableListOf<VoiceTutorStudySnapshot>()
         for (snapshot in additions) {
+            if (!utcNow().isBefore(hardEndsAt)) break
             var query = database.sql(
                 """
                 insert into voice_tutor_study_snapshots
@@ -118,7 +166,9 @@ class VoiceTutorStudyContextAdapter(
             query = snapshot.parentStudyId?.let { query.bind("parentId", it) }
                 ?: query.bindNull("parentId", java.lang.Long::class.java)
             query.fetch().rowsUpdated().awaitSingle()
+            captured += snapshot.copy(topic = snapshot.topic.take(255))
         }
+        return existing + captured
     }
 
     private fun ownedSnapshot(row: Row) = VoiceTutorStudySnapshot(
@@ -130,11 +180,17 @@ class VoiceTutorStudyContextAdapter(
 
     private fun utcNow(): LocalDateTime = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
 
-    private data class AcceptedStudy(val studyId: Long?, val topic: String, val difficulty: Int)
+    private data class AcceptedStudy(
+        val studyId: Long?,
+        val topic: String,
+        val difficulty: Int,
+        val hardEndsAt: LocalDateTime,
+    )
 
     private companion object {
         const val INITIAL_CHILDREN = 10
         const val MAX_CAPTURE_BATCH = 32
         const val MAX_SNAPSHOTS = 64
+        const val MAX_PARENT_EDGES = 32
     }
 }

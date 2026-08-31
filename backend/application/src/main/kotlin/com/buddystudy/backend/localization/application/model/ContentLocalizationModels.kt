@@ -12,6 +12,7 @@ enum class LocalizableContentType {
     ANSWER,
     AI_RESPONSE,
     COMMENT,
+    VOICE_STUDY_RECORD,
 }
 
 data class ContentTranslationRequestedEvent(

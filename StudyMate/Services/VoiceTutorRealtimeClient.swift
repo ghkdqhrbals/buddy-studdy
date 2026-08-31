@@ -77,7 +77,8 @@ struct VoiceTutorRealtimeAudioDelta: Equatable, Sendable {
 }
 
 enum VoiceTutorRealtimeEvent: Equatable, Sendable {
-    case sessionReady(hardEndsAt: Date?, quotaRemainingSeconds: Int?)
+    case sessionReady(hardEndsAt: Date?, quotaRemainingSeconds: Int?, pauseProtocol: String? = nil)
+    case pauseAcknowledged(sequence: Int64, paused: Bool)
     case quotaUpdated(VoiceTutorRealtimeQuotaUpdate)
     case sessionEnding(reason: String?, hardEndsAt: Date?)
     case sessionEnded(VoiceTutorRealtimeEnded)
@@ -128,8 +129,18 @@ enum VoiceTutorRealtimeEventParser {
         case "buddystudy.voice.session.ready":
             return .sessionReady(
                 hardEndsAt: date("hardEndsAt", in: object),
-                quotaRemainingSeconds: integer("quotaRemainingSeconds", in: object)
+                quotaRemainingSeconds: integer("quotaRemainingSeconds", in: object),
+                pauseProtocol: string("pauseProtocol", in: object)
             )
+        case "buddystudy.voice.pause.state":
+            guard let number = object["sequence"] as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  let sequence = Int64(number.stringValue), sequence > 0,
+                  let paused = object["paused"] as? NSNumber,
+                  CFGetTypeID(paused) == CFBooleanGetTypeID() else {
+                return .ignored(type: type)
+            }
+            return .pauseAcknowledged(sequence: sequence, paused: paused.boolValue)
         case "buddystudy.voice.quota.updated":
             return .quotaUpdated(
                 VoiceTutorRealtimeQuotaUpdate(
@@ -347,11 +358,23 @@ actor VoiceTutorWebSocketTransport {
     }
 
     func sendInputSpeechActivity(_ event: VoiceTutorLocalSpeechEvent, attemptID: UUID) async throws {
+        try await sendCallControl(.speech(event), attemptID: attemptID)
+    }
+
+    func sendCallControl(_ event: VoiceTutorCallControlEvent, attemptID: UUID) async throws {
         guard localSpeechAttemptID == attemptID else { throw VoiceTutorLocalSpeechDeliveryError.staleAttempt }
         guard let socketTask else { throw TransportError.notConnected }
         // Capture this attempt's socket before the first suspension. A delayed
         // old pump can never send its utterance sequence to a retried call.
-        let data = try JSONSerialization.data(withJSONObject: VoiceTutorLocalSpeechProtocol.payload(for: event))
+        let payload: [String: Any]
+        switch event {
+        case .speech(let speech):
+            payload = try VoiceTutorLocalSpeechProtocol.payload(for: speech)
+        case .pause(let command):
+            guard command.sequence > 0 else { throw VoiceTutorLocalSpeechDeliveryError.invalidSequence }
+            payload = ["type": command.kind.rawValue, "sequence": command.sequence]
+        }
+        let data = try JSONSerialization.data(withJSONObject: payload)
         guard let text = String(data: data, encoding: .utf8) else {
             throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8
         }

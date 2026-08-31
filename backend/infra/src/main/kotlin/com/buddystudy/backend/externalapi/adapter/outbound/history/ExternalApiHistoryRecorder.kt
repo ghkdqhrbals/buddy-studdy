@@ -1,6 +1,7 @@
 package com.buddystudy.backend.externalapi.adapter.outbound.history
 
 import com.buddystudy.backend.common.adapter.outbound.security.SensitiveDataRedactor
+import com.buddystudy.backend.common.application.privacy.PrivateLearningContentLogScope
 import com.buddystudy.backend.externalapi.application.model.FinishExternalApiCallCommand
 import com.buddystudy.backend.externalapi.application.model.StartExternalApiCallCommand
 import com.buddystudy.backend.externalapi.application.port.inbound.ExternalApiCallHistoryUseCase
@@ -51,6 +52,8 @@ class ExternalApiHistoryRecorder(
         correlationId: String?,
         call: suspend () -> ExternalApiResponse<T>,
     ): T {
+        // Voice source/translated content must never enter general provider history, even on errors.
+        if (PrivateLearningContentLogScope.isActive()) return call().value
         val callId = start(request, correlationId)
         val response = try {
             call()
@@ -85,6 +88,8 @@ class ExternalApiHistoryRecorder(
         request: ExternalApiRequest,
         call: () -> ExternalApiResponse<T>,
     ): T {
+        // Check before runBlocking switches threads and loses the caller's coroutine context.
+        if (PrivateLearningContentLogScope.isActive()) return call().value
         val correlationId = MDC.get("requestId")
         return runBlocking(Dispatchers.IO) { recordWithCorrelation(request, correlationId) { call() } }
     }

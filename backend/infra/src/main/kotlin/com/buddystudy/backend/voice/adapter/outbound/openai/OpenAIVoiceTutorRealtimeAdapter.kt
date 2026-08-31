@@ -205,6 +205,14 @@ internal class VoiceTutorDuplexTurnController(
         .onBackpressureBuffer(Queues.get<String>(MAX_BUFFERED_CONTROLS).get())
     private val inputWork = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<VoiceTutorInputTurnCoordinator.Action>(MAX_BUFFERED_CONTROLS).get())
+    private val clientControls = Sinks.many().unicast()
+        .onBackpressureBuffer(Queues.get<String>(MAX_BUFFERED_CONTROLS).get())
+    private val pauseCoordinator = if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+        VoiceTutorPauseCoordinator(responseTimeout)
+    } else {
+        null
+    }
+    private var pauseTimer: Disposable? = null
     private val toolWork = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<VoiceTutorMcpCall>(VoiceTutorMcpTurnCoordinator.MAX_CALLS_PER_RESPONSE).get())
     private val toolCoordinator = if (toolsEnabled && transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
@@ -256,6 +264,8 @@ internal class VoiceTutorDuplexTurnController(
     fun providerEvents(): Flux<String> = controls.asFlux().filter { !closed }
 
     fun inputActions(): Flux<VoiceTutorInputTurnCoordinator.Action> = inputWork.asFlux().filter { !closed }
+
+    fun clientEvents(): Flux<String> = clientControls.asFlux().filter { !closed }
 
     fun toolActions(): Flux<VoiceTutorMcpCall> = toolWork.asFlux().filter { !closed }
 
@@ -405,6 +415,29 @@ internal class VoiceTutorDuplexTurnController(
                 }
                 // These notifications control the server's turn state only.
                 // Neither their type nor their client-supplied fields go upstream.
+                true
+            }
+            VoiceTutorRealtimeContract.PAUSE_REQUEST_EVENT,
+            VoiceTutorRealtimeContract.PAUSE_INPUT_QUIESCED_EVENT,
+            VoiceTutorRealtimeContract.RESUME_REQUEST_EVENT,
+            -> {
+                val pause = pauseCoordinator
+                val sequence = clientSpeechSequence(node)
+                if (closed || pause == null || sequence == null) return true
+                when (node.path("type").asText()) {
+                    VoiceTutorRealtimeContract.PAUSE_REQUEST_EVENT -> {
+                        applyPauseActions(pause.requestPause(sequence, nanoTime()))
+                        if (pause.blocksResponses) {
+                            interventionTimer?.dispose()
+                            interventionTimer = null
+                            interventionDeadlineElapsedWhileResponseActive = false
+                        }
+                    }
+                    VoiceTutorRealtimeContract.PAUSE_INPUT_QUIESCED_EVENT -> pause.confirmInputQuiesced(sequence)
+                    VoiceTutorRealtimeContract.RESUME_REQUEST_EVENT ->
+                        applyPauseActions(pause.requestResume(sequence, nanoTime()))
+                }
+                advancePause()
                 true
             }
             VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT -> {
@@ -557,6 +590,17 @@ internal class VoiceTutorDuplexTurnController(
                 }
                 VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
             }
+            "input_audio_buffer.cleared" -> {
+                val pause = pauseCoordinator ?: return VoiceTutorProviderRelayDisposition.DROP
+                try {
+                    applyPauseActions(pause.acknowledgeClear(node.path("event_id").asText(), nanoTime()))
+                    advancePause()
+                    createNormalResponseIfReady()
+                } catch (error: VoiceTutorPauseAcknowledgementTimeoutException) {
+                    terminate(error)
+                }
+                VoiceTutorProviderRelayDisposition.DROP
+            }
             "response.created" -> accepted(observeResponseCreated(node))
             "response.done" -> accepted(observeResponseDone(node))
             "error" -> if (observeEmptyInputCommit(node)) {
@@ -572,7 +616,7 @@ internal class VoiceTutorDuplexTurnController(
     internal fun fireContinuousSpeechDeadline() {
         interventionTimer = null
         if (
-            closed || !openingResponseRequested || openingResponsePending ||
+            closed || pauseCoordinator?.blocksResponses == true || !openingResponseRequested || openingResponsePending ||
             !userSpeaking || interventionDeliveredDuringCurrentSpeech
         ) return
         if (responseActive || pendingInputCommits.isNotEmpty() || inputCoordinator?.hasPending == true ||
@@ -641,6 +685,9 @@ internal class VoiceTutorDuplexTurnController(
             delayedStopCommit = null
             toolAcknowledgementTimer?.dispose()
             toolAcknowledgementTimer = null
+            pauseTimer?.dispose()
+            pauseTimer = null
+            pauseCoordinator?.close()
             toolCoordinator?.close()
             inputCoordinator?.close()
             pendingInputPublications.clear()
@@ -659,6 +706,7 @@ internal class VoiceTutorDuplexTurnController(
             }
             inputWork.tryEmitComplete()
             toolWork.tryEmitComplete()
+            clientControls.tryEmitComplete()
         }
     }
 
@@ -669,7 +717,14 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     private fun observeClientSpeechStarted(sequence: Long) {
-        if (sequence <= lastClientSpeechSequence || activeClientSpeechSequence != null) return
+        if (sequence <= lastClientSpeechSequence) return
+        if (pauseCoordinator?.acceptsSpeechEdges != true) {
+            // Keep a high-water mark even for suppressed edges. Replaying an
+            // old held start after resume cannot revive a discarded utterance.
+            lastClientSpeechSequence = sequence
+            return
+        }
+        if (activeClientSpeechSequence != null) return
         if (pendingSpeechCommitCount >= MAX_PENDING_SPEECH_COMMITS) {
             throw VoiceTutorPendingInputCommitOverflowException()
         }
@@ -837,7 +892,9 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     private fun scheduleIntervention() {
-        if (closed || !openingResponseRequested || openingResponsePending || interventionDeliveredDuringCurrentSpeech) return
+        if (closed || pauseCoordinator?.blocksResponses == true || !openingResponseRequested ||
+            openingResponsePending || interventionDeliveredDuringCurrentSpeech
+        ) return
         interventionTimer?.dispose()
         interventionTimer = Mono.delay(continuousSpeechLimit)
             .subscribe { fireContinuousSpeechDeadline() }
@@ -845,7 +902,8 @@ internal class VoiceTutorDuplexTurnController(
 
     private fun createNormalResponseIfReady() {
         if (
-            closed || !openingResponseRequested || userSpeaking || pendingSpeechCommitCount > 0 || responseActive ||
+            closed || pauseCoordinator?.blocksResponses == true || !openingResponseRequested || userSpeaking ||
+            pendingSpeechCommitCount > 0 || responseActive ||
             inputCoordinator?.hasPending == true || toolCoordinator?.hasPending == true ||
             (!openingResponsePending && !queuedCommittedTurn && toolCoordinator?.continuationReady != true)
         ) return
@@ -876,6 +934,56 @@ internal class VoiceTutorDuplexTurnController(
                 ),
             ),
         )
+    }
+
+    @Synchronized
+    internal fun advancePause() {
+        val pause = pauseCoordinator ?: return
+        if (closed) return
+        try {
+            applyPauseActions(
+                pause.advance(
+                    boundaryReady = !responseActive && !userSpeaking && activeClientSpeechSequence == null &&
+                        pendingSpeechCommitCount == 0 && pendingInputCommits.isEmpty() && delayedStopCommit == null,
+                    now = nanoTime(),
+                ),
+            )
+        } catch (error: VoiceTutorPauseAcknowledgementTimeoutException) {
+            terminate(error)
+            return
+        }
+        if (pause.needsClock) {
+            if (pauseTimer == null) {
+                pauseTimer = Flux.interval(INPUT_DEADLINE_POLL_INTERVAL).subscribe { advancePause() }
+            }
+        } else {
+            pauseTimer?.dispose()
+            pauseTimer = null
+        }
+    }
+
+    private fun applyPauseActions(actions: List<VoiceTutorPauseCoordinator.Action>) {
+        for (action in actions) {
+            when (action) {
+                is VoiceTutorPauseCoordinator.Action.ClearInput -> emit(
+                    linkedMapOf("event_id" to action.eventId, "type" to "input_audio_buffer.clear"),
+                )
+                is VoiceTutorPauseCoordinator.Action.Acknowledge -> {
+                    val result = clientControls.tryEmitNext(
+                        mapper.writeValueAsString(
+                            mapOf(
+                                "type" to VoiceTutorRealtimeContract.PAUSE_STATE_EVENT,
+                                "sequence" to action.sequence,
+                                "paused" to action.paused,
+                            ),
+                        ),
+                    )
+                    if (result.isFailure && !closed) {
+                        terminate(IllegalStateException("Voice Tutor client control buffer overflowed."))
+                    }
+                }
+            }
+        }
     }
 
     private fun emit(event: Map<String, Any?>) {

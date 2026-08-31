@@ -6,9 +6,10 @@ BuddyStudy exposes a private, stateless Model Context Protocol endpoint at
 `POST /api/v1/mcp`. An authenticated LLM client can read the current user's
 profile, resume, interests, studies, questions, grading feedback, scores, and
 topic-level statistics, plus private Voice Tutor quota, session history, and
-Tutor Learning Results. It can also update the private learning context, create
-root studies or child topics, request questions, submit answers, and delete a
-confirmed study subtree.
+Tutor Learning Results. A saved study node's learning history combines ordinary
+question records and private, source-backed voice exchanges. The client can also
+update the private learning context, create root studies or child topics, request
+questions, submit answers, and delete a confirmed study subtree.
 
 The implementation targets MCP `2025-11-25` through Spring AI `2.0.1` and the
 MCP Java SDK `2.0.1`. It uses stateless Streamable HTTP so requests can be
@@ -28,6 +29,8 @@ In scope:
 - owned study-tree reads, root creation, child-topic creation, and confirmed
   subtree deletion;
 - bounded pending-question and record reads;
+- cursor-paged, node-scoped ordinary and voice learning history, with optional
+  descendant inclusion and original/localized text views;
 - asynchronous question request and process polling;
 - asynchronous answer submission and grading polling;
 - grading score, feedback, explanation, and rubric details;
@@ -87,7 +90,8 @@ arguments or tool results.
 An enabled MCP HTTP endpoint does not itself teach the voice model its tools.
 For an authenticated WebRTC call, the backend registers the existing
 `list_studies`, `get_study`, `create_study_topic`, `list_records`, `get_record`,
-`get_topic_stats`, and `get_study_growth` definitions as Realtime function tools.
+`list_study_learning_records`, `get_voice_learning_record`, `get_topic_stats`,
+and `get_study_growth` definitions as nine Realtime function tools.
 The server's local `McpVoiceTutorToolAdapter` executes those same MCP handlers
 with the captured, revalidated principal and returns a bounded
 `function_call_output`; the model receives neither an app bearer nor a new MCP
@@ -99,6 +103,15 @@ change its production rollout gate.
   404s, the count and page share the owner/parent/query filter, and omitting the
   argument preserves the existing all-studies behavior. `get_study` returns a
   single node, not a child-topic list.
+- The two learning-history tools require the requested node and the call's
+  selected node to resolve to the same owned root through their actual current
+  parent chains. Each chain is bounded to 32 nodes; missing nodes, unresolved
+  parents, cycles, malformed identities, or another root fail closed. A shared
+  topic name or a cached lesson snapshot is not proof of ancestry. Single voice
+  detail is checked using its returned study ID, not a model-supplied node ID.
+  Active call/device authorization is rechecked across suspended reads before
+  returning private history. This additional call-tree restriction applies to
+  these two tools; general MCP reads remain owner-scoped.
 - Child creation requires an explicit learner request and an unambiguous parent
   inside the call's selected study subtree. Schema validation, active identity,
   parent scope and the existing use-case permissions are all enforced before
@@ -110,9 +123,11 @@ change its production rollout gate.
   retry an uncertain mutation. JSON arguments and results are capped at 16 KiB;
   large reads ask for a smaller page, while large successful creation results
   retain compact verified study-tree metadata.
-- Audio and transcripts are not sent through MCP. Successful child metadata
-  refreshes never replace the active question or answer draft. Logs expose
-  counts, fixed error codes and types only, not arguments or result bodies.
+- Live audio frames and binary recordings are not passed through MCP. Persisted
+  transcript-derived questions, answers and feedback are private history tool
+  results, not new learner answers or consent to start a lesson. Successful child
+  metadata refreshes never replace the active question or answer draft. Logs
+  expose counts, fixed error codes and types only, not arguments or result bodies.
 
 See [OpenAI's Realtime tool guidance](https://developers.openai.com/api/docs/guides/realtime-mcp)
 for the distinction between server-owned functions and a provider-hosted remote
@@ -161,8 +176,10 @@ receive. Never put it in prompts, logs, repository files, or browser code.
 | `get_question_process` | Read | `record:read` | Poll until `terminal=true`; no remaining question quota required |
 | `submit_answer` | Write | `record:update` | Preserves the authored answer; queues grading |
 | `get_grading_process` | Read | `record:update` | Cursor uses `after_event_id`; poll until terminal |
-| `list_records` | Read | `record:read` | Bounded page with score/feedback when ready |
-| `get_record` | Read | `record:read` | Full score, feedback, explanation, and rubric |
+| `list_records` | Read | `record:read` | Existing ordinary-question `limit`/`offset` page with score/feedback when ready |
+| `get_record` | Read | `record:read` | Ordinary-question detail: score, feedback, explanation, and rubric |
+| `list_study_learning_records` | Read | `study:read`, `record:read`, and `voice-tutor:read` | Owned node's mixed question/voice cursor page; default 5, maximum 30; exact node and original text by default |
+| `get_voice_learning_record` | Read | `voice-tutor:read` | One owned persisted voice exchange; positive numeric `voiceRecord.id`, original text by default; never an ordinary question ID |
 | `list_voice_tutor_sessions` | Read | `voice-tutor:read` | Owner-scoped opaque-cursor page; returns `sessions` and `nextCursor` without live-session mutation |
 | `get_voice_tutor_session` | Read | `voice-tutor:read` | Owned session, bounded transcript turns, private learning result, and safe recording status metadata; never binary audio, object keys, or signed URLs |
 | `get_voice_tutor_quota` | Read | `voice-tutor:read` | Server-owned seconds, remaining time, and reset boundary |
@@ -173,6 +190,36 @@ Tool errors use MCP `isError=true` with structured `code`, HTTP-style `status`,
 and a safe message. Business and validation failures are exposed without stack
 traces. Unexpected exceptions produce a generic internal error and logs contain
 only the operation name and exception type, never tool arguments.
+
+### Learning-history arguments and results
+
+- `list_study_learning_records` requires a positive integer `study_id`.
+  `scope` is `node` (default) or `subtree`; `limit` is 1–30 (default 5).
+  Omit `cursor` on the first page; subsequent cursors must be the returned
+  `nextCursor`, 1–512 characters, for the same owner, study and scope.
+- `get_voice_learning_record` requires positive integer `record_id`, taken from
+  a returned `voiceRecord.id` and sent as a JSON number. Do not pass the page's
+  `voice:123` envelope ID or a `questionRecord.id` to this tool.
+- Both accept `language=ko|en|ja` (default `ko`) and
+  `view=original|localized` (default `original`). The existing `list_records`
+  and `get_record` contracts remain ordinary-question reads with their existing
+  `localized` default.
+
+The mixed page returns `{items, nextCursor, hasMore, limit}`. Each item has
+`source=QUESTION|VOICE_TUTOR`, its exact `studyId`, and the corresponding
+`questionRecord` or `voiceRecord`; envelope IDs are `question:<id>` or
+`voice:<id>`. Ordering is timestamp descending, source ascending, then numeric
+record ID descending. A deletion during hydration can leave an empty page with
+`hasMore=true`; use its next cursor rather than treating it as empty history.
+
+Voice detail preserves the saved topic/level, nullable supported score,
+question/answer/feedback text, strengths and improvements, depth summary, and
+session/turn evidence. `localized` can enqueue bounded read repair through the
+existing translation outbox/stream; unavailable translations fall back to
+original text, with `translationPending` describing localization progress.
+Translation never rewrites source evidence, node IDs, levels or scores. These reads do not
+submit answers, create public/ordinary questions, consume question quota or
+replace an active draft.
 
 ## Resources
 
@@ -240,11 +287,27 @@ get_voice_tutor_session(session_id)
   -> owned session + bounded transcript turns + private Tutor Learning Result
 ```
 
+Study-node learning history:
+
+```text
+list_study_learning_records(study_id, scope="node", limit=5, view="original")
+  -> {items, nextCursor, hasMore, limit}
+  -> QUESTION item: get_record(questionRecord.id, view="original")
+  -> VOICE_TUTOR item: get_voice_learning_record(voiceRecord.id, view="original")
+```
+
+Read `subtree` only when descendant history is wanted, and retain each item's
+actual node ID. In voice calls, begin with a small exact-node page (the tutor
+prompt recommends 3 records) for the agreed lesson focus. Prior answers are
+reference evidence, not permission to change the topic, difficulty or learning
+state. On `RESULT_TOO_LARGE`, request a smaller page; do not retry an oversized
+single record indefinitely or claim that an unavailable read proves no history.
+
 These reads never call the OpenAI Realtime provider, reserve a new session, or
-read or mutate an answer draft. The shared server read use case may settle a
-stale/expired session and lazily advance an overdue quota period before
-returning the authoritative snapshot. That housekeeping is owner-scoped and
-does not let MCP explicitly end, extend, or stream a live session.
+read or mutate an answer draft. The session/quota read use case may settle a
+stale/expired session and lazily advance an overdue quota period before returning
+the authoritative snapshot. That housekeeping is owner-scoped and does not let
+MCP explicitly end, extend, or stream a live session.
 
 Study deletion:
 
@@ -273,11 +336,12 @@ explicit user confirmation
   are constrained by JSON Schema and application validation.
 - The server never accepts a caller-supplied user ID or token passthrough.
 - Voice Tutor transcript turns, results, consent state, and recording metadata
-  remain private owner-scoped content. Tool arguments and returned content are
-  never copied into API exchange logs, provider-history bodies, analytics, or
-  error messages. MCP has no tool/resource for realtime frames, locally pending
-  files, S3 object keys, upload grants, or presigned playback URLs, regardless
-  of whether the owner explicitly recorded a call through the iOS app.
+  and node-linked voice learning exchanges remain private owner-scoped content.
+  Tool arguments and returned content are never copied into API exchange logs,
+  provider-history bodies, analytics, or error messages. MCP has no tool/resource
+  for realtime frames, locally pending files, S3 object keys, upload grants, or
+  presigned playback URLs, regardless of whether the owner explicitly recorded
+  a call through the iOS app.
 
 ## Configuration
 

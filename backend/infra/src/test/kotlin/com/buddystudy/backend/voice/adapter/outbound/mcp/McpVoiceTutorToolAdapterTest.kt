@@ -45,7 +45,43 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(lessonTopic.path("studyId").asLong()).isEqualTo(102)
         assertThat(lessonTopic.path("difficulty").asInt()).isEqualTo(3)
         assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isTrue()
+        val tree = json(result).path("voiceLessonTree")
+        assertThat(tree.path("selectedStudyId").asLong()).isEqualTo(101)
+        assertThat(tree.path("selectedRootStudyId").asLong()).isEqualTo(101)
+        assertThat(tree.path("selectedPathComplete").asBoolean()).isTrue()
+        assertThat(tree.path("nodes").size()).isEqualTo(1)
+        assertThat(tree.path("nodes")[0].path("studyId").asLong()).isEqualTo(102)
+        assertThat(tree.path("nodes")[0].path("relationToSelected").asText()).isEqualTo("DESCENDANT")
         assertThat(contextStore.remembered).containsExactly(listOf(102L))
+        assertThat(contextStore.listReads).isEqualTo(1)
+        assertThat(result.studyTreeChanged).isFalse()
+    }
+
+    @Test
+    fun `an explicitly read other root keeps its exact relation without silently changing the selected lesson tree`(): Unit = runBlocking {
+        val contextStore = ContextStore().apply {
+            saved[100L] = VoiceTutorStudySnapshot(100, null, "Systems", 9)
+            saved[101L] = VoiceTutorStudySnapshot(101, 100, "Cache", 5)
+            saved[200L] = VoiceTutorStudySnapshot(200, null, "Cache", 5)
+            saved[201L] = VoiceTutorStudySnapshot(201, 200, "Cache", 2)
+        }
+        val fixture = Fixture(studyContexts = contextStore).apply {
+            // Live names and levels cannot supply ancestry or replace the frozen lesson level.
+            handler = { _, _ -> success(mapOf("id" to 201L, "topic" to "Cache", "parentStudyId" to 101L, "difficultyLevel" to 9)) }
+        }
+        val result = fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 201L))
+        assertThat(result.isError).isFalse()
+        assertThat(json(result).path("voiceLessonTopics").size()).isEqualTo(1)
+        assertThat(json(result).path("voiceLessonTopics")[0].path("parentStudyId").asLong()).isEqualTo(200)
+        assertThat(json(result).path("voiceLessonTopics")[0].path("difficulty").asInt()).isEqualTo(2)
+        val tree = json(result).path("voiceLessonTree")
+        assertThat(tree.path("selectedStudyId").asLong()).isEqualTo(101)
+        assertThat(tree.path("selectedRootStudyId").asLong()).isEqualTo(100)
+        assertThat(tree.path("selectedPathStudyIds").map { it.asLong() }).containsExactly(100, 101)
+        assertThat(tree.path("nodes").size()).isEqualTo(1)
+        assertThat(tree.path("nodes")[0].path("relationToSelected").asText()).isEqualTo("OTHER_TREE")
+        assertThat(tree.path("nodes")[0].path("rootStudyId").asLong()).isEqualTo(200)
+        assertThat(fixture.calls.map { it.name }).containsExactly("get_study")
         assertThat(result.studyTreeChanged).isFalse()
     }
 
@@ -72,6 +108,7 @@ class McpVoiceTutorToolAdapterTest {
         fixture.authorized = false
         assertCode(fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 102L)), "CALL_NOT_AUTHORIZED")
         assertThat(contextStore.remembered).isEmpty()
+        assertThat(contextStore.listReads).isZero()
     }
 
     @Test
@@ -88,6 +125,28 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(result.output).doesNotContain("private-database-detail")
         assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
         assertThat(json(result).path("voiceLessonTopics")).isEmpty()
+        assertThat(json(result).path("voiceLessonTree").path("selectedPathComplete").asBoolean()).isFalse()
+        assertThat(json(result).path("voiceLessonTree").path("nodes")[0].path("relationToSelected").asText()).isEqualTo("UNRESOLVED")
+    }
+
+    @Test
+    fun `ancestry read failure preserves a completed creation and its captured level without inventing a root`(): Unit = runBlocking {
+        val contextStore = ContextStore().apply { failList = true }
+        val fixture = Fixture(studyContexts = contextStore).apply {
+            handler = { _, _ -> success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Cache")) }
+        }
+        val result = fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Cache"))
+        assertThat(result.isError).isFalse()
+        assertThat(result.createdStudyId).isEqualTo(102)
+        assertThat(result.studyTreeChanged).isTrue()
+        assertThat(json(result).path("voiceLessonTopics")[0].path("difficulty").asInt()).isEqualTo(3)
+        assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isTrue()
+        val tree = json(result).path("voiceLessonTree")
+        assertThat(tree.path("selectedRootStudyId").isNull).isTrue()
+        assertThat(tree.path("selectedPathComplete").asBoolean()).isFalse()
+        assertThat(tree.path("nodes")[0].path("relationToSelected").asText()).isEqualTo("UNRESOLVED")
+        assertThat(result.output).doesNotContain("private-database-detail")
+        assertThat(fixture.calls.map { it.name }).containsExactly("create_study_topic")
     }
 
     @Test
@@ -100,6 +159,7 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(json(result).path("difficultyLevel").asInt()).isEqualTo(9)
         assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
         assertThat(json(result).path("voiceLessonTopics")).isEmpty()
+        assertThat(json(result).path("voiceLessonTree").path("nodes")[0].path("relationToSelected").asText()).isEqualTo("UNRESOLVED")
         assertThat(fixture.calls).hasSize(1)
     }
 
@@ -131,6 +191,7 @@ class McpVoiceTutorToolAdapterTest {
                 assertThat(result.isError).isFalse()
                 assertThat(result.createdStudyId).isEqualTo(102)
                 assertThat(json(result).path("voiceLessonTopics")[0].path("difficulty").asInt()).isEqualTo(3)
+                assertThat(json(result).path("voiceLessonTree").path("nodes")[0].path("relationToSelected").asText()).isEqualTo("DESCENDANT")
             }
         }
     }
@@ -144,7 +205,8 @@ class McpVoiceTutorToolAdapterTest {
 
         assertThat(definitions.map { it.name }).containsExactly(
             "list_studies", "get_study", "create_study_topic",
-            "list_records", "get_record", "get_topic_stats", "get_study_growth",
+            "list_records", "get_record", "list_study_learning_records", "get_voice_learning_record",
+            "get_topic_stats", "get_study_growth",
         )
         for (definition in definitions) {
             val original = fixture.catalog.single { it.tool().name() == definition.name }.tool()
@@ -152,9 +214,149 @@ class McpVoiceTutorToolAdapterTest {
             assertThat(definition.description).startsWith(original.description())
         }
         assertThat(definitions.single { it.name == "create_study_topic" }.description).contains("descendants")
+        assertThat(definitions.filter { it.name in setOf("list_study_learning_records", "get_voice_learning_record") })
+            .allSatisfy { assertThat(it.description).contains("verified study tree") }
         fixture.adapter.definitions()
         assertThat(fixture.catalogReads).isEqualTo(1)
         assertThat(fixture.calls).isEmpty()
+    }
+
+    @Test
+    fun `node history and voice detail preserve source evidence and allow verified same tree siblings`(): Unit = runBlocking {
+        val contextStore = ContextStore()
+        val fixture = Fixture(studyContexts = contextStore).apply { persistedSession = session().copy(studyId = 201L) }
+        val page = mapOf(
+            "items" to listOf(mapOf("id" to "voice:91", "source" to "VOICE_TUTOR", "studyId" to 202L,
+                "voiceRecord" to learningRecordPayload(202L))),
+            "nextCursor" to "same-scope-position", "hasMore" to true, "limit" to 3,
+        )
+        fixture.handler = { name, args ->
+            when (name) {
+                "get_study" -> {
+                    val id = (args.getValue("study_id") as Number).toLong()
+                    success(mapOf("id" to id, "parentStudyId" to if (id == 101L) null else 101L, "difficultyLevel" to 9))
+                }
+                "list_study_learning_records" -> success(page)
+                "get_voice_learning_record" -> success(learningRecordPayload(202L))
+                else -> error("Unexpected tool")
+            }
+        }
+        val active = context().copy(session = fixture.persistedSession!!)
+
+        val listResult = fixture.adapter.execute(active, "list_study_learning_records", mapOf(
+            "study_id" to 202L, "scope" to "node", "limit" to 3, "cursor" to "prior-position", "view" to "original",
+        ))
+        val detailResult = fixture.adapter.execute(active, "get_voice_learning_record", mapOf("record_id" to 91L, "view" to "original"))
+
+        assertThat(listResult.isError).isFalse()
+        // Compare the complete wire-decoded trees: valueToTree keeps Kotlin Long
+        // nodes, but JSON parsing uses IntNode for the same small integer values.
+        assertThat(json(listResult)).isEqualTo(mapper.readTree(mapper.writeValueAsBytes(page)))
+        assertThat(detailResult.isError).isFalse()
+        assertThat(json(detailResult)).isEqualTo(mapper.readTree(mapper.writeValueAsBytes(learningRecordPayload(202L))))
+        assertThat(json(detailResult).path("difficulty").asInt()).isEqualTo(3)
+        assertThat(listResult.studyTreeChanged).isFalse()
+        assertThat(detailResult.studyTreeChanged).isFalse()
+        assertThat(detailResult.createdStudyId).isNull()
+        assertThat(fixture.calls.single { it.name == "list_study_learning_records" }.arguments)
+            .containsEntry("cursor", "prior-position").containsEntry("study_id", 202L)
+        assertThat(fixture.calls.map { it.principal }).allMatch { it === principal }
+        assertThat(contextStore.remembered).isEmpty()
+    }
+
+    @Test
+    fun `new learning history cannot cross a root or guess missing foreign cyclic and deep ancestry`(): Unit = runBlocking {
+        val rejectedNodes = listOf<(Long) -> McpSchema.CallToolResult>(
+            { id -> success(mapOf("id" to id, "parentStudyId" to null)) },
+            { _ -> failure("RECORD_NOT_FOUND") },
+            { id -> success(mapOf("id" to id)) },
+            { _ -> success(mapOf("id" to 999L, "parentStudyId" to 101L)) },
+            { id -> success(mapOf("id" to id, "parentStudyId" to 101.5)) },
+            { id -> success(mapOf("id" to id, "parentStudyId" to if (id == 201L) 202L else 201L)) },
+            { id -> success(mapOf("id" to id, "parentStudyId" to id + 1)) },
+        )
+        for (readNode in rejectedNodes) {
+            val fixture = Fixture().apply {
+                handler = { name, args ->
+                    assertThat(name).isEqualTo("get_study")
+                    val id = (args.getValue("study_id") as Number).toLong()
+                    if (id == 101L) success(mapOf("id" to id, "parentStudyId" to null)) else readNode(id)
+                }
+            }
+            assertCode(fixture.adapter.execute(context(), "list_study_learning_records", mapOf("study_id" to 201L)), "STUDY_SCOPE_DENIED")
+            assertThat(fixture.calls).hasSizeLessThanOrEqualTo(33)
+            assertThat(fixture.calls.map { it.name }).containsOnly("get_study")
+        }
+        val noStudy = Fixture().apply { persistedSession = session().copy(studyId = null) }
+        assertCode(noStudy.adapter.execute(context().copy(session = noStudy.persistedSession!!), "list_study_learning_records", mapOf("study_id" to 101L)), "STUDY_SCOPE_DENIED")
+        assertThat(noStudy.calls).isEmpty()
+    }
+
+    @Test
+    fun `voice detail uses the returned owned record node and never exposes outside tree or mismatched identity`(): Unit = runBlocking {
+        for ((record, expectedCode) in listOf(
+            learningRecordPayload(201L) to "STUDY_SCOPE_DENIED",
+            (learningRecordPayload(101L) + ("id" to "92")) to "INVALID_TOOL_RESULT",
+            (learningRecordPayload(101L) + ("studyId" to "101")) to "INVALID_TOOL_RESULT",
+        )) {
+            val fixture = Fixture().apply {
+                handler = { name, args ->
+                    when (name) {
+                        "get_voice_learning_record" -> success(record)
+                        "get_study" -> success(mapOf("id" to args.getValue("study_id"), "parentStudyId" to null))
+                        else -> error("Unexpected tool")
+                    }
+                }
+            }
+            val result = fixture.adapter.execute(context(), "get_voice_learning_record", mapOf("record_id" to 91L))
+            assertCode(result, expectedCode)
+            assertThat(result.output).doesNotContain("private-prior-answer", "synthetic-prior-session")
+            assertThat(result.studyTreeChanged).isFalse()
+            assertThat(fixture.calls.map { it.name }).doesNotContain("get_record", "create_study_topic")
+        }
+    }
+
+    @Test
+    fun `new history rechecks active call and device authorization after suspended reads`(): Unit = runBlocking {
+        for (logout in listOf(false, true)) {
+            val fixture = Fixture()
+            fixture.handler = { name, args ->
+                if (name == "get_study") success(mapOf("id" to args.getValue("study_id"), "parentStudyId" to null))
+                else {
+                    assertThat(name).isEqualTo("list_study_learning_records")
+                    if (logout) fixture.authorized = false
+                    else fixture.persistedSession = session().copy(status = VoiceTutorSessionStatus.ENDING)
+                    success(mapOf("items" to listOf(learningRecordPayload(101L))))
+                }
+            }
+            val result = fixture.adapter.execute(context(), "list_study_learning_records", mapOf("study_id" to 101L))
+            assertCode(result, "CALL_NOT_AUTHORIZED")
+            assertThat(result.output).doesNotContain("private-prior-answer")
+            assertThat(fixture.calls.map { it.name }).containsExactly("get_study", "list_study_learning_records")
+        }
+        val revoked = Fixture().apply { authorized = false }
+        assertCode(revoked.adapter.execute(context(), "get_voice_learning_record", mapOf("record_id" to 91L)), "CALL_NOT_AUTHORIZED")
+        assertThat(revoked.calls).isEmpty()
+    }
+
+    @Test
+    fun `oversized learning pages and voice detail fail explicitly without truncating original evidence`(): Unit = runBlocking {
+        for (name in listOf("list_study_learning_records", "get_voice_learning_record")) {
+            val fixture = Fixture().apply {
+                handler = { tool, args ->
+                    if (tool == "get_study") success(mapOf("id" to args.getValue("study_id"), "parentStudyId" to null))
+                    else success(learningRecordPayload(101L) + ("answer" to "private-prior-answer".repeat(2_000)))
+                }
+            }
+            val args = if (name == "list_study_learning_records") mapOf("study_id" to 101L) else mapOf("record_id" to 91L)
+            val result = fixture.adapter.execute(context(), name, args)
+            assertCode(result, "RESULT_TOO_LARGE")
+            assertThat(result.output.toByteArray(Charsets.UTF_8).size).isLessThanOrEqualTo(16 * 1_024)
+            assertThat(result.output).doesNotContain("private-prior-answer")
+            assertThat(json(result).path("error").path("message").asText()).contains("not cut into partial JSON")
+            assertThat(result.studyTreeChanged).isFalse()
+            assertThat(result.createdStudyId).isNull()
+        }
     }
 
     @Test
@@ -278,6 +480,15 @@ class McpVoiceTutorToolAdapterTest {
             "list_studies" to mapOf("offset" to -1),
             "list_studies" to mapOf("offset" to Long.MAX_VALUE),
             "list_records" to mapOf("limit" to 101),
+            "list_study_learning_records" to emptyMap<String, Any>(),
+            "list_study_learning_records" to mapOf("study_id" to 101L, "limit" to 31),
+            "list_study_learning_records" to mapOf("study_id" to 101L, "scope" to "all"),
+            "list_study_learning_records" to mapOf("study_id" to 101L, "offset" to 1),
+            "list_study_learning_records" to mapOf("study_id" to 101L, "cursor" to ""),
+            "list_study_learning_records" to mapOf("study_id" to 101L, "cursor" to "x".repeat(513)),
+            "get_voice_learning_record" to mapOf("record_id" to "voice:91"),
+            "get_voice_learning_record" to mapOf("record_id" to 91.5),
+            "get_voice_learning_record" to mapOf("record_id" to 91L, "user_id" to 99L),
             "create_study_topic" to mapOf("parent_study_id" to 101L, "topic" to ""),
             "create_study_topic" to mapOf("parent_study_id" to 101L, "topic" to "가".repeat(256)),
             "create_study_topic" to mapOf("parent_study_id" to 101L, "topic" to "Streams", "sort_order" to 10_001),
@@ -543,21 +754,40 @@ class McpVoiceTutorToolAdapterTest {
 
     private class ContextStore : VoiceTutorStudyContextPort {
         val remembered = mutableListOf<List<Long>>()
+        val saved = linkedMapOf(101L to VoiceTutorStudySnapshot(101, null, "Selected root", 5))
         var fail = false
+        var failList = false
+        var listReads = 0
         override suspend fun prepare(session: VoiceTutorSession) = emptyList<VoiceTutorStudySnapshot>()
-        override suspend fun list(userId: Long, sessionId: String) = emptyList<VoiceTutorStudySnapshot>()
+        override suspend fun list(userId: Long, sessionId: String): List<VoiceTutorStudySnapshot> {
+            assertThat(userId).isEqualTo(principal.userId)
+            assertThat(sessionId).isEqualTo(session().id)
+            listReads += 1
+            if (failList) throw IllegalStateException("private-database-detail")
+            return saved.values.toList()
+        }
         override suspend fun remember(userId: Long, sessionId: String, studyIds: List<Long>): List<VoiceTutorStudySnapshot> {
             assertThat(userId).isEqualTo(principal.userId)
             assertThat(sessionId).isEqualTo(session().id)
             remembered += studyIds
             if (fail) throw IllegalStateException("private-database-detail")
-            return studyIds.map { VoiceTutorStudySnapshot(it, 101, "Cache", 3) }
+            return studyIds.map { id -> saved.getOrPut(id) { VoiceTutorStudySnapshot(id, 101, "Cache", 3) } }
         }
     }
 
     private data class Call(val name: String, val arguments: Map<String, Any>, val principal: Principal?)
 
     private companion object {
+        fun learningRecordPayload(studyId: Long): Map<String, Any?> = linkedMapOf(
+            "id" to "91", "sessionId" to "synthetic-prior-session", "studyId" to studyId,
+            "parentStudyId" to 101L, "topic" to "Redis", "difficulty" to 3, "kind" to "TUTOR_QUESTION",
+            "question" to "어떤 키를 제거하나요?", "answer" to "  private-prior-answer\n", "score" to 85,
+            "feedback" to "85점입니다.", "strengths" to listOf("최근 사용 시점을 짚음"), "improvements" to emptyList<String>(),
+            "depthSummary" to "LRU를 살펴봄", "questionTurnId" to 11L,
+            "answerTurnIds" to listOf(12L), "feedbackTurnIds" to listOf(13L),
+            "sourceLanguage" to "ko", "requestedLanguage" to "ko", "displayLanguage" to "ko", "translationPending" to false,
+        )
+
         val now: Instant = Instant.parse("2026-08-31T00:00:00Z")
         val principal = Principal(userId = 7L, deviceId = "synthetic-device", sessionId = 11L, anonymous = false)
         val mapper = jacksonObjectMapper().findAndRegisterModules()

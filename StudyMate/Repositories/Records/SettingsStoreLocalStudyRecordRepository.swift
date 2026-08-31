@@ -11,6 +11,18 @@ struct SettingsStoreLocalStudyRecordRepository: LocalStudyRecordRepository {
         settingsStore.loadStudyRecords()
     }
 
+    #if os(iOS)
+    func loadLearningRecordsPage(for key: StudyLearningRecordsCacheKey) -> BackendStudyLearningRecordsPage? {
+        settingsStore.loadStudyLearningRecordsPage(for: key)
+    }
+
+    func saveLearningRecordsPage(_ page: BackendStudyLearningRecordsPage, for key: StudyLearningRecordsCacheKey) {
+        settingsStore.saveStudyLearningRecordsPage(page, for: key)
+    }
+
+    func clearLearningRecordsPages() { settingsStore.clearStudyLearningRecordsPages() }
+    #endif
+
     func appendStudyRecord(question: QuestionItem, settings: StudySettings) {
         settingsStore.appendStudyRecord(question: question, settings: settings)
     }

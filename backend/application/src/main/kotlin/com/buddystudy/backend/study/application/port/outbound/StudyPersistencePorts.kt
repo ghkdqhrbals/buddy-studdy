@@ -82,6 +82,9 @@ interface QuestionPort {
     ): Boolean = false
     suspend fun updateGradingLastEventId(id: Long, requestId: String, eventId: Long): Boolean = false
     suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
+    suspend fun findOwnedRecordsByIds(userId: Long, ids: Collection<Long>): List<QuestionEntity> =
+        ids.distinct().take(100).mapNotNull { findByIdAndUserIdAndDeletedAtIsNull(it, userId) }
+            .filter { it.userId == userId && it.deletedAt == null && it.skippedAt == null && it.score != null }
     suspend fun findByGradingRequestIdAndUserIdAndDeletedAtIsNull(
         gradingRequestId: String,
         userId: Long,

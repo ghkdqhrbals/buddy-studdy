@@ -1,17 +1,67 @@
 package com.buddystudy.backend.externalapi.adapter.outbound.history
 
 import com.buddystudy.backend.common.adapter.outbound.security.SensitiveDataRedactor
+import com.buddystudy.backend.common.application.privacy.PrivateLearningContentLogScope
 import com.buddystudy.backend.externalapi.application.model.FinishExternalApiCallCommand
 import com.buddystudy.backend.externalapi.application.model.StartExternalApiCallCommand
 import com.buddystudy.backend.externalapi.application.port.inbound.ExternalApiCallHistoryUseCase
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.slf4j.MDC
 
 class ExternalApiHistoryRecorderTest {
+    @Test
+    fun `private learning scope bypasses provider history across child dispatchers and restores normal logging`() = runBlocking<Unit> {
+        val history = RecordingHistoryUseCase()
+        val recorder = recorder(history)
+        val request = ExternalApiRequest("libretranslate", "translate-text", "POST", "https://translate.example/translate", body = "private voice answer")
+        PrivateLearningContentLogScope.protecting {
+            coroutineScope {
+                assertThat(async(Dispatchers.Default) {
+                    recorder.record(request) { ExternalApiResponse("translated private answer", body = "private translated body") }
+                }.await()).isEqualTo("translated private answer")
+            }
+            withContext(Dispatchers.IO) {
+                assertThat(recorder.recordBlocking(request) { ExternalApiResponse("blocking answer", body = "private blocking body") })
+                    .isEqualTo("blocking answer")
+            }
+            assertThat(history.started).isEmpty()
+            assertThat(history.finished).isEmpty()
+        }
+        assertThat(PrivateLearningContentLogScope.isActive()).isFalse()
+        recorder.record(request.copy(body = "ordinary public content")) { ExternalApiResponse(Unit, body = "ordinary translation") }
+        assertThat(history.started).hasSize(1)
+        assertThat(history.finished).hasSize(1)
+    }
+
+    @Test
+    fun `private provider exceptions never create history and nested scope restores even on failure`() = runBlocking<Unit> {
+        val history = RecordingHistoryUseCase()
+        val recorder = recorder(history)
+        val request = ExternalApiRequest("libretranslate", "translate-text", "POST", "https://translate.example/translate", body = "private request")
+        PrivateLearningContentLogScope.protecting {
+            val failure = runCatching {
+                PrivateLearningContentLogScope.protecting {
+                    withContext(Dispatchers.Default) {
+                        recorder.record<String>(request) { throw IllegalStateException("private provider response") }
+                    }
+                }
+            }.exceptionOrNull()
+            assertThat(failure).hasMessage("private provider response")
+            assertThat(PrivateLearningContentLogScope.isActive()).isTrue()
+        }
+        assertThat(PrivateLearningContentLogScope.isActive()).isFalse()
+        assertThat(history.started).isEmpty()
+        assertThat(history.finished).isEmpty()
+    }
+
     @Test
     fun `stores full bodies while redacting credentials before persistence`() = runBlocking<Unit> {
         val useCase = RecordingHistoryUseCase()

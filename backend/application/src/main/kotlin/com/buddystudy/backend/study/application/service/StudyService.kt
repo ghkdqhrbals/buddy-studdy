@@ -51,6 +51,15 @@ class StudyService(
     private val contentLocalizations: ContentLocalizationPort,
     private val localizationRequests: RequestContentLocalizationUseCase,
 ) : StudyUseCase, BrowseRecordsUseCase {
+    @Transactional(readOnly = true)
+    override suspend fun recordsByIds(
+        principal: Principal,
+        ids: Collection<Long>,
+        language: String,
+        view: String,
+    ): List<StudyRecordResponse> = questions.findOwnedRecordsByIds(principal.userId, ids)
+        .toRecordResponses(QuestionLanguage.normalize(language), translationViewMode(view))
+
     override suspend fun answer(
         principal: Principal,
         recordId: Long,

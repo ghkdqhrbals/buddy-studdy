@@ -104,14 +104,47 @@ quota uses its own account-created monthly anchor and advances an overdue period
 lazily on authenticated Voice Tutor access; it is not handled by the question
 quota's managed rollover job.
 
-Voice lessons use the saved topic's configured 1–10 level for spoken questions,
-brief 0–100 answer feedback, and deeper follow-up questions. V102 freezes the
+Voice lessons follow the actual saved learning tree and each topic's configured
+1–10 level. Brief 0–100 answer feedback leaves room for the learner's next intent,
+without automatically escalating or chaining deeper questions. V102 freezes the
 owned topic metadata supplied to each session; V101 adds nullable structured
 explorations to the private result. The existing summary-model request extracts
 actual exchanges and explicit spoken assessments with source turn IDs; it does
 not generate question records or grade the learner again. Missing/unsupported
 scores stay null. Old results decode with no explorations. These changes require
 the normal Flyway migrations, not a new service, database, or Redis instance.
+
+V103 projects verified voice exchanges into private `voice_study_learning_records`
+under their actual owned tree nodes. Result completion, record insertion and
+translation outboxes are atomic and idempotent. The existing result recovery
+also projects already structured completed results without another LLM request.
+The existing configured content-translation stream accepts
+`VOICE_STUDY_RECORD` and builds ko/en/ja text projections guarded by source hash
+and request token. Originals, node identity, level and spoken score never change.
+Private content is excluded from provider history and HTTP/client body logs.
+
+Read combined node history at
+`GET /api/v1/studies/{id}/learning-records?scope=node&limit=30&tl=ko&view=localized`;
+`scope=subtree` explicitly includes descendants and `cursor` continues its stable
+owner/node/scope-bound page. Voice-only detail is
+`GET /api/v1/voice-tutor/learning-records/{id}` with the same `tl`/`view` options.
+These reads do not generate questions, consume question quota or replace drafts.
+
+The MCP catalog and voice Realtime functions also expose
+`list_study_learning_records` (default `scope=node`, `limit=5`, `view=original`;
+maximum 30) and `get_voice_learning_record` (numeric `voiceRecord.id`). The
+tutor reads a small page for the agreed node before its first question, so
+previous spoken answers can inform the lesson without regrading them. Voice
+history reads require a verified shared tree root and recheck the active call
+after fetching; ordinary MCP reads remain owner-scoped. Existing
+`list_records`/`get_record` still read ordinary question records only. See the
+[MCP contracts](../docs/MCP_SERVER.md) for pagination and permission details.
+
+WebRTC ready may advertise `pauseProtocol: pause-v1`. Compatible iOS clients
+offer a small connected break: tutor output finishes and server input-clear ACKs
+fence pause/resume, with no output cancellation or truncation. Pause still uses
+connected call time and preserves the monthly and single-call deadlines; PCM
+fallback and servers without the capability do not advertise this control.
 
 The optional session-create `voice` accepts `alloy`, `ash`, `ballad`, `coral`,
 `echo`, `sage`, `shimmer`, `verse`, `marin`, or `cedar`. An omitted/blank field uses

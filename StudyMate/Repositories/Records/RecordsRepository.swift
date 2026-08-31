@@ -2,6 +2,17 @@ import Foundation
 
 @MainActor
 protocol RecordsRepository {
+    #if os(iOS)
+    func fetchStudyLearningRecords(
+        registration: RemotePushRegistration, studyID: Int, scope: StudyLearningRecordScope,
+        limit: Int, cursor: String?, language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendStudyLearningRecordsPage
+
+    func fetchVoiceStudyLearningRecord(
+        registration: RemotePushRegistration, recordID: String,
+        language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendVoiceStudyLearningRecord
+    #endif
     func fetchRecords(
         registration: RemotePushRegistration,
         limit: Int,
@@ -63,3 +74,17 @@ protocol RecordsRepository {
         view: LocalizedContentView
     ) async throws -> StudyRecord
 }
+
+#if os(iOS)
+extension RecordsRepository {
+    func fetchStudyLearningRecords(
+        registration: RemotePushRegistration, studyID: Int, scope: StudyLearningRecordScope,
+        limit: Int, cursor: String?, language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendStudyLearningRecordsPage { throw StudyLearningRecordsError.unavailable }
+
+    func fetchVoiceStudyLearningRecord(
+        registration: RemotePushRegistration, recordID: String,
+        language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendVoiceStudyLearningRecord { throw StudyLearningRecordsError.unavailable }
+}
+#endif

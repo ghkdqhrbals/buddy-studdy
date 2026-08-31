@@ -11,6 +11,18 @@ struct LocalStudyRecordUseCase {
         repository.loadStudyRecords()
     }
 
+    #if os(iOS)
+    func loadLearningRecordsPage(for key: StudyLearningRecordsCacheKey) -> BackendStudyLearningRecordsPage? {
+        repository.loadLearningRecordsPage(for: key)
+    }
+
+    func saveLearningRecordsPage(_ page: BackendStudyLearningRecordsPage, for key: StudyLearningRecordsCacheKey) {
+        repository.saveLearningRecordsPage(page, for: key)
+    }
+
+    func clearLearningRecordsPages() { repository.clearLearningRecordsPages() }
+    #endif
+
     func appendRecord(question: QuestionItem, settings: StudySettings) {
         repository.appendStudyRecord(question: question, settings: settings)
     }

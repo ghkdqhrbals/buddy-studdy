@@ -243,6 +243,24 @@ class VoiceTutorControlWebSocketHandler(
                             )))
                         }
                     }
+                    VoiceTutorRealtimeContract.PAUSE_REQUEST_EVENT,
+                    VoiceTutorRealtimeContract.PAUSE_INPUT_QUIESCED_EVENT,
+                    VoiceTutorRealtimeContract.RESUME_REQUEST_EVENT,
+                    -> {
+                        val sequence = node.path("sequence")
+                        if (!sidebandReady.get() || !sequence.isIntegralNumber ||
+                            !sequence.canConvertToLong() || sequence.longValue() <= 0
+                        ) {
+                            // Invalid/stale hold commands cannot change the
+                            // turn or microphone state, nor tear down a call.
+                            Mono.empty()
+                        } else {
+                            Mono.just(mapper.writeValueAsString(mapOf(
+                                "type" to type,
+                                "sequence" to sequence.longValue(),
+                            )))
+                        }
+                    }
                     else -> Mono.error(
                         VoiceTutorClientProtocolException("Unsupported Voice Tutor WebRTC control event."),
                     )
@@ -450,6 +468,7 @@ class VoiceTutorControlWebSocketHandler(
                     "hardEndsAt" to session.hardEndsAt,
                     "quotaRemainingSeconds" to status.quota.remainingSeconds,
                     "transport" to "WEBRTC",
+                    "pauseProtocol" to VoiceTutorRealtimeContract.PAUSE_PROTOCOL,
                 ),
             ),
         )

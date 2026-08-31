@@ -1,19 +1,15 @@
 # Pro Voice Tutor verification
 
-Verification date: 2026-08-31. This is implementation verification, not a
+Verification date: 2026-09-01. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [bundled Silero plus contextual meaningful-input
-assessment](#silero-and-contextual-meaningful-input-assessment), commit
-`9b1d30f0`, is running in the existing 8080 dev API and installed on the physical
-iPhone. It follows the response-continuation fix `c33f0fe4`. The earlier checks below are historical;
-they do not all describe the current implementation. The selected native
-three-turn test [passed after network
-approval](#physical-native-three-turn-verification-after-network-approval),
-but that receive/playout test is not a microphone/semantic-gate end-to-end test.
-The [earlier OSS probes](#additional-meaningful-input-model-probes) motivated
-separating acoustic speech detection from contextual communicative intent;
-none of their rejected semantic models or filler regexes was installed.
+Latest implementation: [study-tree records, pacing and connected breaks](#study-tree-records-pacing-and-connected-breaks).
+It extends the existing Silero/contextual-input, MCP and source-backed summary
+contracts; it does not change the ordinary overlap/playback policy or regrade
+past answers. Earlier checks below are historical and do not all describe the
+current implementation. Source/fixture tests, iPhone tests and actual dev runtime
+observations are recorded separately; none implies a new human microphone-to-
+tutor conversation unless that specific check is explicitly recorded.
 
 ## Contract
 
@@ -1157,3 +1153,113 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   and the final passing `build/voiceExplorationDevRuntimeVerification.log`.
 - The local-runtime note in `backend/README.md` now documents the external SQL
   synchronization requirement so a later JAR-only refresh does not repeat it.
+
+<a id="study-tree-records-pacing-and-connected-breaks"></a>
+
+## 2026-09-01 — Study-tree records, pacing and connected breaks
+
+### Implemented boundaries
+
+- Lesson focus follows actual saved node/parent IDs and frozen 1–10 levels,
+  with explicit incomplete ancestry/child-page metadata. Deepening means a
+  learner-chosen part of that tree, not automatically harder follow-up questions.
+  Feedback ends with space for the next meaningful learner turn; silence is not
+  consent to continue, change levels, create a topic or end the call.
+- V103 adds private, node-attached voice learning records, uniquely keyed by
+  session/question turn. The projector rechecks owned frozen tree membership,
+  exact source role/order and explicitly spoken score evidence, then copies
+  question, answer and feedback from original transcript turns. Ambiguous,
+  unsupported, other-root, deleted-node or oversized associations remain in
+  session history instead of being filed under a guessed node or truncated.
+- Completion, bounded projection, localization requests and existing outboxes
+  share the session-first transaction. The existing recovery scheduler also
+  projects previously completed structured results, at most ten per batch,
+  without another summary/grade model call. No ordinary/public question, quota,
+  pending answer, draft or topic-stat score is fabricated from a voice exchange.
+- Translation extends the existing configured content-translation stream with
+  `VOICE_STUDY_RECORD`; no stream topology or service stack is added. ko/en/ja
+  localizations use exact field sets, source hashes and request-token CAS;
+  original text, source turns, node IDs, levels and scores are immutable.
+  Private content is excluded from HTTP/client bodies and provider history,
+  including structured-coroutine propagation and retry exception causes.
+- My Studies and tree nodes use one shared, compact history section for ordinary
+  and voice records. API keyset pages are owner/node/scope-bound; iOS keeps one
+  visible 30-item page with an eight-page typed memory cache in the existing
+  SettingsStore record path. Account, backend, locale and request fences prevent
+  stale private data from being displayed. Detail exposes original/localized
+  text and at most three delayed translation refreshes, not infinite polling.
+- The MCP catalog now has 21 tools; the voice subset has nine. The two new
+  history tools default to original text and exact-node scope, retain the old
+  ordinary-question contracts, and use the same typed history use case. Voice
+  reads require verified shared-root ancestry and reauthorization after reads.
+  The tutor starts with a small recent-history page for the agreed node; earlier
+  answers are reference evidence, never a current answer, consent or a regrade.
+- Optional WebRTC `pause-v1` adds a compact connected break. One ordered control
+  FIFO fences capture-stop and quiet input; the current tutor response completes
+  before a server input clear and matching ACK establish pause. Resume waits for
+  a fresh clear ACK before restoring the user's original mute setting. Work,
+  clears and transition deadlines remain bounded; stale/duplicate ACKs cannot
+  unmute or replay input. No tutor response cancellation, output clear,
+  truncation or legacy device-playout gate is introduced. Connected time,
+  heartbeat, hard session/monthly limits and foreground termination still apply;
+  the UI explicitly discloses that a break continues to use call time.
+
+### iOS and physical iPhone verification
+
+- The required generic iOS Debug build passed using `StudyMateiOS`,
+  `generic/platform=iOS`, `CODE_SIGNING_ALLOWED=NO` and the existing
+  `build/iOSDeviceDerivedData` directory. Log:
+  `build/voice-tree-records-iOS-generic-build.log`. No macOS target was built.
+- Signed build-for-testing and **208 explicitly selected, non-destructive
+  iPhone tests passed**, zero failures/skips: 26 node-history, 12 pause,
+  76 call contracts, 16 explorations, four MCP, 25 Silero/pipeline, 31 summary
+  and 18 voice preferences. Scope/source decoding, empty continuation pages,
+  cache bounds, account/locale cancellation, stale detail reads, source scores,
+  pause ACK ordering and compact presentation are covered. No real call,
+  microphone, provider request, recording purge or account purge was invoked.
+  Logs: `build/voiceTreeRecordsDeviceTestBuild.log` and
+  `build/voiceTreeRecordsDeviceTests.log`.
+- A normal signed iOS build passed afterward, without injected XCTest plug-ins
+  or frameworks, followed by strict deep signature verification. Log:
+  `build/voiceTreeRecordsSignedBuildFinal.log`. Installation/runtime observations
+  are recorded separately from build success.
+- A new human-device lesson covering audible pause/resume, tree focus and
+  automatic use of previous answers has not been claimed. Contract/fixture tests
+  do not measure real Realtime pedagogical behavior or end-to-end latency.
+
+### Backend verification and artifact
+
+- The final selected regression contains 58 suites and 669 tests: **667 passed,
+  zero failures/errors and two explicit opt-in provider tests skipped**.
+  Application: 168 passed; infrastructure: 483 passed/two skipped; tutor HTTP
+  MCP/native hints: 16 passed. Only the selected suite names were counted;
+  unrelated historical XML files in the output directory were excluded.
+  Logs: `build/voiceTreeRecordsBackendVerifiedFinal.log` and the final discovery
+  audit run `build/voiceTreeRecordsBackendExecutedAudit.log`.
+- Coverage includes exact node/owner/scope cursor reads, deletion during page
+  hydration, immutable transcript/score evidence, cross-tree rejection,
+  concurrent duplicate projection, transactional translation outboxes, stale
+  localization-token/hash rejection, failed translation original fallback,
+  privacy across coroutine children and retry causes, bounded recovery,
+  MCP history/active-identity boundaries, and pause/resume ordering/timeouts.
+  H2 fixtures preserve CHECK/FK/unique constraints and independent transactional
+  writers; they are not proof of actual MySQL DDL or locking behavior.
+- Earlier runs exposed H2 recursive-CTE column declaration compatibility and
+  test-fixture schema-connection lifetime issues; explicit CTE column lists and
+  a held schema connection resolved them without weakening constraints. A
+  structured-coroutine privacy fixture and Jackson numeric-node wire comparison
+  were corrected. A final annotation/discovery audit found two inferred
+  non-Unit test methods; explicit Unit signatures restored both tests. All 106
+  declared tests in the 11 new backend test classes are now present and passing.
+- The five test-AOT tasks were explicitly excluded; no Testcontainers or new
+  database/Redis instance was started. Normal main AOT and `bootJar` passed
+  separately using the existing build-only `aot` profile. Generated bean
+  definitions include the new controller, read/projection services and adapters;
+  all three nested history response DTOs have runtime reflection hints.
+  Log: `build/voiceTreeRecordsMainAotJar.log`.
+- Verified JAR: 330,970,838 bytes, SHA-256
+  `6ba38da9c58fc3845f75d45a2d273fdf7e4267d0e50d3619f4e50e668e119b2c`.
+  V103 is embedded in that JAR and its source SQL hash is
+  `132ab4935187010cf704cb76c545f3b076bce06c93f7adbe6eec297eaf098c22`.
+  The dev refresh must synchronize that same SQL into the existing external
+  Flyway directory along with the JAR; no Flyway configuration change is needed.

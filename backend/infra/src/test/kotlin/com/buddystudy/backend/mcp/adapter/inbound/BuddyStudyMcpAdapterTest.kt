@@ -8,6 +8,9 @@ import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
 import com.buddystudy.backend.study.application.model.StudyPageResponse
+import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
+import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
+import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
@@ -36,7 +39,7 @@ class BuddyStudyMcpAdapterTest {
 
         assertThat(tools.map { it.tool().name() })
             .containsExactlyElementsOf(expected.map(ToolContract::name))
-        assertThat(tools).hasSize(19)
+        assertThat(tools).hasSize(21)
 
         tools.zip(expected).forEach { (specification, contract) ->
             val tool = specification.tool()
@@ -57,6 +60,74 @@ class BuddyStudyMcpAdapterTest {
             assertThat(annotations.openWorldHint())
                 .describedAs("openWorldHint for ${contract.name}")
                 .isEqualTo(contract.openWorld)
+        }
+    }
+
+    @Test
+    fun `node and voice history tools default to original content without changing ordinary record defaults`() {
+        val calls = mutableListOf<Pair<String, List<Any?>>>()
+        val adapter = adapter(proxyUseCase { method, arguments ->
+            calls += method to arguments.dropLast(1)
+            when (method) {
+                "listStudyLearningRecords" -> StudyLearningRecordsPageResponse(emptyList(), null, false, 5)
+                "getVoiceLearningRecord" -> voiceRecord()
+                else -> error("Unexpected operation")
+            }
+        })
+
+        val page = call(adapter, "list_study_learning_records", mapOf("study_id" to 42L), authenticatedContext)
+        val detail = call(adapter, "get_voice_learning_record", mapOf("record_id" to 91L), authenticatedContext)
+
+        assertThat(page.isError()).isFalse()
+        assertThat(detail.isError()).isFalse()
+        assertThat(calls.map { it.first }).containsExactly("listStudyLearningRecords", "getVoiceLearningRecord")
+        assertThat(calls[0].second).containsExactly(principal, 42L, "node", 5, null, "ko", "original")
+        assertThat(calls[1].second).containsExactly(principal, 91L, "ko", "original")
+        val payload = jacksonObjectMapper().valueToTree<com.fasterxml.jackson.databind.JsonNode>(detail.structuredContent())
+        assertThat(payload.path("answer").asText()).isEqualTo("  오래전에 쓴 키부터요.\n")
+        assertThat(payload.path("score").asInt()).isEqualTo(85)
+        assertThat(payload.path("questionTurnId").asLong()).isEqualTo(11)
+        assertThat(payload.path("sessionId").asText()).isEqualTo("synthetic-prior-session")
+    }
+
+    @Test
+    fun `node history forwards its opaque cursor and exact subtree scope without converting to an offset`() {
+        var forwarded = emptyList<Any?>()
+        val adapter = adapter(proxyUseCase { method, arguments ->
+            assertThat(method).isEqualTo("listStudyLearningRecords")
+            forwarded = arguments.dropLast(1)
+            StudyLearningRecordsPageResponse(emptyList(), "next-position", true, 3)
+        })
+
+        val result = call(adapter, "list_study_learning_records", mapOf(
+            "study_id" to 42L, "scope" to "subtree", "limit" to 3,
+            "cursor" to "prior-position", "language" to "ja", "view" to "original",
+        ), authenticatedContext)
+
+        assertThat(result.isError()).isFalse()
+        assertThat(forwarded).containsExactly(principal, 42L, "subtree", 3, "prior-position", "ja", "original")
+        val payload = result.structuredContent() as Map<*, *>
+        assertThat(payload["nextCursor"]).isEqualTo("next-position")
+        assertThat(payload["hasMore"]).isEqualTo(true)
+    }
+
+    @Test
+    fun `new private history tools cannot invoke use cases without a principal and preserve owner rejection`() {
+        for ((name, arguments) in listOf(
+            "list_study_learning_records" to mapOf("study_id" to 42L),
+            "get_voice_learning_record" to mapOf("record_id" to 91L),
+        )) {
+            var invoked = false
+            val adapter = adapter(proxyUseCase { _, _ ->
+                invoked = true
+                throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+            })
+            assertThat(errorDetails(call(adapter, name, arguments, McpTransportContext.EMPTY)))
+                .containsEntry("code", "PERMISSION_DENIED")
+            assertThat(invoked).isFalse()
+            assertThat(errorDetails(call(adapter, name, arguments, authenticatedContext)))
+                .containsEntry("code", "RECORD_NOT_FOUND").containsEntry("status", 404)
+            assertThat(invoked).isTrue()
         }
     }
 
@@ -419,6 +490,33 @@ class BuddyStudyMcpAdapterTest {
             readOnly = true,
         ),
         ToolContract(
+            name = "list_study_learning_records",
+            schema = objectSchema(
+                properties = linkedMapOf(
+                    "study_id" to idProperty("Owned study node ID whose learning history to read."),
+                    "scope" to stringProperty("node reads only this node; subtree includes saved descendants.", values = listOf("node", "subtree"), default = "node"),
+                    "limit" to integerProperty("Maximum learning records to return. Prefer a small page for voice calls.", 1, 30, 5),
+                    "cursor" to stringProperty("Opaque nextCursor from the same study and scope; omit on the first page.", minLength = 1, maxLength = 512),
+                    "language" to languageProperty(),
+                    "view" to viewProperty(default = "original"),
+                ),
+                required = listOf("study_id"),
+            ),
+            readOnly = true,
+        ),
+        ToolContract(
+            name = "get_voice_learning_record",
+            schema = objectSchema(
+                properties = linkedMapOf(
+                    "record_id" to idProperty("Owned voiceRecord.id, not a question record ID or the voice: prefixed envelope ID."),
+                    "language" to languageProperty(),
+                    "view" to viewProperty(default = "original"),
+                ),
+                required = listOf("record_id"),
+            ),
+            readOnly = true,
+        ),
+        ToolContract(
             name = "get_topic_stats",
             schema = pagedSchema(
                 additional = linkedMapOf(
@@ -482,6 +580,15 @@ class BuddyStudyMcpAdapterTest {
     )
 
     private companion object {
+        fun voiceRecord() = VoiceStudyLearningRecordResponse(
+            id = "91", sessionId = "synthetic-prior-session", studyId = 42L, parentStudyId = 40L,
+            topic = "Redis", difficulty = 3, createdAt = Instant.EPOCH, kind = VoiceTutorExchangeKind.TUTOR_QUESTION,
+            question = "어떤 키를 제거하나요?", answer = "  오래전에 쓴 키부터요.\n", score = 85,
+            strengths = listOf("최근 사용 시점을 짚음"), improvements = emptyList(), depthSummary = "LRU를 살펴봄",
+            feedback = "85점입니다.", questionTurnId = 11L, answerTurnIds = listOf(12L), feedbackTurnIds = listOf(13L),
+            sourceLanguage = "ko", requestedLanguage = "ko", displayLanguage = "ko", translationPending = false,
+        )
+
         val principal = Principal(
             userId = 7,
             deviceId = "mcp-test-device",
@@ -532,11 +639,11 @@ class BuddyStudyMcpAdapterTest {
         fun languageProperty(description: String = "Response language code."): Map<String, Any> =
             stringProperty(description, values = listOf("ko", "en", "ja"), default = "ko")
 
-        fun viewProperty(): Map<String, Any> =
+        fun viewProperty(default: String = "localized"): Map<String, Any> =
             stringProperty(
                 "Localized or author-original content view.",
                 values = listOf("localized", "original"),
-                default = "localized",
+                default = default,
             )
 
         fun instantProperty(description: String): Map<String, Any> =

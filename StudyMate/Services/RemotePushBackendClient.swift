@@ -531,6 +531,18 @@ protocol RemotePushBackendClientProtocol {
         language: AppLanguage
     ) async throws -> BackendRecordsPage
 
+    #if os(iOS)
+    func fetchStudyLearningRecords(
+        registration: RemotePushRegistration, studyID: Int, scope: StudyLearningRecordScope,
+        limit: Int, cursor: String?, language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendStudyLearningRecordsPage
+
+    func fetchVoiceStudyLearningRecord(
+        registration: RemotePushRegistration, recordID: String,
+        language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendVoiceStudyLearningRecord
+    #endif
+
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings
 
     func fetchAPIStatus(registration: RemotePushRegistration) async throws -> BackendAPIStatus
@@ -1010,6 +1022,18 @@ extension RemotePushBackendClientProtocol {
     ) async throws -> BackendRecordsPage {
         throw RemotePushBackendError.invalidResponse
     }
+
+    #if os(iOS)
+    func fetchStudyLearningRecords(
+        registration: RemotePushRegistration, studyID: Int, scope: StudyLearningRecordScope,
+        limit: Int, cursor: String?, language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendStudyLearningRecordsPage { throw StudyLearningRecordsError.unavailable }
+
+    func fetchVoiceStudyLearningRecord(
+        registration: RemotePushRegistration, recordID: String,
+        language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendVoiceStudyLearningRecord { throw StudyLearningRecordsError.unavailable }
+    #endif
 }
 
 @MainActor
@@ -1973,6 +1997,77 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(BackendRecordsPage.self, from: data)
     }
 
+    #if os(iOS)
+    func fetchStudyLearningRecords(
+        registration: RemotePushRegistration, studyID: Int, scope: StudyLearningRecordScope,
+        limit: Int, cursor: String?, language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendStudyLearningRecordsPage {
+        guard studyID > 0, cursor == nil || cursor!.utf8.count <= 4_096 else {
+            throw StudyLearningRecordsError.invalidResponse
+        }
+        var components = URLComponents(
+            url: endpoint("api", "v1", "studies", String(studyID), "learning-records"),
+            resolvingAgainstBaseURL: false
+        )
+        var items = [
+            URLQueryItem(name: "scope", value: scope.rawValue),
+            URLQueryItem(name: "limit", value: String(max(1, min(limit, 100)))),
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: view.rawValue)
+        ]
+        if let cursor { items.append(URLQueryItem(name: "cursor", value: cursor)) }
+        components?.queryItems = items
+        guard let url = components?.url else { throw StudyLearningRecordsError.invalidResponse }
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await performStudyLearningRequest(request)
+        let page = try decoder.decode(BackendStudyLearningRecordsPage.self, from: data)
+        guard scope == .subtree || page.items.allSatisfy({ $0.studyID == studyID }),
+              !page.hasMore || page.nextCursor != cursor else {
+            throw StudyLearningRecordsError.invalidResponse
+        }
+        return page
+    }
+
+    func fetchVoiceStudyLearningRecord(
+        registration: RemotePushRegistration, recordID: String,
+        language: AppLanguage, view: LocalizedContentView
+    ) async throws -> BackendVoiceStudyLearningRecord {
+        guard let numericID = Int64(recordID), numericID > 0 else {
+            throw StudyLearningRecordsError.invalidResponse
+        }
+        var components = URLComponents(
+            url: endpoint("api", "v1", "voice-tutor", "learning-records", String(numericID)),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: view.rawValue)
+        ]
+        guard let url = components?.url else { throw StudyLearningRecordsError.invalidResponse }
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await performStudyLearningRequest(request)
+        let record = try decoder.decode(BackendVoiceStudyLearningRecord.self, from: data)
+        guard record.id == String(numericID) else { throw StudyLearningRecordsError.invalidResponse }
+        return record
+    }
+
+    private func performStudyLearningRequest(_ request: URLRequest) async throws -> Data {
+        do {
+            return try await perform(request, logsBodyContents: false)
+        } catch RemotePushBackendError.httpStatus(let status, _, let apiError) {
+            // Preserve the structured auth/permission code for the standard
+            // recovery policy, but not private text in auth diagnostic logs.
+            var safeError = apiError
+            safeError?.message = "Learning records request failed."
+            safeError?.description = nil
+            safeError?.debugDescription = nil
+            throw RemotePushBackendError.httpStatus(status, "", safeError)
+        }
+    }
+    #endif
+
     func fetchNotifications(
         registration: RemotePushRegistration,
         limit: Int = 30,
@@ -2846,6 +2941,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         logsBodyContents: Bool = true
     ) async throws -> Data {
         var request = request
+        let logsBodyContents = logsBodyContents && !Self.suppressesPrivateLearningBodies(for: request.url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let startedAt = Date()
         let redactedBodyDescription = logsBodyContents ? "" : "[REDACTED]"
@@ -2922,7 +3018,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     responseBody: logsBodyContents
                         ? Self.safeResponseBody(responseBodyText)
                         : redactedBodyDescription,
-                    error: backendError?.message ?? "HTTP \(statusCode)",
+                    error: logsBodyContents ? (backendError?.message ?? "HTTP \(statusCode)") : "HTTP \(statusCode)",
                     isError: true
                 )
                 NotificationCenter.default.post(
@@ -2979,7 +3075,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                 requestHeaders: requestLog.requestHeaders,
                 requestBody: requestLog.requestBody,
                 responseBody: "",
-                error: error.localizedDescription,
+                error: logsBodyContents ? error.localizedDescription : "Request failed.",
                 isError: true
             )
             NotificationCenter.default.post(
@@ -2989,6 +3085,22 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             )
             throw error
         }
+    }
+
+    /// One endpoint-level policy covers success/error logs and the debug popup.
+    /// It never inspects or classifies the learner's words.
+    nonisolated static func suppressesPrivateLearningBodies(for url: URL?) -> Bool {
+        guard let url else { return false }
+        let parts = url.path.split(separator: "/").map(String.init)
+        guard parts.count >= 3 else { return false }
+        for index in 0...(parts.count - 3) where parts[index] == "api" && parts[index + 1] == "v1" {
+            if parts[index + 2] == "voice-tutor" { return true }
+            if parts.count == index + 5,
+               parts[index + 2] == "studies",
+               Int64(parts[index + 3]).map({ $0 > 0 }) == true,
+               parts[index + 4] == "learning-records" { return true }
+        }
+        return false
     }
 
     private static func safeHeaderLog(for request: URLRequest) -> String {

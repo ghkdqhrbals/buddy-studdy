@@ -81,6 +81,17 @@ struct StudyView: View {
                             .frame(maxWidth: .infinity, minHeight: 140)
                     }
                 }
+
+                #if os(iOS)
+                if let room = appState.backendStudyRoom(categoryID: preferredCategoryID) {
+                    Divider().padding(.top, 8)
+                    StudyLearningRecordsSection(
+                        studyID: room.id,
+                        allowsSubtree: room.parentStudyId == nil || appState.backendStudyRooms.contains { $0.parentStudyId == room.id }
+                    )
+                    .id(room.id)
+                }
+                #endif
             }
             .padding(.top, 10)
             .padding(.trailing, 8)

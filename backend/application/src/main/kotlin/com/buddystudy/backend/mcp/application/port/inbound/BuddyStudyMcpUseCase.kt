@@ -12,8 +12,10 @@ import com.buddystudy.backend.study.application.model.QuestionGenerationAccepted
 import com.buddystudy.backend.study.application.model.QuestionGenerationProcessResponse
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
+import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
+import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
@@ -91,6 +93,23 @@ interface BuddyStudyMcpUseCase {
         language: String,
         view: String,
     ): StudyRecordResponse
+
+    suspend fun listStudyLearningRecords(
+        principal: Principal,
+        studyId: Long,
+        scope: String,
+        limit: Int,
+        cursor: String?,
+        language: String,
+        view: String,
+    ): StudyLearningRecordsPageResponse
+
+    suspend fun getVoiceLearningRecord(
+        principal: Principal,
+        recordId: Long,
+        language: String,
+        view: String,
+    ): VoiceStudyLearningRecordResponse
 
     suspend fun getTopicStats(
         principal: Principal,

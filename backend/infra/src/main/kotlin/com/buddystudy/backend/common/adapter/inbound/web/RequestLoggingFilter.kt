@@ -37,7 +37,8 @@ class RequestLoggingFilter(
         val requestId = UUID.randomUUID().toString()
         val capturesBodies = loggingPolicy.capturesBodies &&
             !isMcpEndpoint(exchange) &&
-            !isVoiceTutorEndpoint(exchange)
+            !isVoiceTutorEndpoint(exchange) &&
+            !isStudyLearningRecordEndpoint(exchange)
         val requestCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
         val responseCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
         val started = System.nanoTime()
@@ -98,6 +99,13 @@ class RequestLoggingFilter(
             .filterIsInstance<PathContainer.PathSegment>()
             .map { it.valueToMatch() }
             .take(3) == VOICE_TUTOR_ENDPOINT_PREFIX
+
+    private fun isStudyLearningRecordEndpoint(exchange: ServerWebExchange): Boolean {
+        val segments = exchange.request.path.pathWithinApplication().elements()
+            .filterIsInstance<PathContainer.PathSegment>().map { it.valueToMatch() }
+        return segments.size == 5 && segments.take(3) == listOf("api", "v1", "studies") &&
+            segments[4] == "learning-records"
+    }
 
     private fun logExchange(
         requestId: String,

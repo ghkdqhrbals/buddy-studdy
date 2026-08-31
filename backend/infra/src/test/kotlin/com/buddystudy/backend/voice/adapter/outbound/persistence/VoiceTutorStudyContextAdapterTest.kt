@@ -1,5 +1,6 @@
 package com.buddystudy.backend.voice.adapter.outbound.persistence
 
+import com.buddystudy.backend.voice.application.model.VoiceTutorLessonTreeContext
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
@@ -24,6 +25,7 @@ import org.springframework.transaction.reactive.executeAndAwait
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.UUID
 
@@ -122,6 +124,149 @@ class VoiceTutorStudyContextAdapterTest {
         insertSession(accepted)
         insertStudy(10)
         assertThat(transaction { adapter.prepare(accepted) }).isEmpty()
+        assertThat(snapshotCount()).isZero()
+    }
+
+    @Test
+    fun `prepare adds the owned parent path without collecting siblings or recursively expanding children`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(1, topic = "Systems", difficulty = 9)
+        insertStudy(5, parentId = 1, topic = "Databases", difficulty = 2)
+        insertStudy(10, parentId = 5, topic = "Live Redis", difficulty = 8)
+        insertStudy(11, parentId = 10, topic = "Cache", difficulty = 3)
+        insertStudy(6, parentId = 1, topic = "Sibling branch")
+        insertStudy(12, parentId = 11, topic = "Unopened grandchild")
+        insertStudy(99, topic = "Other root")
+
+        val saved = transaction { adapter.prepare(accepted) }
+
+        assertThat(saved.map { it.studyId }).containsExactly(1, 5, 10, 11)
+        assertThat(saved.single { it.studyId == 10L }).isEqualTo(VoiceTutorStudySnapshot(10, 5, "Accepted Redis", 6))
+        assertThat(saved.single { it.studyId == 5L }.difficulty).isEqualTo(2)
+        assertThat(saved.single { it.studyId == 11L }.difficulty).isEqualTo(3)
+        val tree = VoiceTutorLessonTreeContext.metadata(10, saved)
+        assertThat(tree["selectedPathStudyIds"]).isEqualTo(listOf(1L, 5L, 10L))
+        assertThat(tree["selectedPathComplete"]).isEqualTo(true)
+    }
+
+    @Test
+    fun `a selected node missing owned evidence is not fabricated as a root even when its id has children`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        assertThat(transaction { adapter.prepare(accepted) }).isEmpty()
+        insertStudy(10, userId = 99, topic = "Foreign node")
+        insertStudy(11, parentId = 10, topic = "Inconsistent child")
+        assertThat(transaction { adapter.prepare(accepted) }).isEmpty()
+        assertThat(snapshotCount()).isZero()
+    }
+
+    @Test
+    fun `foreign or missing parent paths remain incomplete without inferring a same named root`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(10, parentId = 1)
+        insertStudy(11, parentId = 10)
+        insertStudy(1, userId = 99, topic = "Systems")
+        insertStudy(2, topic = "Systems")
+        val saved = transaction { adapter.prepare(accepted) }
+        assertThat(saved.map { it.studyId }).containsExactly(10, 11)
+        val tree = VoiceTutorLessonTreeContext.metadata(10, saved)
+        assertThat(tree["selectedRootStudyId"]).isNull()
+        assertThat(tree["selectedPathComplete"]).isEqualTo(false)
+        assertThat(tree["selectedPathStudyIds"]).isEqualTo(listOf(10L))
+    }
+
+    @Test
+    fun `remember captures an exact owned ancestry but returns only the requested immutable nodes`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(1)
+        insertStudy(10, parentId = 1)
+        insertStudy(11, parentId = 10, difficulty = 3)
+        insertStudy(12, parentId = 11, difficulty = 2)
+        insertStudy(13, parentId = 10)
+
+        val captured = transaction { adapter.remember(7, accepted.id, listOf(12)) }
+        assertThat(captured).containsExactly(VoiceTutorStudySnapshot(12, 11, "Synthetic topic 12", 2))
+        assertThat(adapter.list(7, accepted.id).map { it.studyId }).containsExactly(1, 10, 11, 12)
+        insertStudy(88)
+        execute("update studies set parent_study_id = 88, difficulty_level = 9 where id in (11, 12)")
+        assertThat(transaction { adapter.remember(7, accepted.id, listOf(12)) }).isEqualTo(captured)
+        assertThat(adapter.list(7, accepted.id).map { it.studyId }).containsExactly(1, 10, 11, 12)
+        assertThat(adapter.list(7, accepted.id).single { it.studyId == 11L }.parentStudyId).isEqualTo(10)
+    }
+
+    @Test
+    fun `actual requested nodes take the final capacity before their shared parent metadata`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        for (id in 100L..161L) insertStudy(id)
+        transaction { adapter.remember(7, accepted.id, (100L..131L).toList()) }
+        transaction { adapter.remember(7, accepted.id, (132L..161L).toList()) }
+        insertStudy(1)
+        insertStudy(200, parentId = 1)
+        insertStudy(201, parentId = 1)
+
+        val captured = transaction { adapter.remember(7, accepted.id, listOf(200, 201)) }
+        assertThat(captured.map { it.studyId }).containsExactly(200, 201)
+        val saved = adapter.list(7, accepted.id)
+        assertThat(saved).hasSize(64)
+        assertThat(saved.map { it.studyId }).doesNotContain(1L)
+        assertThat(VoiceTutorLessonTreeContext.metadata(200, saved)["selectedPathComplete"]).isEqualTo(false)
+    }
+
+    @Test
+    fun `selected node and immediate child take the final capacity before preparing ancestors`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        for (id in 100L..161L) insertStudy(id)
+        transaction { adapter.remember(7, accepted.id, (100L..131L).toList()) }
+        transaction { adapter.remember(7, accepted.id, (132L..161L).toList()) }
+        insertStudy(1)
+        insertStudy(10, parentId = 1)
+        insertStudy(11, parentId = 10)
+
+        val saved = transaction { adapter.prepare(accepted) }
+        assertThat(saved).hasSize(64)
+        assertThat(saved.map { it.studyId }).contains(10L, 11L).doesNotContain(1L)
+        assertThat(saved.single { it.studyId == 10L }.difficulty).isEqualTo(6)
+    }
+
+    @Test
+    fun `ancestry stops at thirty two edges and leaves overlong or cyclic paths explicit`(): Unit = runBlocking {
+        val accepted = session(studyId = 139)
+        insertSession(accepted)
+        for (id in 100L..139L) insertStudy(id, parentId = if (id == 100L) null else id - 1)
+        val saved = transaction { adapter.prepare(accepted) }
+        assertThat(saved.map { it.studyId }).containsExactlyElementsOf((107L..139L).toList())
+        assertThat(VoiceTutorLessonTreeContext.metadata(139, saved)["selectedPathComplete"]).isEqualTo(false)
+        assertThat(VoiceTutorLessonTreeContext.metadata(139, saved)["selectedRootStudyId"]).isNull()
+
+        val cyclicSession = session(id = "cyclic-study-context")
+        insertSession(cyclicSession)
+        insertStudy(10, parentId = 11)
+        insertStudy(11, parentId = 10)
+        val cyclic = transaction { adapter.prepare(cyclicSession) }
+        assertThat(cyclic.map { it.studyId }).containsExactly(10, 11)
+        assertThat(VoiceTutorLessonTreeContext.metadata(10, cyclic)["selectedPathComplete"]).isEqualTo(false)
+    }
+
+    @Test
+    fun `a lease expiring during metadata reads cannot append selected children or ancestor snapshots`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(1)
+        insertStudy(10, parentId = 1)
+        insertStudy(11, parentId = 10)
+        var readings = 0
+        val expiringClock = object : Clock() {
+            override fun getZone(): ZoneId = ZoneOffset.UTC
+            override fun withZone(zone: ZoneId): Clock = this
+            override fun instant(): Instant = if (readings++ == 0) now else accepted.hardEndsAt
+        }
+        val expiring = VoiceTutorStudyContextAdapter(database, expiringClock)
+        assertThat(transaction { expiring.prepare(accepted) }).isEmpty()
         assertThat(snapshotCount()).isZero()
     }
 

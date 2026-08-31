@@ -232,7 +232,10 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 onProviderEvent = onProviderEvent,
             )
             val toolWork = voiceTutorMcpToolRelay(turnController, context, mcpTools, onProviderEvent)
-            val receive = Mono.firstWithSignal(providerReceive, turnController.inputFailure(), inputWork, toolWork)
+            val clientControls = turnController.clientEvents().concatMap { raw ->
+                mono { onProviderEvent(raw, false, true) }.then()
+            }.then()
+            val receive = Mono.firstWithSignal(providerReceive, turnController.inputFailure(), inputWork, toolWork, clientControls)
             val ready = sessionHandshake.awaitConfirmation().then(
                 mono {
                     onProviderEvent(SIDEBAND_READY_PAYLOAD, false, true)

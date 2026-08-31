@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.translation
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.common.application.privacy.PrivateLearningContentLogScope
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import com.buddystudy.backend.study.application.port.outbound.QuestionTranslationPort
 import com.buddystudy.backend.study.application.port.outbound.TranslationValidationMode
@@ -64,7 +65,7 @@ class ResilientQuestionTranslationAdapter(
                     provider.providerId,
                     sourceLanguage,
                     error.javaClass.simpleName,
-                    error.message,
+                    if (PrivateLearningContentLogScope.isActive()) "Private learning content translation failed." else error.message,
                 )
             }
         }
