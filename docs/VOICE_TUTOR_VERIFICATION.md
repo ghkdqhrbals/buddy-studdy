@@ -1121,3 +1121,39 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
 - A human-device lesson exercising the new question/assessment loop and every
   selectable voice remains a separate end-to-end check; these results do not
   claim one was performed or that previous word-boundary playback work changed.
+
+### Existing dev runtime and MySQL migration verification
+
+- Implementation commit `341c90d1` and its verified JAR were installed into the
+  existing `backend-backend-1` API (`8c8c7589bae9`) on `127.0.0.1:8080`. The
+  `dev` profile, AWS `buddystudy/dev` configuration, original environment,
+  network, mounts and resource limits were preserved. The previous `4cfac5ee`
+  JAR is retained in the existing artifact volume for rollback. Log:
+  `build/voiceExplorationDevRefresh.log`.
+- The initial artifact refresh omitted the external SQL files: the preserved
+  `FLYWAY_LOCATIONS=filesystem:/app/db/migration-mysql` correctly continued to
+  read that directory, not the new files embedded in the JAR. Read-only metadata
+  confirmed that V100 was still the last migration. This was a dev artifact
+  synchronization omission, not a disabled Flyway or AWS configuration failure.
+- Only the missing V101/V102 SQL artifacts were copied from the same verified
+  source, with hashes checked and existing applied files left untouched. After
+  a guarded restart of the same API container at 22:31:49 KST, Flyway applied
+  both migrations normally at 22:31:56. No manual schema-history edit, repair,
+  user record/quota adjustment or production deployment occurred.
+- MySQL metadata now confirms successful versions 101 and 102, all six snapshot
+  columns, and the nullable result exploration column. Startup completed with
+  zero observed ERROR log entries; manual local and existing public dev health
+  endpoints returned HTTP 200. These observations verify the actual MySQL DDL
+  and running dev schema, not a human Realtime lesson or production runtime.
+- Active call count was zero before artifact copying and restart. Database,
+  Redis, translation and backup container IDs/start times remain identical to
+  the pre-refresh values. No Docker image build or additional service stack was
+  used. The offline artifact-copy helper was transient and automatically removed.
+- The one-off copy helper initially reported a post-restart comparison failure
+  because Docker returned the two unchanged mounts in a different array order.
+  A separate read-only verification normalized mount ordering and confirmed
+  expected mounts, source/JAR/SQL hashes, infrastructure, schema and HTTP status;
+  no second restart was needed. Logs: `build/voiceExplorationDevMigrationSync.log`
+  and the final passing `build/voiceExplorationDevRuntimeVerification.log`.
+- The local-runtime note in `backend/README.md` now documents the external SQL
+  synchronization requirement so a later JAR-only refresh does not repeat it.

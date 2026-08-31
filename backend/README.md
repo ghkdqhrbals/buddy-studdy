@@ -217,6 +217,14 @@ at 12 GiB; allocate at least 14 GiB to the native build environment. Runtime
 selection is a build concern; API and deployment configuration must not branch
 on it.
 
+For a local dev runtime with a volume-mounted JVM artifact, refresh the external
+`/app/db/migration-mysql` SQL files from the same source revision as the JAR,
+preserving already applied migration files. With the existing filesystem Flyway
+location, replacing only the JAR does not make new migrations available, even
+when that JAR contains them. Restart only the existing API after checking there
+are no active voice calls; preserve its dev profile, AWS configuration and
+database/Redis infrastructure, and verify the expected migration versions.
+
 The `Build Backend Image` GitHub workflow exposes the same `backend_runtime`
 choice. Tag-triggered deployments remain `native` by default. A manually
 selected JVM build is pushed and deployed through a runtime-qualified immutable
