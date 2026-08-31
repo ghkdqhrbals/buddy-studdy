@@ -20,6 +20,11 @@
 		F81000000000000000000007 /* VoiceTutorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000008 /* VoiceTutorView.swift */; };
 		F81000000000000000000009 /* VoiceTutorContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8100000000000000000000A /* VoiceTutorContractTests.swift */; };
 		F83000000000000000000001 /* VoiceTutorNativeConversationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F83000000000000000000002 /* VoiceTutorNativeConversationTests.swift */; };
+		F84000000000000000000001 /* VoiceTutorSileroSpeechScorer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84000000000000000000002 /* VoiceTutorSileroSpeechScorer.swift */; };
+		F84000000000000000000003 /* VoiceTutorSileroAudioPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84000000000000000000004 /* VoiceTutorSileroAudioPipeline.swift */; };
+		F84000000000000000000005 /* silero-vad-unified-v6.0.0.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = F84000000000000000000006 /* silero-vad-unified-v6.0.0.mlpackage */; };
+		F84000000000000000000007 /* SileroVAD-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = F84000000000000000000008 /* SileroVAD-LICENSE.txt */; };
+		F84000000000000000000009 /* VoiceTutorSileroTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8400000000000000000000A /* VoiceTutorSileroTests.swift */; };
 		F82000000000000000000001 /* VoiceTutorWebRTCTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000002 /* VoiceTutorWebRTCTransport.swift */; };
 		F82000000000000000000003 /* VoiceTutorRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000004 /* VoiceTutorRecording.swift */; };
 		F82000000000000000000005 /* LiveKitWebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F82000000000000000000006 /* LiveKitWebRTC */; };
@@ -438,6 +443,11 @@
 		120000000000000000000208 /* QuestionGenerationFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionGenerationFlowTests.swift; sourceTree = "<group>"; };
 		F8100000000000000000000A /* VoiceTutorContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorContractTests.swift; sourceTree = "<group>"; };
 		F83000000000000000000002 /* VoiceTutorNativeConversationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorNativeConversationTests.swift; sourceTree = "<group>"; };
+		F84000000000000000000002 /* VoiceTutorSileroSpeechScorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorSileroSpeechScorer.swift; sourceTree = "<group>"; };
+		F84000000000000000000004 /* VoiceTutorSileroAudioPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorSileroAudioPipeline.swift; sourceTree = "<group>"; };
+		F84000000000000000000006 /* silero-vad-unified-v6.0.0.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = "silero-vad-unified-v6.0.0.mlpackage"; sourceTree = "<group>"; };
+		F84000000000000000000008 /* SileroVAD-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "SileroVAD-LICENSE.txt"; sourceTree = "<group>"; };
+		F8400000000000000000000A /* VoiceTutorSileroTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorSileroTests.swift; sourceTree = "<group>"; };
 		B90000000000000000000001 /* StudyMateDev.storekit */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StudyMateDev.storekit; sourceTree = "<group>"; };
 		F70000000000000000000020 /* AppControlPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppControlPolicyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -861,6 +871,8 @@
 				F81000000000000000000004 /* VoiceTutorAudioEngine.swift */,
 				F81000000000000000000002 /* VoiceTutorRealtimeClient.swift */,
 				F82000000000000000000002 /* VoiceTutorWebRTCTransport.swift */,
+				F84000000000000000000002 /* VoiceTutorSileroSpeechScorer.swift */,
+				F84000000000000000000004 /* VoiceTutorSileroAudioPipeline.swift */,
 				F82000000000000000000004 /* VoiceTutorRecording.swift */,
 				110000000000000000000004 /* SettingsStore.swift */,
 				110000000000000000000005 /* OpenAIClient.swift */,
@@ -916,6 +928,7 @@
 				120000000000000000000208 /* QuestionGenerationFlowTests.swift */,
 				F8100000000000000000000A /* VoiceTutorContractTests.swift */,
 				F83000000000000000000002 /* VoiceTutorNativeConversationTests.swift */,
+				F8400000000000000000000A /* VoiceTutorSileroTests.swift */,
 			);
 			path = StudyMateiOSTests;
 			sourceTree = "<group>";
@@ -953,6 +966,7 @@
 				F90000000000000000000002 /* PrivacyInfo.xcprivacy */,
 				11000000000000000000014A /* Assets.xcassets */,
 				110000000000000000000069 /* Sounds */,
+				F8400000000000000000000B /* SileroVAD */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -963,6 +977,15 @@
 				120000000000000000000301 /* AppDebugControls.swift */,
 			);
 			path = Debug;
+			sourceTree = "<group>";
+		};
+		F8400000000000000000000B /* SileroVAD */ = {
+			isa = PBXGroup;
+			children = (
+				F84000000000000000000006 /* silero-vad-unified-v6.0.0.mlpackage */,
+				F84000000000000000000008 /* SileroVAD-LICENSE.txt */,
+			);
+			path = SileroVAD;
 			sourceTree = "<group>";
 		};
 		110000000000000000000069 /* Sounds */ = {
@@ -1169,6 +1192,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F84000000000000000000007 /* SileroVAD-LICENSE.txt in Resources */,
 				F90000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */,
 				F60000000000000000000004 /* GoogleService-Info.plist in Resources */,
 				120000000000000000000150 /* study_ping.wav in Resources */,
@@ -1361,6 +1385,7 @@
 				120000000000000000000209 /* QuestionGenerationFlowTests.swift in Sources */,
 				F81000000000000000000009 /* VoiceTutorContractTests.swift in Sources */,
 				F83000000000000000000001 /* VoiceTutorNativeConversationTests.swift in Sources */,
+				F84000000000000000000009 /* VoiceTutorSileroTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1368,6 +1393,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F84000000000000000000001 /* VoiceTutorSileroSpeechScorer.swift in Sources */,
+				F84000000000000000000003 /* VoiceTutorSileroAudioPipeline.swift in Sources */,
+				F84000000000000000000005 /* silero-vad-unified-v6.0.0.mlpackage in Sources */,
 				F82000000000000000000001 /* VoiceTutorWebRTCTransport.swift in Sources */,
 				F82000000000000000000003 /* VoiceTutorRecording.swift in Sources */,
 				A10000000000000000000003 /* AdMobNativeAdvertising.swift in Sources */,
@@ -1762,6 +1790,7 @@
 		1200000000000000000000A2 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				COREML_CODEGEN_LANGUAGE = None;
 				ADMOB_APP_ID = "ca-app-pub-3940256099942544~1458002511";
 				ADMOB_NATIVE_AD_UNIT_ID = "ca-app-pub-3940256099942544/3986624511";
 				APNS_ENVIRONMENT = development;
@@ -1801,6 +1830,7 @@
 		1200000000000000000000A3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				COREML_CODEGEN_LANGUAGE = None;
 				ADMOB_APP_ID = "ca-app-pub-6088017773958522~4861541440";
 				ADMOB_NATIVE_AD_UNIT_ID = "ca-app-pub-6088017773958522/6777258345";
 				APNS_ENVIRONMENT = production;

@@ -653,7 +653,7 @@ class VoiceTutorServiceTest {
         }
 
         override suspend fun relaySideband(
-            callId: String,
+            context: com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext,
             clientEvents: Flow<String>,
             terminalEvents: Flow<VoiceTutorRelayTermination>,
             onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,

@@ -14,6 +14,17 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
+    fun `input retry is a compact nonterminal server hint and cannot be forged as client control`() {
+        val raw = """{"type":"${VoiceTutorRealtimeContract.INPUT_RETRY_EVENT}","message":"untrusted extra body"}"""
+        val decision = policy.providerDecision(raw, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+        assertThat(decision.terminate).isFalse()
+        assertThat(mapper.readTree(decision.payload).fieldNames().asSequence().toList()).containsExactly("type")
+        assertThat(mapper.readTree(decision.payload).path("type").asText()).isEqualTo(VoiceTutorRealtimeContract.INPUT_RETRY_EVENT)
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }
+            .isInstanceOf(VoiceTutorClientProtocolException::class.java)
+    }
+
+    @Test
     fun `local speech boundaries are validated but never forwarded to the provider`() {
         listOf(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT)
             .forEach { type ->

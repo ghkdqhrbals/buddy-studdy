@@ -3,13 +3,16 @@
 Verification date: 2026-08-31. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest checkpoint: response-continuation fix `c33f0fe4` is running in the existing
-8080 dev API and on the physical iPhone. The selected native three-turn test
-[passed after network approval](#physical-native-three-turn-verification-after-network-approval).
-The earlier checks below are historical; they do not all describe the current
-implementation. A regex-free meaningful-input gate remains **unimplemented**:
-the [tested OSS candidates](#additional-meaningful-input-model-probes) did not
-reliably separate hesitation from short meaningful Korean answers.
+Latest implementation: [bundled Silero plus contextual meaningful-input
+assessment](#silero-and-contextual-meaningful-input-assessment) follows the
+response-continuation fix `c33f0fe4`. The earlier checks below are historical;
+they do not all describe the current implementation. The selected native
+three-turn test [passed after network
+approval](#physical-native-three-turn-verification-after-network-approval),
+but that receive/playout test is not a microphone/semantic-gate end-to-end test.
+The [earlier OSS probes](#additional-meaningful-input-model-probes) motivated
+separating acoustic speech detection from contextual communicative intent;
+none of their rejected semantic models or filler regexes was installed.
 
 ## Contract
 
@@ -21,7 +24,9 @@ reliably separate hesitation from short meaningful Korean answers.
 - Learner overlap never triggers playback stop, response cancellation, or
   truncation. Each tutor response is one short complete sentence. The next
   answer requires completion of the same provider response, provider audio-buffer
-  drain, and a committed learner turn. The continuous WebRTC track retains its
+  drain, and a meaningful, persisted learner turn with no unresolved input work.
+  A raw microphone edge, commit acknowledgement or partial transcript is not
+  permission to reply. The continuous WebRTC track retains its
   locally buffered tail; PCM silence is not a response gate or an acoustic EOS
   acknowledgement. The legacy PCM fallback keeps its real playback callback.
 - TIER2/TIER3 default to 60 minutes per user's monthly window. Tier defaults and
@@ -676,3 +681,148 @@ The earlier test results remain historical evidence, not the current turn gate.
   provider call was made for this host-only hardening. Root verification log:
   `build/voiceNativeHostOfflineRegression.log`.
   Reproduce using the [offline host checks](../scripts/voice-tutor-native-conversation.md#no-network-host-regression-checks).
+
+## Silero and contextual meaningful-input assessment
+
+### Implementation boundaries
+
+- iOS bundles the pinned MIT Silero v6 Core ML model (905,043 source bytes,
+  approximately 0.9 MB). Model provenance, hashes, conversion revision and
+  license are in [the bundled model README](../StudyMate/Resources/SileroVAD/README.md).
+  Five-second local model loading/warm-up must complete before reserving a call;
+  there is no model download, RMS-classifier fallback or additional runtime.
+- Native FloatS16 microphone frames remain untouched for WebRTC transmission.
+  A separate bounded worker copies/normalizes one channel, continuously converts
+  to 16 kHz and runs 512-sample Silero windows with recurrent state and context.
+  Probability hysteresis uses an 80 ms onset and 700 ms release. Readiness,
+  explicit mute, close and capture-format generations fence stale callbacks;
+  tutor speech never gates capture or interrupts tutor playback.
+- Acoustic speech includes hesitation. Final ASR therefore goes through the
+  existing GPT configuration (default `gpt-5.4`) with the latest completed
+  teacher sentence. The strict-schema result must contain exactly one decision
+  for each original USER item ID. No regex, filler blacklist, minimum sentence
+  length, transcript rewrite or alternate-model fallback decides meaning.
+  Short acknowledgements, negations, names, numbers, questions and partial
+  meaningful ideas are explicitly valid; uncertainty preserves meaningful input.
+- The application service implements its inbound use case and depends on an
+  outbound provider port. Process-wide admission is bounded to four requests,
+  with a five-second total deadline, no waiting queue and no implicit retries.
+  Configurable batch/text bounds are documented in [the backend README](../backend/README.md).
+  The authenticated context supplies user identity; callers cannot select a
+  different key/account through a provider call ID. Chat Completions uses
+  `store: false` and the body `safety_identifier`, not the Realtime-only header.
+- Assessment and transcript publication run in an independent ordered worker,
+  never inside the provider's ordered receive loop. Meaningful input is
+  persisted/forwarded before authorizing a reply. Non-communicative USER items
+  are removed by exact ID and matching provider acknowledgement before another
+  reply. Late responses, stale assessment tokens, duplicate events and closed
+  sessions cannot republish input or schedule work.
+- ASR, assessment, publish/delete acknowledgement and response phases have
+  separate deadlines. Assessment failure is not a negative semantic verdict:
+  a small retry hint keeps the call alive after safe input cleanup. An unresolved
+  cleanup or terminal deadline closes pending work immediately through an
+  independent failure signal, even when outbound control delivery is blocked.
+- A long learner monologue first gets a checkpoint commit without stopping
+  capture. Only a meaningful, persisted checkpoint permits a short tutor
+  intervention. Immediate stop/tail commits wait up to 250 ms; rapid mute/unmute
+  stops in that interval share a commit that settles every reserved speech slot.
+  An exact matching empty-commit error settles only its own outstanding commit.
+  None of these input decisions clears, cancels, truncates, mutes or resets the
+  teacher's audio.
+
+### Backend and real-model checks
+
+- The final focused application run passed 72 tests; the infrastructure report
+  contains 240 tests with zero failures and one explicitly opt-in live-model
+  test skipped (239 passed). `:tutor:bootJar` also passed. These counts come from
+  the current Gradle reports, not unrelated old temporary XML files in the
+  reused build directory. Log: `build/voiceMeaningfulInputBackendFinal.log`.
+- Coverage includes strict parsing/identity correlation, bounded admission,
+  cancellation/deadlines, private diagnostics, ASR-before-commit acknowledgement,
+  both teacher completion/audio-stop orders, meaningful publication barriers,
+  filler deletion acknowledgement, checkpoint/tail coalescing, stale worker
+  callbacks and terminal failure under outbound backpressure.
+- A separate, explicitly enabled real-GPT test used the production use case,
+  adapter, default model, schema and five-second deadline. Four sequential
+  requests classified 24 frozen synthetic cases: all 15 meaningful and all nine
+  non-communicative cases matched their expected labels. Batch durations were
+  4,555 ms, 1,650 ms, 1,662 ms and 1,709 ms (9,583 ms total). No retries or
+  prompt/model tuning followed the results. Log:
+  `build/voiceMeaningfulInputLiveAssessment.log`; reusable opt-in test:
+  `VoiceTutorInputAssessmentLiveTest`.
+- The live check used the existing dev regular user-content API credential
+  only in process memory. It created no app session, quota reservation,
+  database record or recording, and used no real conversation/audio. It is
+  skipped in ordinary tests/CI. Twenty-four synthetic cases are not an accuracy
+  benchmark, and the cold request's proximity to the deadline is not evidence
+  of a production latency guarantee or load/concurrency performance.
+
+### Physical iPhone checks
+
+- The required generic `StudyMateiOS` Debug build passed using
+  `generic/platform=iOS`, the existing `build/iOSDeviceDerivedData`, and
+  `CODE_SIGNING_ALLOWED=NO`. Log:
+  `build/voiceMeaningfulInputGenericBuildFinal.log`.
+- The signed test host built successfully. A selected run on iPhone 16 Pro,
+  iOS 26.6, passed 101 tests with no failures or skips: 76 non-mutating call
+  contracts and 25 offline Silero/pipeline contracts. Recording/account purge
+  tests and microphone/provider probes were excluded from that run. Existing
+  DerivedData was reused. Logs:
+  `build/voiceMeaningfulInputDeviceTestBuildFinal.log` and
+  `build/voiceMeaningfulInputDeviceTestsFinal.log`; result bundle:
+  `Test-StudyMateiOS-2026.08.31_19-15-28-+0900.xcresult`.
+- The first physical run exposed a genuine large-buffer conversion defect:
+  the once-only input provider ignored the converter's requested frame count,
+  supplying only a 4,096-frame prefix of larger 44.1/48 kHz input. The fix
+  retains an offset and supplies bounded slices until the complete input is
+  consumed. Assertions were strengthened, not relaxed: 100 ms inputs must
+  produce exactly 1,600 samples, and 250 ms inputs at 8/32/44.1/48/96/192 kHz
+  must produce exactly 4,000 samples with the same waveform as 10 ms chunks.
+  On-device pull metadata confirmed complete consumption even for 48,000 input
+  frames. This finding is not an attribution of the user's earlier incident.
+  Attachment: `build/voiceMeaningfulInputResamplerAttachments`.
+- A separately selected, explicitly enabled synthetic Korean test passed with
+  no skip. The installed, non-personal system voice generated five in-memory
+  clips: short affirmative, short negative, voiced hesitation, readiness and
+  topic question. Each produced both acoustic start and stop with the bundled
+  model. Per-prediction maxima ranged from 0.56 to 1.23 ms in this selected
+  device run; these are not production tail-latency or battery measurements.
+  There was no microphone, audible playback, provider, recording file or
+  semantic judgement. Log: `build/voiceMeaningfulInputSyntheticDeviceProbe.log`;
+  attachment: `build/voiceMeaningfulInputSyntheticAttachments`.
+- The opt-in native microphone test also passed, without requesting a new
+  permission. The actual production WebRTC module factory installed its capture
+  delegate; readiness-disabled delivery was observed before enabling the
+  acoustic gate. The real 48 kHz callback then reached five bundled Silero
+  predictions, with 28 native input buffers observed. No sender, SDP, ICE
+  gathering, provider, audio storage or playback was used. Log:
+  `build/voiceMeaningfulInputNativeCaptureProbe.log`; attachment:
+  `build/voiceMeaningfulInputNativeCaptureAttachments`.
+- These tests separately exercise real microphone-to-model delivery, Korean
+  acoustic detection, actual GPT classification, controller integration and the
+  previously verified native receive/playout path. They do **not** constitute
+  a human microphone → live ASR → backend admission → audible reply end-to-end
+  pass or a guarantee that all natural Korean calls remain uninterrupted.
+
+### Post-call summary inspection (read-only)
+
+- The reported summary is a server-side operation over stored final transcripts,
+  not another microphone session or a reanalysis of an audio recording. Ending
+  a call settles usage and queues its separate result as `PENDING`; the existing
+  five-second recovery scheduler claims work as `PROCESSING`. A separate GPT
+  request receives topic, difficulty, role-tagged text and summary instructions,
+  then persists summary/strengths/improvements/next steps as `COMPLETED`.
+- The inspected 147-second dev call had a completed `gpt-5.4` result roughly
+  8.03 seconds after call end (seven learner and ten tutor transcript items).
+  No transcript, recording, credential, user identity or full session ID was
+  copied into this report. An earlier 131-second call completed its result in
+  approximately 10.31 seconds. These are observations, not an SLA.
+- The app can incorrectly leave its pending text visible: its poll exits when
+  any non-nil result exists, including the server's `PROCESSING` placeholder,
+  and a cached history detail is not refreshed. The backend had already
+  completed the inspected result. This turn diagnosed that UI bug but did not
+  change result polling/caching, stored summaries or quota data.
+- No-transcript calls receive a deterministic empty-conversation result without
+  GPT. Provider/parse failure becomes `FAILED`, not an automatic retry; an
+  abandoned `PROCESSING` lease can be reclaimed after 300 seconds. No new MCP
+  integration, worker container or infrastructure is needed for this flow.

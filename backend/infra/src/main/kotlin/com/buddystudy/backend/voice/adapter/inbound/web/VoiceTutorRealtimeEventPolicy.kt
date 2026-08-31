@@ -97,6 +97,17 @@ internal class VoiceTutorRealtimeEventPolicy(
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
+            VoiceTutorRealtimeContract.INPUT_RETRY_EVENT -> if (
+                transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND
+            ) {
+                // A safe server-owned hint, not a provider failure or call end.
+                // Never forward provider bodies/classifier text to the UI.
+                ProviderEventDecision(
+                    mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.INPUT_RETRY_EVENT)),
+                )
+            } else {
+                ProviderEventDecision(payload = null)
+            }
             VoiceTutorRealtimeContract.SIDEBAND_READY_EVENT -> if (
                 transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND
             ) {

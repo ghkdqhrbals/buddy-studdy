@@ -3066,6 +3066,14 @@ struct AppStrings {
     var voiceTutorCallStart: String { text("통화하기", "Call", "通話する") }
     var voiceTutorCallConnecting: String { text("연결 중", "Connecting", "接続中") }
     var voiceTutorCallListening: String { text("듣는 중", "Listening", "聞いています") }
+    var voiceTutorInputRepeat: String { text("다시 말해 주세요", "Please say that again", "もう一度話してください") }
+    var voiceTutorInputPreparationFailed: String {
+        text(
+            "음성 입력을 준비하지 못했어요. 다시 시도해 주세요.",
+            "Couldn't prepare voice input. Please try again.",
+            "音声入力を準備できませんでした。もう一度お試しください。"
+        )
+    }
     var voiceTutorCallSpeaking: String { text("답변 중", "Speaking", "応答中") }
     var voiceTutorCallEnding: String { text("통화 마치는 중", "Ending call", "通話を終了中") }
     var voiceTutorCallEnded: String { text("통화 종료", "Call ended", "通話終了") }

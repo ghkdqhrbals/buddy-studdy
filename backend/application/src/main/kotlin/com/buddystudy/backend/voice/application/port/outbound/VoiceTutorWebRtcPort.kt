@@ -1,5 +1,6 @@
 package com.buddystudy.backend.voice.application.port.outbound
 
+import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 
@@ -27,7 +28,7 @@ interface VoiceTutorWebRtcPort {
     ): VoiceTutorWebRtcAnswer
 
     suspend fun relaySideband(
-        callId: String,
+        context: VoiceTutorWebRtcControlContext,
         clientEvents: Flow<String>,
         terminalEvents: Flow<VoiceTutorRelayTermination>,
         onProviderEvent: suspend (
@@ -50,7 +51,7 @@ object UnavailableVoiceTutorWebRtcPort : VoiceTutorWebRtcPort {
     ): VoiceTutorWebRtcAnswer = unavailable()
 
     override suspend fun relaySideband(
-        callId: String,
+        context: VoiceTutorWebRtcControlContext,
         clientEvents: Flow<String>,
         terminalEvents: Flow<VoiceTutorRelayTermination>,
         onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,

@@ -2,6 +2,9 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentRequest
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
+import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcPort
 import kotlinx.coroutines.CancellationException
@@ -21,7 +24,13 @@ import java.time.Duration
 
 class OpenAIVoiceTutorWebRtcAdapterTest {
     private val mapper = JsonMapperProvider.mapper
-    private val adapter = OpenAIVoiceTutorWebRtcAdapter(BuddyStudyProperties())
+    private val adapter = OpenAIVoiceTutorWebRtcAdapter(
+        BuddyStudyProperties(),
+        object : VoiceTutorInputAssessmentUseCase {
+            override suspend fun assess(request: VoiceTutorInputAssessmentRequest): VoiceTutorInputAssessmentResult =
+                error("A configuration/negotiation test must never request input assessment.")
+        },
+    )
 
     @Test
     fun `component implements the server owned webrtc port`() {

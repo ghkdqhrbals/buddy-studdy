@@ -260,7 +260,7 @@ class VoiceTutorControlWebSocketHandler(
 
         val providerRelay = mono {
             webRtc.relaySideband(
-                callId = callId,
+                context = context,
                 clientEvents = providerControlEvents.asFlux().asFlow(),
                 terminalEvents = terminalSignal.asMono().asFlow(),
             ) { raw, persist, forwardToClient ->

@@ -257,6 +257,7 @@ final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var isMuted = false
     @Published private(set) var isRecording = false
+    @Published private(set) var inputNeedsRepeat = false
 
     var quotaRemainingSeconds: Int { sessionQuota.remainingSeconds }
     var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
@@ -312,6 +313,7 @@ final class VoiceTutorViewModel: ObservableObject {
         sessionID = nil
         clearSessionCountdown()
         isMuted = false
+        inputNeedsRepeat = false
         errorMessage = nil
         detail = nil
         captions = []
@@ -345,6 +347,16 @@ final class VoiceTutorViewModel: ObservableObject {
 
         do {
             phase = .connecting
+            // Validate and warm the bundled acoustic model before allocating a
+            // quota reservation or provider call. No model/network download.
+            let speechScorer = try await VoiceTutorSileroSpeechScorer.prepareBundled()
+            guard connectionAttemptFence.isCurrent(attemptID), phase == .connecting else { return }
+            guard appState.isCommunitySessionActive,
+                  appState.communityProfile?.id == requestedOwnerID,
+                  VoiceTutorRecordingStore.isCurrentLifecycleGeneration(requestedLifecycleGeneration) else {
+                phase = .ended
+                return
+            }
             let connection = try await appState.createVoiceTutorConnection(
                 studyID: study.id,
                 recordingConsent: recordingConsent
@@ -371,7 +383,7 @@ final class VoiceTutorViewModel: ObservableObject {
 
             usesWebRTC = connection.webRTC != nil
             if let webRTCConnection = connection.webRTC {
-                let webRTCTransport = VoiceTutorWebRTCTransport()
+                let webRTCTransport = VoiceTutorWebRTCTransport(preparedSpeechScorer: speechScorer)
                 self.webRTCTransport = webRTCTransport
                 let speechEvents = startLocalSpeechEventPump(attemptID: attemptID, connection: connection)
                 webRTCTransport.onLocalSpeechActivity = { event in
@@ -652,6 +664,7 @@ final class VoiceTutorViewModel: ObservableObject {
                           self.phase.isLive, !self.isFinalizing else { return }
                     switch event.activity {
                     case .started:
+                        self.inputNeedsRepeat = false
                         self.duplexPlaybackState.userSpeechStarted()
                         if !self.duplexPlaybackState.assistantResponseActive {
                             self.phase = .listening
@@ -903,6 +916,10 @@ final class VoiceTutorViewModel: ObservableObject {
             )
         case .heartbeatAcknowledged:
             break
+        case .inputRetry:
+            // This is not a disconnected call. Keep native capture/output alive
+            // and show a small retry hint after the tutor finishes speaking.
+            inputNeedsRepeat = true
         case .serviceError(let code, _, _):
             switch code?.uppercased() {
             case "VOICE_TUTOR_PRO_REQUIRED":
@@ -949,8 +966,10 @@ final class VoiceTutorViewModel: ObservableObject {
             }
             commitAssistantTranscript(transcript)
         case .userTranscript(let transcript):
+            inputNeedsRepeat = false
             appendCaption(speaker: .learner, text: transcript)
         case .userSpeechStarted:
+            inputNeedsRepeat = false
             duplexPlaybackState.userSpeechStarted()
             if !duplexPlaybackState.assistantResponseActive {
                 phase = .listening
@@ -1222,6 +1241,9 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     private func localizedMessage(for error: Error) -> String {
+        if error is VoiceTutorSileroError {
+            return appState.strings.voiceTutorInputPreparationFailed
+        }
         if let preparationError = error as? VoiceTutorPreparationError {
             switch preparationError {
             case .signInRequired:

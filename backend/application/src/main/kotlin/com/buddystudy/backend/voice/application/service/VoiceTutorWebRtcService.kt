@@ -163,11 +163,11 @@ class VoiceTutorWebRtcService(
     }
 
     override suspend fun relaySideband(
-        callId: String,
+        context: VoiceTutorWebRtcControlContext,
         clientEvents: Flow<String>,
         terminalEvents: Flow<VoiceTutorRelayTermination>,
         onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
-    ) = realtime.relaySideband(callId, clientEvents, terminalEvents, onProviderEvent)
+    ) = realtime.relaySideband(context, clientEvents, terminalEvents, onProviderEvent)
 
     override suspend fun hangup(callId: String) {
         if (PROVIDER_CALL_ID.matches(callId)) realtime.hangup(callId)

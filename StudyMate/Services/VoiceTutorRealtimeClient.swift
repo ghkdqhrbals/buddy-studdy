@@ -90,6 +90,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case userTranscript(String)
     case userSpeechStarted
     case userSpeechStopped
+    case inputRetry
     case responseStarted(responseID: String?, isTutorIntervention: Bool)
     case responseFinished(responseID: String?)
     case outputAudioBufferStarted(responseID: String?)
@@ -158,6 +159,8 @@ enum VoiceTutorRealtimeEventParser {
             return .resultReady
         case "buddystudy.voice.heartbeat.ack":
             return .heartbeatAcknowledged
+        case "buddystudy.voice.input.retry":
+            return .inputRetry
         case "buddystudy.voice.error":
             return .serviceError(
                 code: string("code", in: object),

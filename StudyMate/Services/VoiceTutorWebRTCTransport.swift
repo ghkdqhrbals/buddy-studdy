@@ -39,8 +39,9 @@ enum VoiceTutorSpeechSampleScale: Equatable, Sendable {
     case webRTCFloatS16
 }
 
-/// A display/transport-independent energy detector. It never changes microphone
-/// or tutor PCM, commits provider input, or uses the tutor's speaking state.
+/// A display/transport-independent acoustic boundary detector. Production uses
+/// Silero probability, not amplitude, words or the tutor's speaking state. It
+/// never changes microphone/tutor PCM or commits provider input itself.
 struct VoiceTutorLocalSpeechDetector {
     private(set) var isSpeaking = false
     private(set) var sequence = 0
@@ -67,6 +68,29 @@ struct VoiceTutorLocalSpeechDetector {
         return VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: sequence)
     }
 
+    mutating func process(speechProbability: Double, duration: TimeInterval) -> VoiceTutorLocalSpeechEvent? {
+        guard isEnabled, speechProbability.isFinite, (0...1).contains(speechProbability),
+              duration.isFinite, duration > 0, duration <= 0.25 else { return nil }
+        if isSpeaking {
+            silenceDuration = speechProbability < 0.35 ? silenceDuration + duration : 0
+            guard silenceDuration + 0.000_000_001 >= 0.7 else { return nil }
+            isSpeaking = false
+            onsetDuration = 0
+            silenceDuration = 0
+            return VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: sequence)
+        }
+        guard speechProbability >= 0.5 else { onsetDuration = 0; return nil }
+        onsetDuration += duration
+        guard onsetDuration + 0.000_000_001 >= 0.08, sequence < Int.max else { return nil }
+        sequence += 1
+        isSpeaking = true
+        onsetDuration = 0
+        silenceDuration = 0
+        return VoiceTutorLocalSpeechEvent(activity: .started, sequence: sequence)
+    }
+
+    /// Retained for earlier deterministic sample-scale/energy contracts. The
+    /// live capture tap never calls this overload and has no RMS fallback.
     mutating func process(normalizedRMS: Double, duration: TimeInterval) -> VoiceTutorLocalSpeechEvent? {
         guard isEnabled, normalizedRMS.isFinite, (0...1).contains(normalizedRMS),
               duration.isFinite, duration > 0, duration <= 0.25 else { return nil }
@@ -98,6 +122,17 @@ struct VoiceTutorLocalSpeechDetector {
         let adaptation = 1 - exp(-duration / 2)
         noiseRMS = max(0.0001, min(0.02, noiseRMS + adaptation * (normalizedRMS - noiseRMS)))
         return nil
+    }
+
+    /// A native format discontinuity must not reuse recurrent evidence, but it
+    /// also must not reuse an utterance sequence already sent to the backend.
+    mutating func resetAcousticEvidence() -> VoiceTutorLocalSpeechEvent? {
+        onsetDuration = 0
+        silenceDuration = 0
+        noiseRMS = 0.001
+        guard isSpeaking else { return nil }
+        isSpeaking = false
+        return VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: sequence)
     }
 
     mutating func close() {
@@ -239,49 +274,81 @@ struct VoiceTutorLocalSpeechCaptureSnapshot: Equatable, Sendable {
     let processedBufferCount: Int
     let validInputBufferCount: Int
     let validInputFrameCount: Int
+    let speechInferenceCount: Int
     let sampleRate: Double
+    let inputChannelCount: Int
+    let processingGeneration: UInt64
     let gateEnabled: Bool
     let isClosed: Bool
 }
 
 /// Installed for every WebRTC call, even without optional recording consent.
-/// Only transitions leave this realtime callback; microphone samples stay in
-/// the existing native media path and the explicitly consented recorder tap.
+/// Copies bounded mono input to an off-thread, local-only acoustic pipeline.
+/// Original native media and the explicitly consented recorder stay unchanged.
 final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessingDelegate,
     @unchecked Sendable {
     private let lock = NSLock()
     private var detector = VoiceTutorLocalSpeechDetector()
     private var sampleRate: Double = 0
+    private var inputChannelCount = 0
     private var isClosed = false
     private var initializationCount = 0
     private var processedBufferCount = 0
     private var validInputBufferCount = 0
     private var validInputFrameCount = 0
+    private var speechInferenceCount = 0
+    private var captureGeneration: UInt64 = 0
+    private var didReportSpeechFailure = false
     private var didReportInitialization = false
     private var didReportValidInput = false
     private let recordingTap: VoiceTutorAudioProcessingTap?
+    private var speechPipeline: VoiceTutorSileroAudioPipeline?
+    private let failureDelivery = DispatchQueue(label: "com.buddystudy.voice.capture-failure")
     private let onActivity: @Sendable (VoiceTutorLocalSpeechEvent) -> Void
     private let onDiagnostic: (@Sendable (
         VoiceTutorLocalSpeechCaptureDiagnostic, VoiceTutorLocalSpeechCaptureSnapshot
     ) -> Void)?
+    private let onFailure: (@Sendable (VoiceTutorSileroError) -> Void)?
 
     init(
         recordingTap: VoiceTutorAudioProcessingTap?,
+        speechScorer: (any VoiceTutorSpeechProbabilityScoring)? = nil,
         onActivity: @escaping @Sendable (VoiceTutorLocalSpeechEvent) -> Void,
         onDiagnostic: (@Sendable (
             VoiceTutorLocalSpeechCaptureDiagnostic, VoiceTutorLocalSpeechCaptureSnapshot
-        ) -> Void)? = nil
+        ) -> Void)? = nil,
+        onFailure: (@Sendable (VoiceTutorSileroError) -> Void)? = nil
     ) {
         self.recordingTap = recordingTap
         self.onActivity = onActivity
         self.onDiagnostic = onDiagnostic
+        self.onFailure = onFailure
+        super.init()
+        if let speechScorer {
+            speechPipeline = VoiceTutorSileroAudioPipeline(
+                scorer: speechScorer,
+                onProbability: { [weak self] probability, generation in
+                    self?.processSpeechProbability(probability, generation: generation)
+                },
+                onFailure: { [weak self] error, generation in
+                    self?.speechProcessingFailed(error, generation: generation)
+                }
+            )
+        }
     }
 
     func audioProcessingInitialize(sampleRate: Int, channels: Int) {
         lock.lock()
         guard !isClosed else { lock.unlock(); return }
         initializationCount += 1
-        self.sampleRate = sampleRate > 0 ? Double(sampleRate) : 0
+        let nextSampleRate = sampleRate > 0 ? Double(sampleRate) : 0
+        let nextChannelCount = channels > 0 ? channels : 0
+        if self.sampleRate != nextSampleRate || inputChannelCount != nextChannelCount {
+            if let event = detector.resetAcousticEvidence() { onActivity(event) }
+            resetPipelineLocked()
+        }
+        self.sampleRate = nextSampleRate
+        inputChannelCount = nextChannelCount
         let firstInitialization = !didReportInitialization && sampleRate > 0 && channels > 0
         if firstInitialization { didReportInitialization = true }
         let initialSnapshot = firstInitialization ? snapshotLocked() : nil
@@ -304,18 +371,29 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
         processedBufferCount += 1
         let frames = Int(audioBuffer.frames)
         let channels = Int(audioBuffer.channels)
-        guard sampleRate > 0, frames > 0,
-              channels > 0, channels <= 32 else { return }
+        guard sampleRate > 0, frames > 0, frames <= 48_000,
+              channels > 0, channels <= 32 else {
+            if detector.isEnabled { failLocked(.invalidAudio) }
+            return
+        }
         let duration = Double(frames) / sampleRate
-        guard duration.isFinite, duration > 0, duration <= 0.25 else { return }
-        var rms = 0.0
+        guard duration.isFinite, duration > 0, duration <= 0.25 else {
+            if detector.isEnabled { failLocked(.invalidAudio) }
+            return
+        }
+        var strongestChannel = 0
+        var strongestRMS = -1.0
         for channel in 0..<channels {
             let samples = UnsafeBufferPointer(start: audioBuffer.rawBuffer(forChannel: channel), count: frames)
             guard let level = VoiceTutorLocalSpeechDetector.normalizedRMS(
                 samples: samples, scale: .webRTCFloatS16
-            ) else { return }
-            // A silent secondary channel must not dilute genuine learner audio.
-            rms = max(rms, level)
+            ) else {
+                if detector.isEnabled { failLocked(.invalidAudio) }
+                return
+            }
+            // RMS only selects a channel; it never classifies speech. A silent
+            // secondary channel must not dilute genuine learner audio.
+            if level > strongestRMS { strongestChannel = channel; strongestRMS = level }
         }
         validInputBufferCount += 1
         validInputFrameCount += frames
@@ -324,10 +402,27 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
             firstInputSnapshot = snapshotLocked()
         }
         guard detector.isEnabled else { return }
-        if let event = detector.process(normalizedRMS: rms, duration: duration) {
-            // The speech callback is a nonblocking bounded-stream yield. Keep it
-            // under the gate lock so a simultaneous mute cannot reorder stop N
-            // before start N. No network, actor hop, or disk work runs here.
+        // A scorer-less tap is supported for metadata-only native probes with
+        // their gate closed. Live input must never silently fall back to RMS.
+        guard let speechPipeline else { failLocked(.bundledModelMissing); return }
+        let pointer = audioBuffer.rawBuffer(forChannel: strongestChannel)
+        guard let samples = VoiceTutorAudioProcessingTap.normalizedRecordingSamples(
+            UnsafeBufferPointer(start: pointer, count: frames)
+        ) else { failLocked(.invalidAudio); return }
+        speechPipeline.enqueue(samples: samples, sampleRate: sampleRate, generation: captureGeneration)
+    }
+
+    private func processSpeechProbability(_ probability: Double, generation: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isClosed, !didReportSpeechFailure, detector.isEnabled,
+              generation == captureGeneration else { return }
+        speechInferenceCount += 1
+        if let event = detector.process(
+            speechProbability: probability, duration: VoiceTutorSileroSpeechScorer.frameDuration
+        ) {
+            // Nonblocking bounded-stream yield under the gate lock: mute cannot
+            // reorder stop N before start N. No network or disk work runs here.
             onActivity(event)
         }
     }
@@ -335,8 +430,37 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
     func updateGate(mediaReady: Bool, muted: Bool) {
         lock.lock()
         defer { lock.unlock() }
+        guard !isClosed, !didReportSpeechFailure else { return }
+        let wasEnabled = detector.isEnabled
         if let event = detector.updateGate(mediaReady: mediaReady, muted: muted) {
             onActivity(event)
+        }
+        if wasEnabled != detector.isEnabled { resetPipelineLocked() }
+    }
+
+    private func resetPipelineLocked() {
+        captureGeneration &+= 1
+        speechPipeline?.reset(generation: captureGeneration)
+    }
+
+    private func speechProcessingFailed(_ error: VoiceTutorSileroError, generation: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard generation == captureGeneration else { return }
+        failLocked(error)
+    }
+
+    private func failLocked(_ error: VoiceTutorSileroError) {
+        guard !isClosed, !didReportSpeechFailure else { return }
+        didReportSpeechFailure = true
+        detector.close()
+        speechPipeline?.close()
+        failureDelivery.async { [weak self] in
+            guard let self else { return }
+            lock.lock()
+            let shouldReport = !isClosed && didReportSpeechFailure
+            lock.unlock()
+            if shouldReport { onFailure?(error) }
         }
     }
 
@@ -344,7 +468,9 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
         lock.lock()
         isClosed = true
         detector.close()
+        speechPipeline?.close()
         sampleRate = 0
+        inputChannelCount = 0
         lock.unlock()
     }
 
@@ -360,7 +486,10 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
             processedBufferCount: processedBufferCount,
             validInputBufferCount: validInputBufferCount,
             validInputFrameCount: validInputFrameCount,
+            speechInferenceCount: speechInferenceCount,
             sampleRate: sampleRate,
+            inputChannelCount: inputChannelCount,
+            processingGeneration: captureGeneration,
             gateEnabled: detector.isEnabled,
             isClosed: isClosed
         )
@@ -445,6 +574,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private var isClosed = false
     private var sessionMediaReady = false
     private var microphoneMuted = false
+    private var preparedSpeechScorer: VoiceTutorSileroSpeechScorer?
     private static let audioSessionOwnershipLock = NSLock()
     private nonisolated(unsafe) static var activeAudioSessionOwnerID: UUID?
 
@@ -462,6 +592,13 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         }
     }
 
+    /// The view model can preflight the local model before reserving an app
+    /// session. One fresh recurrent scorer is consumed by exactly this attempt.
+    convenience init(preparedSpeechScorer: VoiceTutorSileroSpeechScorer) {
+        self.init()
+        self.preparedSpeechScorer = preparedSpeechScorer
+    }
+
     deinit {
         stateLock.lock()
         let observer = interruptionObserver
@@ -477,6 +614,19 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         recorder: VoiceTutorSessionRecorder?
     ) async throws {
         guard let onLocalSpeechActivity else { throw VoiceTutorWebRTCError.speechActivityUnavailable }
+        try ensureOpen()
+        let speechScorer: VoiceTutorSileroSpeechScorer
+        do {
+            if let prepared = takePreparedSpeechScorer() { speechScorer = prepared }
+            else { speechScorer = try await VoiceTutorSileroSpeechScorer.prepareBundled() }
+            try ensureOpen()
+        } catch {
+            if let failure = error as? VoiceTutorSileroError {
+                emitMediaDiagnostic("speech_model_preflight_failed_\(failure.rawValue)")
+            }
+            throw error
+        }
+        emitMediaDiagnostic("speech_model_ready_silero_v6")
         try configureAudioSession()
         try installInterruptionObserver()
         _ = LKRTCInitializeSSL()
@@ -484,9 +634,13 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
 
         let nextCaptureTap = VoiceTutorLocalSpeechCaptureTap(
             recordingTap: recorder.map { VoiceTutorAudioProcessingTap(participant: .learner, recorder: $0) },
+            speechScorer: speechScorer,
             onActivity: onLocalSpeechActivity,
             onDiagnostic: { [weak self] event, snapshot in
                 self?.recordCaptureDiagnostic(event, snapshot: snapshot)
+            },
+            onFailure: { [weak self] error in
+                self?.recordSpeechProcessingFailure(error)
             }
         )
         let nextRenderTap = recorder.map {
@@ -562,6 +716,14 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         emitMediaDiagnostic("media_connected")
     }
 
+    private func takePreparedSpeechScorer() -> VoiceTutorSileroSpeechScorer? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        let prepared = preparedSpeechScorer
+        preparedSpeechScorer = nil
+        return prepared
+    }
+
     func setMuted(_ muted: Bool) {
         stateLock.lock()
         guard !isClosed else { stateLock.unlock(); return }
@@ -599,6 +761,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         isClosed = true
         sessionMediaReady = false
         microphoneMuted = true
+        preparedSpeechScorer = nil
         captureTap?.close()
         shouldDeactivateAudioSession = Self.activeAudioSessionOwnerID == audioSessionOwnerID
         if shouldDeactivateAudioSession {
@@ -898,6 +1061,20 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         }
     }
 
+    private func recordSpeechProcessingFailure(_ error: VoiceTutorSileroError) {
+        // Capture/pipeline errors arrive on a non-realtime failure queue. Keep
+        // ADM diagnostics and application callbacks off that queue as well.
+        diagnosticQueue.async { [weak self] in
+            guard let self else { return }
+            stateLock.lock()
+            let failureCallback = isClosed ? nil : onConnectionFailure
+            stateLock.unlock()
+            guard let failureCallback else { return }
+            emitMediaDiagnostic("speech_model_failed_\(error.rawValue)")
+            failureCallback()
+        }
+    }
+
     private func emitMediaDiagnostic(
         _ event: String,
         uptime: TimeInterval = ProcessInfo.processInfo.systemUptime,
@@ -946,7 +1123,10 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
                     "captureBuffers=\(capture.processedBufferCount)",
                     "captureValidBuffers=\(capture.validInputBufferCount)",
                     "captureFrames=\(capture.validInputFrameCount)",
+                    "captureSpeechInferences=\(capture.speechInferenceCount)",
                     "captureSampleRate=\(Int(capture.sampleRate))",
+                    "captureChannels=\(capture.inputChannelCount)",
+                    "captureGeneration=\(capture.processingGeneration)",
                     "captureGate=\(capture.gateEnabled ? 1 : 0)",
                     "captureClosed=\(capture.isClosed ? 1 : 0)"
                 ]

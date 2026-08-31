@@ -571,6 +571,37 @@ final class VoiceTutorContractTests: XCTestCase {
         )
     }
 
+    func testInputAssessmentRetryIsASeparateNonterminalEvent() throws {
+        let event = try VoiceTutorRealtimeEventParser.parse(
+            text: #"{"type":"buddystudy.voice.input.retry","reason":"ignored","message":"not UI content"}"#
+        )
+        XCTAssertEqual(event, .inputRetry)
+        XCTAssertNotEqual(event, .serviceError(code: nil, message: "", retryable: true))
+    }
+
+    func testInputRetryKeepsCompactCallLiveAndDoesNotOverrideTutorSpeechOrMute() {
+        let strings = AppStrings(language: .korean)
+        var call = VoiceTutorCallPresentation(
+            phase: .listening,
+            inputNeedsRepeat: true,
+            sessionSecondsRemaining: 120
+        )
+        XCTAssertEqual(call.statusText(strings), strings.voiceTutorInputRepeat)
+        XCTAssertEqual(call.primaryAction, .end)
+        XCTAssertEqual(call.remainingTime, .call(120))
+        XCTAssertTrue(call.canMute)
+        XCTAssertFalse(call.showsConnectionFailure(strings, errorMessage: nil))
+        call.phase = .speaking
+        XCTAssertEqual(call.statusText(strings), strings.voiceTutorCallSpeaking)
+        call.phase = .listening
+        call.isMuted = true
+        XCTAssertEqual(call.statusText(strings), strings.voiceTutorCallMuted)
+        call.isMuted = false
+        call.inputNeedsRepeat = false
+        XCTAssertEqual(call.statusText(strings), strings.voiceTutorCallListening)
+        XCTAssertEqual(AppStrings(language: .english).voiceTutorInputRepeat, "Please say that again")
+    }
+
     func testLearnerOverlapKeepsCurrentTutorSentenceActive() {
         var state = VoiceTutorDuplexPlaybackState()
 
@@ -2399,8 +2430,11 @@ final class VoiceTutorContractTests: XCTestCase {
         }
 
         let diagnostics = VoiceTutorContractCaptureDiagnostics()
+        let verifySilero = ProcessInfo.processInfo.environment["BUDDYSTUDY_SILERO_NATIVE_CAPTURE_TEST"] == "1"
+        let speechScorer = verifySilero ? try await VoiceTutorSileroSpeechScorer.prepareBundled() : nil
         let tap = VoiceTutorLocalSpeechCaptureTap(
             recordingTap: nil,
+            speechScorer: speechScorer,
             onActivity: { _ in diagnostics.observeActivity() },
             onDiagnostic: { kind, snapshot in diagnostics.observe(kind, snapshot: snapshot) }
         )
@@ -2483,6 +2517,33 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(peer.senders.isEmpty)
         XCTAssertTrue(peer.receivers.isEmpty)
         XCTAssertEqual(peer.iceGatheringState, .new, "The microphone probe must never gather ICE candidates")
+        if verifySilero {
+            // Additional explicit opt-in: observe the actual native callback →
+            // copy → resampler → bundled Core ML path. Activity is counted only;
+            // there is still no sender, SDP, provider, playback or audio storage.
+            tap.updateGate(mediaReady: true, muted: false)
+            let acousticDeadline = ProcessInfo.processInfo.systemUptime + 3
+            while tap.snapshot().speechInferenceCount < 5,
+                  ProcessInfo.processInfo.systemUptime < acousticDeadline {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            let acoustic = tap.snapshot()
+            let acousticAttachment = XCTAttachment(string: """
+            nativeSileroInferenceCount=\(acoustic.speechInferenceCount)
+            nativeInputBuffers=\(acoustic.validInputBufferCount)
+            sampleRate=\(acoustic.sampleRate)
+            gateEnabled=\(acoustic.gateEnabled)
+            providerConnection=false
+            recording=false
+            """)
+            acousticAttachment.name = "native-silero-capture-metadata-only"
+            acousticAttachment.lifetime = .keepAlways
+            add(acousticAttachment)
+            XCTAssertGreaterThanOrEqual(acoustic.speechInferenceCount, 5,
+                                        "Native callbacks must reach the real bundled model, not just the gate-disabled tap")
+            XCTAssertTrue(acoustic.gateEnabled)
+            tap.updateGate(mediaReady: false, muted: false)
+        }
         #endif
     }
 

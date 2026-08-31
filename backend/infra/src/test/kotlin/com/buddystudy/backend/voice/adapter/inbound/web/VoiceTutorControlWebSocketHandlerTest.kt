@@ -196,7 +196,7 @@ class VoiceTutorControlWebSocketHandlerTest {
             ): VoiceTutorWebRtcControlContext = VoiceTutorWebRtcControlContext(session, "rtc_call-1")
 
             override suspend fun relaySideband(
-                callId: String,
+                context: VoiceTutorWebRtcControlContext,
                 clientEvents: Flow<String>,
                 terminalEvents: Flow<VoiceTutorRelayTermination>,
                 onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
@@ -328,7 +328,7 @@ class VoiceTutorControlWebSocketHandlerTest {
             ) = VoiceTutorWebRtcControlContext(session, "rtc_call-1")
 
             override suspend fun relaySideband(
-                callId: String,
+                context: VoiceTutorWebRtcControlContext,
                 clientEvents: Flow<String>,
                 terminalEvents: Flow<VoiceTutorRelayTermination>,
                 onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,

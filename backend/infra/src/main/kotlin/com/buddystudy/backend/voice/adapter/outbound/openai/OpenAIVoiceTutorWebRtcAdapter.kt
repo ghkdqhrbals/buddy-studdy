@@ -2,7 +2,10 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.config.VoiceTutorInputAssessmentProperties
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
+import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcAnswer
@@ -44,6 +47,8 @@ import java.util.UUID
 @Component
 class OpenAIVoiceTutorWebRtcAdapter(
     private val properties: BuddyStudyProperties,
+    private val inputAssessment: VoiceTutorInputAssessmentUseCase,
+    private val inputAssessmentProperties: VoiceTutorInputAssessmentProperties = VoiceTutorInputAssessmentProperties(),
 ) : VoiceTutorWebRtcPort {
     private val mapper = JsonMapperProvider.mapper
     private val httpClient = HttpClient.create().responseTimeout(
@@ -117,7 +122,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
     }
 
     override suspend fun relaySideband(
-        callId: String,
+        context: VoiceTutorWebRtcControlContext,
         clientEvents: Flow<String>,
         terminalEvents: Flow<VoiceTutorRelayTermination>,
         onProviderEvent: suspend (
@@ -126,7 +131,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
             forwardToClient: Boolean,
         ) -> Unit,
     ) {
-        val validatedCallId = validateWebRtcCallId(callId)
+        val validatedCallId = validateWebRtcCallId(context.callId)
         val providerUri = UriComponentsBuilder.fromUriString(OPENAI_REALTIME_SIDEBAND_URL)
             .queryParam("call_id", validatedCallId)
             .build(true)
@@ -150,6 +155,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                     properties.voiceTutor.responseTimeoutSeconds.coerceIn(10, 120),
                 ),
                 transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+                inputCoordinator = VoiceTutorInputTurnCoordinator(limits = inputAssessmentProperties),
             )
             val terminal = terminalEvents.asFlux()
                 .next()
@@ -180,7 +186,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
             val send = providerSession.send(
                 Flux.concat(liveControls, terminalProviderEvents).map(providerSession::textMessage),
             )
-            val receive = providerSession.receive()
+            val providerReceive = providerSession.receive()
                 .filter { it.type == WebSocketMessage.Type.TEXT }
                 .map { it.payloadAsText }
                 .concatMap { raw ->
@@ -200,6 +206,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                         return@concatMap Mono.error<Void>(observationFailure)
                     }
                     val disposition = observed.getOrThrow()
+                    if (!disposition.persist && !disposition.forwardToClient) return@concatMap Mono.empty<Void>()
                     mono {
                         onProviderEvent(
                             raw,
@@ -209,6 +216,17 @@ class OpenAIVoiceTutorWebRtcAdapter(
                     }.then()
                 }
                 .then()
+            // Assessment/persistence is a separate subscriber: never await a
+            // classifier inside the ordered provider receive loop. In particular
+            // response.done and output_audio_buffer.stopped must stay observable.
+            val inputWork = voiceTutorInputAssessmentRelay(
+                controller = turnController,
+                userId = context.session.userId,
+                language = context.session.language,
+                assessment = inputAssessment,
+                onProviderEvent = onProviderEvent,
+            )
+            val receive = Mono.firstWithSignal(providerReceive, turnController.inputFailure(), inputWork)
             val ready = sessionHandshake.awaitConfirmation().then(
                 mono {
                     onProviderEvent(SIDEBAND_READY_PAYLOAD, false, true)

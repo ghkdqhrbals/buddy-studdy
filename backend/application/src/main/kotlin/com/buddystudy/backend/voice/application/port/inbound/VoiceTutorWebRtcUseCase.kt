@@ -20,7 +20,7 @@ interface VoiceTutorWebRtcUseCase {
     ): VoiceTutorWebRtcControlContext
 
     suspend fun relaySideband(
-        callId: String,
+        context: VoiceTutorWebRtcControlContext,
         clientEvents: Flow<String>,
         terminalEvents: Flow<VoiceTutorRelayTermination>,
         onProviderEvent: suspend (

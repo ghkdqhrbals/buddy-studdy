@@ -404,6 +404,7 @@ struct VoiceTutorSessionView: View {
                 phase: viewModel.phase,
                 isMuted: viewModel.isMuted,
                 isRecording: viewModel.isRecording,
+                inputNeedsRepeat: viewModel.inputNeedsRepeat,
                 sessionSecondsRemaining: viewModel.sessionSecondsRemaining,
                 quotaRemainingSeconds: viewModel.quotaRemainingSeconds,
                 quotaReservedSeconds: viewModel.quotaReservedSeconds,
@@ -466,6 +467,7 @@ struct VoiceTutorCallPresentation {
     var phase: VoiceTutorSessionPhase
     var isMuted = false
     var isRecording = false
+    var inputNeedsRepeat = false
     var sessionSecondsRemaining: Int?
     var quotaRemainingSeconds = 0
     var quotaReservedSeconds = 0
@@ -518,7 +520,9 @@ struct VoiceTutorCallPresentation {
         }
         switch phase {
         case .idle, .requestingPermission, .connecting: return strings.voiceTutorCallConnecting
-        case .listening: return isMuted ? strings.voiceTutorCallMuted : strings.voiceTutorCallListening
+        case .listening:
+            if isMuted { return strings.voiceTutorCallMuted }
+            return inputNeedsRepeat ? strings.voiceTutorInputRepeat : strings.voiceTutorCallListening
         case .speaking: return strings.voiceTutorCallSpeaking
         case .ending: return strings.voiceTutorCallEnding
         case .ended: return strings.voiceTutorCallEnded
