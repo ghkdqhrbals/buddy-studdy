@@ -328,6 +328,20 @@ the previous checks above remain a historical record, not the current policy.
   route changes, or a complete 60-minute call. Those real-device release gates
   remain below. The model, monthly/per-user limits, optional-recording consent,
   provider key source, Docker infrastructure, and Routingflare were not changed.
+- Local runtime rollout applied implementation `b762d163` to the existing
+  `backend-backend-1` on `127.0.0.1:8080`, retaining the `dev` profile and
+  `buddystudy/dev` AWS Secret. The refreshed JAR SHA-256 is
+  `78bccbbc1824b8a9237aa2b6ed060b86269d874442ffacce8e9df5de7820b830`.
+  Every original environment value was compared and preserved exactly; the
+  four existing infrastructure container IDs and network were unchanged.
+  Both local readiness and dependency health requests returned HTTP 200.
+  No new persistent infrastructure container or routing change was made.
+  Log: `build/voiceManualTurnDevRefresh.log`.
+- With zero active dev calls confirmed, the normal signed iOS app was built,
+  installed on the paired iPhone, and explicitly launched successfully. No
+  microphone/provider call was started automatically. Logs:
+  `build/voiceManualTurnSignedBuild.log`, `build/voiceManualTurnDeviceInstall.log`,
+  and `build/voiceManualTurnDeviceLaunch.log`.
 
 The manual-turn wire protocol follows [OpenAI's conversation guide](https://developers.openai.com/api/docs/guides/realtime-conversations);
 the observed interruption is distinguished from response completion using the
