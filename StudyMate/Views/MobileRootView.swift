@@ -1,5 +1,6 @@
 import SwiftUI
 #if os(iOS)
+import AVFoundation
 import AuthenticationServices
 import SafariServices
 import StoreKit
@@ -11179,6 +11180,7 @@ private extension View {
 private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var adMobPrivacyCoordinator = AdMobPrivacyCoordinator.shared
+    @State private var isVoiceTutorVoicePickerPresented = false
 
     private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
 
@@ -11290,23 +11292,14 @@ private struct MobileSettingsView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Menu {
-                            ForEach(VoiceTutorVoice.allCases) { voice in
-                                Button {
-                                    appState.setDraftVoiceTutorVoice(voice)
-                                } label: {
-                                    if appState.draftSettings.voiceTutorVoice == voice {
-                                        Label(strings.voiceTutorVoiceName(voice), systemImage: "checkmark")
-                                    } else {
-                                        Text(strings.voiceTutorVoiceName(voice))
-                                    }
-                                }
-                            }
+                        Button {
+                            isVoiceTutorVoicePickerPresented = true
                         } label: {
                             MobileSettingsRow(
                                 systemImage: "waveform",
                                 title: strings.voiceTutorVoiceSetting,
-                                value: strings.voiceTutorVoiceName(appState.draftSettings.voiceTutorVoice)
+                                value: strings.voiceTutorVoiceName(appState.draftSettings.voiceTutorVoice),
+                                showsChevron: true
                             )
                             .frame(minHeight: 44)
                         }
@@ -11475,6 +11468,12 @@ private struct MobileSettingsView: View {
             }
             #endif
         }
+        .sheet(isPresented: $isVoiceTutorVoicePickerPresented) {
+            NavigationStack {
+                MobileVoiceTutorVoiceSettingsView()
+            }
+            .environmentObject(appState)
+        }
         .contentShape(Rectangle())
         .disabled(appState.isLoadingBackendSettingsForEditing)
         .onAppear {
@@ -11510,6 +11509,256 @@ private struct MobileSettingsView: View {
         .disabled(appState.isValidatingAPIKey)
     }
 
+}
+
+private struct MobileVoiceTutorVoiceSettingsView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var previewPlayer = VoiceTutorVoicePreviewPlayer()
+    @State private var requestedVoice: VoiceTutorVoice?
+    @State private var previewError: String?
+    @State private var previewTask: Task<Void, Never>?
+    @State private var previewRequestID: UUID?
+
+    private var strings: AppStrings { appState.settingsEditorStrings }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                MobileSettingsCard(
+                    title: strings.voiceTutorVoiceSetting,
+                    systemImage: "waveform"
+                ) {
+                    ForEach(VoiceTutorVoice.allCases) { voice in
+                        Button {
+                            selectAndPreview(voice)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: previewPlayer.activeVoice == voice
+                                    ? "speaker.wave.2.fill" : "waveform.circle")
+                                    .font(.title3)
+                                    .foregroundStyle(previewPlayer.activeVoice == voice ? Color.accentColor : .secondary)
+                                    .frame(width: 30)
+
+                                Text(strings.voiceTutorVoiceName(voice))
+                                    .foregroundStyle(.primary)
+
+                                Spacer(minLength: 12)
+
+                                if requestedVoice == voice {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else if previewPlayer.activeVoice == voice {
+                                    Text(strings.voiceTutorVoicePreviewPlaying)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                if appState.draftSettings.voiceTutorVoice == voice {
+                                    Image(systemName: "checkmark")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                            .frame(minHeight: 48)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(
+                            (requestedVoice != nil && requestedVoice != voice)
+                                || (previewPlayer.activeVoice != nil && previewPlayer.activeVoice != voice)
+                        )
+                        .accessibilityLabel(strings.voiceTutorVoiceName(voice))
+                        .accessibilityHint(strings.voiceTutorVoiceSettingHelp)
+                        .accessibilityAddTraits(
+                            appState.draftSettings.voiceTutorVoice == voice ? .isSelected : []
+                        )
+                        .accessibilityIdentifier("settings.voiceTutorVoice.\(voice.rawValue)")
+
+                        if voice != VoiceTutorVoice.allCases.last {
+                            Divider()
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(strings.voiceTutorVoiceSettingHelp)
+                    Text(strings.voiceTutorVoicePreviewDisclosure)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 4)
+
+                if let previewError {
+                    Label(previewError, systemImage: "exclamationmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
+                        .accessibilityIdentifier("settings.voiceTutorVoice.previewError")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle(strings.voiceTutorVoiceSetting)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(strings.done) { dismiss() }
+            }
+        }
+        .onDisappear {
+            previewTask?.cancel()
+            previewTask = nil
+            previewRequestID = nil
+            requestedVoice = nil
+            previewPlayer.stop()
+        }
+    }
+
+    private func selectAndPreview(_ voice: VoiceTutorVoice) {
+        appState.setDraftVoiceTutorVoice(voice)
+        previewTask?.cancel()
+        previewTask = nil
+        previewRequestID = nil
+        previewPlayer.stop()
+        previewError = nil
+        guard appState.isCommunitySessionActive else {
+            requestedVoice = nil
+            previewError = strings.voiceTutorSignInRequired
+            return
+        }
+
+        let requestID = UUID()
+        previewRequestID = requestID
+        requestedVoice = voice
+        do {
+            if try previewPlayer.playCached(voice: voice) {
+                previewRequestID = nil
+                requestedVoice = nil
+                return
+            }
+        } catch {
+            previewRequestID = nil
+            requestedVoice = nil
+            previewError = strings.voiceTutorVoicePreviewFailed
+            return
+        }
+        let language = appState.draftSettings.appLanguage
+        previewTask = Task { @MainActor in
+            do {
+                let data = try await appState.loadVoiceTutorVoicePreview(
+                    voice: voice,
+                    language: language
+                )
+                try Task.checkCancellation()
+                guard previewRequestID == requestID else { return }
+                try previewPlayer.play(data: data, voice: voice)
+                previewTask = nil
+                previewRequestID = nil
+                requestedVoice = nil
+            } catch is CancellationError {
+                guard previewRequestID == requestID else { return }
+                previewTask = nil
+                previewRequestID = nil
+                requestedVoice = nil
+            } catch {
+                guard previewRequestID == requestID else { return }
+                previewTask = nil
+                previewRequestID = nil
+                requestedVoice = nil
+                previewError = appState.voiceTutorVoicePreviewDisplayMessage(for: error)
+            }
+        }
+    }
+}
+
+@MainActor
+private final class VoiceTutorVoicePreviewPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @Published private(set) var activeVoice: VoiceTutorVoice?
+    private var player: AVAudioPlayer?
+    private var cachedAudio: [VoiceTutorVoice: Data] = [:]
+
+    func playCached(voice: VoiceTutorVoice) throws -> Bool {
+        guard let data = cachedAudio[voice] else { return false }
+        try play(data: data, voice: voice)
+        return true
+    }
+
+    func play(data: Data, voice: VoiceTutorVoice) throws {
+        stop()
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try audioSession.setActive(true)
+            let player = try AVAudioPlayer(data: data)
+            player.delegate = self
+            player.volume = 1
+            guard player.prepareToPlay(), player.play() else {
+                throw VoiceTutorVoicePreviewPlaybackError.unableToPlay
+            }
+            self.player = player
+            cachedAudio[voice] = data
+            activeVoice = voice
+        } catch {
+            player?.stop()
+            player = nil
+            activeVoice = nil
+            try? audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
+            throw error
+        }
+    }
+
+    func stop() {
+        guard player != nil || activeVoice != nil else { return }
+        player?.delegate = nil
+        player?.stop()
+        player = nil
+        activeVoice = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        let finishedPlayer = VoiceTutorVoicePreviewPlayerReference(player)
+        Task { @MainActor [weak self, finishedPlayer] in
+            guard
+                let self,
+                let currentPlayer = self.player,
+                currentPlayer === finishedPlayer.player
+            else { return }
+            self.stop()
+        }
+    }
+
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        let failedPlayer = VoiceTutorVoicePreviewPlayerReference(player)
+        Task { @MainActor [weak self, failedPlayer] in
+            guard
+                let self,
+                let currentPlayer = self.player,
+                currentPlayer === failedPlayer.player
+            else { return }
+            self.stop()
+        }
+    }
+}
+
+/// Delegate callbacks can arrive after a preview is replaced. Holding the
+/// callback player until the MainActor identity check prevents an allocator
+/// address reuse (ABA) from stopping the newer preview.
+private final class VoiceTutorVoicePreviewPlayerReference: @unchecked Sendable {
+    let player: AVAudioPlayer
+
+    init(_ player: AVAudioPlayer) {
+        self.player = player
+    }
+}
+
+private enum VoiceTutorVoicePreviewPlaybackError: Error {
+    case unableToPlay
 }
 
 private struct MobileAccountSettingsView: View {

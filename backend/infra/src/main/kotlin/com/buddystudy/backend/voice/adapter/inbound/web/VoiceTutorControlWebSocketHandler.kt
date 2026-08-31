@@ -292,6 +292,15 @@ class VoiceTutorControlWebSocketHandler(
                 terminalEvents = terminalSignal.asMono().asFlow(),
             ) { raw, persist, forwardToClient ->
                 val type = runCatching { mapper.readTree(raw).path("type").asText() }.getOrDefault("")
+                if (type == VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT) {
+                    // Only the server-side semantic input path emits this type.
+                    // It is never client/provider data and follows the exact
+                    // explicit-end finalization, settlement and summary path.
+                    if (!persist && !forwardToClient) {
+                        signalTerminal("LEARNER_SPOKEN_END", cancelActiveResponse = false, reason = "USER_ENDED")
+                    }
+                    return@relaySideband false
+                }
                 if (type == VoiceTutorRealtimeContract.SIDEBAND_READY_EVENT) {
                     val firstReady = synchronized(terminalGate) {
                         !relayTerminated.get() && sidebandReady.compareAndSet(false, true)

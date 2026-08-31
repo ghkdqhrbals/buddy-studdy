@@ -7,6 +7,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentE
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentFailure
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -21,13 +22,36 @@ class VoiceTutorInputTurnCoordinatorTest {
         val assessment = assess(coordinator.observeTranscript("item-one", "응", "original-event", 1))
 
         assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), 2))
-            .containsExactly(Action.Publish("item-one", "original-event"))
+            .containsExactly(Action.Publish("item-one", "original-event", sequence = 7, checkpoint = true))
         assertThat(coordinator.hasPending).isTrue()
         assertThat(coordinator.confirmPublished("other", 3)).isEmpty()
         assertThat(coordinator.confirmDeleted("item-one", 3)).isEmpty()
         assertThat(coordinator.confirmPublished("item-one", 4)).containsExactly(Action.Ready(7, true))
         assertThat(coordinator.hasPending).isFalse()
         assertThat(coordinator.confirmPublished("item-one", 5)).isEmpty()
+    }
+
+    @Test
+    fun `structured spoken lesson end intent stays bound to the exact meaningful publication`() {
+        val coordinator = VoiceTutorInputTurnCoordinator()
+        coordinator.observeCommitted("end-item", 9, false, 0)
+        val assessment = assess(coordinator.observeTranscript("end-item", "학습 끝낼게", "end-raw", 1))
+        val result = VoiceTutorInputAssessmentResult(listOf(
+            VoiceTutorInputItemAssessment(
+                "end-item", VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON,
+            ),
+        ))
+
+        assertThat(coordinator.completeAssessment(assessment.token, Result.success(result), 2)).containsExactly(
+            Action.Publish(
+                "end-item", "end-raw", sequence = 9,
+                intent = VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON,
+            ),
+        )
+        assertThat(coordinator.confirmPublished("other-item", 3)).isEmpty()
+        assertThat(coordinator.confirmPublished("end-item", 4)).containsExactly(Action.Ready(9, false))
+        assertThat(coordinator.confirmPublished("end-item", 5)).isEmpty()
     }
 
     @Test
@@ -59,7 +83,7 @@ class VoiceTutorInputTurnCoordinatorTest {
         assertThat(assessment.utterances.single().transcript).isEqualTo("Redis")
         assertThat(coordinator.bufferedTranscriptCount).isZero()
         assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), 3))
-            .containsExactly(Action.Publish("item-one", "verbatim-raw"))
+            .containsExactly(Action.Publish("item-one", "verbatim-raw", sequence = 2))
     }
 
     @Test
@@ -87,7 +111,7 @@ class VoiceTutorInputTurnCoordinatorTest {
         assertThat(coordinator.observeTranscriptionFailure("item-one", 3)).isEmpty()
         assertThat(coordinator.completeAssessment(999, meaningful(assessment), 4)).isEmpty()
         assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), 5))
-            .containsExactly(Action.Publish("item-one", raw("item-one", "first text")))
+            .containsExactly(Action.Publish("item-one", raw("item-one", "first text"), sequence = 1))
         assertThat(coordinator.completeAssessment(assessment.token, nonCommunicative(assessment), 6)).isEmpty()
         assertThat(coordinator.confirmPublished("item-one", 7)).containsExactly(Action.Ready(1, false))
         assertThat(coordinator.observeCommitted("item-one", 1000, true, 8)).isEmpty()
@@ -115,7 +139,7 @@ class VoiceTutorInputTurnCoordinatorTest {
             ),
         )
         assertThat(coordinator.completeAssessment(assessment.token, reversedResult, 4)).containsExactly(
-            Action.Delete("first"), Action.Publish("second", "second-raw"),
+            Action.Delete("first"), Action.Publish("second", "second-raw", sequence = 12),
         )
         assertThat(coordinator.confirmPublished("second", 5)).containsExactly(Action.Ready(12, false))
         assertThat(coordinator.hasPending).isTrue()
@@ -133,7 +157,7 @@ class VoiceTutorInputTurnCoordinatorTest {
             // These are deliberately fake decisions. This proves no local word
             // list or minimum-length rule overrides the semantic assessment.
             assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), 1))
-                .containsExactly(Action.Publish("item-one", raw("item-one", text)))
+                .containsExactly(Action.Publish("item-one", raw("item-one", text), sequence = 1))
         }
     }
 
@@ -245,7 +269,7 @@ class VoiceTutorInputTurnCoordinatorTest {
         val coordinator = VoiceTutorInputTurnCoordinator()
         val assessment = registered(coordinator, "item-one", "응")
         assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(4_999)))
-            .containsExactly(Action.Publish("item-one", raw("item-one", "응")))
+            .containsExactly(Action.Publish("item-one", raw("item-one", "응"), sequence = 1))
         assertThat(coordinator.expire(ms(5_000))).isEmpty()
         assertThat(coordinator.confirmPublished("item-one", ms(5_001))).containsExactly(Action.Ready(1, false))
         assertThat(coordinator.expire(ms(20_000))).isEmpty()
@@ -298,7 +322,7 @@ class VoiceTutorInputTurnCoordinatorTest {
         assertThat(second.utterances).isEqualTo(first.utterances)
         assertThat(coordinator.completeAssessment(first.token, meaningful(first), 3)).isEmpty()
         assertThat(coordinator.completeAssessment(second.token, meaningful(second), 4))
-            .containsExactly(Action.Publish("item-one", raw("item-one", "응")))
+            .containsExactly(Action.Publish("item-one", raw("item-one", "응"), sequence = 1))
     }
 
     @Test

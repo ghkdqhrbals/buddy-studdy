@@ -3,6 +3,13 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
+import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentRequest
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
+import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -14,12 +21,19 @@ import reactor.core.publisher.Sinks
 import reactor.test.StepVerifier
 import java.time.Duration
 import java.util.Base64
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 class OpenAIVoiceTutorRealtimeAdapterTest {
     private val mapper = JsonMapperProvider.mapper
+    private val unavailableAssessment = object : VoiceTutorInputAssessmentUseCase {
+        override suspend fun assess(request: VoiceTutorInputAssessmentRequest): VoiceTutorInputAssessmentResult =
+            error("This adapter unit test must never invoke input assessment.")
+    }
     private val preparedProviderEvents = mutableMapOf<VoiceTutorDuplexTurnController, Flux<String>>()
     private val controllerTransports = mutableMapOf<VoiceTutorDuplexTurnController, VoiceTutorRealtimeTransport>()
     private val clientSpeechSequences = mutableMapOf<VoiceTutorDuplexTurnController, Long>()
@@ -37,7 +51,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
 
     @Test
     fun `session owns response creation and disables provider auto interruption`() {
-        val adapter = OpenAIVoiceTutorRealtimeAdapter(BuddyStudyProperties())
+        val adapter = OpenAIVoiceTutorRealtimeAdapter(BuddyStudyProperties(), unavailableAssessment)
         val update = mapper.readTree(
             adapter.sessionUpdate(
                 VoiceTutorRealtimeRequest(
@@ -62,6 +76,119 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         val cancel = mapper.readTree(adapter.responseCancelEvent("relay-terminal"))
         assertThat(cancel.path("type").asText()).isEqualTo("response.cancel")
         assertThat(cancel.path("event_id").asText()).startsWith("buddystudy-internal-relay-terminal-")
+    }
+
+    @Test
+    fun `legacy provider transcript cannot self authorize spoken end without semantic input assessment`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY)
+        val lifecycle = mutableListOf<String>()
+        val subscription = controller.serverLifecycleEvents().subscribe(lifecycle::add)
+        try {
+            learnerTurn(controller)
+            val disposition = controller.observeProviderEvent(mapper.writeValueAsString(mapOf(
+                "type" to "conversation.item.input_audio_transcription.completed",
+                "item_id" to "legacy-user-item",
+                "transcript" to "학습 끝낼게",
+            )))
+
+            assertThat(disposition).isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST)
+            assertThat(lifecycle).isEmpty()
+            assertThat(controller.acceptsInputEvents()).isTrue()
+        } finally {
+            controller.close()
+            subscription.dispose()
+        }
+    }
+
+    @Test
+    fun `production legacy turn path assesses and persists the exact server VAD item before spoken end`() {
+        val assessments = CopyOnWriteArrayList<VoiceTutorInputAssessmentRequest>()
+        val persisted = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val lifecycle = CopyOnWriteArrayList<String>()
+        val ended = CountDownLatch(1)
+        val assessment = object : VoiceTutorInputAssessmentUseCase {
+            override suspend fun assess(request: VoiceTutorInputAssessmentRequest): VoiceTutorInputAssessmentResult {
+                assessments += request
+                return VoiceTutorInputAssessmentResult(
+                    request.utterances.map {
+                        VoiceTutorInputItemAssessment(
+                            itemId = it.itemId,
+                            decision = VoiceTutorInputDecision.MEANINGFUL,
+                            intent = VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON,
+                        )
+                    },
+                )
+            }
+        }
+        val adapter = OpenAIVoiceTutorRealtimeAdapter(BuddyStudyProperties(), assessment)
+        val request = VoiceTutorRealtimeRequest(
+            userId = 77,
+            model = "gpt-realtime-test",
+            voice = "marin",
+            instructions = "Tutor safely.",
+            language = "ko",
+        )
+        val controller = adapter.createLegacyTurnController()
+        val controls = CopyOnWriteArrayList<String>()
+        val controlSubscription = controller.providerEvents().subscribe(controls::add, errors::add)
+        val lifecycleSubscription = controller.serverLifecycleEvents().subscribe({ raw ->
+            lifecycle += raw
+            ended.countDown()
+        }, errors::add)
+        val inputWorker = adapter.legacyInputAssessmentRelay(controller, request) { raw, persist, forward ->
+            assertThat(persist).isTrue()
+            assertThat(forward).isTrue()
+            persisted += raw
+            true
+        }.subscribe({}, errors::add)
+        try {
+            controller.startOpeningResponse()
+            val openingControl = controls.single()
+            controller.observeProviderEvent(responseEvent("response.created", "legacy-opening", openingControl))
+            controller.observeProviderEvent(responseEvent("response.done", "legacy-opening", openingControl))
+
+            val itemId = "legacy-user-item"
+            assertThat(controller.observeProviderEvent(mapper.writeValueAsString(mapOf(
+                "type" to "input_audio_buffer.speech_started", "item_id" to itemId,
+            )))).isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST)
+            assertThat(controller.observeProviderEvent(mapper.writeValueAsString(mapOf(
+                "type" to "input_audio_buffer.speech_stopped", "item_id" to itemId,
+            )))).isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST)
+            assertThat(controller.observeProviderEvent(mapper.writeValueAsString(mapOf(
+                "type" to "input_audio_buffer.committed", "item_id" to itemId,
+            )))).isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST)
+            val transcript = mapper.writeValueAsString(mapOf(
+                "type" to "conversation.item.input_audio_transcription.completed",
+                "item_id" to itemId,
+                "transcript" to "학습 종료할게",
+            ))
+            assertThat(controller.observeProviderEvent(transcript)).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+
+            assertThat(ended.await(2, TimeUnit.SECONDS)).isTrue()
+            assertThat(errors).isEmpty()
+            assertThat(assessments).hasSize(1)
+            assertThat(assessments.single().userId).isEqualTo(77)
+            assertThat(assessments.single().language).isEqualTo("ko")
+            assertThat(assessments.single().utterances.single().itemId).isEqualTo(itemId)
+            assertThat(persisted).hasSize(1)
+            val persistedTranscript = mapper.readTree(persisted.single())
+            assertThat(persistedTranscript.path("type").asText())
+                .isEqualTo("conversation.item.input_audio_transcription.completed")
+            assertThat(persistedTranscript.path("item_id").asText()).isEqualTo(itemId)
+            assertThat(persistedTranscript.path("transcript").asText()).isEqualTo("학습 종료할게")
+            assertThat(persistedTranscript.path(VoiceTutorTranscriptMetadata.LESSON_REVISION).asLong()).isZero()
+            assertThat(lifecycle.map { mapper.readTree(it).path("type").asText() })
+                .containsExactly(VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT)
+            assertThat(controls.map { mapper.readTree(it).path("type").asText() })
+                .containsExactly("response.create")
+            assertThat(controller.acceptsInputEvents()).isFalse()
+        } finally {
+            controller.close()
+            inputWorker.dispose()
+            lifecycleSubscription.dispose()
+            controlSubscription.dispose()
+        }
     }
 
     @TestFactory

@@ -125,9 +125,68 @@ final class VoiceTutorVoiceSettingsTests: XCTestCase {
             let strings = AppStrings(language: language)
             XCTAssertFalse(strings.voiceTutorVoiceSetting.isEmpty)
             XCTAssertFalse(strings.voiceTutorVoiceSettingHelp.isEmpty)
+            XCTAssertFalse(strings.voiceTutorVoicePreviewDisclosure.isEmpty)
+            XCTAssertFalse(strings.voiceTutorVoicePreviewPlaying.isEmpty)
+            XCTAssertFalse(strings.voiceTutorVoicePreviewFailed.isEmpty)
             XCTAssertEqual(strings.voiceTutorVoiceName(.marin), "Marin")
             XCTAssertEqual(strings.voiceTutorVoiceName(.cedar), "Cedar")
         }
+    }
+
+    func testVoicePreviewUsesAuthenticatedFixedVoiceAndLanguageWithoutStartingALesson() async throws {
+        let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: .sage))
+        defer { fixture.close() }
+
+        let explicit = try await fixture.appState.loadVoiceTutorVoicePreview(
+            voice: .cedar,
+            language: .korean
+        )
+        let serverDefault = try await fixture.appState.loadVoiceTutorVoicePreview(
+            voice: .serverDefault,
+            language: .japanese
+        )
+
+        XCTAssertEqual(explicit, fixture.previewAudio)
+        XCTAssertEqual(serverDefault, fixture.previewAudio)
+        XCTAssertEqual(fixture.requests.map { $0.httpMethod }, ["GET", "GET"])
+        XCTAssertEqual(fixture.requests.map { $0.url?.path }, [
+            "/api/v1/voice-tutor/voices/cedar/preview",
+            "/api/v1/voice-tutor/voices/default/preview"
+        ])
+        XCTAssertEqual(fixture.requests.compactMap { request in
+            guard let url = request.url else { return nil }
+            return URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "language" })?.value
+        }, ["ko", "ja"])
+        XCTAssertTrue(fixture.requests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Accept") == "audio/mpeg"
+                && $0.value(forHTTPHeaderField: "Authorization") != nil
+                && $0.httpBody == nil
+        })
+        XCTAssertTrue(fixture.creationBodies.isEmpty)
+        XCTAssertEqual(fixture.appState.settings.voiceTutorVoice, .sage)
+        XCTAssertEqual(fixture.appState.draftSettings.voiceTutorVoice, .sage)
+        fixture.assertAnswerDraftsUnchanged()
+    }
+
+    func testVoicePreviewRejectsAnOversizedBackendPayloadWithoutChangingSettings() async throws {
+        let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: .ash))
+        defer { fixture.close() }
+        fixture.previewAudio = Data(repeating: 0x41, count: 524_289)
+
+        do {
+            _ = try await fixture.appState.loadVoiceTutorVoicePreview(
+                voice: .marin,
+                language: .english
+            )
+            XCTFail("An oversized preview must be rejected")
+        } catch {
+            XCTAssertTrue(error is RemotePushBackendError)
+        }
+
+        XCTAssertEqual(fixture.appState.settings.voiceTutorVoice, .ash)
+        XCTAssertTrue(fixture.creationBodies.isEmpty)
+        fixture.assertAnswerDraftsUnchanged()
     }
 
     func testVoiceEditingIsDirtyCancelableAndDoesNotStartRequests() throws {
@@ -299,6 +358,7 @@ private final class VoiceSettingsAppFixture {
     let registration: RemotePushRegistration
     var requests: [URLRequest] = []
     var creationBodies: [[String: Any]] = []
+    var previewAudio = Data([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00])
     var expireFirstCreate = false
     var onTokenRequest: (() -> Void)?
     private let host: String
@@ -370,16 +430,17 @@ private final class VoiceSettingsAppFixture {
 
     private func respond(to request: URLRequest) throws -> (HTTPURLResponse, Data) {
         requests.append(request)
-        XCTAssertEqual(request.httpMethod, "POST")
         let body: String
         var status = 200
         switch request.url?.path {
         case "/api/v1/auth/token":
+            XCTAssertEqual(request.httpMethod, "POST")
             onTokenRequest?()
             body = """
             {"accessToken":"\(registration.accessToken!)","accessTokenExpiresAt":"2100-01-01T00:00:00Z"}
             """
         case "/api/v1/voice-tutor/sessions":
+            XCTAssertEqual(request.httpMethod, "POST")
             creationBodies.append(try Self.requestBody(request))
             if expireFirstCreate, creationBodies.count == 1 {
                 status = 401
@@ -392,6 +453,19 @@ private final class VoiceSettingsAppFixture {
                 "controlWebsocketUrl":"/api/v1/voice-tutor/sessions/\(id)/control"}
                 """
             }
+        case "/api/v1/voice-tutor/voices/cedar/preview",
+             "/api/v1/voice-tutor/voices/default/preview",
+             "/api/v1/voice-tutor/voices/marin/preview":
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertNil(request.httpBody)
+            return (try XCTUnwrap(HTTPURLResponse(
+                url: try XCTUnwrap(request.url), statusCode: status, httpVersion: nil,
+                headerFields: [
+                    "Content-Type": "audio/mpeg",
+                    "Cache-Control": "no-store",
+                    "Content-Length": String(previewAudio.count)
+                ]
+            )), previewAudio)
         default:
             XCTFail("Voice preference tests must not call other endpoints")
             throw URLError(.unsupportedURL)

@@ -17,14 +17,12 @@ import java.time.Duration
 /** Wire-configuration regression only; never claims recognition accuracy from synthetic JSON. */
 class VoiceTutorInputTranscriptionConfigurationTest {
     private val mapper = JsonMapperProvider.mapper
-    private val pcm = OpenAIVoiceTutorRealtimeAdapter(BuddyStudyProperties())
-    private val webRtc = OpenAIVoiceTutorWebRtcAdapter(
-        BuddyStudyProperties(),
-        object : VoiceTutorInputAssessmentUseCase {
-            override suspend fun assess(request: VoiceTutorInputAssessmentRequest): VoiceTutorInputAssessmentResult =
-                error("A transcription configuration test must never invoke a provider.")
-        },
-    )
+    private val unavailableAssessment = object : VoiceTutorInputAssessmentUseCase {
+        override suspend fun assess(request: VoiceTutorInputAssessmentRequest): VoiceTutorInputAssessmentResult =
+            error("A transcription configuration test must never invoke a provider.")
+    }
+    private val pcm = OpenAIVoiceTutorRealtimeAdapter(BuddyStudyProperties(), unavailableAssessment)
+    private val webRtc = OpenAIVoiceTutorWebRtcAdapter(BuddyStudyProperties(), unavailableAssessment)
 
     @TestFactory
     fun `all provider setup paths use the accepted call language independently of tutor instructions`() =

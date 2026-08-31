@@ -9,8 +9,8 @@ import kotlinx.coroutines.reactor.mono
 import reactor.core.publisher.Mono
 
 /**
- * Owned by the sideband lifecycle, independently of its ordered receive loop.
- * A slow classifier cannot hide provider audio completion or stop native RTP.
+ * Owned by the provider lifecycle, independently of its ordered receive loop.
+ * A slow classifier cannot hide provider audio completion or stop either media path.
  * The controller correlates every asynchronous result with its original batch.
  */
 internal fun voiceTutorInputAssessmentRelay(

@@ -438,6 +438,12 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration
     ) async throws -> BackendVoiceTutorStatus
 
+    func fetchVoiceTutorVoicePreview(
+        registration: RemotePushRegistration,
+        voice: VoiceTutorVoice,
+        language: AppLanguage
+    ) async throws -> Data
+
     func createVoiceTutorSession(
         registration: RemotePushRegistration,
         studyID: Int?,
@@ -804,6 +810,14 @@ extension RemotePushBackendClientProtocol {
             voice: voice,
             idempotencyKey: idempotencyKey
         )
+    }
+
+    func fetchVoiceTutorVoicePreview(
+        registration: RemotePushRegistration,
+        voice: VoiceTutorVoice,
+        language: AppLanguage
+    ) async throws -> Data {
+        throw RemotePushBackendError.invalidResponse
     }
 
     func fetchNativeAdvertisementFallback(
@@ -1645,6 +1659,29 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         let data = try await perform(request, logsBodyContents: false)
         return try decoder.decode(BackendVoiceTutorStatus.self, from: data)
+    }
+
+    func fetchVoiceTutorVoicePreview(
+        registration: RemotePushRegistration,
+        voice: VoiceTutorVoice,
+        language: AppLanguage
+    ) async throws -> Data {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "voice-tutor", "voices", voice.rawValue, "preview"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "language", value: language.backendCode)]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        request.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
+        let data = try await perform(request, logsBodyContents: false)
+        guard !data.isEmpty, data.count <= 524_288 else {
+            throw RemotePushBackendError.invalidResponse
+        }
+        return data
     }
 
     func createVoiceTutorSession(

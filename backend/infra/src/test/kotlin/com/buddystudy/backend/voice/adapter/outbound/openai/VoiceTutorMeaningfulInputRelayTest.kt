@@ -7,6 +7,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentF
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import kotlinx.coroutines.CompletableDeferred
@@ -57,6 +58,168 @@ class VoiceTutorMeaningfulInputRelayTest {
         assertThat(f.responses()).hasSize(2)
         f.assertNoAudioDisruption()
     }
+
+    @Test
+    fun `spoken lesson end emits one server lifecycle request only after exact durable learner publication`() {
+        fixture().use { f ->
+            f.utterance(1, "not-persisted", "학습 끝낼게")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
+            val publication = f.publications().single()
+            f.controller.confirmInputPublished(publication.itemId, persisted = false)
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+            assertThat(f.responses()).hasSize(2)
+            assertThat(f.controller.acceptsInputEvents()).isTrue()
+        }
+
+        fixture().use { f ->
+            f.utterance(1, "persisted-end", "학습 끝낼게")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
+            val publication = f.publications().single()
+            f.controller.confirmInputPublished(publication.itemId, persisted = true)
+            f.controller.confirmInputPublished(publication.itemId, persisted = true)
+            assertThat(f.serverLifecycleTypes()).containsExactly(VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT)
+            assertThat(f.responses()).hasSize(1)
+            assertThat(f.controller.acceptsInputEvents()).isFalse()
+            f.assertNoAudioDisruption()
+        }
+
+        fixture().use { f ->
+            f.start(1)
+            f.controller.fireContinuousSpeechDeadline()
+            f.commit("incomplete-checkpoint")
+            f.transcript("incomplete-checkpoint", "학습 끝낼게라고 말하면")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
+            val publication = f.publications().single()
+            assertThat(publication.checkpoint).isTrue()
+            f.controller.confirmInputPublished(publication.itemId, persisted = true)
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+            assertThat(f.responses()).hasSize(1)
+            assertThat(f.controller.acceptsInputEvents()).isTrue()
+        }
+    }
+
+    @Test
+    fun `spoken lesson end waits for the active tutor sentence to drain completely`() =
+        fixture(finishOpening = false).use { f ->
+            f.utterance(1, "persisted-end", "학습 끝낼게")
+            f.openingDone()
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
+            val publication = f.publications().single()
+            f.controller.confirmInputPublished(publication.itemId, persisted = true)
+
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+            assertThat(f.responses()).hasSize(1)
+            f.start(1) // Duplicate/stale speech generation cannot retract a valid END.
+            f.provider("output_audio_buffer.stopped", "response_id" to "wrong-response")
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+
+            f.openingStopped()
+            assertThat(f.serverLifecycleTypes()).containsExactly(VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT)
+            assertThat(f.responses()).hasSize(1)
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `a newer learner generation retracts an in flight or awaiting persistence spoken end`() {
+        fixture().use { f ->
+            f.utterance(1, "old-end", "학습 끝낼게")
+            f.start(2)
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
+            val oldPublication = f.publications().single()
+            f.controller.confirmInputPublished(oldPublication.itemId, persisted = true)
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+
+            f.stop(2)
+            f.commit("continue")
+            f.transcript("continue", "아니, 계속할게")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL)
+            f.controller.confirmInputPublished("continue", persisted = true)
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+            assertThat(f.responses()).hasSize(2)
+            f.assertNoAudioDisruption()
+        }
+
+        fixture().use { f ->
+            f.utterance(1, "old-end", "학습 끝낼게")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
+            val oldPublication = f.publications().single()
+            f.start(2)
+            f.controller.confirmInputPublished(oldPublication.itemId, persisted = true)
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+
+            f.stop(2)
+            f.commit("continue")
+            f.transcript("continue", "아니, 계속할게")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL)
+            f.controller.confirmInputPublished("continue", persisted = true)
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+            assertThat(f.responses()).hasSize(2)
+            f.assertNoAudioDisruption()
+        }
+
+        fixture(finishOpening = false).use { f ->
+            f.utterance(1, "old-end", "학습 끝낼게")
+            f.openingDone()
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
+            f.controller.confirmInputPublished("old-end", persisted = true)
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+
+            // The END is already persisted, but the active tutor sentence has
+            // not drained. A newer learner generation must still retract it.
+            f.utterance(2, "continue", "아니, 계속할게")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL)
+            f.controller.confirmInputPublished("continue", persisted = true)
+            f.openingStopped()
+
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+            assertThat(f.responses()).hasSize(2)
+            assertThat(f.controller.acceptsInputEvents()).isTrue()
+            f.assertNoAudioDisruption()
+        }
+
+        fixture(finishOpening = false).use { f ->
+            f.utterance(1, "old-end", "학습 끝낼게")
+            f.openingDone()
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
+            f.controller.confirmInputPublished("old-end", persisted = true)
+            f.utterance(2, "noise", "어… 음…")
+            f.assess(VoiceTutorInputDecision.NON_COMMUNICATIVE)
+            f.deleted("noise")
+            f.openingStopped()
+
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+            assertThat(f.responses()).hasSize(2)
+            assertThat(f.controller.acceptsInputEvents()).isTrue()
+            f.assertNoAudioDisruption()
+        }
+    }
+
+    @Test
+    fun `a mixed batch cannot revive an older end when the newer publication is acknowledged first`() =
+        fixture(finishOpening = false).use { f ->
+            f.utterance(1, "old-end", "학습 끝낼게")
+            f.utterance(2, "continue", "아니, 계속할게")
+            f.openingDone()
+            val batch = f.assessments().single()
+            f.controller.completeInputAssessment(
+                batch.token,
+                Result.success(VoiceTutorInputAssessmentResult(listOf(
+                    VoiceTutorInputItemAssessment(
+                        "old-end", VoiceTutorInputDecision.MEANINGFUL,
+                        VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON,
+                    ),
+                    VoiceTutorInputItemAssessment("continue", VoiceTutorInputDecision.MEANINGFUL),
+                ))),
+            )
+            assertThat(f.publications().map { it.itemId }).containsExactly("old-end", "continue")
+            f.controller.confirmInputPublished("continue", persisted = true)
+            f.controller.confirmInputPublished("old-end", persisted = true)
+            f.openingStopped()
+
+            assertThat(f.serverLifecycleTypes()).isEmpty()
+            assertThat(f.responses()).hasSize(2)
+            f.assertNoAudioDisruption()
+        }
 
     @Test
     fun `filler is removed from provider context without transcript or tutor reply`() = fixture().use { f ->
@@ -465,6 +628,7 @@ class VoiceTutorMeaningfulInputRelayTest {
     private inner class Fixture(finishOpening: Boolean, captureInputActions: Boolean, controlDemand: Long) : AutoCloseable {
         val now = AtomicLong()
         val controls = CopyOnWriteArrayList<String>()
+        val serverLifecycle = CopyOnWriteArrayList<String>()
         val actions = CopyOnWriteArrayList<VoiceTutorInputTurnCoordinator.Action>()
         val errors = CopyOnWriteArrayList<Throwable>()
         val nextResponse = CountDownLatch(1)
@@ -476,6 +640,7 @@ class VoiceTutorMeaningfulInputRelayTest {
             inputCoordinator = VoiceTutorInputTurnCoordinator(),
         )
         private val controlSubscription: Disposable
+        private val serverLifecycleSubscription: Disposable
         private val workSubscription: Disposable?
         private val openingToken: String
 
@@ -488,6 +653,7 @@ class VoiceTutorMeaningfulInputRelayTest {
                 }
                 override fun hookOnError(throwable: Throwable) { errors += throwable }
             })
+            serverLifecycleSubscription = controller.serverLifecycleEvents().subscribe(serverLifecycle::add, errors::add)
             workSubscription = if (captureInputActions) controller.inputActions().subscribe(actions::add, errors::add) else null
             controller.startOpeningResponse()
             openingToken = responses().single().path("event_id").asText()
@@ -518,15 +684,25 @@ class VoiceTutorMeaningfulInputRelayTest {
         )
         fun assessments() = actions.filterIsInstance<VoiceTutorInputTurnCoordinator.Action.Assess>()
         fun publications() = actions.filterIsInstance<VoiceTutorInputTurnCoordinator.Action.Publish>()
-        fun assess(decision: VoiceTutorInputDecision) {
+        fun assess(
+            decision: VoiceTutorInputDecision,
+            intent: VoiceTutorInputIntent = VoiceTutorInputIntent.NONE,
+        ) {
             val batch = assessments().last()
-            controller.completeInputAssessment(batch.token, result(batch, decision))
+            controller.completeInputAssessment(batch.token, result(batch, decision, intent))
         }
-        fun result(batch: VoiceTutorInputTurnCoordinator.Action.Assess, decision: VoiceTutorInputDecision) = Result.success(
-            VoiceTutorInputAssessmentResult(batch.utterances.map { VoiceTutorInputItemAssessment(it.itemId, decision) }),
+        fun result(
+            batch: VoiceTutorInputTurnCoordinator.Action.Assess,
+            decision: VoiceTutorInputDecision,
+            intent: VoiceTutorInputIntent = VoiceTutorInputIntent.NONE,
+        ) = Result.success(
+            VoiceTutorInputAssessmentResult(batch.utterances.map {
+                VoiceTutorInputItemAssessment(it.itemId, decision, intent)
+            }),
         )
         fun publishAll() { publications().forEach { controller.confirmInputPublished(it.itemId) } }
         fun responses() = controls.map(mapper::readTree).filter { it.path("type").asText() == "response.create" }
+        fun serverLifecycleTypes() = serverLifecycle.map { mapper.readTree(it).path("type").asText() }
         fun deletions() = controls.map(mapper::readTree).filter { it.path("type").asText() == "conversation.item.delete" }
         fun inputCommits() = controls.map(mapper::readTree).filter { it.path("type").asText() == "input_audio_buffer.commit" }
         fun assertNoAudioDisruption() {
@@ -553,6 +729,7 @@ class VoiceTutorMeaningfulInputRelayTest {
             controller.close()
             workSubscription?.dispose()
             controlSubscription.dispose()
+            serverLifecycleSubscription.dispose()
         }
     }
 }

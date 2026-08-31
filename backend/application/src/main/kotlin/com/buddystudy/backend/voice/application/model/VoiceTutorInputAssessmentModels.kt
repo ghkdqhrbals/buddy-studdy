@@ -19,8 +19,15 @@ data class VoiceTutorInputAssessmentRequest(
 
 enum class VoiceTutorInputDecision { MEANINGFUL, NON_COMMUNICATIVE }
 
-data class VoiceTutorInputItemAssessment(val itemId: String, val decision: VoiceTutorInputDecision) {
-    override fun toString(): String = "VoiceTutorInputItemAssessment(itemId=[redacted], decision=$decision)"
+enum class VoiceTutorInputIntent { NONE, END_CURRENT_VOICE_LESSON }
+
+data class VoiceTutorInputItemAssessment(
+    val itemId: String,
+    val decision: VoiceTutorInputDecision,
+    val intent: VoiceTutorInputIntent = VoiceTutorInputIntent.NONE,
+) {
+    override fun toString(): String =
+        "VoiceTutorInputItemAssessment(itemId=[redacted], decision=$decision, intent=$intent)"
 }
 
 /** Exactly one decision for each requested item, returned in original request order. */
@@ -45,5 +52,13 @@ fun VoiceTutorInputAssessmentResult.correlatedTo(
     if (byId.size != decisions.size || byId.keys != expected.toSet()) {
         throw VoiceTutorInputAssessmentException(VoiceTutorInputAssessmentFailure.INVALID_RESULT)
     }
-    return VoiceTutorInputAssessmentResult(expected.map { byId.getValue(it) })
+    val ordered = expected.map { byId.getValue(it) }
+    if (ordered.any {
+            it.decision == VoiceTutorInputDecision.NON_COMMUNICATIVE &&
+                it.intent != VoiceTutorInputIntent.NONE
+        }
+    ) {
+        throw VoiceTutorInputAssessmentException(VoiceTutorInputAssessmentFailure.INVALID_RESULT)
+    }
+    return VoiceTutorInputAssessmentResult(ordered)
 }

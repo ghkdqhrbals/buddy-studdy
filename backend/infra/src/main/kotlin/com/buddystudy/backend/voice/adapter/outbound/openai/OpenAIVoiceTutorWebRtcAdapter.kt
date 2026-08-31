@@ -240,7 +240,14 @@ class OpenAIVoiceTutorWebRtcAdapter(
             val clientControls = turnController.clientEvents().concatMap { raw ->
                 mono { onProviderEvent(raw, false, true) }.then()
             }.then()
-            val receive = Mono.firstWithSignal(providerReceive, turnController.inputFailure(), inputWork, toolWork, clientControls)
+            val serverLifecycle = turnController.serverLifecycleEvents().concatMap { raw ->
+                // This is an authenticated in-process lifecycle request. It is
+                // neither provider output nor a payload for the mobile client.
+                mono { onProviderEvent(raw, false, false) }.then()
+            }.then()
+            val receive = Mono.firstWithSignal(
+                providerReceive, turnController.inputFailure(), inputWork, toolWork, clientControls, serverLifecycle,
+            )
             val ready = sessionHandshake.awaitConfirmation().then(
                 mono {
                     onProviderEvent(SIDEBAND_READY_PAYLOAD, false, true)

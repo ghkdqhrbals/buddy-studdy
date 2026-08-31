@@ -8026,6 +8026,41 @@ final class AppState: ObservableObject {
         return registration
     }
 
+    /// Fetches a short server-owned sample for Settings. It never creates a
+    /// lesson, reserves voice quota, changes the saved voice, or reuses a live
+    /// call's audio session.
+    func loadVoiceTutorVoicePreview(
+        voice: VoiceTutorVoice,
+        language: AppLanguage
+    ) async throws -> Data {
+        let context = try makeVoiceTutorRequestContext()
+        let currentVoiceTutorUseCase = voiceTutorUseCase
+        let registration = try await prepareVoiceTutorRegistration(
+            context: context,
+            reason: "voice-tutor-voice-preview"
+        )
+        let data = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "voice-tutor-voice-preview",
+            validity: context.isCurrent,
+            operation: { recoveredRegistration in
+                try await currentVoiceTutorUseCase.voicePreview(
+                    registration: recoveredRegistration,
+                    voice: voice,
+                    language: language
+                )
+            }
+        )
+        guard !Task.isCancelled, context.isCurrent() else {
+            throw CancellationError()
+        }
+        return data
+    }
+
+    func voiceTutorVoicePreviewDisplayMessage(for error: Error) -> String {
+        voiceTutorDisplayMessage(for: error)
+    }
+
     func refreshVoiceTutorStatus() async {
         guard !isLoadingVoiceTutorStatus else {
             return

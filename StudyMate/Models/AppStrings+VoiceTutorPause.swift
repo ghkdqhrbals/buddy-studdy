@@ -23,6 +23,34 @@ extension AppStrings {
             "休憩の状態を確認できませんでした。接続し直してください。"
         )
     }
+    var voiceTutorOrbPauseHint: String {
+        voiceTutorPauseText(
+            "탭하면 선생님이 현재 문장을 마친 뒤 쉬어요.",
+            "Tap to pause after the tutor finishes the current sentence.",
+            "タップすると、チューターが今の文を話し終えてから休憩します。"
+        )
+    }
+    var voiceTutorOrbResumeHint: String {
+        voiceTutorPauseText(
+            "탭하면 대화를 계속해요.",
+            "Tap to continue the conversation.",
+            "タップすると会話を再開します。"
+        )
+    }
+    var voiceTutorCallRevealConversation: String {
+        voiceTutorPauseText(
+            "아래로 쓸어 대화 보기",
+            "Swipe down for conversation",
+            "下にスワイプして会話を表示"
+        )
+    }
+    var voiceTutorCallCollapseConversation: String {
+        voiceTutorPauseText(
+            "위로 쓸어 통화로 돌아가기",
+            "Swipe up to return to the call",
+            "上にスワイプして通話に戻る"
+        )
+    }
 
     private func voiceTutorPauseText(_ korean: String, _ english: String, _ japanese: String) -> String {
         switch language {

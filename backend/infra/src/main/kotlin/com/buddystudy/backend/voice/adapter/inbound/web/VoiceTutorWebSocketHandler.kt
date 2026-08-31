@@ -64,7 +64,6 @@ class VoiceTutorWebSocketHandler(
         val sessionId = context.session.id
         val endReason = AtomicReference("PROVIDER_CLOSED")
         val failure = AtomicReference<Throwable?>(null)
-        val userEnded = AtomicBoolean(false)
         val trafficGuard = VoiceTutorClientTrafficGuard(eventPolicy, context.session.maxSessionSeconds)
         val audioAccounting = VoiceTutorAcceptedAudioAccounting { bytes ->
             relay.recordAcceptedAudioBytes(principal, sessionId, bytes)
@@ -75,11 +74,18 @@ class VoiceTutorWebSocketHandler(
         val relayTerminated = AtomicBoolean(false)
         val terminalGate = Any()
 
-        fun signalTerminal() {
-            synchronized(terminalGate) {
-                if (relayTerminated.compareAndSet(false, true)) {
-                    terminalSignal.tryEmitValue(VoiceTutorRelayTermination(cancelActiveResponse = true))
-                }
+        fun claimTerminal(
+            reason: String,
+            error: Throwable? = null,
+            cancelActiveResponse: Boolean = true,
+        ): Boolean = synchronized(terminalGate) {
+            if (!relayTerminated.compareAndSet(false, true)) {
+                false
+            } else {
+                endReason.set(reason)
+                failure.set(error)
+                terminalSignal.tryEmitValue(VoiceTutorRelayTermination(cancelActiveResponse = cancelActiveResponse))
+                true
             }
         }
 
@@ -98,16 +104,16 @@ class VoiceTutorWebSocketHandler(
             .coerceAtLeast(Duration.ZERO)
         val deadline = Mono.delay(untilDeadline)
             .map {
-                endReason.set("TIME_LIMIT")
-                signalTerminal()
-                emit(
-                    outgoing,
-                    synthetic(
-                        "buddystudy.voice.session.ending",
-                        sessionId,
-                        mapOf("reason" to "TIME_LIMIT", "hardEndsAt" to context.session.hardEndsAt),
-                    ),
-                )
+                if (claimTerminal("TIME_LIMIT")) {
+                    emit(
+                        outgoing,
+                        synthetic(
+                            "buddystudy.voice.session.ending",
+                            sessionId,
+                            mapOf("reason" to "TIME_LIMIT", "hardEndsAt" to context.session.hardEndsAt),
+                        ),
+                    )
+                }
                 "TIME_LIMIT"
             }
         val serverControl = Flux.interval(Duration.ofSeconds(2))
@@ -129,16 +135,16 @@ class VoiceTutorWebSocketHandler(
                     control.state == com.buddystudy.voice.domain.VoiceTutorSessionStatus.ENDING -> "USER_ENDED"
                     else -> "SERVER_FINALIZED"
                 }
-                endReason.set(reason)
-                signalTerminal()
-                emit(
-                    outgoing,
-                    synthetic(
-                        "buddystudy.voice.session.ending",
-                        sessionId,
-                        mapOf("reason" to reason, "hardEndsAt" to context.session.hardEndsAt),
-                    ),
-                )
+                if (claimTerminal(reason)) {
+                    emit(
+                        outgoing,
+                        synthetic(
+                            "buddystudy.voice.session.ending",
+                            sessionId,
+                            mapOf("reason" to reason, "hardEndsAt" to context.session.hardEndsAt),
+                        ),
+                    )
+                }
                 reason
             }
         val serverStop = Mono.firstWithSignal(deadline, serverControl)
@@ -148,9 +154,7 @@ class VoiceTutorWebSocketHandler(
             .takeUntil { raw ->
                 val end = eventPolicy.eventType(raw) == VoiceTutorRealtimeEventPolicy.CLIENT_END_EVENT
                 if (end) {
-                    userEnded.set(true)
-                    endReason.set("USER_ENDED")
-                    signalTerminal()
+                    claimTerminal("USER_ENDED")
                 }
                 end
             }
@@ -195,10 +199,7 @@ class VoiceTutorWebSocketHandler(
             }
             .takeUntilOther(serverStop)
             .doOnComplete {
-                if (!userEnded.get() && endReason.get() == "PROVIDER_CLOSED") {
-                    endReason.compareAndSet("PROVIDER_CLOSED", "CLIENT_DISCONNECTED")
-                }
-                signalTerminal()
+                claimTerminal("CLIENT_DISCONNECTED")
             }
             .onErrorResume { error ->
                 audioAccounting.flush().then(Mono.error(error))
@@ -248,11 +249,25 @@ class VoiceTutorWebSocketHandler(
                 clientEvents = clientEvents.asFlow(),
                 terminalEvents = terminalSignal.asMono().asFlow(),
             ) { raw, persist, forwardToClient ->
+                val type = eventPolicy.eventType(raw)
+                if (type == VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT) {
+                    if (!persist && !forwardToClient) {
+                        claimTerminal("USER_ENDED", cancelActiveResponse = false)
+                    }
+                    return@relayProvider false
+                }
                 val decision = eventPolicy.providerDecision(raw, sessionId, Instant.now())
                 if (decision.terminate) {
                     decision.payload?.let(::emitProviderPayload)
-                    signalTerminal()
-                    throw VoiceTutorProviderReportedException()
+                    val error = VoiceTutorProviderReportedException()
+                    if (claimTerminal("PROVIDER_ERROR", error)) {
+                        logger.warn(
+                            "voice_tutor_relay_failed sessionId={} errorType={}",
+                            sessionId,
+                            error.javaClass.simpleName,
+                        )
+                    }
+                    throw error
                 }
                 val persisted = persist && inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull() == true
                 if (forwardToClient) {
@@ -266,9 +281,10 @@ class VoiceTutorWebSocketHandler(
             }
 
         val providerFlow = ready.then(providerRelay).doOnError { error ->
-            failure.set(error)
-            endReason.set(if (error is VoiceTutorClientProtocolException) "CLIENT_PROTOCOL_ERROR" else "PROVIDER_ERROR")
-            logger.warn("voice_tutor_relay_failed sessionId={} errorType={}", sessionId, error.javaClass.simpleName)
+            val reason = if (error is VoiceTutorClientProtocolException) "CLIENT_PROTOCOL_ERROR" else "PROVIDER_ERROR"
+            if (claimTerminal(reason, error)) {
+                logger.warn("voice_tutor_relay_failed sessionId={} errorType={}", sessionId, error.javaClass.simpleName)
+            }
         }.onErrorResume { Mono.empty() }
             .then(
                 mono {

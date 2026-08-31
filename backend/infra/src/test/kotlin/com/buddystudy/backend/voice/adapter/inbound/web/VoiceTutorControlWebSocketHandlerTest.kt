@@ -43,6 +43,7 @@ import java.lang.reflect.Proxy
 import java.net.URI
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -155,6 +156,33 @@ class VoiceTutorControlWebSocketHandlerTest {
                 .filter { it.startsWith("voice_tutor_control_terminal ") }
             assertThat(terminals).hasSize(1)
             assertThat(terminals.single()).contains("source=CLIENT_END", "reason=USER_ENDED")
+        }
+    }
+
+    @Test
+    fun `server verified spoken end uses the same graceful user end finalization exactly once`() {
+        withControlLogs { logs ->
+            val result = runControlScenario(
+                serverLifecycleEventBeforeCompletion =
+                    """{"type":"${VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT}"}""",
+                provider = { _, terminal ->
+                    assertThat(terminal.first().cancelActiveResponse).isFalse()
+                },
+                closeStatus = Mono.never(),
+            )
+
+            assertThat(result.failed).isFalse()
+            assertThat(result.reason).isEqualTo("USER_ENDED")
+            assertThat(result.finishCalls).isEqualTo(1)
+            assertThat(result.closeObserverDisposed.get()).isTrue()
+            assertThat(result.deliveryOrder).containsSubsequence(
+                "sent:buddystudy.voice.session.ended", "close",
+            )
+            assertThat(logs.list.map { it.formattedMessage }.filter {
+                it.startsWith("voice_tutor_control_terminal ")
+            }).singleElement().asString().contains(
+                "source=LEARNER_SPOKEN_END", "reason=USER_ENDED", "errorType=none",
+            )
         }
     }
 
@@ -359,6 +387,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         var finishCalls = 0
         var clientEndAfterErrorSent = false
         val closeObserverDisposed = AtomicBoolean()
+        val deliveryOrder = CopyOnWriteArrayList<String>()
     }
 
     private fun runControlScenario(
@@ -366,6 +395,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         clientCompletes: Boolean = false,
         closeStatus: Mono<CloseStatus> = Mono.empty(),
         providerEventBeforeCompletion: String? = null,
+        serverLifecycleEventBeforeCompletion: String? = null,
         clientAfterReady: List<String> = emptyList(),
         clientEndsOnProviderError: Boolean = false,
         provider: suspend (Flow<String>, Flow<VoiceTutorRelayTermination>) -> Unit,
@@ -412,6 +442,9 @@ class VoiceTutorControlWebSocketHandlerTest {
                         // so its provider error never escapes relaySideband.
                     }
                 }
+                if (serverLifecycleEventBeforeCompletion != null) {
+                    onProviderEvent(serverLifecycleEventBeforeCompletion, false, false)
+                }
                 provider(clientEvents, terminalEvents)
             }
 
@@ -448,7 +481,9 @@ class VoiceTutorControlWebSocketHandlerTest {
         val socket = webSocket(
             principal, messages, mutableListOf(),
             closeStatus.doFinally { result.closeObserverDisposed.set(true) },
+            onClose = { result.deliveryOrder += "close" },
             onServerMessage = { raw ->
+                result.deliveryOrder += "sent:${JsonType.type(raw)}"
                 if (clientEndsOnProviderError && JsonType.type(raw) == "buddystudy.voice.error") {
                     val emitted = afterReady.tryEmitNext(WebSocketMessage(
                         WebSocketMessage.Type.TEXT,
@@ -467,7 +502,13 @@ class VoiceTutorControlWebSocketHandlerTest {
 
     private fun withControlLogs(test: (ListAppender<ILoggingEvent>) -> Unit) {
         val logger = LoggerFactory.getLogger(VoiceTutorControlWebSocketHandler::class.java) as Logger
-        val appender = ListAppender<ILoggingEvent>().also { it.start() }
+        val appender = ListAppender<ILoggingEvent>().also {
+            // Handler completion and its final diagnostic can race on different
+            // coroutine workers; the test must not iterate Logback's ArrayList
+            // while that final event is appended.
+            it.list = CopyOnWriteArrayList()
+            it.start()
+        }
         logger.addAppender(appender)
         try {
             test(appender)

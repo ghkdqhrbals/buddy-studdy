@@ -1120,6 +1120,27 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
+    func testSingleOrbTranscriptGestureRequiresAnIntentionalVerticalSwipe() {
+        typealias Gesture = VoiceTutorCallTranscriptGesture
+        XCTAssertEqual(
+            Gesture.action(translation: CGSize(width: 0, height: 44), isExpanded: false),
+            .reveal
+        )
+        XCTAssertEqual(
+            Gesture.action(translation: CGSize(width: 0, height: -44), isExpanded: true),
+            .collapse
+        )
+        XCTAssertNil(Gesture.action(translation: CGSize(width: 0, height: -80), isExpanded: false))
+        XCTAssertNil(Gesture.action(translation: CGSize(width: 0, height: 80), isExpanded: true))
+        XCTAssertNil(Gesture.action(translation: CGSize(width: 0, height: 43), isExpanded: false))
+        XCTAssertNil(Gesture.action(translation: CGSize(width: 80, height: 60), isExpanded: false))
+        XCTAssertNil(Gesture.action(translation: CGSize(width: 40, height: 44), isExpanded: false))
+        XCTAssertEqual(
+            Gesture.action(translation: CGSize(width: 20, height: 80), isExpanded: false),
+            .reveal
+        )
+    }
+
     @MainActor
     func testCompactVoiceCallScreensRenderWithoutCreatingARealSession() async throws {
         let pending = try makeCompactCallDetail(resultStatus: "PROCESSING")
@@ -1127,15 +1148,23 @@ final class VoiceTutorContractTests: XCTestCase {
             resultStatus: "COMPLETED",
             result: ["summaryMarkdown": "Redis의 만료 시간과 캐시 갱신을 복습했습니다."]
         )
+        var pausedState = VoiceTutorCallPauseState()
+        pausedState.isSupported = true
+        let pause = try XCTUnwrap(pausedState.requestPause())
+        XCTAssertTrue(pausedState.acknowledge(sequence: pause.sequence, paused: true))
         let fixtures: [VoiceTutorCompactCallSnapshot] = [
             .init(name: "01-connecting", phase: .connecting, seconds: nil),
             .init(name: "02-listening", phase: .listening, seconds: 3_596),
             .init(name: "03-speaking-recording", phase: .speaking, isRecording: true),
-            .init(name: "04-failed-with-saved-summary", phase: .failed, detail: completed),
-            .init(name: "05-ended-summary-pending", phase: .ended, detail: pending),
-            .init(name: "06-expanded-conversation", phase: .speaking, showsTranscript: true),
             .init(
-                name: "07-narrow-accessibility-english", phase: .listening,
+                name: "04-paused-static", phase: .listening,
+                pauseState: pausedState
+            ),
+            .init(name: "05-failed-with-saved-summary", phase: .failed, detail: completed),
+            .init(name: "06-ended-summary-pending", phase: .ended, detail: pending),
+            .init(name: "07-expanded-conversation", phase: .speaking, showsTranscript: true),
+            .init(
+                name: "08-narrow-accessibility-english", phase: .listening,
                 showsTranscript: true, language: .english,
                 topic: "Redis caching and concurrent updates",
                 size: CGSize(width: 320, height: 696), dynamicType: .accessibility3
@@ -2641,6 +2670,7 @@ final class VoiceTutorContractTests: XCTestCase {
                 presentation: VoiceTutorCallPresentation(
                     phase: fixture.phase,
                     isRecording: fixture.isRecording,
+                    pauseState: fixture.pauseState,
                     sessionSecondsRemaining: fixture.seconds,
                     quotaRemainingSeconds: fixture.phase.isLive ? 0 : 3_540,
                     quotaReservedSeconds: fixture.phase.isLive ? 3_600 : 0,
@@ -2665,7 +2695,7 @@ final class VoiceTutorContractTests: XCTestCase {
         .environment(\.locale, Locale(identifier: fixture.language == .english ? "en_US" : "ko_KR"))
         .dynamicTypeSize(fixture.dynamicType)
         let controller = UIHostingController(rootView: root)
-        controller.overrideUserInterfaceStyle = .dark
+        controller.overrideUserInterfaceStyle = UIUserInterfaceStyle.dark
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
         let previousKeyWindow = scene?.windows.first { $0.isKeyWindow }
@@ -2878,6 +2908,7 @@ private struct VoiceTutorCompactCallSnapshot {
     var phase: VoiceTutorSessionPhase
     var seconds: Int? = 1_852
     var isRecording = false
+    var pauseState = VoiceTutorCallPauseState()
     var detail: BackendVoiceTutorSessionDetail?
     var showsTranscript = false
     var language: AppLanguage = .korean

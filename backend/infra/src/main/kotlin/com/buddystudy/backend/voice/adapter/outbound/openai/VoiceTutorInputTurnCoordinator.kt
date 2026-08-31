@@ -5,6 +5,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentE
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentFailure
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
 import com.buddystudy.backend.voice.application.model.correlatedTo
 
@@ -30,7 +31,13 @@ internal class VoiceTutorInputTurnCoordinator(
                 "Assess(token=$token, contextCharacters=${teacherContext.length}, utteranceCount=${utterances.size})"
         }
 
-        data class Publish(val itemId: String, val rawEvent: String) : Action {
+        data class Publish(
+            val itemId: String,
+            val rawEvent: String,
+            val sequence: Long,
+            val checkpoint: Boolean = false,
+            val intent: VoiceTutorInputIntent = VoiceTutorInputIntent.NONE,
+        ) : Action {
             override fun toString(): String = "Publish(itemId=[redacted], eventCharacters=${rawEvent.length})"
         }
 
@@ -190,7 +197,9 @@ internal class VoiceTutorInputTurnCoordinator(
                         VoiceTutorInputDecision.MEANINGFUL -> {
                             item.stage = Stage.WAITING_PUBLISH
                             item.stageStartedAt = nowNanos
-                            actions += Action.Publish(item.itemId, requireNotNull(item.rawEvent))
+                            actions += Action.Publish(
+                                item.itemId, requireNotNull(item.rawEvent), item.sequence, item.checkpoint, decision.intent,
+                            )
                         }
                         VoiceTutorInputDecision.NON_COMMUNICATIVE -> delete(item, nowNanos, actions)
                     }

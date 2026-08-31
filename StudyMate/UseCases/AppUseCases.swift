@@ -216,6 +216,11 @@ struct TermsUseCase {
 @MainActor
 protocol VoiceTutorRepository {
     func status(registration: RemotePushRegistration) async throws -> BackendVoiceTutorStatus
+    func voicePreview(
+        registration: RemotePushRegistration,
+        voice: VoiceTutorVoice,
+        language: AppLanguage
+    ) async throws -> Data
     func createSession(
         registration: RemotePushRegistration,
         studyID: Int?,
@@ -267,6 +272,18 @@ struct RemoteVoiceTutorRepository: VoiceTutorRepository {
 
     func status(registration: RemotePushRegistration) async throws -> BackendVoiceTutorStatus {
         try await backendClient.fetchVoiceTutorStatus(registration: registration)
+    }
+
+    func voicePreview(
+        registration: RemotePushRegistration,
+        voice: VoiceTutorVoice,
+        language: AppLanguage
+    ) async throws -> Data {
+        try await backendClient.fetchVoiceTutorVoicePreview(
+            registration: registration,
+            voice: voice,
+            language: language
+        )
     }
 
     func createSession(
@@ -372,6 +389,18 @@ struct VoiceTutorUseCase {
 
     func status(registration: RemotePushRegistration) async throws -> BackendVoiceTutorStatus {
         try await repository.status(registration: registration)
+    }
+
+    func voicePreview(
+        registration: RemotePushRegistration,
+        voice: VoiceTutorVoice,
+        language: AppLanguage
+    ) async throws -> Data {
+        try await repository.voicePreview(
+            registration: registration,
+            voice: voice,
+            language: language
+        )
     }
 
     func createSession(

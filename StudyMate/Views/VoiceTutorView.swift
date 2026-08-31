@@ -432,6 +432,14 @@ struct VoiceTutorCallPresentation {
         case end, retry, dismiss, wait
     }
 
+    enum OrbState: Equatable {
+        case connecting, listening, speaking, pausing, paused, resuming, ending, ended, failed
+    }
+
+    enum OrbAction: Equatable {
+        case none, pause, resume
+    }
+
     var phase: VoiceTutorSessionPhase
     var isMuted = false
     var isRecording = false
@@ -450,6 +458,34 @@ struct VoiceTutorCallPresentation {
         showsPauseControl && (phase == .listening || phase == .speaking) && !pauseState.isAwaitingAcknowledgement
     }
     var microphoneIsMuted: Bool { pauseState.effectiveMicrophoneMuted(userMuted: isMuted) }
+
+    var orbState: OrbState {
+        if phase == .listening || phase == .speaking {
+            switch pauseState.mode {
+            case .pausing: return .pausing
+            case .paused: return .paused
+            case .resuming: return .resuming
+            case .active: break
+            }
+        }
+        switch phase {
+        case .idle, .requestingPermission, .connecting: return .connecting
+        case .listening: return .listening
+        case .speaking: return .speaking
+        case .ending: return .ending
+        case .ended: return .ended
+        case .failed: return .failed
+        }
+    }
+
+    var orbAction: OrbAction {
+        guard canChangePause else { return .none }
+        return pauseState.mode == .paused ? .resume : .pause
+    }
+
+    var orbAnimates: Bool {
+        orbState == .listening || orbState == .speaking
+    }
 
     var remainingTime: RemainingTime? {
         if phase.isLive {
@@ -524,13 +560,38 @@ struct VoiceTutorCallPresentation {
            error == strings.voiceTutorConnectionFailed { return nil }
         return error
     }
+
+    func needsVisibleStatus(_ strings: AppStrings, errorMessage: String?) -> Bool {
+        guard phase == .listening || phase == .speaking else { return true }
+        return pauseState.mode != .active || isMuted || inputNeedsRepeat
+            || supplementaryError(strings, errorMessage: errorMessage) != nil
+    }
+}
+
+/// A deliberately small, deterministic gesture contract so transcript reveal
+/// never treats a short tap or horizontal page gesture as a call command.
+struct VoiceTutorCallTranscriptGesture {
+    enum Action: Equatable { case reveal, collapse }
+
+    static let minimumVerticalDistance: CGFloat = 44
+
+    static func action(translation: CGSize, isExpanded: Bool) -> Action? {
+        let verticalDistance = abs(translation.height)
+        guard verticalDistance >= minimumVerticalDistance,
+              verticalDistance > abs(translation.width) * 1.15 else { return nil }
+        if isExpanded, translation.height < 0 { return .collapse }
+        if !isExpanded, translation.height > 0 { return .reveal }
+        return nil
+    }
 }
 
 /// The same non-networking surface is rendered by device visual tests.
 struct VoiceTutorCallScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var showsInformation = false
+    @ScaledMetric(relativeTo: .largeTitle) private var preferredOrbDiameter: CGFloat = 196
+    @ScaledMetric(relativeTo: .title) private var preferredExpandedOrbDiameter: CGFloat = 88
+    @State private var orbPulseExpanded = false
     let topic: String
     var discoveryPrompt: String? = nil
     let presentation: VoiceTutorCallPresentation
@@ -549,145 +610,250 @@ struct VoiceTutorCallScreen: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ScrollView {
-                VStack(spacing: 22) {
-                    timeAndRecording
-                    Spacer(minLength: 12)
-                    callIdentity
-
-                    if showsTranscript {
-                        transcriptPanel
-                            .frame(height: min(260, geometry.size.height * 0.43))
-                            .transition(.opacity)
-                    }
-
-                    summaryRow
-                    if showsSummary && presentation.summaryState == .ready {
-                        VoiceTutorResultSections(detail: presentation.detail, strings: strings)
-                    }
-                    Spacer(minLength: 12)
+            Group {
+                if showsTranscript {
+                    expandedCall(in: geometry)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else {
+                    compactCall(in: geometry)
+                        .transition(.opacity)
+                        .simultaneousGesture(transcriptDragGesture(isExpanded: false))
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 16)
-                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
             }
-            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(uiColor: .systemBackground))
-        .safeAreaInset(edge: .bottom) {
-            controls
-                .padding(.horizontal, 24)
-                .padding(.top, 12)
-                .padding(.bottom, 20)
-                .background(Color(uiColor: .systemBackground))
+        .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            updateOrbAnimation()
         }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showsInformation = true
-                } label: {
-                    Image(systemName: "info.circle")
-                }
-                .accessibilityLabel(strings.voiceTutorCallDetails)
-            }
+        .onChange(of: presentation.orbState) { _, _ in
+            updateOrbAnimation()
         }
-        .alert(strings.voiceTutorCallDetails, isPresented: $showsInformation) {
-            Button(strings.done, role: .cancel) {}
-        } message: {
-            Text(informationText)
+        .onChange(of: reduceMotion) { _, _ in
+            updateOrbAnimation()
+        }
+        .accessibilityAction(
+            named: Text(showsTranscript ? strings.voiceTutorCallCollapseConversation : strings.voiceTutorCallRevealConversation)
+        ) {
+            setTranscriptExpanded(!showsTranscript)
         }
     }
 
-    private var timeAndRecording: some View {
-        VStack(spacing: 8) {
-            Group {
-                switch presentation.remainingTime {
-                case .call(let seconds):
-                    Label(strings.voiceTutorCallRemaining(seconds), systemImage: "clock")
-                case .monthly(let seconds):
-                    Label(strings.voiceTutorCallMonthlyRemaining(seconds), systemImage: "clock")
-                case nil:
-                    Color.clear.frame(height: 16).accessibilityHidden(true)
+    private func compactCall(in geometry: GeometryProxy) -> some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                Spacer(minLength: max(12, geometry.size.height * 0.08))
+
+                Text(topic)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("voiceCall.topic")
+
+                if let discoveryPrompt {
+                    Text(discoveryPrompt)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("voiceCall.discoveryPrompt")
+                }
+
+                callOrb(diameter: compactOrbDiameter(in: geometry))
+
+                callNotices
+                summaryRow
+                if showsSummary && presentation.summaryState == .ready {
+                    VoiceTutorResultSections(detail: presentation.detail, strings: strings)
+                }
+                terminalControls
+
+                Spacer(minLength: 12)
+                if canRevealTranscript {
+                    transcriptAffordance(expanded: false)
                 }
             }
-            .font(.subheadline.monospacedDigit())
-            .foregroundStyle(.secondary)
-            .accessibilityIdentifier("voiceCall.remainingTime")
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private func expandedCall(in geometry: GeometryProxy) -> some View {
+        ScrollView {
+            VStack(spacing: 14) {
+                VStack(spacing: 10) {
+                    transcriptAffordance(expanded: true)
+                    callOrb(diameter: expandedOrbDiameter(in: geometry))
+
+                    Text(topic)
+                        .font(.subheadline.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    expandedTime
+                    callNotices
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+                .gesture(transcriptDragGesture(isExpanded: true))
+
+                transcriptPanel
+                    .frame(height: transcriptHeight(in: geometry))
+
+                summaryRow
+                if showsSummary && presentation.summaryState == .ready {
+                    VoiceTutorResultSections(detail: presentation.detail, strings: strings)
+                }
+                expandedControls
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    @ViewBuilder
+    private func callOrb(diameter: CGFloat) -> some View {
+        if presentation.showsPauseControl {
+            Button(action: onPause) {
+                orbVisual(diameter: diameter)
+            }
+            .buttonStyle(.plain)
+            .disabled(presentation.orbAction == .none)
+            .accessibilityLabel(orbActionLabel)
+            .accessibilityValue(orbAccessibilityValue)
+            .accessibilityHint(orbActionHint)
+            .accessibilityAddTraits(presentation.pauseState.holdsMicrophone ? .isSelected : [])
+            .accessibilityIdentifier("voiceCall.orb")
+        } else {
+            orbVisual(diameter: diameter)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(strings.voiceTutorTeacher)
+                .accessibilityValue(orbAccessibilityValue)
+                .accessibilityIdentifier("voiceCall.orb")
+        }
+    }
+
+    private func orbVisual(diameter: CGFloat) -> some View {
+        ZStack {
+            if presentation.orbAnimates {
+                Circle()
+                    .stroke(orbTint.opacity(orbPulseExpanded ? 0.05 : 0.26), lineWidth: 2)
+                    .scaleEffect(orbPulseExpanded ? 1.16 : 1.02)
+            }
+
+            Circle()
+                .fill(orbTint.opacity(presentation.orbState == .paused ? 0.08 : 0.16))
+
+            Circle()
+                .stroke(
+                    orbTint.opacity(presentation.orbState == .paused ? 0.62 : 0.78),
+                    style: StrokeStyle(
+                        lineWidth: presentation.orbState == .paused ? 3 : 2,
+                        lineCap: .round,
+                        dash: presentation.orbState == .paused ? [7, 9] : []
+                    )
+                )
+
+            if let symbol = orbSymbol {
+                Image(systemName: symbol)
+                    .font(.system(size: diameter * 0.24, weight: .semibold))
+                    .foregroundStyle(orbTint)
+                    .symbolEffect(
+                        .variableColor.iterative,
+                        options: .repeating,
+                        isActive: presentation.orbState == .speaking && !reduceMotion
+                    )
+            } else {
+                ProgressView()
+                    .controlSize(diameter > 120 ? .large : .regular)
+                    .tint(orbTint)
+            }
+
+            if presentation.microphoneIsMuted && !presentation.pauseState.holdsMicrophone {
+                Image(systemName: "mic.slash.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(8)
+                    .background(Color.secondary, in: Circle())
+                    .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 3))
+                    .offset(x: diameter * 0.31, y: diameter * 0.31)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(width: diameter, height: diameter)
+        .scaleEffect(orbScale)
+        .shadow(
+            color: presentation.orbAnimates ? orbTint.opacity(orbPulseExpanded ? 0.18 : 0.08) : .clear,
+            radius: orbPulseExpanded ? 28 : 12
+        )
+        .contentShape(Circle())
+    }
+
+    private var callNotices: some View {
+        VStack(spacing: 7) {
+            if presentation.isRecording {
+                Label(strings.voiceTutorCallRecording, systemImage: "record.circle.fill")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("voiceCall.recording")
+            }
+
+            if presentation.needsVisibleStatus(strings, errorMessage: errorMessage) {
+                HStack(spacing: 6) {
+                    Image(systemName: statusSymbol)
+                        .foregroundStyle(statusColor)
+                    Text(presentation.statusText(strings, errorMessage: errorMessage))
+                }
+                .font(.caption)
+                .foregroundStyle(showsConnectionFailure ? Color.red : Color.secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("voiceCall.status")
+            }
+
+            if let error = presentation.supplementaryError(strings, errorMessage: errorMessage) {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(showsConnectionFailure ? Color.red : Color.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("voiceCall.error")
+            }
 
             if presentation.phase.isLive && presentation.pauseState.holdsMicrophone {
                 Text(strings.voiceTutorPauseUsesTime)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("voiceCall.pauseUsesTime")
-            }
-
-            if presentation.isRecording {
-                Label(strings.voiceTutorCallRecording, systemImage: "record.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .accessibilityIdentifier("voiceCall.recording")
-            }
-        }
-    }
-
-    private var callIdentity: some View {
-        VStack(spacing: 12) {
-            if !showsTranscript && !dynamicTypeSize.isAccessibilitySize {
-                Image(systemName: presentation.phase == .speaking ? "waveform" : "person.fill")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(presentation.phase == .speaking ? Color.accentColor : .secondary)
-                    .frame(width: 60, height: 60)
-                    .background(Color.secondary.opacity(0.08), in: Circle())
-                    .symbolEffect(.pulse, options: .repeating, isActive: presentation.phase == .speaking && !reduceMotion)
-                    .accessibilityHidden(true)
-            }
-
-            Text(topic)
-                .font(.title3.weight(.semibold))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("voiceCall.topic")
-
-            if let discoveryPrompt {
-                Text(discoveryPrompt)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .accessibilityIdentifier("voiceCall.discoveryPrompt")
-            }
-
-            HStack(spacing: 6) {
-                if !showsConnectionFailure
-                    && ([.idle, .requestingPermission, .connecting, .ending].contains(presentation.phase)
-                        || (presentation.phase.isLive && presentation.pauseState.isAwaitingAcknowledgement)) {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: statusSymbol)
-                        .foregroundStyle(statusColor)
-                }
-                Text(presentation.statusText(strings, errorMessage: errorMessage))
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("voiceCall.status")
-
-            // Preserve actionable permission/quota errors without repeating the
-            // generic disconnect sentence already represented by the status.
-            if let error = presentation.supplementaryError(strings, errorMessage: errorMessage) {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
             }
         }
         .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(strings.voiceTutorTeacher)
+    }
+
+    private var expandedTime: some View {
+        Group {
+            switch presentation.remainingTime {
+            case .call(let seconds):
+                Label(strings.voiceTutorCallRemaining(seconds), systemImage: "clock")
+                    .accessibilityIdentifier("voiceCall.remainingTime")
+            case .monthly(let seconds):
+                Label(strings.voiceTutorCallMonthlyRemaining(seconds), systemImage: "clock")
+                    .accessibilityIdentifier("voiceCall.remainingTime")
+            case nil:
+                EmptyView()
+            }
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
     }
 
     private var transcriptPanel: some View {
@@ -714,7 +880,7 @@ struct VoiceTutorCallScreen: View {
                 .padding(.vertical, 12)
                 .padding(.horizontal, 14)
             }
-            .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+            .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
             .onAppear { proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom) }
             .onChange(of: captions.last?.id) { _, _ in
                 proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom)
@@ -724,6 +890,239 @@ struct VoiceTutorCallScreen: View {
             }
         }
         .accessibilityIdentifier("voiceCall.transcript")
+    }
+
+    private func transcriptAffordance(expanded: Bool) -> some View {
+        Button {
+            setTranscriptExpanded(!expanded)
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.caption.weight(.semibold))
+                Text(expanded ? strings.voiceTutorCallCollapseConversation : strings.voiceTutorCallRevealConversation)
+                    .font(.caption2)
+                    .multilineTextAlignment(.center)
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(expanded ? "voiceCall.collapseTranscript" : "voiceCall.revealTranscript")
+    }
+
+    @ViewBuilder
+    private var expandedControls: some View {
+        switch presentation.primaryAction {
+        case .end:
+            responsiveControlLayout {
+                neutralControl(
+                    title: presentation.microphoneIsMuted ? strings.voiceTutorUnmute : strings.voiceTutorMute,
+                    symbol: presentation.microphoneIsMuted ? "mic.slash.fill" : "mic.fill",
+                    selected: presentation.microphoneIsMuted,
+                    enabled: presentation.canMute,
+                    identifier: "voiceCall.mute",
+                    action: onMute
+                )
+                destructiveControl(
+                    title: strings.voiceTutorCallEnd,
+                    symbol: "phone.down.fill",
+                    identifier: "voiceCall.end",
+                    action: onEnd
+                )
+            }
+        case .retry, .dismiss:
+            terminalControls
+        case .wait:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var terminalControls: some View {
+        switch presentation.primaryAction {
+        case .retry:
+            responsiveControlLayout {
+                primaryControl(
+                    title: strings.voiceTutorCallRetry,
+                    symbol: "phone.fill",
+                    tint: .green,
+                    identifier: "voiceCall.retry",
+                    action: onRetry
+                )
+                neutralControl(
+                    title: strings.done,
+                    symbol: "xmark",
+                    identifier: "voiceCall.done",
+                    action: onDismiss
+                )
+            }
+        case .dismiss:
+            primaryControl(
+                title: strings.done,
+                symbol: "checkmark",
+                tint: .accentColor,
+                identifier: "voiceCall.done",
+                action: onDismiss
+            )
+        case .end, .wait:
+            EmptyView()
+        }
+    }
+
+    private func responsiveControlLayout<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout { content() }
+            .frame(maxWidth: .infinity)
+    }
+
+    private func neutralControl(
+        title: String,
+        symbol: String,
+        selected: Bool = false,
+        enabled: Bool = true,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .disabled(!enabled)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func primaryControl(
+        title: String,
+        symbol: String,
+        tint: Color,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.capsule)
+        .tint(tint)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func destructiveControl(
+        title: String,
+        symbol: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        primaryControl(title: title, symbol: symbol, tint: .red, identifier: identifier, action: action)
+    }
+
+    private func transcriptDragGesture(isExpanded: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onEnded { value in
+                guard let action = VoiceTutorCallTranscriptGesture.action(
+                    translation: value.translation,
+                    isExpanded: isExpanded
+                ) else { return }
+                setTranscriptExpanded(action == .reveal)
+            }
+    }
+
+    private func setTranscriptExpanded(_ expanded: Bool) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
+            showsTranscript = expanded
+        }
+    }
+
+    private func compactOrbDiameter(in geometry: GeometryProxy) -> CGFloat {
+        let available = min(geometry.size.width - 64, geometry.size.height * 0.43)
+        return min(max(148, preferredOrbDiameter), max(148, available))
+    }
+
+    private func expandedOrbDiameter(in geometry: GeometryProxy) -> CGFloat {
+        min(max(72, preferredExpandedOrbDiameter), min(112, geometry.size.width * 0.3))
+    }
+
+    private func transcriptHeight(in geometry: GeometryProxy) -> CGFloat {
+        let fraction = dynamicTypeSize.isAccessibilitySize ? 0.48 : 0.52
+        return min(360, max(190, geometry.size.height * fraction))
+    }
+
+    private var canRevealTranscript: Bool {
+        presentation.phase.isLive || !captions.isEmpty || !assistantTranscriptDraft.isEmpty
+    }
+
+    private var orbScale: CGFloat {
+        if presentation.orbState == .paused { return 0.84 }
+        guard presentation.orbAnimates else { return 1 }
+        return orbPulseExpanded ? 1.035 : 0.985
+    }
+
+    private var orbTint: Color {
+        switch presentation.orbState {
+        case .listening: return .green
+        case .speaking: return .accentColor
+        case .failed: return .red
+        case .paused, .pausing, .resuming, .connecting, .ending, .ended: return .secondary
+        }
+    }
+
+    private var orbSymbol: String? {
+        switch presentation.orbState {
+        case .connecting, .ending: return nil
+        case .listening: return "mic.fill"
+        case .speaking: return "waveform"
+        case .pausing, .paused: return "pause.fill"
+        case .resuming: return "play.fill"
+        case .ended: return "checkmark"
+        case .failed: return "wifi.exclamationmark"
+        }
+    }
+
+    private var orbActionLabel: String {
+        orbRepresentsResume ? strings.voiceTutorResumeLesson : strings.voiceTutorTakeBreak
+    }
+
+    private var orbActionHint: String {
+        orbRepresentsResume ? strings.voiceTutorOrbResumeHint : strings.voiceTutorOrbPauseHint
+    }
+
+    private var orbRepresentsResume: Bool {
+        presentation.pauseState.mode == .paused || presentation.pauseState.mode == .resuming
+    }
+
+    private var orbAccessibilityValue: String {
+        var parts = [presentation.statusText(strings, errorMessage: errorMessage)]
+        switch presentation.remainingTime {
+        case .call(let seconds): parts.append(strings.voiceTutorCallRemaining(seconds))
+        case .monthly(let seconds): parts.append(strings.voiceTutorCallMonthlyRemaining(seconds))
+        case nil: break
+        }
+        if presentation.isRecording { parts.append(strings.voiceTutorCallRecording) }
+        return parts.joined(separator: ", ")
+    }
+
+    private func updateOrbAnimation() {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            orbPulseExpanded = false
+        }
+        guard presentation.orbAnimates, !reduceMotion else { return }
+        let duration = presentation.orbState == .speaking ? 0.72 : 1.35
+        withAnimation(.easeInOut(duration: duration).repeatForever(autoreverses: true)) {
+            orbPulseExpanded = true
+        }
     }
 
     @ViewBuilder
@@ -739,7 +1138,10 @@ struct VoiceTutorCallScreen: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         case .failed, .deferred, .unavailable:
-            HStack(spacing: 8) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+            layout {
                 Label(summaryStatusText, systemImage: presentation.summaryState == .deferred ? "clock" : "exclamationmark.circle")
                     .foregroundStyle(.secondary)
                 Button(strings.voiceTutorSummaryRefresh, action: onSummaryRefresh)
@@ -776,99 +1178,6 @@ struct VoiceTutorCallScreen: View {
         }
     }
 
-    private var controls: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: presentation.showsPauseControl ? 12 : 18))
-        return layout {
-            callButton(
-                title: presentation.microphoneIsMuted ? strings.voiceTutorUnmute : strings.voiceTutorMute,
-                symbol: presentation.microphoneIsMuted ? "mic.slash.fill" : "mic.fill",
-                selected: presentation.microphoneIsMuted,
-                enabled: presentation.canMute,
-                identifier: "voiceCall.mute",
-                action: onMute
-            )
-            if presentation.showsPauseControl {
-                let resume = presentation.pauseState.mode == .paused || presentation.pauseState.mode == .resuming
-                callButton(
-                    title: resume ? strings.voiceTutorResumeLesson : strings.voiceTutorTakeBreak,
-                    symbol: resume ? "play.fill" : "pause.fill",
-                    selected: presentation.pauseState.holdsMicrophone,
-                    enabled: presentation.canChangePause,
-                    identifier: "voiceCall.pause",
-                    action: onPause
-                )
-            }
-            callButton(
-                title: strings.voiceTutorCallTranscript,
-                symbol: showsTranscript ? "captions.bubble.fill" : "captions.bubble",
-                selected: showsTranscript,
-                identifier: "voiceCall.captions"
-            ) {
-                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                    showsTranscript.toggle()
-                }
-            }
-            switch presentation.primaryAction {
-            case .end:
-                callButton(title: strings.voiceTutorCallEnd, symbol: "phone.down.fill", tint: .red,
-                           identifier: "voiceCall.end", action: onEnd)
-            case .retry:
-                callButton(title: strings.voiceTutorCallRetry, symbol: "phone.fill", tint: .green,
-                           identifier: "voiceCall.retry", action: onRetry)
-            case .dismiss:
-                callButton(title: strings.done, symbol: "checkmark", tint: .accentColor,
-                           identifier: "voiceCall.done", action: onDismiss)
-            case .wait:
-                callButton(title: strings.voiceTutorCallEnd, symbol: "phone.down.fill", enabled: false,
-                           identifier: "voiceCall.ending", action: {})
-            }
-        }
-    }
-
-    private func callButton(
-        title: String,
-        symbol: String,
-        tint: Color? = nil,
-        selected: Bool = false,
-        enabled: Bool = true,
-        identifier: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(HStackLayout(alignment: .center, spacing: 14))
-            : AnyLayout(VStackLayout(alignment: .center, spacing: 8))
-        return Button(action: action) {
-            layout {
-                Image(systemName: symbol)
-                    .font(.system(size: 21, weight: .medium))
-                    .foregroundStyle(tint == nil ? Color.primary : .white)
-                    .frame(width: 54, height: 54)
-                    .background(
-                        tint ?? Color.secondary.opacity(selected ? 0.22 : 0.09),
-                        in: Circle()
-                    )
-                Text(title)
-                    .font(.caption)
-                    .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(
-                maxWidth: .infinity,
-                minHeight: dynamicTypeSize.isAccessibilitySize ? 54 : 82,
-                alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .top
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.35)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier(identifier)
-    }
-
     private var statusSymbol: String {
         if showsConnectionFailure { return "wifi.exclamationmark" }
         if presentation.phase.isLive && presentation.pauseState.mode == .paused { return "pause.fill" }
@@ -896,13 +1205,6 @@ struct VoiceTutorCallScreen: View {
         presentation.showsConnectionFailure(strings, errorMessage: errorMessage)
     }
 
-    private var informationText: String {
-        var parts: [String] = []
-        if let errorMessage, !errorMessage.isEmpty { parts.append(errorMessage) }
-        if presentation.summaryState == .failed { parts.append(strings.voiceTutorSummaryFailed) }
-        parts.append(strings.voiceTutorForegroundOnly)
-        return parts.joined(separator: "\n\n")
-    }
 }
 
 private struct VoiceTutorCaptionBubble: View {

@@ -191,6 +191,54 @@ final class VoiceTutorPauseTests: XCTestCase {
         XCTAssertNil(presentation.remainingTime, "Reserved monthly quota is not settled usage")
     }
 
+    func testSingleOrbUsesOnlyStablePauseAcknowledgementStatesAsTapActions() throws {
+        let strings = AppStrings(language: .korean)
+        var state = supportedState()
+        var presentation = VoiceTutorCallPresentation(phase: .listening, pauseState: state)
+        XCTAssertEqual(presentation.orbState, .listening)
+        XCTAssertEqual(presentation.orbAction, .pause)
+        XCTAssertTrue(presentation.orbAnimates)
+        XCTAssertFalse(presentation.needsVisibleStatus(strings, errorMessage: nil))
+
+        let pause = try XCTUnwrap(state.requestPause())
+        presentation.pauseState = state
+        XCTAssertEqual(presentation.orbState, .pausing)
+        XCTAssertEqual(presentation.orbAction, .none)
+        XCTAssertFalse(presentation.orbAnimates)
+        XCTAssertTrue(presentation.needsVisibleStatus(strings, errorMessage: nil))
+
+        XCTAssertTrue(state.acknowledge(sequence: pause.sequence, paused: true))
+        presentation.pauseState = state
+        XCTAssertEqual(presentation.orbState, .paused)
+        XCTAssertEqual(presentation.orbAction, .resume)
+        XCTAssertFalse(presentation.orbAnimates, "A paused orb must have an unmistakably stopped effect")
+
+        _ = try XCTUnwrap(state.requestResume())
+        presentation.pauseState = state
+        XCTAssertEqual(presentation.orbState, .resuming)
+        XCTAssertEqual(presentation.orbAction, .none)
+        XCTAssertFalse(presentation.orbAnimates)
+    }
+
+    func testSingleOrbKeepsNormalStatusQuietButSurfacesActionableLiveStates() {
+        let strings = AppStrings(language: .english)
+        var presentation = VoiceTutorCallPresentation(phase: .speaking)
+        XCTAssertEqual(presentation.orbState, .speaking)
+        XCTAssertTrue(presentation.orbAnimates)
+        XCTAssertFalse(presentation.needsVisibleStatus(strings, errorMessage: nil))
+
+        presentation.phase = .listening
+        presentation.isMuted = true
+        XCTAssertTrue(presentation.needsVisibleStatus(strings, errorMessage: nil))
+        presentation.isMuted = false
+        presentation.inputNeedsRepeat = true
+        XCTAssertTrue(presentation.needsVisibleStatus(strings, errorMessage: nil))
+        presentation.inputNeedsRepeat = false
+        XCTAssertTrue(presentation.needsVisibleStatus(strings, errorMessage: strings.voiceTutorMicrophoneDenied))
+        XCTAssertTrue(VoiceTutorCallPresentation(phase: .connecting).needsVisibleStatus(strings, errorMessage: nil))
+        XCTAssertTrue(VoiceTutorCallPresentation(phase: .failed).needsVisibleStatus(strings, errorMessage: nil))
+    }
+
     func testPendingStateIsNotRenderedAsPausedAndHasNoSecondPauseAction() throws {
         var state = supportedState()
         _ = try XCTUnwrap(state.requestPause())
