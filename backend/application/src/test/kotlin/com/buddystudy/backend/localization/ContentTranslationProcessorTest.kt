@@ -15,6 +15,7 @@ import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
 import com.buddystudy.backend.test.EmptyContentLocalizationPort
 import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.StudyRecordType
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -23,6 +24,24 @@ import java.time.Duration
 import java.time.Instant
 
 class ContentTranslationProcessorTest {
+    @Test
+    fun `ordinary translation event cannot process a canonical voice record`(): Unit = runBlocking {
+        val voice = QuestionEntity(id = 58, recordType = StudyRecordType.VOICE_TUTOR, voiceRecordId = 7,
+            question = "private voice question", answer = "private answer", feedback = "private feedback", score = 90)
+        val questions = Mockito.mock(QuestionPort::class.java)
+        Mockito.`when`(questions.findQuestionById(voice.id)).thenReturn(voice)
+        val translator = RecordingContentTranslator()
+        val processor = ContentTranslationProcessor(questions, Mockito.mock(QuestionCommentPort::class.java),
+            EmptyContentLocalizationPort(), translator, RecordingStreamInbox(shouldClaim = true))
+        val hashes = ContentSourceHashPolicy.recordHashes(voice)
+        for ((type, hash) in listOf(LocalizableContentType.QUESTION to hashes.question,
+            LocalizableContentType.ANSWER to hashes.answer, LocalizableContentType.AI_RESPONSE to hashes.aiResponse)) {
+            processor.process(ContentTranslationRequestedEvent(eventId = "unexpected-$type", contentType = type,
+                contentId = 58, targetLanguage = "en", sourceHash = hash!!, requestedAt = Instant.now()))
+        }
+        assertThat(translator.callCount).isZero()
+    }
+
     @Test
     fun `legacy record event is drained without translating bundled content`() = runBlocking {
         val translator = RecordingContentTranslator()

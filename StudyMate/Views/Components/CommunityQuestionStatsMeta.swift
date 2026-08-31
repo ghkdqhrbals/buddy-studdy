@@ -5,6 +5,8 @@ struct CommunityQuestionTopMeta: View {
 
     var body: some View {
         HStack(spacing: 7) {
+            Image(systemName: question.recordType.symbolName)
+                .accessibilityHidden(true)
             Text(question.topic.isEmpty ? "Swift" : question.topic)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -68,7 +70,7 @@ struct CommunityQuestionStatsMeta: View {
     }
 
     private var resultPresentation: CommunityQuestionResultPresentation? {
-        guard let score = question.gradingResult?.score else {
+        guard let score = question.displayScore else {
             return nil
         }
 

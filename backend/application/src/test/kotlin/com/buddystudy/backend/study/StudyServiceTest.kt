@@ -36,6 +36,7 @@ import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystudy.backend.study.application.service.QuestionCreationWriteService
 import com.buddystudy.backend.study.application.service.StudyRecordWriteService
 import com.buddystudy.backend.study.application.service.StudyService
+import com.buddystudy.backend.study.application.service.VoiceRecordContentProjector
 import com.buddystudy.backend.study.application.model.AnswerGradingProgress
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.AnswerGradingStatus
@@ -59,6 +60,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource
 import java.time.Instant
 import java.util.Optional
 
@@ -78,6 +80,7 @@ class StudyServiceTest {
     private val notificationOutbox = FakeNotificationOutbox()
     private val translationEvents = RecordingContentTranslationEventPort()
     private val outboxPublisher = NoOpOutboxPublisher()
+    private val voiceLocalizations = CommonRecordVoiceLocalizations()
     private val recordWriter = StudyRecordWriteService(
         questions,
         questionCoverage,
@@ -96,8 +99,68 @@ class StudyServiceTest {
         languageDetector = PassthroughLanguageDetector(),
         contentLocalizations = EmptyContentLocalizationPort(),
         localizationRequests = RecordingLocalizationRequests(),
+        voiceRecordProjector = VoiceRecordContentProjector(voiceLocalizations),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
+
+    @Test
+    fun `common record reads allow transactional voice translation repair while pending remains read only`() {
+        val attributes = AnnotationTransactionAttributeSource()
+        for (name in listOf("records", "recordsByIds", "record")) {
+            val method = StudyService::class.java.methods.single { it.name == name }
+            val transaction = attributes.getTransactionAttribute(method, StudyService::class.java)
+            assertThat(transaction).describedAs("transaction for %s", name).isNotNull()
+            assertThat(transaction!!.isReadOnly).describedAs("translation repair for %s", name).isFalse()
+        }
+        val pending = StudyService::class.java.methods.single { it.name == "pending" }
+        assertThat(attributes.getTransactionAttribute(pending, StudyService::class.java)!!.isReadOnly).isTrue()
+    }
+
+    @Test
+    fun `record pages and detail use a single canonical identity for both record types`(): Unit = runBlocking {
+        questions.visibleRows += gradedQuestion(id = 101, topic = "Swift")
+        questions.visibleRows += commonRecordVoiceQuestion().apply { score = null }
+        voiceLocalizations.records[7] = commonRecordVoiceFixture(score = null)
+        questionStats.rows += QuestionStatsEntity(questionId = 900, likeCount = 3, commentCount = 5, viewCount = 8)
+
+        val page = service.records(principal, 30, 0, null, language = "ko", view = "original")
+        assertThat(page.records.map { it.id }).containsExactly("101", "900")
+        val voice = page.records.last()
+        assertThat(voice.recordType.name).isEqualTo("VOICE_TUTOR")
+        assertThat(voice.questionStatus).isEqualTo(QuestionStatus.COMPLETED)
+        assertThat(voice.gradingResult).isNull()
+        assertThat(voice.voiceRecord?.score).isNull()
+        assertThat(voice.commentCount).isEqualTo(5)
+        assertThat(voice.likeCount).isEqualTo(3)
+        val detail = service.record(principal, 900, "ko", "original")
+        assertThat(detail).isEqualTo(voice)
+        assertThat(translationEvents.events).isEmpty()
+    }
+
+    @Test
+    fun `scoreless answered voice record supports the same publicity mutation`(): Unit = runBlocking {
+        val q = commonRecordVoiceQuestion().apply { score = null }
+        questions.visibleRows += q
+        voiceLocalizations.records[7] = commonRecordVoiceFixture(score = null)
+        val published = service.publicity(principal, 900, true)
+        assertThat(published.id).isEqualTo("900")
+        assertThat(published.isPublic).isTrue()
+        assertThat(published.voiceRecord).isNotNull()
+        assertThat(published.gradingResult).isNull()
+        val unpublished = service.publicity(principal, 900, false)
+        assertThat(unpublished.isPublic).isFalse()
+        assertThat(notificationOutbox.gradingEvents).isEmpty()
+    }
+
+    @Test
+    fun `voice record deletion uses canonical ID and cannot be reopened through record detail`(): Unit = runBlocking {
+        questions.visibleRows += commonRecordVoiceQuestion()
+        voiceLocalizations.records[7] = commonRecordVoiceFixture()
+        service.delete(principal, 900)
+        assertThat(questions.visibleRows.single().deletedAt).isNotNull()
+        assertThat(runCatching { service.record(principal, 900, "ko", "original") }.exceptionOrNull())
+            .isInstanceOf(com.buddystudy.backend.common.application.error.ApiException::class.java)
+    }
 
     @Test
     fun `records load question stats in one batch`(): Unit = runBlocking {

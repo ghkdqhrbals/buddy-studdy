@@ -5,11 +5,29 @@ import com.buddystudy.backend.study.application.model.toRecordResponse
 import com.buddystudy.backend.study.application.port.outbound.AiCriterionAssessment
 import com.buddystudy.backend.study.application.port.outbound.AiGradingAssessment
 import com.buddystudy.study.domain.StudyRecordProjection
+import com.buddystudy.study.domain.StudyRecord
+import com.buddystudy.study.domain.StudyRecordState
+import com.buddystudy.study.domain.entity.StudyRecordType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 
 class StudyRecordMappersTest {
+    @Test
+    fun `voice spoken score cannot masquerade as an ordinary grading result`() {
+        val state = StudyRecordState(id = 900, question = "캐시가 뭔가요?", hint = null, createdAt = Instant.EPOCH,
+            answer = "임시 저장입니다.", score = 82, correct = null, feedback = "잘 설명했어요.", explanation = null,
+            topic = "Redis", difficultyLevel = 3, answeredAt = Instant.EPOCH, publicQuestion = false,
+            questionStatus = "completed", recordType = StudyRecordType.VOICE_TUTOR, voiceRecordId = 7)
+        val response = StudyRecord.of(state).toProjection().toRecordResponse()
+        assertThat(response.id).isEqualTo("900")
+        assertThat(response.gradingResult).isNull()
+        assertThat(response.question.question).isEqualTo(state.question)
+        val json = JsonMapperProvider.mapper.readTree(JsonMapperProvider.mapper.writeValueAsString(response))
+        assertThat(json["recordType"].asText()).isEqualTo("VOICE_TUTOR")
+        assertThat(json["questionStatus"].asText()).isEqualTo("COMPLETED")
+    }
+
     @Test
     fun `graded record exposes final AI verdict and auditable criterion evidence`() {
         val assessment = AiGradingAssessment(

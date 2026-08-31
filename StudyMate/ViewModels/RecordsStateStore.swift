@@ -12,7 +12,7 @@ struct RecordsStateStore {
     }
 
     var pendingRecords: [StudyRecord] {
-        records.filter { $0.gradingResult == nil }
+        records.filter(\.isPendingQuestion)
     }
 
     mutating func replace(with records: [StudyRecord]) {
@@ -43,7 +43,7 @@ struct RecordsStateStore {
     }
 
     mutating func removeLoadedBackendRecord(_ record: StudyRecord) {
-        guard record.gradingResult != nil else {
+        guard record.isCompletedRecord else {
             return
         }
         totalCount = max(totalCount - 1, 0)
@@ -65,7 +65,7 @@ struct RecordsStateStore {
             return nil
         }
 
-        return records.last { matches($0, question) }
+        return records.last { $0.isQuestion && matches($0, question) }
     }
 
     func record(questionCreatedAt: TimeInterval?) -> StudyRecord? {
@@ -74,6 +74,7 @@ struct RecordsStateStore {
         }
 
         return records
+            .filter(\.isQuestion)
             .map {
                 (
                     record: $0,
@@ -96,6 +97,7 @@ struct RecordsStateStore {
 
         if let currentQuestion,
            gradingResult == nil,
+           !records.contains(where: { $0.isDetachedLocalQuestion && matches($0, currentQuestion) }),
            !pending.contains(where: { matches($0, currentQuestion) }) {
             pending.append(
                 StudyRecord(

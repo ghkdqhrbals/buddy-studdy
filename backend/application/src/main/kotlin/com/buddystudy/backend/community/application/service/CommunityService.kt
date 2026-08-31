@@ -30,6 +30,7 @@ import com.buddystudy.backend.localization.application.port.ContentLanguageDetec
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.localization.application.port.ContentTranslationRequestAppendPort
 import com.buddystudy.backend.localization.application.port.RequestContentLocalizationUseCase
+import com.buddystudy.backend.localization.application.port.UnavailableVoiceStudyLearningLocalizationPort
 import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -63,6 +64,7 @@ import com.buddystudy.backend.profile.application.model.toProfile
 import com.buddystudy.backend.community.application.model.toResponse
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystudy.backend.study.application.service.VoiceRecordContentProjector
 import com.buddystudy.backend.community.application.port.outbound.NativeAdEligibilityPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotReservation
@@ -108,6 +110,7 @@ class CommunityService(
     private val translationRequestManager: ContentTranslationRequestAppendPort,
     private val afterCommit: AfterCommitPort,
     private val outboxPublisher: PublishOutboxUseCase,
+    private val voiceRecordProjector: VoiceRecordContentProjector = VoiceRecordContentProjector(UnavailableVoiceStudyLearningLocalizationPort),
 ) : CommunityUseCase {
     @Transactional
     override suspend fun getPublicQuestions(
@@ -130,7 +133,8 @@ class CommunityService(
         )
     }
 
-    @Transactional(readOnly = true)
+    // Localized voice records may durably enqueue a missing translation while returning source text.
+    @Transactional
     override suspend fun getPublicQuestionsV2(
         principal: Principal?,
         query: String?,
@@ -169,7 +173,8 @@ class CommunityService(
         includeNativeAdSlot = offset == 0,
     )
 
-    @Transactional(readOnly = true)
+    // Localized voice records may durably enqueue a missing translation while returning source text.
+    @Transactional
     override suspend fun getLikedPublicQuestions(
         principal: Principal,
         query: String?,
@@ -778,6 +783,25 @@ class CommunityService(
         requestedLanguage: String = q.sourceLanguage.databaseValue,
         viewMode: TranslationViewMode = TranslationViewMode.LOCALIZED,
     ): CommunityQuestionResponse {
+        // The caller has already resolved this row through public eligibility. Voice
+        // source content stays on its own hash-fenced translation path; never enqueue
+        // ordinary question/answer translation work for a private session payload.
+        val voice = voiceRecordProjector.project(q, requestedLanguage, viewMode)
+        if (voice != null) {
+            val author = q.userId?.let { context.authorsById[it]?.toAuthorProjection() }
+            val stats = context.statsByQuestionId[q.id]
+            return PublicQuestion.of(
+                q.toPublicQuestionState().copy(question = voice.question, answer = voice.answer),
+                author,
+                stats?.toPublicQuestionStats(),
+                q.id in context.likedQuestionIds,
+            ).toProjection().toCommunityQuestionResponse(
+                requestedLanguage = QuestionLanguage.normalize(requestedLanguage),
+                viewMode = viewMode,
+                voiceRecord = voice.content,
+                voiceLocalization = voice.localization,
+            )
+        }
         val projected = localizedRecord(
             q,
             requestedLanguage,
@@ -1045,6 +1069,7 @@ private suspend fun QuestionEntity.toPublicQuestionState() = PublicQuestionState
     questionSourceLanguage = sourceLanguage.databaseValue,
     answerSourceLanguage = answerSourceLanguage?.databaseValue,
     aiResponseSourceLanguage = aiResponseSourceLanguage?.databaseValue,
+    recordType = recordType,
 )
 
 private suspend fun QuestionStatsEntity.toPublicQuestionStats() = PublicQuestionStats(

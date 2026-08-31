@@ -6,8 +6,9 @@ BuddyStudy exposes a private, stateless Model Context Protocol endpoint at
 `POST /api/v1/mcp`. An authenticated LLM client can read the current user's
 profile, resume, interests, studies, questions, grading feedback, scores, and
 topic-level statistics, plus private Voice Tutor quota, session history, and
-Tutor Learning Results. A saved study node's learning history combines ordinary
-question records and private, source-backed voice exchanges. The client can also
+Tutor Learning Results. A saved study node's learning history reads the same
+canonical QUESTION/VOICE_TUTOR records as the Records tab. Publicity and comments
+use that same record identity; full voice session evidence stays owner-only. The client can also
 update the private learning context, create root studies or child topics, request
 questions, submit answers, and delete a confirmed study subtree.
 
@@ -176,8 +177,8 @@ receive. Never put it in prompts, logs, repository files, or browser code.
 | `get_question_process` | Read | `record:read` | Poll until `terminal=true`; no remaining question quota required |
 | `submit_answer` | Write | `record:update` | Preserves the authored answer; queues grading |
 | `get_grading_process` | Read | `record:update` | Cursor uses `after_event_id`; poll until terminal |
-| `list_records` | Read | `record:read` | Existing ordinary-question `limit`/`offset` page with score/feedback when ready |
-| `get_record` | Read | `record:read` | Ordinary-question detail: score, feedback, explanation, and rubric |
+| `list_records` | Read | `record:read` | Common QUESTION/VOICE_TUTOR `limit`/`offset` page, with canonical IDs and type-specific feedback |
+| `get_record` | Read | `record:read` | Either canonical record type; ordinary grading or nullable spoken voice assessment, never fabricated grading |
 | `list_study_learning_records` | Read | `study:read`, `record:read`, and `voice-tutor:read` | Owned node's mixed question/voice cursor page; default 5, maximum 30; exact node and original text by default |
 | `get_voice_learning_record` | Read | `voice-tutor:read` | One owned persisted voice exchange; positive numeric `voiceRecord.id`, original text by default; never an ordinary question ID |
 | `list_voice_tutor_sessions` | Read | `voice-tutor:read` | Owner-scoped opaque-cursor page; returns `sessions` and `nextCursor` without live-session mutation |
@@ -202,17 +203,23 @@ only the operation name and exception type, never tool arguments.
   `voice:123` envelope ID or a `questionRecord.id` to this tool.
 - Both accept `language=ko|en|ja` (default `ko`) and
   `view=original|localized` (default `original`). The existing `list_records`
-  and `get_record` contracts remain ordinary-question reads with their existing
-  `localized` default.
+  and `get_record` contracts now read both types with their existing `localized`
+  default and canonical `record.id`, not the legacy voice evidence ID.
 
 The mixed page returns `{items, nextCursor, hasMore, limit}`. Each item has
-`source=QUESTION|VOICE_TUTOR`, its exact `studyId`, and the corresponding
-`questionRecord` or `voiceRecord`; envelope IDs are `question:<id>` or
+`source=QUESTION|VOICE_TUTOR`, its exact `studyId`, a common `record`, and the
+backward-compatible `questionRecord` or `voiceRecord`; envelope IDs are `question:<id>` or
 `voice:<id>`. Ordering is timestamp descending, source ascending, then numeric
 record ID descending. A deletion during hydration can leave an empty page with
 `hasMore=true`; use its next cursor rather than treating it as empty history.
 
-Voice detail preserves the saved topic/level, nullable supported score,
+`record.recordType` distinguishes `QUESTION` (optional `gradingResult`) from
+`VOICE_TUTOR` (safe `voiceRecord` content with nullable spoken score, feedback,
+strengths, improvements and depth). Common record payloads exclude private
+session/turn/tree evidence. Legacy voice detail additionally returns `recordId`
+to link to this canonical identity while keeping its original `id` unchanged.
+
+Owner-only voice evidence detail preserves the saved topic/level, nullable supported score,
 question/answer/feedback text, strengths and improvements, depth summary, and
 session/turn evidence. `localized` can enqueue bounded read repair through the
 existing translation outbox/stream; unavailable translations fall back to
@@ -292,8 +299,8 @@ Study-node learning history:
 ```text
 list_study_learning_records(study_id, scope="node", limit=5, view="original")
   -> {items, nextCursor, hasMore, limit}
-  -> QUESTION item: get_record(questionRecord.id, view="original")
-  -> VOICE_TUTOR item: get_voice_learning_record(voiceRecord.id, view="original")
+  -> either type: get_record(record.id, view="original")
+  -> optional owner-only voice evidence: get_voice_learning_record(voiceRecord.id, view="original")
 ```
 
 Read `subtree` only when descendant history is wanted, and retain each item's

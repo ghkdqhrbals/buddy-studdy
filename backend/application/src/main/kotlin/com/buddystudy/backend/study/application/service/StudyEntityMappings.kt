@@ -103,6 +103,8 @@ internal fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = 
         questionSourceLanguage = sourceLanguage.databaseValue,
         answerSourceLanguage = answerSourceLanguage?.databaseValue,
         aiResponseSourceLanguage = aiResponseSourceLanguage?.databaseValue,
+        recordType = recordType,
+        voiceRecordId = voiceRecordId,
     ),
     stats?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
 )

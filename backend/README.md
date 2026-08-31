@@ -110,12 +110,16 @@ without automatically escalating or chaining deeper questions. V102 freezes the
 owned topic metadata supplied to each session; V101 adds nullable structured
 explorations to the private result. The existing summary-model request extracts
 actual exchanges and explicit spoken assessments with source turn IDs; it does
-not generate question records or grade the learner again. Missing/unsupported
+not generate ordinary questions or grade the learner again. Missing/unsupported
 scores stay null. Old results decode with no explorations. These changes require
 the normal Flyway migrations, not a new service, database, or Redis instance.
 
-V103 projects verified voice exchanges into private `voice_study_learning_records`
-under their actual owned tree nodes. Result completion, record insertion and
+V105 makes `questions.id` the canonical record identity for both `QUESTION` and
+`VOICE_TUTOR`. Verified voice exchanges use the same Records-tab, public-detail,
+like/comment/report, visibility and deletion paths as ordinary records. The old
+`voice_study_learning_records.id` is retained only for the typed evidence and
+existing translation/legacy-detail contracts; common question/answer/feedback
+text is stored once in `questions`. Result completion, record insertion and
 translation outboxes are atomic and idempotent. The existing result recovery
 also projects already structured completed results without another LLM request.
 The existing configured content-translation stream accepts
@@ -126,7 +130,9 @@ Private content is excluded from provider history and HTTP/client body logs.
 Read combined node history at
 `GET /api/v1/studies/{id}/learning-records?scope=node&limit=30&tl=ko&view=localized`;
 `scope=subtree` explicitly includes descendants and `cursor` continues its stable
-owner/node/scope-bound page. Voice-only detail is
+owner/node/scope-bound page. Its `record` field uses the same canonical ID as
+`GET /api/v1/records/{id}` for both types; the legacy wrapper and cursor remain
+compatible. Owner-only voice evidence detail is
 `GET /api/v1/voice-tutor/learning-records/{id}` with the same `tl`/`view` options.
 These reads do not generate questions, consume question quota or replace drafts.
 
@@ -137,8 +143,30 @@ tutor reads a small page for the agreed node before its first question, so
 previous spoken answers can inform the lesson without regrading them. Voice
 history reads require a verified shared tree root and recheck the active call
 after fetching; ordinary MCP reads remain owner-scoped. Existing
-`list_records`/`get_record` still read ordinary question records only. See the
+`list_records`/`get_record` now read both types with canonical IDs and explicit
+`recordType`. A voice score is nullable spoken evidence, not `gradingResult`.
+The old `get_voice_learning_record` still takes the legacy evidence ID. See the
 [MCP contracts](../docs/MCP_SERVER.md) for pagination and permission details.
+
+V105 copies historical voice core text into canonical records without rerunning
+the model, allocates IDs from the existing question sequence, and preserves
+legacy translation IDs and frozen tree metadata. Historical rows and all
+pre-migration sessions (including delayed summaries) are explicitly private;
+new sessions snapshot the normal per-record sharing default, still gated by
+the owner's live account sharing setting. Full session/turn identities and
+recordings never appear in the public voice payload. Common record and public
+feed bodies are excluded from API/client logs. Voice translation retains the
+existing `VOICE_STUDY_RECORD` stream contract and source-hash/token CAS.
+
+Deploy V105 and this application as one version: it removes the old duplicate
+voice text columns after copying them, so an old JAR is not a rollback option
+against the migrated schema. Stop the previous API writer before the new API
+runs Flyway. Keep a verified database backup for a schema rollback; never undo
+this migration by dropping new canonical records or overwriting user visibility.
+No additional DB/Redis/container stack is needed. Ordinary question pending,
+grading, generation, embedding, quota and statistics paths explicitly remain
+`QUESTION`-only. Deletion uses the common record's existing soft-delete path;
+voice evidence and translation reads honor that same tombstone.
 
 WebRTC ready may advertise `pauseProtocol: pause-v1`. Compatible iOS clients
 offer a small connected break: tutor output finishes and server input-clear ACKs

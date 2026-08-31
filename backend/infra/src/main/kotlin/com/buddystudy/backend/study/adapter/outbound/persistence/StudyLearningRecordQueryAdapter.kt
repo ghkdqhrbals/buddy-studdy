@@ -46,12 +46,17 @@ class StudyLearningRecordQueryAdapter(private val client: DatabaseClient) : Stud
                 select q.id as record_id, q.study_id, 'QUESTION' as record_source,
                        coalesce(q.answered_at, q.created_at) as occurred_at
                 from questions q join selected_nodes n on n.id = q.study_id
-                where q.user_id = :userId and q.deleted_at is null and q.skipped_at is null and q.score is not null
+                where q.user_id = :userId and q.record_type = 'QUESTION'
+                  and q.deleted_at is null and q.skipped_at is null and q.score is not null
                 union all
-                select r.id as record_id, r.study_id, 'VOICE_TUTOR' as record_source, r.occurred_at
-                from voice_study_learning_records r join selected_nodes n on n.id = r.study_id
+                -- Preserve the v1 source/extension cursor key, never duplicate the canonical row.
+                select r.id as record_id, q.study_id, 'VOICE_TUTOR' as record_source, q.created_at
+                from questions q join selected_nodes n on n.id = q.study_id
+                join voice_study_learning_records r on r.id = q.voice_record_id and r.study_id = q.study_id
                 join voice_tutor_sessions s on s.id = r.session_id and s.user_id = r.user_id
-                where r.user_id = :userId and s.ended_at is not null
+                where q.user_id = :userId and r.user_id = :userId
+                  and q.record_type = 'VOICE_TUTOR' and q.status = 'completed'
+                  and q.deleted_at is null and q.skipped_at is null and s.ended_at is not null
             )
             select record_id, study_id, record_source, occurred_at from learning_records
             $position

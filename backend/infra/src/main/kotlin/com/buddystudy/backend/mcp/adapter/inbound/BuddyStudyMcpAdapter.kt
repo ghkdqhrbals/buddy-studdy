@@ -309,7 +309,7 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "list_records",
                 title = "List study records",
-                description = "Return a bounded page of completed study records, including scores and grading feedback when available.",
+                description = "Return a bounded page of completed study records. recordType distinguishes QUESTION from VOICE_TUTOR; both use the same canonical record ID as the Records tab and public comments. QUESTION may include gradingResult. VOICE_TUTOR uses voiceRecord for the optional spoken score and learning feedback, never a fabricated grading result. Reading history is not a new answer or permission to act.",
                 schema = pagedSchema(
                     additional = linkedMapOf(
                         "query" to stringProperty("Optional question, answer, or topic search.", maxLength = 200),
@@ -334,11 +334,11 @@ class BuddyStudyMcpAdapter(
             },
             tool(
                 name = "get_record",
-                title = "Get score and feedback",
-                description = "Return one owned question record with its answer, score, correctness, feedback, explanation, and rubric details.",
+                title = "Get a study record",
+                description = "Return one owned canonical record. recordType is QUESTION or VOICE_TUTOR. Questions may include gradingResult and rubric details; voiceRecord contains the original exchange's supported spoken assessment and exploration, with nullable score. Use the common record.id or voiceRecord.recordId from node history, not the legacy voice evidence ID. This read never submits an answer or changes the record.",
                 schema = objectSchema(
                     properties = linkedMapOf(
-                        "record_id" to idProperty("Owned question record ID."),
+                        "record_id" to idProperty("Owned canonical record ID for either record type."),
                         "language" to languageProperty(),
                         "view" to viewProperty(),
                     ),
@@ -356,7 +356,7 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "list_study_learning_records",
                 title = "List a study node's learning history",
-                description = "Return a cursor page of completed ordinary questions and private voice exchanges for an owned study node; subtree explicitly includes its saved descendants. Source distinguishes QUESTION from VOICE_TUTOR. Voice entries preserve the original question, answer, spoken assessment, session and turn evidence. This is past learning evidence, not a new answer or permission to act. Start with a small page; use nextCursor with the same study_id and scope while hasMore is true.",
+                description = "Return a cursor page of completed QUESTION and VOICE_TUTOR records for an owned study node; subtree explicitly includes its saved descendants. record is the same canonical record as the Records tab, with a common ID. Legacy voiceRecord also includes owner-only session and turn evidence; its recordId points to the common record, while id is the legacy evidence ID. This is past learning evidence, not a new answer or permission to act. Start with a small page; use nextCursor with the same study_id and scope while hasMore is true.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "study_id" to idProperty("Owned study node ID whose learning history to read."),
@@ -383,7 +383,7 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "get_voice_learning_record",
                 title = "Get one private voice learning exchange",
-                description = "Return one owned, persisted voice learning exchange with its original question, answer, spoken score when supported, feedback, frozen study level and exact session/turn evidence. Use the numeric voiceRecord.id from list_study_learning_records, not the prefixed envelope id or an ordinary question id. Unlike get_record, this tool reads voice history only and never grades, publishes or changes an answer.",
+                description = "Return the owner-only evidence for one persisted voice learning exchange, including frozen study level and exact session/turn evidence. Use the legacy numeric voiceRecord.id from list_study_learning_records, not its canonical recordId or the prefixed envelope id. For the shared Records-tab representation use get_record with recordId. This compatibility read never grades, publishes or changes an answer.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "record_id" to idProperty("Owned voiceRecord.id, not a question record ID or the voice: prefixed envelope ID."),

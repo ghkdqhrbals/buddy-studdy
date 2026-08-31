@@ -6,6 +6,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorResultResponse
 import com.buddystudy.backend.study.application.model.StudyLearningRecordResponse
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
+import com.buddystudy.backend.study.application.model.VoiceRecordContentResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.aot.hint.MemberCategory
@@ -20,6 +21,7 @@ class VoiceTutorExplorationRuntimeHintsTest {
         listOf(
             VoiceTutorResultResponse::class.java, VoiceTutorExplorationResponse::class.java, VoiceTutorLearningExchangeResponse::class.java,
             StudyLearningRecordResponse::class.java, StudyLearningRecordsPageResponse::class.java, VoiceStudyLearningRecordResponse::class.java,
+            VoiceRecordContentResponse::class.java,
         )
             .forEach { type ->
                 assertThat(RuntimeHintsPredicates.reflection().onType(type).withMemberCategories(

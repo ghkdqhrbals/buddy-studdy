@@ -588,7 +588,7 @@ class BuddyStudyMcpAdapterTest {
             name = "get_record",
             schema = objectSchema(
                 properties = linkedMapOf(
-                    "record_id" to idProperty("Owned question record ID."),
+                    "record_id" to idProperty("Owned canonical record ID for either record type."),
                     "language" to languageProperty(),
                     "view" to viewProperty(),
                 ),

@@ -2,7 +2,7 @@ package com.buddystudy.voice.domain
 
 import java.time.Instant
 
-/** A private, source-backed voice exchange attached to an actual saved study-tree node. */
+/** Source-backed voice details; [recordId] is the shared question/record identity. */
 data class VoiceStudyLearningRecord(
     val id: Long,
     val userId: Long,
@@ -26,6 +26,8 @@ data class VoiceStudyLearningRecord(
     val sourceLanguage: String,
     val sourceLanguages: Map<String, String>,
     val sourceHash: String,
+    /** [id] stays the internal/legacy extension key for existing translation requests. */
+    val recordId: Long? = null,
 ) {
     /** Only these text fields may be translated; identity, hierarchy and assessment never are. */
     fun translatableFields(): Map<String, String?> = linkedMapOf<String, String?>(

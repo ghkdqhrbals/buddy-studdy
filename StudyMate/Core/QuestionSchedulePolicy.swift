@@ -47,7 +47,7 @@ enum QuestionSchedulePolicy {
         currentQuestion: QuestionItem?,
         studyRecords: [StudyRecord]
     ) -> Date? {
-        let recordDates = studyRecords.map(\.question.createdAt)
+        let recordDates = studyRecords.filter(\.isQuestion).map(\.question.createdAt)
         return ([currentQuestion?.createdAt].compactMap { $0 } + recordDates).max()
     }
 }

@@ -16,6 +16,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
+import com.buddystudy.study.domain.entity.StudyRecordType
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -38,6 +39,9 @@ class QuestionCreationWriteService(
         questionKey: OpenAIQuestionKey,
         now: Instant,
     ): QuestionWriteResult {
+        require(question.recordType == StudyRecordType.QUESTION && question.voiceRecordId == null) {
+            "Voice learning records cannot enter question generation."
+        }
         val savedQuestion = questions.save(question)
         questionStats.save(QuestionStatsEntity(questionId = savedQuestion.id, updatedAt = now))
         coverage?.let { questionCoverage.markAsked(it, now) }

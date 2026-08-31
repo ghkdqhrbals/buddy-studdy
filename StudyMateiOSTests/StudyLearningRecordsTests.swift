@@ -180,11 +180,11 @@ final class StudyLearningRecordsTests: XCTestCase {
     func testPrivateLearningBodyPolicyMatchesEndpointsNotWordsOrUnrelatedPaths() {
         for path in [
             "/api/v1/studies/41/learning-records?tl=ko", "/prefix/api/v1/studies/41/learning-records/",
-            "/api/v1/voice-tutor/learning-records/456", "/api/v1/voice-tutor/sessions/fixture"
+            "/api/v1/voice-tutor/learning-records/456", "/api/v1/voice-tutor/sessions/fixture", "/api/v1/records"
         ] {
             XCTAssertTrue(RemotePushBackendClient.suppressesPrivateLearningBodies(for: URL(string: "https://fixture.test\(path)")))
         }
-        for path in ["/api/v1/studies/41", "/api/v1/records", "/api/v1/studies/41/learning-records-other"] {
+        for path in ["/api/v1/studies/41", "/api/v1/studies/41/learning-records-other"] {
             XCTAssertFalse(RemotePushBackendClient.suppressesPrivateLearningBodies(for: URL(string: "https://fixture.test\(path)")))
         }
     }

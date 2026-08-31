@@ -1076,20 +1076,19 @@ private final class InMemoryStudyRecordStore: StudyRecordStorage {
     func find(question: QuestionItem) -> StudyRecord? {
         let normalizedQuestion = SettingsStore.normalizedQuestionText(question.question)
         return records.last {
-            $0.question.createdAt == question.createdAt ||
-                SettingsStore.normalizedQuestionText($0.question.question) == normalizedQuestion
+            $0.isQuestion && ($0.question.createdAt == question.createdAt ||
+                SettingsStore.normalizedQuestionText($0.question.question) == normalizedQuestion)
         }
     }
 
     func append(_ record: StudyRecord) {
-        let normalizedQuestion = SettingsStore.normalizedQuestionText(record.question.question)
-        records.removeAll {
-            SettingsStore.normalizedQuestionText($0.question.question) == normalizedQuestion
-        }
+        guard !records.contains(where: { $0.id == record.id && $0.recordType != record.recordType }) else { return }
+        records.removeAll { StudyRecordIdentityPolicy.recordsMatch($0, record) }
         records.append(record)
     }
 
     func save(_ record: StudyRecord) {
+        guard !records.contains(where: { $0.id == record.id && $0.recordType != record.recordType }) else { return }
         if let index = records.lastIndex(where: { $0.id == record.id }) {
             records[index] = record
         } else {
@@ -1098,11 +1097,7 @@ private final class InMemoryStudyRecordStore: StudyRecordStorage {
     }
 
     func delete(_ record: StudyRecord) {
-        let normalizedQuestion = SettingsStore.normalizedQuestionText(record.question.question)
-        records.removeAll {
-            $0.id == record.id ||
-                SettingsStore.normalizedQuestionText($0.question.question) == normalizedQuestion
-        }
+        records.removeAll { StudyRecordIdentityPolicy.recordsMatch($0, record) }
     }
 
     func clear() {

@@ -1959,6 +1959,8 @@ struct RecordLocalizationMetadata: Codable, Equatable {
 
 struct StudyRecord: Codable, Equatable, Identifiable {
     var id: String
+    var recordType: StudyRecordType
+    var voiceRecord: VoiceRecordContent?
     var studyID: Int?
     var question: QuestionItem
     var answer: String?
@@ -1980,6 +1982,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case recordType, voiceRecord
         case studyID = "studyId"
         case question
         case answer
@@ -2013,7 +2016,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         topic: String,
         difficulty: Difficulty,
         answeredAt: Date? = nil,
-        isPublic: Bool = true,
+        isPublic: Bool? = nil,
         likeCount: Int = 0,
         commentCount: Int = 0,
         viewCount: Int = 0,
@@ -2023,17 +2026,21 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         gradingError: String? = nil,
         questionStatus: QuestionStatus? = nil,
         gradingLastEventID: Int64? = nil,
-        localization: RecordLocalizationMetadata? = nil
+        localization: RecordLocalizationMetadata? = nil,
+        recordType: StudyRecordType = .question,
+        voiceRecord: VoiceRecordContent? = nil
     ) {
         self.id = id
+        self.recordType = recordType
+        self.voiceRecord = voiceRecord
         self.studyID = studyID
         self.question = question
         self.answer = answer
-        self.gradingResult = gradingResult
+        self.gradingResult = recordType == .voiceTutor ? nil : gradingResult
         self.topic = topic
         self.difficulty = difficulty
         self.answeredAt = answeredAt
-        self.isPublic = isPublic
+        self.isPublic = isPublic ?? (recordType == .question)
         self.likeCount = likeCount
         self.commentCount = commentCount
         self.viewCount = viewCount
@@ -2041,10 +2048,10 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.correlationID = correlationID ?? gradingRequestID
         self.gradingStatus = gradingStatus
         self.gradingError = gradingError
-        self.questionStatus = questionStatus
+        self.questionStatus = recordType == .voiceTutor ? .completed : (questionStatus
             ?? (gradingResult != nil
                 ? .graded
-                : (self.gradingRequestID?.isEmpty == false || gradingStatus != nil ? .grading : .ungraded))
+                : (self.gradingRequestID?.isEmpty == false || gradingStatus != nil ? .grading : .ungraded)))
         self.gradingLastEventID = gradingLastEventID
         self.localization = localization
     }
@@ -2053,6 +2060,8 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let backendBooleanContainer = try decoder.container(keyedBy: BackendBooleanCodingKeys.self)
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        recordType = try container.decodeIfPresent(StudyRecordType.self, forKey: .recordType) ?? .question
+        voiceRecord = try container.decodeIfPresent(VoiceRecordContent.self, forKey: .voiceRecord)
         studyID = try container.decodeIfPresent(Int.self, forKey: .studyID)
         question = try container.decode(QuestionItem.self, forKey: .question)
         answer = try container.decodeIfPresent(String.self, forKey: .answer)
@@ -2062,7 +2071,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
         isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic)
             ?? backendBooleanContainer.decodeIfPresent(Bool.self, forKey: .publicValue)
-            ?? true
+            ?? (recordType == .question)
         likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
         commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
         viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0
@@ -2078,10 +2087,23 @@ struct StudyRecord: Codable, Equatable, Identifiable {
                 : (gradingRequestID?.isEmpty == false || gradingStatus != nil ? .grading : .ungraded))
         gradingLastEventID = try container.decodeIfPresent(Int64.self, forKey: .gradingLastEventID)
         localization = try container.decodeIfPresent(RecordLocalizationMetadata.self, forKey: .localization)
+        if recordType == .voiceTutor {
+            guard voiceRecord != nil, questionStatus == .completed, gradingResult == nil,
+                  gradingRequestID == nil, gradingStatus == nil,
+                  Int64(id).map({ $0 > 0 }) == true else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .recordType, in: container, debugDescription: "Invalid voice record contract."
+                )
+            }
+        } else if voiceRecord != nil {
+            throw DecodingError.dataCorruptedError(
+                forKey: .recordType, in: container, debugDescription: "Question cannot contain a voice payload."
+            )
+        }
     }
 
     func asCommunityQuestion(author: CommunityUserProfile?) -> CommunityQuestion? {
-        guard isPublic, gradingResult != nil else {
+        guard isPublic, canPublish else {
             return nil
         }
 
@@ -2096,8 +2118,8 @@ struct StudyRecord: Codable, Equatable, Identifiable {
             gradingResult: gradingResult,
             topic: topic,
             difficultyLevel: difficulty.level,
-            status: "graded",
-            source: "record",
+            status: isVoiceRecord ? "completed" : "graded",
+            source: isVoiceRecord ? "voice_tutor" : "record",
             createdAt: question.createdAt,
             answeredAt: answeredAt,
             author: author,
@@ -2105,7 +2127,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
             commentCount: commentCount,
             viewCount: viewCount,
             isLikedByMe: false,
-            localization: localization
+            localization: localization,
+            recordType: recordType,
+            voiceRecord: voiceRecord
         )
     }
 }
@@ -2116,6 +2140,7 @@ enum QuestionStatus: String, Codable, Equatable {
     case graded = "GRADED"
     case failed = "FAILED"
     case skipped = "SKIPPED"
+    case completed = "COMPLETED"
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -2191,6 +2216,7 @@ enum StudyAnswerPresentationPolicy {
         guard let record else {
             return .awaitingAnswer
         }
+        guard record.isQuestion else { return .completed }
         if record.questionStatus == .graded ||
             record.gradingResult != nil ||
             record.gradingStatus == .completed {
@@ -2229,6 +2255,7 @@ struct DeletedStudyRecordMarker: Codable, Equatable, Identifiable {
     var normalizedQuestion: String
     var mergeKey: String
     var deletedAt: Date
+    var recordType: StudyRecordType?
 
     var id: String {
         [recordID, mergeKey, String(deletedAt.timeIntervalSince1970)].joined(separator: "|")
@@ -2236,19 +2263,24 @@ struct DeletedStudyRecordMarker: Codable, Equatable, Identifiable {
 
     init(record: StudyRecord, deletedAt: Date = Date()) {
         self.recordID = record.id
-        self.normalizedQuestion = Self.normalizedQuestionText(record.question.question)
+        self.normalizedQuestion = record.isQuestion ? Self.normalizedQuestionText(record.question.question) : ""
         self.mergeKey = Self.mergeKey(for: record)
         self.deletedAt = deletedAt
+        self.recordType = record.recordType
     }
 
     func matches(_ record: StudyRecord) -> Bool {
-        record.id == recordID ||
-            Self.mergeKey(for: record) == mergeKey ||
+        guard (recordType ?? .question) == record.recordType else { return false }
+        if record.id == recordID { return true }
+        guard !record.isDetachedLocalQuestion, !recordID.hasPrefix("local-draft:") else { return false }
+        guard (recordType ?? .question) == .question, record.isQuestion else { return false }
+        return Self.mergeKey(for: record) == mergeKey ||
             Self.normalizedQuestionText(record.question.question) == normalizedQuestion
     }
 
     static func mergeKey(for record: StudyRecord) -> String {
-        [
+        guard record.isQuestion else { return "record:\(record.id)" }
+        return [
             record.topic.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
             String(record.difficulty.level),
             normalizedQuestionText(record.question.question)

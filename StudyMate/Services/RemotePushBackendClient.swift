@@ -2941,7 +2941,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         logsBodyContents: Bool = true
     ) async throws -> Data {
         var request = request
-        let logsBodyContents = logsBodyContents && !Self.suppressesPrivateLearningBodies(for: request.url)
+        let protectsLearningContent = Self.suppressesPrivateLearningBodies(for: request.url)
+        let logsBodyContents = logsBodyContents && !protectsLearningContent
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let startedAt = Date()
         let redactedBodyDescription = logsBodyContents ? "" : "[REDACTED]"
@@ -3037,6 +3038,13 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                         ]
                     )
                 }
+                if protectsLearningContent {
+                    var safeError = backendError
+                    safeError?.message = "Learning records request failed."
+                    safeError?.description = nil
+                    safeError?.debugDescription = nil
+                    throw RemotePushBackendError.httpStatus(statusCode, "", safeError)
+                }
                 throw RemotePushBackendError.httpStatus(statusCode, responseBodyText, backendError)
             }
 
@@ -3093,8 +3101,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         guard let url else { return false }
         let parts = url.path.split(separator: "/").map(String.init)
         guard parts.count >= 3 else { return false }
-        for index in 0...(parts.count - 3) where parts[index] == "api" && parts[index + 1] == "v1" {
+        for index in 0...(parts.count - 3) where parts[index] == "api" {
+            if parts[index + 1] == "v2", parts.count >= index + 4,
+               parts[index + 2] == "public", parts[index + 3] == "questions" { return true }
+            guard parts[index + 1] == "v1" else { continue }
             if parts[index + 2] == "voice-tutor" { return true }
+            if parts[index + 2] == "records" { return true }
+            if parts.count >= index + 4,
+               parts[index + 2] == "public", parts[index + 3] == "questions" { return true }
             if parts.count == index + 5,
                parts[index + 2] == "studies",
                Int64(parts[index + 3]).map({ $0 > 0 }) == true,
@@ -4831,6 +4845,8 @@ struct BackendStudyGrowthTrendPoint: Decodable, Equatable, Identifiable {
 
 struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var id: String
+    var recordType: StudyRecordType
+    var voiceRecord: VoiceRecordContent?
     var question: String
     var answer: String?
     var gradingResult: GradingResult?
@@ -4849,6 +4865,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case recordType, voiceRecord
         case question
         case answer
         case gradingResult
@@ -4883,12 +4900,16 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         commentCount: Int = 0,
         viewCount: Int = 0,
         isLikedByMe: Bool = false,
-        localization: RecordLocalizationMetadata? = nil
+        localization: RecordLocalizationMetadata? = nil,
+        recordType: StudyRecordType = .question,
+        voiceRecord: VoiceRecordContent? = nil
     ) {
         self.id = id
+        self.recordType = recordType
+        self.voiceRecord = voiceRecord
         self.question = question
         self.answer = answer
-        self.gradingResult = gradingResult
+        self.gradingResult = recordType == .voiceTutor ? nil : gradingResult
         self.topic = topic
         self.difficultyLevel = difficultyLevel
         self.status = status
@@ -4906,6 +4927,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
+        recordType = try container.decodeIfPresent(StudyRecordType.self, forKey: .recordType) ?? .question
+        voiceRecord = try container.decodeIfPresent(VoiceRecordContent.self, forKey: .voiceRecord)
         question = try container.decode(String.self, forKey: .question)
         answer = try container.decodeIfPresent(String.self, forKey: .answer)
         gradingResult = try container.decodeIfPresent(GradingResult.self, forKey: .gradingResult)
@@ -4923,6 +4946,18 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
             ?? container.decodeIfPresent(Bool.self, forKey: .likedByMe)
             ?? false
         localization = try container.decodeIfPresent(RecordLocalizationMetadata.self, forKey: .localization)
+        if recordType == .voiceTutor {
+            guard voiceRecord != nil, status.caseInsensitiveCompare("completed") == .orderedSame,
+                  gradingResult == nil, Int64(id).map({ $0 > 0 }) == true else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .recordType, in: container, debugDescription: "Invalid public voice record contract."
+                )
+            }
+        } else if voiceRecord != nil {
+            throw DecodingError.dataCorruptedError(
+                forKey: .recordType, in: container, debugDescription: "Question cannot contain a voice payload."
+            )
+        }
     }
 }
 

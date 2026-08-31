@@ -35,7 +35,7 @@ class VoiceTutorPersonalizationAdapter(
                 select question, answer, feedback, score
                 from questions
                 where user_id = :userId and study_id = :studyId
-                  and deleted_at is null and score is not null
+                  and record_type = 'QUESTION' and deleted_at is null and score is not null
                 order by coalesce(graded_at, answered_at, created_at) desc, id desc
                 limit 10
                 """.trimIndent(),

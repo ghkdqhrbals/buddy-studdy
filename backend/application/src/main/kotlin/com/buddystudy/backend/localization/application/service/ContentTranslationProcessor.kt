@@ -14,6 +14,7 @@ import com.buddystudy.backend.localization.application.port.UnavailableVoiceStud
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.StudyRecordType
 import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -109,6 +110,7 @@ class ContentTranslationProcessor(
 
     private suspend fun processQuestion(event: ContentTranslationRequestedEvent) {
         val question = questions.findQuestionById(event.contentId) ?: return
+        if (question.recordType != StudyRecordType.QUESTION) return
         processQuestion(event, question)
     }
 
@@ -134,6 +136,7 @@ class ContentTranslationProcessor(
 
     private suspend fun processAnswer(event: ContentTranslationRequestedEvent) {
         val question = questions.findQuestionById(event.contentId) ?: return
+        if (question.recordType != StudyRecordType.QUESTION) return
         processAnswer(event, question)
     }
 
@@ -155,6 +158,7 @@ class ContentTranslationProcessor(
 
     private suspend fun processAiResponse(event: ContentTranslationRequestedEvent) {
         val question = questions.findQuestionById(event.contentId) ?: return
+        if (question.recordType != StudyRecordType.QUESTION) return
         processAiResponse(event, question)
     }
 

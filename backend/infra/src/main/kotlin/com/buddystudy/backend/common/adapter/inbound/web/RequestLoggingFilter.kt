@@ -38,7 +38,8 @@ class RequestLoggingFilter(
         val capturesBodies = loggingPolicy.capturesBodies &&
             !isMcpEndpoint(exchange) &&
             !isVoiceTutorEndpoint(exchange) &&
-            !isStudyLearningRecordEndpoint(exchange)
+            !isStudyLearningRecordEndpoint(exchange) &&
+            !isCommonRecordEndpoint(exchange)
         val requestCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
         val responseCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
         val started = System.nanoTime()
@@ -105,6 +106,15 @@ class RequestLoggingFilter(
             .filterIsInstance<PathContainer.PathSegment>().map { it.valueToMatch() }
         return segments.size == 5 && segments.take(3) == listOf("api", "v1", "studies") &&
             segments[4] == "learning-records"
+    }
+
+    private fun isCommonRecordEndpoint(exchange: ServerWebExchange): Boolean {
+        val segments = exchange.request.path.pathWithinApplication().elements()
+            .filterIsInstance<PathContainer.PathSegment>().map { it.valueToMatch() }
+        if (segments.size < 3 || segments[0] != "api" || segments[1] !in setOf("v1", "v2")) return false
+        // Either type can occur in these pages (including comments/liked/search/detail). Do not
+        // buffer/parse a potentially private transcript just to decide which row to redact.
+        return segments[2] == "records" || segments.drop(2).take(2) == listOf("public", "questions")
     }
 
     private fun logExchange(

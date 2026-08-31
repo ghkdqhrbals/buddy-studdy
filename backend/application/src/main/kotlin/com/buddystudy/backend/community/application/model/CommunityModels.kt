@@ -5,6 +5,8 @@ import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.study.application.model.GradingResultResponse
 import com.buddystudy.backend.study.application.model.ContentLocalizationResponse
 import com.buddystudy.backend.study.application.model.RecordLocalizationResponse
+import com.buddystudy.backend.study.application.model.VoiceRecordContentResponse
+import com.buddystudy.study.domain.entity.StudyRecordType
 import java.time.Instant
 
 data class ReportQuestionResponse(val ok: Boolean = true)
@@ -32,6 +34,8 @@ data class CommunityQuestionResponse(
     val viewCount: Int = 0,
     val isLikedByMe: Boolean = false,
     val localization: RecordLocalizationResponse? = null,
+    val recordType: StudyRecordType = StudyRecordType.QUESTION,
+    val voiceRecord: VoiceRecordContentResponse? = null,
 )
 
 data class CommunityQuestionsResponse(

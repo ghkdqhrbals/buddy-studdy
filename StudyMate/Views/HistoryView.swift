@@ -17,7 +17,7 @@ struct HistoryView: View {
 
     private var orderedRecords: [StudyRecord] {
         recordsSource
-            .filter { $0.gradingResult != nil }
+            .filter(\.isCompletedRecord)
             .sorted { sortDate(for: $0) > sortDate(for: $1) }
     }
 
@@ -174,7 +174,7 @@ struct HistoryView: View {
                                     selectedRecordID = record.id
                                 }
                                 .contextMenu {
-                                    if appState.isCommunitySessionActive {
+                                    if appState.isCommunitySessionActive, record.isPublic || record.canPublish {
                                         Button {
                                             appState.updateStudyRecordPublicity(record, isPublic: !record.isPublic)
                                         } label: {
@@ -266,6 +266,13 @@ struct HistoryView: View {
         }
         .onChange(of: appState.focusedRecordRequest) {
             showFocusedRecord()
+        }
+        .onChange(of: appState.commonRecordsIdentity) { _, _ in
+            selectedRecordID = nil
+            pendingRecordDeletion = nil
+            recordSearchDebounceTask?.cancel()
+            appState.clearBackendRecordSearchResults()
+            Task { await appState.refreshBackendRecords() }
         }
         .onAppear {
             if appState.focusedRecordRequest != nil {
@@ -493,30 +500,7 @@ struct HistoryView: View {
     private func recordDetailDestination(recordID: String, strings: AppStrings) -> some View {
         if let record = record(for: recordID) {
             #if os(iOS)
-            Group {
-                if let question = record.asCommunityQuestion(author: appState.communityProfile) {
-                    CommunityQuestionDetailView(question: question)
-                        .navigationTitle(strings.browseQuestions)
-                        .navigationBarTitleDisplayMode(.inline)
-                } else {
-                    StudyRecordDetailView(record: record)
-                        .padding(.horizontal, 16)
-                        .navigationTitle(strings.recordDetail)
-                        .navigationBarTitleDisplayMode(.inline)
-                }
-            }
-            .toolbar {
-                if #available(iOS 26.0, *) {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        recordDetailActionsMenu(record: record, strings: strings)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        recordDetailActionsMenu(record: record, strings: strings)
-                    }
-                }
-            }
+            CommonStudyRecordDetailView(record: record)
             #else
             StudyRecordDetailView(record: record)
                 .padding(.horizontal, 16)
@@ -533,30 +517,6 @@ struct HistoryView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
         }
-    }
-
-    private func recordDetailActionsMenu(record: StudyRecord, strings: AppStrings) -> some View {
-        Menu {
-            if appState.isCommunitySessionActive {
-                Button {
-                    appState.updateStudyRecordPublicity(record, isPublic: !record.isPublic)
-                } label: {
-                    Label(
-                        record.isPublic ? strings.makeQuestionPrivate : strings.makeQuestionPublic,
-                        systemImage: record.isPublic ? "lock.fill" : "globe"
-                    )
-                }
-            }
-
-            Button(role: .destructive) {
-                pendingRecordDeletion = record
-            } label: {
-                Label(strings.clear, systemImage: "trash")
-            }
-        } label: {
-            MobileToolbarIconButtonLabel(systemName: "ellipsis")
-        }
-        .accessibilityLabel(strings.more)
     }
 
     private func record(for recordID: String) -> StudyRecord? {
@@ -680,6 +640,8 @@ struct HistoryRow: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
                     HStack(spacing: 6) {
+                        Image(systemName: record.recordType.symbolName)
+                            .accessibilityLabel(strings.recordTypeLabel(record.recordType))
                         if !record.isPublic {
                             Image(systemName: "lock.fill")
                                 .font(.caption2.weight(.semibold))
@@ -704,12 +666,12 @@ struct HistoryRow: View {
 
                     Spacer(minLength: 8)
 
-                    if let result = record.gradingResult {
-                        Text("\(result.score)/100")
+                    if let score = record.displayScore {
+                        Text("\(score)/100")
                             .font(.title3.weight(.bold))
-                            .foregroundStyle(scoreColor(result.score))
+                            .foregroundStyle(scoreColor(score))
                             .lineLimit(1)
-                    } else {
+                    } else if record.isPendingQuestion {
                         Text(strings.ungraded)
                             .font(.caption)
                             .foregroundStyle(.secondary)

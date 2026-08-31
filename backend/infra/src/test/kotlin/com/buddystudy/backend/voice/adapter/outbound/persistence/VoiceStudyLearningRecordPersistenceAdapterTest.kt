@@ -6,6 +6,9 @@ import com.buddystudy.backend.localization.application.model.LocalizableContentT
 import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
 import com.buddystudy.backend.localization.application.port.ContentTranslationEventPort
 import com.buddystudy.backend.voice.adapter.outbound.VoiceTutorExplorationJsonCodec
+import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionSearchProjectionManager
+import com.buddystudy.backend.study.application.port.outbound.QuestionPort
+import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.voice.domain.VoiceStudyLearningRecord
 import com.buddystudy.voice.domain.VoiceTutorExploration
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
@@ -38,9 +41,9 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Independent H2/MySQL-mode contracts, not an execution of MySQL Flyway DDL or its locking engine.
- * JSON uses CLOB; relevant V97/V102/V103/V104 unique/check/cascade constraints are mirrored explicitly.
+ * JSON uses CLOB; relevant V97/V102/V103/V104/V105 unique/check/cascade constraints are mirrored explicitly.
  * The fake outbox writes real SQL through the same transaction context. No containers, sockets,
- * accounts, model calls, ordinary question tables or quota tables participate.
+ * real accounts, model calls, question-generation/grading flows or quota tables participate.
  */
 @Timeout(20)
 class VoiceStudyLearningRecordPersistenceAdapterTest {
@@ -54,10 +57,13 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
     private val database = DatabaseClient.create(connections)
     private val transactions = TransactionalOperator.create(R2dbcTransactionManager(connections))
     private val outbox = SqlOutbox(database)
+    private var detectLanguage: (String, String) -> String = { _, _ -> "ko" }
     private val languageDetector = object : ContentLanguageDetectionPort {
-        override fun detect(text: String, fallbackLanguage: String): String = "ko"
+        override fun detect(text: String, fallbackLanguage: String): String = detectLanguage(text, fallbackLanguage)
     }
-    private val adapter = VoiceStudyLearningRecordPersistenceAdapter(database, outbox, languageDetector)
+    private val searchProjection = QuestionSearchProjectionManager(database)
+    private val questions = SqlQuestions(database, searchProjection)
+    private val adapter = VoiceStudyLearningRecordPersistenceAdapter(database, outbox, languageDetector, questions, searchProjection)
 
     @BeforeEach
     fun schema(): Unit = runBlocking {
@@ -77,6 +83,7 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
             create table voice_tutor_sessions (
                 id varchar(36) primary key, user_id bigint not null, study_id bigint, accepted_study_id bigint,
                 language varchar(8) not null, ended_at timestamp(6), result_status varchar(24) not null,
+                records_default_public boolean not null default true,
                 updated_at timestamp(6) not null,
                 foreign key (user_id) references users(id) on delete cascade,
                 foreign key (study_id) references studies(id) on delete set null,
@@ -124,22 +131,42 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         executeSchema("""
             create table voice_study_learning_records (
                 id bigint auto_increment primary key, user_id bigint not null, session_id varchar(36) not null,
-                study_id bigint not null, parent_study_id bigint, topic varchar(255) not null,
-                difficulty int not null, kind varchar(24) not null, question clob not null, answer clob,
-                score int, feedback clob, strengths_json clob not null, improvements_json clob not null,
+                study_id bigint not null, parent_study_id bigint, kind varchar(24) not null,
+                strengths_json clob not null, improvements_json clob not null,
                 depth_summary clob not null, question_turn_id bigint not null,
                 answer_turn_ids_json clob not null, feedback_turn_ids_json clob not null,
-                source_language varchar(8) not null, source_languages_json clob not null, source_hash varchar(64) not null,
-                occurred_at timestamp(6) not null, created_at timestamp(6) not null,
+                source_languages_json clob not null, source_hash varchar(64) not null, created_at timestamp(6) not null,
                 unique (session_id, question_turn_id),
                 foreign key (session_id) references voice_tutor_sessions(id) on delete cascade,
-                check (kind in ('TUTOR_QUESTION', 'LEARNER_QUESTION')),
-                check (difficulty between 1 and 10),
-                check (score is null or (score between 0 and 100 and kind = 'TUTOR_QUESTION' and answer is not null))
+                check (kind in ('TUTOR_QUESTION', 'LEARNER_QUESTION'))
             )
         """.trimIndent())
-        executeSchema("create index idx_voice_study_record_node_time on voice_study_learning_records(user_id, study_id, occurred_at desc, id desc)")
-        executeSchema("create index idx_voice_study_record_user_time on voice_study_learning_records(user_id, occurred_at desc, id desc)")
+        executeSchema("create index idx_voice_study_record_frozen_node on voice_study_learning_records(user_id, study_id, id)")
+        executeSchema("""
+            create table questions (
+                id bigint auto_increment primary key, user_id bigint not null, study_id bigint,
+                device_id varchar(191) not null, record_type varchar(24) not null default 'QUESTION', voice_record_id bigint unique,
+                topic varchar(255) not null, difficulty_level int not null, question clob not null, answer clob, score int, feedback clob,
+                source_language varchar(16) not null, answer_source_language varchar(16), ai_response_source_language varchar(16),
+                status varchar(24) not null, source varchar(24) not null, is_public boolean not null,
+                scheduled_for timestamp(6) not null, created_at timestamp(6) not null, updated_at timestamp(6) not null,
+                deleted_at timestamp(6), skipped_at timestamp(6),
+                foreign key (voice_record_id) references voice_study_learning_records(id) on delete cascade,
+                foreign key (study_id) references studies(id) on delete set null,
+                check (record_type in ('QUESTION', 'VOICE_TUTOR')),
+                check (record_type <> 'VOICE_TUTOR' or (status = 'completed' and source = 'voice_tutor' and device_id = '')),
+                check (difficulty_level between 1 and 10),
+                check (score is null or (score between 0 and 100 and answer is not null))
+            )
+        """.trimIndent())
+        executeSchema("""
+            create table question_search (
+                question_id bigint not null, language varchar(16) not null,
+                topic clob, question clob, answer clob, feedback clob, explanation clob,
+                updated_at timestamp(6) not null, primary key (question_id, language),
+                foreign key (question_id) references questions(id) on delete cascade
+            )
+        """.trimIndent())
         executeSchema("""
             create table voice_study_learning_localizations (
                 record_id bigint not null, target_language varchar(8) not null, source_language varchar(8) not null,
@@ -196,6 +223,110 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         assertThat(adapter.snapshot(record.id, "en")?.status).isEqualTo("PENDING")
         assertThat(adapter.snapshot(record.id, "en")?.fields).isEmpty()
         assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
+        assertThat(record.recordId).isPositive()
+        assertThat(text("select record_type from questions")).isEqualTo("VOICE_TUTOR")
+        assertThat(text("select status from questions")).isEqualTo("completed")
+        assertThat(text("select source from questions")).isEqualTo("voice_tutor")
+        assertThat(text("select device_id from questions")).isEmpty()
+        assertThat(text("select question from questions")).isEqualTo(record.question)
+        assertThat(count("questions")).isEqualTo(1)
+        assertThat(count("question_search")).isEqualTo(3)
+        assertThat(database.sql("select is_public from questions").map { row, _ -> row.get("is_public", Boolean::class.javaObjectType)!! }.one().awaitSingle()).isTrue()
+    }
+
+    @Test
+    fun `canonical allocation cannot overwrite an ordinary record with the same legacy voice ID`(): Unit = runBlocking {
+        seed()
+        execute("""
+            insert into questions(id, user_id, study_id, device_id, record_type, topic, difficulty_level, question,
+                source_language, status, source, is_public, scheduled_for, created_at, updated_at)
+            values (1, 7, 11, 'synthetic-question-device', 'QUESTION', 'Ordinary saved topic', 4,
+                'Ordinary immutable question', 'ko', 'ungraded', 'manual', false, current_timestamp, current_timestamp, current_timestamp)
+        """.trimIndent())
+
+        append()
+        val voice = onlyRecord()
+
+        assertThat(voice.id).isEqualTo(1)
+        assertThat(voice.recordId).isNotEqualTo(voice.id)
+        assertThat(text("select question from questions where id = 1")).isEqualTo("Ordinary immutable question")
+        assertThat(text("select status from questions where id = 1")).isEqualTo("ungraded")
+        assertThat(count("questions")).isEqualTo(2)
+        assertThat(questions.saved).hasSize(1)
+        assertThat(questions.saved.single().voiceRecordId).isEqualTo(voice.id)
+        assertThat(outbox.events().map { it.contentId }).containsOnly(voice.id)
+    }
+
+    @Test
+    fun `a pre-migration private call remains private when its previously missing records are recovered later`(): Unit = runBlocking {
+        seed()
+        execute("update voice_tutor_sessions set records_default_public = false")
+        val candidate = adapter.completedCandidates(1).single()
+        transaction { adapter.appendCompletedSession(candidate.userId, candidate.sessionId, candidate.explorations, now.plusSeconds(86_400)) }
+
+        assertThat(database.sql("select is_public from questions").map { row, _ -> row.get("is_public", Boolean::class.javaObjectType)!! }.one().awaitSingle()).isFalse()
+        assertThat(onlyRecord().question).isEqualTo(fixture.turns().first().transcript)
+        assertThat(projected()).isTrue()
+    }
+
+    @Test
+    fun `per-field source languages are carried into canonical columns without conflating learner answer and tutor feedback`(): Unit = runBlocking {
+        seed()
+        val answer = fixture.turns()[1].transcript + "\n" + fixture.turns()[2].transcript
+        val feedback = fixture.turns()[3].transcript
+        detectLanguage = { text, _ -> when (text) { answer -> "en"; feedback -> "ja"; else -> "ko" } }
+
+        append()
+
+        assertThat(text("select source_language from questions")).isEqualTo("ko")
+        assertThat(text("select answer_source_language from questions")).isEqualTo("en")
+        assertThat(text("select ai_response_source_language from questions")).isEqualTo("ja")
+        assertThat(onlyRecord().answer).isEqualTo(answer)
+        assertThat(onlyRecord().feedback).isEqualTo(feedback)
+    }
+
+    @Test
+    fun `canonical soft deletion hides legacy detail translations and recovery without deleting original session evidence`(): Unit = runBlocking {
+        seed()
+        append()
+        val record = onlyRecord()
+        val event = outbox.events().first { it.targetLanguage == "en" }
+        execute("update questions set deleted_at = updated_at where voice_record_id = ${record.id}")
+
+        assertThat(adapter.findOwned(7, record.id)).isNull()
+        assertThat(adapter.findAllOwned(7, listOf(record.id))).isEmpty()
+        assertThat(adapter.content(record.id)).isNull()
+        assertThat(adapter.snapshot(record.id, "en")).isNull()
+        transaction { adapter.request(record, "en", now.plusSeconds(600)) }
+        assertThat(transaction { adapter.saveReady(record, event, translation(record), now.plusSeconds(601)) }).isFalse()
+        adapter.markFailed(event, "not retained", now.plusSeconds(602))
+        assertThat(text("select status from voice_study_learning_localizations where target_language = 'en'")).isEqualTo("PENDING")
+        clearProjectionMarker()
+        append(at = now.plusSeconds(603))
+
+        assertThat(count("questions")).isEqualTo(1)
+        assertThat(count("voice_study_learning_records")).isEqualTo(1)
+        assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
+        assertThat(questions.saved).hasSize(1)
+        assertThat(projected()).isTrue()
+        assertThat(outbox.events()).hasSize(2)
+        assertThat(text("select question from questions")).isEqualTo(record.question)
+    }
+
+    @Test
+    fun `an inconsistent canonical owner cannot leak a legacy voice record or accept a late translation`(): Unit = runBlocking {
+        seed()
+        append()
+        val record = onlyRecord()
+        val event = outbox.events().first { it.targetLanguage == "en" }
+        execute("update questions set user_id = 99")
+
+        assertThat(adapter.findOwned(7, record.id)).isNull()
+        assertThat(adapter.findOwned(99, record.id)).isNull()
+        assertThat(adapter.content(record.id)).isNull()
+        assertThat(adapter.snapshot(record.id, "en")).isNull()
+        assertThat(transaction { adapter.saveReady(record, event, translation(record), now.plusSeconds(1)) }).isFalse()
+        assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
     }
 
     @Test
@@ -212,6 +343,7 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         append(listOf(fixture.exploration()), now.plusSeconds(2))
         assertThat(onlyRecord()).isEqualTo(original)
         assertThat(count("voice_study_learning_records")).isEqualTo(1)
+        assertThat(count("questions")).isEqualTo(1)
         assertThat(outbox.events()).hasSize(2)
         assertThat(projected()).isTrue()
     }
@@ -304,12 +436,42 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         assertThat(adapter.snapshot(record.id, "en")?.status).isEqualTo("READY")
         assertThat(adapter.snapshot(record.id, "en")?.fields).isEqualTo(translated.fields)
         assertThat(adapter.snapshot(record.id, "en")?.provider).isEqualTo("synthetic-translator")
+        assertThat(text("select question from question_search where language = 'en'"))
+            .isEqualTo(translated.fields["question"])
+        assertThat(text("select question from question_search where language = 'ko'"))
+            .isEqualTo(record.question)
         assertThat(onlyRecord()).isEqualTo(record)
         assertThat(adapter.saveReady(record, event, translated, now.plusSeconds(3))).isFalse()
         adapter.markFailed(event, "private provider detail", now.plusSeconds(4))
         assertThat(adapter.snapshot(record.id, "en")?.status).isEqualTo("READY")
         transaction { adapter.request(record, "en-US", now.plusSeconds(3_600)) }
         assertThat(outbox.events()).hasSize(2)
+    }
+
+    @Test
+    fun `ready translation and canonical search projection roll back together if the derived search update fails`(): Unit = runBlocking {
+        seed()
+        append()
+        val record = onlyRecord()
+        val event = outbox.events().single { it.targetLanguage == "en" }
+        executeSchema("alter table question_search add constraint synthetic_search_rejection check (question not like 'Translated:%')")
+
+        val failure = runCatching {
+            transaction { adapter.saveReady(record, event, translation(record), now.plusSeconds(2)) }
+        }.exceptionOrNull()
+
+        assertThat(failure).isNotNull()
+        assertThat(adapter.snapshot(record.id, "en")?.status).isEqualTo("PENDING")
+        assertThat(adapter.snapshot(record.id, "en")?.fields).isEmpty()
+        assertThat(count("question_search")).isEqualTo(3)
+        assertThat(text("select question from question_search where language = 'en'")).isEqualTo(record.question)
+        assertThat(onlyRecord()).isEqualTo(record)
+        assertThat(outbox.events()).hasSize(2)
+
+        executeSchema("alter table question_search drop constraint synthetic_search_rejection")
+        assertThat(transaction { adapter.saveReady(record, event, translation(record), now.plusSeconds(3)) }).isTrue()
+        assertThat(adapter.snapshot(record.id, "en")?.status).isEqualTo("READY")
+        assertThat(onlyRecord()).isEqualTo(record)
     }
 
     @Test
@@ -405,6 +567,8 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         assertThat(text("select result_status from voice_tutor_sessions")).isEqualTo("PROCESSING")
         assertThat(projected()).isFalse()
         assertThat(count("voice_study_learning_records")).isZero()
+        assertThat(count("questions")).isZero()
+        assertThat(count("question_search")).isZero()
         assertThat(count("voice_study_learning_localizations")).isZero()
         assertThat(outbox.events()).isEmpty()
         assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
@@ -417,6 +581,7 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         assertThat(text("select status from voice_tutor_results")).isEqualTo("COMPLETED")
         assertThat(projected()).isTrue()
         assertThat(count("voice_study_learning_records")).isEqualTo(1)
+        assertThat(count("questions")).isEqualTo(1)
         assertThat(outbox.events()).hasSize(2)
     }
 
@@ -499,6 +664,8 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         assertThat(adapter.findOwned(7, record.id)).isEqualTo(record)
         execute("delete from voice_tutor_sessions where id = '${fixture.SESSION_ID}'")
         assertThat(count("voice_study_learning_records")).isZero()
+        assertThat(count("questions")).isZero()
+        assertThat(count("question_search")).isZero()
         assertThat(count("voice_study_learning_localizations")).isZero()
         assertThat(count("voice_tutor_transcript_turns")).isZero()
         assertThat(count("voice_tutor_results")).isZero()
@@ -510,7 +677,7 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
 
     @Test
     fun `managed completion and localization request entry points declare transactional boundaries`() {
-        for (name in listOf("appendCompletedSession", "request")) {
+        for (name in listOf("appendCompletedSession", "request", "saveReady")) {
             val method = VoiceStudyLearningRecordPersistenceAdapter::class.java.methods.single { it.name == name }
             assertThat(method.getAnnotation(Transactional::class.java)).describedAs(name).isNotNull()
         }
@@ -699,6 +866,55 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         requireNotNull(transactions.executeAndAwait { block() })
 
     private fun Instant.utc() = LocalDateTime.ofInstant(this, ZoneOffset.UTC)
+
+    /** The real QuestionPort save boundary is exercised with SQL, without enabling its generation use cases. */
+    private class SqlQuestions(
+        private val database: DatabaseClient,
+        private val searchProjection: QuestionSearchProjectionManager,
+    ) : QuestionPort by unsupportedPort() {
+        val saved = mutableListOf<QuestionEntity>()
+
+        override suspend fun save(entity: QuestionEntity): QuestionEntity {
+            check(entity.id == 0L)
+            check(entity.gradingRequestId == null && entity.gradingStatus == null && entity.correct == null)
+            check(entity.conceptId == null && entity.angleKey == null)
+            database.sql("""
+                insert into questions(user_id, study_id, device_id, record_type, voice_record_id,
+                    topic, difficulty_level, question, answer, score, feedback, source_language,
+                    answer_source_language, ai_response_source_language, status, source, is_public,
+                    scheduled_for, created_at, updated_at)
+                values (:userId, :studyId, :deviceId, :recordType, :voiceId, :topic, :difficulty,
+                    :question, :answer, :score, :feedback, :language, :answerLanguage, :feedbackLanguage,
+                    :status, :source, :public, :scheduled, :created, :updated)
+            """.trimIndent()).bind("userId", requireNotNull(entity.userId)).nullable("studyId", entity.studyId, Long::class.javaObjectType)
+                .bind("deviceId", entity.deviceId).bind("recordType", entity.recordType.name)
+                .bind("voiceId", requireNotNull(entity.voiceRecordId)).bind("topic", entity.topic).bind("difficulty", entity.difficultyLevel)
+                .bind("question", entity.question).nullable("answer", entity.answer, String::class.java)
+                .nullable("score", entity.score, Int::class.javaObjectType).nullable("feedback", entity.feedback, String::class.java)
+                .bind("language", entity.sourceLanguage.databaseValue)
+                .nullable("answerLanguage", entity.answerSourceLanguage?.databaseValue, String::class.java)
+                .nullable("feedbackLanguage", entity.aiResponseSourceLanguage?.databaseValue, String::class.java)
+                .bind("status", entity.status.databaseValue).bind("source", entity.source.databaseValue).bind("public", entity.publicQuestion)
+                .bind("scheduled", LocalDateTime.ofInstant(entity.scheduledFor, ZoneOffset.UTC))
+                .bind("created", LocalDateTime.ofInstant(entity.createdAt, ZoneOffset.UTC))
+                .bind("updated", LocalDateTime.ofInstant(entity.updatedAt, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+            entity.id = database.sql("select id from questions where voice_record_id = :voiceId")
+                .bind("voiceId", requireNotNull(entity.voiceRecordId)).map { row, _ -> (row.get("id") as Number).toLong() }
+                .one().awaitSingle()
+            searchProjection.refresh(entity.id)
+            saved += entity
+            return entity
+        }
+
+        private fun DatabaseClient.GenericExecuteSpec.nullable(name: String, value: Any?, type: Class<*>) =
+            if (value == null) bindNull(name, type) else bind(name, value)
+    }
+
+    private companion object {
+        inline fun <reified T> unsupportedPort(): T = java.lang.reflect.Proxy.newProxyInstance(
+            T::class.java.classLoader, arrayOf(T::class.java),
+        ) { _, method, _ -> error("Unexpected ${T::class.simpleName} call: ${method.name}") } as T
+    }
 
     private class SqlOutbox(private val database: DatabaseClient) : ContentTranslationEventPort {
         var failAfterInsert = false

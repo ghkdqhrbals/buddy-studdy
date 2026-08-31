@@ -4,6 +4,7 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.StudyRecordType
 import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
 import com.buddystudy.backend.study.application.port.inbound.AnswerGradingWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.ProcessAnswerGradingUseCase
@@ -46,7 +47,8 @@ class AnswerGradingService(
         ) ?: return
         val question = questions.findByIdAndUserIdAndDeletedAtIsNull(event.recordId, event.userId)
             ?: return succeed(claim)
-        if (question.gradingRequestId != event.requestId ||
+        if (question.recordType != StudyRecordType.QUESTION ||
+            question.gradingRequestId != event.requestId ||
             question.gradingStatus == AnswerGradingStatus.COMPLETED ||
             question.gradingStatus == AnswerGradingStatus.FAILED
         ) {

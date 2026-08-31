@@ -8,11 +8,18 @@ import com.buddystudy.backend.localization.application.model.TextLocalizationSna
 import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
 import com.buddystudy.backend.localization.application.port.ContentTranslationEventPort
 import com.buddystudy.backend.localization.application.port.VoiceStudyLearningLocalizationPort
+import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionSearchProjectionManager
+import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.VoiceStudyLearningRecordQueryPort
 import com.buddystudy.backend.voice.adapter.outbound.VoiceTutorExplorationJsonCodec
 import com.buddystudy.backend.voice.application.port.outbound.VoiceStudyLearningRecordAppendPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceStudyLearningRecordProjectionCandidate
 import com.buddystudy.study.domain.QuestionLanguage
+import com.buddystudy.common.domain.SupportedLanguage
+import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionSource
+import com.buddystudy.study.domain.entity.QuestionStatus
+import com.buddystudy.study.domain.entity.StudyRecordType
 import com.buddystudy.voice.domain.VoiceStudyLearningRecord
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import com.buddystudy.voice.domain.VoiceTutorExploration
@@ -37,6 +44,8 @@ class VoiceStudyLearningRecordPersistenceAdapter(
     private val database: DatabaseClient,
     private val translations: ContentTranslationEventPort,
     private val languageDetector: ContentLanguageDetectionPort,
+    private val questions: QuestionPort,
+    private val searchProjection: QuestionSearchProjectionManager,
 ) : VoiceStudyLearningRecordAppendPort, VoiceStudyLearningRecordQueryPort, VoiceStudyLearningLocalizationPort {
     private val mapper = JsonMapperProvider.mapper
 
@@ -49,9 +58,12 @@ class VoiceStudyLearningRecordPersistenceAdapter(
     ) {
         // Same session-first lock order as result completion; retries never overwrite existing evidence.
         val header = database.sql(
-            "select id, user_id, accepted_study_id, language from voice_tutor_sessions where id = :sessionId and user_id = :userId and ended_at is not null for update",
+            "select id, user_id, accepted_study_id, language, records_default_public from voice_tutor_sessions where id = :sessionId and user_id = :userId and ended_at is not null for update",
         ).bind("sessionId", sessionId).bind("userId", userId).map { row, _ ->
-            Triple(row.get("id", String::class.java)!!, (row.get("accepted_study_id") as? Number)?.toLong(), row.get("language", String::class.java)!!)
+            CompletedSessionHeader(
+                row.string("id"), (row.get("accepted_study_id") as? Number)?.toLong(), row.string("language"),
+                row.get("records_default_public", Boolean::class.javaObjectType)!!,
+            )
         }.one().awaitSingleOrNull() ?: return
         val result = database.sql(
             "select learning_records_projected_at from voice_tutor_results where session_id = :sessionId and status = 'COMPLETED'",
@@ -69,16 +81,22 @@ class VoiceStudyLearningRecordPersistenceAdapter(
                 .map { row, _ -> (row.get("id") as Number).toLong() }.all().collectList().awaitSingle().toSet()
         }
         val records = VoiceStudyLearningRecordProjector.project(
-            userId = userId, sessionId = header.first, acceptedStudyId = header.second, language = header.third,
+            userId = userId, sessionId = header.id, acceptedStudyId = header.acceptedStudyId, language = header.language,
             explorations = explorations, transcript = transcript(sessionId), snapshots = snapshots,
             ownedStudyIds = ownedStudyIds, detectLanguage = languageDetector::detect,
         )
         for (record in records) {
-            insert(record, now)
+            val extensionId = insertExtension(record, now)
+            // A replay, including a user-deleted canonical row, must never rewrite or resurrect it.
+            val existing = database.sql("select id from questions where voice_record_id = :voiceId")
+                .bind("voiceId", extensionId).map { row, _ -> row.long("id") }.one().awaitSingleOrNull()
+            if (existing == null) {
+                questions.save(record.canonicalQuestion(extensionId, header.recordsDefaultPublic, now))
+            }
             val persisted = database.sql(
-                "select r.* from voice_study_learning_records r where r.session_id = :sessionId and r.question_turn_id = :turnId and r.user_id = :userId",
+                "$OWNED_RECORD_SELECT where r.session_id = :sessionId and r.question_turn_id = :turnId and r.user_id = :userId",
             ).bind("sessionId", sessionId).bind("turnId", record.questionTurnId).bind("userId", userId)
-                .map { row, _ -> row.record() }.one().awaitSingle()
+                .map { row, _ -> row.record() }.one().awaitSingleOrNull() ?: continue
             // Same SQL transaction as record/result; normal outbox recovery publishes after commit.
             for (language in QuestionLanguage.supported.sorted()) request(persisted, language, now)
         }
@@ -120,7 +138,14 @@ class VoiceStudyLearningRecordPersistenceAdapter(
     ).bind("recordId", recordId).map { row, _ -> row.record() }.one().awaitSingleOrNull()
 
     override suspend fun snapshot(recordId: Long, targetLanguage: String): TextLocalizationSnapshot? = database.sql(
-        "select * from voice_study_learning_localizations where record_id = :recordId and target_language = :language",
+        """
+        select l.* from voice_study_learning_localizations l
+        join voice_study_learning_records r on r.id = l.record_id
+        join questions q on q.voice_record_id = r.id and q.user_id = r.user_id
+        join voice_tutor_sessions s on s.id = r.session_id and s.user_id = r.user_id
+        where l.record_id = :recordId and l.target_language = :language
+          and q.record_type = 'VOICE_TUTOR' and q.status = 'completed' and q.deleted_at is null
+        """.trimIndent(),
     ).bind("recordId", recordId).bind("language", targetLanguage).map { row, _ ->
         TextLocalizationSnapshot(
             row.string("source_language"), row.string("target_language"), row.string("source_hash"),
@@ -132,11 +157,7 @@ class VoiceStudyLearningRecordPersistenceAdapter(
     override suspend fun request(record: VoiceStudyLearningRecord, targetLanguage: String, now: Instant) {
         val target = QuestionLanguage.normalize(targetLanguage)
         if (record.translatableFields().keys.all { record.sourceLanguages[it] == target }) return
-        val exists = database.sql(
-            "select id from voice_study_learning_records where id = :id and user_id = :userId and source_hash = :hash for update",
-        ).bind("id", record.id).bind("userId", record.userId).bind("hash", record.sourceHash)
-            .map { row, _ -> (row.get("id") as Number).toLong() }.one().awaitSingleOrNull() ?: return
-        check(exists == record.id)
+        if (!lockAvailableRecord(record)) return
         val previous = database.sql(
             "select source_hash, status, updated_at from voice_study_learning_localizations where record_id = :id and target_language = :target",
         ).bind("id", record.id).bind("target", target).map { row, _ ->
@@ -174,6 +195,7 @@ class VoiceStudyLearningRecordPersistenceAdapter(
         )
     }
 
+    @Transactional
     override suspend fun saveReady(
         record: VoiceStudyLearningRecord,
         event: ContentTranslationRequestedEvent,
@@ -183,24 +205,32 @@ class VoiceStudyLearningRecordPersistenceAdapter(
         if (record.id != event.contentId || record.sourceHash != event.sourceHash ||
             event.contentType != LocalizableContentType.VOICE_STUDY_RECORD
         ) return false
+        if (!lockAvailableRecord(record)) return false
         val sourceFields = record.translatableFields()
         require(result.fields.keys == sourceFields.keys && result.fields.values.all { !it.isNullOrBlank() }) {
             "Voice learning translation returned an invalid field set."
         }
         val json = mapper.writeValueAsString(result.fields)
         require(json.toByteArray(Charsets.UTF_8).size <= 512 * 1024) { "Voice learning translation exceeded its size limit." }
-        return database.sql(
+        val saved = database.sql(
             """
             update voice_study_learning_localizations set status = 'READY', fields_json = :fields,
                 provider = :provider, error_message = null, updated_at = :now
             where record_id = :id and target_language = :target and source_hash = :hash
               and request_token = :token and status = 'PENDING'
-              and exists (select 1 from voice_study_learning_records r where r.id = :id and r.source_hash = :hash)
+              and exists (
+                  select 1 from voice_study_learning_records r
+                  join questions q on q.voice_record_id = r.id and q.user_id = r.user_id
+                  where r.id = :id and r.source_hash = :hash
+                    and q.record_type = 'VOICE_TUTOR' and q.status = 'completed' and q.deleted_at is null
+              )
             """.trimIndent(),
         ).bind("fields", json).bind("provider", result.provider.take(64)).bind("now", now.utc())
             .bind("id", record.id).bind("target", event.targetLanguage).bind("hash", event.sourceHash)
             .bind("token", event.eventId.removePrefix("content-translation-"))
             .fetch().rowsUpdated().awaitSingle() == 1L
+        if (saved) searchProjection.refresh(requireNotNull(record.recordId))
+        return saved
     }
 
     override suspend fun markFailed(event: ContentTranslationRequestedEvent, error: String, now: Instant) {
@@ -210,6 +240,13 @@ class VoiceStudyLearningRecordPersistenceAdapter(
             update voice_study_learning_localizations set status = 'FAILED', error_message = :error, updated_at = :now
             where record_id = :id and target_language = :target and source_hash = :hash
               and request_token = :token and status = 'PENDING'
+              and exists (
+                  select 1 from voice_study_learning_records r
+                  join questions q on q.voice_record_id = r.id and q.user_id = r.user_id
+                  join voice_tutor_sessions s on s.id = r.session_id and s.user_id = r.user_id
+                  where r.id = :id and r.source_hash = :hash
+                    and q.record_type = 'VOICE_TUTOR' and q.status = 'completed' and q.deleted_at is null
+              )
             """.trimIndent(),
         ).bind("error", "Voice learning record translation failed.").bind("now", now.utc())
             .bind("id", event.contentId).bind("target", event.targetLanguage).bind("hash", event.sourceHash)
@@ -244,31 +281,66 @@ class VoiceStudyLearningRecordPersistenceAdapter(
         )
     }.all().collectList().awaitSingle()
 
-    private suspend fun insert(record: VoiceStudyLearningRecord, now: Instant) {
+    private suspend fun insertExtension(record: VoiceStudyLearningRecord, now: Instant): Long {
         database.sql(
             """
             insert into voice_study_learning_records (
-                user_id, session_id, study_id, parent_study_id, topic, difficulty, kind,
-                question, answer, score, feedback, strengths_json, improvements_json, depth_summary,
-                question_turn_id, answer_turn_ids_json, feedback_turn_ids_json, source_language,
-                source_languages_json, source_hash, occurred_at, created_at
+                user_id, session_id, study_id, parent_study_id, kind,
+                strengths_json, improvements_json, depth_summary,
+                question_turn_id, answer_turn_ids_json, feedback_turn_ids_json,
+                source_languages_json, source_hash, created_at
             ) values (
-                :userId, :sessionId, :studyId, :parentId, :topic, :difficulty, :kind,
-                :question, :answer, :score, :feedback, :strengths, :improvements, :depth,
-                :questionTurnId, :answerIds, :feedbackIds, :source, :sourceLanguages, :hash, :occurredAt, :now
+                :userId, :sessionId, :studyId, :parentId, :kind,
+                :strengths, :improvements, :depth,
+                :questionTurnId, :answerIds, :feedbackIds, :sourceLanguages, :hash, :now
             ) on duplicate key update id = id
             """.trimIndent(),
         ).bind("userId", record.userId).bind("sessionId", record.sessionId).bind("studyId", record.studyId)
             .nullable("parentId", record.parentStudyId, Long::class.javaObjectType)
-            .bind("topic", record.topic).bind("difficulty", record.difficulty).bind("kind", record.kind.name)
-            .bind("question", record.question).nullable("answer", record.answer, String::class.java)
-            .nullable("score", record.score, Int::class.javaObjectType).nullable("feedback", record.feedback, String::class.java)
+            .bind("kind", record.kind.name)
             .bind("strengths", mapper.writeValueAsString(record.strengths)).bind("improvements", mapper.writeValueAsString(record.improvements))
             .bind("depth", record.depthSummary).bind("questionTurnId", record.questionTurnId)
             .bind("answerIds", mapper.writeValueAsString(record.answerTurnIds)).bind("feedbackIds", mapper.writeValueAsString(record.feedbackTurnIds))
-            .bind("source", record.sourceLanguage).bind("sourceLanguages", mapper.writeValueAsString(record.sourceLanguages))
-            .bind("hash", record.sourceHash).bind("occurredAt", record.createdAt.utc()).bind("now", now.utc())
+            .bind("sourceLanguages", mapper.writeValueAsString(record.sourceLanguages))
+            .bind("hash", record.sourceHash).bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
+        return database.sql(
+            "select id from voice_study_learning_records where session_id = :sessionId and question_turn_id = :turnId and user_id = :userId",
+        ).bind("sessionId", record.sessionId).bind("turnId", record.questionTurnId).bind("userId", record.userId)
+            .map { row, _ -> row.long("id") }.one().awaitSingle()
+    }
+
+    private fun VoiceStudyLearningRecord.canonicalQuestion(extensionId: Long, defaultPublic: Boolean, now: Instant) = QuestionEntity(
+        // Voice has no question-generation/push device. Never invent a historical installation.
+        deviceId = "", userId = userId, studyId = studyId,
+        question = question, topic = topic, difficultyLevel = difficulty,
+        sourceLanguage = SupportedLanguage.fromLocale(sourceLanguages["question"] ?: sourceLanguage),
+        scheduledFor = createdAt, status = QuestionStatus.COMPLETED, source = QuestionSource.VOICE_TUTOR,
+        answer = answer, score = score, feedback = feedback,
+        answerSourceLanguage = answer?.let { SupportedLanguage.fromLocale(sourceLanguages["answer"] ?: sourceLanguage) },
+        aiResponseSourceLanguage = feedback?.let { SupportedLanguage.fromLocale(sourceLanguages["feedback"] ?: sourceLanguage) },
+        // Existing sessions retain their private creation snapshot; account publicity is a second live gate.
+        publicQuestion = defaultPublic, createdAt = createdAt, updatedAt = now,
+        recordType = StudyRecordType.VOICE_TUTOR, voiceRecordId = extensionId,
+    )
+
+    private suspend fun lockAvailableRecord(record: VoiceStudyLearningRecord): Boolean {
+        val canonicalId = record.recordId ?: return false
+        return database.sql(
+            """
+            select q.id from questions q
+            where q.id = :canonicalId and q.voice_record_id = :id and q.user_id = :userId
+              and q.record_type = 'VOICE_TUTOR' and q.status = 'completed' and q.deleted_at is null
+              and exists (
+                  select 1 from voice_study_learning_records r
+                  join voice_tutor_sessions s on s.id = r.session_id and s.user_id = r.user_id
+                  join users u on u.id = s.user_id and u.status = 'ACTIVE'
+                  where r.id = :id and r.user_id = :userId and r.source_hash = :hash
+              )
+            for update
+            """.trimIndent(),
+        ).bind("canonicalId", canonicalId).bind("id", record.id).bind("userId", record.userId).bind("hash", record.sourceHash)
+            .map { row, _ -> row.long("id") }.one().awaitSingleOrNull() == canonicalId
     }
 
     private fun Row.record() = VoiceStudyLearningRecord(
@@ -281,6 +353,7 @@ class VoiceStudyLearningRecordPersistenceAdapter(
         questionTurnId = long("question_turn_id"), answerTurnIds = longs(string("answer_turn_ids_json")),
         feedbackTurnIds = longs(string("feedback_turn_ids_json")), sourceLanguage = string("source_language"),
         sourceLanguages = textMap(string("source_languages_json")).mapValues { it.value.orEmpty() }, sourceHash = string("source_hash"),
+        recordId = long("canonical_record_id"),
     )
 
     private fun strings(json: String): List<String> = mapper.readTree(json).map { it.asText() }
@@ -297,7 +370,18 @@ class VoiceStudyLearningRecordPersistenceAdapter(
         if (value == null) bindNull(name, type) else bind(name, value)
 
     private companion object {
-        const val OWNED_RECORD_SELECT = "select r.* from voice_study_learning_records r join voice_tutor_sessions s on s.id = r.session_id"
+        const val OWNED_RECORD_SELECT = """
+            select r.*, q.id as canonical_record_id, q.question, q.answer, q.score, q.feedback,
+                   q.topic, q.difficulty_level as difficulty, q.source_language, q.created_at as occurred_at
+            from voice_study_learning_records r
+            join voice_tutor_sessions s on s.id = r.session_id and s.user_id = r.user_id
+            join questions q on q.voice_record_id = r.id and q.user_id = r.user_id
+                and q.record_type = 'VOICE_TUTOR' and q.status = 'completed' and q.deleted_at is null
+        """
         val RETRY_DELAY: Duration = Duration.ofMinutes(5)
     }
+
+    private data class CompletedSessionHeader(
+        val id: String, val acceptedStudyId: Long?, val language: String, val recordsDefaultPublic: Boolean,
+    )
 }

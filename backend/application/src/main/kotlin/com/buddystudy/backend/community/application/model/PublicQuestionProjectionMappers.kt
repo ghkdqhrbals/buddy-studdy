@@ -8,6 +8,8 @@ import com.buddystudy.backend.study.application.model.originalLocalization
 import com.buddystudy.backend.study.application.model.authorOriginalLocalization
 import com.buddystudy.backend.study.application.model.translatedLocalization
 import com.buddystudy.backend.study.application.model.TranslationViewMode
+import com.buddystudy.backend.study.application.model.VoiceRecordContentResponse
+import com.buddystudy.study.domain.entity.StudyRecordType
 
 fun PublicQuestionProjection.toCommunityQuestionResponse(
     requestedLanguage: String = questionSourceLanguage,
@@ -19,11 +21,13 @@ fun PublicQuestionProjection.toCommunityQuestionResponse(
     answerTranslationPending: Boolean = true,
     aiResponseTranslationPending: Boolean = true,
     answerAuthorOriginal: Boolean = false,
+    voiceRecord: VoiceRecordContentResponse? = null,
+    voiceLocalization: RecordLocalizationResponse? = null,
 ) = CommunityQuestionResponse(
     id = id,
     question = question,
     answer = answer,
-    gradingResult = score?.let {
+    gradingResult = score?.takeIf { recordType == StudyRecordType.QUESTION }?.let {
         GradingResultResponse(it, correct ?: (it >= 70), feedback ?: "", explanation ?: "")
     },
     topic = topic,
@@ -46,7 +50,9 @@ fun PublicQuestionProjection.toCommunityQuestionResponse(
     commentCount = commentCount,
     viewCount = viewCount,
     isLikedByMe = isLikedByMe,
-    localization = RecordLocalizationResponse(
+    recordType = recordType,
+    voiceRecord = voiceRecord,
+    localization = voiceLocalization ?: RecordLocalizationResponse(
         question = locale(
             questionSourceLanguage,
             requestedLanguage,

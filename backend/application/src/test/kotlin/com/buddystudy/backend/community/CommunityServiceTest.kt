@@ -8,6 +8,7 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.common.application.outbox.AfterCommitPort
 import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
 import com.buddystudy.backend.common.application.outbox.OutboxReference
@@ -26,12 +27,17 @@ import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotPo
 import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotReservation
 import com.buddystudy.backend.community.application.model.NativeAdvertisementViewedEvent
 import com.buddystudy.backend.community.application.service.CommunityService
+import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionViewLocalization
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystudy.backend.study.application.service.VoiceRecordContentProjector
+import com.buddystudy.backend.study.application.model.TranslationState
+import com.buddystudy.backend.localization.application.port.VoiceStudyLearningLocalizationPort
+import com.buddystudy.backend.localization.application.port.UnavailableVoiceStudyLearningLocalizationPort
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
@@ -44,6 +50,10 @@ import com.buddystudy.community.domain.entity.NativeAdSlotEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
+import com.buddystudy.study.domain.entity.QuestionSource
+import com.buddystudy.study.domain.entity.StudyRecordType
+import com.buddystudy.voice.domain.VoiceStudyLearningRecord
+import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import com.buddystudy.backend.test.EmptyContentLocalizationPort
 import com.buddystudy.backend.test.PassthroughLanguageDetector
 import com.buddystudy.backend.test.RecordingLocalizationRequests
@@ -59,6 +69,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
+import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.util.Optional
 
@@ -77,13 +88,17 @@ class CommunityServiceTest {
     private val reactionPublisher = FakeReactionPublisher()
     private val translationEvents = RecordingContentTranslationEventPort()
     private val translationPublisher = RecordingOutboxPublisher()
+    private val reports = FakeReportPort()
+    private val voiceLocalizations = FakeVoiceLocalizations()
+    private val ordinaryLocalizations = RecordingOrdinaryLocalizations()
+    private val ordinaryRequests = RecordingLocalizationRequests()
     private val service = CommunityService(
         users = users,
         questions = questions,
         questionStats = questionStats,
         likes = likes,
         comments = comments,
-        reports = FakeReportPort(),
+        reports = reports,
         userBlocks = userBlocks,
         feedbacks = FakeFeedbackPort(),
         nativeAdvertisements = nativeAdvertisements,
@@ -93,16 +108,29 @@ class CommunityServiceTest {
         reactions = reactionPublisher,
         notifications = notificationPublisher,
         languageDetector = PassthroughLanguageDetector(),
-        contentLocalizations = EmptyContentLocalizationPort(),
-        localizationRequests = RecordingLocalizationRequests(),
+        contentLocalizations = ordinaryLocalizations,
+        localizationRequests = ordinaryRequests,
         translationRequestManager = ContentTranslationRequestManager(
             EmptyContentLocalizationPort(),
             translationEvents,
         ),
         afterCommit = ImmediateAfterCommit(),
         outboxPublisher = translationPublisher,
+        voiceRecordProjector = VoiceRecordContentProjector(voiceLocalizations),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
+
+    @Test
+    fun `community endpoints that can repair voice translations are read write transactions`(): Unit {
+        val methods = CommunityService::class.java.declaredMethods
+            .filter { it.name == "getPublicQuestionsV2" || it.name == "getLikedPublicQuestions" }
+        assertThat(methods.map { it.name }).containsExactlyInAnyOrder("getPublicQuestionsV2", "getLikedPublicQuestions")
+        assertThat(methods).allSatisfy { method ->
+            val transaction = method.getAnnotation(Transactional::class.java)
+            assertThat(transaction).describedAs("%s transaction", method.name).isNotNull
+            assertThat(transaction.readOnly).describedAs("%s readOnly", method.name).isFalse()
+        }
+    }
 
     @Test
     fun `public feed returns backend ordered typed items with advertisement deep link`(): Unit = runBlocking {
@@ -607,6 +635,220 @@ class CommunityServiceTest {
         assertThat(users.findAllByIdCalls).isZero()
     }
 
+    @Test
+    fun `public voice detail uses source backed text and spoken score without fabricated grading or private evidence`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "voice-author", displayName = "Voice author")
+        val question = voiceQuestion(200, 10).apply {
+            question = "Do not expose stale canonical cache"
+            answer = "Do not expose stale cached answer"
+            score = 99
+            correct = true
+        }
+        questions.rows += question
+        val source = voiceRecord(question)
+        voiceLocalizations.rows += source
+
+        val response = service.getPublicQuestion(principal, 200, "en", "original")
+
+        assertThat(response.id).isEqualTo("200")
+        assertThat(response.recordType).isEqualTo(StudyRecordType.VOICE_TUTOR)
+        assertThat(response.question).isEqualTo(source.question)
+        assertThat(response.answer).isEqualTo(source.answer)
+        assertThat(response.gradingResult).isNull()
+        assertThat(response.voiceRecord?.score).isEqualTo(85)
+        assertThat(response.voiceRecord?.feedback).isEqualTo("85점입니다. 근거를 잘 설명했어요.")
+        assertThat(response.voiceRecord?.strengths).containsExactly("근거 설명")
+        assertThat(response.localization?.question?.translationState).isEqualTo(TranslationState.ORIGINAL)
+        assertThat(ordinaryLocalizations.recordReads).isEmpty()
+        assertThat(ordinaryRequests.records).isEmpty()
+        assertThat(voiceLocalizations.requests).isEmpty()
+        val json = JsonMapperProvider.mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(response)
+        assertThat(json["voiceRecord"].fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+            "kind", "score", "feedback", "strengths", "improvements", "depthSummary",
+            "sourceLanguage", "requestedLanguage", "displayLanguage", "translationPending",
+        )
+        assertThat(json.has("voiceRecordId")).isFalse()
+        assertThat(json.has("studyId")).isFalse()
+        assertThat(json.toString()).doesNotContain("private-voice-session", "sourceHash", "questionTurnId", "answerTurnIds", "feedbackTurnIds")
+    }
+
+    @Test
+    fun `public voice localization uses its validated source hash stream and not question localization`(): Unit = runBlocking {
+        val question = voiceQuestion(201, 10)
+        questions.rows += question
+        val source = voiceRecord(question)
+        voiceLocalizations.rows += source
+        val translatedFields = source.translatableFields().mapValues { (key, _) -> "English $key" }
+        voiceLocalizations.snapshots[source.id to "en"] = TextLocalizationSnapshot(
+            "ko", "en", source.sourceHash, "READY", translatedFields,
+        )
+
+        val response = service.getPublicQuestion(principal, 201, "en", "localized")
+
+        assertThat(response.question).isEqualTo("English question")
+        assertThat(response.answer).isEqualTo("English answer")
+        assertThat(response.voiceRecord?.feedback).isEqualTo("English feedback")
+        assertThat(response.voiceRecord?.score).isEqualTo(85)
+        assertThat(response.voiceRecord?.displayLanguage).isEqualTo("en")
+        assertThat(response.localization?.question?.translationState).isEqualTo(TranslationState.TRANSLATED)
+        assertThat(voiceLocalizations.requests).isEmpty()
+        assertThat(ordinaryLocalizations.recordReads).isEmpty()
+        assertThat(ordinaryRequests.records).isEmpty()
+    }
+
+    @Test
+    fun `stale voice translation falls back to intact original and requests only voice stream read repair`(): Unit = runBlocking {
+        val question = voiceQuestion(202, 10)
+        questions.rows += question
+        val source = voiceRecord(question).copy(score = null)
+        voiceLocalizations.rows += source
+        voiceLocalizations.snapshots[source.id to "en"] = TextLocalizationSnapshot(
+            "ko", "en", "old-source-hash", "READY", source.translatableFields().mapValues { "Untrusted old translation" },
+        )
+
+        val response = service.getPublicQuestion(principal, 202, "en", "localized")
+
+        assertThat(response.question).isEqualTo(source.question)
+        assertThat(response.answer).isEqualTo(source.answer)
+        assertThat(response.gradingResult).isNull()
+        assertThat(response.voiceRecord?.score).isNull()
+        assertThat(response.voiceRecord?.translationPending).isTrue()
+        assertThat(voiceLocalizations.requests).containsExactly(source.id to "en")
+        assertThat(ordinaryLocalizations.recordReads).isEmpty()
+        assertThat(ordinaryRequests.records).isEmpty()
+    }
+
+    @Test
+    fun `public and liked pages retain both record types and canonical ids`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
+        val ordinary = publicQuestion(203, 10, "Redis")
+        val voice = voiceQuestion(204, 10)
+        questions.rows += listOf(ordinary, voice)
+        voiceLocalizations.rows += voiceRecord(voice)
+        likes.rows += QuestionLikeEntity(questionId = ordinary.id, userId = principal.userId)
+        likes.rows += QuestionLikeEntity(questionId = voice.id, userId = principal.userId)
+
+        val publicPage = service.getPublicQuestions(principal, null, "ko", "original", 20, 0)
+        val likedPage = service.getLikedPublicQuestions(principal, null, "ko", "original", 20, 0)
+
+        listOf(publicPage, likedPage).forEach { page ->
+            assertThat(page.questions.map { it.id }).containsExactlyInAnyOrder("203", "204")
+            assertThat(page.totalCount).isEqualTo(2)
+            assertThat(page.questions.single { it.id == "203" }.recordType).isEqualTo(StudyRecordType.QUESTION)
+            assertThat(page.questions.single { it.id == "203" }.voiceRecord).isNull()
+            assertThat(page.questions.single { it.id == "203" }.gradingResult?.score).isEqualTo(90)
+            assertThat(page.questions.single { it.id == "204" }.recordType).isEqualTo(StudyRecordType.VOICE_TUTOR)
+            assertThat(page.questions.single { it.id == "204" }.gradingResult).isNull()
+        }
+    }
+
+    @Test
+    fun `voice comments likes reports and thread notifications all address the shared record id`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
+        users.rows += UserEntity(id = principal.userId, providerId = "viewer", displayName = "Viewer")
+        val question = voiceQuestion(205, 10)
+        questions.rows += question
+        voiceLocalizations.rows += voiceRecord(question)
+        questionStats.rows += QuestionStatsEntity(questionId = question.id)
+
+        service.setLike(principal, question.id, true)
+        val comment = service.createComment(principal, question.id, "대화 근거가 도움이 됐어요", "ko")
+        service.reportQuestion(principal, question.id, ReportQuestionCommand("OTHER", "test report"))
+        val thread = service.getComments(question.id, "ko", "original", 20, 0, principal)
+
+        assertThat(comment.questionId).isEqualTo("205")
+        assertThat(thread.comments.single().id).isEqualTo(comment.id)
+        assertThat(likes.rows.single().questionId).isEqualTo(205)
+        assertThat(reports.rows.single().questionId).isEqualTo(205)
+        assertThat(comments.rows.single().questionId).isEqualTo(205)
+        assertThat(notificationPublisher.rows).hasSize(2).allSatisfy { notification ->
+            assertThat(notification.threadId).isEqualTo("205")
+            assertThat(notification.userId).isEqualTo(10)
+        }
+        assertThat(reactionPublisher.events).contains("QUESTION_LIKED:205:7", "QUESTION_COMMENTED:205:${comment.id}:7")
+        assertThat(translationEvents.events).allMatch { it.contentType == LocalizableContentType.COMMENT }
+        service.setLike(principal, question.id, false)
+        service.deleteComment(principal, question.id, comment.id.toLong())
+        assertThat(likes.rows).isEmpty()
+        assertThat(comments.rows.single().deletedAt).isNotNull()
+        assertThat(ordinaryRequests.records).isEmpty()
+    }
+
+    @Test
+    fun `private or blocked voice is rejected before source reads and hidden from common feeds`(): Unit = runBlocking {
+        val privateVoice = voiceQuestion(206, 10).apply { publicQuestion = false }
+        val blockedVoice = voiceQuestion(207, 11)
+        questions.rows += listOf(privateVoice, blockedVoice)
+        userBlocks.rows += UserBlockEntity(blockerUserId = principal.userId, blockedUserId = 11)
+        listOf(privateVoice, blockedVoice).forEach { question ->
+            assertThatThrownBy {
+                runBlocking { service.getPublicQuestion(principal, question.id, "en", "localized") }
+            }.isInstanceOf(ApiException::class.java)
+            assertThatThrownBy {
+                runBlocking { service.getComments(question.id, "en", "localized", 20, 0, principal) }
+            }.isInstanceOf(ApiException::class.java)
+        }
+
+        assertThat(service.getPublicQuestions(principal, null, "ko", "original", 20, 0).questions).isEmpty()
+        assertThat(voiceLocalizations.contentReads).isEmpty()
+        assertThat(voiceLocalizations.requests).isEmpty()
+        assertThat(reactionPublisher.events).isEmpty()
+    }
+
+    @Test
+    fun `voice extension absent wrong owner or wrong canonical id never falls back to cached public text`(): Unit = runBlocking {
+        val question = voiceQuestion(208, 10)
+        questions.rows += question
+        val source = voiceRecord(question)
+        listOf(null, source.copy(userId = 99), source.copy(recordId = 999)).forEach { invalid ->
+            voiceLocalizations.rows.clear()
+            invalid?.let { voiceLocalizations.rows += it }
+            val error = runCatching { service.getPublicQuestion(principal, question.id, "ko", "original") }.exceptionOrNull()
+            assertThat(error).isInstanceOf(ApiException::class.java)
+            assertThat((error as ApiException).code).isEqualTo(ApiErrorCode.RECORD_NOT_FOUND)
+        }
+        assertThat(reactionPublisher.events).isEmpty()
+        assertThat(ordinaryLocalizations.recordReads).isEmpty()
+    }
+
+    private fun voiceQuestion(id: Long, userId: Long) = publicQuestion(id, userId, "Redis").apply {
+        recordType = StudyRecordType.VOICE_TUTOR
+        voiceRecordId = id + 1000
+        source = QuestionSource.VOICE_TUTOR
+        status = QuestionStatus.COMPLETED
+        score = null
+        correct = null
+        feedback = null
+        explanation = null
+        gradedAt = null
+    }
+
+    private fun voiceRecord(question: QuestionEntity) = VoiceStudyLearningRecord(
+        id = checkNotNull(question.voiceRecordId),
+        userId = checkNotNull(question.userId),
+        sessionId = "private-voice-session",
+        studyId = 8001,
+        parentStudyId = 8000,
+        topic = question.topic,
+        difficulty = question.difficultyLevel,
+        createdAt = question.createdAt,
+        kind = VoiceTutorExchangeKind.TUTOR_QUESTION,
+        question = "레디스의 만료 정책을 설명해 주세요.",
+        answer = "키가 만료되면 삭제되고 메모리가 반환됩니다.",
+        score = 85,
+        strengths = listOf("근거 설명"),
+        improvements = listOf("지연 삭제와 주기적 삭제도 구분해 보세요."),
+        depthSummary = "현재 저장된 Redis 주제의 만료 정책 학습",
+        feedback = "85점입니다. 근거를 잘 설명했어요.",
+        questionTurnId = 9101,
+        answerTurnIds = listOf(9102),
+        feedbackTurnIds = listOf(9103),
+        sourceLanguage = "ko",
+        sourceLanguages = emptyMap(),
+        sourceHash = "voice-source-hash-${question.id}",
+        recordId = question.id,
+    )
+
     private fun publicQuestion(id: Long, userId: Long, topic: String) = QuestionEntity(
         id = id,
         deviceId = "dev-1",
@@ -704,8 +946,7 @@ class CommunityServiceTest {
                 .asSequence()
                 .filter { it.id in likedAtByQuestionId }
                 .filterNot { it.userId in blockedUserIds }
-                .filter { it.publicQuestion && it.deletedAt == null }
-                .filter { it.status == QuestionStatus.GRADED && !it.answer.isNullOrBlank() }
+                .filter(::eligible)
                 .filter { row ->
                     normalizedQuery == null || listOf(row.topic, row.question, row.answer.orEmpty())
                         .any { normalizedQuery in it.lowercase() }
@@ -723,8 +964,8 @@ class CommunityServiceTest {
                 visible.size.toLong(),
             )
         }
-        override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = rows.firstOrNull { it.id == id }
-        override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = rows.filter { it.id in ids }
+        override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = rows.firstOrNull { it.id == id && eligible(it) }
+        override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = rows.filter { it.id in ids && eligible(it) }
         override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
         override suspend fun softDeleteByUserId(userId: Long, now: Instant): Int = 0
         override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
@@ -739,6 +980,7 @@ class CommunityServiceTest {
             val visible = rows
                 .asSequence()
                 .filterNot { it.userId in blockedUserIds }
+                .filter(::eligible)
                 .filter { row ->
                     normalizedQuery == null || listOf(row.topic, row.question, row.answer.orEmpty())
                         .any { normalizedQuery in it.lowercase() }
@@ -749,6 +991,13 @@ class CommunityServiceTest {
             val end = (start + pageable.pageSize).coerceAtMost(visible.size)
             return PageImpl(visible.subList(start, end), pageable, visible.size.toLong())
         }
+
+        private fun eligible(question: QuestionEntity): Boolean = question.publicQuestion &&
+            question.deletedAt == null && !question.answer.isNullOrBlank() && when (question.recordType) {
+                StudyRecordType.QUESTION -> question.status == QuestionStatus.GRADED
+                StudyRecordType.VOICE_TUTOR -> question.status == QuestionStatus.COMPLETED &&
+                    question.voiceRecordId != null && question.question.isNotBlank()
+            }
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {
@@ -850,7 +1099,32 @@ class CommunityServiceTest {
     }
 
     private class FakeReportPort : ReportPort {
-        override suspend fun save(entity: ReportEntity): ReportEntity = entity
+        val rows = mutableListOf<ReportEntity>()
+        override suspend fun save(entity: ReportEntity): ReportEntity = entity.also { rows += it }
+    }
+
+    private class RecordingOrdinaryLocalizations : EmptyContentLocalizationPort() {
+        val recordReads = mutableListOf<Pair<Long, String>>()
+        override suspend fun record(questionId: Long, targetLanguage: String): RecordLocalizationSnapshot {
+            recordReads += questionId to targetLanguage
+            return super.record(questionId, targetLanguage)
+        }
+    }
+
+    private class FakeVoiceLocalizations : VoiceStudyLearningLocalizationPort by UnavailableVoiceStudyLearningLocalizationPort {
+        val rows = mutableListOf<VoiceStudyLearningRecord>()
+        val snapshots = mutableMapOf<Pair<Long, String>, TextLocalizationSnapshot>()
+        val contentReads = mutableListOf<Long>()
+        val requests = mutableListOf<Pair<Long, String>>()
+        override suspend fun content(recordId: Long): VoiceStudyLearningRecord? {
+            contentReads += recordId
+            return rows.firstOrNull { it.id == recordId }
+        }
+        override suspend fun snapshot(recordId: Long, targetLanguage: String): TextLocalizationSnapshot? =
+            snapshots[recordId to targetLanguage]
+        override suspend fun request(record: VoiceStudyLearningRecord, targetLanguage: String, now: Instant) {
+            requests += record.id to targetLanguage
+        }
     }
 
     private class FakeFeedbackPort : FeedbackPort {

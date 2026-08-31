@@ -18,13 +18,13 @@ class AdminAnalyticsSourceAdapter(
         val end = date.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC)
         val weekStart = date.minusDays(6).atStartOfDay().toInstant(ZoneOffset.UTC)
         val previousStart = date.minusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC)
-        val created = count("select count(*) from questions where created_at >= :start and created_at < :end and deleted_at is null", start, end)
-        val answers = count("select count(*) from questions where answered_at >= :start and answered_at < :end and deleted_at is null", start, end)
+        val created = count("select count(*) from questions where record_type = 'QUESTION' and created_at >= :start and created_at < :end and deleted_at is null", start, end)
+        val answers = count("select count(*) from questions where record_type = 'QUESTION' and answered_at >= :start and answered_at < :end and deleted_at is null", start, end)
         val pushSent = count("select count(*) from app_notifications where should_push = true and push_sent_at >= :start and push_sent_at < :end and deleted_at is null", start, end)
         val pushOpened = count("select count(*) from app_notifications where should_push = true and push_sent_at >= :start and push_sent_at < :end and read_at is not null and deleted_at is null", start, end)
         return listOf(
             point(date, "daily_active_users", count("select count(distinct user_id) from user_devices where last_seen_at >= :start and last_seen_at < :end", start, end)),
-            point(date, "weekly_active_learners", count("select count(distinct user_id) from questions where answered_at >= :start and answered_at < :end and deleted_at is null", weekStart, end)),
+            point(date, "weekly_active_learners", count("select count(distinct user_id) from questions where record_type = 'QUESTION' and answered_at >= :start and answered_at < :end and deleted_at is null", weekStart, end)),
             point(date, "question_created_count", created), point(date, "answer_submitted_count", answers),
             AdminDailyMetricPoint(date, "answer_rate", null, ratio(answers, created), created),
             AdminDailyMetricPoint(date, "push_open_rate", null, ratio(pushOpened, pushSent), pushSent),
@@ -42,7 +42,7 @@ class AdminAnalyticsSourceAdapter(
         client.sql(
             """
             select coalesce(avg(timestampdiff(microsecond, created_at, answered_at) / 1000000.0), 0) from questions
-            where answered_at >= :start and answered_at < :end and created_at is not null and deleted_at is null
+            where record_type = 'QUESTION' and answered_at >= :start and answered_at < :end and created_at is not null and deleted_at is null
             """.trimIndent(),
         ).bind("start", start).bind("end", end)
             .map { row, _ -> (row.get(0) as Number).toDouble() }.one().awaitSingleOrNull() ?: 0.0
@@ -51,9 +51,9 @@ class AdminAnalyticsSourceAdapter(
         client.sql(
             """
             select count(distinct today.user_id) from questions today
-            where today.answered_at >= :start and today.answered_at < :end and today.deleted_at is null
+            where today.record_type = 'QUESTION' and today.answered_at >= :start and today.answered_at < :end and today.deleted_at is null
               and exists (select 1 from questions previous where previous.user_id = today.user_id
-                and previous.answered_at >= :previousStart and previous.answered_at < :start and previous.deleted_at is null)
+                and previous.record_type = 'QUESTION' and previous.answered_at >= :previousStart and previous.answered_at < :start and previous.deleted_at is null)
             """.trimIndent(),
         ).bind("previousStart", previousStart).bind("start", start).bind("end", end)
             .map { row, _ -> (row.get(0) as Number).toLong() }.one().awaitSingleOrNull() ?: 0

@@ -8,6 +8,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatus
+import com.buddystudy.study.domain.entity.StudyRecordType
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.data.domain.Page
@@ -46,6 +47,7 @@ class QuestionRepository(
         template.select(
             Query.query(
                 Criteria.where("deleted_at").isNull
+                    .and("record_type").`is`(StudyRecordType.QUESTION.name)
                     .and("score").isNull
                     .and("grading_request_id").isNotNull
                     .and("grading_requested_at").lessThanOrEquals(cutoff)
@@ -66,6 +68,7 @@ class QuestionRepository(
         val updated = template.update(
             Query.query(
                 Criteria.where("id").`is`(id)
+                    .and("record_type").`is`(StudyRecordType.QUESTION.name)
                     .and("deleted_at").isNull
                     .and("score").isNull
                     .and("grading_request_id").`is`(requestId)
@@ -85,6 +88,7 @@ class QuestionRepository(
         val updated = template.update(
             Query.query(
                 Criteria.where("id").`is`(id)
+                    .and("record_type").`is`(StudyRecordType.QUESTION.name)
                     .and("grading_request_id").`is`(requestId)
                     .and("deleted_at").isNull,
             ),
@@ -103,7 +107,7 @@ class QuestionRepository(
         return template.select(
             Query.query(
                 Criteria.where("id").`in`(keys).and("user_id").`is`(userId)
-                    .and("deleted_at").isNull.and("skipped_at").isNull.and("score").isNotNull,
+                    .and("deleted_at").isNull.and("skipped_at").isNull.and(completedRecordCriteria()),
             ),
             QuestionEntity::class.java,
         ).collectList().awaitSingle()
@@ -115,6 +119,7 @@ class QuestionRepository(
     ): QuestionEntity? =
         findOne(
             Criteria.where("grading_request_id").`is`(gradingRequestId)
+                .and("record_type").`is`(StudyRecordType.QUESTION.name)
                 .and("user_id").`is`(userId)
                 .and("deleted_at").isNull,
         )
@@ -138,10 +143,11 @@ class QuestionRepository(
     }
 
     override suspend fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> =
-        page(Criteria.where("user_id").`is`(userId).and("deleted_at").isNull.and("score").isNotNull, pageable)
+        page(Criteria.where("user_id").`is`(userId).and("deleted_at").isNull
+            .and("record_type").`is`(StudyRecordType.QUESTION.name).and("score").isNotNull, pageable)
 
     override suspend fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> =
-        userSearchPage(userId, includePending = false, language = null, query, pageable)
+        userSearchPage(userId, includePending = false, language = null, query, pageable, questionsOnly = true)
 
     override suspend fun findGradedByUserAndTopics(
         userId: Long,
@@ -151,6 +157,7 @@ class QuestionRepository(
         if (topics.isEmpty()) return Page.empty(pageable)
         return page(
             Criteria.where("user_id").`is`(userId).and("deleted_at").isNull
+                .and("record_type").`is`(StudyRecordType.QUESTION.name)
                 .and("score").isNotNull.and("topic").`in`(topics),
             pageable,
         )
@@ -173,6 +180,7 @@ class QuestionRepository(
                        ) as topic_rank
                 from questions q
                 where q.user_id = :userId and q.deleted_at is null and q.score is not null
+                  and q.record_type = 'QUESTION'
                   and q.topic in ($topicMarkers)
             ) ranked
             where topic_rank <= :perTopicLimit
@@ -185,7 +193,8 @@ class QuestionRepository(
     }
 
     override suspend fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> =
-        page(Criteria.where("deleted_at").isNull.and("score").isNotNull, pageable, "answered_at")
+        page(Criteria.where("deleted_at").isNull.and("record_type").`is`(StudyRecordType.QUESTION.name)
+            .and("score").isNotNull, pageable, "answered_at")
 
     override suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> =
         page(pendingCriteria().and("user_id").`is`(userId), pageable)
@@ -206,6 +215,7 @@ class QuestionRepository(
         template.select(
             Query.query(
                 Criteria.where("study_id").`is`(studyId)
+                    .and("record_type").`is`(StudyRecordType.QUESTION.name)
                     .and("user_id").`is`(userId)
                     .and("deleted_at").isNull
                     .and("skipped_at").isNull
@@ -227,7 +237,7 @@ class QuestionRepository(
             """
             select status
             from questions
-            where study_id = :studyId and deleted_at is null
+            where study_id = :studyId and deleted_at is null and record_type = 'QUESTION'
             order by created_at desc, id desc
             limit 1
             """.trimIndent(),
@@ -250,7 +260,7 @@ class QuestionRepository(
                            order by q.created_at desc, q.id desc
                        ) as study_rank
                 from questions q
-                where q.study_id in ($studyMarkers) and q.deleted_at is null
+                where q.study_id in ($studyMarkers) and q.deleted_at is null and q.record_type = 'QUESTION'
             ) ranked
             where study_rank = 1
             """.trimIndent(),
@@ -275,7 +285,7 @@ class QuestionRepository(
                 select q.id, q.status,
                        row_number() over (partition by q.study_id order by q.created_at desc, q.id desc) as study_rank
                 from questions q
-                where q.study_id in ($studyMarkers) and q.deleted_at is null
+                where q.study_id in ($studyMarkers) and q.deleted_at is null and q.record_type = 'QUESTION'
                   and q.skipped_at is null
                   and q.status not in ('graded', 'failed', 'skipped')
             ) ranked
@@ -293,7 +303,7 @@ class QuestionRepository(
         pageable: Pageable,
     ): Page<QuestionEntity> {
         var criteria = Criteria.where("user_id").`is`(userId).and("deleted_at").isNull
-        if (!includePending) criteria = criteria.and("score").isNotNull
+        if (!includePending) criteria = criteria.and(completedRecordCriteria())
         return page(criteria, pageable)
     }
 
@@ -341,7 +351,7 @@ class QuestionRepository(
         var criteria = Criteria.where("user_id").`is`(userId)
             .and("study_id").`is`(studyId)
             .and("deleted_at").isNull
-        if (!includePending) criteria = criteria.and("score").isNotNull
+        if (!includePending) criteria = criteria.and(completedRecordCriteria())
         return page(criteria, pageable)
     }
 
@@ -537,6 +547,7 @@ class QuestionRepository(
         val deleted = template.delete(
             Query.query(
                 Criteria.where("id").`is`(id)
+                    .and("record_type").`is`(StudyRecordType.QUESTION.name)
                     .and("user_id").`is`(userId)
                     .and("score").isNull,
             ),
@@ -560,10 +571,20 @@ class QuestionRepository(
 
     private fun pendingCriteria(): Criteria =
         Criteria.where("deleted_at").isNull
+            .and("record_type").`is`(StudyRecordType.QUESTION.name)
             .and("skipped_at").isNull
             .and("status").notIn(
                 (QuestionStatus.COMPLETED_STATUSES + QuestionStatus.SKIPPED).map(QuestionStatus::databaseValue),
             )
+
+    /** Completed voice exchanges may legitimately have no numeric assessment. */
+    private fun completedRecordCriteria(): Criteria = Criteria.from(
+        Criteria.where("record_type").`is`(StudyRecordType.QUESTION.name).and("score").isNotNull,
+    ).or(
+        Criteria.where("record_type").`is`(StudyRecordType.VOICE_TUTOR.name)
+            .and("status").`is`(QuestionStatus.COMPLETED.databaseValue)
+            .and("voice_record_id").isNotNull,
+    )
 
     private suspend fun recentTexts(
         column: String,
@@ -588,7 +609,7 @@ class QuestionRepository(
             """
             select $questionColumn as localized_question from questions q
             $localizationJoin
-            where q.$column = :id and q.deleted_at is null and lower(q.topic) = lower(:topic)
+            where q.$column = :id and q.deleted_at is null and q.record_type = 'QUESTION' and lower(q.topic) = lower(:topic)
             order by q.created_at desc, q.id desc limit :limit offset :offset
             """.trimIndent(),
         ).bind("id", id).bind("topic", topic).bind("limit", pageable.pageSize).bind("offset", pageable.offset)
@@ -665,6 +686,7 @@ class QuestionRepository(
         query: String,
         pageable: Pageable,
         studyId: Long? = null,
+        questionsOnly: Boolean = false,
     ): Page<QuestionEntity> {
         val searchJoin = if (language == null) "" else {
             "join question_search qs on qs.question_id = q.id and qs.language = :language"
@@ -694,7 +716,11 @@ class QuestionRepository(
             )
             """.trimIndent()
         }
-        val gradedCondition = if (includePending) "" else "and q.score is not null"
+        val gradedCondition = when {
+            questionsOnly -> "and q.record_type = 'QUESTION'" + if (includePending) "" else " and q.score is not null"
+            includePending -> ""
+            else -> "and $COMPLETED_RECORD_CONDITION"
+        }
         val studyCondition = if (studyId == null) "" else "and q.study_id = :studyId"
         val baseSql =
             """
@@ -797,8 +823,17 @@ class QuestionRepository(
             .awaitSingle().toInt()
 
     private companion object {
+        const val COMPLETED_RECORD_CONDITION =
+            "((q.record_type = 'QUESTION' and q.score is not null) or " +
+                "(q.record_type = 'VOICE_TUTOR' and q.status = 'completed' and q.voice_record_id is not null))"
+
         const val PUBLIC_ANSWER_CONDITION =
-            "q.status = 'graded' and q.answer is not null and length(trim(q.answer)) > 0"
+            "q.answer is not null and length(trim(q.answer)) > 0 and (" +
+                "(q.record_type = 'QUESTION' and q.status = 'graded') or " +
+                "(q.record_type = 'VOICE_TUTOR' and q.status = 'completed' " +
+                    "and q.question is not null and length(trim(q.question)) > 0 " +
+                    "and exists (select 1 from voice_study_learning_records voice_record " +
+                        "where voice_record.id = q.voice_record_id and voice_record.user_id = q.user_id)))"
 
         const val BLOCKED_AUTHOR_EXCLUSION =
             "and not exists (" +

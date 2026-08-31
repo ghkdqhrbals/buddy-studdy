@@ -26,6 +26,7 @@ class StudyGrowthStatsRepository(
             select study_id, difficulty_level, score, answered_at, created_at
             from questions
             where user_id = :userId
+              and record_type = 'QUESTION'
               and deleted_at is null
               and study_id is not null
               and (

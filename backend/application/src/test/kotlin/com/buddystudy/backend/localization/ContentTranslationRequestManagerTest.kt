@@ -14,6 +14,7 @@ import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.StudyRecordType
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -23,6 +24,15 @@ class ContentTranslationRequestManagerTest {
     private val localizations = LanguageAwareLocalizationPort()
     private val events = RecordingTranslationEventPort()
     private val manager = ContentTranslationRequestManager(localizations, events)
+
+    @Test
+    fun `voice common records cannot create duplicate ordinary translation requests`(): Unit = runBlocking {
+        val voice = QuestionEntity(id = 42, recordType = StudyRecordType.VOICE_TUTOR, voiceRecordId = 7,
+            question = "private voice question", answer = "private voice answer", score = 80, feedback = "spoken feedback")
+        assertThat(manager.appendRecordForSupportedLanguages(voice, Instant.now())).isEmpty()
+        assertThat(manager.appendRecord(voice, "en", Instant.now())).isEmpty()
+        assertThat(events.rows).isEmpty()
+    }
 
     @Test
     fun `record mutation appends one request for every missing supported translation`() = runBlocking<Unit> {

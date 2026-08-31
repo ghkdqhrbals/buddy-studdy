@@ -5,6 +5,7 @@ import com.buddystudy.backend.study.application.port.outbound.AiGradingAssessmen
 import com.buddystudy.study.domain.StudyRecordProjection
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.study.domain.entity.QuestionStatus
+import com.buddystudy.study.domain.entity.StudyRecordType
 
 fun StudyRecordProjection.toRecordResponse(
     requestedLanguage: String = questionSourceLanguage,
@@ -24,7 +25,7 @@ fun StudyRecordProjection.toRecordResponse(
         id = id,
         question = QuestionItemResponse(question = question, expectedAnswerHint = expectedAnswerHint, createdAt = createdAt),
         answer = answer,
-        gradingResult = score?.let {
+        gradingResult = score?.takeIf { recordType == StudyRecordType.QUESTION }?.let {
             GradingResultResponse(
                 score = it,
                 isCorrect = correct ?: (it >= 70),
@@ -63,6 +64,7 @@ fun StudyRecordProjection.toRecordResponse(
         gradingError = gradingError,
         gradingLastEventId = gradingLastEventId,
         questionStatus = QuestionStatus.fromDatabaseValue(questionStatus),
+        recordType = recordType,
         localization = RecordLocalizationResponse(
             question = localeMetadata(
                 sourceLanguage = questionSourceLanguage,

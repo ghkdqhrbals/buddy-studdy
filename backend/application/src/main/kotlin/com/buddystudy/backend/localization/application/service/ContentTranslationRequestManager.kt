@@ -11,6 +11,7 @@ import com.buddystudy.backend.localization.application.policy.ContentSourceHashP
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.StudyRecordType
 import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
@@ -43,6 +44,9 @@ class ContentTranslationRequestManager(
         targetLanguage: String,
         requestedAt: Instant,
     ): List<OutboxReference> {
+        // Voice records use their existing typed source-hash/token contract, not three duplicate
+        // question/answer/AI events whose provider logging lacks the private-learning scope.
+        if (question.recordType != StudyRecordType.QUESTION) return emptyList()
         val target = QuestionLanguage.normalize(targetLanguage)
         val pendingRequests = localizations.ensureRecordPending(
             question = question,

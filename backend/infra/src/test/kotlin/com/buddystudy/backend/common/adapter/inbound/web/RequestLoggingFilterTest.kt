@@ -22,10 +22,16 @@ class RequestLoggingFilterTest {
     private val compactFilter = RequestLoggingFilter(ApiLoggingPolicy("compact"))
 
     @Test
-    fun `node learning records and voice detail preserve response but suppress private bodies in both log modes`(output: CapturedOutput) = runBlocking {
+    fun `node learning records and voice detail preserve response but suppress private bodies in both log modes`(output: CapturedOutput): Unit = runBlocking {
         val responseBody = """{"question":"private-voice-question","answer":"private-voice-answer"}"""
         for (activeFilter in listOf(filter, compactFilter)) {
-            for (path in listOf("/api/v1/studies/12/learning-records?tl=en", "/api/v1/voice-tutor/learning-records/4?view=original")) {
+            for (path in listOf(
+                "/api/v1/studies/12/learning-records?tl=en", "/api/v1/voice-tutor/learning-records/4?view=original",
+                "/api/v1/records", "/api/v1/records/81", "/api/v1/records;view=voice/81/publicity",
+                "/api/v1/public/questions", "/api/v2/public/questions/search", "/api/v1/public/questions/liked",
+                "/api/v1/public/questions/81", "/api/v1/public/questions/81/comments",
+                "/api/v2/public;type=voice/questions",
+            )) {
                 val exchange = execute(MockServerHttpRequest.get(path).build(), activeFilter) { current ->
                     writeJson(current, responseBody)
                 }
@@ -64,7 +70,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `api request and response are logged in a single exchange line with secrets redacted`(output: CapturedOutput) = runBlocking {
+    fun `api request and response are logged in a single exchange line with secrets redacted`(output: CapturedOutput): Unit = runBlocking {
         val exchange = execute(
             MockServerHttpRequest.post("/api/v1/auth/google")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -90,8 +96,8 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `json response is logged as nested utf8 json without escaped quotes`(output: CapturedOutput) = runBlocking {
-        val exchange = execute(MockServerHttpRequest.get("/api/v1/records").build()) { current ->
+    fun `json response is logged as nested utf8 json without escaped quotes`(output: CapturedOutput): Unit = runBlocking {
+        val exchange = execute(MockServerHttpRequest.get("/api/v1/logging-fixture").build()) { current ->
             writeJson(current, """{"records":[{"id":1,"question":"짧고 명확하게"}]}""")
         }
 
@@ -101,7 +107,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `json-like header values are logged as nested json`(output: CapturedOutput) = runBlocking {
+    fun `json-like header values are logged as nested json`(output: CapturedOutput): Unit = runBlocking {
         execute(
             MockServerHttpRequest.get("/api/v1/records")
                 .header("Cf-Visitor", """{"scheme":"https"}""")
@@ -112,12 +118,12 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `large response body capture is bounded and response remains complete`(output: CapturedOutput) = runBlocking {
+    fun `large response body capture is bounded and response remains complete`(output: CapturedOutput): Unit = runBlocking {
         val records = (1..300).joinToString(",") { index ->
             """{"id":$index,"question":"question-$index-${"x".repeat(40)}"}"""
         }
         val responseBody = """{"records":[$records]}"""
-        val exchange = execute(MockServerHttpRequest.get("/api/v1/records").build()) { current ->
+        val exchange = execute(MockServerHttpRequest.get("/api/v1/logging-fixture").build()) { current ->
             writeJson(current, responseBody)
         }
 
@@ -129,7 +135,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `x forwarded for first address is logged as client ip`(output: CapturedOutput) = runBlocking {
+    fun `x forwarded for first address is logged as client ip`(output: CapturedOutput): Unit = runBlocking {
         execute(
             MockServerHttpRequest.get("/api/v1/records")
                 .header("X-Forwarded-For", "198.51.100.7, 10.0.0.2")
@@ -141,7 +147,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `server error api exchanges are logged at error level`(output: CapturedOutput) = runBlocking {
+    fun `server error api exchanges are logged at error level`(output: CapturedOutput): Unit = runBlocking {
         execute(MockServerHttpRequest.get("/api/v1/stats").build()) { current ->
             current.response.statusCode = HttpStatus.INTERNAL_SERVER_ERROR
             writeJson(current, """{"error":{"code":"INTERNAL_SERVER_ERROR"}}""")
@@ -153,7 +159,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `compact api log includes redacted headers and bodies but omits request identity`(output: CapturedOutput) = runBlocking {
+    fun `compact api log includes redacted headers and bodies but omits request identity`(output: CapturedOutput): Unit = runBlocking {
         val requestBody = """{"topic":"Redis","accessToken":"secret-token"}"""
         val exchange = execute(
             request = MockServerHttpRequest.post("/api/v1/studies?source=dev")
@@ -190,7 +196,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `mcp exchange keeps metadata but never captures request or response bodies`(output: CapturedOutput) = runBlocking {
+    fun `mcp exchange keeps metadata but never captures request or response bodies`(output: CapturedOutput): Unit = runBlocking {
         val requestBody = """{"resume":"private-resume-content"}"""
         val responseBody = """{"feedback":"private-feedback-content"}"""
         val exchange = execute(
@@ -221,7 +227,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `mcp matrix parameter cannot bypass body suppression`(output: CapturedOutput) = runBlocking {
+    fun `mcp matrix parameter cannot bypass body suppression`(output: CapturedOutput): Unit = runBlocking {
         val requestBody = """{"resume":"matrix-private-resume"}"""
         val responseBody = """{"feedback":"matrix-private-feedback"}"""
         val exchange = execute(
@@ -302,7 +308,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `body suppression does not apply to nested non-mcp api paths`(output: CapturedOutput) = runBlocking {
+    fun `body suppression does not apply to nested non-mcp api paths`(output: CapturedOutput): Unit = runBlocking {
         execute(
             MockServerHttpRequest.post("/api/v1/mcp/tools")
                 .contentType(MediaType.APPLICATION_JSON)

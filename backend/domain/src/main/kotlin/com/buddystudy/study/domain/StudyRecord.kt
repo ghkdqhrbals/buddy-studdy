@@ -1,5 +1,6 @@
 package com.buddystudy.study.domain
 
+import com.buddystudy.study.domain.entity.StudyRecordType
 import java.time.Instant
 
 class StudyRecord private constructor(
@@ -43,7 +44,11 @@ class StudyRecord private constructor(
     )
 
     fun restrictPublicity(isPublic: Boolean, now: Instant = Instant.now()) = StudyRecordPublicityUpdate(
-        publicQuestion = isPublic && question.score != null,
+        publicQuestion = isPublic && when (question.recordType) {
+            StudyRecordType.QUESTION -> question.score != null
+            StudyRecordType.VOICE_TUTOR -> question.questionStatus == "completed" && question.voiceRecordId != null &&
+                question.question.isNotBlank() && !question.answer.isNullOrBlank()
+        },
         updatedAt = now,
     )
 
@@ -78,6 +83,8 @@ class StudyRecord private constructor(
         questionSourceLanguage = question.questionSourceLanguage,
         answerSourceLanguage = question.answerSourceLanguage,
         aiResponseSourceLanguage = question.aiResponseSourceLanguage,
+        recordType = question.recordType,
+        voiceRecordId = question.voiceRecordId,
     )
 
     companion object {
@@ -113,6 +120,8 @@ data class StudyRecordState(
     val questionSourceLanguage: String = "ko",
     val answerSourceLanguage: String? = null,
     val aiResponseSourceLanguage: String? = null,
+    val recordType: StudyRecordType = StudyRecordType.QUESTION,
+    val voiceRecordId: Long? = null,
 )
 
 data class StudyRecordStats(
@@ -181,4 +190,6 @@ data class StudyRecordProjection(
     val questionSourceLanguage: String = "ko",
     val answerSourceLanguage: String? = null,
     val aiResponseSourceLanguage: String? = null,
+    val recordType: StudyRecordType = StudyRecordType.QUESTION,
+    val voiceRecordId: Long? = null,
 )

@@ -8,8 +8,8 @@ enum StudyLearningRecordScope: String, CaseIterable, Identifiable, Hashable, Sen
     var id: String { rawValue }
 }
 
-/// A display-only union. Voice material must never be converted to StudyRecord,
-/// whose ungraded/public/draft behavior belongs exclusively to normal questions.
+/// The node page keeps legacy source IDs for pagination, while new servers
+/// supply the same canonical typed record used by Records and public comments.
 struct BackendStudyLearningRecord: Decodable, Equatable, Identifiable {
     enum Source: String, Decodable {
         case question = "QUESTION"
@@ -22,9 +22,10 @@ struct BackendStudyLearningRecord: Decodable, Equatable, Identifiable {
     var createdAt: Date
     var questionRecord: StudyRecord?
     var voiceRecord: BackendVoiceStudyLearningRecord?
+    var record: StudyRecord?
 
     private enum CodingKeys: String, CodingKey {
-        case id, source, createdAt, questionRecord, voiceRecord
+        case id, source, createdAt, questionRecord, voiceRecord, record
         case studyID = "studyId"
     }
 
@@ -36,6 +37,7 @@ struct BackendStudyLearningRecord: Decodable, Equatable, Identifiable {
         createdAt = try values.decode(Date.self, forKey: .createdAt)
         questionRecord = try values.decodeIfPresent(StudyRecord.self, forKey: .questionRecord)
         voiceRecord = try values.decodeIfPresent(BackendVoiceStudyLearningRecord.self, forKey: .voiceRecord)
+        record = try values.decodeIfPresent(StudyRecord.self, forKey: .record)
         guard studyID > 0 else { throw StudyLearningRecordsError.invalidResponse }
         switch source {
         case .question:
@@ -50,15 +52,31 @@ struct BackendStudyLearningRecord: Decodable, Equatable, Identifiable {
                 throw StudyLearningRecordsError.invalidResponse
             }
         }
+        if let record {
+            guard record.studyID == studyID,
+                  record.recordType == (source == .question ? .question : .voiceTutor),
+                  record.id == (source == .question ? questionRecord?.id : voiceRecord?.recordID) else {
+                throw StudyLearningRecordsError.invalidResponse
+            }
+        }
     }
 
-    var topic: String { questionRecord?.topic ?? voiceRecord?.topic ?? "" }
-    var question: String { questionRecord?.question.question ?? voiceRecord?.question ?? "" }
-    var answer: String? { questionRecord?.answer ?? voiceRecord?.answer }
-    var difficulty: Int? { questionRecord?.difficulty.level ?? voiceRecord?.difficulty }
-    var score: Int? { questionRecord?.gradingResult?.score ?? voiceRecord?.displayScore }
+    var commonRecord: StudyRecord? { record ?? questionRecord }
+    var canonicalRecordID: String? { commonRecord?.id ?? voiceRecord?.recordID }
+    var topic: String { commonRecord?.topic ?? voiceRecord?.topic ?? "" }
+    var question: String { commonRecord?.question.question ?? voiceRecord?.question ?? "" }
+    var answer: String? {
+        if let commonRecord { return commonRecord.answer }
+        return voiceRecord?.answer
+    }
+    var difficulty: Int? { commonRecord?.difficulty.level ?? voiceRecord?.difficulty }
+    var score: Int? {
+        if let commonRecord { return commonRecord.displayScore }
+        return voiceRecord?.displayScore
+    }
     var translationPending: Bool {
-        questionRecord?.localization?.containsPendingTranslation == true || voiceRecord?.translationPending == true
+        if let commonRecord { return commonRecord.translationPending }
+        return voiceRecord?.translationPending == true
     }
 }
 
@@ -69,6 +87,7 @@ struct BackendVoiceStudyLearningRecord: Decodable, Equatable, Identifiable {
     }
 
     var id: String
+    var recordID: String?
     var sessionID: String
     var studyID: Int
     var parentStudyID: Int?
@@ -93,6 +112,7 @@ struct BackendVoiceStudyLearningRecord: Decodable, Equatable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, topic, difficulty, createdAt, kind, question, answer, score
+        case recordID = "recordId"
         case strengths, improvements, depthSummary, feedback
         case sourceLanguage, requestedLanguage, displayLanguage, translationPending
         case sessionID = "sessionId"
@@ -106,6 +126,7 @@ struct BackendVoiceStudyLearningRecord: Decodable, Equatable, Identifiable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(StudyLearningSourceID.self, forKey: .id).value
+        recordID = try values.decodeIfPresent(StudyLearningSourceID.self, forKey: .recordID)?.value
         sessionID = try values.decode(String.self, forKey: .sessionID)
         studyID = try values.decode(Int.self, forKey: .studyID)
         parentStudyID = try values.decodeIfPresent(Int.self, forKey: .parentStudyID)

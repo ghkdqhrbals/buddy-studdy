@@ -66,7 +66,11 @@ struct StudyLearningRecordsSection: View {
                     LazyVStack(spacing: 0) {
                         ForEach(page.items) { item in
                             NavigationLink {
-                                StudyLearningRecordDetailView(record: item, loader: loader)
+                                if let record = item.commonRecord {
+                                    CommonStudyRecordDetailView(record: record)
+                                } else {
+                                    StudyLearningRecordDetailView(record: item, loader: loader)
+                                }
                             } label: {
                                 StudyLearningRecordRow(record: item, strings: strings, showsTopic: scope == .subtree)
                             }
@@ -195,6 +199,24 @@ private struct StudyLearningRecordDetailView: View {
     }
 
     var body: some View {
+        Group {
+            if isCurrent, let commonRecord = model.record.commonRecord {
+                CommonStudyRecordDetailView(record: commonRecord)
+            } else {
+                legacyDetail
+            }
+        }
+        .task {
+            await model.load(using: loader, view: model.isShowingOriginal ? .original : .localized)
+        }
+        .onDisappear {
+            readTask?.cancel()
+            model.deactivate()
+        }
+        .accessibilityIdentifier("studyLearningRecords.detail")
+    }
+
+    private var legacyDetail: some View {
         ScrollView {
             if isCurrent {
                 VStack(alignment: .leading, spacing: 16) {
@@ -239,14 +261,6 @@ private struct StudyLearningRecordDetailView: View {
         }
         .navigationTitle(isCurrent ? model.record.topic : strings.studyLearningRecordsTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await model.load(using: loader, view: model.isShowingOriginal ? .original : .localized)
-        }
-        .onDisappear {
-            readTask?.cancel()
-            model.deactivate()
-        }
-        .accessibilityIdentifier("studyLearningRecords.detail")
     }
 
     @ViewBuilder

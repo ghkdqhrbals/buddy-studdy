@@ -1446,3 +1446,126 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   `build/voiceStudyMutationsDeviceLaunch.log`. Human confirmation of a long spoken
   answer, an audible response afterward and intentional spoken topic changes
   remains the separate end-to-end acceptance step.
+
+<a id="common-question-and-voice-records"></a>
+
+## 2026-09-01 — One record identity for question and voice learning
+
+### Implemented boundaries
+
+- `questions.id` is the canonical record ID for `QUESTION` and `VOICE_TUTOR`.
+  The Records tab, search, study-node history, public detail, comments, likes,
+  reporting, visibility and deletion use that same identity. Voice extensions
+  retain only typed learning metadata and private evidence; V105 moves the eight
+  duplicated core fields into the canonical record instead of adding another
+  independently writable store. Existing voice evidence/translation IDs remain
+  stable and map to the new canonical ID, even when old numeric IDs collide.
+- Voice records use the explicit `COMPLETED` lifecycle and a safe `voiceRecord`
+  payload, not a fabricated `GradingResult`. Missing scores stay missing. Both
+  tutor-question and learner-question exchanges can appear in owner history;
+  publication requires a nonblank question and answer, a public record and the
+  account's existing sharing permission. A complete session transcript, recording,
+  private tree identifiers and transcript-turn evidence never enter public DTOs.
+- Old private records and calls created before V105, including delayed summaries,
+  stay private. New calls capture the existing default-public record policy,
+  still subject to the live account-level gate. No real record was published or
+  commented on by the verification fixtures.
+- Node/subtree cursor identities remain compatible with the existing contract;
+  each node item adds the shared `record` representation. The compatibility
+  owner-only voice endpoint remains available. Deletion, owner withdrawal and
+  stale translation tokens cannot revive a removed canonical record. The
+  existing voice translation stream is reused and updates the common search
+  projection transactionally; no ordinary grading/translation event is invented.
+- All pending, generation, grading, quota, question scheduling, embedding,
+  personalization and ordinary question-statistics paths explicitly distinguish
+  record type. Common API bodies and public/comment bodies are suppressed in
+  server and client traffic logs; request metadata remains available.
+
+### Exact MySQL migration verification
+
+- The complete, unchanged V105 SQL passed **17 assertions on MySQL 8.4.10**,
+  using a uniquely named disposable schema in the existing database container.
+  Only schema definitions and synthetic rows were copied; no real user rows or
+  credentials entered test output, and no new container or infrastructure stack
+  was created. The disposable schema was removed after verification.
+- Checks cover numeric-ID collisions, original text/score/language preservation,
+  deleted and foreign node associations, nullable assessment, removal of duplicate
+  core columns, three-language search, reused READY translations, old/new call
+  publicity defaults, canonical comment/like FKs, soft deletion, session cascade
+  cleanup and zero question-quota/grading/push side effects.
+- Report: `build/voiceCommonRecordsMySqlMigration.json`. Verified migration hash:
+  `ff188021bd5cfe843640f0d4c21fd0122989b266992fdc4c29640a5c18b09b97`.
+  H2 fixtures independently exercise the source INSERT-SELECT and transactional
+  behavior, but do not substitute for MySQL DDL validation. The H2 R2DBC driver
+  splits semicolons inside quoted column comments, so only the metadata COMMENT
+  is omitted in its publicity-default fixture; actual MySQL used the whole file.
+- V105 is a single-version cutover because it removes the old duplicate columns.
+  The dev refresh must stop old writers and retain a protected full pre-migration
+  database backup before starting the new binary. Restoring only the old JAR
+  after V105 is explicitly forbidden; failure after cutover needs forward recovery
+  or a coordinated database restoration, never an automatic binary-only rollback.
+
+### Backend regression
+
+- Final selected regression: **1,074 tests in 125 suites — 1,072 passed,
+  zero failures/errors, two explicit opt-in provider tests skipped**. Domain:
+  20 passed; application: 336 passed; infrastructure: 700 passed/two skipped;
+  tutor MCP/native-hint contracts: 16 passed. Log:
+  `build/voiceCommonRecordsBackend-tests-retry7.log`.
+- The source-to-JUnit audit verified all **173 ordinary `@Test` methods in
+  19 changed classes** were discovered. Counts use XML suite identities rather
+  than Gradle's abbreviated macOS filenames, and include parameter-resolver
+  method signatures such as `CapturedOutput`. Existing non-Unit logging tests
+  were made explicit Unit tests rather than being silently omitted. Report:
+  `build/voiceCommonRecordsBackendAudit-retry2.json`.
+- Coverage includes mixed owner/public/liked pages, unscored exchanges, canonical
+  comment/like identity, privacy gates, owner and node isolation, deletion/replay,
+  original and translated payloads, translation CAS/search rollback and retry,
+  ordinary-question mutation/analytics exclusion and private-body log suppression.
+  Existing call/summary/MCP regression remains in the selection; no live provider,
+  microphone, user content mutation or extra database/Redis container was used.
+- Review found that localized common-record reads may enqueue a missing voice
+  translation. Those entrypoints now allow a read-write transaction, covered by
+  Spring transaction-attribute tests, rather than issuing `FOR UPDATE` from a
+  MySQL read-only transaction. An actual Spring application-context test also
+  verifies that the projector receives the localization port; its all-default
+  Kotlin constructor no longer permits an unintended no-argument fallback bean.
+- Main `processAot` and `bootJar` passed with the existing build-only `aot`
+  profile; five test-AOT tasks remain excluded. Generated wiring now explicitly
+  selects `VoiceStudyLearningLocalizationPort` for the projector, and native
+  reflection includes the new payload and record-type enums. Log:
+  `build/voiceCommonRecordsBackend-jar-retry2.log`. Final JAR: 331,110,774 bytes,
+  SHA-256 `61f7c5e2f65994ee98dd9a0077ae12c906599aa2dc1a7be45daf972d9a21ce4b`.
+  Embedded V105 SQL matches the exact-MySQL-tested source hash above.
+
+### iOS and paired iPhone verification
+
+- Generic iOS Debug build and signed build-for-testing passed using only
+  `StudyMateiOS` and the reused `build/iOSDeviceDerivedData` directory. Logs:
+  `build/voiceCommonRecordsGenericBuild-retry2.log` and
+  `build/voiceCommonRecordsDeviceTestBuild-retry2.log`. The new callback wrapper
+  explicitly retains main-actor isolation rather than transferring an unconstrained
+  generic mutation result to a nonisolated completion handler.
+- **270 explicitly selected iPhone tests passed**, zero failures/skips:
+  51 common-record, 26 node-history, 76 call contracts, 16 explorations,
+  15 MCP/metadata, 12 pause, 25 Silero/pipeline, 31 summary and 18 preferences.
+  Log: `build/voiceCommonRecordsDeviceTests-retry2.log`. The common-record
+  fixtures use isolated defaults and a fail-closed GET-only synthetic transport;
+  actual public search and error-envelope contracts are checked without live
+  provider/ad calls or user-record mutations.
+- The final normal signed iOS build passed after testing, and deep, strict
+  code-signature verification passed. The installable app contains no injected
+  XCTest plug-ins or test frameworks. Log:
+  `build/voiceCommonRecordsSignedBuildFinal.log`.
+- Checks cover both record types in a paginated list, nullable and actual zero
+  scores, read-only unanswered exchanges, legacy node fallback, canonical detail
+  and comment IDs, publication eligibility, translations, body-log suppression,
+  stale account/environment/locale callbacks and preserving active question drafts.
+  Colliding numeric IDs across different types cannot overwrite, select or delete
+  the wrong local record. On account/API-origin changes, old numeric question
+  drafts detach into existing local draft storage; locale-only changes do not
+  rekey them or consume quota. Public/liked caches are invalidated consistently.
+- No macOS target, simulator, real voice call, microphone, recording purge,
+  account purge or real publication/comment mutation was used for these checks.
+  Human inspection of a newly completed lesson and an intentional public comment
+  remains an end-to-end acceptance check, not something these fixtures claim.

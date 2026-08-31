@@ -502,7 +502,7 @@ struct StudyRecordDetailView: View {
         _draftAnswer = State(initialValue: record.answer ?? "")
         _detailRecord = State(initialValue: record)
         _originalAvailable = State(
-            initialValue: record.localization?.containsTranslation == true ||
+            initialValue: record.hasTranslatedContent || record.isVoiceRecord ||
                 record.localization?.question.originalAvailable == true
         )
     }
@@ -548,7 +548,7 @@ struct StudyRecordDetailView: View {
                     }
 
                     if let answer = submittedAnswer(for: displayedRecord),
-                       displayedRecord.gradingResult != nil || isGradingAnswer {
+                       displayedRecord.isCompletedRecord || isGradingAnswer {
                         RecordChatBubble(role: .answer) {
                             MarkdownMessageText(markdown: answer, fillsWidth: false)
                                 .font(.body)
@@ -556,7 +556,7 @@ struct StudyRecordDetailView: View {
                                 .tint(.white)
                                 .textSelection(.enabled)
                         }
-                    } else if displayedRecord.gradingResult == nil {
+                    } else if displayedRecord.isPendingQuestion {
                         RecordChatBubble(role: .input) {
                             RecordAnswerInput(
                                 strings: appState.strings,
@@ -613,6 +613,11 @@ struct StudyRecordDetailView: View {
                             }
                         }
                     }
+                    #if os(iOS)
+                    if let voice = displayedRecord.voiceRecord {
+                        VoiceRecordFeedbackContent(content: voice, answer: displayedRecord.answer, strings: appState.strings)
+                    }
+                    #endif
                 }
             }
             .padding(.top, 10)
@@ -638,10 +643,9 @@ struct StudyRecordDetailView: View {
 
     private var latestRecord: StudyRecord {
         guard !isShowingOriginal,
-              detailRecord.gradingResult == nil,
+              detailRecord.isPendingQuestion,
               let liveRecord = appState.studyRecords.first(where: {
-                  $0.id == record.id ||
-                      StudyRecordIdentityPolicy.questionsMatch($0.question.question, record.question.question)
+                  StudyRecordIdentityPolicy.recordsMatch($0, record)
               }),
               liveRecord.gradingResult != nil else {
             return detailRecord
@@ -678,7 +682,7 @@ struct StudyRecordDetailView: View {
             applyRefreshedRecord(refreshed)
         }
 
-        guard detailRecord.localization?.containsPendingTranslation == true else {
+        guard detailRecord.translationPending else {
             return
         }
         for delay in [1, 2, 4] {
@@ -688,7 +692,7 @@ struct StudyRecordDetailView: View {
                 return
             }
             applyRefreshedRecord(retried)
-            if retried.localization?.containsPendingTranslation != true {
+            if !retried.translationPending {
                 return
             }
         }
@@ -697,7 +701,7 @@ struct StudyRecordDetailView: View {
     private func applyRefreshedRecord(_ refreshed: StudyRecord) {
         detailRecord = refreshed
         originalAvailable = originalAvailable ||
-            refreshed.localization?.containsTranslation == true ||
+            refreshed.hasTranslatedContent ||
             refreshed.localization?.question.originalAvailable == true
     }
 
@@ -719,7 +723,7 @@ struct StudyRecordDetailView: View {
 
     private func canSkip(_ record: StudyRecord) -> Bool {
         onSkip != nil &&
-            record.gradingResult == nil &&
+            record.isPendingQuestion &&
             record.gradingRequestID == nil &&
             !appState.isAnswerGradingInProgress(for: record)
     }
@@ -809,11 +813,11 @@ private struct RecordDetailHeader: View {
 
                 Spacer(minLength: 8)
 
-                if let score = record.gradingResult?.score {
+                if let score = record.displayScore {
                     Text("\(score)/100")
                         .font(.title3.weight(.semibold))
                         .lineLimit(1)
-                } else {
+                } else if record.isPendingQuestion {
                     Text(strings.ungraded)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -3804,7 +3808,7 @@ private enum LegacyStudyGrowthProjection {
         }
         let filteredRecords = records.filter { record in
             let date = record.answeredAt ?? record.question.createdAt
-            return date >= startAt && date < endAt
+            return record.isQuestion && date >= startAt && date < endAt
         }
         let recordsByStudy = Dictionary(grouping: filteredRecords.compactMap { record -> (Int, StudyRecord)? in
             guard let studyID = record.studyID else {

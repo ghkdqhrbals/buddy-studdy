@@ -105,11 +105,11 @@ struct StudyRoomStateStore {
         rooms = rooms.map { room in
             var nextRoom = room
             if let pendingQuestion = room.pendingQuestion,
-               let refreshedRecord = records.first(where: { $0.id == pendingQuestion.id }) {
+               let refreshedRecord = records.first(where: { $0.isQuestion && $0.id == pendingQuestion.id }) {
                 nextRoom.pendingQuestion = refreshedRecord
             }
             if let latestQuestion = room.latestQuestion,
-               let refreshedRecord = records.first(where: { $0.id == latestQuestion.id }) {
+               let refreshedRecord = records.first(where: { $0.isQuestion && $0.id == latestQuestion.id }) {
                 nextRoom.latestQuestion = refreshedRecord
             }
             return nextRoom
@@ -117,6 +117,7 @@ struct StudyRoomStateStore {
     }
 
     mutating func setPendingQuestion(_ record: StudyRecord, forStudyID studyID: Int) {
+        guard record.isQuestion else { return }
         rooms = rooms.map { room in
             guard room.id == studyID else {
                 return room
@@ -142,6 +143,7 @@ struct StudyRoomStateStore {
     }
 
     mutating func applyAnsweredRecord(_ record: StudyRecord) {
+        guard record.isQuestion else { return }
         rooms = rooms.map { room in
             guard room.pendingQuestion?.id == record.id else {
                 return room
@@ -159,6 +161,7 @@ struct StudyRoomStateStore {
     }
 
     mutating func applyIncomingRecord(_ record: StudyRecord) -> Bool {
+        guard record.isQuestion else { return false }
         var didApply = false
         rooms = rooms.map { room in
             let matchesExistingQuestion = room.pendingQuestion?.id == record.id
@@ -208,7 +211,7 @@ struct StudyRoomStateStore {
             return false
         }
 
-        return record.gradingResult == nil
+        return record.isPendingQuestion
     }
 
     private static func normalizedText(_ text: String) -> String {

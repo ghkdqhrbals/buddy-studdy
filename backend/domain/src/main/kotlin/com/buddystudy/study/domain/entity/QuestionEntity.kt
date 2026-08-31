@@ -54,4 +54,7 @@ class QuestionEntity(
     var publicQuestion: Boolean = true,
     var createdAt: Instant = Instant.now(),
     var updatedAt: Instant = Instant.now(),
+    var recordType: StudyRecordType = StudyRecordType.QUESTION,
+    /** Internal typed-extension identity; public/comment/detail identity remains [id]. */
+    var voiceRecordId: Long? = null,
 )

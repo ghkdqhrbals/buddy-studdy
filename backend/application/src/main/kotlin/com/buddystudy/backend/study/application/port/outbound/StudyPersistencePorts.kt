@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.application.port.outbound
 import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatus
+import com.buddystudy.study.domain.entity.StudyRecordType
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.springframework.data.domain.Page
@@ -101,7 +102,13 @@ interface QuestionPort {
     suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
     suspend fun findOwnedRecordsByIds(userId: Long, ids: Collection<Long>): List<QuestionEntity> =
         ids.distinct().take(100).mapNotNull { findByIdAndUserIdAndDeletedAtIsNull(it, userId) }
-            .filter { it.userId == userId && it.deletedAt == null && it.skippedAt == null && it.score != null }
+            .filter {
+                it.userId == userId && it.deletedAt == null && it.skippedAt == null &&
+                    when (it.recordType) {
+                        StudyRecordType.QUESTION -> it.score != null
+                        StudyRecordType.VOICE_TUTOR -> it.status == QuestionStatus.COMPLETED && it.voiceRecordId != null
+                    }
+            }
     suspend fun findByGradingRequestIdAndUserIdAndDeletedAtIsNull(
         gradingRequestId: String,
         userId: Long,

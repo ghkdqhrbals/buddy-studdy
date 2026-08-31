@@ -13,6 +13,8 @@ import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.service.AnswerGradingService
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
+import com.buddystudy.study.domain.entity.StudyRecordType
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -23,6 +25,42 @@ import java.time.Duration
 import java.time.Instant
 
 class AnswerGradingServiceTest {
+    @Test
+    fun `forged queued voice grading closes its Inbox claim before provider or writer use`(): Unit = runBlocking {
+        val event = AnswerGradingRequestedEvent("voice-event", "voice-request", 20, 7, Instant.parse("2026-08-31T00:00:00Z"))
+        val questions = mock(QuestionPort::class.java)
+        val studies = mock(StudyPort::class.java)
+        val openAI = mock(OpenAIPort::class.java)
+        val writer = mock(AnswerGradingWriteUseCase::class.java)
+        val publisher = mock(PublishOutboxUseCase::class.java)
+        val inbox = RecordingInbox()
+        val voice = QuestionEntity(
+            id = 20,
+            userId = 7,
+            studyId = 50,
+            question = "Actual tutor question",
+            answer = "Actual learner response",
+            recordType = StudyRecordType.VOICE_TUTOR,
+            voiceRecordId = 21,
+            status = QuestionStatus.COMPLETED,
+            gradingRequestId = event.requestId,
+            gradingStatus = AnswerGradingStatus.QUEUED,
+        )
+        `when`(questions.findByIdAndUserIdAndDeletedAtIsNull(20, 7)).thenReturn(voice)
+        val properties = BuddyStudyProperties()
+        val service = AnswerGradingService(
+            properties, questions, studies, UserContentOpenAIKeyProvider(properties), openAI,
+            writer, inbox, publisher,
+        )
+
+        service.process(event, "study.answer.grade.v1")
+
+        assertThat(inbox.succeeded?.eventId).isEqualTo(event.eventId)
+        assertThat(voice.status).isEqualTo(QuestionStatus.COMPLETED)
+        assertThat(voice.gradingStatus).isEqualTo(AnswerGradingStatus.QUEUED)
+        verifyNoInteractions(studies, openAI, writer, publisher)
+    }
+
     @Test
     fun `redelivered terminal grading closes the Inbox claim without calling OpenAI`() = runBlocking<Unit> {
         val event = AnswerGradingRequestedEvent(

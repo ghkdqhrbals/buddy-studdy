@@ -26,6 +26,8 @@ data class StudyLearningRecordResponse(
     val createdAt: Instant,
     val questionRecord: StudyRecordResponse? = null,
     val voiceRecord: VoiceStudyLearningRecordResponse? = null,
+    /** Both source types open the same canonical record/detail/share path. */
+    val record: StudyRecordResponse? = null,
 )
 
 data class StudyLearningRecordsPageResponse(
@@ -58,4 +60,6 @@ data class VoiceStudyLearningRecordResponse(
     val requestedLanguage: String,
     val displayLanguage: String,
     val translationPending: Boolean,
+    /** Shared record ID; [id] remains the legacy private-detail/translation key. */
+    val recordId: String? = null,
 )

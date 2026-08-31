@@ -21,6 +21,7 @@ import com.buddystudy.backend.study.application.port.outbound.VoiceStudyLearning
 import com.buddystudy.backend.study.application.service.StudyLearningRecordService
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyEntity
+import com.buddystudy.study.domain.entity.StudyRecordType
 import com.buddystudy.voice.domain.VoiceStudyLearningRecord
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import kotlinx.coroutines.CancellationException
@@ -128,11 +129,15 @@ class StudyLearningRecordServiceTest {
         assertThat(result.items.map { it.id }).containsExactly("question:9", "voice:9", "voice:8")
         assertThat(result.items.map { it.studyId }).containsOnly(NODE)
         assertThat(result.items.first().questionRecord).isSameAs(question)
+        assertThat(result.items.first().record).isSameAs(question)
         assertThat(result.items.first().voiceRecord).isNull()
+        assertThat(result.items[1].record?.id).isEqualTo(selectedVoice.recordId.toString())
+        assertThat(result.items[1].record?.recordType).isEqualTo(StudyRecordType.VOICE_TUTOR)
+        assertThat(result.items[1].voiceRecord?.recordId).isEqualTo(result.items[1].record?.id)
         assertThat(question.isPublic).isFalse()
         assertThat(question.gradingResult?.score).isEqualTo(88)
         assertThat(question.difficulty).isEqualTo(4)
-        assertThat(fixture.questions.calls).containsExactly(QuestionRead(PRINCIPAL, listOf(9), "en", "original"))
+        assertThat(fixture.questions.calls).containsExactly(QuestionRead(PRINCIPAL, listOf(9, 1_000_009, 1_000_008), "en", "original"))
         assertThat(fixture.voices.batchReads).containsExactly(USER to listOf(9L, 8L))
         assertThat(result.hasMore).isTrue()
         assertThat(StudyLearningRecordsCursorPolicy.decode(result.nextCursor, USER, NODE, StudyLearningRecordScope.NODE))
@@ -187,6 +192,25 @@ class StudyLearningRecordServiceTest {
         assertThat(result.items[1].voiceRecord?.difficulty).isEqualTo(6)
         assertThat(result.hasMore).isFalse()
         assertThat(result.nextCursor).isNull()
+    }
+
+    @Test
+    fun `a legacy extension cannot bypass a missing deleted or wrong-type canonical record`(): Unit = runBlocking {
+        for (canonical in listOf(null, question(1_000_009))) {
+            val fixture = Fixture()
+            fixture.keys.rows = listOf(key(StudyLearningRecordSource.VOICE_TUTOR, 9), key(StudyLearningRecordSource.VOICE_TUTOR, 8))
+            fixture.voices.rows = listOf(voice(9))
+            fixture.questions.includeVoiceRecords = false
+            fixture.questions.rows = listOfNotNull(canonical)
+
+            val result = fixture.page(limit = 1, language = "en")
+
+            assertThat(result.items).isEmpty()
+            assertThat(result.hasMore).isTrue()
+            assertThat(StudyLearningRecordsCursorPolicy.decode(result.nextCursor, USER, NODE, StudyLearningRecordScope.NODE))
+                .isEqualTo(fixture.keys.rows.first().cursor())
+            assertThat(fixture.localizations.requests).isEmpty()
+        }
     }
 
     @Test
@@ -355,7 +379,7 @@ class StudyLearningRecordServiceTest {
         val studies = StudyFixture()
         val keys = KeysFixture()
         val voices = VoiceFixture()
-        val questions = QuestionFixture()
+        val questions = QuestionFixture { voices.rows }
         val localizations = LocalizationFixture()
         val service = StudyLearningRecordService(studies, keys, voices, localizations, questions)
 
@@ -385,12 +409,22 @@ class StudyLearningRecordServiceTest {
 
     private data class QuestionRead(val principal: Principal, val ids: List<Long>, val language: String, val view: String)
 
-    private class QuestionFixture : BrowseRecordsUseCase by unsupportedPort() {
+    private class QuestionFixture(private val voiceSources: () -> List<VoiceStudyLearningRecord>) : BrowseRecordsUseCase by unsupportedPort() {
         var rows = emptyList<StudyRecordResponse>()
+        var includeVoiceRecords = true
         val calls = mutableListOf<QuestionRead>()
         override suspend fun recordsByIds(principal: Principal, ids: Collection<Long>, language: String, view: String): List<StudyRecordResponse> {
             calls += QuestionRead(principal, ids.toList(), language, view)
-            return rows
+            return rows + if (includeVoiceRecords) voiceSources().mapNotNull { source ->
+                source.recordId?.let { id ->
+                    question(id).copy(
+                        question = QuestionItemResponse(source.question, createdAt = source.createdAt),
+                        answer = source.answer, gradingResult = null, topic = source.topic,
+                        difficulty = source.difficulty, studyId = source.studyId,
+                        questionStatus = QuestionStatus.COMPLETED, recordType = StudyRecordType.VOICE_TUTOR,
+                    )
+                }
+            } else emptyList()
         }
     }
 
@@ -450,6 +484,7 @@ class StudyLearningRecordServiceTest {
             depthSummary = "합성 학습 기록", feedback = "좋은 답변이에요.", questionTurnId = 101,
             answerTurnIds = listOf(102, 103), feedbackTurnIds = listOf(104), sourceLanguage = "ko",
             sourceLanguages = emptyMap(), sourceHash = "synthetic-source-hash",
+            recordId = 1_000_000 + id,
         )
 
         fun snapshot(source: VoiceStudyLearningRecord, status: String = "READY", fields: Map<String, String?>) =
@@ -466,6 +501,7 @@ class StudyLearningRecordServiceTest {
 
         fun assertIdentityAndAssessment(response: VoiceStudyLearningRecordResponse, source: VoiceStudyLearningRecord) {
             assertThat(response.id).isEqualTo(source.id.toString())
+            assertThat(response.recordId).isEqualTo(source.recordId?.toString())
             assertThat(response.sessionId).isEqualTo(source.sessionId)
             assertThat(response.studyId).isEqualTo(source.studyId)
             assertThat(response.parentStudyId).isEqualTo(source.parentStudyId)

@@ -77,7 +77,7 @@ struct CommunityFeedStateStore {
             pageSize = response.limit
         }
         let visibleQuestions = response.questions.filter {
-            $0.status.caseInsensitiveCompare("graded") == .orderedSame &&
+            $0.canPublish &&
                 !hiddenQuestionIDs.contains($0.id) &&
                 !isAuthorHidden($0.author?.id)
         }
@@ -265,7 +265,7 @@ struct LikedQuestionsStateStore {
     }
 
     mutating func applyPage(_ response: CommunityQuestionsResponse, offset normalizedOffset: Int, reset: Bool) {
-        let page = response.questions.filter { $0.status.caseInsensitiveCompare("graded") == .orderedSame }
+        let page = response.questions.filter(\.canPublish)
         if reset {
             questions = page
             hasLoadedInitialPage = true

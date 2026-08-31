@@ -10360,6 +10360,8 @@ struct CommunityQuestionDetailView: View {
     @State private var comments: [CommunityQuestionComment] = []
     @State private var commentsTotalCount = 0
     @State private var hasLoadedComments = false
+    @State private var detailRequestID = UUID()
+    @State private var commentsRequestID = UUID()
     @State private var commentDraft = ""
     @State private var isSendingComment = false
     @State private var deletingCommentIDs: Set<String> = []
@@ -10380,7 +10382,7 @@ struct CommunityQuestionDetailView: View {
         _displayQuestion = State(initialValue: question)
         _commentsTotalCount = State(initialValue: question.commentCount)
         _originalAvailable = State(
-            initialValue: question.localization?.containsTranslation == true ||
+            initialValue: question.hasTranslatedContent || question.recordType == .voiceTutor ||
                 question.localization?.question.originalAvailable == true
         )
     }
@@ -10390,7 +10392,7 @@ struct CommunityQuestionDetailView: View {
     }
 
     private var canWriteCommunityReaction: Bool {
-        contentSource.showsCommunityInteractions && appState.isCommunitySessionActive
+        contentSource.showsCommunityInteractions && displayQuestion.canPublish && appState.isCommunitySessionActive
     }
 
     private var isLikePending: Bool {
@@ -10405,16 +10407,32 @@ struct CommunityQuestionDetailView: View {
                 localizationControl
 
                 CommunityMessageBubble(role: .question) {
-                    MarkdownMessageText(markdown: displayQuestion.question)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .tint(.accentColor)
-                        .textSelection(.enabled)
+                    VStack(alignment: .leading, spacing: 5) {
+                        if let voice = displayQuestion.voiceRecord {
+                            Text(voice.kind == .tutorQuestion ? strings.voiceRecordTutorQuestion : strings.voiceRecordLearnerQuestion)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        MarkdownMessageText(markdown: displayQuestion.question)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .tint(.accentColor)
+                            .textSelection(.enabled)
+                    }
                 }
 
                 if let answer = displayQuestion.answer?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !answer.isEmpty {
-                    CommunityAnswerMessage(answer: answer)
+                    VStack(alignment: .leading, spacing: 5) {
+                        if let voice = displayQuestion.voiceRecord {
+                            Text(voice.kind == .tutorQuestion ? strings.voiceRecordLearnerAnswer : strings.voiceRecordTutorAnswer)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        CommunityAnswerMessage(answer: answer)
+                    }
+                }
+
+                if let voice = displayQuestion.voiceRecord {
+                    VoiceRecordFeedbackContent(content: voice, answer: displayQuestion.answer, strings: strings)
                 }
 
                 if let gradingResult = displayQuestion.gradingResult {
@@ -10437,7 +10455,7 @@ struct CommunityQuestionDetailView: View {
                     }
                 }
 
-                if contentSource.showsCommunityInteractions {
+                if contentSource.showsCommunityInteractions && displayQuestion.canPublish {
                     communityActions
 
                     Divider()
@@ -10448,7 +10466,7 @@ struct CommunityQuestionDetailView: View {
             .padding(16)
         }
         .scrollDismissesKeyboard(.interactively)
-        .navigationTitle(strings.communityQuestion)
+        .navigationTitle(displayQuestion.recordType == .voiceTutor ? strings.commonRecordTitle : strings.communityQuestion)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if contentSource == .community && appState.isCommunitySessionActive {
@@ -10553,6 +10571,7 @@ struct CommunityQuestionDetailView: View {
             async let commentsLoad: Void = loadCommentsIfAvailable()
             _ = await (questionLoad, commentsLoad)
         }
+        .onChange(of: appState.commonRecordsIdentity) { _, _ in dismiss() }
     }
 
     private var communityQuestionMeta: some View {
@@ -10575,6 +10594,9 @@ struct CommunityQuestionDetailView: View {
                 }
 
                 HStack(spacing: 6) {
+                    if displayQuestion.recordType == .voiceTutor {
+                        Label(strings.recordTypeLabel(.voiceTutor), systemImage: StudyRecordType.voiceTutor.symbolName)
+                    }
                     Text(displayQuestion.topic.isEmpty ? "Swift" : displayQuestion.topic)
                         .lineLimit(1)
 
@@ -10659,7 +10681,9 @@ struct CommunityQuestionDetailView: View {
     private var localizationControl: some View {
         if originalAvailable || isShowingOriginal {
             HStack(spacing: 6) {
-                if !isShowingOriginal {
+                if !isShowingOriginal, displayQuestion.translationPending {
+                    ProgressView().controlSize(.mini)
+                } else if !isShowingOriginal, displayQuestion.hasTranslatedContent {
                     Text(strings.translatedIntoLanguage)
                         .foregroundStyle(.secondary)
                     Text("·")
@@ -10809,10 +10833,13 @@ struct CommunityQuestionDetailView: View {
     }
 
     private func loadComments() async {
+        let token = UUID()
+        commentsRequestID = token
+        let identity = appState.commonRecordsIdentity
         guard let response = await appState.loadCommunityQuestionComments(
             questionID: displayQuestion.id,
             refresh: true
-        ) else {
+        ), token == commentsRequestID, identity == appState.commonRecordsIdentity else {
             return
         }
 
@@ -10822,11 +10849,11 @@ struct CommunityQuestionDetailView: View {
         }
         for delay in [1, 2, 4] {
             try? await Task.sleep(for: .seconds(delay))
-            guard !Task.isCancelled,
+            guard !Task.isCancelled, token == commentsRequestID, identity == appState.commonRecordsIdentity,
                   let retried = await appState.loadCommunityQuestionComments(
                     questionID: displayQuestion.id,
                     refresh: true
-                  ) else {
+                  ), token == commentsRequestID, identity == appState.commonRecordsIdentity else {
                 return
             }
             applyComments(retried)
@@ -10837,7 +10864,7 @@ struct CommunityQuestionDetailView: View {
     }
 
     private func loadCommentsIfAvailable() async {
-        guard contentSource.showsCommunityInteractions else {
+        guard contentSource.showsCommunityInteractions, displayQuestion.canPublish else {
             hasLoadedComments = true
             return
         }
@@ -10859,45 +10886,56 @@ struct CommunityQuestionDetailView: View {
     }
 
     private func loadQuestionDetail() async {
-        guard let question = await loadQuestion(view: .localized) else {
+        let token = UUID()
+        detailRequestID = token
+        let identity = appState.commonRecordsIdentity
+        guard let question = await loadQuestion(view: .localized), token == detailRequestID,
+              identity == appState.commonRecordsIdentity else {
             return
         }
         displayQuestion = question
         originalAvailable = originalAvailable ||
-            question.localization?.containsTranslation == true ||
+            question.hasTranslatedContent ||
             question.localization?.question.originalAvailable == true
-        guard question.localization?.containsPendingTranslation == true else {
+        guard question.translationPending else {
             return
         }
         for delay in [1, 2, 4] {
             try? await Task.sleep(for: .seconds(delay))
-            guard !Task.isCancelled,
-                  let retried = await loadQuestion(view: .localized) else {
+            guard !Task.isCancelled, token == detailRequestID,
+                  let retried = await loadQuestion(view: .localized), token == detailRequestID,
+                  identity == appState.commonRecordsIdentity else {
                 return
             }
             displayQuestion = retried
-            originalAvailable = originalAvailable || retried.localization?.containsTranslation == true
-            if retried.localization?.containsPendingTranslation != true {
+            originalAvailable = originalAvailable || retried.hasTranslatedContent
+            if !retried.translationPending {
                 return
             }
         }
     }
 
     private func switchContentView() async {
+        let token = UUID()
+        detailRequestID = token
+        commentsRequestID = UUID()
+        let identity = appState.commonRecordsIdentity
         let target: LocalizedContentView = isShowingOriginal ? .localized : .original
-        guard let loaded = await loadQuestion(view: target) else {
+        guard let loaded = await loadQuestion(view: target), token == detailRequestID,
+              identity == appState.commonRecordsIdentity else {
             return
         }
         displayQuestion = loaded
-        if contentSource.showsCommunityInteractions {
+        if contentSource.showsCommunityInteractions, displayQuestion.canPublish {
             if let response = await appState.loadCommunityQuestionComments(
                 questionID: loaded.id,
                 refresh: true,
                 view: target
-            ) {
+            ), token == detailRequestID, identity == appState.commonRecordsIdentity {
                 applyComments(response)
             }
         }
+        guard token == detailRequestID, identity == appState.commonRecordsIdentity else { return }
         isShowingOriginal = target == .original
         originalAvailable = true
     }

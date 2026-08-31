@@ -1,5 +1,6 @@
 package com.buddystudy.community.domain
 
+import com.buddystudy.study.domain.entity.StudyRecordType
 import java.time.Instant
 
 class PublicQuestion private constructor(
@@ -30,6 +31,7 @@ class PublicQuestion private constructor(
         questionSourceLanguage = question.questionSourceLanguage,
         answerSourceLanguage = question.answerSourceLanguage,
         aiResponseSourceLanguage = question.aiResponseSourceLanguage,
+        recordType = question.recordType,
     )
 
     companion object {
@@ -59,6 +61,7 @@ data class PublicQuestionState(
     val questionSourceLanguage: String = "ko",
     val answerSourceLanguage: String? = null,
     val aiResponseSourceLanguage: String? = null,
+    val recordType: StudyRecordType = StudyRecordType.QUESTION,
 )
 
 data class PublicQuestionStats(
@@ -99,4 +102,5 @@ data class PublicQuestionProjection(
     val questionSourceLanguage: String = "ko",
     val answerSourceLanguage: String? = null,
     val aiResponseSourceLanguage: String? = null,
+    val recordType: StudyRecordType = StudyRecordType.QUESTION,
 )

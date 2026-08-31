@@ -20,6 +20,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePo
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatus
+import com.buddystudy.study.domain.entity.StudyRecordType
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -44,7 +45,7 @@ class StudyRecordWriteService(
         grade: GradedAnswer?,
         now: Instant,
     ): QuestionWriteResult {
-        val question = lockRecord(recordId, userId)
+        val question = lockGeneratedQuestion(recordId, userId)
         if (question.gradingRequestId != null ||
             question.gradingStatus != null ||
             question.score != null ||
@@ -99,7 +100,7 @@ class StudyRecordWriteService(
 
     @Transactional
     override suspend fun skip(userId: Long, recordId: Long): QuestionEntity {
-        val question = lockRecord(recordId, userId)
+        val question = lockGeneratedQuestion(recordId, userId)
         question.apply(question.toStudyRecord().skip())
         return questions.save(question)
     }
@@ -132,7 +133,7 @@ class StudyRecordWriteService(
         aiResponseLanguage: String,
         now: Instant,
     ): QueuedAnswerGrading {
-        val question = lockRecord(recordId, userId)
+        val question = lockGeneratedQuestion(recordId, userId)
         val normalizedAnswer = answer.trim()
         val persistedAnswer = question.answer?.trim()?.takeIf { it.isNotEmpty() }
         if ((persistedAnswer != null && persistedAnswer != normalizedAnswer) ||
@@ -199,6 +200,7 @@ class StudyRecordWriteService(
     ): Boolean {
         require(!status.terminal) { "Terminal grading status must use complete or fail." }
         val question = lockRecord(event.recordId, event.userId)
+        if (question.recordType != StudyRecordType.QUESTION) return false
         if (question.gradingRequestId != event.requestId || question.score != null) return false
         if (question.gradingStatus == AnswerGradingStatus.FAILED ||
             question.gradingStatus == AnswerGradingStatus.COMPLETED
@@ -230,6 +232,7 @@ class StudyRecordWriteService(
         now: Instant,
     ): CompletedAnswerGrading {
         val question = lockRecord(event.recordId, event.userId)
+        if (question.recordType != StudyRecordType.QUESTION) return CompletedAnswerGrading(false)
         if (question.gradingRequestId != event.requestId) return CompletedAnswerGrading(false)
         if (question.score != null && question.gradingStatus == AnswerGradingStatus.COMPLETED) {
             return CompletedAnswerGrading(true)
@@ -286,6 +289,7 @@ class StudyRecordWriteService(
         now: Instant,
     ) {
         val question = lockRecord(event.recordId, event.userId)
+        if (question.recordType != StudyRecordType.QUESTION) return
         if (question.gradingRequestId != event.requestId || question.score != null) return
         if (question.gradingStatus == AnswerGradingStatus.FAILED ||
             question.gradingStatus == AnswerGradingStatus.COMPLETED
@@ -307,6 +311,18 @@ class StudyRecordWriteService(
         )
         question.gradingLastEventId = progress.id
         questions.save(question)
+    }
+
+    private suspend fun lockGeneratedQuestion(recordId: Long, userId: Long): QuestionEntity {
+        val record = lockRecord(recordId, userId)
+        if (record.recordType != StudyRecordType.QUESTION) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Completed voice learning records cannot be answered, skipped, or regraded.",
+            )
+        }
+        return record
     }
 
     private suspend fun lockRecord(recordId: Long, userId: Long): QuestionEntity =

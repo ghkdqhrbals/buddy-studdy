@@ -277,6 +277,11 @@ final class AppState: ObservableObject {
     @Published private var communitySessionState: CommunitySessionStateStore
     @Published private var searchState = SearchStateStore()
     private var communityCommentsCache: [String: CommunityCommentsResponse] = [:]
+    private var commonRecordsCacheIdentity: CommonRecordsIdentity?
+    private var recordSearchCacheIdentity: CommonRecordsIdentity?
+    private var communityCommentsCacheIdentity: CommonRecordsIdentity?
+    private var communityRecordsCacheIdentity: CommonRecordsIdentity?
+    private var commonRecordsPageRequestID = UUID()
 
     var appLogs: [AppLogEntry] {
         get {
@@ -373,7 +378,122 @@ final class AppState: ObservableObject {
     }
 
     var studyRecords: [StudyRecord] {
-        recordsState.records
+        guard commonRecordsCacheIdentity == commonRecordsIdentity else {
+            // Existing question drafts remain intact. Voice read-model material
+            // from a different account/environment/locale is never displayed.
+            return recordsState.records.filter(\.isQuestion)
+        }
+        return recordsState.records
+    }
+
+    var commonRecordsIdentity: CommonRecordsIdentity {
+        CommonRecordsIdentity(
+            userID: communityProfile?.id,
+            sessionGeneration: communitySessionState.generation,
+            backendGeneration: backendClientGeneration,
+            languageCode: settings.appLanguage.backendCode
+        )
+    }
+
+    private func makeRecordRequestValidity() -> @MainActor @Sendable () -> Bool {
+        let identity = commonRecordsIdentity
+        let account = try? makeVoiceTutorRequestContext()
+        return { [weak self] in
+            guard let self else { return false }
+            return self.commonRecordsIdentity == identity && (account?.isCurrent() ?? true)
+        }
+    }
+
+    private func prepareRecordRegistration(
+        reason: String,
+        validity: @escaping @MainActor @Sendable () -> Bool
+    ) async -> RemotePushRegistration? {
+        guard validity(), let stored = storedBackendIdentityUseCase.loadRegistration() else { return nil }
+        let registration = await registrationWithAccessToken(
+            stored, reason: reason, syncSettingsAfterRegistration: false, validity: validity
+        )
+        guard validity(), !Task.isCancelled else { return nil }
+        return registration
+    }
+
+    private func invalidateStudyLearningRecordPages() {
+        #if os(iOS)
+        studyLearningRecordsLifetimeID = UUID()
+        localStudyRecordUseCase.clearLearningRecordsPages()
+        #endif
+    }
+
+    private func prepareCommonRecordCacheForCurrentIdentity() {
+        guard commonRecordsCacheIdentity != commonRecordsIdentity else { return }
+        // A canonical record opened from a node page can enter the same store
+        // before the first Records page is loaded. Evict stale voice material
+        // before admitting that current-identity record; retain question drafts.
+        let questions = localStudyRecordUseCase.loadRecords().filter(\.isQuestion)
+        localStudyRecordUseCase.replaceRecords(questions)
+        recordsState.replace(with: questions)
+        commonRecordsCacheIdentity = commonRecordsIdentity
+    }
+
+    private func invalidateCommonRecordReads(detachQuestionDrafts: Bool = false) {
+        commonRecordsPageRequestID = UUID()
+        backendRecordRefreshTask?.cancel()
+        backendRecordRefreshTask = nil
+        backendRecordRefreshContext = nil
+        commonRecordsCacheIdentity = nil
+        recordSearchCacheIdentity = nil
+        communityCommentsCacheIdentity = nil
+        communityCommentsCache.removeAll()
+        communityRecordsCacheIdentity = nil
+        communityFeedState.reset()
+        likedQuestionsState.reset()
+        communityQuestionLikeRequestState.reset()
+        if detachQuestionDrafts { detachQuestionDraftsFromPreviousIdentity() }
+        // No answer draft/current question is removed by this cache eviction.
+        let questions = localStudyRecordUseCase.loadRecords().filter(\.isQuestion)
+        localStudyRecordUseCase.replaceRecords(questions)
+        var state = recordsState
+        state.clear()
+        state.replace(with: questions)
+        recordsState = state
+        replaceRecordSearchResults(nil)
+        invalidateStudyLearningRecordPages()
+    }
+
+    private func detachQuestionDraftsFromPreviousIdentity() {
+        // Only account/origin changes call this, never a locale change. Move
+        // drafts through the existing store before a new origin can reuse the
+        // same numeric record ID; retain the visible question and answer.
+        flushPendingAnswerDraftSave()
+        let drafts = localStudyRecordUseCase.loadRecords().compactMap { record -> StudyRecord? in
+            guard record.isQuestion, record.gradingResult == nil else { return nil }
+            guard !record.isDetachedLocalQuestion, Int64(record.id) != nil else { return record }
+            var detached = record
+            detached.id = "local-draft:\(UUID().uuidString)"
+            detached.studyID = nil
+            detached.isPublic = false
+            detached.gradingRequestID = nil
+            detached.correlationID = nil
+            detached.gradingStatus = nil
+            detached.gradingError = nil
+            detached.gradingLastEventID = nil
+            detached.questionStatus = .ungraded
+            let draft = localStudyRecordUseCase.loadAnswerDraft(recordID: record.id)
+            let text = draft.isEmpty ? (record.answer ?? "") : draft
+            localStudyRecordUseCase.saveAnswerDraft(text, recordID: detached.id)
+            localStudyRecordUseCase.deleteAnswerDraft(recordID: record.id)
+            detached.answer = nil
+            return detached
+        }
+        localStudyRecordUseCase.replaceRecords(drafts)
+    }
+
+    private func prepareCommunityRecordCachesForCurrentIdentity() {
+        if let previous = communityRecordsCacheIdentity, previous != commonRecordsIdentity {
+            communityFeedState.reset()
+            likedQuestionsState.reset()
+            communityQuestionLikeRequestState.reset()
+        }
+        communityRecordsCacheIdentity = commonRecordsIdentity
     }
 
     var homeStudySearchResults: [StudyCategory]? {
@@ -381,11 +501,14 @@ final class AppState: ObservableObject {
     }
 
     var recordSearchResults: [StudyRecord]? {
-        searchState.recordResults
+        guard recordSearchCacheIdentity == commonRecordsIdentity else {
+            return searchState.recordResults?.filter(\.isQuestion)
+        }
+        return searchState.recordResults
     }
 
     var recordTotalCount: Int {
-        max(recordsState.totalCount, studyRecords.filter { $0.gradingResult != nil }.count)
+        max(recordsState.totalCount, studyRecords.filter(\.isCompletedRecord).count)
     }
 
     var isLoadingRecordPage: Bool {
@@ -490,7 +613,9 @@ final class AppState: ObservableObject {
 
     var communityQuestions: [CommunityQuestion] {
         get {
-            communityFeedState.questions
+            communityRecordsCacheIdentity == commonRecordsIdentity
+                ? communityFeedState.questions
+                : communityFeedState.questions.filter { $0.recordType == .question }
         }
         set {
             var nextState = communityFeedState
@@ -514,8 +639,14 @@ final class AppState: ObservableObject {
     }
 
     var communityFeedItems: [CommunityFeedItem] {
-        if communityFeedState.items.isEmpty, !communityFeedState.questions.isEmpty {
-            return communityFeedState.questions.map(CommunityFeedItem.publicQuestion)
+        if communityFeedState.items.isEmpty, !communityQuestions.isEmpty {
+            return communityQuestions.map(CommunityFeedItem.publicQuestion)
+        }
+        if communityRecordsCacheIdentity != commonRecordsIdentity {
+            return communityFeedState.items.filter { item in
+                if case .publicQuestion(let question) = item { return question.recordType == .question }
+                return true
+            }
         }
         return communityFeedState.items
     }
@@ -564,7 +695,11 @@ final class AppState: ObservableObject {
         }
     }
 
-    var likedCommunityQuestions: [CommunityQuestion] { likedQuestionsState.questions }
+    var likedCommunityQuestions: [CommunityQuestion] {
+        communityRecordsCacheIdentity == commonRecordsIdentity
+            ? likedQuestionsState.questions
+            : likedQuestionsState.questions.filter { $0.recordType == .question }
+    }
     var likedCommunityQuestionsTotalCount: Int { likedQuestionsState.totalCount }
     var likedCommunityQuestionsOffset: Int { likedQuestionsState.offset }
     var isLoadingLikedCommunityQuestions: Bool { likedQuestionsState.isLoading }
@@ -636,9 +771,11 @@ final class AppState: ObservableObject {
             communityProfileState.profile
         }
         set {
+            let changesAccount = communityProfileState.profile?.id != nil && communityProfileState.profile?.id != newValue?.id
             var nextState = communityProfileState
             nextState.profile = newValue
             communityProfileState = nextState
+            if changesAccount { invalidateCommonRecordReads(detachQuestionDrafts: true) }
         }
     }
 
@@ -783,6 +920,7 @@ final class AppState: ObservableObject {
     private var cloudSyncTask: Task<Void, Never>?
     private var visibleDataRefreshTask: Task<Void, Never>?
     private var backendRecordRefreshTask: Task<Void, Never>?
+    private var backendRecordRefreshContext: (identity: CommonRecordsIdentity, requestID: UUID)?
     private var studyOpeningTask: Task<Void, Never>?
     private var studyOpeningRequestID: String?
     private var answerDraftSaveTask: Task<Void, Never>?
@@ -1599,6 +1737,7 @@ final class AppState: ObservableObject {
         nativeAdvertisingEntitlementRefresh = nil
         billingRefreshRequestID += 1
         if didChangeBackend {
+            invalidateCommonRecordReads(detachQuestionDrafts: true)
             billingCatalog = nil
             billingStatus = nil
             billingInvoices = []
@@ -2942,11 +3081,16 @@ final class AppState: ObservableObject {
             return
         }
         #endif
+        let identity = commonRecordsIdentity
         if let backendRecordRefreshTask {
-            await backendRecordRefreshTask.value
-            return
+            if backendRecordRefreshContext?.identity == identity {
+                await backendRecordRefreshTask.value
+                return
+            }
+            invalidateCommonRecordReads()
         }
-
+        let requestID = UUID()
+        backendRecordRefreshContext = (identity, requestID)
         let task = Task { @MainActor [weak self] in
             guard let self else {
                 return
@@ -2955,7 +3099,10 @@ final class AppState: ObservableObject {
         }
         backendRecordRefreshTask = task
         await task.value
-        backendRecordRefreshTask = nil
+        if backendRecordRefreshContext?.requestID == requestID {
+            backendRecordRefreshTask = nil
+            backendRecordRefreshContext = nil
+        }
     }
 
     func loadMoreBackendRecords() async {
@@ -2970,24 +3117,24 @@ final class AppState: ObservableObject {
         limit: Int = 30,
         offset: Int
     ) async throws -> BackendRecordsPage {
-        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
-              let registration = await registrationWithAccessToken(
-                storedRegistration,
-                reason: "study-records"
-              ) else {
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = recordsUseCase
+        guard let registration = await prepareRecordRegistration(reason: "study-records", validity: isCurrent) else {
             throw AppStateError.missingRemotePushRegistration
         }
 
         return try await performWithBackendIdentityRecovery(
             registration: registration,
             reason: "study-records",
+            validity: isCurrent,
             operation: { recoveredRegistration in
-                try await recordsUseCase.fetchRecordsForStudy(
+                try await useCase.fetchRecordsForStudy(
                     registration: recoveredRegistration,
                     studyID: studyID,
                     limit: max(1, min(limit, 100)),
                     offset: max(0, offset),
-                    language: settings.appLanguage
+                    language: language
                 )
             }
         )
@@ -3124,15 +3271,26 @@ final class AppState: ObservableObject {
     #endif
 
     private func loadBackendRecordsPage(reset: Bool) async {
+        if commonRecordsCacheIdentity != nil && commonRecordsCacheIdentity != commonRecordsIdentity {
+            invalidateCommonRecordReads()
+        }
+        let identity = commonRecordsIdentity
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = recordsUseCase
         var loadingState = recordsState
         guard loadingState.beginPageLoad() else {
             return
         }
         recordsState = loadingState
+        let requestID = UUID()
+        commonRecordsPageRequestID = requestID
 
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
-              let registration = await registrationWithAccessToken(storedRegistration, reason: "records") else {
-            finishBackendRecordPageLoad()
+              let registration = await registrationWithAccessToken(
+                storedRegistration, reason: "records", validity: isCurrent
+              ), isCurrent() else {
+            if commonRecordsPageRequestID == requestID { finishBackendRecordPageLoad() }
             log(.warning, "백엔드 등록이 없어 기록 새로고침을 건너뛰었습니다.")
             return
         }
@@ -3143,19 +3301,22 @@ final class AppState: ObservableObject {
                 try await performWithBackendIdentityRecovery(
                     registration: registration,
                     reason: "records",
+                    validity: isCurrent,
                     operation: { recoveredRegistration in
-                        try await recordsUseCase.fetchRecords(
+                        try await useCase.fetchRecords(
                             registration: recoveredRegistration,
                             limit: Self.recordPageSize,
                             offset: offset,
                             query: "",
-                            language: settings.appLanguage
+                            language: language
                         )
                     }
                 )
             },
             onSuccess: { recordsPage in
-                let pendingRecords = studyRecords.filter { $0.gradingResult == nil }
+                guard isCurrent(), commonRecordsPageRequestID == requestID else { return }
+                commonRecordsCacheIdentity = identity
+                let pendingRecords = studyRecords.filter(\.isPendingQuestion)
                 applyBackendRecordsPage(
                     recordsPage,
                     pendingRecords: pendingRecords,
@@ -3169,6 +3330,7 @@ final class AppState: ObservableObject {
                 log(.info, "백엔드 기록만 새로고침했습니다. records=\(recordsPage.records.count)")
             },
             onFailure: { error in
+                guard isCurrent(), commonRecordsPageRequestID == requestID else { return }
                 if Self.isCancellationLikeError(error) {
                     log(.info, "기록 조회 취소를 인증 또는 페이지 접근 오류로 처리하지 않습니다.")
                     return
@@ -3179,7 +3341,7 @@ final class AppState: ObservableObject {
                 log(.warning, "백엔드 기록 새로고침 실패: \(error.localizedDescription)")
             },
             onCompletion: {
-                finishBackendRecordPageLoad()
+                if commonRecordsPageRequestID == requestID { finishBackendRecordPageLoad() }
             }
         )
     }
@@ -3603,7 +3765,7 @@ final class AppState: ObservableObject {
             }
         )
         let staleLocalPendingRecords = studyRecords.filter { record in
-            guard record.gradingResult == nil,
+            guard record.isPendingQuestion,
                   let studyID = record.studyID,
                   visibleStudyIDs.contains(studyID) else {
                 return false
@@ -3751,7 +3913,7 @@ final class AppState: ObservableObject {
         let returnedPendingID = room.pendingQuestion?.id
         let authoritativeRecords = studyRecords.filter { record in
             guard record.studyID == room.id,
-                  record.gradingResult == nil else {
+                  record.isPendingQuestion else {
                 return true
             }
             return record.id == returnedPendingID
@@ -3840,6 +4002,10 @@ final class AppState: ObservableObject {
     }
 
     func searchBackendRecords(query: String, reset: Bool = true) async {
+        let identity = commonRecordsIdentity
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = recordsUseCase
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else {
             replaceRecordSearchResults(nil)
@@ -3851,10 +4017,9 @@ final class AppState: ObservableObject {
             return
         }
         searchState = loadingState
+        defer { finishBackendRecordSearchPage(query: trimmedQuery, requestID: requestID) }
 
-        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
-              let registration = await registrationWithAccessToken(storedRegistration, reason: "record-search") else {
-            finishBackendRecordSearchPage(query: trimmedQuery, requestID: requestID)
+        guard let registration = await prepareRecordRegistration(reason: "record-search", validity: isCurrent) else {
             return
         }
 
@@ -3863,16 +4028,19 @@ final class AppState: ObservableObject {
             let page = try await performWithBackendIdentityRecovery(
                 registration: registration,
                 reason: "record-search",
+                validity: isCurrent,
                 operation: { recoveredRegistration in
-                    try await recordsUseCase.fetchRecords(
+                    try await useCase.fetchRecords(
                         registration: recoveredRegistration,
                         limit: Self.recordPageSize,
                         offset: offset,
                         query: trimmedQuery,
-                        language: settings.appLanguage
+                        language: language
                     )
                 }
             )
+            guard isCurrent(), !Task.isCancelled else { return }
+            recordSearchCacheIdentity = identity
             var nextState = searchState
             nextState.applyRecordPage(
                 page,
@@ -3882,9 +4050,9 @@ final class AppState: ObservableObject {
             )
             searchState = nextState
         } catch {
+            guard isCurrent(), !Self.isCancellationLikeError(error) else { return }
             log(.warning, "기록 검색 실패: \(error.localizedDescription)")
         }
-        finishBackendRecordSearchPage(query: trimmedQuery, requestID: requestID)
     }
 
     func loadMoreBackendRecordSearchResults() async {
@@ -4313,6 +4481,10 @@ final class AppState: ObservableObject {
             return
         }
         #endif
+        prepareCommunityRecordCachesForCurrentIdentity()
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = communityUseCase
         let trimmedTopic = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedOffset = reset ? 0 : communityOffset
         let limit = Self.communityQuestionPageSize
@@ -4331,7 +4503,23 @@ final class AppState: ObservableObject {
             resolvedAdFreeEntitlement = billingStatus?.adFree
         }
 
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-feed") else {
+        guard isCurrent(), !Task.isCancelled else {
+            finishCommunityFeedLoad(requestID)
+            return
+        }
+        let preparedRegistration: RemotePushRegistration?
+        if storedBackendIdentityUseCase.loadRegistration() != nil {
+            preparedRegistration = await prepareRecordRegistration(reason: "community-feed", validity: isCurrent)
+        } else {
+            // Keep the existing first-install anonymous feed bootstrap. A
+            // response can still be applied only to the captured identity.
+            preparedRegistration = await backendRegistrationForOpenAIRequests(reason: "community-feed")
+        }
+        guard isCurrent(), !Task.isCancelled else {
+            finishCommunityFeedLoad(requestID)
+            return
+        }
+        guard let registration = preparedRegistration else {
             if userInitiated {
                 clearCommunityErrorForMissingRegistration(reason: "community-feed")
             }
@@ -4341,17 +4529,17 @@ final class AppState: ObservableObject {
 
         await actionRunner.run(
             operation: {
-                try await communityUseCase.fetchPublicQuestions(
+                try await useCase.fetchPublicQuestions(
                     registration: registration,
                     query: trimmedTopic.isEmpty ? nil : trimmedTopic,
                     limit: limit,
                     offset: normalizedOffset,
                     excludeDeviceID: nil,
-                    language: settings.appLanguage
+                    language: language
                 )
             },
             onSuccess: { response in
-                guard isCurrentCommunityFeedLoad(requestID) else {
+                guard isCurrent(), !Task.isCancelled, isCurrentCommunityFeedLoad(requestID) else {
                     return
                 }
 
@@ -4369,7 +4557,7 @@ final class AppState: ObservableObject {
                 log(.info, "공개 질문 목록을 로드했습니다. count=\(response.questions.count), total=\(response.totalCount), offset=\(communityOffset)")
             },
             onFailure: { error in
-                guard isCurrentCommunityFeedLoad(requestID) else {
+                guard isCurrent(), !Self.isCancellationLikeError(error), isCurrentCommunityFeedLoad(requestID) else {
                     return
                 }
                 if reset, !preserveExistingOnFailure {
@@ -4428,6 +4616,10 @@ final class AppState: ObservableObject {
         userInitiated: Bool = false,
         preserveExistingOnFailure: Bool = false
     ) async {
+        prepareCommunityRecordCachesForCurrentIdentity()
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = communityUseCase
         let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if likedQuestionsState.isLoading, !reset {
             return
@@ -4444,7 +4636,14 @@ final class AppState: ObservableObject {
         let requestID = nextState.beginLoading(query: normalizedQuery)
         likedQuestionsState = nextState
 
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "liked-community-feed") else {
+        let registration = await prepareRecordRegistration(reason: "liked-community-feed", validity: isCurrent)
+        guard isCurrent(), !Task.isCancelled else {
+            var completedState = likedQuestionsState
+            completedState.finishLoading(requestID)
+            likedQuestionsState = completedState
+            return
+        }
+        guard let registration else {
             var failedState = likedQuestionsState
             failedState.finishLoading(requestID)
             if reset {
@@ -4456,25 +4655,25 @@ final class AppState: ObservableObject {
 
         await actionRunner.run(
             operation: {
-                try await communityUseCase.fetchLikedPublicQuestions(
+                try await useCase.fetchLikedPublicQuestions(
                     registration: registration,
                     query: normalizedQuery.isEmpty ? nil : normalizedQuery,
                     limit: Self.communityQuestionPageSize,
                     offset: normalizedOffset,
-                    language: settings.appLanguage,
+                    language: language,
                     view: .localized
                 )
             },
             onSuccess: { response in
-                guard likedQuestionsState.isCurrentRequest(requestID) else { return }
+                guard isCurrent(), !Task.isCancelled, likedQuestionsState.isCurrentRequest(requestID) else { return }
                 var loadedState = likedQuestionsState
                 loadedState.applyPage(response, offset: normalizedOffset, reset: reset)
                 likedQuestionsState = loadedState
             },
             onFailure: { error in
-                guard likedQuestionsState.isCurrentRequest(requestID) else { return }
+                guard isCurrent(), !Self.isCancellationLikeError(error), likedQuestionsState.isCurrentRequest(requestID) else { return }
                 let handled = handleLikedQuestionsError(error)
-                guard likedQuestionsState.isCurrentRequest(requestID) else { return }
+                guard isCurrent(), likedQuestionsState.isCurrentRequest(requestID) else { return }
                 var failedState = likedQuestionsState
                 if handled {
                     if reset {
@@ -4530,12 +4729,13 @@ final class AppState: ObservableObject {
         let localGradingResult = gradingResult
 
         let existingRecords = append
-            ? studyRecords.filter { $0.gradingResult != nil }
+            ? studyRecords.filter(\.isCompletedRecord)
             : []
         let pageRecords = recordsPage.records.reduce(existingRecords) { records, record in
             mergeBackendRecord(record, into: records)
         }
-        let mergedRecords = pendingRecords.reduce(pageRecords) { records, pendingRecord in
+        let keptRecords = pendingRecords + studyRecords.filter(\.isDetachedLocalQuestion)
+        let mergedRecords = keptRecords.reduce(pageRecords) { records, pendingRecord in
             mergeBackendRecord(pendingRecord, into: records)
         }
         localStudyRecordUseCase.replaceBackendRecords(mergedRecords)
@@ -4558,7 +4758,7 @@ final class AppState: ObservableObject {
 
         let visibleRecord = localCurrentQuestion.flatMap { studyRecord(matching: $0) } ??
             studyRecords
-                .filter { $0.gradingResult == nil }
+                .filter(\.isPendingQuestion)
                 .sorted { $0.question.createdAt > $1.question.createdAt }
                 .first
 
@@ -5347,6 +5547,7 @@ final class AppState: ObservableObject {
         #endif
         cancelAllAnswerGradingPolling(reason: "community-session-reset")
         setCommunitySessionSignedIn(false)
+        invalidateCommonRecordReads(detachQuestionDrafts: true)
         studyRoomState.replace(with: [])
         backendStudyLoadState = .idle
         isRequiredTermsGatePresented = false
@@ -6290,7 +6491,8 @@ final class AppState: ObservableObject {
     }
 
     func cachedCommunityQuestionComments(questionID: String) -> CommunityCommentsResponse? {
-        communityCommentsCache[questionID]
+        guard communityCommentsCacheIdentity == commonRecordsIdentity else { return nil }
+        return communityCommentsCache[questionID]
     }
 
     func loadCommunityQuestionComments(
@@ -6300,33 +6502,44 @@ final class AppState: ObservableObject {
         refresh: Bool = false,
         view: LocalizedContentView = .localized
     ) async -> CommunityCommentsResponse? {
+        let identity = commonRecordsIdentity
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = communityUseCase
+        if communityCommentsCacheIdentity != identity {
+            communityCommentsCache.removeAll()
+            communityCommentsCacheIdentity = identity
+        }
         if view == .localized, !refresh, offset == 0, let cached = communityCommentsCache[questionID] {
             return cached
         }
 
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comments") else {
+        guard let registration = await prepareRecordRegistration(reason: "community-comments", validity: isCurrent) else {
             clearCommunityErrorForMissingRegistration(reason: "community-comments")
             return nil
         }
 
         return await actionRunner.run(
             operation: {
-                let response = try await communityUseCase.fetchComments(
+                let response = try await useCase.fetchComments(
                     registration: registration,
                     questionID: questionID,
                     limit: limit,
                     offset: offset,
-                    language: settings.appLanguage,
+                    language: language,
                     view: view
                 )
+                guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
                 return visibleCommunityComments(in: response)
             },
             onSuccess: { response in
+                guard isCurrent() else { return }
                 if view == .localized, offset == 0 {
                     communityCommentsCache[questionID] = response
                 }
             },
             onFailure: { error in
+                guard isCurrent(), !Self.isCancellationLikeError(error) else { return }
                 handleCommunityError(error)
                 log(.warning, "공개 질문 댓글 로드 실패: \(error.localizedDescription)")
             }
@@ -6337,27 +6550,33 @@ final class AppState: ObservableObject {
         questionID: String,
         view: LocalizedContentView = .localized
     ) async -> CommunityQuestion? {
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-question-detail") else {
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = communityUseCase
+        guard let registration = await prepareRecordRegistration(reason: "community-question-detail", validity: isCurrent) else {
             clearCommunityErrorForMissingRegistration(reason: "community-question-detail")
             return nil
         }
 
         let question = await actionRunner.run(
             operation: {
-                try await communityUseCase.fetchPublicQuestion(
+                let result = try await useCase.fetchPublicQuestion(
                     registration: registration,
                     questionID: questionID,
-                    language: settings.appLanguage,
+                    language: language,
                     view: view
                 )
+                guard isCurrent(), !Task.isCancelled, result.id == questionID else { throw CancellationError() }
+                return result
             },
             onSuccess: { _ in },
             onFailure: { error in
+                guard isCurrent(), !Self.isCancellationLikeError(error) else { return }
                 handleCommunityError(error)
                 log(.warning, "공개 질문 상세 로드 실패: \(error.localizedDescription)")
             }
         )
-        guard let question,
+        guard isCurrent(), let question, question.canPublish,
               !communityFeedState.isAuthorHidden(question.author?.id) else {
             return nil
         }
@@ -6372,20 +6591,29 @@ final class AppState: ObservableObject {
         recordID: String,
         view: LocalizedContentView = .localized
     ) async -> StudyRecord? {
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "record-detail") else {
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = recordsUseCase
+        guard let registration = await prepareRecordRegistration(reason: "record-detail", validity: isCurrent) else {
             return nil
         }
         return await actionRunner.run(
             operation: {
-                try await recordsUseCase.fetchRecord(
-                    registration: registration,
-                    recordID: recordID,
-                    language: settings.appLanguage,
-                    view: view
+                let result = try await performWithBackendIdentityRecovery(
+                    registration: registration, reason: "record-detail", syncSettingsAfterRegistration: false,
+                    validity: isCurrent,
+                    operation: { registration in
+                        try await useCase.fetchRecord(
+                            registration: registration, recordID: recordID, language: language, view: view
+                        )
+                    }
                 )
+                guard isCurrent(), !Task.isCancelled, result.id == recordID else { throw CancellationError() }
+                return result
             },
             onSuccess: { _ in },
             onFailure: { error in
+                guard isCurrent(), !Self.isCancellationLikeError(error) else { return }
                 log(.warning, "기록 상세 로드 실패: \(error.localizedDescription)")
             }
         )
@@ -6396,24 +6624,30 @@ final class AppState: ObservableObject {
             return nil
         }
 
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-create") else {
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = communityUseCase
+        guard let registration = await prepareRecordRegistration(reason: "community-comment-create", validity: isCurrent) else {
             clearCommunityErrorForMissingRegistration(reason: "community-comment-create")
             return nil
         }
 
         return await actionRunner.run(
             operation: {
-                try await communityUseCase.createComment(
+                let result = try await useCase.createComment(
                     registration: registration,
                     questionID: questionID,
                     body: body,
                     sourceLanguage: ContentLanguageRecognizer.detect(
                         body,
-                        fallback: settings.appLanguage
+                        fallback: language
                     )
                 )
+                guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                return result
             },
             onSuccess: { comment in
+                guard isCurrent() else { return }
                 if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
                     communityQuestions[index].commentCount += 1
                 }
@@ -6425,6 +6659,7 @@ final class AppState: ObservableObject {
                 }
             },
             onFailure: { error in
+                guard isCurrent(), !Self.isCancellationLikeError(error) else { return }
                 handleCommunityError(error)
                 log(.warning, "공개 질문 댓글 작성 실패: \(error.localizedDescription)")
             }
@@ -6436,20 +6671,24 @@ final class AppState: ObservableObject {
             return false
         }
 
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-delete") else {
+        let isCurrent = makeRecordRequestValidity()
+        let useCase = communityUseCase
+        guard let registration = await prepareRecordRegistration(reason: "community-comment-delete", validity: isCurrent) else {
             clearCommunityErrorForMissingRegistration(reason: "community-comment-delete")
             return false
         }
 
         return await actionRunner.runVoid(
             operation: {
-                try await communityUseCase.deleteComment(
+                try await useCase.deleteComment(
                     registration: registration,
                     questionID: questionID,
                     commentID: commentID
                 )
+                guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
             },
             onSuccess: {
+                guard isCurrent() else { return }
                 if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
                     communityQuestions[index].commentCount = max(0, communityQuestions[index].commentCount - 1)
                 }
@@ -6463,6 +6702,7 @@ final class AppState: ObservableObject {
                 }
             },
             onFailure: { error in
+                guard isCurrent(), !Self.isCancellationLikeError(error) else { return }
                 handleCommunityError(error)
                 log(.warning, "공개 질문 댓글 삭제 실패: \(error.localizedDescription)")
             }
@@ -7054,7 +7294,7 @@ final class AppState: ObservableObject {
 
         guard let gradingPollingOwnerID,
               let record = studyRoomRecordForDisplay(categoryID: categoryID),
-              record.gradingResult == nil,
+              record.isPendingQuestion,
               let gradingStatus = record.gradingStatus,
               !gradingStatus.isTerminal,
               let gradingRequestID = record.gradingRequestID,
@@ -7178,7 +7418,7 @@ final class AppState: ObservableObject {
 
         if let studyID = Int(category.id) {
             guard let record = backendStudyRoom(id: studyID)?.pendingQuestion,
-                  record.gradingResult == nil else {
+                  record.isPendingQuestion else {
                 return nil
             }
             return record
@@ -7187,7 +7427,7 @@ final class AppState: ObservableObject {
         let categoryKey = Self.normalizedCategoryText(for: category.title)
         let matchesCategory: (StudyRecord?) -> StudyRecord? = { record in
             guard let record,
-                  record.gradingResult == nil,
+                  record.isPendingQuestion,
                   Self.normalizedCategoryText(for: record.topic) == categoryKey else {
                 return nil
             }
@@ -7205,7 +7445,7 @@ final class AppState: ObservableObject {
             return pendingRecord
         }
 
-        if let latestQuestion = backendStudyRoom(categoryID: categoryID)?.latestQuestion {
+        if let latestQuestion = backendStudyRoom(categoryID: categoryID)?.latestQuestion, latestQuestion.isQuestion {
             return latestQuestion
         }
 
@@ -8959,7 +9199,7 @@ final class AppState: ObservableObject {
     }
 
     func answerDraft(for record: StudyRecord?) -> String {
-        guard let record else {
+        guard let record, record.isQuestion else {
             return ""
         }
 
@@ -8972,7 +9212,7 @@ final class AppState: ObservableObject {
     }
 
     func isAnswerGradingInProgress(for record: StudyRecord?) -> Bool {
-        guard let record else {
+        guard let record, record.isQuestion else {
             return false
         }
         return StudyAnswerPresentationPolicy.state(
@@ -8982,6 +9222,7 @@ final class AppState: ObservableObject {
     }
 
     func gradingPresentationMessage(for record: StudyRecord?) -> String? {
+        guard record?.isVoiceRecord != true else { return nil }
         if let record,
            answerSubmissionRecordIDs.contains(record.id),
            record.gradingStatus == nil {
@@ -9003,6 +9244,7 @@ final class AppState: ObservableObject {
     }
 
     func updateAnswer(_ answer: String, for record: StudyRecord) {
+        guard record.isQuestion else { return }
         pendingAnswerDraft = PendingAnswerDraft(question: record.question, recordID: record.id, answer: answer)
         answerDraftSaveTask?.cancel()
         let sleepProvider = appSleepProvider
@@ -10864,10 +11106,11 @@ final class AppState: ObservableObject {
     }
 
     private func beginAnswerSubmission(for record: StudyRecord) -> Bool {
-        guard !answerSubmissionRecordIDs.contains(record.id) else {
+        guard record.isQuestion, !record.isDetachedLocalQuestion,
+              !answerSubmissionRecordIDs.contains(record.id) else {
             return false
         }
-        let authoritativeRecord = studyRecords.first(where: { $0.id == record.id })
+        let authoritativeRecord = StudyRecordIdentityPolicy.cachedRecord(matching: record, in: studyRecords)
             ?? studyRoomState.rooms
                 .compactMap(\.pendingQuestion)
                 .first(where: { $0.id == record.id })
@@ -10974,7 +11217,7 @@ final class AppState: ObservableObject {
     }
 
     func skipPendingQuestion(_ record: StudyRecord, shouldOpenNextQuestion: Bool = true) {
-        guard record.gradingResult == nil else {
+        guard record.isPendingQuestion else {
             return
         }
 
@@ -11021,7 +11264,7 @@ final class AppState: ObservableObject {
             }
 
             let remainingPendingRecords = studyRecords
-                .filter { $0.gradingResult == nil }
+                .filter(\.isPendingQuestion)
                 .sorted { $0.question.createdAt > $1.question.createdAt }
 
             if let nextRecord = remainingPendingRecords.first {
@@ -11171,6 +11414,10 @@ final class AppState: ObservableObject {
     }
 
     func selectStudyRecord(_ record: StudyRecord) {
+        guard record.isQuestion else {
+            _ = openRoute(.recordDetail(recordID: record.id))
+            return
+        }
         guard requirePageAccess(.studyDetail) else {
             return
         }
@@ -11192,7 +11439,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func notificationRoute(for record: StudyRecord) -> AppRoute {
-        if record.gradingResult == nil {
+        if record.isPendingQuestion {
             return .studyRoom(categoryID: categoryID(forTopic: record.topic))
         }
 
@@ -11201,7 +11448,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func openNotificationRecord(_ record: StudyRecord) -> Bool {
-        if record.gradingResult == nil {
+        if record.isPendingQuestion {
             selectStudyRecord(record)
             return true
         }
@@ -11254,37 +11501,42 @@ final class AppState: ObservableObject {
     }
 
     func fetchBackendNotificationRecord(recordID: String, replyText: String? = nil) async throws -> StudyRecord {
-        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
-              let registration = await registrationWithAccessToken(storedRegistration, reason: "backend-record-push") else {
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = recordsUseCase
+        guard let registration = await prepareRecordRegistration(reason: "backend-record-push", validity: isCurrent) else {
             log(.warning, "백엔드 push record를 열 수 없습니다. 기기 등록 정보가 없습니다.")
             throw AppStateError.missingRemotePushRegistration
         }
 
-        var record = try await recordsUseCase.fetchRecord(
+        var record = try await useCase.fetchRecord(
             registration: registration,
             recordID: recordID,
-            language: settings.appLanguage,
+            language: language,
             view: .localized
         )
+        guard isCurrent(), !Task.isCancelled, record.id == recordID else { throw CancellationError() }
 
         let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !trimmedReply.isEmpty, record.gradingResult == nil {
-            record = try await recordsUseCase.gradeRecord(
+        if !trimmedReply.isEmpty, record.isPendingQuestion {
+            record = try await useCase.gradeRecord(
                 registration: registration,
                 recordID: recordID,
                 answer: trimmedReply,
                 sourceLanguage: ContentLanguageRecognizer.detect(
                     trimmedReply,
-                    fallback: settings.appLanguage
+                    fallback: language
                 )
             )
         }
+        guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
 
+        prepareCommonRecordCacheForCurrentIdentity()
         localStudyRecordUseCase.replaceRecords(mergeBackendRecord(record, into: studyRecords))
         reloadStudyRecordsFromStore()
         _ = studyRoomState.applyIncomingRecord(record)
 
-        if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
+        if record.isQuestion, currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
             lastAnswer = record.answer ?? lastAnswer
             gradingResult = record.gradingResult
             currentStudySessionUseCase.saveLastAnswer(lastAnswer)
@@ -11345,16 +11597,18 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func handleBackendRecordPush(recordID: String, openStudy: Bool, replyText: String? = nil) async -> Bool {
+        let isCurrent = makeRecordRequestValidity()
         do {
             let record = try await fetchBackendNotificationRecord(recordID: recordID, replyText: replyText)
+            guard isCurrent(), !Task.isCancelled else { return false }
             let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
             if openStudy {
                 _ = openNotificationRecord(record)
                 notificationLandingMessage = nil
                 statusMessage = trimmedReply.isEmpty
-                    ? (record.gradingResult == nil ? "알림에서 열린 질문입니다." : "알림에서 기록을 열었습니다.")
-                    : "알림 답장을 기록에 저장했습니다."
+                    ? (record.isPendingQuestion ? "알림에서 열린 질문입니다." : "알림에서 기록을 열었습니다.")
+                    : (record.isVoiceRecord ? strings.commonRecordTitle : "알림 답장을 기록에 저장했습니다.")
             } else if !trimmedReply.isEmpty {
                 statusMessage = "알림 답장을 기록에 저장했습니다."
             }
@@ -11362,6 +11616,7 @@ final class AppState: ObservableObject {
             log(.info, "백엔드 push record를 처리했습니다. recordID=\(recordID), openStudy=\(openStudy)")
             return true
         } catch {
+            guard isCurrent(), !Self.isCancellationLikeError(error) else { return false }
             if handlePageAccessError(error, page: .studyDetail) {
                 return false
             }
@@ -11552,6 +11807,7 @@ final class AppState: ObservableObject {
     }
 
     func clearStudyRecords() {
+        invalidateStudyLearningRecordPages()
         let recordsToClear = studyRecords
         let currentQuestionToRestore = currentQuestion
         let lastAnswerToRestore = lastAnswer
@@ -11593,10 +11849,11 @@ final class AppState: ObservableObject {
             return
         }
 
+        let useCase = recordsUseCase
         runBackendRecordMutation(
             reason: "clear-records",
             operation: { recoveredRegistration in
-                try await self.recordsUseCase.clearRecords(registration: recoveredRegistration)
+                try await useCase.clearRecords(registration: recoveredRegistration)
             },
             onSuccess: { _ in
                 await self.refreshBackendStudyIfPossible(updateVisibleQuestion: false)
@@ -11627,7 +11884,9 @@ final class AppState: ObservableObject {
     }
 
     func deleteStudyRecord(_ record: StudyRecord) {
-        notificationService.cancelQuestionNotification(for: record.question)
+        guard !recordsState.records.contains(where: { $0.id == record.id && $0.recordType != record.recordType }) else { return }
+        if record.isQuestion { notificationService.cancelQuestionNotification(for: record.question) }
+        invalidateStudyLearningRecordPages()
         var nextRecordsState = recordsState
         nextRecordsState.removeLoadedBackendRecord(record)
         recordsState = nextRecordsState
@@ -11639,7 +11898,8 @@ final class AppState: ObservableObject {
         removeCommunityQuestion(id: record.id)
         notificationLandingMessage = nil
 
-        if StudyRecordIdentityPolicy.questionsMatch(currentQuestion?.question ?? "", record.question.question) {
+        if record.isQuestion,
+           StudyRecordIdentityPolicy.questionsMatch(currentQuestion?.question ?? "", record.question.question) {
             currentQuestion = nil
             gradingResult = nil
             lastAnswer = ""
@@ -11650,15 +11910,21 @@ final class AppState: ObservableObject {
 
         statusMessage = "기록을 삭제했습니다."
         log(.info, "학습 기록을 1개 삭제했습니다.")
+        guard !record.isDetachedLocalQuestion else { return }
+        let useCase = recordsUseCase
         runBackendRecordMutation(
             reason: "delete-record",
             operation: { recoveredRegistration in
-                try await self.recordsUseCase.deleteRecord(registration: recoveredRegistration, recordID: record.id)
+                try await useCase.deleteRecord(registration: recoveredRegistration, recordID: record.id)
             },
             onSuccess: { _ in
-                await self.refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+                if record.isQuestion {
+                    await self.refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+                }
                 await self.loadCommunityQuestions(reset: true, userInitiated: false)
-                await self.syncRemotePushScheduleIfPossible(reason: "delete-record")
+                if record.isQuestion {
+                    await self.syncRemotePushScheduleIfPossible(reason: "delete-record")
+                }
             },
             onFailure: { _ in
                 self.localStudyRecordUseCase.saveRecord(record)
@@ -11677,6 +11943,11 @@ final class AppState: ObservableObject {
     }
 
     func updateStudyRecordPublicity(_ record: StudyRecord, isPublic: Bool) {
+        guard !record.isDetachedLocalQuestion,
+              !recordsState.records.contains(where: { $0.id == record.id && $0.recordType != record.recordType }) else { return }
+        guard !isPublic || record.canPublish else { return }
+        if record.isVoiceRecord { prepareCommonRecordCacheForCurrentIdentity() }
+        invalidateStudyLearningRecordPages()
         var updatedRecord = record
         updatedRecord.isPublic = isPublic
         localStudyRecordUseCase.saveRecord(updatedRecord)
@@ -11688,10 +11959,11 @@ final class AppState: ObservableObject {
         }
         markCloudDataChanged()
 
+        let useCase = recordsUseCase
         runBackendRecordMutation(
             reason: "record-publicity",
             operation: { recoveredRegistration in
-                try await self.recordsUseCase.updateRecordPublicity(
+                try await useCase.updateRecordPublicity(
                     registration: recoveredRegistration,
                     recordID: record.id,
                     isPublic: isPublic
@@ -11724,17 +11996,20 @@ final class AppState: ObservableObject {
     private func runBackendRecordMutation<Value>(
         reason: String,
         operation: @escaping (RemotePushRegistration) async throws -> Value,
-        onSuccess: @escaping (Value) async -> Void = { _ in },
-        onFailure: @escaping (Error) async -> Void = { _ in },
+        onSuccess: @escaping @MainActor (Value) async -> Void = { _ in },
+        onFailure: @escaping @MainActor (Error) async -> Void = { _ in },
         failureMessage: @escaping (Error) -> String
     ) {
         guard let registration = storedBackendIdentityUseCase.loadRegistration() else {
             return
         }
+        let isCurrent = makeRecordRequestValidity()
 
         Task { [weak self] in
             guard let self,
-                  let tokenRegistration = await registrationWithAccessToken(registration, reason: reason) else {
+                  let tokenRegistration = await registrationWithAccessToken(
+                    registration, reason: reason, validity: isCurrent
+                  ), isCurrent() else {
                 return
             }
 
@@ -11743,11 +12018,16 @@ final class AppState: ObservableObject {
                     try await performWithBackendIdentityRecovery(
                         registration: tokenRegistration,
                         reason: reason,
+                        validity: isCurrent,
                         operation: operation
                     )
                 },
-                onSuccess: onSuccess,
+                onSuccess: { value in
+                    guard isCurrent() else { return }
+                    await onSuccess(value)
+                },
                 onFailure: { error in
+                    guard isCurrent(), !Self.isCancellationLikeError(error) else { return }
                     await onFailure(error)
                     handleAppError(error, fallback: "", target: .none)
                     log(.warning, failureMessage(error))
@@ -13117,7 +13397,7 @@ final class AppState: ObservableObject {
             gradingResult: gradingResult,
             isRunning: isRunning,
             hasCompletedOnboarding: hasCompletedOnboarding,
-            studyRecords: studyRecords,
+            studyRecords: studyRecords.filter(\.isQuestion),
             deletedStudyRecordMarkers: localStudyRecordUseCase.loadDeletedRecordMarkers(),
             studyRecordsClearedAt: localStudyRecordUseCase.loadRecordsClearedAt()
         )
@@ -13609,7 +13889,7 @@ final class AppState: ObservableObject {
     }
 
     private func studyRecordMatches(_ record: StudyRecord, question: QuestionItem) -> Bool {
-        Self.questionsMatch(record.question, question)
+        record.isQuestion && Self.questionsMatch(record.question, question)
     }
 
     nonisolated private static func questionsMatch(_ lhs: QuestionItem, _ rhs: QuestionItem) -> Bool {
@@ -13636,8 +13916,9 @@ final class AppState: ObservableObject {
     }
 
     private func mergeBackendRecord(_ record: StudyRecord, into records: [StudyRecord]) -> [StudyRecord] {
+        guard !records.contains(where: { $0.id == record.id && $0.recordType != record.recordType }) else { return records }
         let matchingRecords = records.filter {
-            $0.id == record.id || studyRecordMatches($0, question: record.question)
+            StudyRecordIdentityPolicy.recordsMatch($0, record)
         }
         var mergedRecord = record
         let matchingCursor = matchingRecords
@@ -13649,7 +13930,9 @@ final class AppState: ObservableObject {
             mergedRecord.gradingLastEventID = matchingCursor
         }
 
-        var merged = records.filter { $0.id != record.id && !studyRecordMatches($0, question: record.question) }
+        var merged = records.filter {
+            !StudyRecordIdentityPolicy.recordsMatch($0, record)
+        }
         merged.append(mergedRecord)
         return merged.sorted { studyRecordSortDate($0) < studyRecordSortDate($1) }
     }
@@ -14227,7 +14510,7 @@ final class AppState: ObservableObject {
 
     private func activateStudyContext(forTopic topic: String) {
         let matchingRecords = studyRecords
-            .filter { normalizedTopicKey(for: $0.topic) == normalizedTopicKey(for: topic) }
+            .filter { $0.isQuestion && normalizedTopicKey(for: $0.topic) == normalizedTopicKey(for: topic) }
             .sorted { lhs, rhs in
                 let lhsDate = lhs.answeredAt ?? lhs.question.createdAt
                 let rhsDate = rhs.answeredAt ?? rhs.question.createdAt

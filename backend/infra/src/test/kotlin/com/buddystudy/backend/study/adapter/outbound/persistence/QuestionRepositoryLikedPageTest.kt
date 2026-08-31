@@ -3,14 +3,19 @@ package com.buddystudy.backend.study.adapter.outbound.persistence
 import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.study.domain.entity.QuestionSource
 import com.buddystudy.study.domain.entity.QuestionStatus
+import com.buddystudy.study.domain.entity.StudyRecordType
+import com.buddystudy.backend.stats.adapter.outbound.persistence.StudyGrowthStatsRepository
 import io.r2dbc.spi.ConnectionFactories
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.core.convert.converter.Converter
 import org.springframework.data.convert.ReadingConverter
+import org.springframework.data.convert.WritingConverter
+import org.springframework.data.domain.PageRequest
 import org.springframework.data.r2dbc.convert.MappingR2dbcConverter
 import org.springframework.data.r2dbc.convert.R2dbcCustomConversions
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
@@ -19,6 +24,7 @@ import org.springframework.data.relational.core.mapping.RelationalMappingContext
 import org.springframework.r2dbc.core.DatabaseClient
 import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class QuestionRepositoryLikedPageTest {
     private val connectionFactory = ConnectionFactories.get(
@@ -26,26 +32,30 @@ class QuestionRepositoryLikedPageTest {
     )
     private val database = DatabaseClient.create(connectionFactory)
     private val repository: QuestionRepository
+    private val entityTemplate: R2dbcEntityTemplate
 
     init {
         val conversions = R2dbcCustomConversions.of(
             MySqlDialect.INSTANCE,
             OffsetDateTimeToInstant,
+            InstantToOffsetDateTime,
             StringToSupportedLanguage,
             StringToQuestionStatus,
+            QuestionStatusToString,
             StringToQuestionSource,
+            StringToStudyRecordType,
         )
         val mappingContext = RelationalMappingContext().also {
             it.setSimpleTypeHolder(conversions.simpleTypeHolder)
         }
         val converter = MappingR2dbcConverter(mappingContext, conversions)
-        val template = R2dbcEntityTemplate(database, MySqlDialect.INSTANCE, converter)
-        repository = QuestionRepository(template, QuestionSearchProjectionManager(database))
+        entityTemplate = R2dbcEntityTemplate(database, MySqlDialect.INSTANCE, converter)
+        repository = QuestionRepository(entityTemplate, QuestionSearchProjectionManager(database))
     }
 
     @BeforeEach
     fun setUp(): Unit = runBlocking {
-        listOf("question_search", "user_blocks", "question_likes", "questions", "users").forEach {
+        listOf("question_search", "question_embeddings", "user_blocks", "question_likes", "questions", "voice_study_learning_records", "users").forEach {
             execute("drop table if exists $it")
         }
         execute(
@@ -100,9 +110,22 @@ class QuestionRepositoryLikedPageTest {
                 skipped_at timestamp with time zone,
                 deleted_at timestamp with time zone,
                 source varchar(64) not null,
+                record_type varchar(24) not null default 'QUESTION',
+                voice_record_id bigint,
                 is_public boolean not null,
                 created_at timestamp with time zone not null,
                 updated_at timestamp with time zone not null
+            )
+            """.trimIndent(),
+        )
+        execute("create table voice_study_learning_records (id bigint primary key, user_id bigint not null)")
+        execute(
+            """
+            create table question_embeddings (
+                question_id bigint primary key, user_id bigint not null, study_id bigint not null,
+                topic varchar(255) not null, topic_key varchar(255) not null,
+                question text not null, embedding text not null,
+                created_at timestamp with time zone not null, updated_at timestamp with time zone not null
             )
             """.trimIndent(),
         )
@@ -209,6 +232,175 @@ class QuestionRepositoryLikedPageTest {
         assertThat(page.content.map { it.id }).containsExactly(101L)
     }
 
+    @Test
+    fun `owner records include unscored voice exchanges without crossing user or node scope`(): Unit = runBlocking {
+        insertVoice(201, studyId = 501)
+        insertVoice(202, studyId = 501, answer = "")
+        insertVoice(203, userId = 11, studyId = 501)
+        insertVoice(204, studyId = 502)
+        insertVoice(205, studyId = 501, status = "ungraded")
+        val owned = repository.findVisibleByUser(10, false, PageRequest.of(0, 100))
+        val node = repository.findVisibleByUserAndStudyId(10, false, 501, null, PageRequest.of(0, 100))
+        val searched = repository.findVisibleByUserAndStudyId(10, false, 501, "voice", PageRequest.of(0, 100))
+        val hydrated = repository.findOwnedRecordsByIds(10, listOf(201, 202, 203, 205))
+
+        assertThat(owned.content.map { it.id }).contains(201L, 202L, 204L).doesNotContain(203L, 205L)
+        assertThat(node.content.map { it.id }).containsExactly(202L, 201L)
+        assertThat(searched.content.map { it.id }).containsExactly(202L, 201L)
+        assertThat(node.totalElements).isEqualTo(2)
+        assertThat(hydrated.map { it.id }).containsExactlyInAnyOrder(201L, 202L)
+        assertThat(hydrated).allMatch { it.recordType == StudyRecordType.VOICE_TUTOR && it.score == null }
+    }
+
+    @Test
+    fun `new completed voice never hides an existing pending generated question`(): Unit = runBlocking {
+        insertQuestion(211, 10, "Pending", "ungraded", "", publicQuestion = true)
+        execute("update questions set study_id = 501, score = null where id = 211")
+        insertQuestion(210, 10, "Prior generated", "graded", "Answer", publicQuestion = true)
+        execute("update questions set study_id = 501 where id = 210")
+        insertVoice(212, studyId = 501, score = 85)
+
+        assertThat(repository.findLatestStatusByStudyId(501)).isEqualTo(QuestionStatus.UNGRADED)
+        assertThat(repository.findLatestStatusesByStudyIds(listOf(501))).containsEntry(501L, QuestionStatus.UNGRADED)
+        assertThat(repository.countPendingForStudy(501)).isEqualTo(1)
+        assertThat(repository.countPendingByStudyIds(listOf(501))).containsEntry(501L, 1L)
+        assertThat(repository.findLatestPendingByStudyIds(listOf(501)).map { it.id }).containsExactly(211L)
+        assertThat(repository.findPendingByStudyId(501, PageRequest.of(0, 20)).content.map { it.id }).containsExactly(211L)
+        assertThat(repository.findLatestCompletedByStudyIdAndUserId(501, 10)?.id).isEqualTo(210L)
+    }
+
+    @Test
+    fun `spoken scores do not become graded mastery or generation history`(): Unit = runBlocking {
+        insertQuestion(221, 10, "Voice stats", "graded", "Answer", publicQuestion = true)
+        execute("update questions set study_id = 501 where id = 221")
+        execute("insert into question_search values (221, 'ko', 'Voice stats', 'Question 221', 'Answer', 'Good', 'Because')")
+        insertVoice(222, studyId = 501, score = 99, topic = "Voice stats")
+        insertVoice(223, studyId = 501, topic = "Voice stats")
+
+        assertThat(repository.findGradedByUserAndTopics(10, listOf("Voice stats"), PageRequest.of(0, 20)).content.map { it.id })
+            .containsExactly(221L)
+        assertThat(repository.findGradedByUserAndQuery(10, "Voice stats", PageRequest.of(0, 20)).content.map { it.id })
+            .containsExactly(221L)
+        assertThat(repository.findLatestGradedByUserAndTopics(10, listOf("Voice stats"), 3).map { it.id }).containsExactly(221L)
+        assertThat(repository.findAllGradedForStats(PageRequest.of(0, 100)).content.map { it.id }).doesNotContain(222L, 223L)
+        assertThat(repository.findRecentQuestionTextsByStudyIdAndTopic(501, "Voice stats", PageRequest.of(0, 20)))
+            .containsExactly("Question 221")
+        assertThat(repository.findRecentQuestionTextsByUserIdAndTopic(10, "Voice stats", PageRequest.of(0, 20)))
+            .containsExactly("Question 221")
+        val growth = StudyGrowthStatsRepository(entityTemplate).findByUser(
+            10, Instant.parse("2026-06-01T00:00:00Z"), Instant.parse("2026-07-01T00:00:00Z"),
+        )
+        assertThat(growth).hasSize(1)
+        assertThat(growth.single().score).isEqualTo(90)
+    }
+
+    @Test
+    fun `public voice eligibility is shared by detail list search and liked pagination`(): Unit = runBlocking {
+        insertVoice(231)
+        insertVoice(232, publicQuestion = false)
+        insertVoice(233, deleted = true)
+        insertVoice(234, userId = 11)
+        insertVoice(235, userId = 12)
+        insertVoice(236, answer = "  ")
+        insertVoice(237)
+        execute("update questions set question = '  ' where id = 237")
+        insertVoice(238, persistExtension = false)
+        insertVoice(239, extensionOwner = 11)
+        insertVoice(240, status = "ungraded")
+        (231L..240L).forEach { id ->
+            execute("insert into question_likes values ($id, $id, 7, timestamp with time zone '2026-06-12 00:00:00+00:00')")
+        }
+
+        assertThat(repository.findPublicAnsweredById(231)?.recordType).isEqualTo(StudyRecordType.VOICE_TUTOR)
+        assertThat(repository.findPublicAnsweredByIdAndLanguage(231, "en")?.id).isEqualTo(231L)
+        listOf(232L, 233, 234, 236, 237, 238, 239, 240).forEach { id ->
+            assertThat(repository.findPublicAnsweredById(id)).describedAs("voice eligibility for %s", id).isNull()
+        }
+        val page = repository.findPublicAnsweredByLanguageAndQueryVisibleTo(7, "ko", "voice", PageRequest.of(0, 20))
+        val liked = repository.findLikedPublicAnsweredVisibleTo(7, "voice", "ko", 20, 0)
+        assertThat(page.content.map { it.id }).containsExactly(231L)
+        assertThat(page.totalElements).isEqualTo(1)
+        assertThat(liked.content.map { it.id }).containsExactly(231L)
+        assertThat(liked.totalElements).isEqualTo(1)
+        assertThat(repository.findPublicAnsweredByIds((231L..240L).toList()).map { it.id })
+            .containsExactlyInAnyOrder(231L, 235L) // Viewer-specific block applies in the visible page/detail service.
+    }
+
+    @Test
+    fun `global sharing changes and record deletion cannot publish a migrated private voice record`(): Unit = runBlocking {
+        insertVoice(241)
+        insertVoice(242, publicQuestion = false)
+        execute("update users set allow_public_questions = false where id = 10")
+        assertThat(repository.findPublicAnsweredById(241)).isNull()
+        execute("update users set allow_public_questions = true where id = 10")
+        assertThat(repository.findPublicAnsweredById(241)?.id).isEqualTo(241L)
+        assertThat(repository.findPublicAnsweredById(242)).isNull()
+        assertThat(repository.softDelete(241, 10, Instant.parse("2026-06-13T00:00:00Z"))).isEqualTo(1)
+        assertThat(repository.findPublicAnsweredById(241)).isNull()
+        assertThat(repository.findOwnedRecordsByIds(10, listOf(241))).isEmpty()
+        assertThat(repository.findByIdAndUserIdAndDeletedAtIsNull(241, 10)).isNull()
+    }
+
+    @Test
+    fun `grading watchdog event updates and generation rollback cannot modify voice records`(): Unit = runBlocking {
+        insertVoice(251)
+        execute("update questions set grading_request_id = 'forged', grading_status = 'QUEUED', grading_requested_at = timestamp with time zone '2026-06-01 00:00:00+00:00' where id = 251")
+        val cutoff = Instant.parse("2026-06-13T00:00:00Z")
+
+        assertThat(repository.findStalledGradings(cutoff, 20)).isEmpty()
+        assertThat(repository.failStalledGrading(251, "forged", cutoff, "Must not write", cutoff)).isFalse()
+        assertThat(repository.updateGradingLastEventId(251, "forged", 777)).isFalse()
+        assertThat(repository.findByGradingRequestIdAndUserIdAndDeletedAtIsNull("forged", 10)).isNull()
+        assertThat(repository.deleteGeneratedForRollback(251, 10)).isZero()
+        val retained = requireNotNull(repository.findQuestionById(251))
+        assertThat(retained.status).isEqualTo(QuestionStatus.COMPLETED)
+        assertThat(retained.gradingError).isNull()
+        assertThat(retained.gradingLastEventId).isNull()
+    }
+
+    @Test
+    fun `voice cannot enter question embeddings and legacy stray embeddings are excluded`(): Unit = runBlocking {
+        insertVoice(261, studyId = 501, topic = "Voice embeddings")
+        insertQuestion(262, 10, "Voice embeddings", "graded", "Answer", publicQuestion = true)
+        execute("update questions set study_id = 501 where id = 262")
+        val embeddings = QuestionEmbeddingRepository(entityTemplate)
+        assertThatThrownBy {
+            runBlocking { embeddings.save(261, 10, 501, "Voice embeddings", "Voice source", listOf(0.2f)) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        listOf(261L, 262L).forEach { id ->
+            execute("insert into question_embeddings values ($id, 10, 501, 'Voice embeddings', 'voice embeddings', 'Question $id', '0.2,0.4', timestamp with time zone '2026-06-10 00:00:00+00:00', timestamp with time zone '2026-06-10 00:00:00+00:00')")
+        }
+        assertThat(embeddings.findRecentByStudyIdAndTopic(501, "Voice embeddings", 20).map { it.questionId })
+            .containsExactly(262L)
+    }
+
+    private suspend fun insertVoice(
+        id: Long,
+        userId: Long = 10,
+        studyId: Long = 501,
+        answer: String = "원문 답변",
+        score: Int? = null,
+        publicQuestion: Boolean = true,
+        deleted: Boolean = false,
+        status: String = "completed",
+        persistExtension: Boolean = true,
+        extensionOwner: Long = userId,
+        topic: String = "Voice record",
+    ) {
+        insertQuestion(id, userId, topic, status, answer, publicQuestion, deleted)
+        if (persistExtension) execute("insert into voice_study_learning_records values (${1000 + id}, $extensionOwner)")
+        execute(
+            """
+            update questions set record_type = 'VOICE_TUTOR', voice_record_id = ${1000 + id},
+                study_id = $studyId, score = ${score ?: "null"}, source = 'voice_tutor',
+                created_at = timestamp with time zone '2026-06-11 00:00:00+00:00',
+                answered_at = timestamp with time zone '2026-06-11 00:01:00+00:00'
+            where id = $id
+            """.trimIndent(),
+        )
+        execute("insert into question_search values ($id, 'ko', '$topic', 'Voice question $id', 'Voice answer', 'Voice feedback', 'Voice depth')")
+    }
+
     private suspend fun insertQuestion(
         id: Long,
         userId: Long,
@@ -246,6 +438,11 @@ class QuestionRepositoryLikedPageTest {
         override fun convert(source: OffsetDateTime): Instant = source.toInstant()
     }
 
+    @WritingConverter
+    private object InstantToOffsetDateTime : Converter<Instant, OffsetDateTime> {
+        override fun convert(source: Instant): OffsetDateTime = source.atOffset(ZoneOffset.UTC)
+    }
+
     @ReadingConverter
     private object StringToSupportedLanguage : Converter<String, SupportedLanguage> {
         override fun convert(source: String): SupportedLanguage = SupportedLanguage.fromDatabaseValue(source)
@@ -256,8 +453,18 @@ class QuestionRepositoryLikedPageTest {
         override fun convert(source: String): QuestionStatus = QuestionStatus.fromDatabaseValue(source)
     }
 
+    @WritingConverter
+    private object QuestionStatusToString : Converter<QuestionStatus, String> {
+        override fun convert(source: QuestionStatus): String = source.databaseValue
+    }
+
     @ReadingConverter
     private object StringToQuestionSource : Converter<String, QuestionSource> {
         override fun convert(source: String): QuestionSource = QuestionSource.fromDatabaseValue(source)
+    }
+
+    @ReadingConverter
+    private object StringToStudyRecordType : Converter<String, StudyRecordType> {
+        override fun convert(source: String): StudyRecordType = StudyRecordType.valueOf(source)
     }
 }

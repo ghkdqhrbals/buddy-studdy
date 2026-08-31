@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F88000000000000000000001 /* VoiceStudyRecordContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88000000000000000000002 /* VoiceStudyRecordContent.swift */; };
+		F88000000000000000000003 /* AppStrings+CommonRecords.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88000000000000000000004 /* AppStrings+CommonRecords.swift */; };
+		F88000000000000000000005 /* VoiceCommonRecordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88000000000000000000006 /* VoiceCommonRecordTests.swift */; };
+		F88000000000000000000007 /* CommonStudyRecordDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88000000000000000000008 /* CommonStudyRecordDetailView.swift */; };
 		A10000000000000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000002 /* GoogleMobileAds */; };
 		A10000000000000000000003 /* AdMobNativeAdvertising.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* AdMobNativeAdvertising.swift */; };
 		D40000000000000000000001 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000002 /* MarkdownUI */; };
@@ -316,6 +320,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F88000000000000000000002 /* VoiceStudyRecordContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceStudyRecordContent.swift"; sourceTree = "<group>"; };
+		F88000000000000000000004 /* AppStrings+CommonRecords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStrings+CommonRecords.swift"; sourceTree = "<group>"; };
+		F88000000000000000000006 /* VoiceCommonRecordTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceCommonRecordTests.swift"; sourceTree = "<group>"; };
+		F88000000000000000000008 /* CommonStudyRecordDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommonStudyRecordDetailView.swift"; sourceTree = "<group>"; };
 		A10000000000000000000004 /* AdMobNativeAdvertising.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdMobNativeAdvertising.swift; sourceTree = "<group>"; };
 		E50000000000000000000004 /* SentryMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryMonitoring.swift; sourceTree = "<group>"; };
 		110000000000000000000001 /* StudyMateApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyMateApp.swift; sourceTree = "<group>"; };
@@ -897,6 +905,8 @@
 				F86000000000000000000006 /* VoiceTutorExploration.swift */,
 				F86000000000000000000008 /* AppStrings+VoiceTutorExploration.swift */,
 				F87000000000000000000002 /* StudyLearningRecords.swift */,
+				F88000000000000000000002 /* VoiceStudyRecordContent.swift */,
+				F88000000000000000000004 /* AppStrings+CommonRecords.swift */,
 				F87000000000000000000004 /* AppStrings+StudyLearningRecords.swift */,
 				F8700000000000000000000C /* VoiceTutorCallPauseState.swift */,
 				F8700000000000000000000E /* AppStrings+VoiceTutorPause.swift */,
@@ -967,6 +977,7 @@
 				F8600000000000000000000A /* VoiceTutorVoiceSettingsTests.swift */,
 				F8600000000000000000000C /* VoiceTutorExplorationTests.swift */,
 				F8700000000000000000000A /* StudyLearningRecordsTests.swift */,
+				F88000000000000000000006 /* VoiceCommonRecordTests.swift */,
 				F87000000000000000000010 /* VoiceTutorPauseTests.swift */,
 				120000000000000000000200 /* ArchitecturePolicyTests.swift */,
 				120000000000000000000202 /* QuestionSchedulePolicyTests.swift */,
@@ -995,6 +1006,7 @@
 				120000000000000000000003 /* MobileRootView.swift */,
 				F81000000000000000000008 /* VoiceTutorView.swift */,
 				F87000000000000000000008 /* StudyLearningRecordsView.swift */,
+				F88000000000000000000008 /* CommonStudyRecordDetailView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -1432,6 +1444,7 @@
 				F8600000000000000000000B /* VoiceTutorExplorationTests.swift in Sources */,
 				F87000000000000000000009 /* StudyLearningRecordsTests.swift in Sources */,
 				F8700000000000000000000F /* VoiceTutorPauseTests.swift in Sources */,
+				F88000000000000000000005 /* VoiceCommonRecordTests.swift in Sources */,
 				120000000000000000000201 /* ArchitecturePolicyTests.swift in Sources */,
 				120000000000000000000203 /* QuestionSchedulePolicyTests.swift in Sources */,
 				F70000000000000000000021 /* AppControlPolicyTests.swift in Sources */,
@@ -1455,6 +1468,9 @@
 				F86000000000000000000005 /* VoiceTutorExploration.swift in Sources */,
 				F86000000000000000000007 /* AppStrings+VoiceTutorExploration.swift in Sources */,
 				F87000000000000000000001 /* StudyLearningRecords.swift in Sources */,
+				F88000000000000000000001 /* VoiceStudyRecordContent.swift in Sources */,
+				F88000000000000000000003 /* AppStrings+CommonRecords.swift in Sources */,
+				F88000000000000000000007 /* CommonStudyRecordDetailView.swift in Sources */,
 				F87000000000000000000003 /* AppStrings+StudyLearningRecords.swift in Sources */,
 				F87000000000000000000005 /* StudyLearningRecordsViewModel.swift in Sources */,
 				F87000000000000000000007 /* StudyLearningRecordsView.swift in Sources */,

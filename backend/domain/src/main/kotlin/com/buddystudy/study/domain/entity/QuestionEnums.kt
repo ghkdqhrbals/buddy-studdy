@@ -1,11 +1,15 @@
 package com.buddystudy.study.domain.entity
 
+/** A shared record identity does not make a voice exchange a generated/gradable question. */
+enum class StudyRecordType { QUESTION, VOICE_TUTOR }
+
 enum class QuestionStatus(
     val databaseValue: String,
 ) {
     UNGRADED("ungraded"),
     GRADING("grading"),
     GRADED("graded"),
+    COMPLETED("completed"),
     FAILED("failed"),
     SKIPPED("skipped"),
     ;
@@ -27,6 +31,7 @@ enum class QuestionSource(
 ) {
     SCHEDULED("scheduled"),
     MANUAL("manual"),
+    VOICE_TUTOR("voice_tutor"),
     ;
 
     companion object {

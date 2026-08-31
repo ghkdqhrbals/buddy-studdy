@@ -39,6 +39,8 @@ class StudyLearningRecordQueryAdapterTest {
             create table questions (
                 id bigint primary key, user_id bigint not null, study_id bigint,
                 topic varchar(255) not null, score integer, is_public boolean not null default false,
+                record_type varchar(24) not null default 'QUESTION', voice_record_id bigint unique,
+                status varchar(24) not null default 'graded',
                 deleted_at timestamp(6), skipped_at timestamp(6),
                 answered_at timestamp(6), created_at timestamp(6) not null
             )
@@ -51,8 +53,7 @@ class StudyLearningRecordQueryAdapterTest {
             """
             create table voice_study_learning_records (
                 id bigint primary key, user_id bigint not null, session_id varchar(64) not null,
-                study_id bigint not null, topic varchar(255) not null, score integer,
-                occurred_at timestamp(6) not null
+                study_id bigint not null
             )
             """,
         )) database.sql(schema.trimIndent()).fetch().rowsUpdated().awaitSingle()
@@ -165,6 +166,24 @@ class StudyLearningRecordQueryAdapterTest {
     }
 
     @Test
+    fun `canonical deletion and missing or inconsistent type linkage hide voice rows without changing legacy cursor identities`(): Unit = runBlocking {
+        node(10)
+        session()
+        question(1)
+        voice(1)
+        voice(2)
+        voice(3)
+        voice(4)
+        database.sql("update questions set deleted_at = created_at where voice_record_id = 2").fetch().rowsUpdated().awaitSingle()
+        database.sql("delete from questions where voice_record_id = 3").fetch().rowsUpdated().awaitSingle()
+        database.sql("update questions set record_type = 'QUESTION', score = null where voice_record_id = 4").fetch().rowsUpdated().awaitSingle()
+
+        assertThat(page().labels()).containsExactly("QUESTION:1", "VOICE_TUTOR:1")
+        val afterOrdinary = page(cursor = StudyLearningRecordsCursor(AT, StudyLearningRecordSource.QUESTION, 1))
+        assertThat(afterOrdinary.labels()).containsExactly("VOICE_TUTOR:1")
+    }
+
+    @Test
     fun `keyset traverses timestamp ties without duplicates after anchor deletion and concurrent newer insertion`(): Unit = runBlocking {
         node(10)
         session()
@@ -234,17 +253,20 @@ class StudyLearningRecordQueryAdapterTest {
     private suspend fun question(
         id: Long, studyId: Long? = 10, userId: Long = 7, createdAt: Instant = AT, answeredAt: Instant? = createdAt,
         score: Int? = 80, deleted: Boolean = false, skipped: Boolean = false, topic: String = "Repeated title",
+        recordType: String = "QUESTION", voiceRecordId: Long? = null,
     ) {
         database.sql(
             """
-            insert into questions(id, user_id, study_id, topic, score, created_at, answered_at, deleted_at, skipped_at)
-            values(:id, :userId, :studyId, :topic, :score, :createdAt, :answeredAt, :deletedAt, :skippedAt)
+            insert into questions(id, user_id, study_id, topic, score, created_at, answered_at, deleted_at, skipped_at, record_type, voice_record_id, status)
+            values(:id, :userId, :studyId, :topic, :score, :createdAt, :answeredAt, :deletedAt, :skippedAt, :recordType, :voiceRecordId, :status)
             """.trimIndent(),
         ).bind("id", id).bind("userId", userId).nullable("studyId", studyId, java.lang.Long::class.java)
             .bind("topic", topic).nullable("score", score, java.lang.Integer::class.java).bind("createdAt", createdAt.utc())
             .nullable("answeredAt", answeredAt?.utc(), LocalDateTime::class.java)
             .nullable("deletedAt", if (deleted) AT.utc() else null, LocalDateTime::class.java)
             .nullable("skippedAt", if (skipped) AT.utc() else null, LocalDateTime::class.java)
+            .bind("recordType", recordType).nullable("voiceRecordId", voiceRecordId, java.lang.Long::class.java)
+            .bind("status", if (recordType == "VOICE_TUTOR") "completed" else "graded")
             .fetch().rowsUpdated().awaitSingle()
     }
 
@@ -254,12 +276,15 @@ class StudyLearningRecordQueryAdapterTest {
     ) {
         database.sql(
             """
-            insert into voice_study_learning_records(id, user_id, session_id, study_id, topic, score, occurred_at)
-            values(:id, :userId, :sessionId, :studyId, :topic, :score, :at)
+            insert into voice_study_learning_records(id, user_id, session_id, study_id)
+            values(:id, :userId, :sessionId, :studyId)
             """.trimIndent(),
         ).bind("id", id).bind("userId", userId).bind("sessionId", sessionId).bind("studyId", studyId)
-            .bind("topic", topic).nullable("score", score, java.lang.Integer::class.java).bind("at", at.utc())
             .fetch().rowsUpdated().awaitSingle()
+        question(
+            id = 1_000_000 + id, studyId = studyId, userId = userId, createdAt = at, answeredAt = null,
+            topic = topic, score = score, recordType = "VOICE_TUTOR", voiceRecordId = id,
+        )
     }
 
     private fun DatabaseClient.GenericExecuteSpec.nullable(name: String, value: Any?, type: Class<*>) =

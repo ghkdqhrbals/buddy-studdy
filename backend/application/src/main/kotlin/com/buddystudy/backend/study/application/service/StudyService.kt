@@ -17,9 +17,11 @@ import com.buddystudy.backend.localization.application.model.RecordLocalizationS
 import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.localization.application.port.RequestContentLocalizationUseCase
+import com.buddystudy.backend.localization.application.port.UnavailableVoiceStudyLearningLocalizationPort
 import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.AnswerGradingWriteUseCase
@@ -50,8 +52,10 @@ class StudyService(
     private val languageDetector: ContentLanguageDetectionPort,
     private val contentLocalizations: ContentLocalizationPort,
     private val localizationRequests: RequestContentLocalizationUseCase,
+    private val voiceRecordProjector: VoiceRecordContentProjector = VoiceRecordContentProjector(UnavailableVoiceStudyLearningLocalizationPort),
 ) : StudyUseCase, BrowseRecordsUseCase {
-    @Transactional(readOnly = true)
+    // Localized voice reads may enqueue missing translations in the same transaction.
+    @Transactional
     override suspend fun recordsByIds(
         principal: Principal,
         ids: Collection<Long>,
@@ -100,11 +104,10 @@ class StudyService(
         }
         outboxPublisher.publishNow(written.outboxes)
         val saved = written.question
-        return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection()
-            .toRecordResponse()
+        return recordResponse(saved, questionStats.findById(saved.id))
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     override suspend fun records(
         principal: Principal,
         limit: Int,
@@ -154,7 +157,7 @@ class StudyService(
         return RecordsPageResponse(page.content.toRecordResponses(), page.totalElements, limit, offset)
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     override suspend fun record(principal: Principal, id: Long, language: String, view: String): StudyRecordResponse {
         val normalizedLanguage = QuestionLanguage.normalize(language)
         val viewMode = translationViewMode(view)
@@ -163,26 +166,12 @@ class StudyService(
         if (question.skippedAt != null) {
             throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         }
-        val projected = project(question, normalizedLanguage, viewMode)
-        return projected.question.toStudyRecord(questionStats.findById(id))
-            .toProjection()
-            .toRecordResponse(
-                requestedLanguage = normalizedLanguage,
-                viewMode = viewMode,
-                questionDisplayLanguage = projected.questionDisplayLanguage,
-                answerDisplayLanguage = projected.answerDisplayLanguage,
-                aiResponseDisplayLanguage = projected.aiResponseDisplayLanguage,
-                questionTranslationPending = projected.questionTranslationPending,
-                answerTranslationPending = projected.answerTranslationPending,
-                aiResponseTranslationPending = projected.aiResponseTranslationPending,
-                answerAuthorOriginal = projected.answerAuthorOriginal,
-            )
+        return recordResponse(question, questionStats.findById(id), normalizedLanguage, viewMode)
     }
 
     override suspend fun skip(principal: Principal, id: Long): StudyRecordResponse {
         val saved = recordWriter.skip(principal.userId, id)
-        return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection()
-            .toRecordResponse()
+        return recordResponse(saved, questionStats.findById(saved.id))
     }
 
     override suspend fun delete(principal: Principal, id: Long) {
@@ -195,8 +184,7 @@ class StudyService(
 
     override suspend fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse {
         val saved = recordWriter.updatePublicity(principal.userId, id, isPublic)
-        return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection()
-            .toRecordResponse()
+        return recordResponse(saved, questionStats.findById(saved.id))
     }
 
     private suspend fun List<QuestionEntity>.toRecordResponses(
@@ -206,25 +194,44 @@ class StudyService(
         if (isEmpty()) return emptyList()
         val statsByQuestionId = questionStats.findAllByIds(map { it.id }).associateBy { it.questionId }
         return map { question ->
-            val projected = project(
+            recordResponse(
                 question,
+                statsByQuestionId[question.id],
                 requestedLanguage ?: question.sourceLanguage.databaseValue,
                 viewMode,
             )
-            projected.question.toStudyRecord(statsByQuestionId[question.id])
-                .toProjection()
-                .toRecordResponse(
-                    requestedLanguage = requestedLanguage ?: question.sourceLanguage.databaseValue,
-                    viewMode = viewMode,
-                    questionDisplayLanguage = projected.questionDisplayLanguage,
-                    answerDisplayLanguage = projected.answerDisplayLanguage,
-                    aiResponseDisplayLanguage = projected.aiResponseDisplayLanguage,
-                    questionTranslationPending = projected.questionTranslationPending,
-                    answerTranslationPending = projected.answerTranslationPending,
-                    aiResponseTranslationPending = projected.aiResponseTranslationPending,
-                    answerAuthorOriginal = projected.answerAuthorOriginal,
-                )
         }
+    }
+
+    private suspend fun recordResponse(
+        question: QuestionEntity,
+        stats: QuestionStatsEntity?,
+        requestedLanguage: String = question.sourceLanguage.databaseValue,
+        viewMode: TranslationViewMode = TranslationViewMode.LOCALIZED,
+    ): StudyRecordResponse {
+        // The two record types share identity/publicity/counters, not grading or translation work.
+        voiceRecordProjector.project(question, requestedLanguage, viewMode)?.let { voice ->
+            val base = question.toStudyRecord(stats).toProjection().toRecordResponse()
+            return base.copy(
+                question = base.question.copy(question = voice.question, expectedAnswerHint = null),
+                answer = voice.answer,
+                gradingResult = null,
+                voiceRecord = voice.content,
+                localization = voice.localization,
+            )
+        }
+        val projected = project(question, requestedLanguage, viewMode)
+        return projected.question.toStudyRecord(stats).toProjection().toRecordResponse(
+            requestedLanguage = requestedLanguage,
+            viewMode = viewMode,
+            questionDisplayLanguage = projected.questionDisplayLanguage,
+            answerDisplayLanguage = projected.answerDisplayLanguage,
+            aiResponseDisplayLanguage = projected.aiResponseDisplayLanguage,
+            questionTranslationPending = projected.questionTranslationPending,
+            answerTranslationPending = projected.answerTranslationPending,
+            aiResponseTranslationPending = projected.aiResponseTranslationPending,
+            answerAuthorOriginal = projected.answerAuthorOriginal,
+        )
     }
 
     private suspend fun project(

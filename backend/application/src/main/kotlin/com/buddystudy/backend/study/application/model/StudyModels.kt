@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.application.model
 import com.buddystudy.backend.common.application.model.PageResponse
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.study.domain.entity.QuestionStatus
+import com.buddystudy.study.domain.entity.StudyRecordType
 import java.time.Instant
 
 data class QuestionItemResponse(val question: String, val expectedAnswerHint: String? = null, val createdAt: Instant)
@@ -50,6 +51,8 @@ data class StudyRecordResponse(
     val gradingLastEventId: Long? = null,
     val questionStatus: QuestionStatus = QuestionStatus.UNGRADED,
     val localization: RecordLocalizationResponse? = null,
+    val recordType: StudyRecordType = StudyRecordType.QUESTION,
+    val voiceRecord: VoiceRecordContentResponse? = null,
 )
 
 data class RecordsPageResponse(

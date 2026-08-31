@@ -145,6 +145,17 @@ final class StudyLearningRecordDetailViewModel: ObservableObject {
             let result = await actionRunner.run(
                 operation: {
                     var next = seed
+                    if let canonicalID = seed.canonicalRecordID {
+                        let fetched = try await loader.loadQuestion(canonicalID, view)
+                        guard fetched.id == canonicalID,
+                              fetched.studyID == nil || fetched.studyID == seed.studyID,
+                              fetched.recordType == (seed.source == .question ? .question : .voiceTutor) else {
+                            throw StudyLearningRecordsError.invalidResponse
+                        }
+                        next.record = fetched
+                        if seed.source == .question { next.questionRecord = fetched }
+                        return next
+                    }
                     switch seed.source {
                     case .question:
                         guard let existing = seed.questionRecord else { throw StudyLearningRecordsError.invalidResponse }

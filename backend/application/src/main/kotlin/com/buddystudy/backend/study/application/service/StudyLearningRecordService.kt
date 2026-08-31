@@ -18,6 +18,7 @@ import com.buddystudy.backend.study.application.port.outbound.StudyLearningRecor
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.port.outbound.VoiceStudyLearningRecordQueryPort
 import com.buddystudy.study.domain.QuestionLanguage
+import com.buddystudy.study.domain.entity.StudyRecordType
 import com.buddystudy.voice.domain.VoiceStudyLearningRecord
 import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
@@ -25,7 +26,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Instant
 
-/** Composition of private voice history and ordinary records, without creating pending/public questions. */
+/** One canonical record/detail path, with legacy typed envelopes and cursor keys retained. */
 @Service
 class StudyLearningRecordService(
     private val studies: StudyPort,
@@ -59,26 +60,39 @@ class StudyLearningRecordService(
         val position = StudyLearningRecordsCursorPolicy.decode(cursor, principal.userId, studyId, selectedScope)
         val pageKeys = keys.pageKeys(principal.userId, studyId, selectedScope, pageLimit + 1, position)
         val consumed = pageKeys.take(pageLimit)
-        val questions = consumed.filter { it.source == StudyLearningRecordSource.QUESTION }.map { it.recordId }
-            .takeIf { it.isNotEmpty() }
-            ?.let { records.recordsByIds(principal, it, target, view) }
-            .orEmpty().associateBy { it.id }
         val voices = consumed.filter { it.source == StudyLearningRecordSource.VOICE_TUTOR }.map { it.recordId }
             .takeIf { it.isNotEmpty() }
             ?.let { voiceRecords.findAllOwned(principal.userId, it) }
             .orEmpty().filter { it.userId == principal.userId }.associateBy { it.id }
+        val canonicalIds = consumed.mapNotNull { key ->
+            when (key.source) {
+                StudyLearningRecordSource.QUESTION -> key.recordId
+                StudyLearningRecordSource.VOICE_TUTOR -> voices[key.recordId]?.recordId
+            }
+        }.distinct()
+        val canonicalRecords = canonicalIds.takeIf { it.isNotEmpty() }
+            ?.let { records.recordsByIds(principal, it, target, view) }
+            .orEmpty().associateBy { it.id }
         val items = consumed.mapNotNull { key ->
             when (key.source) {
                 StudyLearningRecordSource.QUESTION -> {
-                    val record = questions[key.recordId.toString()]?.takeIf { it.studyId == key.studyId }
+                    val record = canonicalRecords[key.recordId.toString()]?.takeIf {
+                        it.studyId == key.studyId && it.recordType == StudyRecordType.QUESTION
+                    }
                         ?: return@mapNotNull null // Deleted/reparented between the key and content queries.
-                    StudyLearningRecordResponse("question:${key.recordId}", key.source, key.studyId, key.createdAt, questionRecord = record)
+                    StudyLearningRecordResponse(
+                        "question:${key.recordId}", key.source, key.studyId, key.createdAt,
+                        questionRecord = record, record = record,
+                    )
                 }
                 StudyLearningRecordSource.VOICE_TUTOR -> {
                     val record = voices[key.recordId]?.takeIf { it.studyId == key.studyId } ?: return@mapNotNull null
+                    val canonical = record.recordId?.let { canonicalRecords[it.toString()] }
+                        ?.takeIf { it.studyId == key.studyId && it.recordType == StudyRecordType.VOICE_TUTOR }
+                        ?: return@mapNotNull null
                     StudyLearningRecordResponse(
                         "voice:${key.recordId}", key.source, key.studyId, key.createdAt,
-                        voiceRecord = project(record, target, original),
+                        voiceRecord = project(record, target, original), record = canonical,
                     )
                 }
             }
@@ -144,6 +158,7 @@ class StudyLearningRecordService(
             feedbackTurnIds = record.feedbackTurnIds,
             sourceLanguage = record.sourceLanguage, requestedLanguage = target,
             displayLanguage = if (translated) target else record.sourceLanguage, translationPending = pending,
+            recordId = record.recordId?.toString(),
         )
     }
 
