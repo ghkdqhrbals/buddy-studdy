@@ -959,23 +959,12 @@ private struct VoiceTutorSessionDetailView: View {
                     }
 
                     if !detail.transcriptTurns.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(strings.voiceTutorLiveCaptions)
-                                .font(.headline)
-                            ForEach(detail.transcriptTurns) { turn in
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(
-                                        turn.role.lowercased() == "user"
-                                            ? strings.voiceTutorYou
-                                            : strings.voiceTutorTeacher
-                                    )
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    Text(turn.text)
-                                        .font(.subheadline)
-                                }
-                            }
-                        }
+                        VoiceTutorSourceConversation(
+                            turns: detail.transcriptTurns,
+                            strings: strings
+                        )
+                        .padding(14)
+                        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
                     }
                 } else if summaryRefreshState == .loading {
                     ProgressView()
@@ -1177,6 +1166,13 @@ private struct VoiceTutorResultSections: View {
                 if !nextSteps.isEmpty {
                     bulletSection(title: strings.voiceTutorNextSteps, values: nextSteps)
                 }
+                if result.explorations.contains(where: VoiceTutorExplorationPresentation.hasContent) {
+                    VoiceTutorExplorationSections(
+                        explorations: result.explorations,
+                        transcript: detail?.transcriptTurns ?? [],
+                        strings: strings
+                    )
+                }
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {
@@ -1241,6 +1237,267 @@ private struct VoiceTutorResultSections: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+/// Expanding a private result never creates questions, writes studies, or fetches
+/// the user's entire record history. Only this session's bounded data is shown.
+private struct VoiceTutorExplorationSections: View {
+    let explorations: [BackendVoiceTutorExploration]
+    let transcript: [BackendVoiceTutorTranscriptTurn]
+    let strings: AppStrings
+    @State private var isExpanded = false
+    @State private var visibleCount = VoiceTutorExplorationPresentation.topicPageSize
+
+    private var items: [BackendVoiceTutorExploration] {
+        explorations.filter(VoiceTutorExplorationPresentation.hasContent)
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            if isExpanded {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(items.prefix(visibleCount).enumerated()), id: \.offset) { index, exploration in
+                        if index > 0 { Divider() }
+                        VoiceTutorExplorationRow(
+                            exploration: exploration,
+                            transcript: transcript,
+                            strings: strings
+                        )
+                    }
+                    if visibleCount < items.count {
+                        Button(strings.voiceTutorExplorationMoreTopics) {
+                            visibleCount = VoiceTutorExplorationPresentation.nextVisibleCount(
+                                current: visibleCount,
+                                total: items.count,
+                                pageSize: VoiceTutorExplorationPresentation.topicPageSize
+                            )
+                        }
+                        .font(.subheadline)
+                        .frame(minHeight: 44)
+                    }
+                }
+                .padding(.top, 10)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(strings.voiceTutorExplorationsTitle)
+                    .font(.headline)
+                Text(strings.voiceTutorExplorationCount(items.count))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityIdentifier("voiceSummary.explorations")
+    }
+}
+
+private struct VoiceTutorExplorationRow: View {
+    let exploration: BackendVoiceTutorExploration
+    let transcript: [BackendVoiceTutorTranscriptTurn]
+    let strings: AppStrings
+    @State private var isExpanded = false
+    @State private var visibleCount = VoiceTutorExplorationPresentation.exchangePageSize
+
+    private var exchanges: [BackendVoiceTutorExplorationExchange] {
+        VoiceTutorExplorationPresentation.displayExchanges(exploration.exchanges)
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            if isExpanded {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    if !exploration.depthSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(strings.voiceTutorExplorationDepth)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Text(verbatim: exploration.depthSummary)
+                                .font(.subheadline)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    ForEach(Array(exchanges.prefix(visibleCount).enumerated()), id: \.offset) { _, exchange in
+                        VoiceTutorExplorationExchangeRow(
+                            exchange: exchange,
+                            transcript: transcript,
+                            strings: strings
+                        )
+                    }
+                    if visibleCount < exchanges.count {
+                        Button(strings.voiceTutorExplorationMoreExchanges) {
+                            visibleCount = VoiceTutorExplorationPresentation.nextVisibleCount(
+                                current: visibleCount,
+                                total: exchanges.count,
+                                pageSize: VoiceTutorExplorationPresentation.exchangePageSize
+                            )
+                        }
+                        .font(.subheadline)
+                        .frame(minHeight: 44)
+                    }
+                }
+                .padding(.top, 8)
+            }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(verbatim: exploration.topic)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(isExpanded ? nil : 2)
+                if let level = exploration.difficulty {
+                    Text("\(strings.studyLevelShort) \(level)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
+            }
+        }
+        .accessibilityIdentifier("voiceSummary.topic")
+    }
+}
+
+private struct VoiceTutorExplorationExchangeRow: View {
+    let exchange: BackendVoiceTutorExplorationExchange
+    let transcript: [BackendVoiceTutorTranscriptTurn]
+    let strings: AppStrings
+    @State private var isExpanded = false
+
+    private var isLearnerQuestion: Bool { exchange.kind == .learnerQuestion }
+    private var sourceTurns: [BackendVoiceTutorTranscriptTurn] {
+        VoiceTutorExplorationPresentation.sourceTurns(for: exchange, in: transcript)
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(isLearnerQuestion
+                             ? strings.voiceTutorExplorationTutorAnswer
+                             : strings.voiceTutorExplorationLearnerAnswer)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        if exchange.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(strings.voiceTutorExplorationNoAnswer)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(verbatim: exchange.answer)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if !isLearnerQuestion {
+                        feedback(title: strings.voiceTutorStrengths, values: exchange.strengths)
+                        feedback(title: strings.voiceTutorImprovements, values: exchange.improvements)
+                    }
+                    if !sourceTurns.isEmpty {
+                        VoiceTutorSourceConversation(turns: sourceTurns, strings: strings)
+                    }
+                }
+                .font(.subheadline)
+                .padding(.top, 7)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { exchangeMetadata }
+                    VStack(alignment: .leading, spacing: 3) { exchangeMetadata }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Text(verbatim: exchange.question)
+                    .font(.subheadline)
+                    .lineLimit(isExpanded ? nil : 2)
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityIdentifier(isLearnerQuestion ? "voiceSummary.learnerQuestion" : "voiceSummary.tutorQuestion")
+    }
+
+    @ViewBuilder
+    private var exchangeMetadata: some View {
+        Text(isLearnerQuestion
+             ? strings.voiceTutorExplorationLearnerQuestion
+             : strings.voiceTutorExplorationTutorQuestion)
+            .fontWeight(.medium)
+        if let score = VoiceTutorExplorationPresentation.displayScore(for: exchange) {
+            Text(strings.voiceTutorExplorationScore(score))
+                .accessibilityIdentifier("voiceSummary.callScore")
+        }
+    }
+
+    @ViewBuilder
+    private func feedback(title: String, values: [String]) -> some View {
+        let items = VoiceTutorSummaryState.nonemptyItems(values)
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                ForEach(Array(items.enumerated()), id: \.offset) { _, text in
+                    HStack(alignment: .top, spacing: 5) {
+                        Text("•")
+                        Text(verbatim: text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Used both by a specific exchange's evidence and by the whole-session history.
+/// No live-call caption/transport behavior is changed by this view.
+private struct VoiceTutorSourceConversation: View {
+    let turns: [BackendVoiceTutorTranscriptTurn]
+    let strings: AppStrings
+    @State private var isExpanded = false
+    @State private var visibleCount = VoiceTutorExplorationPresentation.transcriptPageSize
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            if isExpanded {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(turns.prefix(visibleCount).enumerated()), id: \.offset) { _, turn in
+                        VStack(alignment: .leading, spacing: 3) {
+                            if let speaker = speaker(for: turn) {
+                                Text(speaker)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(verbatim: turn.text)
+                                .font(.subheadline)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if visibleCount < turns.count {
+                        Button(strings.voiceTutorExplorationMoreExchanges) {
+                            visibleCount = VoiceTutorExplorationPresentation.nextVisibleCount(
+                                current: visibleCount,
+                                total: turns.count,
+                                pageSize: VoiceTutorExplorationPresentation.transcriptPageSize
+                            )
+                        }
+                        .font(.subheadline)
+                        .frame(minHeight: 44)
+                    }
+                }
+                .padding(.top, 8)
+            }
+        } label: {
+            Text(strings.voiceTutorExplorationSource)
+                .font(.subheadline.weight(.medium))
+        }
+        .accessibilityIdentifier("voiceSummary.sourceConversation")
+    }
+
+    private func speaker(for turn: BackendVoiceTutorTranscriptTurn) -> String? {
+        switch turn.role.lowercased() {
+        case "user": strings.voiceTutorYou
+        case "assistant", "tutor": strings.voiceTutorTeacher
+        default: nil
+        }
     }
 }
 #endif

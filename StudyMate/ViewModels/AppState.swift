@@ -3326,6 +3326,7 @@ final class AppState: ObservableObject {
                                 language: settings.appLanguage.studyLanguage,
                                 openAIModel: uniqueOptions.first?.id ?? StudySettings.defaultOpenAIModel,
                                 notificationSound: settings.notificationSound,
+                                voiceTutorVoice: settings.voiceTutorVoice,
                                 customPrompt: settings.customPrompt,
                                 intervalMinutes: settings.sanitizedIntervalMinutes,
                                 maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -3490,6 +3491,7 @@ final class AppState: ObservableObject {
                 language: settings.appLanguage.studyLanguage,
                 openAIModel: selectedCategory?.openAIModel ?? settings.sanitizedOpenAIModel,
                 notificationSound: settings.notificationSound,
+                voiceTutorVoice: settings.voiceTutorVoice,
                 customPrompt: selectedCategory?.customPrompt ?? settings.customPrompt,
                 intervalMinutes: settings.sanitizedIntervalMinutes,
                 maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -6296,6 +6298,11 @@ final class AppState: ObservableObject {
             : "\(sound.displayName(language: draftSettings.appLanguage)) 알림음을 재생했습니다."
     }
 
+    func setDraftVoiceTutorVoice(_ voice: VoiceTutorVoice) {
+        // Follow the settings editor's Save/Cancel contract without creating a call or preview.
+        draftSettings.voiceTutorVoice = voice
+    }
+
     func applyClipboardOpenAIAPIKey() {
         clipboardPasteRequestID += 1
         let requestID = clipboardPasteRequestID
@@ -6555,6 +6562,7 @@ final class AppState: ObservableObject {
             language: settings.appLanguage.studyLanguage,
             openAIModel: settings.sanitizedOpenAIModel,
             notificationSound: settings.notificationSound,
+            voiceTutorVoice: settings.voiceTutorVoice,
             customPrompt: settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -6630,6 +6638,7 @@ final class AppState: ObservableObject {
             language: settings.appLanguage.studyLanguage,
             openAIModel: settings.selectedStudyCategoryID == id ? (editedCategory?.sanitizedOpenAIModel ?? openAIModel) : settings.sanitizedOpenAIModel,
             notificationSound: settings.notificationSound,
+            voiceTutorVoice: settings.voiceTutorVoice,
             customPrompt: settings.selectedStudyCategoryID == id ? customPrompt : settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -7811,6 +7820,9 @@ final class AppState: ObservableObject {
         voice: String? = nil,
         recordingConsent: Bool = false
     ) async throws -> VoiceTutorLiveConnection {
+        // Freeze the saved selection before registration/recovery can suspend.
+        // A settings edit cannot change this call or its idempotent retry.
+        let requestedVoice = voice ?? settings.voiceTutorVoice.apiValue
         let context = try makeVoiceTutorRequestContext()
         let identityFence = context.identityFence
         let ownerUserID = identityFence.ownerUserID
@@ -7841,7 +7853,7 @@ final class AppState: ObservableObject {
                         registration: recoveredRegistration,
                         studyID: studyID,
                         language: self.settings.appLanguage,
-                        voice: voice,
+                        voice: requestedVoice,
                         recordingConsent: recordingConsent,
                         recordingConsentVersion: recordingConsent ? "voice-recording-v1" : nil,
                         idempotencyKey: idempotencyKey
@@ -8964,6 +8976,7 @@ final class AppState: ObservableObject {
             language: settings.appLanguage.studyLanguage,
             openAIModel: selectedCategory?.sanitizedOpenAIModel ?? settings.sanitizedOpenAIModel,
             notificationSound: settings.notificationSound,
+            voiceTutorVoice: settings.voiceTutorVoice,
             customPrompt: selectedCategory?.normalizedCustomPrompt ?? settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -9124,6 +9137,7 @@ final class AppState: ObservableObject {
             language: settings.appLanguage.studyLanguage,
             openAIModel: settings.activeCategory?.sanitizedOpenAIModel ?? settings.sanitizedOpenAIModel,
             notificationSound: settings.notificationSound,
+            voiceTutorVoice: settings.voiceTutorVoice,
             customPrompt: settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -9321,6 +9335,7 @@ final class AppState: ObservableObject {
             language: pendingSettings.appLanguage.studyLanguage,
             openAIModel: pendingSettings.sanitizedOpenAIModel,
             notificationSound: pendingSettings.notificationSound,
+            voiceTutorVoice: pendingSettings.voiceTutorVoice,
             customPrompt: pendingSettings.customPrompt,
             intervalMinutes: pendingSettings.sanitizedIntervalMinutes,
             maxHistoryCount: pendingSettings.sanitizedMaxHistoryCount,
@@ -12607,6 +12622,7 @@ final class AppState: ObservableObject {
             language: source.appLanguage.studyLanguage,
             openAIModel: rootCategories.first?.sanitizedOpenAIModel ?? source.sanitizedOpenAIModel,
             notificationSound: source.notificationSound,
+            voiceTutorVoice: source.voiceTutorVoice,
             customPrompt: rootCategories.first?.normalizedCustomPrompt ?? source.customPrompt,
             intervalMinutes: source.sanitizedIntervalMinutes,
             maxHistoryCount: source.sanitizedMaxHistoryCount,
@@ -12795,6 +12811,7 @@ final class AppState: ObservableObject {
             language: settings.appLanguage.studyLanguage,
             openAIModel: settings.sanitizedOpenAIModel,
             notificationSound: settings.notificationSound,
+            voiceTutorVoice: settings.voiceTutorVoice,
             customPrompt: settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
                         maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -13807,6 +13824,7 @@ final class AppState: ObservableObject {
             language: settings.appLanguage.studyLanguage,
             openAIModel: settings.sanitizedOpenAIModel,
             notificationSound: settings.notificationSound,
+            voiceTutorVoice: settings.voiceTutorVoice,
             customPrompt: settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -13879,6 +13897,7 @@ final class AppState: ObservableObject {
             language: settings.appLanguage.studyLanguage,
             openAIModel: settings.sanitizedOpenAIModel,
             notificationSound: settings.notificationSound,
+            voiceTutorVoice: settings.voiceTutorVoice,
             customPrompt: settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,

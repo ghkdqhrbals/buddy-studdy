@@ -4218,6 +4218,7 @@ struct BackendVoiceTutorSessionResult: Decodable, Equatable, Sendable {
     var strengths: [String]
     var improvements: [String]
     var nextSteps: [String]
+    var explorations: [BackendVoiceTutorExploration]
     var model: String?
     var promptVersion: String?
     var errorMessage: String?
@@ -4230,6 +4231,7 @@ struct BackendVoiceTutorSessionResult: Decodable, Equatable, Sendable {
         case strengths
         case improvements
         case nextSteps
+        case explorations
         case model
         case promptVersion
         case errorMessage
@@ -4245,6 +4247,7 @@ struct BackendVoiceTutorSessionResult: Decodable, Equatable, Sendable {
         strengths = try values.decodeIfPresent([String].self, forKey: .strengths) ?? []
         improvements = try values.decodeIfPresent([String].self, forKey: .improvements) ?? []
         nextSteps = try values.decodeIfPresent([String].self, forKey: .nextSteps) ?? []
+        explorations = try values.decodeIfPresent([BackendVoiceTutorExploration].self, forKey: .explorations) ?? []
         model = try values.decodeIfPresent(String.self, forKey: .model)
         promptVersion = try values.decodeIfPresent(String.self, forKey: .promptVersion)
         errorMessage = try values.decodeIfPresent(String.self, forKey: .errorMessage)
@@ -5434,6 +5437,7 @@ struct BackendStudySettings: Decodable, Equatable {
             language: language.studyLanguage,
             openAIModel: openAIModel,
             notificationSound: NotificationSoundOption(backendSoundName: notificationSound) ?? fallback.notificationSound,
+            voiceTutorVoice: fallback.voiceTutorVoice,
             customPrompt: customPrompt,
             intervalMinutes: intervalMinutes,
             maxHistoryCount: maxHistoryCount,

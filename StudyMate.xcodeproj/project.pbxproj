@@ -28,6 +28,12 @@
 		F85000000000000000000001 /* VoiceTutorSummaryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000002 /* VoiceTutorSummaryState.swift */; };
 		F85000000000000000000003 /* VoiceTutorSummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000004 /* VoiceTutorSummaryTests.swift */; };
 		F85000000000000000000005 /* VoiceTutorMcpContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000006 /* VoiceTutorMcpContractTests.swift */; };
+		F86000000000000000000001 /* VoiceTutorVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86000000000000000000002 /* VoiceTutorVoice.swift */; };
+		F86000000000000000000003 /* VoiceTutorVoiceStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86000000000000000000004 /* VoiceTutorVoiceStrings.swift */; };
+		F86000000000000000000005 /* VoiceTutorExploration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86000000000000000000006 /* VoiceTutorExploration.swift */; };
+		F86000000000000000000007 /* AppStrings+VoiceTutorExploration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86000000000000000000008 /* AppStrings+VoiceTutorExploration.swift */; };
+		F86000000000000000000009 /* VoiceTutorVoiceSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8600000000000000000000A /* VoiceTutorVoiceSettingsTests.swift */; };
+		F8600000000000000000000B /* VoiceTutorExplorationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8600000000000000000000C /* VoiceTutorExplorationTests.swift */; };
 		F82000000000000000000001 /* VoiceTutorWebRTCTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000002 /* VoiceTutorWebRTCTransport.swift */; };
 		F82000000000000000000003 /* VoiceTutorRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000004 /* VoiceTutorRecording.swift */; };
 		F82000000000000000000005 /* LiveKitWebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F82000000000000000000006 /* LiveKitWebRTC */; };
@@ -454,6 +460,12 @@
 		F85000000000000000000002 /* VoiceTutorSummaryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorSummaryState.swift; sourceTree = "<group>"; };
 		F85000000000000000000004 /* VoiceTutorSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorSummaryTests.swift; sourceTree = "<group>"; };
 		F85000000000000000000006 /* VoiceTutorMcpContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorMcpContractTests.swift; sourceTree = "<group>"; };
+		F86000000000000000000002 /* VoiceTutorVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorVoice.swift; sourceTree = "<group>"; };
+		F86000000000000000000004 /* VoiceTutorVoiceStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorVoiceStrings.swift; sourceTree = "<group>"; };
+		F86000000000000000000006 /* VoiceTutorExploration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorExploration.swift; sourceTree = "<group>"; };
+		F86000000000000000000008 /* AppStrings+VoiceTutorExploration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStrings+VoiceTutorExploration.swift"; sourceTree = "<group>"; };
+		F8600000000000000000000A /* VoiceTutorVoiceSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorVoiceSettingsTests.swift; sourceTree = "<group>"; };
+		F8600000000000000000000C /* VoiceTutorExplorationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorExplorationTests.swift; sourceTree = "<group>"; };
 		B90000000000000000000001 /* StudyMateDev.storekit */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StudyMateDev.storekit; sourceTree = "<group>"; };
 		F70000000000000000000020 /* AppControlPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppControlPolicyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -864,6 +876,10 @@
 		110000000000000000000063 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				F86000000000000000000002 /* VoiceTutorVoice.swift */,
+				F86000000000000000000004 /* VoiceTutorVoiceStrings.swift */,
+				F86000000000000000000006 /* VoiceTutorExploration.swift */,
+				F86000000000000000000008 /* AppStrings+VoiceTutorExploration.swift */,
 				110000000000000000000002 /* StudyModels.swift */,
 				1100000000000000000000E0 /* JapaneseAppStrings.swift */,
 			);
@@ -927,6 +943,8 @@
 		120000000000000000000066 /* StudyMateiOSTests */ = {
 			isa = PBXGroup;
 			children = (
+				F8600000000000000000000A /* VoiceTutorVoiceSettingsTests.swift */,
+				F8600000000000000000000C /* VoiceTutorExplorationTests.swift */,
 				120000000000000000000200 /* ArchitecturePolicyTests.swift */,
 				120000000000000000000202 /* QuestionSchedulePolicyTests.swift */,
 				F70000000000000000000020 /* AppControlPolicyTests.swift */,
@@ -1386,6 +1404,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F86000000000000000000009 /* VoiceTutorVoiceSettingsTests.swift in Sources */,
+				F8600000000000000000000B /* VoiceTutorExplorationTests.swift in Sources */,
 				120000000000000000000201 /* ArchitecturePolicyTests.swift in Sources */,
 				120000000000000000000203 /* QuestionSchedulePolicyTests.swift in Sources */,
 				F70000000000000000000021 /* AppControlPolicyTests.swift in Sources */,
@@ -1404,6 +1424,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F86000000000000000000001 /* VoiceTutorVoice.swift in Sources */,
+				F86000000000000000000003 /* VoiceTutorVoiceStrings.swift in Sources */,
+				F86000000000000000000005 /* VoiceTutorExploration.swift in Sources */,
+				F86000000000000000000007 /* AppStrings+VoiceTutorExploration.swift in Sources */,
 				F84000000000000000000001 /* VoiceTutorSileroSpeechScorer.swift in Sources */,
 				F84000000000000000000003 /* VoiceTutorSileroAudioPipeline.swift in Sources */,
 				F84000000000000000000005 /* silero-vad-unified-v6.0.0.mlpackage in Sources */,

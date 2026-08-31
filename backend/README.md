@@ -75,7 +75,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `VOICE_TUTOR_SESSION_RECOVERY_POLL_MS`, `VOICE_TUTOR_SESSION_RECOVERY_INITIAL_DELAY_MS`, `VOICE_TUTOR_SESSION_RECOVERY_BATCH_SIZE`: bounded stale-session recovery controls; defaults to `5000`, `5000`, and `100`.
 - `VOICE_TUTOR_SUMMARY_MODEL`: existing Chat Completions model used for the private Tutor Learning Result and contextual input-meaning assessment; defaults to `OPENAI_MODEL`, currently `gpt-5.4`. Input assessment requires strict JSON-schema support. It uses the same regular user-content key, not an additional credential, container or service.
 - `buddystudy.voice-tutor.input-assessment.*`: independent, validated operational limits bound live input assessment: `timeout-milliseconds=5000` (1–15000), `max-concurrent-assessments=4` (1–16), `max-utterances=8` (1–8), `max-transcript-characters=4000`, `max-batch-transcript-characters=16000`, and `max-teacher-context-characters=4000` (these text bounds may be lowered, not raised). Configure through normal Spring property binding. Admission is process-wide and fail-fast, with no unbounded queue or automatic retry. A failure requests another utterance without cancelling tutor playback; it is never a negative semantic verdict. The coordinator uses the same limit snapshot, an 8-second ASR deadline and 5-second publish/delete-ACK deadlines. No raw input, context, provider body or credential enters diagnostics.
-- `VOICE_TUTOR_SUMMARY_PROMPT_VERSION`: persisted/result audit version for the summary contract; defaults to `voice-tutor-summary-v1`.
+- `VOICE_TUTOR_SUMMARY_PROMPT_VERSION`: persisted/result audit version for the summary contract; defaults to `voice-tutor-summary-v2` (source-linked topic explorations in addition to the overall summary).
 - `VOICE_TUTOR_SUMMARY_RECOVERY_POLL_MS`, `VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS`, `VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE`, `VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS`: bounded result-generation recovery controls; defaults to `5000`, `5000`, `10`, and `300`.
 - `VOICE_TUTOR_TRANSCRIPT_MAX_CHARS`: maximum bounded transcript text accepted for one session; defaults to `100000`. Realtime audio frames are never written to application logs or MySQL; an original mixed recording is stored only through the separate explicit-consent recording flow below.
 - `VOICE_TUTOR_TRANSCRIPT_MAX_TURNS`: maximum persisted transcript turns per session; defaults to `2000`.
@@ -103,6 +103,21 @@ controls feature/provider behavior and the per-session ceiling only. The voice
 quota uses its own account-created monthly anchor and advances an overdue period
 lazily on authenticated Voice Tutor access; it is not handled by the question
 quota's managed rollover job.
+
+Voice lessons use the saved topic's configured 1–10 level for spoken questions,
+brief 0–100 answer feedback, and deeper follow-up questions. V102 freezes the
+owned topic metadata supplied to each session; V101 adds nullable structured
+explorations to the private result. The existing summary-model request extracts
+actual exchanges and explicit spoken assessments with source turn IDs; it does
+not generate question records or grade the learner again. Missing/unsupported
+scores stay null. Old results decode with no explorations. These changes require
+the normal Flyway migrations, not a new service, database, or Redis instance.
+
+The optional session-create `voice` accepts `alloy`, `ash`, `ballad`, `coral`,
+`echo`, `sage`, `shimmer`, `verse`, `marin`, or `cedar`. An omitted/blank field uses
+`OPENAI_REALTIME_VOICE`; unsupported explicit names fail before reserving time.
+The iOS Settings preference is captured for the next call, never applied to an
+active one. See the [Realtime voice contract](https://developers.openai.com/api/docs/guides/realtime-conversations#voice-options).
 
 Voice Tutor recording is a separate, default-off capability. A session can
 receive a recording upload only when the registered owner explicitly sends

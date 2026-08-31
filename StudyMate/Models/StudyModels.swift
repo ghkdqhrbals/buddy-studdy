@@ -1290,6 +1290,7 @@ struct StudySettings: Codable, Equatable {
     var language: StudyLanguage
     var openAIModel: String
     var notificationSound: NotificationSoundOption
+    var voiceTutorVoice: VoiceTutorVoice
     var customPrompt: String
     var intervalMinutes: Int
     var maxHistoryCount: Int
@@ -1304,6 +1305,7 @@ struct StudySettings: Codable, Equatable {
         language: StudyLanguage = .korean,
         openAIModel: String = StudySettings.defaultOpenAIModel,
         notificationSound: NotificationSoundOption = .defaultSound,
+        voiceTutorVoice: VoiceTutorVoice = .serverDefault,
         customPrompt: String,
         intervalMinutes: Int,
         maxHistoryCount: Int = 100,
@@ -1338,6 +1340,7 @@ struct StudySettings: Codable, Equatable {
         self.language = language
         self.openAIModel = activeCategory?.sanitizedOpenAIModel ?? openAIModel
         self.notificationSound = notificationSound
+        self.voiceTutorVoice = voiceTutorVoice
         self.customPrompt = activeCategory?.normalizedCustomPrompt ?? customPrompt
         self.intervalMinutes = intervalMinutes
         self.maxHistoryCount = maxHistoryCount
@@ -1353,6 +1356,7 @@ struct StudySettings: Codable, Equatable {
         case language
         case openAIModel
         case notificationSound
+        case voiceTutorVoice
         case customPrompt
         case intervalMinutes
         case maxHistoryCount
@@ -1369,6 +1373,8 @@ struct StudySettings: Codable, Equatable {
         language = try container.decodeIfPresent(StudyLanguage.self, forKey: .language) ?? .korean
         openAIModel = try container.decodeIfPresent(String.self, forKey: .openAIModel) ?? Self.defaultOpenAIModel
         notificationSound = try container.decodeIfPresent(NotificationSoundOption.self, forKey: .notificationSound) ?? .defaultSound
+        // Missing, removed, or malformed voice preferences must not discard the other settings.
+        voiceTutorVoice = (try? container.decode(VoiceTutorVoice.self, forKey: .voiceTutorVoice)) ?? .serverDefault
         let decodedCustomPrompt = try container.decode(String.self, forKey: .customPrompt)
         intervalMinutes = try container.decode(Int.self, forKey: .intervalMinutes)
         maxHistoryCount = try container.decodeIfPresent(Int.self, forKey: .maxHistoryCount) ?? 100
@@ -1580,6 +1586,7 @@ struct StudySettings: Codable, Equatable {
             language: language,
             openAIModel: activeCategory?.sanitizedOpenAIModel ?? openAIModel,
             notificationSound: notificationSound,
+            voiceTutorVoice: voiceTutorVoice,
             customPrompt: activeCategory?.normalizedCustomPrompt ?? customPrompt,
             intervalMinutes: intervalMinutes,
             maxHistoryCount: maxHistoryCount,
@@ -1613,6 +1620,7 @@ struct StudySettings: Codable, Equatable {
             language: language,
             openAIModel: activeCategory?.sanitizedOpenAIModel ?? openAIModel,
             notificationSound: notificationSound,
+            voiceTutorVoice: voiceTutorVoice,
             customPrompt: activeCategory?.normalizedCustomPrompt ?? customPrompt,
             intervalMinutes: intervalMinutes,
             maxHistoryCount: maxHistoryCount,
@@ -1630,6 +1638,7 @@ struct StudySettings: Codable, Equatable {
             language: language,
             openAIModel: openAIModel,
             notificationSound: notificationSound,
+            voiceTutorVoice: voiceTutorVoice,
             customPrompt: customPrompt,
             intervalMinutes: intervalMinutes,
             maxHistoryCount: maxHistoryCount,

@@ -11249,6 +11249,39 @@ private struct MobileSettingsView: View {
                     }
                     .buttonStyle(.plain)
 
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Menu {
+                            ForEach(VoiceTutorVoice.allCases) { voice in
+                                Button {
+                                    appState.setDraftVoiceTutorVoice(voice)
+                                } label: {
+                                    if appState.draftSettings.voiceTutorVoice == voice {
+                                        Label(strings.voiceTutorVoiceName(voice), systemImage: "checkmark")
+                                    } else {
+                                        Text(strings.voiceTutorVoiceName(voice))
+                                    }
+                                }
+                            }
+                        } label: {
+                            MobileSettingsRow(
+                                systemImage: "waveform",
+                                title: strings.voiceTutorVoiceSetting,
+                                value: strings.voiceTutorVoiceName(appState.draftSettings.voiceTutorVoice)
+                            )
+                            .frame(minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings.voiceTutorVoice")
+                        .accessibilityHint(strings.voiceTutorVoiceSettingHelp)
+
+                        Text(strings.voiceTutorVoiceSettingHelp)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     if canEditAccountPreferences {
                         Divider()
 

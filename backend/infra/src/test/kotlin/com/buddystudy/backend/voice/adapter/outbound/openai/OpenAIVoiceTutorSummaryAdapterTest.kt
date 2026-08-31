@@ -8,9 +8,11 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
+import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
 import com.fasterxml.jackson.databind.JsonNode
@@ -61,16 +63,21 @@ class OpenAIVoiceTutorSummaryAdapterTest {
         assertThat(summary.summaryMarkdown).isEqualTo("합성 학습 요약")
         assertThat(summary.model).isEqualTo("gpt-5.4-2026-03-05")
         assertThat(requestBody!!.path("model").asText()).isEqualTo(summary.model)
-        assertThat(requestBody!!.path("response_format").path("type").asText()).isEqualTo("json_object")
+        assertThat(requestBody!!.path("response_format").path("type").asText()).isEqualTo("json_schema")
+        assertThat(requestBody!!.path("response_format").path("json_schema").path("strict").booleanValue()).isTrue()
         assertThat(requestBody!!.path("store").booleanValue()).isFalse()
-        assertThat(requestBody!!.path("max_completion_tokens").intValue()).isEqualTo(4_096)
+        assertThat(requestBody!!.path("max_completion_tokens").intValue()).isEqualTo(16_384)
         assertThat(requestBody!!.path("safety_identifier").asText())
             .isEqualTo(VoiceTutorSafetyIdentifier.create(7, "private-test-regular-key")).isNotEqualTo("7")
         assertThat(requestBody!!.toString()).doesNotContain("private-test-regular-key", "private-system-key")
         val messages = requestBody!!.path("messages")
         assertThat(messages[0].path("content").asText()).contains("untrusted JSON data object")
         val data = mapper.readTree(messages.last().path("content").asText())
-        assertThat(data.path("transcript").asText()).isEqualTo("USER: 합성 학습 질문입니다.")
+        assertThat(data.path("transcriptTurns").single().path("id").longValue()).isEqualTo(1)
+        assertThat(data.path("transcriptTurns").single().path("role").textValue()).isEqualTo("USER")
+        assertThat(data.path("transcriptTurns").single().path("transcript").textValue()).isEqualTo("합성 학습 질문입니다.")
+        assertThat(data.path("knownTopics").single().path("studyId").longValue()).isEqualTo(42)
+        assertThat(summary.explorations).isEmpty()
     }
 
     @Test
@@ -153,12 +160,92 @@ class OpenAIVoiceTutorSummaryAdapterTest {
             "strengths" to List(12) { "b".repeat(700) },
             "improvements" to listOf("<script>discard link</script> [label](https://example.test/private)"),
             "nextSteps" to emptyList<String>(),
+            "explorations" to emptyList<Any>(),
         ))
         val summary = adapter(exchange = ExchangeFunction { Mono.just(response(envelope(content))) })
             .summarize(session(), transcript())
         assertThat(summary.summaryMarkdown).hasSize(20_000)
         assertThat(summary.strengths).hasSize(10).allSatisfy { assertThat(it).hasSize(500) }
         assertThat(summary.improvements.single()).doesNotContain("<", ">", "https://", "](")
+    }
+
+    @Test
+    fun `summary uses immutable child snapshot and publishes verified graded exchanges end to end`() = runBlocking<Unit> {
+        var requestBody: JsonNode? = null
+        val context = object : VoiceTutorStudyContextPort {
+            override suspend fun list(userId: Long, sessionId: String): List<VoiceTutorStudySnapshot> {
+                assertThat(userId).isEqualTo(7)
+                assertThat(sessionId).isEqualTo(session().id)
+                return listOf(VoiceTutorStudySnapshot(43, 42, "Redis eviction", 7))
+            }
+            override suspend fun prepare(session: VoiceTutorSession): List<VoiceTutorStudySnapshot> = error("Summary must not recapture mutable study metadata")
+            override suspend fun remember(userId: Long, sessionId: String, studyIds: List<Long>): List<VoiceTutorStudySnapshot> = error("Summary is read-only")
+        }
+        val properties = properties()
+        val adapter = OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties, ExchangeFunction { request ->
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map {
+                    requestBody = mapper.readTree(it)
+                    response(envelope(lessonResult()))
+                }
+            })
+        }, context)
+
+        val generated = adapter.summarize(session(), lessonTurns())
+
+        assertThat(generated.explorations.single().difficulty).isEqualTo(7)
+        assertThat(generated.explorations.single().studyId).isEqualTo(43)
+        assertThat(generated.explorations.single().exchanges.single().score).isEqualTo(85)
+        assertThat(generated.explorations.single().exchanges.single().questionTurnId).isEqualTo(1)
+        assertThat(generated.promptVersion).isEqualTo("voice-tutor-summary-v2")
+        val source = mapper.readTree(requestBody!!.path("messages").last().path("content").textValue())
+        assertThat(source.path("knownTopics").map { it.path("studyId").longValue() }).contains(42L, 43L)
+        assertThat(source.path("transcriptTurns").map { it.path("id").longValue() }).containsExactly(1L, 2L, 3L)
+    }
+
+    @Test
+    fun `unsupported score and nonexistent exchange do not make the valid core summary fail`() = runBlocking<Unit> {
+        val raw = mapper.readTree(lessonResult()) as com.fasterxml.jackson.databind.node.ObjectNode
+        val topic = raw.path("explorations")[0] as com.fasterxml.jackson.databind.node.ObjectNode
+        topic.putNull("studyId")
+        topic.putNull("difficulty")
+        val exchanges = topic.path("exchanges") as com.fasterxml.jackson.databind.node.ArrayNode
+        val invalid = (exchanges[0] as com.fasterxml.jackson.databind.node.ObjectNode).deepCopy()
+        invalid.put("questionTurnId", 999)
+        exchanges.add(invalid)
+        val provider = adapter(exchange = ExchangeFunction { Mono.just(response(envelope(raw.toString()))) })
+        val transcript = lessonTurns().map { if (it.id == 3L) it.copy(transcript = "85ms입니다.") else it }
+
+        val generated = provider.summarize(session(), transcript)
+
+        assertThat(generated.summaryMarkdown).isEqualTo("합성 학습 요약")
+        assertThat(generated.explorations.single().exchanges).hasSize(1)
+        assertThat(generated.explorations.single().exchanges.single().score).isNull()
+        assertThat(generated.explorations.single().exchanges.single().strengths).isEmpty()
+        assertThat(generated.explorations.single().exchanges.single().improvements).isEmpty()
+    }
+
+    @Test
+    fun `transcript budget cannot turn a partial supplied utterance into complete assessment evidence`() = runBlocking<Unit> {
+        val properties = properties().apply { voiceTutor.transcriptMaxCharacters = 1 }
+        var source: JsonNode? = null
+        val adapter = adapter(properties, ExchangeFunction { request ->
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map {
+                    source = mapper.readTree(mapper.readTree(it).path("messages").last().path("content").textValue())
+                    response(envelope(lessonResult()))
+                }
+            })
+        })
+
+        val generated = adapter.summarize(session(), lessonTurns())
+
+        assertThat(generated.explorations).isEmpty()
+        assertThat(generated.summaryMarkdown).isNotEmpty()
+        assertThat(source!!.path("transcriptTurns").size()).isZero()
+        assertThat(source!!.path("transcriptTruncated").booleanValue()).isTrue()
     }
 
     private fun assertProviderFailure(error: Throwable?) {
@@ -183,6 +270,7 @@ class OpenAIVoiceTutorSummaryAdapterTest {
         "strengths" to emptyList<String>(),
         "improvements" to emptyList<String>(),
         "nextSteps" to listOf("복습하기"),
+        "explorations" to emptyList<Any>(),
     ))
 
     private fun envelope(content: String, finishReason: String = "stop", refusal: String? = null) = mapper.writeValueAsString(mapOf(
@@ -205,6 +293,26 @@ class OpenAIVoiceTutorSummaryAdapterTest {
     private fun transcript() = listOf(VoiceTutorTranscriptTurn(
         1, session().id, "synthetic-item", VoiceTutorTranscriptRole.USER, "합성 학습 질문입니다.", 1, now,
     ))
+
+    private fun lessonTurns() = listOf(
+        VoiceTutorTranscriptTurn(1, session().id, "question", VoiceTutorTranscriptRole.TUTOR, "키를 왜 제거하나요?", 1, now),
+        VoiceTutorTranscriptTurn(2, session().id, "answer", VoiceTutorTranscriptRole.USER, "메모리 공간을 확보하려고요.", 2, now.plusSeconds(1)),
+        VoiceTutorTranscriptTurn(3, session().id, "feedback", VoiceTutorTranscriptRole.TUTOR, "85점입니다. 공간 확보 목적을 이해했네요. LRU와 LFU 차이를 복습하세요.", 3, now.plusSeconds(2)),
+    )
+
+    private fun lessonResult(): String {
+        val root = mapper.readTree(result()) as com.fasterxml.jackson.databind.node.ObjectNode
+        root.set<JsonNode>("explorations", mapper.valueToTree(listOf(mapOf(
+            "topic" to "Redis eviction", "studyId" to 43, "difficulty" to 7,
+            "depthSummary" to "메모리 공간 확보의 이유와 LRU, LFU의 교체 정책 차이를 탐구했습니다.",
+            "exchanges" to listOf(mapOf(
+                "kind" to "TUTOR_QUESTION", "question" to "키를 왜 제거하나요?", "answer" to "메모리 공간 확보를 위해서입니다.",
+                "score" to 85, "strengths" to listOf("공간 확보 목적 이해"), "improvements" to listOf("LRU와 LFU 차이 복습"),
+                "questionTurnId" to 1, "answerTurnIds" to listOf(2), "feedbackTurnIds" to listOf(3),
+            )),
+        ))))
+        return root.toString()
+    }
 
     private fun session() = VoiceTutorSession(
         id = "synthetic-summary-session", userId = 7, studyId = 42, idempotencyKey = "synthetic-attempt",

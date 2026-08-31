@@ -1031,3 +1031,93 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
 - The already verified normal iPhone app is installed with the same dev base
   URL. A new human call exercising saved-topic lookup/creation and audible
   continuation remains a separate user-device end-to-end check.
+
+## 2026-08-31 — Level-based deep dives and selectable tutor voices
+
+### Implemented boundaries
+
+- Spoken lessons use saved child topics and each node's configured 1–10 level,
+  with one question, an actual learner answer, brief supported 0–100 feedback,
+  and learner/tutor follow-up exploration. These are private voice exchanges,
+  not standard question generation, answer submission, grading records or quota.
+- V102 stores owner-scoped, first-seen topic/parent/name/level snapshots, bounded
+  to 64 per call and 32 additions per operation. The selected accepted topic and
+  first ten direct children are prepared before provider negotiation. Session
+  row locking protects the bound; terminal/expired sessions cannot write. A
+  missing snapshot is explicitly unavailable for a new lesson/assessment, without
+  misreporting an already successful child creation or replaying that mutation.
+- Context preparation failure/cancellation now releases the unconnected session
+  through bounded, non-cancellable terminal settlement; storage failure retains
+  existing stale-session recovery. No media interruption/replay policy changed.
+- V101 adds nullable result JSON. The v2 extraction contract retains topic/depth,
+  tutor and learner questions, answers, optional spoken scores, supported feedback
+  and source turn IDs. Owner/session, role/order and score provenance checks reject
+  unsupported associations without discarding valid summary content. Legacy null
+  results remain readable. No existing summary is automatically rewritten.
+- iOS adds collapsed topic/exchange/source sections with bounded lazy expansion
+  and a Settings voice selector. The saved choice is captured before the first
+  session-start await, survives backend settings refresh and applies next call.
+  Default still delegates to the server. The supported choices and next-session
+  constraint follow the [official Realtime voice contract](https://developers.openai.com/api/docs/guides/realtime-conversations#voice-options).
+
+### Backend verification
+
+- The first focused run found one numeric-evidence bug: a sentence-ending period
+  after `Your score is 85.` was mistaken for a decimal boundary. The parser now
+  distinguishes a period from period-plus-digit, with English fractions and
+  Korean/Japanese score, other-scale, percentage and quantity regressions.
+- Final focused regression: 38 suites, 502 tests, **500 passed, zero failed,
+  two opt-in provider tests skipped**. Application: 99 passed; infrastructure:
+  385 passed/two skipped; tutor HTTP MCP/native hints: 16 passed. Log:
+  `build/voiceExplorationBackendRegressionFinal.log`.
+- This includes 12 isolated H2 snapshot tests with UTC `timestamp(6)` bindings,
+  immutable rename/level/reparent/delete history, ownership, cascade, terminal
+  writes, batch bounds and two transactional writers competing for slot 64.
+  Three H2 result-read tests use the actual persistence adapter/JSON codec and
+  nested response mapping. H2 is not presented as MySQL migration execution or
+  proof of MySQL lock behavior.
+- The task graph was checked before running `tutor:test`; the five test-AOT
+  tasks were excluded. No Testcontainer or extra database/Redis stack was started.
+  Normal main AOT and `bootJar` passed separately with the existing build-only
+  `aot` profile. New persistence bean and nested response hints are present.
+  Log: `build/voiceExplorationMainAotJar.log`; JAR: 330,760,903 bytes; SHA-256:
+  `7e0c85c1759efcbdbf9c464a59fa777df0a677d79174d1cd1c85beb2ed1f61b8`.
+
+### One real model extraction check
+
+- Explicit opt-in `VoiceTutorSummaryLiveTest` made exactly one production-adapter
+  request to the unchanged `gpt-5.4` summary model, using eight frozen synthetic
+  Korean turns and the existing regular development user-content credential.
+  No real transcript, account record, database, microphone, call reservation,
+  question quota or recording was used; no credential entered a file or log.
+- Passed in 8,617 ms: one topic, three exchanges, the saved child identity and
+  level 4, exact question/answer/feedback source IDs, the explicitly spoken 85
+  score with feedback, an ungraded learner follow-up, and an unanswered question
+  with no invented answer or score. The readiness greeting was excluded.
+  Log: `build/voiceExplorationLiveSummary.log`; the JUnit result records one test,
+  zero skipped/failures and metadata-only `voice_summary_live` counters.
+- This verifies one real structured-output extraction, not general pedagogical
+  accuracy, a live Realtime question/assessment conversation, or physical audio.
+
+### iOS and iPhone verification
+
+- Generic iOS Debug build passed using `StudyMateiOS`, `generic/platform=iOS`,
+  `CODE_SIGNING_ALLOWED=NO` and the existing `build/iOSDeviceDerivedData` path.
+  Log: `build/voiceExplorationGenericBuild.log`. No macOS target was built/tested.
+- Signed build-for-testing and **170 explicitly selected iPhone tests passed**:
+  76 call contracts, 25 Silero contracts, 31 summary-state tests, four MCP tests,
+  18 voice-preference tests and 16 exploration contract/presentation tests.
+  Preference tests use isolated settings suites and intercepted URLs, not actual
+  provider/media/session endpoints. No destructive recording or account test ran.
+  Logs: `build/voiceExplorationDeviceTestBuild.log`,
+  `build/voiceExplorationDeviceTests.log`; result bundle:
+  `Test-StudyMateiOS-2026.08.31_21-58-58-+0900.xcresult`.
+- A normal signed build and strict signature verification passed afterward, with
+  no injected XCTest plug-in/framework. The normal app was installed and launched
+  on the paired iPhone 16 Pro using the unchanged `https://lowfidev.cloud` dev URL.
+  Active dev call count was zero before tests, install and launch. Logs:
+  `build/voiceExplorationSignedBuildFinal.log`,
+  `build/voiceExplorationDeviceInstall.log`, `build/voiceExplorationDeviceLaunch.log`.
+- A human-device lesson exercising the new question/assessment loop and every
+  selectable voice remains a separate end-to-end check; these results do not
+  claim one was performed or that previous word-boundary playback work changed.

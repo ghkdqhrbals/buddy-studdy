@@ -10,9 +10,12 @@ import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTu
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAuthorizationPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
+import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
@@ -29,6 +32,109 @@ import java.time.Instant
 import java.time.ZoneOffset
 
 class McpVoiceTutorToolAdapterTest {
+    @Test
+    fun `successful study read returns the immutable lesson level alongside current app metadata`(): Unit = runBlocking {
+        val contextStore = ContextStore()
+        val fixture = Fixture(studyContexts = contextStore).apply {
+            handler = { _, _ -> success(mapOf("id" to 102L, "topic" to "Cache", "difficultyLevel" to 9)) }
+        }
+        val result = fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 102L))
+        assertThat(result.isError).isFalse()
+        assertThat(json(result).path("difficultyLevel").asInt()).isEqualTo(9)
+        val lessonTopic = json(result).path("voiceLessonTopics")[0]
+        assertThat(lessonTopic.path("studyId").asLong()).isEqualTo(102)
+        assertThat(lessonTopic.path("difficulty").asInt()).isEqualTo(3)
+        assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isTrue()
+        assertThat(contextStore.remembered).containsExactly(listOf(102L))
+        assertThat(result.studyTreeChanged).isFalse()
+    }
+
+    @Test
+    fun `study pages capture only validated IDs from the returned bounded page`(): Unit = runBlocking {
+        val contextStore = ContextStore()
+        val fixture = Fixture(studyContexts = contextStore).apply {
+            handler = { _, _ -> success(mapOf("studies" to listOf(
+                mapOf("id" to 102L), mapOf("id" to 103L), mapOf("id" to -1),
+                mapOf("id" to "104"), mapOf("id" to 1.5), mapOf("id" to 102L),
+            ), "totalCount" to 6, "offset" to 0)) }
+        }
+        val result = fixture.adapter.execute(context(), "list_studies", mapOf("parent_study_id" to 101L, "limit" to 10))
+        assertThat(result.isError).isFalse()
+        assertThat(contextStore.remembered).containsExactly(listOf(102L, 103L))
+        assertThat(json(result).path("totalCount").asInt()).isEqualTo(6)
+    }
+
+    @Test
+    fun `failed tools and failed authorization do not capture topic metadata`(): Unit = runBlocking {
+        val contextStore = ContextStore()
+        val fixture = Fixture(studyContexts = contextStore).apply { handler = { _, _ -> failure("NOT_FOUND") } }
+        assertCode(fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 102L)), "NOT_FOUND")
+        fixture.authorized = false
+        assertCode(fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 102L)), "CALL_NOT_AUTHORIZED")
+        assertThat(contextStore.remembered).isEmpty()
+    }
+
+    @Test
+    fun `metadata persistence failure cannot misreport an already committed child creation`(): Unit = runBlocking {
+        val contextStore = ContextStore().apply { fail = true }
+        val fixture = Fixture(studyContexts = contextStore).apply {
+            handler = { _, _ -> success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Cache")) }
+        }
+        val result = fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Cache"))
+        assertThat(result.isError).isFalse()
+        assertThat(result.studyTreeChanged).isTrue()
+        assertThat(result.createdStudyId).isEqualTo(102)
+        assertThat(fixture.calls.map { it.name }).containsExactly("create_study_topic")
+        assertThat(result.output).doesNotContain("private-database-detail")
+        assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
+        assertThat(json(result).path("voiceLessonTopics")).isEmpty()
+    }
+
+    @Test
+    fun `a full snapshot cache preserves app metadata but explicitly withholds an unfrozen lesson level`(): Unit = runBlocking {
+        val fixture = Fixture(studyContexts = UnavailableVoiceTutorStudyContextPort).apply {
+            handler = { _, _ -> success(mapOf("id" to 102L, "topic" to "Cache", "difficultyLevel" to 9)) }
+        }
+        val result = fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 102L))
+        assertThat(result.isError).isFalse()
+        assertThat(json(result).path("difficultyLevel").asInt()).isEqualTo(9)
+        assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
+        assertThat(json(result).path("voiceLessonTopics")).isEmpty()
+        assertThat(fixture.calls).hasSize(1)
+    }
+
+    @Test
+    fun `topics beyond the capture batch stay readable without falsely claiming every page level is frozen`(): Unit = runBlocking {
+        val contextStore = ContextStore()
+        val fixture = Fixture(studyContexts = contextStore).apply {
+            handler = { _, _ -> success(mapOf("studies" to (102L..141L).map { mapOf("id" to it) })) }
+        }
+        val result = fixture.adapter.execute(context(), "list_studies", mapOf("limit" to 50))
+        assertThat(result.isError).isFalse()
+        assertThat(json(result).path("studies").size()).isEqualTo(40)
+        assertThat(json(result).path("voiceLessonTopics").size()).isEqualTo(32)
+        assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
+        assertThat(contextStore.remembered.single()).hasSize(32)
+    }
+
+    @Test
+    fun `lesson metadata obeys the output bound without losing a committed creation`(): Unit = runBlocking {
+        for (name in listOf("get_study", "create_study_topic")) {
+            val fixture = Fixture(studyContexts = ContextStore()).apply {
+                handler = { _, _ -> success(mapOf("id" to 102L, "topic" to "Cache", "customPrompt" to "x".repeat(16_300))) }
+            }
+            val args = if (name == "get_study") mapOf("study_id" to 102L)
+                else mapOf("parent_study_id" to 101L, "topic" to "Cache")
+            val result = fixture.adapter.execute(context(), name, args)
+            assertThat(result.output.toByteArray(Charsets.UTF_8).size).isLessThanOrEqualTo(16 * 1_024)
+            if (name == "get_study") assertCode(result, "RESULT_TOO_LARGE") else {
+                assertThat(result.isError).isFalse()
+                assertThat(result.createdStudyId).isEqualTo(102)
+                assertThat(json(result).path("voiceLessonTopics")[0].path("difficulty").asInt()).isEqualTo(3)
+            }
+        }
+    }
+
     @Test
     fun `advertises only existing allowed schemas and resolves the MCP catalog lazily`() {
         val fixture = Fixture()
@@ -382,7 +488,10 @@ class McpVoiceTutorToolAdapterTest {
         }.isInstanceOf(CancellationException::class.java)
     }
 
-    private class Fixture(actualMcp: BuddyStudyMcpPort? = null) {
+    private class Fixture(
+        actualMcp: BuddyStudyMcpPort? = null,
+        studyContexts: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
+    ) {
         var authorized = true
         var persistedSession: VoiceTutorSession? = session()
         var authorizationCalls = 0
@@ -428,7 +537,22 @@ class McpVoiceTutorToolAdapterTest {
             },
             objectMapper = mapper,
             clock = Clock.fixed(now, ZoneOffset.UTC),
+            studyContexts = studyContexts,
         )
+    }
+
+    private class ContextStore : VoiceTutorStudyContextPort {
+        val remembered = mutableListOf<List<Long>>()
+        var fail = false
+        override suspend fun prepare(session: VoiceTutorSession) = emptyList<VoiceTutorStudySnapshot>()
+        override suspend fun list(userId: Long, sessionId: String) = emptyList<VoiceTutorStudySnapshot>()
+        override suspend fun remember(userId: Long, sessionId: String, studyIds: List<Long>): List<VoiceTutorStudySnapshot> {
+            assertThat(userId).isEqualTo(principal.userId)
+            assertThat(sessionId).isEqualTo(session().id)
+            remembered += studyIds
+            if (fail) throw IllegalStateException("private-database-detail")
+            return studyIds.map { VoiceTutorStudySnapshot(it, 101, "Cache", 3) }
+        }
     }
 
     private data class Call(val name: String, val arguments: Map<String, Any>, val principal: Principal?)

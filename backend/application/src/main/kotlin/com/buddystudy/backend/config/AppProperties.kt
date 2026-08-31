@@ -194,7 +194,7 @@ data class BuddyStudyProperties(
         var sessionRecoveryInitialDelayMs: Long = 5_000,
         var sessionRecoveryBatchSize: Int = 100,
         var summaryModel: String = "gpt-5.4",
-        var summaryPromptVersion: String = "voice-tutor-summary-v1",
+        var summaryPromptVersion: String = "voice-tutor-summary-v2",
         var summaryRecoveryPollMs: Long = 5_000,
         var summaryRecoveryInitialDelayMs: Long = 5_000,
         var summaryRecoveryBatchSize: Int = 10,

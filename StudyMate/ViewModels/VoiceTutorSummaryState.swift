@@ -39,6 +39,7 @@ enum VoiceTutorSummaryState: Equatable, Sendable {
     private static func hasContent(_ result: BackendVoiceTutorSessionResult) -> Bool {
         !result.summaryMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !nonemptyItems(result.strengths + result.improvements + result.nextSteps).isEmpty
+            || result.explorations.contains(where: VoiceTutorExplorationPresentation.hasContent)
     }
 }
 

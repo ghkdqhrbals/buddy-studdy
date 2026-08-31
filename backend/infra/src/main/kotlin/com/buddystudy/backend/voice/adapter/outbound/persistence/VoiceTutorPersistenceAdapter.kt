@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice.adapter.outbound.persistence
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
+import com.buddystudy.backend.voice.adapter.outbound.VoiceTutorExplorationJsonCodec
 import com.buddystudy.backend.voice.application.model.ReserveVoiceTutorSessionResult
 import com.buddystudy.backend.voice.application.model.ReservedVoiceTutorSession
 import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
@@ -579,6 +580,7 @@ class VoiceTutorPersistenceAdapter(
                 result.strengths_json = :strengths,
                 result.improvements_json = :improvements,
                 result.next_steps_json = :nextSteps,
+                result.explorations_json = :explorations,
                 result.model = :model,
                 result.prompt_version = :promptVersion,
                 result.error_message = null,
@@ -590,6 +592,7 @@ class VoiceTutorPersistenceAdapter(
             .bind("strengths", mapper.writeValueAsString(generated.strengths))
             .bind("improvements", mapper.writeValueAsString(generated.improvements))
             .bind("nextSteps", mapper.writeValueAsString(generated.nextSteps))
+            .bind("explorations", VoiceTutorExplorationJsonCodec.encode(generated.explorations))
             .bind("model", generated.model).bind("promptVersion", generated.promptVersion)
             .bind("now", now.utc()).bind("sessionId", sessionId).bind("userId", userId)
             .fetch().rowsUpdated().awaitSingle()
@@ -875,6 +878,7 @@ class VoiceTutorPersistenceAdapter(
         errorMessage = get("error_message", String::class.java),
         createdAt = instant("created_at"),
         updatedAt = instant("updated_at"),
+        explorations = VoiceTutorExplorationJsonCodec.decode(get("explorations_json", String::class.java)),
     )
 
     private fun Row.quota() = QuotaRow(

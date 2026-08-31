@@ -9,9 +9,12 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolP
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAuthorizationPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
 import io.modelcontextprotocol.spec.McpSchema
@@ -19,6 +22,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.context.annotation.Lazy
 import org.springframework.stereotype.Component
+import org.slf4j.LoggerFactory
 import java.time.Clock
 
 /** A local bridge to the same MCP catalog and permission-checked handlers used over HTTP. */
@@ -31,7 +35,9 @@ class McpVoiceTutorToolAdapter(
     private val persistence: VoiceTutorPersistencePort,
     private val objectMapper: ObjectMapper,
     private val clock: Clock = Clock.systemUTC(),
+    private val studyContexts: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
 ) : VoiceTutorMcpToolPort {
+    private val logger = LoggerFactory.getLogger(javaClass)
     private val validator by lazy { McpJsonSchemaValidatorProvider.create() }
     private val specifications by lazy {
         mcp.tools().filter { it.tool().name() in ALLOWED_TOOLS }.associateBy { it.tool().name() }
@@ -82,7 +88,7 @@ class McpVoiceTutorToolAdapter(
                 if (!isAuthorized(context)) return inactiveCall()
             }
             val result = invoke(context.principal!!, specification, arguments)
-            return boundedResult(result, toolName)
+            return withLessonContext(context, boundedResult(result, toolName), toolName)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -185,6 +191,66 @@ class McpVoiceTutorToolAdapter(
         ).copy(studyTreeChanged = changed, createdStudyId = createdStudyId)
     }
 
+    private suspend fun withLessonContext(
+        context: VoiceTutorWebRtcControlContext,
+        result: VoiceTutorMcpToolResult,
+        toolName: String,
+    ): VoiceTutorMcpToolResult {
+        if (result.isError || toolName !in STUDY_CONTEXT_TOOLS) return result
+        val payload = objectMapper.readTree(result.output) as? ObjectNode ?: return result
+        val nodes = if (toolName == "list_studies") payload.path("studies").toList() else listOf(payload)
+        val ids = nodes.take(32).mapNotNull { node ->
+            node.path("id").takeIf { it.isIntegralNumber && it.canConvertToLong() && it.longValue() > 0 }
+                ?.longValue()
+        }.distinct()
+        if (ids.isEmpty()) return result
+        val snapshots = try {
+            studyContexts.remember(context.session.userId, context.session.id, ids)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // A study creation already committed. Do not turn metadata-cache failure into
+            // a false failed write that encourages the model to create the topic twice.
+            logger.warn("voice_tutor_study_context_capture_failed errorType={}", error.javaClass.simpleName)
+            emptyList()
+        }
+        val frozenIds = snapshots.mapTo(mutableSetOf()) { it.studyId }
+        payload.put("voiceLessonContextReady", nodes.size <= 32 && ids.all { it in frozenIds })
+        payload.set<JsonNode>(
+            "voiceLessonTopics",
+            objectMapper.valueToTree(snapshots.map { snapshot ->
+                linkedMapOf(
+                    "studyId" to snapshot.studyId,
+                    "parentStudyId" to snapshot.parentStudyId,
+                    "topic" to snapshot.topic,
+                    "difficulty" to snapshot.difficulty,
+                )
+            }),
+        )
+        val enriched = objectMapper.writeValueAsBytes(payload)
+        if (enriched.size <= MAX_OUTPUT_BYTES) return result.copy(output = String(enriched, Charsets.UTF_8))
+        if (result.studyTreeChanged) {
+            val compact = objectMapper.createObjectNode()
+            for (field in CREATED_TOPIC_FIELDS + listOf("voiceLessonTopics", "voiceLessonContextReady")) {
+                payload.get(field)?.let { compact.set<JsonNode>(field, it) }
+            }
+            compact.put("truncated", true)
+            compact.put("notice", "Topic creation succeeded. Only study-tree and lesson metadata are included.")
+            val compactBytes = objectMapper.writeValueAsBytes(compact)
+            if (compactBytes.size <= MAX_OUTPUT_BYTES) return result.copy(output = String(compactBytes, Charsets.UTF_8))
+            // Even an unusually large metadata capture must not imply that a
+            // successful creation failed or that mutable live levels are frozen.
+            return result.copy(output = objectMapper.writeValueAsString(mapOf(
+                "id" to result.createdStudyId,
+                "voiceLessonTopics" to emptyList<Any>(),
+                "voiceLessonContextReady" to false,
+                "truncated" to true,
+                "notice" to "Topic creation succeeded; lesson metadata is not ready. Do not repeat creation.",
+            )))
+        }
+        return failure("RESULT_TOO_LARGE", "Request a smaller study page to receive its lesson topic and difficulty metadata.")
+    }
+
     private fun inactiveCall() = failure("CALL_NOT_AUTHORIZED", "This call is no longer authorized to use study tools.")
 
     private fun failure(code: String, message: String) = VoiceTutorMcpToolResult(
@@ -202,6 +268,7 @@ class McpVoiceTutorToolAdapter(
             "list_studies", "get_study", CREATE_TOPIC,
             "list_records", "get_record", "get_topic_stats", "get_study_growth",
         )
+        val STUDY_CONTEXT_TOOLS = setOf("list_studies", "get_study", CREATE_TOPIC)
         val CREATED_TOPIC_FIELDS = listOf(
             "id", "parentStudyId", "topic", "sortOrder", "difficultyLevel", "activeForQuestions", "enabled",
         )

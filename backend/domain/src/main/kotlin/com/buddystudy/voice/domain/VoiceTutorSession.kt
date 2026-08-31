@@ -105,4 +105,5 @@ data class VoiceTutorResult(
     val errorMessage: String?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val explorations: List<VoiceTutorExploration> = emptyList(),
 )

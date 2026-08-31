@@ -1,5 +1,8 @@
 package com.buddystudy.backend.voice.application.model
 
+import com.buddystudy.voice.domain.VoiceTutorExchangeKind
+import com.buddystudy.voice.domain.VoiceTutorExploration
+import com.buddystudy.voice.domain.VoiceTutorLearningExchange
 import com.buddystudy.voice.domain.VoiceTutorResult
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorRecording
@@ -122,6 +125,27 @@ data class VoiceTutorResultResponse(
     val promptVersion: String,
     val errorMessage: String?,
     val createdAt: Instant,
+    val explorations: List<VoiceTutorExplorationResponse> = emptyList(),
+)
+
+data class VoiceTutorExplorationResponse(
+    val topic: String,
+    val studyId: Long?,
+    val difficulty: Int?,
+    val depthSummary: String,
+    val exchanges: List<VoiceTutorLearningExchangeResponse>,
+)
+
+data class VoiceTutorLearningExchangeResponse(
+    val kind: VoiceTutorExchangeKind,
+    val question: String,
+    val answer: String,
+    val score: Int?,
+    val strengths: List<String>,
+    val improvements: List<String>,
+    val questionTurnId: Long,
+    val answerTurnIds: List<Long>,
+    val feedbackTurnIds: List<Long>,
 )
 
 data class VoiceTutorSessionDetailResponse(
@@ -156,6 +180,7 @@ data class VoiceTutorGeneratedResult(
     val nextSteps: List<String>,
     val model: String,
     val promptVersion: String,
+    val explorations: List<VoiceTutorExploration> = emptyList(),
 )
 
 data class VoiceTutorRelayContext(
@@ -250,6 +275,27 @@ fun VoiceTutorResult.toResponse() = VoiceTutorResultResponse(
     promptVersion = promptVersion,
     errorMessage = errorMessage,
     createdAt = createdAt,
+    explorations = explorations.map(VoiceTutorExploration::toResponse),
+)
+
+fun VoiceTutorExploration.toResponse() = VoiceTutorExplorationResponse(
+    topic = topic,
+    studyId = studyId,
+    difficulty = difficulty,
+    depthSummary = depthSummary,
+    exchanges = exchanges.map(VoiceTutorLearningExchange::toResponse),
+)
+
+fun VoiceTutorLearningExchange.toResponse() = VoiceTutorLearningExchangeResponse(
+    kind = kind,
+    question = question,
+    answer = answer,
+    score = score,
+    strengths = strengths,
+    improvements = improvements,
+    questionTurnId = questionTurnId,
+    answerTurnIds = answerTurnIds,
+    feedbackTurnIds = feedbackTurnIds,
 )
 
 fun VoiceTutorRecording.toResponse(enabled: Boolean, retentionDays: Int, now: Instant) = VoiceTutorRecordingResponse(
