@@ -28,6 +28,8 @@ import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Pageable
+import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -59,6 +61,35 @@ class StudySyncService(
         } else {
             studies.findByUserIdAndQuery(principal.userId, search, pageable)
         }
+        return StudyPageResponse(
+            studies = page.content.toStudyRoomResponses(QuestionLanguage.normalize(language)),
+            totalCount = page.totalElements,
+            limit = limit,
+            offset = offset,
+            serverTime = Instant.now(),
+        )
+    }
+
+    @Transactional(readOnly = true)
+    override suspend fun study(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+        parentStudyId: Long,
+    ): StudyPageResponse {
+        if (parentStudyId <= 0 || limit !in 1..500 || offset < 0) {
+            throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR, "Invalid child study page.")
+        }
+        studies.findByIdAndUserId(parentStudyId, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        val page = studies.findByUserIdAndParentStudyId(
+            userId = principal.userId,
+            parentStudyId = parentStudyId,
+            query = query?.trim()?.takeIf { it.isNotEmpty() },
+            pageable = ChildStudyPageable(limit, offset.toLong()),
+        )
         return StudyPageResponse(
             studies = page.content.toStudyRoomResponses(QuestionLanguage.normalize(language)),
             totalCount = page.totalElements,
@@ -319,3 +350,22 @@ internal fun String.normalizedStudyTopicKey(): String =
     trim()
         .lowercase()
         .replace(Regex("\\s+"), " ")
+
+private data class ChildStudyPageable(
+    private val limit: Int,
+    private val exactOffset: Long,
+) : Pageable {
+    init {
+        require(limit > 0 && exactOffset >= 0)
+    }
+
+    override fun getPageNumber(): Int = (exactOffset / limit).toInt()
+    override fun getPageSize(): Int = limit
+    override fun getOffset(): Long = exactOffset
+    override fun getSort(): Sort = Sort.unsorted()
+    override fun next(): Pageable = copy(exactOffset = exactOffset + limit)
+    override fun previousOrFirst(): Pageable = copy(exactOffset = maxOf(0, exactOffset - limit))
+    override fun first(): Pageable = copy(exactOffset = 0)
+    override fun withPage(pageNumber: Int): Pageable = copy(exactOffset = pageNumber.toLong() * limit)
+    override fun hasPrevious(): Boolean = exactOffset > 0
+}

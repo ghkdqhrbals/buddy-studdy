@@ -67,9 +67,10 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "list_studies",
                 title = "List my studies",
-                description = "Return a bounded page of the authenticated user's study tree nodes and pending questions.",
+                description = "Return a bounded page of the authenticated user's study tree nodes and pending questions. Set parent_study_id to list only the direct saved children of an owned study, ordered by sibling position and ID; omit it to search all owned nodes.",
                 schema = pagedSchema(
                     additional = linkedMapOf(
+                        "parent_study_id" to idProperty("Optional owned parent study ID. Returns direct children only, not the parent or deeper descendants."),
                         "query" to stringProperty("Optional topic search.", maxLength = 200),
                         "language" to languageProperty(),
                     ),
@@ -78,13 +79,25 @@ class BuddyStudyMcpAdapter(
                 ),
                 readOnly = true,
             ) { principal, args ->
-                buddyStudy.listStudies(
-                    principal,
-                    args.int("limit", 100),
-                    args.int("offset", 0),
-                    args.optionalString("query"),
-                    args.string("language", "ko"),
-                )
+                val parentStudyId = args.optionalLong("parent_study_id")
+                if (parentStudyId == null) {
+                    buddyStudy.listStudies(
+                        principal,
+                        args.int("limit", 100),
+                        args.int("offset", 0),
+                        args.optionalString("query"),
+                        args.string("language", "ko"),
+                    )
+                } else {
+                    buddyStudy.listStudies(
+                        principal,
+                        args.int("limit", 100),
+                        args.int("offset", 0),
+                        args.optionalString("query"),
+                        args.string("language", "ko"),
+                        parentStudyId,
+                    )
+                }
             },
             tool(
                 name = "get_study",

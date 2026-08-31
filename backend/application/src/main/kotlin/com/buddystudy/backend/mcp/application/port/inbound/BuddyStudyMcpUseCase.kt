@@ -36,6 +36,15 @@ interface BuddyStudyMcpUseCase {
         language: String,
     ): StudyPageResponse
 
+    suspend fun listStudies(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+        parentStudyId: Long,
+    ): StudyPageResponse
+
     suspend fun getStudy(principal: Principal, studyId: Long, language: String): StudyRoomResponse
     suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
     suspend fun createStudyTopic(

@@ -159,7 +159,7 @@ class VoiceTutorWebRtcService(
         val callId = session.providerSessionId?.takeIf(PROVIDER_CALL_ID::matches) ?: throw conflict()
         if (!now.isBefore(session.hardEndsAt)) throw conflict()
         if (!controlClaims.claim(registered.userId, id, normalizedConnectionId, now)) throw conflict()
-        return VoiceTutorWebRtcControlContext(session, callId)
+        return VoiceTutorWebRtcControlContext(session, callId, registered)
     }
 
     override suspend fun relaySideband(

@@ -1,6 +1,7 @@
 package com.buddystudy.backend.config
 
 import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpPort
+import com.buddystudy.backend.mcp.adapter.inbound.McpJsonSchemaValidatorProvider
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.json.McpJsonMapper
@@ -65,6 +66,7 @@ class McpServerConfig {
         properties: BuddyStudyProperties,
     ): McpStatelessAsyncServer = McpServer.async(transport)
         .jsonMapper(jsonMapper)
+        .jsonSchemaValidator(McpJsonSchemaValidatorProvider.create())
         .serverInfo("buddystudy-mcp", "0.1.0")
         .instructions(SERVER_INSTRUCTIONS)
         .requestTimeout(Duration.ofSeconds(properties.mcp.requestTimeoutSeconds.coerceIn(5, 120)))

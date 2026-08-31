@@ -6,6 +6,8 @@ import com.buddystudy.backend.config.VoiceTutorInputAssessmentProperties
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMcpToolPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcAnswer
@@ -49,6 +51,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
     private val properties: BuddyStudyProperties,
     private val inputAssessment: VoiceTutorInputAssessmentUseCase,
     private val inputAssessmentProperties: VoiceTutorInputAssessmentProperties = VoiceTutorInputAssessmentProperties(),
+    private val mcpTools: VoiceTutorMcpToolPort = UnavailableVoiceTutorMcpToolPort,
 ) : VoiceTutorWebRtcPort {
     private val mapper = JsonMapperProvider.mapper
     private val httpClient = HttpClient.create().responseTimeout(
@@ -145,6 +148,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
             val sessionHandshake = VoiceTutorWebRtcSessionHandshake(
                 validatedCallId,
                 Duration.ofSeconds(properties.voiceTutor.connectTimeoutSeconds.coerceIn(5, 300)),
+                expectedTools = voiceTutorRealtimeFunctionTools(mcpTools.definitions()),
             )
             val turnController = VoiceTutorDuplexTurnController(
                 mapper = mapper,
@@ -156,6 +160,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 ),
                 transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
                 inputCoordinator = VoiceTutorInputTurnCoordinator(limits = inputAssessmentProperties),
+                toolsEnabled = mcpTools.definitions().isNotEmpty(),
             )
             val terminal = terminalEvents.asFlux()
                 .next()
@@ -226,7 +231,8 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 assessment = inputAssessment,
                 onProviderEvent = onProviderEvent,
             )
-            val receive = Mono.firstWithSignal(providerReceive, turnController.inputFailure(), inputWork)
+            val toolWork = voiceTutorMcpToolRelay(turnController, context, mcpTools, onProviderEvent)
+            val receive = Mono.firstWithSignal(providerReceive, turnController.inputFailure(), inputWork, toolWork)
             val ready = sessionHandshake.awaitConfirmation().then(
                 mono {
                     onProviderEvent(SIDEBAND_READY_PAYLOAD, false, true)
@@ -265,6 +271,8 @@ class OpenAIVoiceTutorWebRtcAdapter(
             "model" to request.model,
             "instructions" to request.instructions,
             "output_modalities" to listOf("audio"),
+            "tools" to voiceTutorRealtimeFunctionTools(mcpTools.definitions()),
+            "tool_choice" to "auto",
             "audio" to linkedMapOf(
                 "input" to linkedMapOf(
                     "transcription" to mapOf("model" to "gpt-4o-mini-transcribe"),

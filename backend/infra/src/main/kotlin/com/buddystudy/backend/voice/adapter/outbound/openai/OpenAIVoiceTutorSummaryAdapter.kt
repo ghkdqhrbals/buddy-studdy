@@ -9,21 +9,34 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSummaryPort
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.reactor.awaitSingle
+import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
+import org.springframework.web.reactive.function.client.ExchangeFunction
 import org.springframework.web.reactive.function.client.WebClient
+import reactor.core.publisher.Mono
 import java.time.Duration
 
 @Component
-class OpenAIVoiceTutorSummaryAdapter(
+class OpenAIVoiceTutorSummaryAdapter private constructor(
     private val keys: UserContentOpenAIKeyProvider,
     private val properties: BuddyStudyProperties,
+    private val client: WebClient,
 ) : VoiceTutorSummaryPort {
+    @Autowired
+    constructor(keys: UserContentOpenAIKeyProvider, properties: BuddyStudyProperties) :
+        this(keys, properties, client())
+
+    internal constructor(keys: UserContentOpenAIKeyProvider, properties: BuddyStudyProperties, exchange: ExchangeFunction) :
+        this(keys, properties, client(exchange))
+
     private val mapper = JsonMapperProvider.mapper
-    private val client = WebClient.builder().baseUrl(OPENAI_BASE_URL).build()
+    private val logger = LoggerFactory.getLogger(javaClass)
 
     override suspend fun summarize(
         session: VoiceTutorSession,
@@ -31,7 +44,7 @@ class OpenAIVoiceTutorSummaryAdapter(
     ): VoiceTutorGeneratedResult {
         val transcriptText = transcript.joinToString("\n") { turn ->
             "${turn.role.name}: ${turn.transcript}"
-        }.take(properties.voiceTutor.transcriptMaxCharacters)
+        }.take(properties.voiceTutor.transcriptMaxCharacters.coerceIn(1, 1_000_000))
         val outputLanguage = when (session.language) {
             "ko" -> "Korean"
             "ja" -> "Japanese"
@@ -40,37 +53,52 @@ class OpenAIVoiceTutorSummaryAdapter(
         val body = mapOf(
             "model" to properties.voiceTutor.summaryModel,
             "response_format" to mapOf("type" to "json_object"),
+            "store" to false,
+            "max_completion_tokens" to 4_096,
             "messages" to VoiceTutorSummaryPromptProvider.messages(session, transcriptText, outputLanguage),
         )
         val response = try {
+            val key = keys.requireApiKey()
             client.post()
                 .uri("/v1/chat/completions")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer ${keys.requireApiKey()}")
-                .header(
-                    "OpenAI-Safety-Identifier",
-                    VoiceTutorSafetyIdentifier.create(session.userId, properties.openai.userContentApiKey),
-                )
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $key")
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(String::class.java)
+                .bodyValue(body + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(session.userId, key)))
+                .exchangeToMono { result ->
+                    if (result.statusCode().is2xxSuccessful) {
+                        result.bodyToMono(String::class.java)
+                    } else {
+                        logger.warn("voice_tutor_summary_provider_rejected status={}", result.statusCode().value())
+                        // Provider bodies can echo private transcript or key
+                        // material. Discard rather than retain them in errors.
+                        result.releaseBody().then(Mono.error(providerFailure()))
+                    }
+                }
                 .timeout(Duration.ofSeconds(properties.openai.requestTimeoutSeconds.coerceIn(5, 180)))
                 .awaitSingle()
-        } catch (_: Throwable) {
-            throw ApiException(
-                HttpStatus.SERVICE_UNAVAILABLE,
-                ApiErrorCode.VOICE_TUTOR_PROVIDER_UNAVAILABLE,
-                "Voice Tutor summary provider failed.",
-            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            logger.warn("voice_tutor_summary_provider_failed errorType={}", error.javaClass.simpleName)
+            throw providerFailure()
         }
-        val root = mapper.readTree(response)
-        val content = root.path("choices").path(0).path("message").path("content").asText()
-        val result = runCatching { mapper.readTree(content) }.getOrElse {
-            throw ApiException(
-                HttpStatus.SERVICE_UNAVAILABLE,
-                ApiErrorCode.VOICE_TUTOR_PROVIDER_UNAVAILABLE,
-                "Voice Tutor summary response was invalid.",
-            )
+        val root = runCatching { mapper.readTree(response) }.getOrNull()
+            ?: invalidResponse("INVALID_JSON")
+        val choices = root.path("choices")
+        if (!choices.isArray || choices.size() != 1) invalidResponse("INVALID_CHOICES")
+        val choice = choices[0]
+        if (choice.path("finish_reason").asText() != "stop") invalidResponse("INCOMPLETE_OUTPUT")
+        val message = choice.path("message")
+        if (message.hasNonNull("refusal")) invalidResponse("REFUSAL")
+        if (!message.path("content").isTextual) invalidResponse("INVALID_CONTENT")
+        val result = runCatching { mapper.readTree(message.path("content").textValue()) }.getOrNull()
+            ?: invalidResponse("INVALID_CONTENT_JSON")
+        if (!result.isObject || !result.path("summaryMarkdown").isTextual ||
+            listOf("strengths", "improvements", "nextSteps").any { field ->
+                !result.path(field).isArray || result.path(field).any { !it.isTextual }
+            }
+        ) {
+            invalidResponse("INVALID_RESULT_SHAPE")
         }
         val summary = VoiceTutorLearningResultSanitizer.plainText(result.path("summaryMarkdown").asText())
         if (summary.isEmpty()) {
@@ -97,11 +125,30 @@ class OpenAIVoiceTutorSummaryAdapter(
                 ?.take(MAX_ITEM_CHARACTERS)
         }?.take(MAX_ITEMS).orEmpty()
 
+    private fun invalidResponse(reason: String): Nothing {
+        logger.warn("voice_tutor_summary_response_invalid reason={}", reason)
+        throw ApiException(
+            HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.VOICE_TUTOR_PROVIDER_UNAVAILABLE,
+            "Voice Tutor summary response was invalid.",
+        )
+    }
+
     private companion object {
         const val OPENAI_BASE_URL = "https://api.openai.com"
         const val MAX_SUMMARY_CHARACTERS = 20_000
         const val MAX_ITEM_CHARACTERS = 500
         const val MAX_ITEMS = 10
+
+        fun client(exchange: ExchangeFunction? = null): WebClient = WebClient.builder()
+            .baseUrl(OPENAI_BASE_URL)
+            .codecs { it.defaultCodecs().maxInMemorySize(128 * 1024) }
+            .also { builder -> if (exchange != null) builder.exchangeFunction(exchange) }
+            .build()
+
+        fun providerFailure() = ApiException(
+            HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.VOICE_TUTOR_PROVIDER_UNAVAILABLE,
+            "Voice Tutor summary provider failed.",
+        )
     }
 }
 
@@ -119,7 +166,8 @@ internal object VoiceTutorSummaryPromptProvider {
         mapOf(
             "role" to "user",
             "content" to "Summarize the supplied AI tutoring session as a compact factual learning record in $outputLanguage. " +
-                "Return JSON only with keys summaryMarkdown, strengths, improvements, and nextSteps.",
+                "Return JSON only with keys summaryMarkdown, strengths, improvements, and nextSteps. " +
+                "summaryMarkdown must be a string; strengths, improvements, and nextSteps must be arrays of strings.",
         ),
         mapOf(
             "role" to "user",

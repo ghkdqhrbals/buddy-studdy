@@ -5,6 +5,8 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
+import com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorSidebandBranch
+import com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorUnexpectedSidebandCloseException
 import com.buddystudy.backend.voice.application.model.VoiceTutorQuotaResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
@@ -157,6 +159,58 @@ class VoiceTutorControlWebSocketHandlerTest {
     }
 
     @Test
+    fun `provider close after explicit client end does not turn a finished lesson into a failure`() {
+        listOf(1000, 1006, null).forEach { code ->
+            withControlLogs { logs ->
+                val result = runControlScenario(
+                    clientPayload = """{"type":"buddystudy.voice.session.end"}""",
+                    provider = { _, terminal ->
+                        assertThat(terminal.first().cancelActiveResponse).isTrue()
+                        throw VoiceTutorUnexpectedSidebandCloseException(VoiceTutorSidebandBranch.RECEIVE, code)
+                    },
+                    closeStatus = Mono.never(),
+                )
+
+                assertThat(result.failed).isFalse()
+                assertThat(result.reason).isEqualTo("USER_ENDED")
+                assertThat(result.finishCalls).isEqualTo(1)
+                assertThat(result.closeObserverDisposed.get()).isTrue()
+                val messages = logs.list.map { it.formattedMessage }
+                assertThat(messages.filter { it.startsWith("voice_tutor_control_terminal ") })
+                    .singleElement().asString().contains("source=CLIENT_END", "reason=USER_ENDED", "errorType=none")
+                assertThat(messages.none { it.startsWith("voice_tutor_webrtc_sideband_failed ") }).isTrue()
+            }
+        }
+    }
+
+    @Test
+    fun `a provider close before any local end remains a failed call`() {
+        val result = runControlScenario(
+            provider = { _, _ -> throw VoiceTutorUnexpectedSidebandCloseException(VoiceTutorSidebandBranch.RECEIVE, 1006) },
+        )
+        assertThat(result.failed).isTrue()
+        assertThat(result.reason).isEqualTo("PROVIDER_ERROR")
+        assertThat(result.finishCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `a client end triggered by a provider error notification cannot overwrite that earlier error`() {
+        withControlLogs { logs ->
+            val result = runControlScenario(
+                providerEventBeforeCompletion = """{"type":"output_audio_buffer.cleared","response_id":"private-error-response"}""",
+                clientEndsOnProviderError = true,
+                provider = { _, _ -> },
+            )
+            assertThat(result.failed).isTrue()
+            assertThat(result.reason).isEqualTo("PROVIDER_ERROR")
+            assertThat(result.finishCalls).isEqualTo(1)
+            assertThat(result.clientEndAfterErrorSent).isTrue()
+            assertThat(logs.list.map { it.formattedMessage }.filter { it.startsWith("voice_tutor_control_terminal ") })
+                .singleElement().asString().contains("source=PROVIDER_EVENT_ERROR", "reason=PROVIDER_ERROR")
+        }
+    }
+
+    @Test
     fun `client receive completion is distinguishable from provider completion`() {
         withControlLogs { logs ->
             val result = runControlScenario(
@@ -252,6 +306,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         closeStatus: Mono<CloseStatus> = Mono.empty(),
         turnProtocol: String? = VoiceTutorRealtimeContract.LOCAL_VAD_TURN_PROTOCOL,
         onClose: (CloseStatus) -> Unit = {},
+        onServerMessage: (String) -> Unit = {},
     ): WebSocketSession {
         val buffers = DefaultDataBufferFactory.sharedInstance
         val authentication = UsernamePasswordAuthenticationToken.authenticated(principal, "", emptyList())
@@ -275,7 +330,10 @@ class VoiceTutorControlWebSocketHandlerTest {
                 "receive" -> receive
                 "send" -> Flux.from(arguments!![0] as Publisher<*>)
                     .cast(WebSocketMessage::class.java)
-                    .doOnNext { sent += it.payloadAsText }
+                    .doOnNext {
+                        sent += it.payloadAsText
+                        onServerMessage(it.payloadAsText)
+                    }
                     .then()
                 "isOpen" -> true
                 "close" -> {
@@ -298,6 +356,8 @@ class VoiceTutorControlWebSocketHandlerTest {
     private class ControlResult {
         var reason: String? = null
         var failed: Boolean? = null
+        var finishCalls = 0
+        var clientEndAfterErrorSent = false
         val closeObserverDisposed = AtomicBoolean()
     }
 
@@ -307,6 +367,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         closeStatus: Mono<CloseStatus> = Mono.empty(),
         providerEventBeforeCompletion: String? = null,
         clientAfterReady: List<String> = emptyList(),
+        clientEndsOnProviderError: Boolean = false,
         provider: suspend (Flow<String>, Flow<VoiceTutorRelayTermination>) -> Unit,
     ): ControlResult {
         val now = Instant.now()
@@ -359,6 +420,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         val relay = proxy<VoiceTutorRelayUseCase> { method, arguments ->
             when (method) {
                 "finishWebRtc" -> {
+                    result.finishCalls += 1
                     result.reason = arguments[3] as String
                     result.failed = arguments[4] as Boolean
                     detail(session, now)
@@ -375,7 +437,7 @@ class VoiceTutorControlWebSocketHandlerTest {
                 else -> error("Unexpected VoiceTutorUseCase call: $method")
             }
         }
-        val messages = if (clientAfterReady.isNotEmpty()) afterReady.asFlux() else clientPayload?.let {
+        val messages = if (clientAfterReady.isNotEmpty() || clientEndsOnProviderError) afterReady.asFlux() else clientPayload?.let {
             Flux.just(
                 WebSocketMessage(
                     WebSocketMessage.Type.TEXT,
@@ -386,6 +448,16 @@ class VoiceTutorControlWebSocketHandlerTest {
         val socket = webSocket(
             principal, messages, mutableListOf(),
             closeStatus.doFinally { result.closeObserverDisposed.set(true) },
+            onServerMessage = { raw ->
+                if (clientEndsOnProviderError && JsonType.type(raw) == "buddystudy.voice.error") {
+                    val emitted = afterReady.tryEmitNext(WebSocketMessage(
+                        WebSocketMessage.Type.TEXT,
+                        DefaultDataBufferFactory.sharedInstance.wrap("""{"type":"buddystudy.voice.session.end"}""".toByteArray()),
+                    ))
+                    assertThat(emitted).isEqualTo(Sinks.EmitResult.OK)
+                    result.clientEndAfterErrorSent = true
+                }
+            },
         )
         VoiceTutorControlWebSocketHandler(
             webRtc, relay, voiceTutor, VoiceTutorRealtimeMetrics(SimpleMeterRegistry()),

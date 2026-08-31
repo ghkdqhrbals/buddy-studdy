@@ -292,6 +292,7 @@ class VoiceTutorWebRtcServiceTest {
 
         assertThat(context.session).isEqualTo(expected)
         assertThat(context.callId).isEqualTo("rtc_call-1")
+        assertThat(context.principal).isSameAs(principal)
         assertThat(calls.claim).isEqualTo(1)
         assertThat(calls.heartbeat).isZero()
     }

@@ -852,3 +852,151 @@ The earlier test results remain historical evidence, not the current turn gate.
   GPT. Provider/parse failure becomes `FAILED`, not an automatic retry; an
   abandoned `PROCESSING` lease can be reclaimed after 300 seconds. No new MCP
   integration, worker container or infrastructure is needed for this flow.
+
+## 2026-08-31 — voice MCP tools and learning-summary repair
+
+This section supersedes the outstanding polling/cache defect identified in the
+read-only inspection above. It does not change the continuous WebRTC media path,
+the contextual meaningful-input classifier, or the user's 60-minute allowance.
+
+### Confirmed causes and implementation
+
+- The existing MCP catalog exposed study tools, but the voice session registered
+  no tools and had no function-call/result execution path. Its instructions
+  explicitly forbade app-data creation. An enabled HTTP MCP endpoint alone
+  cannot make the voice LLM aware of those capabilities.
+- The voice backend now registers seven existing MCP definitions, verifies
+  their schemas and tool-choice setting in the provider's session-update ACK,
+  and invokes those same permission-checked handlers through a local bridge.
+  The model receives neither the app bearer nor an MCP access token. Writes
+  are restricted to explicitly requested child topics in the current study's
+  subtree; root creation, deletion, question generation and call control remain
+  unavailable as voice tools.
+- `get_study` is a single-node read, not a child list. The existing
+  `list_studies` tool now supports an owner-checked `parent_study_id` filter,
+  with matching count/page predicates and exact offsets. Omitting it preserves
+  the original catalog behavior. Creation still uses the existing study use
+  case and does not consume question quota.
+- A bounded, serial worker executes only correlated, completed function calls.
+  The exact output item/call acknowledgement releases a follow-up response.
+  Proven function-only responses do not wait for an audio-stop event that will
+  never arrive; mixed speech/tool responses still wait for playback completion.
+  Input classification, accepted-transcript persistence and filler-deletion
+  acknowledgement remain independent gates. No cancel, buffer-clear, truncate,
+  microphone reset or RTP restart was added.
+- Each call allows at most eight tools per response, six tool rounds per learner
+  turn and 256 tool-call IDs per session. Arguments/results are valid JSON
+  bounded to 16 KiB; execution and output ACK have separate 15-second deadlines.
+  Duplicate IDs cannot repeat writes, and an uncertain timed-out mutation is
+  not automatically replayed or represented as confirmed success.
+- Successful child creation publishes only its numeric study ID to the app.
+  An identity/attempt-fenced read refreshes that study's metadata through the
+  existing store, preserving pending questions and answer drafts. Private tool
+  arguments/results are not forwarded to the UI or diagnostic logs.
+- Read-only incident inspection found a normal `CLIENT_END` followed by a late
+  provider close. The transport error was copied into a failed result about
+  7.7 ms after call end, with no model recorded: this was not evidence that GPT
+  summary generation failed. The first terminal reason/error now settles
+  atomically, and a late close cannot overwrite a completed call or summary.
+- A failed transport with usable persisted transcript can still be summarized.
+  The existing scheduler also recovers only the narrow legacy signature where
+  the result error is the copied call error and no model was used. Actual model
+  failures remain terminal; cancellation or persistence failure retains the
+  existing recoverable processing lease. Completed results and settled usage
+  are preserved. No manual transcript, summary or quota update is used.
+- Summary generation remains a server-side, bounded GPT request over saved
+  final transcript text, not an audio upload. Response finish reason, refusal,
+  size and JSON shape are validated, with fixed safe failure diagnostics.
+  Detail responses project status and content from the same result-row read,
+  avoiding stale top-level `FAILED` combined with newly completed content.
+- The app now distinguishes pending/processing, completed, empty and failed
+  results. Both call and history screens use at most eight identity-fenced
+  detail reads with bounded delays. Reopening history refreshes cached data;
+  the compact recheck action reads the existing result and does not start a new
+  generation request. A processing placeholder is not treated as completion.
+
+### Actual provider protocol check
+
+- A bounded synthetic check used the existing dev regular API credential only
+  in process memory and one Realtime WebSocket session per attempt. It supplied
+  synthetic study IDs and mocked tool results, with no real MCP business write,
+  microphone, app session, recording file or quota reservation.
+- The first attempt exposed a real Realtime contract violation: the generated
+  function-result item ID was 38 characters, and the provider rejected it with
+  `string_above_max_length`. Production and probe IDs were corrected to the
+  32-character maximum, and a regression assertion preserves that bound.
+- The subsequent bounded attempt passed: one provider session, four responses,
+  two actual model-selected tool calls (child lookup and child creation), two
+  spoken results, 571,200 generated audio bytes, verified session schemas and
+  matching `conversation.item.added` acknowledgements. No output transcript or
+  audio was saved. Local diagnostic: `build/probeVoiceMcpProtocol.py`.
+- This proves actual model tool selection, output acknowledgement and subsequent
+  audio generation for those synthetic exchanges. It is not a physical iPhone
+  microphone → live ASR → production MCP write → audible speaker end-to-end
+  pass. Real ownership/persistence integration is covered separately by mock
+  and in-memory repository tests, not asserted from the synthetic provider run.
+
+### Physical iPhone verification
+
+- The generic iOS Debug build passed using `StudyMateiOS`,
+  `generic/platform=iOS`, `CODE_SIGNING_ALLOWED=NO` and the existing
+  `build/iOSDeviceDerivedData`. Log: `build/voiceSummaryMcpGenericBuild.log`.
+- A signed build-for-testing and explicit selection on the iPhone 16 Pro,
+  iOS 26.6, passed 136 tests with zero failures or skips: 76 existing call
+  contracts, four new MCP event contracts, 25 offline Silero/pipeline contracts,
+  and 31 summary/metadata-refresh tests. The latter include bounded polling,
+  stale identity/attempt completion, processing placeholders, final-attempt
+  completion, read failure and preservation of active drafts/questions.
+  Logs: `build/voiceSummaryMcpDeviceTestBuild.log`,
+  `build/voiceSummaryMcpDeviceTests.log`; result bundle:
+  `Test-StudyMateiOS-2026.08.31_20-12-06-+0900.xcresult`.
+- No microphone, provider request, audio purge, account mutation or recording
+  test ran in that selection. Afterward a normal signed build and strict
+  signature verification passed. The normal app contained the Silero model and
+  MIT notice, with no injected XCTest plug-in/framework. It was installed and
+  launched with the unchanged `https://lowfidev.cloud` dev base URL; active call
+  count was zero before install, before launch and after launch. Logs:
+  `build/voiceSummaryMcpSignedBuildFinal.log`,
+  `build/voiceSummaryMcpDeviceInstall.log`,
+  `build/voiceSummaryMcpDeviceLaunch.log`.
+
+### Backend verification and test-environment findings
+
+- The first focused run exposed a runtime dependency conflict: Spring AI 2.x
+  selected NetworkNT's Jackson 3 ABI, while the MCP SDK selected its Jackson 2
+  validator. Nineteen schema-dependent tests failed with `NoSuchMethodError`.
+  Both the HTTP server and voice bridge now explicitly use the SDK's Jackson 3
+  validator with JSON-compatible map boundaries. Input, output and meta-schema
+  checks remain enabled; validator errors are redacted before SDK logging.
+  HTTP MCP fixtures subsequently passed all eight tests, and the existing
+  OpenAI/Spring AI routing plus structured-output advisor tests passed.
+- A preliminary `tutor:test` invocation revealed that Graal's `processTestAot`
+  initializes all Spring test contexts before JUnit's `--tests` selection. It
+  briefly started an isolated MySQL Testcontainer and its Ryuk helper and
+  attempted the optional default-dev secret import. The build was stopped
+  before test methods ran. Testcontainers removed both temporary containers;
+  Docker metadata confirmed their destruction and unchanged existing database
+  and Redis container IDs/start times. No application voice/model test or
+  production deployment occurred in that invocation.
+- The final focused run explicitly excludes the five test-AOT tasks, with its
+  task graph checked first. Pure HTTP/permission fixtures and H2 repository
+  tests require no new infrastructure. Newly added MySQL summary persistence
+  integration cases compile but are not claimed as executed in this turn.
+- The final 37-suite regression report contains 479 unique tests: 478 passed,
+  zero failed and one explicitly opt-in paid classifier test skipped.
+  Application: 105 passed; infrastructure: 363 passed plus one skipped;
+  tutor: ten passed. This includes H2/loopback verification, not only unit
+  tests. No provider request or real app-data write occurs in that selected
+  regression run. Log: `build/voiceMcpSummaryFinalRegression.log`.
+- Coverage includes 13 function-relay tests, two actual input-coordinator/tool
+  ordering tests, 33 session-tool configuration cases, 23 MCP voice bridge
+  tests, five direct-child repository pagination cases, explicit SDK schema
+  validation and Spring AI compatibility, HTTP MCP/permission boundaries,
+  first-terminal ordering, summary recovery policy and 35 voice service cases
+  including the three detail-snapshot regressions.
+- The normal main `processAot` and `bootJar` then passed with the existing
+  explicit `aot` profile and build-only configuration; only test AOT was
+  excluded. This main build created no Testcontainer and imported no dev
+  secret. Log: `build/voiceMcpSummaryFinalMainAotJar.log`. The final artifact
+  is 330,667,522 bytes with SHA-256
+  `8c73d7b8fc80ef0a5431add049b305458fde9213b4a266c1b5175ddf18379b7a`.

@@ -73,6 +73,51 @@ scoped by the authenticated principal. The MCP composition service has an
 explicit `@RequirePermission` boundary on every public operation, including
 operations whose legacy controller was the only previous permission boundary.
 
+The HTTP server and local voice bridge explicitly select the SDK's Jackson 3
+JSON Schema validator through `McpJsonSchemaValidatorProvider`. Spring AI 2.x
+uses NetworkNT's Jackson 3 ABI; selecting the SDK's Jackson 2 validator by
+classpath order would fail at runtime. Serialization remains on the existing
+application mapper and crosses the validator boundary as JSON-compatible maps.
+Input, output and schema validation stay enabled. Invalid-result diagnostics
+are replaced with fixed text before the SDK logging wrapper can quote private
+arguments or tool results.
+
+## Voice LLM integration
+
+An enabled MCP HTTP endpoint does not itself teach the voice model its tools.
+For an authenticated WebRTC call, the backend registers the existing
+`list_studies`, `get_study`, `create_study_topic`, `list_records`, `get_record`,
+`get_topic_stats`, and `get_study_growth` definitions as Realtime function tools.
+The server's local `McpVoiceTutorToolAdapter` executes those same MCP handlers
+with the captured, revalidated principal and returns a bounded
+`function_call_output`; the model receives neither an app bearer nor a new MCP
+access token. This local bridge does not enable the external HTTP endpoint or
+change its production rollout gate.
+
+- `list_studies` optionally accepts `parent_study_id` to page only the direct
+  children of an owned parent. Missing/foreign parents are indistinguishable
+  404s, the count and page share the owner/parent/query filter, and omitting the
+  argument preserves the existing all-studies behavior. `get_study` returns a
+  single node, not a child-topic list.
+- Child creation requires an explicit learner request and an unambiguous parent
+  inside the call's selected study subtree. Schema validation, active identity,
+  parent scope and the existing use-case permissions are all enforced before
+  the write. Root creation, deletion, question requests, answer submission,
+  profile writes and call/recording control are not voice tools.
+- Function calls are correlated to a completed response and executed serially
+  off the provider receive loop. IDs are registered before execution, output
+  acknowledgement gates the spoken continuation, and timeouts never blindly
+  retry an uncertain mutation. JSON arguments and results are capped at 16 KiB;
+  large reads ask for a smaller page, while large successful creation results
+  retain compact verified study-tree metadata.
+- Audio and transcripts are not sent through MCP. Successful child metadata
+  refreshes never replace the active question or answer draft. Logs expose
+  counts, fixed error codes and types only, not arguments or result bodies.
+
+See [OpenAI's Realtime tool guidance](https://developers.openai.com/api/docs/guides/realtime-mcp)
+for the distinction between server-owned functions and a provider-hosted remote
+MCP connection.
+
 ## Transport and connection
 
 - Endpoint: `https://api.ghkdqhrbals.org/api/v1/mcp`

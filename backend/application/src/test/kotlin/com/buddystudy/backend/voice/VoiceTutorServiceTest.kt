@@ -31,6 +31,7 @@ import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.Flow
 import org.assertj.core.api.Assertions.assertThat
@@ -537,6 +538,202 @@ class VoiceTutorServiceTest {
     }
 
     @Test
+    fun `a failed call with saved speech generates one summary without rewriting its transport outcome`() = runBlocking<Unit> {
+        val persistence = summaryFixture().apply {
+            session = session.copy(
+                status = VoiceTutorSessionStatus.ACTIVE,
+                finalizedAt = null,
+                endedAt = null,
+                chargedSeconds = 109,
+            )
+        }
+        val summaries = FakeSummary()
+        val service = service(persistence, summaries = summaries)
+
+        val ended = service.finish(principal, persistence.session.id, "PROVIDER_ERROR", true, "Realtime provider connection failed.")
+        assertThat(ended.state).isEqualTo(VoiceTutorSessionStatus.FAILED)
+        assertThat(ended.resultStatus).isEqualTo(VoiceTutorResultStatus.PENDING)
+        assertThat(persistence.failedResultCalls).isZero()
+        val finalized = persistence.session
+        persistence.awaiting = listOf(finalized)
+        service.recoverPendingResults(10)
+        service.recoverPendingResults(10)
+
+        assertThat(summaries.calls).isEqualTo(1)
+        assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+        assertThat(persistence.session.status).isEqualTo(VoiceTutorSessionStatus.FAILED)
+        assertThat(persistence.session.chargedSeconds).isEqualTo(finalized.chargedSeconds)
+        assertThat(persistence.session.endReason).isEqualTo(finalized.endReason)
+        assertThat(persistence.session.failureCode).isEqualTo(finalized.failureCode)
+        assertThat(persistence.session.failureMessage).isEqualTo(finalized.failureMessage)
+        assertThat(persistence.completedResult?.summaryMarkdown).isEqualTo("학습 요약")
+    }
+
+    @Test
+    fun `a failed call without saved speech fails its result without calling the summary provider`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val summaries = FakeSummary()
+        val service = service(persistence, summaries = summaries)
+
+        val ended = service.finish(principal, persistence.session.id, "PROVIDER_ERROR", true, "Realtime provider connection failed.")
+
+        assertThat(ended.resultStatus).isEqualTo(VoiceTutorResultStatus.FAILED)
+        assertThat(persistence.failedResultCalls).isEqualTo(1)
+        assertThat(persistence.storedResult?.errorMessage).isEqualTo("Realtime provider connection failed.")
+        assertThat(summaries.calls).isZero()
+    }
+
+    @Test
+    fun `a late failed finish cannot poison a normally finalized pending summary`() = runBlocking<Unit> {
+        val persistence = summaryFixture().apply { turns = emptyList() }
+        val service = service(persistence)
+
+        val ended = service.finish(principal, persistence.session.id, "PROVIDER_ERROR", true, "Late close failure.")
+
+        assertThat(ended.state).isEqualTo(VoiceTutorSessionStatus.COMPLETED)
+        assertThat(ended.resultStatus).isEqualTo(VoiceTutorResultStatus.PENDING)
+        assertThat(persistence.failedResultCalls).isZero()
+        assertThat(persistence.session.failureMessage).isNull()
+    }
+
+    @Test
+    fun `a duplicate failed finish preserves the completed learning result`() = runBlocking<Unit> {
+        val persistence = summaryFixture()
+        val service = service(persistence)
+        service.recoverPendingResults(10)
+        val completed = persistence.storedResult
+
+        service.finish(principal, persistence.session.id, "PROVIDER_ERROR", true, "Late close failure.")
+
+        assertThat(persistence.storedResult).isEqualTo(completed)
+        assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+        assertThat(persistence.failedResultCalls).isZero()
+    }
+
+    @Test
+    fun `summary cancellation retains the processing lease instead of a terminal failure`() = runBlocking<Unit> {
+        val persistence = summaryFixture()
+        val cancellation = CancellationException("Synthetic worker cancellation.")
+        val service = service(persistence, summaries = object : VoiceTutorSummaryPort {
+            override suspend fun summarize(session: VoiceTutorSession, transcript: List<VoiceTutorTranscriptTurn>): VoiceTutorGeneratedResult =
+                throw cancellation
+        })
+
+        val error = runCatching { service.recoverPendingResults(10) }.exceptionOrNull()
+
+        assertThat(error).isSameAs(cancellation)
+        assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.PROCESSING)
+        assertThat(persistence.failedResultCalls).isZero()
+    }
+
+    @Test
+    fun `a real summary provider failure is terminal and never copies private exception content`() = runBlocking<Unit> {
+        val persistence = summaryFixture()
+        var calls = 0
+        val service = service(persistence, summaries = object : VoiceTutorSummaryPort {
+            override suspend fun summarize(session: VoiceTutorSession, transcript: List<VoiceTutorTranscriptTurn>): VoiceTutorGeneratedResult {
+                calls += 1
+                throw IllegalStateException("PRIVATE_PROVIDER_BODY")
+            }
+        })
+
+        service.recoverPendingResults(10)
+        service.recoverPendingResults(10)
+
+        assertThat(calls).isEqualTo(1)
+        assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.FAILED)
+        assertThat(persistence.storedResult?.errorMessage).isEqualTo("Voice Tutor summary generation failed.")
+        assertThat(persistence.storedResult?.errorMessage).doesNotContain("PRIVATE_PROVIDER_BODY")
+    }
+
+    @Test
+    fun `a result persistence error keeps the processing lease recoverable`() = runBlocking<Unit> {
+        val persistence = summaryFixture().apply { completeResultError = IllegalStateException("Synthetic database outage.") }
+        val summaries = FakeSummary()
+
+        service(persistence, summaries = summaries).recoverPendingResults(10)
+
+        assertThat(summaries.calls).isEqualTo(1)
+        assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.PROCESSING)
+        assertThat(persistence.failedResultCalls).isZero()
+    }
+
+    private fun summaryFixture() = FakePersistence(now).apply {
+        session = session.copy(
+            status = VoiceTutorSessionStatus.COMPLETED,
+            connectedAt = now.minusSeconds(109),
+            endedAt = now,
+            finalizedAt = now,
+            chargedSeconds = 109,
+            endReason = "USER_ENDED",
+        )
+        awaiting = listOf(session)
+        turns = listOf(
+            VoiceTutorTranscriptTurn(1, session.id, "synthetic-item", VoiceTutorTranscriptRole.USER, "actor가 무엇인가요?", 1, now),
+        )
+    }
+
+    @Test
+    fun `detail projects recovered result status and content from the same result snapshot`() = runBlocking<Unit> {
+        for (latestStatus in listOf(VoiceTutorResultStatus.PROCESSING, VoiceTutorResultStatus.COMPLETED)) {
+            val persistence = FakePersistence(now).apply {
+                session = session.copy(
+                    status = VoiceTutorSessionStatus.FAILED,
+                    resultStatus = VoiceTutorResultStatus.FAILED,
+                    endedAt = now,
+                    finalizedAt = now,
+                )
+                storedResult = VoiceTutorResult(
+                    session.id, latestStatus,
+                    if (latestStatus == VoiceTutorResultStatus.COMPLETED) "학습 요약" else null,
+                    emptyList(), emptyList(), emptyList(), null, "summary-v1", null, now, now,
+                )
+            }
+
+            val detail = service(persistence).session(principal, persistence.session.id)
+
+            assertThat(detail.state).isEqualTo(VoiceTutorSessionStatus.FAILED)
+            assertThat(detail.resultStatus).isEqualTo(latestStatus)
+            assertThat(detail.result?.status).isEqualTo(latestStatus)
+            assertThat(detail.result?.summaryMarkdown).isEqualTo(persistence.storedResult?.summaryMarkdown)
+            assertThat(persistence.failedResultCalls).isZero()
+            assertThat(persistence.finalizeCalls).isZero()
+        }
+    }
+
+    @Test
+    fun `detail reports a newly failed result even when the session snapshot was processing`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now).apply {
+            session = session.copy(
+                status = VoiceTutorSessionStatus.COMPLETED,
+                resultStatus = VoiceTutorResultStatus.PROCESSING,
+                endedAt = now,
+                finalizedAt = now,
+            )
+            storedResult = VoiceTutorResult(
+                session.id, VoiceTutorResultStatus.FAILED, null, emptyList(), emptyList(), emptyList(),
+                null, "summary-v1", "Voice Tutor summary generation failed.", now, now,
+            )
+        }
+
+        val detail = service(persistence).session(principal, persistence.session.id)
+
+        assertThat(detail.state).isEqualTo(VoiceTutorSessionStatus.COMPLETED)
+        assertThat(detail.resultStatus).isEqualTo(VoiceTutorResultStatus.FAILED)
+        assertThat(detail.result?.status).isEqualTo(VoiceTutorResultStatus.FAILED)
+    }
+
+    @Test
+    fun `detail preserves pending state before a summary result row exists`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+
+        val detail = service(persistence).session(principal, persistence.session.id)
+
+        assertThat(detail.resultStatus).isEqualTo(VoiceTutorResultStatus.PENDING)
+        assertThat(detail.result).isNull()
+    }
+
+    @Test
     fun `session detail remains owner scoped`() {
         val persistence = FakePersistence(now)
         val service = service(persistence)
@@ -721,6 +918,8 @@ class VoiceTutorServiceTest {
         var turns: List<VoiceTutorTranscriptTurn> = emptyList()
         var storedResult: VoiceTutorResult? = null
         var completedResult: VoiceTutorGeneratedResult? = null
+        var completeResultError: Exception? = null
+        var failedResultCalls = 0
         var reserveOverride: ReserveVoiceTutorSessionResult? = null
         var reserveCalls = 0
         var finalizeCalls = 0
@@ -904,11 +1103,17 @@ class VoiceTutorServiceTest {
             now: Instant,
         ): VoiceTutorSession {
             finalizeCalls += 1
+            if (session.finalizedAt != null) return session
             session = session.copy(
                 status = if (failed) VoiceTutorSessionStatus.FAILED else VoiceTutorSessionStatus.COMPLETED,
+                resultStatus = if (failed && turns.none { it.transcript.isNotBlank() }) {
+                    VoiceTutorResultStatus.FAILED
+                } else session.resultStatus,
                 endedAt = session.endedAt ?: now,
                 finalizedAt = session.finalizedAt ?: now,
                 endReason = session.endReason ?: reason,
+                failureCode = if (failed) "REALTIME_RELAY_FAILED" else null,
+                failureMessage = failureMessage,
             )
             return session
         }
@@ -920,7 +1125,7 @@ class VoiceTutorServiceTest {
             now: Instant,
             processingLeaseSeconds: Long,
         ): Boolean {
-            if (resultClaimed) return false
+            if (resultClaimed || session.resultStatus == VoiceTutorResultStatus.COMPLETED) return false
             resultClaimed = true
             session = session.copy(resultStatus = VoiceTutorResultStatus.PROCESSING)
             return true
@@ -932,6 +1137,7 @@ class VoiceTutorServiceTest {
             sessionId: String,
             now: Instant,
         ) {
+            completeResultError?.let { throw it }
             completedResult = generated
             session = session.copy(resultStatus = VoiceTutorResultStatus.COMPLETED)
             storedResult = VoiceTutorResult(
@@ -950,7 +1156,13 @@ class VoiceTutorServiceTest {
         }
 
         override suspend fun failResult(userId: Long, sessionId: String, promptVersion: String, error: String, now: Instant) {
+            failedResultCalls += 1
+            if (session.resultStatus == VoiceTutorResultStatus.COMPLETED) return
             session = session.copy(resultStatus = VoiceTutorResultStatus.FAILED)
+            storedResult = VoiceTutorResult(
+                sessionId, VoiceTutorResultStatus.FAILED, null, emptyList(), emptyList(), emptyList(),
+                null, promptVersion, error, now, now,
+            )
         }
 
         companion object {

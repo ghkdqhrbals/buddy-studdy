@@ -38,6 +38,9 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-starter-model-openai")
     implementation("org.springframework.ai:mcp-spring-webflux")
     implementation("io.modelcontextprotocol.sdk:mcp-json-jackson2")
+    // Application/HTTP serialization remains Jackson 2. Schema validation uses
+    // the SDK's Jackson 3 implementation to share NetworkNT 3.x with Spring AI.
+    implementation("io.modelcontextprotocol.sdk:mcp-json-jackson3")
     implementation("org.springframework:spring-aop")
     implementation("org.aspectj:aspectjweaver")
     implementation("org.springframework.security:spring-security-core")

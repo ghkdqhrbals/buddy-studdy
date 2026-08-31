@@ -3086,6 +3086,9 @@ struct AppStrings {
     var voiceTutorCallSummaryPending: String { text("학습 정리 중", "Summarizing", "学習を整理中") }
     var voiceTutorCallSummaryReady: String { text("학습 기록 보기", "View learning record", "学習記録を見る") }
     var voiceTutorCallSummaryFailed: String { text("학습 정리 실패", "Summary failed", "学習の整理に失敗") }
+    var voiceTutorCallSummaryDeferred: String { text("요약 준비 대기", "Summary not ready", "要約の準備待ち") }
+    var voiceTutorCallSummaryUnavailable: String { text("요약 조회 실패", "Couldn't load summary", "要約を読み込めません") }
+    var voiceTutorSummaryRefresh: String { text("다시 확인", "Check again", "再確認") }
     var voiceTutorCallNoCaptions: String {
         text("대화가 여기에 표시돼요", "Your conversation appears here", "会話がここに表示されます")
     }
@@ -3192,6 +3195,23 @@ struct AppStrings {
             "The learning summary could not be created. Your session record is still saved.",
             "今回の会話の学習要約を作成できませんでした。通話記録は保存されています。"
         )
+    }
+    var voiceTutorSummaryDeferred: String {
+        text(
+            "요약이 아직 준비되지 않았어요. 잠시 후 다시 확인해 주세요.",
+            "The summary isn't ready yet. Check again shortly.",
+            "要約はまだ準備できていません。しばらくしてから再確認してください。"
+        )
+    }
+    var voiceTutorSummaryUnavailable: String {
+        text(
+            "학습 요약을 불러오지 못했어요. 다시 확인해 주세요.",
+            "The learning summary couldn't be loaded. Please check again.",
+            "学習要約を読み込めませんでした。もう一度ご確認ください。"
+        )
+    }
+    var voiceTutorSummaryEmpty: String {
+        text("저장된 학습 요약이 없습니다.", "No learning summary was saved.", "保存された学習要約はありません。")
     }
     func voiceTutorCallRemaining(_ seconds: Int) -> String {
         let duration = voiceTutorCallClock(seconds)

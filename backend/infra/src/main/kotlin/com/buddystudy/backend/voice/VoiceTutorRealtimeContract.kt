@@ -11,6 +11,7 @@ internal object VoiceTutorRealtimeContract {
     const val SPEECH_STARTED_EVENT = "buddystudy.voice.input.speech.started"
     const val SPEECH_STOPPED_EVENT = "buddystudy.voice.input.speech.stopped"
     const val INPUT_RETRY_EVENT = "buddystudy.voice.input.retry"
+    const val STUDY_TREE_CHANGED_EVENT = "buddystudy.voice.study.changed"
     const val TURN_PROTOCOL_HEADER = "X-Voice-Turn-Protocol"
     const val LOCAL_VAD_TURN_PROTOCOL = "local-vad-v1"
 }

@@ -7,6 +7,7 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
+import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import java.lang.reflect.Proxy
+import java.time.Instant
 
 class BuddyStudyMcpAdapterTest {
     @Test
@@ -56,6 +58,57 @@ class BuddyStudyMcpAdapterTest {
                 .describedAs("openWorldHint for ${contract.name}")
                 .isEqualTo(contract.openWorld)
         }
+    }
+
+    @Test
+    fun `list studies forwards an optional parent to the owned child page overload`() {
+        var forwarded: List<Any?> = emptyList()
+        val adapter = adapter(proxyUseCase { method, arguments ->
+            assertThat(method).isEqualTo("listStudies")
+            forwarded = arguments.dropLast(1)
+            StudyPageResponse(emptyList(), 0, 3, 1, Instant.EPOCH)
+        })
+
+        val result = call(
+            adapter,
+            "list_studies",
+            mapOf("parent_study_id" to 42L, "limit" to 3, "offset" to 1, "query" to "Redis", "language" to "en"),
+            authenticatedContext,
+        )
+
+        assertThat(result.isError()).isFalse()
+        assertThat(forwarded).containsExactly(principal, 3, 1, "Redis", "en", 42L)
+    }
+
+    @Test
+    fun `list studies without a parent keeps the original unfiltered overload`() {
+        var forwarded: List<Any?> = emptyList()
+        val adapter = adapter(proxyUseCase { method, arguments ->
+            assertThat(method).isEqualTo("listStudies")
+            forwarded = arguments.dropLast(1)
+            StudyPageResponse(emptyList(), 0, 100, 0, Instant.EPOCH)
+        })
+
+        val result = call(adapter, "list_studies", emptyMap(), authenticatedContext)
+
+        assertThat(result.isError()).isFalse()
+        assertThat(forwarded).containsExactly(principal, 100, 0, null, "ko")
+    }
+
+    @Test
+    fun `foreign or missing list parent remains a not found tool result`() {
+        val adapter = adapter(proxyUseCase { method, arguments ->
+            assertThat(method).isEqualTo("listStudies")
+            assertThat(arguments[5]).isEqualTo(42L)
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        })
+
+        val result = call(adapter, "list_studies", mapOf("parent_study_id" to 42L), authenticatedContext)
+
+        assertThat(result.isError()).isTrue()
+        assertThat(errorDetails(result))
+            .containsEntry("code", "STUDY_SETTINGS_MISSING")
+            .containsEntry("status", 404)
     }
 
     @Test
@@ -217,6 +270,7 @@ class BuddyStudyMcpAdapterTest {
             name = "list_studies",
             schema = pagedSchema(
                 additional = linkedMapOf(
+                    "parent_study_id" to idProperty("Optional owned parent study ID. Returns direct children only, not the parent or deeper descendants."),
                     "query" to stringProperty("Optional topic search.", maxLength = 200),
                     "language" to languageProperty(),
                 ),

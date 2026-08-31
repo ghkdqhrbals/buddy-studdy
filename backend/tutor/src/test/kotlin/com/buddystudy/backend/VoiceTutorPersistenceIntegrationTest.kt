@@ -2,9 +2,17 @@ package com.buddystudy.backend
 
 import com.buddystudy.backend.admin.management.application.port.outbound.AdminManagementPort
 import com.buddystudy.backend.voice.application.model.ReserveVoiceTutorSessionResult
+import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcCleanupPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRecordingPersistencePort
+import com.buddystudy.voice.domain.VoiceTutorResultStatus
+import com.buddystudy.voice.domain.VoiceTutorSession
+import com.buddystudy.voice.domain.VoiceTutorSessionStatus
+import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -32,6 +40,99 @@ class VoiceTutorPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var recordings: VoiceTutorRecordingPersistencePort
     @Autowired lateinit var admin: AdminManagementPort
     @Autowired lateinit var database: DatabaseClient
+
+    @Test
+    fun `summary recovery claims failed transcribed sessions once and preserves completed results`() = runBlocking<Unit> {
+        val endedAt = Instant.parse("2031-08-31T10:00:00Z")
+        val session = failedSummarySession(endedAt, transcript = true)
+        val originalQuota = voiceTutor.quota(session.userId, endedAt)!!
+
+        assertThat(session.status).isEqualTo(VoiceTutorSessionStatus.FAILED)
+        assertThat(session.resultStatus).isEqualTo(VoiceTutorResultStatus.PENDING)
+        assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt, 300).map { it.id }).contains(session.id)
+        val claims = List(2) {
+            async(Dispatchers.Default) { voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt, 300) }
+        }.awaitAll()
+        assertThat(claims.count { it }).isEqualTo(1)
+        assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt.plusSeconds(299), 300).map { it.id })
+            .doesNotContain(session.id)
+        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(299), 300))
+            .isFalse()
+        assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt.plusSeconds(300), 300).map { it.id }).contains(session.id)
+        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(300), 300))
+            .isTrue()
+
+        val generated = VoiceTutorGeneratedResult("Saved synthetic summary", emptyList(), emptyList(), listOf("Review"), "gpt-test", "summary-test-v1")
+        voiceTutor.completeResult(session.userId, generated, session.id, endedAt.plusSeconds(301))
+        val completed = voiceTutor.result(session.userId, session.id)!!
+        voiceTutor.completeResult(session.userId, generated.copy(summaryMarkdown = "Late obsolete result"), session.id, endedAt.plusSeconds(302))
+        voiceTutor.failResult(session.userId, session.id, "summary-test-v1", "Late failure", endedAt.plusSeconds(303))
+        voiceTutor.finalize(session.userId, session.id, "LATE_END", false, null, endedAt.plusSeconds(304))
+
+        assertThat(voiceTutor.result(session.userId, session.id)).isEqualTo(completed)
+        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(900), 300))
+            .isFalse()
+        assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt.plusSeconds(900), 300).map { it.id }).doesNotContain(session.id)
+        val preserved = voiceTutor.findSession(session.userId, session.id)!!
+        assertThat(preserved.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+        assertThat(preserved.status).isEqualTo(session.status)
+        assertThat(preserved.failureCode).isEqualTo(session.failureCode)
+        assertThat(preserved.failureMessage).isEqualTo(session.failureMessage)
+        assertThat(preserved.endReason).isEqualTo(session.endReason)
+        assertThat(preserved.chargedSeconds).isEqualTo(session.chargedSeconds)
+        assertThat(voiceTutor.quota(session.userId, endedAt.plusSeconds(900))!!.usedSeconds).isEqualTo(originalQuota.usedSeconds)
+    }
+
+    @Test
+    fun `summary recovery only retries the exact historical copied call failure once`() = runBlocking<Unit> {
+        val endedAt = Instant.parse("2031-08-31T11:00:00Z")
+        val session = failedSummarySession(endedAt, transcript = true)
+        // Simulate the old settlement/service combination, only in the isolated
+        // Testcontainers database. No real provider or existing user is involved.
+        voiceTutor.failResult(session.userId, session.id, "summary-test-v1", session.failureMessage!!, endedAt)
+        assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt, 300).map { it.id }).contains(session.id)
+        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt, 300)).isTrue()
+
+        voiceTutor.failResult(session.userId, session.id, "summary-test-v1", "Voice Tutor summary generation failed.", endedAt.plusSeconds(1))
+        assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt.plusSeconds(900), 300).map { it.id }).doesNotContain(session.id)
+        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(900), 300)).isFalse()
+        // MySQL's case-insensitive default collation must not broaden the
+        // narrowly approved legacy recovery signature.
+        voiceTutor.failResult(session.userId, session.id, "summary-test-v1", session.failureMessage!!.lowercase(), endedAt.plusSeconds(901))
+        assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt.plusSeconds(902), 300).map { it.id }).doesNotContain(session.id)
+        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(902), 300)).isFalse()
+    }
+
+    @Test
+    fun `summary recovery never claims failed calls without saved speech or another owner's session`() = runBlocking<Unit> {
+        val endedAt = Instant.parse("2031-08-31T12:00:00Z")
+        val empty = failedSummarySession(endedAt, transcript = false)
+        val recorded = failedSummarySession(endedAt, transcript = true)
+        assertThat(empty.resultStatus).isEqualTo(VoiceTutorResultStatus.FAILED)
+        assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt, 300).map { it.id }).doesNotContain(empty.id)
+        assertThat(voiceTutor.beginResult(empty.userId, empty.id, "summary-test-v1", endedAt, 300)).isFalse()
+        assertThat(voiceTutor.beginResult(empty.userId, recorded.id, "summary-test-v1", endedAt, 300)).isFalse()
+        assertThat(voiceTutor.findSession(recorded.userId, recorded.id)!!.resultStatus).isEqualTo(VoiceTutorResultStatus.PENDING)
+    }
+
+    private suspend fun failedSummarySession(endedAt: Instant, transcript: Boolean): VoiceTutorSession {
+        val startedAt = endedAt.minusSeconds(109)
+        val fixture = paidUser(startedAt.minusSeconds(86_400))
+        val reserved = voiceTutor.reserve(
+            fixture.userId, fixture.studyId, "summary-${fixture.suffix}", "ko", "gpt-realtime-test", "marin", 3_600, startedAt,
+        ) as ReserveVoiceTutorSessionResult.Reserved
+        val session = voiceTutor.markActive(fixture.userId, reserved.value.session.id, startedAt)!!
+        assertThat(voiceTutor.attachProviderSession(fixture.userId, session.id, "provider-${fixture.suffix}", startedAt)).isTrue()
+        if (transcript) {
+            assertThat(voiceTutor.appendTranscript(
+                fixture.userId, session.id, "synthetic-item", VoiceTutorTranscriptRole.USER,
+                "Synthetic study question", endedAt.minusSeconds(1), 4_000, 10,
+            )).isTrue()
+        }
+        return voiceTutor.finalize(
+            fixture.userId, session.id, "PROVIDER_ERROR", true, "Realtime provider connection failed.", endedAt,
+        )!!
+    }
 
     @Test
     fun `withdrawal prefix tombstone survives without a user and remains after its deadline`() = runBlocking<Unit> {

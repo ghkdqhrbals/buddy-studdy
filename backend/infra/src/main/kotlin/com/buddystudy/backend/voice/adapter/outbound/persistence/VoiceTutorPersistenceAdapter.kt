@@ -237,13 +237,31 @@ class VoiceTutorPersistenceAdapter(
         select session.*
         from voice_tutor_sessions session
         left join voice_tutor_results result on result.session_id = session.id
-        where session.status = 'COMPLETED'
+        where session.finalized_at is not null
           and (
-                session.result_status = 'PENDING'
+                session.status = 'COMPLETED'
+                or (
+                    session.status = 'FAILED'
+                    and exists (
+                        select 1 from voice_tutor_transcript_turns turn
+                        where turn.session_id = session.id and char_length(trim(turn.transcript)) > 0
+                    )
+                )
+              )
+          and (
+                (session.result_status = 'PENDING' and result.session_id is null)
                 or (
                     session.result_status = 'PROCESSING'
                     and result.status = 'PROCESSING'
                     and result.updated_at <= :staleBefore
+                )
+                or (
+                    session.status = 'FAILED'
+                    and session.result_status = 'FAILED'
+                    and result.status = 'FAILED'
+                    and result.model is null
+                    and session.failure_message is not null
+                    and binary result.error_message = binary session.failure_message
                 )
               )
         order by session.finalized_at, session.id
@@ -507,12 +525,14 @@ class VoiceTutorPersistenceAdapter(
         processingLeaseSeconds: Long,
     ): Boolean {
         val session = findSessionRow(userId, sessionId, lock = true) ?: return false
-        if (session.status != VoiceTutorSessionStatus.COMPLETED) return false
         val existing = result(userId, sessionId)
-        if (existing?.status == VoiceTutorResultStatus.COMPLETED) return false
-        if (
-            existing?.status == VoiceTutorResultStatus.PROCESSING &&
-            existing.updatedAt.plusSeconds(processingLeaseSeconds.coerceAtLeast(30)).isAfter(now)
+        if (!voiceTutorSummaryCanBeClaimed(
+                session,
+                existing,
+                hasUsableTranscript = session.status == VoiceTutorSessionStatus.FAILED && hasUsableTranscript(session.id),
+                now = now,
+                processingLeaseSeconds = processingLeaseSeconds,
+            )
         ) return false
         if (existing == null) {
             database.sql(
@@ -547,6 +567,9 @@ class VoiceTutorPersistenceAdapter(
         sessionId: String,
         now: Instant,
     ) {
+        // Use the same owner/session lock order as claim and failure. A late
+        // completion must not race a claim into overwriting a completed result.
+        findSessionRow(userId, sessionId, lock = true) ?: return
         val updated = database.sql(
             """
             update voice_tutor_results result
@@ -683,6 +706,11 @@ class VoiceTutorPersistenceAdapter(
         if (session.finalizedAt != null) return
         val effectiveEnd = minInstant(usageEndedAt, session.hardEndsAt)
         val charged = voiceTutorChargedSeconds(session, effectiveEnd)
+        val resultStatus = voiceTutorResultStatusAfterSettlement(
+            session.resultStatus,
+            failed,
+            hasUsableTranscript = failed && hasUsableTranscript(session.id),
+        )
         val quota = quotaRow(session.userId, lock = true)
         if (quota != null && quota.periodStartedAt == session.periodStartedAt && quota.periodEndsAt == session.periodEndsAt) {
             database.sql(
@@ -702,7 +730,7 @@ class VoiceTutorPersistenceAdapter(
             """
             update voice_tutor_sessions
             set status = :status,
-                result_status = case when :failed then 'FAILED' else result_status end,
+                result_status = :resultStatus,
                 charged_seconds = :charged,
                 ended_at = :endedAt,
                 finalized_at = :now,
@@ -714,6 +742,7 @@ class VoiceTutorPersistenceAdapter(
             where id = :sessionId and user_id = :userId and finalized_at is null
             """.trimIndent(),
         ).bind("status", if (failed) "FAILED" else "COMPLETED")
+            .bind("resultStatus", resultStatus.name)
             .bind("failed", failed).bind("charged", charged).bind("endedAt", effectiveEnd.utc())
             .bind("now", now.utc()).bind("finalizationKey", "voice-session:${session.id}:finalize")
             .bind("reason", reason.take(64))
@@ -724,6 +753,14 @@ class VoiceTutorPersistenceAdapter(
             .bind("sessionId", session.id).bind("userId", session.userId)
             .fetch().rowsUpdated().awaitSingle()
     }
+
+    private suspend fun hasUsableTranscript(sessionId: String): Boolean = database.sql(
+        """
+        select id from voice_tutor_transcript_turns
+        where session_id = :sessionId and char_length(trim(transcript)) > 0
+        limit 1
+        """.trimIndent(),
+    ).bind("sessionId", sessionId).map { _, _ -> true }.one().awaitSingleOrNull() ?: false
 
     private suspend fun effectivePlan(userId: Long, at: Instant): VoicePlan = database.sql(
         """
@@ -894,6 +931,41 @@ class VoiceTutorPersistenceAdapter(
     ) {
         val remainingSeconds: Int
             get() = (baseSeconds - usedSeconds - reservedSeconds).coerceAtLeast(0)
+    }
+}
+
+internal fun voiceTutorResultStatusAfterSettlement(
+    current: VoiceTutorResultStatus,
+    failed: Boolean,
+    hasUsableTranscript: Boolean,
+): VoiceTutorResultStatus = if (failed && !hasUsableTranscript && current == VoiceTutorResultStatus.PENDING) {
+    VoiceTutorResultStatus.FAILED
+} else {
+    current
+}
+
+internal fun voiceTutorSummaryCanBeClaimed(
+    session: VoiceTutorSession,
+    existing: VoiceTutorResult?,
+    hasUsableTranscript: Boolean,
+    now: Instant,
+    processingLeaseSeconds: Long,
+): Boolean {
+    if (session.finalizedAt == null || session.resultStatus == VoiceTutorResultStatus.COMPLETED) return false
+    if (session.status != VoiceTutorSessionStatus.COMPLETED &&
+        (session.status != VoiceTutorSessionStatus.FAILED || !hasUsableTranscript)
+    ) return false
+    return when (existing?.status) {
+        null -> session.resultStatus == VoiceTutorResultStatus.PENDING
+        VoiceTutorResultStatus.PROCESSING -> session.resultStatus == VoiceTutorResultStatus.PROCESSING &&
+            !existing.updatedAt.plusSeconds(processingLeaseSeconds.coerceAtLeast(30)).isAfter(now)
+        // Older finalization copied a transport failure into an unattempted
+        // learning result. Recover only that exact signature, never a genuine
+        // failed summary observed by another scheduler before its claim.
+        VoiceTutorResultStatus.FAILED -> session.status == VoiceTutorSessionStatus.FAILED &&
+            session.resultStatus == VoiceTutorResultStatus.FAILED && existing.model == null &&
+            session.failureMessage != null && existing.errorMessage == session.failureMessage
+        VoiceTutorResultStatus.PENDING, VoiceTutorResultStatus.COMPLETED -> false
     }
 }
 

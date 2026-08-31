@@ -409,7 +409,8 @@ struct VoiceTutorSessionView: View {
                 quotaRemainingSeconds: viewModel.quotaRemainingSeconds,
                 quotaReservedSeconds: viewModel.quotaReservedSeconds,
                 quotaLimitSeconds: viewModel.quotaLimitSeconds,
-                detail: viewModel.detail
+                detail: viewModel.detail,
+                summaryRefreshState: viewModel.summaryRefreshState
             ),
             strings: strings,
             captions: viewModel.captions,
@@ -423,7 +424,8 @@ struct VoiceTutorSessionView: View {
                 showsSummary = false
                 Task { await viewModel.start() }
             },
-            onDismiss: { dismiss() }
+            onDismiss: { dismiss() },
+            onSummaryRefresh: { Task { await viewModel.refreshSummary() } }
         )
         .navigationTitle(strings.voiceTutorCallTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -457,7 +459,7 @@ struct VoiceTutorCallPresentation {
     }
 
     enum SummaryState: Equatable {
-        case hidden, pending, ready, failed
+        case hidden, pending, ready, failed, deferred, unavailable
     }
 
     enum PrimaryAction: Equatable {
@@ -473,6 +475,7 @@ struct VoiceTutorCallPresentation {
     var quotaReservedSeconds = 0
     var quotaLimitSeconds = 0
     var detail: BackendVoiceTutorSessionDetail?
+    var summaryRefreshState: VoiceTutorSummaryRefreshState = .idle
 
     var canMute: Bool { phase == .listening || phase == .speaking }
 
@@ -497,16 +500,20 @@ struct VoiceTutorCallPresentation {
     }
 
     var summaryState: SummaryState {
-        guard phase == .ended || phase == .failed, let detail else { return .hidden }
-        let statuses = [detail.resultStatus, detail.result?.status].compactMap { $0?.uppercased() }
-        if statuses.contains("FAILED") { return .failed }
-        if statuses.contains("PENDING") || statuses.contains("PROCESSING") { return .pending }
-        guard let result = detail.result else { return .hidden }
-        let hasContent = !result.summaryMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || [result.strengths, result.improvements, result.nextSteps].joined().contains {
-                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard phase == .ended || phase == .failed else { return .hidden }
+        let state = VoiceTutorSummaryState(detail: detail)
+        switch state {
+        case .ready: return .ready
+        case .failed: return .failed
+        case .empty: return .hidden
+        case .unknown, .pending:
+            switch summaryRefreshState {
+            case .loading: return .pending
+            case .deferred: return .deferred
+            case .unavailable: return .unavailable
+            case .idle: return state == .pending ? .pending : .hidden
             }
-        return hasContent && statuses.contains("COMPLETED") ? .ready : .hidden
+        }
     }
 
     func showsConnectionFailure(_ strings: AppStrings, errorMessage: String?) -> Bool {
@@ -556,6 +563,7 @@ struct VoiceTutorCallScreen: View {
     var onEnd: () -> Void = {}
     var onRetry: () -> Void = {}
     var onDismiss: () -> Void = {}
+    var onSummaryRefresh: () -> Void = {}
 
     var body: some View {
         GeometryReader { geometry in
@@ -729,10 +737,16 @@ struct VoiceTutorCallScreen: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-        case .failed:
-            Label(strings.voiceTutorCallSummaryFailed, systemImage: "exclamationmark.circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        case .failed, .deferred, .unavailable:
+            HStack(spacing: 8) {
+                Label(summaryStatusText, systemImage: presentation.summaryState == .deferred ? "clock" : "exclamationmark.circle")
+                    .foregroundStyle(.secondary)
+                Button(strings.voiceTutorSummaryRefresh, action: onSummaryRefresh)
+                    .frame(minHeight: 44)
+                    .disabled(presentation.summaryRefreshState == .loading)
+                    .accessibilityIdentifier("voiceCall.summaryRefresh")
+            }
+            .font(.caption)
         case .ready:
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
@@ -750,6 +764,14 @@ struct VoiceTutorCallScreen: View {
             .buttonStyle(.plain)
             .foregroundStyle(.tint)
             .accessibilityIdentifier("voiceCall.summary")
+        }
+    }
+
+    private var summaryStatusText: String {
+        switch presentation.summaryState {
+        case .failed: return strings.voiceTutorCallSummaryFailed
+        case .unavailable: return strings.voiceTutorCallSummaryUnavailable
+        default: return strings.voiceTutorCallSummaryDeferred
         }
     }
 
@@ -889,7 +911,8 @@ private struct VoiceTutorCaptionBubble: View {
 private struct VoiceTutorSessionDetailView: View {
     @EnvironmentObject private var appState: AppState
     let sessionID: String
-    @State private var isLoading = false
+    @State private var summaryRefreshID = UUID()
+    @State private var summaryRefreshState: VoiceTutorSummaryRefreshState = .loading
 
     private var strings: AppStrings { appState.strings }
     private var detail: BackendVoiceTutorSessionDetail? {
@@ -918,7 +941,12 @@ private struct VoiceTutorSessionDetailView: View {
                         .foregroundStyle(.secondary)
                     }
 
-                    VoiceTutorResultSections(detail: detail, strings: strings)
+                    VoiceTutorResultSections(
+                        detail: detail,
+                        strings: strings,
+                        refreshState: summaryRefreshState,
+                        onRetry: { summaryRefreshID = UUID() }
+                    )
 
                     if let recording = detail.recording,
                        recording.available
@@ -949,12 +977,16 @@ private struct VoiceTutorSessionDetailView: View {
                             }
                         }
                     }
-                } else if isLoading {
+                } else if summaryRefreshState == .loading {
                     ProgressView()
                         .frame(maxWidth: .infinity, minHeight: 180)
                 } else {
-                    Text(appState.voiceTutorErrorMessage ?? strings.serviceTemporarilyUnavailable)
-                        .foregroundStyle(.secondary)
+                    VoiceTutorResultSections(
+                        detail: nil,
+                        strings: strings,
+                        refreshState: summaryRefreshState,
+                        onRetry: { summaryRefreshID = UUID() }
+                    )
                         .frame(maxWidth: .infinity, minHeight: 180)
                 }
             }
@@ -962,14 +994,32 @@ private struct VoiceTutorSessionDetailView: View {
         }
         .navigationTitle(strings.voiceTutorLearningSummary)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            guard detail == nil else {
-                return
-            }
-            isLoading = true
-            _ = await appState.loadVoiceTutorSessionDetail(sessionID: sessionID)
-            isLoading = false
+        .task(id: summaryRefreshID) {
+            await refreshSummary(requestID: summaryRefreshID)
         }
+    }
+
+    @MainActor
+    private func refreshSummary(requestID: UUID) async {
+        guard !Task.isCancelled, summaryRefreshID == requestID else { return }
+        summaryRefreshState = .loading
+        guard let loader = appState.makeVoiceTutorSessionDetailLoader(
+            sessionID: sessionID,
+            validity: { summaryRefreshID == requestID }
+        ) else {
+            summaryRefreshState = .unavailable
+            return
+        }
+        let outcome = await VoiceTutorSummaryPolling.poll(
+            sessionID: sessionID,
+            initialDetail: detail,
+            // A cache hit must not skip the first GET when reopening history.
+            refreshCachedDetail: true,
+            loader: loader,
+            isCurrent: { summaryRefreshID == requestID }
+        )
+        guard !Task.isCancelled, summaryRefreshID == requestID else { return }
+        summaryRefreshState = outcome.reason == .invalidated ? .unavailable : outcome.refreshState
     }
 }
 
@@ -1100,20 +1150,14 @@ private struct VoiceTutorRecordingPlaybackView: View {
 private struct VoiceTutorResultSections: View {
     var detail: BackendVoiceTutorSessionDetail?
     var strings: AppStrings
+    var refreshState: VoiceTutorSummaryRefreshState = .idle
+    var onRetry: (() -> Void)?
 
     var body: some View {
-        if isFailed {
-            VStack(alignment: .leading, spacing: 8) {
-                Label(strings.voiceTutorLearningSummary, systemImage: "exclamationmark.triangle.fill")
-                    .font(.headline)
-                Text(strings.voiceTutorSummaryFailed)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
-        } else if let result = detail?.result, resultHasContent(result) {
+        if VoiceTutorSummaryState(detail: detail) == .ready, let result = detail?.result {
+            let strengths = VoiceTutorSummaryState.nonemptyItems(result.strengths)
+            let improvements = VoiceTutorSummaryState.nonemptyItems(result.improvements)
+            let nextSteps = VoiceTutorSummaryState.nonemptyItems(result.nextSteps)
             VStack(alignment: .leading, spacing: 18) {
                 if !result.summaryMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     resultSection(title: strings.voiceTutorLearningSummary) {
@@ -1124,23 +1168,29 @@ private struct VoiceTutorResultSections: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                if !result.strengths.isEmpty {
-                    bulletSection(title: strings.voiceTutorStrengths, values: result.strengths)
+                if !strengths.isEmpty {
+                    bulletSection(title: strings.voiceTutorStrengths, values: strengths)
                 }
-                if !result.improvements.isEmpty {
-                    bulletSection(title: strings.voiceTutorImprovements, values: result.improvements)
+                if !improvements.isEmpty {
+                    bulletSection(title: strings.voiceTutorImprovements, values: improvements)
                 }
-                if !result.nextSteps.isEmpty {
-                    bulletSection(title: strings.voiceTutorNextSteps, values: result.nextSteps)
+                if !nextSteps.isEmpty {
+                    bulletSection(title: strings.voiceTutorNextSteps, values: nextSteps)
                 }
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 Text(strings.voiceTutorLearningSummary)
                     .font(.headline)
-                Text(strings.voiceTutorSummaryPending)
+                Text(statusText)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                if let onRetry, refreshState != .loading,
+                   VoiceTutorSummaryState(detail: detail) != .empty {
+                    Button(strings.voiceTutorSummaryRefresh, action: onRetry)
+                        .font(.subheadline)
+                        .frame(minHeight: 44)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
@@ -1148,16 +1198,20 @@ private struct VoiceTutorResultSections: View {
         }
     }
 
-    private var isFailed: Bool {
-        detail?.resultStatus?.uppercased() == "FAILED"
-            || detail?.result?.status?.uppercased() == "FAILED"
-    }
-
-    private func resultHasContent(_ result: BackendVoiceTutorSessionResult) -> Bool {
-        !result.summaryMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || !result.strengths.isEmpty
-            || !result.improvements.isEmpty
-            || !result.nextSteps.isEmpty
+    private var statusText: String {
+        switch VoiceTutorSummaryState(detail: detail) {
+        case .failed: return strings.voiceTutorSummaryFailed
+        case .empty: return strings.voiceTutorSummaryEmpty
+        case .ready: return ""
+        case .unknown, .pending:
+            switch refreshState {
+            case .unavailable: return strings.voiceTutorSummaryUnavailable
+            case .deferred: return strings.voiceTutorSummaryDeferred
+            case .idle, .loading:
+                return VoiceTutorSummaryState(detail: detail) == .pending
+                    ? strings.voiceTutorSummaryPending : strings.voiceTutorSummaryDeferred
+            }
+        }
     }
 
     private func bulletSection(title: String, values: [String]) -> some View {

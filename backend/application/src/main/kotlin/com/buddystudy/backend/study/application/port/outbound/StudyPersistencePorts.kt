@@ -26,6 +26,12 @@ interface StudyPort {
     suspend fun findAllByUserId(userId: Long): List<StudyEntity> =
         findByUserId(userId, Pageable.unpaged()).content
     suspend fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity>
+    suspend fun findByUserIdAndParentStudyId(
+        userId: Long,
+        parentStudyId: Long,
+        query: String?,
+        pageable: Pageable,
+    ): Page<StudyEntity> = throw UnsupportedOperationException("Owned child study pages are not supported.")
     suspend fun claimDue(now: Instant, limit: Int): List<StudyEntity>
 }
 

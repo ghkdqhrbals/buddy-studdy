@@ -73,6 +73,14 @@ interface StudySyncUseCase {
         query: String? = null,
         language: String,
     ): StudyPageResponse = study(principal, limit, offset, query)
+    suspend fun study(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+        parentStudyId: Long,
+    ): StudyPageResponse = throw UnsupportedOperationException("Owned child study pages are not supported.")
     suspend fun study(principal: Principal, studyId: Long, language: String): StudyRoomResponse
     suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
     suspend fun createStudyTopic(

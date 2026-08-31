@@ -91,6 +91,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case userSpeechStarted
     case userSpeechStopped
     case inputRetry
+    case studyTreeChanged(studyID: Int)
     case responseStarted(responseID: String?, isTutorIntervention: Bool)
     case responseFinished(responseID: String?)
     case outputAudioBufferStarted(responseID: String?)
@@ -161,6 +162,13 @@ enum VoiceTutorRealtimeEventParser {
             return .heartbeatAcknowledged
         case "buddystudy.voice.input.retry":
             return .inputRetry
+        case "buddystudy.voice.study.changed":
+            guard let number = object["studyId"] as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  let studyID = Int(number.stringValue), studyID > 0 else {
+                return .ignored(type: type)
+            }
+            return .studyTreeChanged(studyID: studyID)
         case "buddystudy.voice.error":
             return .serviceError(
                 code: string("code", in: object),

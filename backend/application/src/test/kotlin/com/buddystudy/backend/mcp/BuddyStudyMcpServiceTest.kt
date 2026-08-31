@@ -10,6 +10,7 @@ import com.buddystudy.backend.mcp.application.service.BuddyStudyMcpService
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyGrowthUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCase
+import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.GetAnswerGradingProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerationProcessUseCase
@@ -21,6 +22,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
+import java.time.Instant
 import kotlin.reflect.full.declaredMemberFunctions
 import kotlin.reflect.full.findAnnotation
 
@@ -52,6 +54,59 @@ class BuddyStudyMcpServiceTest {
     private val principal = Principal(7, "device-7", 70, anonymous = false)
 
     @Test
+    fun `child list delegates the exact parent search page without question generation`(): Unit = runBlocking {
+        val page = StudyPageResponse(emptyList(), 0, 3, 1, Instant.EPOCH)
+        Mockito.`when`(studies.study(principal, 3, 1, "Redis", "en", 42L)).thenReturn(page)
+
+        val result = service.listStudies(principal, 3, 1, "Redis", "en", parentStudyId = 42L)
+
+        assertThat(result).isSameAs(page)
+        Mockito.verify(studies).study(principal, 3, 1, "Redis", "en", 42L)
+        Mockito.verifyNoMoreInteractions(studies)
+        Mockito.verifyNoInteractions(questionRequests, answers, records, profiles, learningContexts)
+    }
+
+    @Test
+    fun `unfiltered list still delegates the original study page contract`(): Unit = runBlocking {
+        val page = StudyPageResponse(emptyList(), 0, 100, 0, Instant.EPOCH)
+        Mockito.`when`(studies.study(principal, 100, 0, null, "ko")).thenReturn(page)
+
+        assertThat(service.listStudies(principal, 100, 0, null, "ko")).isSameAs(page)
+
+        Mockito.verify(studies).study(principal, 100, 0, null, "ko")
+        Mockito.verifyNoMoreInteractions(studies)
+    }
+
+    @Test
+    fun `invalid child id or page is rejected before querying studies`(): Unit = runBlocking {
+        listOf(
+            Triple(0L, 10, 0),
+            Triple(-1L, 10, 0),
+            Triple(42L, 0, 0),
+            Triple(42L, 501, 0),
+            Triple(42L, 10, -1),
+        ).forEach { (parentId, limit, offset) ->
+            val failure = runCatching {
+                service.listStudies(principal, limit, offset, null, "ko", parentId)
+            }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(ApiException::class.java)
+            assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        }
+        Mockito.verifyNoInteractions(studies, questionRequests)
+    }
+
+    @Test
+    fun `anonymous child list cannot query owned study data`(): Unit = runBlocking {
+        val failure = runCatching {
+            service.listStudies(principal.copy(anonymous = true), 10, 0, null, "ko", 42L)
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(ApiException::class.java)
+        assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.ACCOUNT_FORBIDDEN)
+        Mockito.verifyNoInteractions(studies)
+    }
+
+    @Test
     fun `delete requires explicit confirmation before touching study state`(): Unit = runBlocking {
         val failure = runCatching {
             service.deleteStudy(principal, studyId = 42, confirmed = false)
@@ -76,14 +131,19 @@ class BuddyStudyMcpServiceTest {
 
     @Test
     fun `every public mcp operation has an explicit permission boundary`() {
-        val operations = BuddyStudyMcpService::class.declaredMemberFunctions
+        val methods = BuddyStudyMcpService::class.declaredMemberFunctions
             .filter { it.name in MCP_OPERATION_NAMES }
+        val operations = methods
             .associate { function ->
                 function.name to function.findAnnotation<RequirePermission>()?.value?.toSet().orEmpty()
             }
 
         assertThat(operations.keys).containsExactlyInAnyOrderElementsOf(MCP_OPERATION_NAMES)
         assertThat(operations.values).allSatisfy { permissions -> assertThat(permissions).isNotEmpty() }
+        assertThat(methods.filter { it.name == "listStudies" }).hasSize(2).allSatisfy { function ->
+            assertThat(function.findAnnotation<RequirePermission>()?.value?.toSet())
+                .containsExactly(Permissions.STUDY_READ)
+        }
         assertThat(operations.getValue("deleteStudy")).containsExactly(Permissions.STUDY_DELETE)
         assertThat(operations.getValue("submitAnswer")).containsExactly(Permissions.RECORD_UPDATE)
         assertThat(operations.getValue("getMyContext")).containsExactly(Permissions.PROFILE_READ)

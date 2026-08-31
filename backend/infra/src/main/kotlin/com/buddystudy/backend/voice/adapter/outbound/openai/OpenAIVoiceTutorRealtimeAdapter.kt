@@ -4,6 +4,7 @@ import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
@@ -198,11 +199,20 @@ internal class VoiceTutorDuplexTurnController(
     private val nanoTime: () -> Long = System::nanoTime,
     private val transport: VoiceTutorRealtimeTransport = VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY,
     private val inputCoordinator: VoiceTutorInputTurnCoordinator? = null,
+    toolsEnabled: Boolean = false,
 ) {
     private val controls = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<String>(MAX_BUFFERED_CONTROLS).get())
     private val inputWork = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<VoiceTutorInputTurnCoordinator.Action>(MAX_BUFFERED_CONTROLS).get())
+    private val toolWork = Sinks.many().unicast()
+        .onBackpressureBuffer(Queues.get<VoiceTutorMcpCall>(VoiceTutorMcpTurnCoordinator.MAX_CALLS_PER_RESPONSE).get())
+    private val toolCoordinator = if (toolsEnabled && transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+        VoiceTutorMcpTurnCoordinator(mapper)
+    } else {
+        null
+    }
+    private var toolAcknowledgementTimer: Disposable? = null
     private val terminalInputFailure = Sinks.one<Throwable>()
     private val pendingInputPublications = LinkedHashSet<String>()
     private val meaningfulSpeechSequences = LinkedHashSet<Long>()
@@ -219,11 +229,15 @@ internal class VoiceTutorDuplexTurnController(
     private var activeResponseGeneration = 0L
     private var activeResponseCreateEventId: String? = null
     private var activeResponseId: String? = null
+    private var activeResponseAllowsTools = false
     private var activeResponseAudioBytes = 0L
     private var earliestResponsePlaybackEndNanos: Long? = null
     private var providerResponseDone = false
     private var playbackCompleted = false
     private var providerOutputBufferStopped = false
+    private var providerOutputBufferStarted = false
+    private var providerAudioObserved = false
+    private var toolOnlyResponse = false
     private var playbackTimer: Disposable? = null
     private var responseTimer: Disposable? = null
     private var openingResponseRequested = false
@@ -242,6 +256,38 @@ internal class VoiceTutorDuplexTurnController(
     fun providerEvents(): Flux<String> = controls.asFlux().filter { !closed }
 
     fun inputActions(): Flux<VoiceTutorInputTurnCoordinator.Action> = inputWork.asFlux().filter { !closed }
+
+    fun toolActions(): Flux<VoiceTutorMcpCall> = toolWork.asFlux().filter { !closed }
+
+    @Synchronized
+    fun beginToolExecution(callId: String): Boolean = !closed && toolCoordinator?.beginExecution(callId) == true
+
+    @Synchronized
+    fun completeToolExecution(callId: String, result: VoiceTutorMcpToolResult): Boolean {
+        if (closed) return false
+        val event = try {
+            toolCoordinator?.complete(callId, result, nanoTime()) ?: return false
+        } catch (error: Exception) {
+            terminate(error)
+            return false
+        }
+        emit(event)
+        if (!closed && toolAcknowledgementTimer == null) {
+            toolAcknowledgementTimer = Flux.interval(INPUT_DEADLINE_POLL_INTERVAL)
+                .subscribe { expireToolAcknowledgements() }
+        }
+        return !closed
+    }
+
+    @Synchronized
+    internal fun expireToolAcknowledgements() {
+        if (closed) return
+        try {
+            toolCoordinator?.expire(nanoTime())
+        } catch (error: VoiceTutorMcpOutputAcknowledgementException) {
+            terminate(error)
+        }
+    }
 
     fun inputFailure(): Mono<Void> = terminalInputFailure.asMono().flatMap { Mono.error(it) }
 
@@ -403,19 +449,22 @@ internal class VoiceTutorDuplexTurnController(
                 VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
             }
             "response.output_audio.delta" -> if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+                val matches = matchesKnownActiveResponse(node.path("response_id").asText())
+                if (matches) providerAudioObserved = true
                 accepted(
-                    matchesKnownActiveResponse(node.path("response_id").asText()),
+                    matches,
                     VoiceTutorProviderRelayDisposition.PERSIST_ONLY,
                 )
             } else {
                 accepted(observeResponseAudio(node))
             }
             "response.output_audio.done" -> accepted(matchesActiveResponse(node.path("response_id").asText()))
-            "output_audio_buffer.started" -> accepted(
-                transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
-                    matchesKnownActiveResponse(node.path("response_id").asText()),
-                VoiceTutorProviderRelayDisposition.FORWARD_ONLY,
-            )
+            "output_audio_buffer.started" -> {
+                val matches = transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
+                    matchesKnownActiveResponse(node.path("response_id").asText())
+                if (matches) providerOutputBufferStarted = true
+                accepted(matches, VoiceTutorProviderRelayDisposition.FORWARD_ONLY)
+            }
             "output_audio_buffer.stopped" -> accepted(
                 observeOutputBufferStopped(node),
                 VoiceTutorProviderRelayDisposition.FORWARD_ONLY,
@@ -453,6 +502,21 @@ internal class VoiceTutorDuplexTurnController(
                 withInputCoordinator { confirmDeleted(node.path("item_id").asText(), nanoTime()) }
                 VoiceTutorProviderRelayDisposition.DROP
             }
+            in VoiceTutorMcpTurnCoordinator.OUTPUT_ACK_EVENTS -> {
+                if (toolCoordinator?.acknowledge(node, nanoTime()) == true) {
+                    if (!toolCoordinator.hasPending) {
+                        toolAcknowledgementTimer?.dispose()
+                        toolAcknowledgementTimer = null
+                    }
+                    createNormalResponseIfReady()
+                }
+                // Tool arguments/results and arbitrary conversation items never
+                // become transcripts or client events.
+                VoiceTutorProviderRelayDisposition.DROP
+            }
+            "response.function_call_arguments.delta", "response.function_call_arguments.done",
+            "response.output_item.added", "response.output_item.done",
+            -> VoiceTutorProviderRelayDisposition.DROP
             "input_audio_buffer.speech_started" -> {
                 if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
                     return VoiceTutorProviderRelayDisposition.DROP
@@ -511,7 +575,9 @@ internal class VoiceTutorDuplexTurnController(
             closed || !openingResponseRequested || openingResponsePending ||
             !userSpeaking || interventionDeliveredDuringCurrentSpeech
         ) return
-        if (responseActive || pendingInputCommits.isNotEmpty() || inputCoordinator?.hasPending == true) {
+        if (responseActive || pendingInputCommits.isNotEmpty() || inputCoordinator?.hasPending == true ||
+            toolCoordinator?.hasPending == true || toolCoordinator?.continuationReady == true
+        ) {
             interventionDeadlineElapsedWhileResponseActive = true
             return
         }
@@ -543,6 +609,7 @@ internal class VoiceTutorDuplexTurnController(
                 "type" to "response.create",
                 "response" to linkedMapOf(
                     "instructions" to CONTINUOUS_SPEECH_INTERVENTION_INSTRUCTIONS,
+                    "tool_choice" to "none",
                     "metadata" to linkedMapOf(
                         VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
                         VoiceTutorRealtimeContract.TURN_METADATA_KEY to
@@ -572,6 +639,9 @@ internal class VoiceTutorDuplexTurnController(
             delayedStopCommitTimer?.dispose()
             delayedStopCommitTimer = null
             delayedStopCommit = null
+            toolAcknowledgementTimer?.dispose()
+            toolAcknowledgementTimer = null
+            toolCoordinator?.close()
             inputCoordinator?.close()
             pendingInputPublications.clear()
             meaningfulSpeechSequences.clear()
@@ -588,6 +658,7 @@ internal class VoiceTutorDuplexTurnController(
                 terminalInputFailure.tryEmitValue(error)
             }
             inputWork.tryEmitComplete()
+            toolWork.tryEmitComplete()
         }
     }
 
@@ -775,24 +846,30 @@ internal class VoiceTutorDuplexTurnController(
     private fun createNormalResponseIfReady() {
         if (
             closed || !openingResponseRequested || userSpeaking || pendingSpeechCommitCount > 0 || responseActive ||
-            inputCoordinator?.hasPending == true ||
-            (!openingResponsePending && !queuedCommittedTurn)
+            inputCoordinator?.hasPending == true || toolCoordinator?.hasPending == true ||
+            (!openingResponsePending && !queuedCommittedTurn && toolCoordinator?.continuationReady != true)
         ) return
         val opening = openingResponsePending
+        val toolContinuation = toolCoordinator?.continuationReady == true
         if (opening) {
             openingResponsePending = false
         } else {
+            // Every accepted learner item is already in provider context. If
+            // they spoke during a tool call, this one response addresses the
+            // latest input AND the tool result, after both gates are released.
             queuedCommittedTurn = false
+            if (toolContinuation) toolCoordinator?.consumeContinuation() else toolCoordinator?.beginLearnerTurn()
         }
         // Opening speech uses the same response/playout gate as an ordinary turn.
         // Keep any early learner commit queued until its transport completion gate.
         val responseEventId = internalEventId(if (opening) "opening-response" else "turn-response")
-        beginResponse(responseEventId)
+        beginResponse(responseEventId, allowTools = !opening && toolCoordinator?.toolChoice == "auto")
         emit(
             linkedMapOf(
                 "event_id" to responseEventId,
                 "type" to "response.create",
                 "response" to linkedMapOf(
+                    "tool_choice" to if (opening) "none" else toolCoordinator?.toolChoice ?: "none",
                     "metadata" to linkedMapOf(
                         VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
                     ),
@@ -809,7 +886,7 @@ internal class VoiceTutorDuplexTurnController(
         }
     }
 
-    private fun beginResponse(createEventId: String) {
+    private fun beginResponse(createEventId: String, allowTools: Boolean = false) {
         inputCoordinator?.teacherResponseStarted()
         activeTutorTranscripts.clear()
         playbackTimer?.dispose()
@@ -822,11 +899,15 @@ internal class VoiceTutorDuplexTurnController(
         responseActive = true
         activeResponseCreateEventId = createEventId
         activeResponseId = null
+        activeResponseAllowsTools = allowTools
         activeResponseAudioBytes = 0
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false
         playbackCompleted = false
         providerOutputBufferStopped = false
+        providerOutputBufferStarted = false
+        providerAudioObserved = false
+        toolOnlyResponse = false
         responseTimer?.dispose()
         val responseGeneration = activeResponseGeneration
         responseTimer = Mono.delay(responseTimeout)
@@ -863,7 +944,7 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     private fun observeResponseDone(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
-        if (!responseActive) return false
+        if (!responseActive || providerResponseDone) return false
         val response = node.path("response")
         // A stale provider result cannot fail or complete a different response.
         if (!matchesActiveResponseToken(response)) return false
@@ -879,9 +960,24 @@ internal class VoiceTutorDuplexTurnController(
         if (activeResponseId == null) {
             activeResponseId = responseId
         }
+        if (response.path("output").any { it.path("type").asText() == "function_call" } && !activeResponseAllowsTools) {
+            // An opening, intervention, or exhausted tool round never has
+            // permission to execute a function, even if a provider emits one.
+            throw VoiceTutorMcpProtocolException()
+        }
+        val toolCalls = toolCoordinator?.completedResponse(response) ?: emptyList()
+        toolOnlyResponse = toolCalls.isNotEmpty() &&
+            response.path("output").all { it.path("type").asText() == "function_call" } &&
+            !providerOutputBufferStarted && !providerAudioObserved && activeTutorTranscripts.isEmpty()
         providerResponseDone = true
         responseTimer?.dispose()
         responseTimer = null
+        for (call in toolCalls) {
+            if (toolWork.tryEmitNext(call).isFailure && !closed) {
+                terminate(VoiceTutorMcpProtocolException())
+                return true
+            }
+        }
         withInputCoordinator { teacherResponseCompleted(completedTutorContext(response), nanoTime()) }
         advancePlaybackGate()
         return true
@@ -948,7 +1044,9 @@ internal class VoiceTutorDuplexTurnController(
             // output buffer. Subsequent audio stays on the continuous RTP track;
             // creating a response does not cancel, clear, or reset the old tail.
             // This proves server completion, not that the device heard every sample.
-            if (providerOutputBufferStopped) {
+            // A completed, function-only response has no audio buffer and will
+            // not emit stopped. This is not a shortcut for spoken responses.
+            if (providerOutputBufferStopped || toolOnlyResponse) {
                 finishActiveResponse()
             } else if (playbackTimer == null) {
                 val responseGeneration = activeResponseGeneration
@@ -1080,6 +1178,7 @@ internal class VoiceTutorDuplexTurnController(
         responseActive = false
         activeResponseCreateEventId = null
         activeResponseId = null
+        activeResponseAllowsTools = false
         activeResponseAudioBytes = 0
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false

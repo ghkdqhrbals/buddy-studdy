@@ -117,6 +117,20 @@ internal class VoiceTutorRealtimeEventPolicy(
             } else {
                 ProviderEventDecision(payload = null)
             }
+            VoiceTutorRealtimeContract.STUDY_TREE_CHANGED_EVENT -> {
+                val studyId = node.path("studyId")
+                if (transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
+                    studyId.isIntegralNumber && studyId.canConvertToLong() && studyId.longValue() > 0
+                ) {
+                    ProviderEventDecision(
+                        mapper.writeValueAsString(
+                            mapOf("type" to type, "studyId" to studyId.longValue()),
+                        ),
+                    )
+                } else {
+                    ProviderEventDecision(payload = null)
+                }
+            }
             in WEBRTC_OUTPUT_BUFFER_BOUNDARY_EVENTS -> if (
                 transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
                 validProviderResponseId(node.path("response_id"))

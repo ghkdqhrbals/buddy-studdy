@@ -100,7 +100,22 @@ struct VoiceTutorConnectionIdentityFence: Sendable {
     }
 }
 
-private struct VoiceTutorRequestContext {
+struct VoiceTutorSessionDetailLoader: Sendable {
+    var isCurrent: @MainActor @Sendable () -> Bool
+    var load: @MainActor @Sendable () async -> BackendVoiceTutorSessionDetail?
+}
+
+enum VoiceTutorCreatedStudyMetadata {
+    static func merging(_ fetched: BackendStudyRoom, with previous: BackendStudyRoom?) -> BackendStudyRoom {
+        var metadata = fetched
+        let matchingPrevious = previous?.id == fetched.id ? previous : nil
+        metadata.pendingQuestion = matchingPrevious?.pendingQuestion
+        metadata.latestQuestion = matchingPrevious?.latestQuestion
+        return metadata
+    }
+}
+
+private struct VoiceTutorRequestContext: Sendable {
     var registration: RemotePushRegistration
     var identityFence: VoiceTutorConnectionIdentityFence
     var isCurrent: @MainActor @Sendable () -> Bool
@@ -186,6 +201,7 @@ final class AppState: ObservableObject {
     @Published private(set) var voiceTutorErrorMessage: String?
     private var voiceTutorStatusRequestGeneration: UInt64 = 0
     private var voiceTutorSessionsRequestGeneration: UInt64 = 0
+    private var voiceTutorDetailRequestIDs: [String: UUID] = [:]
     @Published private(set) var referralSummary: BackendReferralSummary?
     @Published private(set) var isLoadingReferral = false
     @Published private(set) var referralErrorMessage: String?
@@ -7500,6 +7516,7 @@ final class AppState: ObservableObject {
         voiceTutorStatus = nil
         voiceTutorSessions = []
         voiceTutorSessionDetails = [:]
+        voiceTutorDetailRequestIDs = [:]
         voiceTutorNextCursor = nil
         voiceTutorErrorMessage = nil
         isLoadingVoiceTutorStatus = false
@@ -7664,9 +7681,48 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func loadVoiceTutorSessionDetail(sessionID: String) async -> BackendVoiceTutorSessionDetail? {
+        guard let loader = makeVoiceTutorSessionDetailLoader(sessionID: sessionID) else { return nil }
+        return await loader.load()
+    }
+
+    /// Capture one account/device/backend lifetime for a whole summary refresh,
+    /// rather than silently changing identity between successive polling reads.
+    func makeVoiceTutorSessionDetailLoader(
+        sessionID: String,
+        validity: @escaping @MainActor @Sendable () -> Bool = { true }
+    ) -> VoiceTutorSessionDetailLoader? {
         let currentVoiceTutorUseCase = voiceTutorUseCase
         guard let context = try? makeVoiceTutorRequestContext() else {
             return nil
+        }
+        let isCurrent: @MainActor @Sendable () -> Bool = { context.isCurrent() && validity() }
+        let guardedContext = VoiceTutorRequestContext(
+            registration: context.registration,
+            identityFence: context.identityFence,
+            isCurrent: isCurrent
+        )
+        return VoiceTutorSessionDetailLoader(isCurrent: isCurrent, load: { [weak self] in
+            guard let self, !Task.isCancelled, isCurrent() else { return nil }
+            return await self.loadVoiceTutorSessionDetail(
+                sessionID: sessionID,
+                context: guardedContext,
+                useCase: currentVoiceTutorUseCase
+            )
+        })
+    }
+
+    private func loadVoiceTutorSessionDetail(
+        sessionID: String,
+        context: VoiceTutorRequestContext,
+        useCase: VoiceTutorUseCase
+    ) async -> BackendVoiceTutorSessionDetail? {
+        guard !Task.isCancelled, context.isCurrent() else { return nil }
+        let requestID = UUID()
+        voiceTutorDetailRequestIDs[sessionID] = requestID
+        defer {
+            if voiceTutorDetailRequestIDs[sessionID] == requestID {
+                voiceTutorDetailRequestIDs.removeValue(forKey: sessionID)
+            }
         }
 
         do {
@@ -7679,20 +7735,23 @@ final class AppState: ObservableObject {
                 reason: "voice-tutor-session-detail",
                 validity: context.isCurrent,
                 operation: { recoveredRegistration in
-                    try await currentVoiceTutorUseCase.session(
+                    try await useCase.session(
                         registration: recoveredRegistration,
                         sessionID: sessionID
                     )
                 }
             )
-            guard context.isCurrent() else {
+            guard !Task.isCancelled, context.isCurrent(),
+                  voiceTutorDetailRequestIDs[sessionID] == requestID,
+                  detail.sessionId == sessionID else {
                 return nil
             }
             voiceTutorSessionDetails[sessionID] = detail
             voiceTutorErrorMessage = nil
             return detail
         } catch where !Self.isCancellationLikeError(error) {
-            guard context.isCurrent() else {
+            guard !Task.isCancelled, context.isCurrent(),
+                  voiceTutorDetailRequestIDs[sessionID] == requestID else {
                 return nil
             }
             voiceTutorErrorMessage = voiceTutorDisplayMessage(for: error)
@@ -7700,6 +7759,50 @@ final class AppState: ObservableObject {
             return nil
         } catch {
             return nil
+        }
+    }
+
+    /// A successful voice tool creates only a study node. Refresh that exact
+    /// node's metadata without reconciling records, drafts, selection or quota.
+    func refreshVoiceTutorCreatedStudy(
+        studyID: Int,
+        validity: @escaping @MainActor @Sendable () -> Bool
+    ) async {
+        guard studyID > 0, !Task.isCancelled, validity(),
+              let context = try? makeVoiceTutorRequestContext() else { return }
+        let isCurrent: @MainActor @Sendable () -> Bool = { context.isCurrent() && validity() }
+        let guardedContext = VoiceTutorRequestContext(
+            registration: context.registration,
+            identityFence: context.identityFence,
+            isCurrent: isCurrent
+        )
+        let currentStudyRoomUseCase = studyRoomUseCase
+        let language = settings.appLanguage
+        do {
+            let registration = try await prepareVoiceTutorRegistration(
+                context: guardedContext,
+                reason: "voice-tutor-created-study"
+            )
+            guard !Task.isCancelled, isCurrent() else { return }
+            let study = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "voice-tutor-created-study",
+                validity: isCurrent,
+                operation: { recoveredRegistration in
+                    try await currentStudyRoomUseCase.fetchStudyDetail(
+                        registration: recoveredRegistration,
+                        studyID: studyID,
+                        language: language
+                    )
+                }
+            )
+            guard !Task.isCancelled, isCurrent(), study.id == studyID,
+                  !isLocallyDeletedStudy(study) else { return }
+            let previous = studyRoomState.rooms.first { $0.id == studyID }
+            studyRoomState.upsertStudy(VoiceTutorCreatedStudyMetadata.merging(study, with: previous))
+        } catch {
+            guard !Self.isCancellationLikeError(error), !Task.isCancelled, isCurrent() else { return }
+            log(.warning, "음성 튜터가 추가한 하위 주제 정보를 가져오지 못했습니다.")
         }
     }
 
@@ -7880,6 +7983,7 @@ final class AppState: ObservableObject {
             }
         )
         guard validity() else { throw CancellationError() }
+        voiceTutorDetailRequestIDs.removeValue(forKey: sessionID)
         voiceTutorSessionDetails[sessionID] = detail
         return detail
     }

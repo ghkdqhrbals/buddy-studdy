@@ -1,6 +1,7 @@
 package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.NullNode
 import org.slf4j.LoggerFactory
@@ -16,10 +17,21 @@ internal class VoiceTutorWebRtcSessionHandshake(
     callId: String,
     private val confirmationTimeout: Duration,
     private val onConfiguration: (VoiceTutorWebRtcConfigurationSnapshot) -> Unit = ::logWebRtcConfiguration,
+    expectedTools: List<Map<String, Any?>> = emptyList(),
 ) {
     private val callRef = voiceTutorCallReference(callId)
     private val updateRequested = AtomicBoolean()
     private val confirmed = Sinks.one<Void>()
+    private val tools = JsonMapperProvider.mapper.valueToTree<JsonNode>(expectedTools)
+
+    init {
+        val names = tools.map { it.path("name").asText() }
+        require(names.size == names.toSet().size && tools.all {
+            it.path("type").asText() == "function" && it.path("name").isTextual &&
+                it.path("name").asText().isNotBlank() && it.path("description").isTextual &&
+                it.path("parameters").isObject
+        }) { "Voice Tutor tools must be uniquely named function definitions." }
+    }
 
     fun initialProviderEvents(): Flux<String> = Flux.defer {
         if (!updateRequested.compareAndSet(false, true)) {
@@ -32,6 +44,8 @@ internal class VoiceTutorWebRtcSessionHandshake(
                         "type" to "session.update",
                         "session" to linkedMapOf(
                             "type" to "realtime",
+                            "tools" to tools,
+                            "tool_choice" to "auto",
                             "audio" to mapOf(
                                 "input" to mapOf("turn_detection" to voiceTutorManualWebRtcTurnDetection()),
                             ),
@@ -74,14 +88,18 @@ internal class VoiceTutorWebRtcSessionHandshake(
         val createResponse = turnDetection.path("create_response").explicitBoolean()
         val interruptResponse = turnDetection.path("interrupt_response").explicitBoolean()
         val requested = updateRequested.get()
+        val toolsVerified = verifiesTools(session)
         val verified = requested && eventType == "session.updated" &&
             schema == VoiceTutorWebRtcConfigurationSchema.GA && sessionType == "realtime" &&
-            turnDetection.isNull
+            turnDetection.isNull && toolsVerified
 
         onConfiguration(
             VoiceTutorWebRtcConfigurationSnapshot(
                 callRef, eventType, sessionType, schema, turnDetectionType,
                 createResponse, interruptResponse, requested, verified,
+                expectedToolCount = tools.size(),
+                effectiveToolCount = session.path("tools").takeIf { it.isArray }?.size() ?: -1,
+                toolsVerified = toolsVerified,
             ),
         )
         if (requested && eventType == "session.updated") {
@@ -91,11 +109,56 @@ internal class VoiceTutorWebRtcSessionHandshake(
         return true
     }
 
+    private fun verifiesTools(session: JsonNode): Boolean {
+        val effective = session.path("tools")
+        val choice = session.path("tool_choice")
+        if (tools.isEmpty) {
+            // Older callers did not send tools. Missing fields remain compatible,
+            // but an unexpected provider tool never acquires execution authority.
+            return (effective.isMissingNode || (effective.isArray && effective.isEmpty)) &&
+                (choice.isMissingNode || (choice.isTextual && choice.textValue() == "auto"))
+        }
+        if (!effective.isArray || effective.size() != tools.size() ||
+            !choice.isTextual || choice.textValue() != "auto"
+        ) return false
+        val effectiveByName = effective.associateBy { it.path("name").asText() }
+        if (effectiveByName.size != effective.size()) return false
+        return tools.all { expected ->
+            val actual = effectiveByName[expected.path("name").asText()] ?: return@all false
+            actual.path("type").isTextual && actual.path("type").textValue() == "function" &&
+                actual.path("name") == expected.path("name") &&
+                actual.path("description") == expected.path("description") &&
+                runCatching {
+                    actual.path("parameters").equals(JSON_SCHEMA_VALUE_COMPARATOR, expected.path("parameters"))
+                }.getOrDefault(false)
+        }
+    }
+
     private companion object {
         val SESSION_TYPES = setOf("realtime", "transcription")
         val TURN_DETECTION_TYPES = setOf("server_vad", "semantic_vad")
+        // JSON object key order and numeric representation are not schema changes.
+        // Property/required/enum contents and all validation constraints must match.
+        val JSON_SCHEMA_VALUE_COMPARATOR = Comparator<JsonNode> { left, right ->
+            when {
+                left.isNumber && right.isNumber -> left.decimalValue().compareTo(right.decimalValue())
+                left == right -> 0
+                else -> 1
+            }
+        }
     }
 }
+
+/** The MCP catalog remains the single source of function names, descriptions, and schemas. */
+internal fun voiceTutorRealtimeFunctionTools(definitions: List<VoiceTutorMcpToolDefinition>): List<Map<String, Any?>> =
+    definitions.map { definition ->
+        linkedMapOf(
+            "type" to "function",
+            "name" to definition.name,
+            "description" to definition.description,
+            "parameters" to definition.parameters,
+        )
+    }
 
 /**
  * WebRTC VAD can clear media even when response interruption is disabled.
@@ -117,10 +180,13 @@ internal data class VoiceTutorWebRtcConfigurationSnapshot(
     val interruptResponse: Boolean?,
     val updateRequested: Boolean,
     val verified: Boolean,
+    val expectedToolCount: Int = 0,
+    val effectiveToolCount: Int = -1,
+    val toolsVerified: Boolean = true,
 )
 
 internal class VoiceTutorWebRtcSessionConfigurationException :
-    RuntimeException("Provider session did not confirm server-owned Voice Tutor turns.")
+    RuntimeException("Provider session did not confirm server-owned Voice Tutor turns and tools.")
 
 internal class VoiceTutorWebRtcSessionConfigurationTimeoutException :
     RuntimeException("Provider session configuration acknowledgement timed out.")
@@ -140,7 +206,8 @@ private val configurationLogger = LoggerFactory.getLogger(
 private fun logWebRtcConfiguration(configuration: VoiceTutorWebRtcConfigurationSnapshot) {
     configurationLogger.info(
         "voice_tutor_sideband_configuration callRef={} eventType={} sessionType={} schema={} " +
-            "turnDetectionType={} createResponse={} interruptResponse={} updateRequested={} verified={}",
+            "turnDetectionType={} createResponse={} interruptResponse={} updateRequested={} verified={} " +
+            "expectedToolCount={} effectiveToolCount={} toolsVerified={}",
         configuration.callRef,
         configuration.eventType,
         configuration.sessionType,
@@ -150,5 +217,8 @@ private fun logWebRtcConfiguration(configuration: VoiceTutorWebRtcConfigurationS
         configuration.interruptResponse ?: "none",
         configuration.updateRequested,
         configuration.verified,
+        configuration.expectedToolCount,
+        configuration.effectiveToolCount,
+        configuration.toolsVerified,
     )
 }

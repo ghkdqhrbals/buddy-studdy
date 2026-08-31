@@ -14,6 +14,28 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
+    fun `successful MCP metadata event contains only a positive exact id and cannot be forged by the client`() {
+        val raw = """{"type":"${VoiceTutorRealtimeContract.STUDY_TREE_CHANGED_EVENT}","studyId":42,"arguments":{"secret":"discard"},"output":"discard"}"""
+        val result = policy.providerDecision(raw, "synthetic-session", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+        assertThat(result.terminate).isFalse()
+        val payload = mapper.readTree(result.payload)
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "studyId")
+        assertThat(payload.path("studyId").asLong()).isEqualTo(42)
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        assertThat(policy.providerDecision(raw, "synthetic-session", Instant.EPOCH).payload).isNull()
+    }
+
+    @Test
+    fun `invalid MCP metadata targets are not forwarded`() {
+        for (id in listOf("null", "true", "0", "-1", "1.5", "\"42\"", "[]", "{}", "9223372036854775808")) {
+            val raw = """{"type":"${VoiceTutorRealtimeContract.STUDY_TREE_CHANGED_EVENT}","studyId":$id}"""
+            val result = policy.providerDecision(raw, "synthetic-session", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+            assertThat(result.payload).isNull()
+            assertThat(result.terminate).isFalse()
+        }
+    }
+
+    @Test
     fun `input retry is a compact nonterminal server hint and cannot be forged as client control`() {
         val raw = """{"type":"${VoiceTutorRealtimeContract.INPUT_RETRY_EVENT}","message":"untrusted extra body"}"""
         val decision = policy.providerDecision(raw, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)

@@ -3,6 +3,7 @@ package com.buddystudy.backend.study
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
+import org.springframework.http.HttpStatus
 import java.time.Instant
 import java.util.Optional
 
@@ -58,6 +60,102 @@ class StudySyncServiceTest {
         assertThat(questions.findLatestPendingByStudyIdsCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isZero()
         assertThat(questionStats.findAllByIdsCalls).isEqualTo(1)
+        assertThat(studies.findByParentCalls).isZero()
+    }
+
+    @Test
+    fun `child study page includes only owned direct children in exact sibling order`(): Unit = runBlocking {
+        studies.rows += study(10, "Databases")
+        studies.rows += study(14, "Fourth").apply { parentStudyId = 10; sortOrder = 2 }
+        studies.rows += study(13, "Third").apply { parentStudyId = 10; sortOrder = 1 }
+        studies.rows += study(11, "First").apply { parentStudyId = 10; sortOrder = 0 }
+        studies.rows += study(12, "Second").apply { parentStudyId = 10; sortOrder = 1 }
+        studies.rows += study(21, "Other parent").apply { parentStudyId = 20 }
+        studies.rows += study(22, "Grandchild").apply { parentStudyId = 11 }
+        studies.rows += study(23, "Other owner").apply { parentStudyId = 10; userId = 99 }
+        questions.pendingRows += pendingQuestion(101, 11, "First")
+        questions.pendingRows += pendingQuestion(102, 12, "Second")
+        questions.pendingRows += pendingQuestion(103, 13, "Third")
+        questionStats.rows += QuestionStatsEntity(questionId = 102, viewCount = 4)
+
+        val page = service.study(principal, 2, 1, null, "ko", parentStudyId = 10)
+
+        assertThat(page.studies.map { it.id }).containsExactly(12L, 13L)
+        assertThat(page.studies.map { it.parentStudyId }).containsOnly(10L)
+        assertThat(page.totalCount).isEqualTo(4)
+        assertThat(page.limit).isEqualTo(2)
+        assertThat(page.offset).isEqualTo(1)
+        assertThat(page.studies.map { it.pendingQuestion?.id }).containsExactly("102", "103")
+        assertThat(page.studies.first().pendingQuestion?.viewCount).isEqualTo(4)
+        assertThat(studies.lastChildPageable?.offset).isEqualTo(1L)
+        assertThat(studies.lastChildPageable?.pageSize).isEqualTo(2)
+        assertThat(studies.findByParentCalls).isEqualTo(1)
+        assertThat(studies.findByUserCalls).isZero()
+        assertThat(studies.findByUserAndQueryCalls).isZero()
+        assertThat(studies.saveCalls).isZero()
+        assertThat(questions.findPendingByStudyIdCalls).isZero()
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `child study search trims search and keeps the parent filter and filtered total`(): Unit = runBlocking {
+        studies.rows += study(10, "Databases")
+        studies.rows += study(11, "Redis cache").apply { parentStudyId = 10 }
+        studies.rows += study(12, "Key value").apply { parentStudyId = 10; customPrompt = "Use Redis examples" }
+        studies.rows += study(13, "SQL").apply { parentStudyId = 10 }
+        studies.rows += study(14, "Redis other parent").apply { parentStudyId = 20 }
+
+        val page = service.study(principal, 10, 0, "  redis  ", "en", parentStudyId = 10)
+
+        assertThat(page.studies.map { it.id }).containsExactly(11L, 12L)
+        assertThat(page.totalCount).isEqualTo(2)
+        assertThat(studies.lastChildQuery).isEqualTo("redis")
+        assertThat(studies.findByUserAndQueryCalls).isZero()
+        assertThat(studies.saveCalls).isZero()
+    }
+
+    @Test
+    fun `owned empty parent returns an empty page without loading question records`(): Unit = runBlocking {
+        studies.rows += study(10, "Empty")
+
+        val page = service.study(principal, 10, 0, "  ", "ko", parentStudyId = 10)
+
+        assertThat(page.studies).isEmpty()
+        assertThat(page.totalCount).isZero()
+        assertThat(studies.lastChildQuery).isNull()
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
+        assertThat(questionStats.findAllByIdsCalls).isZero()
+    }
+
+    @Test
+    fun `missing and foreign child list parents both return not found before page access`(): Unit = runBlocking {
+        studies.rows += study(99, "Foreign parent").apply { userId = 99 }
+        listOf(98L, 99L).forEach { parentId ->
+            val failure = runCatching {
+                service.study(principal, 10, 0, null, "ko", parentId)
+            }.exceptionOrNull()
+
+            assertThat(failure).isInstanceOf(ApiException::class.java)
+            assertThat((failure as ApiException).status).isEqualTo(HttpStatus.NOT_FOUND)
+            assertThat(failure.code).isEqualTo(ApiErrorCode.STUDY_SETTINGS_MISSING)
+        }
+        assertThat(studies.findByParentCalls).isZero()
+        assertThat(studies.findByUserCalls).isZero()
+        assertThat(studies.saveCalls).isZero()
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
+    }
+
+    @Test
+    fun `child use case rejects unbounded or invalid pages directly`(): Unit = runBlocking {
+        listOf(Triple(10L, 0, 0), Triple(10L, 501, 0), Triple(10L, 10, -1), Triple(0L, 10, 0))
+            .forEach { (parentId, limit, offset) ->
+                val failure = runCatching {
+                    service.study(principal, limit, offset, null, "ko", parentId)
+                }.exceptionOrNull()
+                assertThat(failure).isInstanceOf(ApiException::class.java)
+                assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+            }
+        assertThat(studies.findByParentCalls).isZero()
     }
 
     @Test
@@ -288,7 +386,14 @@ class StudySyncServiceTest {
 
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
+        var findByParentCalls = 0
+        var findByUserCalls = 0
+        var findByUserAndQueryCalls = 0
+        var saveCalls = 0
+        var lastChildQuery: String? = null
+        var lastChildPageable: Pageable? = null
         override suspend fun save(entity: StudyEntity): StudyEntity {
+            saveCalls += 1
             if (entity.id == 0L) {
                 entity.id = (rows.maxOfOrNull { it.id } ?: 0L) + 1
                 rows += entity
@@ -308,10 +413,34 @@ class StudySyncServiceTest {
         override suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = rows.firstOrNull { it.userId == userId && it.topic == topic }
         override suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
             rows.filter { it.userId == userId && it.topic in topics }
-        override suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> =
-            PageImpl(rows.filter { it.userId == userId }, pageable, rows.count { it.userId == userId }.toLong())
-        override suspend fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> =
-            PageImpl(rows.filter { it.userId == userId && it.topic.contains(query, ignoreCase = true) }, pageable, rows.count { it.userId == userId }.toLong())
+        override suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> {
+            findByUserCalls += 1
+            return PageImpl(rows.filter { it.userId == userId }, pageable, rows.count { it.userId == userId }.toLong())
+        }
+        override suspend fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> {
+            findByUserAndQueryCalls += 1
+            return PageImpl(rows.filter { it.userId == userId && it.topic.contains(query, ignoreCase = true) }, pageable, rows.count { it.userId == userId }.toLong())
+        }
+        override suspend fun findByUserIdAndParentStudyId(
+            userId: Long,
+            parentStudyId: Long,
+            query: String?,
+            pageable: Pageable,
+        ): Page<StudyEntity> {
+            findByParentCalls += 1
+            lastChildQuery = query
+            lastChildPageable = pageable
+            val matching = rows.filter { row ->
+                row.userId == userId && row.parentStudyId == parentStudyId &&
+                    (query == null || listOf(row.topic, row.customPrompt, row.openaiModel)
+                        .any { it.contains(query, ignoreCase = true) })
+            }.sortedWith(compareBy<StudyEntity> { it.sortOrder }.thenBy { it.id })
+            return PageImpl(
+                matching.drop(pageable.offset.toInt()).take(pageable.pageSize),
+                pageable,
+                matching.size.toLong(),
+            )
+        }
         override suspend fun claimDue(now: Instant, limit: Int): List<StudyEntity> = emptyList()
     }
 

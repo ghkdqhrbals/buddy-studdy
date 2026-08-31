@@ -254,6 +254,7 @@ final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var sessionQuota = VoiceTutorSessionQuotaState()
     @Published private(set) var sessionSecondsRemaining: Int?
     @Published private(set) var detail: BackendVoiceTutorSessionDetail?
+    @Published private(set) var summaryRefreshState: VoiceTutorSummaryRefreshState = .idle
     @Published private(set) var errorMessage: String?
     @Published private(set) var isMuted = false
     @Published private(set) var isRecording = false
@@ -287,6 +288,8 @@ final class VoiceTutorViewModel: ObservableObject {
     private var duplexPlaybackState = VoiceTutorDuplexPlaybackState()
     private var webRTCResponseState = VoiceTutorWebRTCResponseState()
     private var connectionAttemptFence = VoiceTutorConnectionAttemptFence()
+    private var summaryRequestID = UUID()
+    private var summaryContextValidity: (@MainActor @Sendable () -> Bool)?
 
     init(
         appState: AppState,
@@ -309,6 +312,9 @@ final class VoiceTutorViewModel: ObservableObject {
             return
         }
         let attemptID = connectionAttemptFence.begin()
+        summaryRequestID = UUID()
+        summaryContextValidity = nil
+        summaryRefreshState = .idle
         stopLocalSpeechEventPump()
         sessionID = nil
         clearSessionCountdown()
@@ -626,6 +632,9 @@ final class VoiceTutorViewModel: ObservableObject {
         // microphone and playback immediately; the captured old registration
         // owns best-effort REST cleanup and must never update the new account.
         detail = nil
+        summaryRequestID = UUID()
+        summaryContextValidity = nil
+        summaryRefreshState = .idle
         captions = []
         assistantTranscriptDraft = ""
         audioEngine.stop()
@@ -911,8 +920,23 @@ final class VoiceTutorViewModel: ObservableObject {
             let completedSessionID = connection.session.sessionId
             await VoiceTutorAttemptDelivery.deliver(
                 isCurrent: { self.connectionAttemptFence.isCurrent(attemptID) && connection.isCurrent() },
-                operation: { await self.appState.loadVoiceTutorSessionDetail(sessionID: completedSessionID) },
-                apply: { self.detail = $0 }
+                operation: {
+                    let loader = self.appState.makeVoiceTutorSessionDetailLoader(
+                        sessionID: completedSessionID,
+                        validity: { [weak self] in
+                            self?.connectionAttemptFence.isCurrent(attemptID) == true && connection.isCurrent()
+                        }
+                    )
+                    return await loader?.load()
+                },
+                apply: { loaded in
+                    guard let loaded else { return }
+                    self.detail = loaded
+                    if VoiceTutorSummaryState(detail: loaded).isTerminal {
+                        self.summaryRequestID = UUID()
+                        self.summaryRefreshState = .idle
+                    }
+                }
             )
         case .heartbeatAcknowledged:
             break
@@ -920,6 +944,21 @@ final class VoiceTutorViewModel: ObservableObject {
             // This is not a disconnected call. Keep native capture/output alive
             // and show a small retry hint after the tutor finishes speaking.
             inputNeedsRepeat = true
+        case .studyTreeChanged(let studyID):
+            // A confirmed server-side MCP write refreshes only that node's
+            // metadata. Keep the socket receive/audio path non-blocking and
+            // never replace a learner's current question or answer draft.
+            guard phase.isLive else { break }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.appState.refreshVoiceTutorCreatedStudy(
+                    studyID: studyID,
+                    validity: { [weak self] in
+                        self?.connectionAttemptFence.isCurrent(attemptID) == true &&
+                            connection.isCurrent() && self?.phase.isLive == true && self?.isFinalizing == false
+                    }
+                )
+            }
         case .serviceError(let code, _, _):
             switch code?.uppercased() {
             case "VOICE_TUTOR_PRO_REQUIRED":
@@ -1107,6 +1146,14 @@ final class VoiceTutorViewModel: ObservableObject {
         pollAfterMilliseconds: Int?,
         outcome: VoiceTutorSessionPhase = .ended
     ) async {
+        let attemptID = connectionAttemptFence.currentID
+        if let connection = activeConnection, connection.isCurrent() {
+            summaryContextValidity = { [weak self] in
+                self?.connectionAttemptFence.isCurrent(attemptID) == true && connection.isCurrent()
+            }
+        } else {
+            summaryContextValidity = nil
+        }
         detail = activeConnection?.isCurrent() == true ? initialDetail : nil
         if let quota = detail?.quota { applyServerQuota(quota) }
         if activeConnection?.isCurrent() == true, let sessionID {
@@ -1130,6 +1177,8 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         if activeConnection?.isCurrent() != true {
             detail = nil
+            summaryContextValidity = nil
+            summaryRefreshState = .idle
             captions = []
             assistantTranscriptDraft = ""
         }
@@ -1145,35 +1194,60 @@ final class VoiceTutorViewModel: ObservableObject {
         activeConnection = nil
     }
 
+    /// This refresh never opens another call or asks the server to regenerate a
+    /// result. It remains bound to the owner and attempt that ended this call.
+    func refreshSummary() async {
+        guard !isFinalizing, phase == .ended || phase == .failed,
+              summaryRefreshState != .loading, let sessionID else { return }
+        let attemptID = connectionAttemptFence.currentID
+        let refreshed = await pollForResult(
+            sessionID: sessionID,
+            initialDetail: detail,
+            initialDelayMilliseconds: detail?.pollAfterMilliseconds,
+            refreshCachedDetail: true
+        )
+        guard connectionAttemptFence.isCurrent(attemptID) else { return }
+        detail = refreshed
+    }
+
     private func pollForResult(
         sessionID: String,
         initialDetail: BackendVoiceTutorSessionDetail?,
-        initialDelayMilliseconds: Int?
+        initialDelayMilliseconds: Int?,
+        refreshCachedDetail: Bool = false
     ) async -> BackendVoiceTutorSessionDetail? {
-        var current = initialDetail
-        var delayMilliseconds = max(250, min(initialDelayMilliseconds ?? 750, 5_000))
-        for attempt in 0..<8 {
-            guard activeConnection?.isCurrent() == true else { return nil }
-            if current?.result != nil || ["COMPLETED", "FAILED"].contains(current?.resultStatus?.uppercased() ?? "") {
-                return current
-            }
-            if attempt > 0 || initialDetail != nil {
-                try? await Task.sleep(nanoseconds: UInt64(delayMilliseconds) * 1_000_000)
-            }
-            guard activeConnection?.isCurrent() == true else { return nil }
-            guard !Task.isCancelled else {
-                return current
-            }
-            if let loaded = await appState.loadVoiceTutorSessionDetail(sessionID: sessionID) {
-                guard activeConnection?.isCurrent() == true else { return nil }
-                current = loaded
-                delayMilliseconds = max(
-                    250,
-                    min(loaded.pollAfterMilliseconds ?? delayMilliseconds, 5_000)
-                )
-            }
+        let attemptID = connectionAttemptFence.currentID
+        let requestID = UUID()
+        summaryRequestID = requestID
+        guard let contextIsCurrent = summaryContextValidity, contextIsCurrent() else {
+            summaryRefreshState = .idle
+            return nil
         }
-        return current
+        let isCurrent: @MainActor @Sendable () -> Bool = { [weak self] in
+            self?.summaryRequestID == requestID
+                && self?.connectionAttemptFence.isCurrent(attemptID) == true
+                && contextIsCurrent()
+        }
+        guard let loader = appState.makeVoiceTutorSessionDetailLoader(sessionID: sessionID, validity: isCurrent) else {
+            summaryRefreshState = .unavailable
+            return initialDetail
+        }
+        summaryRefreshState = .loading
+        let outcome = await VoiceTutorSummaryPolling.poll(
+            sessionID: sessionID,
+            initialDetail: initialDetail,
+            initialDelayMilliseconds: initialDelayMilliseconds,
+            refreshCachedDetail: refreshCachedDetail,
+            loader: loader,
+            isCurrent: isCurrent,
+            onUpdate: { [weak self] in self?.detail = $0 }
+        )
+        guard connectionAttemptFence.isCurrent(attemptID), contextIsCurrent() else { return nil }
+        // A result-ready event may have published a newer terminal result while
+        // this read was suspended. Never replace it with the older placeholder.
+        guard summaryRequestID == requestID else { return detail }
+        summaryRefreshState = outcome.refreshState
+        return outcome.detail
     }
 
     private func commitAssistantTranscript(_ completedTranscript: String?) {

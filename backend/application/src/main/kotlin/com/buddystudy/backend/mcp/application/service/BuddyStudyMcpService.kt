@@ -70,6 +70,23 @@ class BuddyStudyMcpService(
     )
 
     @RequirePermission(Permissions.STUDY_READ)
+    override suspend fun listStudies(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+        parentStudyId: Long,
+    ) = studies.study(
+        principal = registered(principal),
+        limit = boundedLimit(limit, MAX_STUDY_PAGE_SIZE),
+        offset = nonNegativeOffset(offset),
+        query = query,
+        language = language,
+        parentStudyId = positiveId(parentStudyId, "parent_study_id"),
+    )
+
+    @RequirePermission(Permissions.STUDY_READ)
     override suspend fun getStudy(principal: Principal, studyId: Long, language: String) =
         studies.study(registered(principal), positiveId(studyId, "study_id"), language)
 

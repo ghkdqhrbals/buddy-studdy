@@ -139,6 +139,27 @@ class StudyRepository(
         return template.selectPage(select, Query.query(criteria), StudyEntity::class.java, pageable)
     }
 
+    override suspend fun findByUserIdAndParentStudyId(
+        userId: Long,
+        parentStudyId: Long,
+        query: String?,
+        pageable: Pageable,
+    ): Page<StudyEntity> {
+        var criteria = Criteria.where("user_id").`is`(userId)
+            .and("parent_study_id").`is`(parentStudyId)
+        if (!query.isNullOrBlank()) {
+            val pattern = "%${query.lowercase()}%"
+            val search = Criteria.where("topic").like(pattern).ignoreCase(true)
+                .or("custom_prompt").like(pattern).ignoreCase(true)
+                .or("openai_model").like(pattern).ignoreCase(true)
+            criteria = criteria.and(search)
+        }
+        val select = Query.query(criteria).sort(
+            Sort.by(Sort.Order.asc("sort_order"), Sort.Order.asc("id")),
+        )
+        return template.selectPage(select, Query.query(criteria), StudyEntity::class.java, pageable)
+    }
+
     @Transactional
     override suspend fun claimDue(now: Instant, limit: Int): List<StudyEntity> {
         val claimUntil = now.plusSeconds(properties.scheduler.processingTimeoutSeconds.coerceIn(30, 3_600))

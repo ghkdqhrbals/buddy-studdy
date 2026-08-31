@@ -76,7 +76,6 @@ class VoiceTutorControlWebSocketHandler(
         val terminalSource = AtomicReference("NONE")
         val clientCloseCode = AtomicReference<Int?>(null)
         val localCloseInitiated = AtomicBoolean(false)
-        val userEnded = AtomicBoolean(false)
         val sidebandReady = AtomicBoolean(false)
         val latency = realtimeMetrics.webRtcTracker()
         val clientTraffic = VoiceTutorClientTrafficGuard(
@@ -93,21 +92,34 @@ class VoiceTutorControlWebSocketHandler(
 
         fun elapsedMs(): Long = (System.nanoTime() - startedNanos).coerceAtLeast(0) / 1_000_000
 
-        fun signalTerminal(source: String, cancelActiveResponse: Boolean) {
-            synchronized(terminalGate) {
-                if (relayTerminated.compareAndSet(false, true)) {
-                    terminalSource.set(source)
-                    // Only internal state and numeric close codes belong here. Do
-                    // not log provider/client payloads, close reasons, or errors'
-                    // messages: they can contain private speech or credentials.
-                    logger.info(
-                        "voice_tutor_control_terminal sessionId={} callRef={} source={} reason={} " +
-                            "sidebandReady={} cancelActiveResponse={} elapsedMs={} errorType={}",
-                        sessionId, callRef, source, endReason.get(), sidebandReady.get(),
-                        cancelActiveResponse, elapsedMs(), failure.get()?.javaClass?.simpleName ?: "none",
-                    )
-                    terminalSignal.tryEmitValue(VoiceTutorRelayTermination(cancelActiveResponse))
-                }
+        fun signalTerminal(
+            source: String,
+            cancelActiveResponse: Boolean,
+            reason: String? = null,
+            error: Throwable? = null,
+            payload: String? = null,
+        ): Boolean = synchronized(terminalGate) {
+            if (relayTerminated.compareAndSet(false, true)) {
+                // The first terminal decision owns its outcome as well as
+                // its source. Closing the other branch can synchronously
+                // report 1006/error; that is not a second failed lesson.
+                reason?.let(endReason::set)
+                error?.let(failure::set)
+                terminalSource.set(source)
+                // Only internal state and numeric close codes belong here. Do
+                // not log provider/client payloads, close reasons, or errors'
+                // messages: they can contain private speech or credentials.
+                logger.info(
+                    "voice_tutor_control_terminal sessionId={} callRef={} source={} reason={} " +
+                        "sidebandReady={} cancelActiveResponse={} elapsedMs={} errorType={}",
+                    sessionId, callRef, source, endReason.get(), sidebandReady.get(),
+                    cancelActiveResponse, elapsedMs(), failure.get()?.javaClass?.simpleName ?: "none",
+                )
+                payload?.let { emit(outgoing, it) }
+                terminalSignal.tryEmitValue(VoiceTutorRelayTermination(cancelActiveResponse))
+                true
+            } else {
+                false
             }
         }
 
@@ -120,18 +132,18 @@ class VoiceTutorControlWebSocketHandler(
         val sendToClient = clientSession.send(outgoing.asFlux().map(clientSession::textMessage))
             .doOnError { error ->
                 if (error is IllegalStateException) {
-                    failure.compareAndSet(null, error)
-                    endReason.compareAndSet("PROVIDER_CLOSED", "CONTROL_BACKPRESSURE")
+                    signalTerminal(
+                        "CLIENT_SEND_ERROR", cancelActiveResponse = true,
+                        reason = "CONTROL_BACKPRESSURE", error = error,
+                    )
                 } else {
-                    endReason.compareAndSet("PROVIDER_CLOSED", "CLIENT_DISCONNECTED")
+                    signalTerminal("CLIENT_SEND_ERROR", cancelActiveResponse = true, reason = "CLIENT_DISCONNECTED")
                 }
-                signalTerminal("CLIENT_SEND_ERROR", cancelActiveResponse = true)
             }
             .onErrorResume { Mono.empty() }
         val untilDeadline = Duration.between(Instant.now(), context.session.hardEndsAt).coerceAtLeast(Duration.ZERO)
         val deadline = Mono.delay(untilDeadline).map {
-            endReason.set("TIME_LIMIT")
-            signalTerminal("DEADLINE", cancelActiveResponse = true)
+            signalTerminal("DEADLINE", cancelActiveResponse = true, reason = "TIME_LIMIT")
             emit(
                 outgoing,
                 synthetic(
@@ -159,8 +171,7 @@ class VoiceTutorControlWebSocketHandler(
                     control.state == VoiceTutorSessionStatus.ENDING -> "USER_ENDED"
                     else -> "SERVER_FINALIZED"
                 }
-                endReason.set(reason)
-                signalTerminal("SERVER_CONTROL", cancelActiveResponse = true)
+                signalTerminal("SERVER_CONTROL", cancelActiveResponse = true, reason = reason)
                 emit(
                     outgoing,
                     synthetic(
@@ -175,10 +186,7 @@ class VoiceTutorControlWebSocketHandler(
 
         val clientInput = clientSession.receive()
             .doOnComplete {
-                if (!userEnded.get()) {
-                    endReason.compareAndSet("PROVIDER_CLOSED", "CLIENT_DISCONNECTED")
-                }
-                signalTerminal("CLIENT_RECEIVE_COMPLETE", cancelActiveResponse = true)
+                signalTerminal("CLIENT_RECEIVE_COMPLETE", cancelActiveResponse = true, reason = "CLIENT_DISCONNECTED")
             }
             .map(::voiceTutorClientTextPayload)
             .concatMap { raw ->
@@ -202,8 +210,10 @@ class VoiceTutorControlWebSocketHandler(
                                         ),
                                     )
                                     if (state != VoiceTutorSessionStatus.ACTIVE) {
-                                        endReason.compareAndSet("PROVIDER_CLOSED", "SERVER_FINALIZED")
-                                        signalTerminal("CLIENT_HEARTBEAT_FINALIZED", cancelActiveResponse = true)
+                                        signalTerminal(
+                                            "CLIENT_HEARTBEAT_FINALIZED", cancelActiveResponse = true,
+                                            reason = "SERVER_FINALIZED",
+                                        )
                                     }
                                 }
                                 .then(Mono.empty<String>())
@@ -212,9 +222,7 @@ class VoiceTutorControlWebSocketHandler(
                         }
                     }
                     VoiceTutorRealtimeEventPolicy.CLIENT_END_EVENT -> {
-                        userEnded.set(true)
-                        endReason.set("USER_ENDED")
-                        signalTerminal("CLIENT_END", cancelActiveResponse = true)
+                        signalTerminal("CLIENT_END", cancelActiveResponse = true, reason = "USER_ENDED")
                         Mono.empty()
                     }
                     VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT -> {
@@ -244,15 +252,15 @@ class VoiceTutorControlWebSocketHandler(
             .takeUntilOther(terminalSignal.asMono())
             .doOnNext { raw -> emitClientControl(providerControlEvents, raw) }
             .onErrorResume { error ->
-                failure.compareAndSet(null, error)
-                endReason.set(
-                    if (error is VoiceTutorClientProtocolException) {
+                signalTerminal(
+                    "CLIENT_RECEIVE_ERROR", cancelActiveResponse = true,
+                    reason = if (error is VoiceTutorClientProtocolException) {
                         "CLIENT_PROTOCOL_ERROR"
                     } else {
                         "CONTROL_ERROR"
                     },
+                    error = error,
                 )
-                signalTerminal("CLIENT_RECEIVE_ERROR", cancelActiveResponse = true)
                 Mono.empty()
             }
             .doFinally { providerControlEvents.tryEmitComplete() }
@@ -287,10 +295,10 @@ class VoiceTutorControlWebSocketHandler(
                     // delivered. Record failure first so that race cannot turn
                     // a provider error/cleared sentence into a successful call.
                     val error = VoiceTutorProviderReportedException()
-                    failure.compareAndSet(null, error)
-                    endReason.compareAndSet("PROVIDER_CLOSED", "PROVIDER_ERROR")
-                    decision.payload?.let(::emitProviderPayload)
-                    signalTerminal("PROVIDER_EVENT_ERROR", cancelActiveResponse = false)
+                    signalTerminal(
+                        "PROVIDER_EVENT_ERROR", cancelActiveResponse = false,
+                        reason = "PROVIDER_ERROR", error = error, payload = decision.payload,
+                    )
                     throw error
                 }
                 if (persist) inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull()
@@ -354,14 +362,21 @@ class VoiceTutorControlWebSocketHandler(
         val providerWork = providerRelay
             .doOnSuccess { signalTerminal("PROVIDER_RELAY_COMPLETE", cancelActiveResponse = false) }
             .doOnError { error ->
-                failure.compareAndSet(null, error)
-                if (endReason.get() == "PROVIDER_CLOSED") endReason.set("PROVIDER_ERROR")
-                signalTerminal("PROVIDER_RELAY_ERROR", cancelActiveResponse = false)
-                logger.warn(
-                    "voice_tutor_webrtc_sideband_failed sessionId={} callRef={} errorType={}",
-                    sessionId, callRef,
-                    error.javaClass.simpleName,
-                )
+                if (signalTerminal(
+                        "PROVIDER_RELAY_ERROR", cancelActiveResponse = false,
+                        reason = "PROVIDER_ERROR", error = error,
+                    )
+                ) {
+                    logger.warn(
+                        "voice_tutor_webrtc_sideband_failed sessionId={} callRef={} errorType={}",
+                        sessionId, callRef, error.javaClass.simpleName,
+                    )
+                } else {
+                    logger.info(
+                        "voice_tutor_webrtc_sideband_closed_after_terminal sessionId={} callRef={} source={} errorType={}",
+                        sessionId, callRef, terminalSource.get(), error.javaClass.simpleName,
+                    )
+                }
             }
         val providerFlow = Mono.usingWhen(
             Mono.just(callId),
@@ -369,8 +384,7 @@ class VoiceTutorControlWebSocketHandler(
             { cleanupProvider() },
             { _, _ -> cleanupProvider() },
             {
-                endReason.compareAndSet("PROVIDER_CLOSED", "CLIENT_DISCONNECTED")
-                signalTerminal("BRIDGE_CANCEL", cancelActiveResponse = true)
+                signalTerminal("BRIDGE_CANCEL", cancelActiveResponse = true, reason = "CLIENT_DISCONNECTED")
                 cleanupProvider()
             },
         )
