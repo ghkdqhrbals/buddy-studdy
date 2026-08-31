@@ -3,13 +3,86 @@
 Verification date: 2026-09-01. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [spoken topic discovery through saved study trees](#spoken-topic-discovery-through-saved-study-trees).
-It extends the existing Silero/contextual-input, MCP and source-backed summary
-contracts; it does not change the ordinary overlap/playback policy or regrade
-past answers. Earlier checks below are historical and do not all describe the
-current implementation. Source/fixture tests, iPhone tests and actual dev runtime
-observations are recorded separately; none implies a new human microphone-to-
-tutor conversation unless that specific check is explicitly recorded.
+Latest implementation: [single-orb call and spoken lesson end](#single-orb-call-and-spoken-lesson-end).
+It extends the existing topic-discovery, Silero/contextual-input, MCP and
+source-backed summary contracts; it does not regrade past answers. Earlier
+checks below are historical and do not all describe the current implementation.
+Source/fixture tests, iPhone tests and actual dev runtime observations are
+recorded separately; none implies a new human microphone-to-tutor conversation
+unless that specific check is explicitly recorded.
+
+## Single-orb call and spoken lesson end
+
+Implementation verified on 2026-09-01, branch `feature/2.0`, commit
+`ef972cb332ecb3b03aab75f81671978359a2084f`.
+
+- A live lesson now defaults to one central state orb. Its existing acknowledged
+  pause/resume contract owns taps; a pause acknowledgement makes the orb small
+  and still instead of guessing from a pending request. A deliberate downward
+  vertical swipe reveals the transcript, exact server countdown, mute and end
+  actions; an upward swipe returns to the compact view. Failure, retry, result,
+  actionable permission/quota text, VoiceOver, Dynamic Type and Reduce Motion
+  remain reachable.
+- Voice selection moved to a compact Settings destination. Selecting a voice
+  fetches and plays fixed, server-owned copy from
+  `GET /api/v1/voice-tutor/voices/{voice}/preview`; the caller cannot submit text.
+  The preview requires the authenticated registered Pro user and the regular
+  server OpenAI key, but creates no lesson and reserves or charges no voice
+  seconds. Audio is bounded to 512 KiB, not logged or persisted by the backend,
+  rate/concurrency limited in process, and served with no-store/nosniff headers.
+  iOS bounds its own in-memory reuse and fences cancellation, stale completion,
+  decoder failure and rapid same-voice replacement before touching the shared
+  audio session. The UI identifies the sample as AI-generated speech.
+- A final meaningful learner turn can semantically request
+  `END_CURRENT_VOICE_LESSON`. Silence, noise, filler-only audio, quotations,
+  hypothetical/negative/future statements, questions about whether to end,
+  topic completion and long-speech checkpoints cannot end the call. The exact
+  original learner transcript must first pass contextual assessment and durable
+  persistence; assessment or persistence failure keeps the lesson open.
+- WebRTC and legacy PCM both use the same `USER_ENDED` settlement/summary path.
+  WebRTC retains its numbered app speech edges; legacy PCM correlates OpenAI
+  server-VAD start, stop and commit events by the provider item ID before assigning
+  an internal sequence. A newer speech start retracts an un-emitted end candidate.
+  If the tutor is already speaking, the current response and device playout drain
+  finish before the end lifecycle fires; the spoken command does not cancel or
+  truncate the tutor sentence. Explicit red end remains available in the expanded
+  view and keeps its existing immediate user-end behavior.
+
+Verification completed so far:
+
+- Focused simulator run: **132 tests passed, one opt-in hardware capture test
+  skipped, zero failures** across `VoiceTutorContractTests`,
+  `VoiceTutorPauseTests` and `VoiceTutorVoiceSettingsTests`. This includes the
+  single-orb render/gesture states, pause acknowledgement, preview request bounds,
+  identity recovery and lesson-free preview contract.
+- Required unsigned `StudyMateiOS` generic iOS Debug build passed after the final
+  audio-player identity fix. A separate normal signed Debug app build also passed;
+  deep code-sign verification passed, the bundle ID matched, and no XCTest plug-in,
+  framework or injection library remained in the app bundle.
+- Focused application/infrastructure voice tests passed for preview admission and
+  provider mapping, contextual intent parsing, exact publication/persistence,
+  WebRTC and legacy spoken-end races, terminal ownership and the production legacy
+  adapter factory. Spring AOT processing and `:tutor:bootJar` also passed. A wider
+  backend run still contains eight isolated stale fixture/expectation failures
+  outside this implementation; no full-suite-green claim is made here.
+- The existing dev API container alone was recreated at the commit above with
+  artifact SHA-256
+  `5f6871dc0c79c97620d65c2d5001e61029bc9b732ea73ccda32c55b8b2530634`.
+  It retained the `dev` profile, AWS secret selector, localhost-only port 8080,
+  network, data volume, environment and resource/security limits. MySQL, Redis,
+  LibreTranslate and backup retained their exact container IDs and start times;
+  no persistent container was added. Zero active calls were observed at both
+  drain gates, schema remained V106, the new preview path appeared in OpenAPI,
+  and local dependency/readiness/health plus public dev health all passed.
+- Physical iPhone verification is not yet complete. The paired iPhone 16 Pro was
+  still locked during two safe `build-for-testing` attempts and rejected the app
+  install for the same reason. No device test, install or launch is claimed until
+  the phone is unlocked and those steps succeed.
+
+The preview provider contract follows the OpenAI
+[text-to-speech guide](https://developers.openai.com/api/docs/guides/text-to-speech),
+and the exact Realtime input/response sequencing follows the OpenAI
+[Realtime conversations guide](https://developers.openai.com/api/docs/guides/realtime-conversations).
 
 ## Spoken topic discovery through saved study trees
 
