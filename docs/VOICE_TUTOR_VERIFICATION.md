@@ -14,15 +14,18 @@ unless that specific check is explicitly recorded.
 ## Single-orb call and spoken lesson end
 
 Implementation verified on 2026-09-01, branch `feature/2.0`, commit
-`ef972cb332ecb3b03aab75f81671978359a2084f`.
+`fe2f601333677f7ea2be81ea7b159360dbcb9013`.
 
-- A live lesson now defaults to one central state orb. Its existing acknowledged
-  pause/resume contract owns taps; a pause acknowledgement makes the orb small
-  and still instead of guessing from a pending request. A deliberate downward
-  vertical swipe reveals the transcript, exact server countdown, mute and end
-  actions; an upward swipe returns to the compact view. Failure, retry, result,
-  actionable permission/quota text, VoiceOver, Dynamic Type and Reduce Motion
-  remain reachable.
+- An ordinary live lesson now renders literally one central state orb: topic,
+  discovery copy, countdown, transcript affordance, mute and end controls remain
+  hidden until interaction. The orb's existing acknowledged pause/resume contract
+  owns taps; a pause acknowledgement makes it small and still instead of guessing
+  from a pending request. A deliberate downward vertical swipe reveals the topic,
+  transcript, exact server countdown, mute and end actions. An upward overscroll
+  returns to the orb only after the enlarged outer call and, when applicable, the
+  nested transcript have reached their latest edges, so large-text controls and
+  older dialogue remain scrollable. Failure, retry, result, actionable permission/
+  quota text, VoiceOver, Dynamic Type and Reduce Motion remain reachable.
 - Voice selection moved to a compact Settings destination. Selecting a voice
   fetches and plays fixed, server-owned copy from
   `GET /api/v1/voice-tutor/voices/{voice}/preview`; the caller cannot submit text.
@@ -43,20 +46,31 @@ Implementation verified on 2026-09-01, branch `feature/2.0`, commit
   WebRTC retains its numbered app speech edges; legacy PCM correlates OpenAI
   server-VAD start, stop and commit events by the provider item ID before assigning
   an internal sequence. A newer speech start retracts an un-emitted end candidate.
-  If the tutor is already speaking, the current response and device playout drain
-  finish before the end lifecycle fires; the spoken command does not cancel or
-  truncate the tutor sentence. Explicit red end remains available in the expanded
-  view and keeps its existing immediate user-end behavior.
+  If the tutor is already speaking, the server waits for the exact response's
+  completion and output-buffer-stop boundaries. iOS then keeps that exact response
+  generation's native output path alive for a bounded local grace before closing:
+  450 ms with renderer evidence, at most 1.25 seconds without it. If terminal
+  ownership suppresses the second raw provider event, the server-verified spoken
+  lifecycle seals the still-active exact response ID locally instead of skipping
+  this fence. A newer response, close, cancellation, background or dismissal
+  invalidates it. The spoken command sends no cancel, clear or truncate, while the
+  explicit red end keeps its immediate behavior. This is defensive jitter/Core
+  Audio grace, not proof that software observed the final acoustic sample leave the
+  speaker.
 
 Verification completed so far:
 
-- Focused simulator run: **132 tests passed, one opt-in hardware capture test
+- Focused simulator run: **141 tests passed, one opt-in hardware capture test
   skipped, zero failures** across `VoiceTutorContractTests`,
   `VoiceTutorPauseTests` and `VoiceTutorVoiceSettingsTests`. This includes the
-  single-orb render/gesture states, pause acknowledgement, preview request bounds,
-  identity recovery and lesson-free preview contract.
-- Required unsigned `StudyMateiOS` generic iOS Debug build passed after the final
-  audio-player identity fix. A separate normal signed Debug app build also passed;
+  literal single-orb source/render states, nested/outer latest-edge gesture routing,
+  both spoken-end provider-boundary orders and the server-attested fallback race,
+  pause acknowledgement, preview request bounds, identity recovery and lesson-free
+  preview contract. Result bundle:
+  `/tmp/buddystudy-single-orb-audit-fixes-v2-20260901.xcresult`.
+- The exact required unsigned `StudyMateiOS` generic iOS Debug build passed after
+  the final gesture and playout-race fixes. A separate normal signed Debug app build
+  from the preceding implementation also passed;
   deep code-sign verification passed, the bundle ID matched, and no XCTest plug-in,
   framework or injection library remained in the app bundle.
 - Focused application/infrastructure voice tests passed for preview admission and
@@ -74,10 +88,12 @@ Verification completed so far:
   no persistent container was added. Zero active calls were observed at both
   drain gates, schema remained V106, the new preview path appeared in OpenAPI,
   and local dependency/readiness/health plus public dev health all passed.
-- Physical iPhone verification is not yet complete. The paired iPhone 16 Pro was
-  still locked during three safe `build-for-testing` attempts and rejected the app
-  install for the same reason. No device test, install or launch is claimed until
-  the phone is unlocked and those steps succeed.
+- Physical iPhone verification of this final commit is not yet complete. The latest
+  read-only device check still reported the paired iPhone 16 Pro as locked, with
+  developer services unavailable and its tunnel disconnected; earlier safe
+  `build-for-testing`/install attempts were rejected for that same reason. No test,
+  signed build, install, launch or audible end-to-end result is claimed for this
+  commit until the phone is unlocked and those steps succeed.
 
 The preview provider contract follows the OpenAI
 [text-to-speech guide](https://developers.openai.com/api/docs/guides/text-to-speech),
