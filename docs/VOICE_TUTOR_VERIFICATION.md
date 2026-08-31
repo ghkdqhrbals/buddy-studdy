@@ -1410,3 +1410,39 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   The existing dev runtime uses an external Flyway directory, so refresh must
   stage that SQL alongside the verified JAR without changing the profile or
   creating any new persistent infrastructure.
+
+### Existing dev API and iPhone rollout
+
+- Implementation `e2cf47d0` was committed on `feature/2.0` and installed into the
+  existing `backend-backend-1` API (`ab6688fa64cb`) on `127.0.0.1:8080`, starting
+  at 02:04:29 KST on September 1. The `dev` profile, AWS `buddystudy/dev` source,
+  every original environment value, network, mounts and resource limits were
+  preserved. The original database, Redis, LibreTranslate and backup containers
+  retained their IDs and start times. No production server or GitHub deployment
+  was used. Logs: `build/voiceStudyMutationsDevPreflight.log` and
+  `build/voiceStudyMutationsDevRefresh.log`.
+- Active calls were zero before staging, after staging and before restart.
+  Only the existing API was recreated, without an image build or dependency
+  restart. Offline artifact-copy helpers were transient and automatically
+  removed. The previous `c1fbe8c7` JAR remains in the same artifact volume for
+  rollback; earlier backups and source data were not deleted.
+- V104 applied through the unchanged external Flyway directory. MySQL confirms
+  the immutable accepted-node and transcript-revision columns plus the seven
+  revision-table columns. Source, embedded SQL, mounted SQL and JAR hashes match;
+  V101–V103 remain applied. Startup reported zero observed ERROR entries or
+  projection failures, and manual local/public dev health checks returned 200.
+- Ten read-only MySQL probes passed: the four existing node/subtree cursor
+  variants and six source-extracted revision/history/confirmation SELECTs.
+  An impossible owner/session returned zero rows (or current revision zero).
+  These prove SQL syntax, not live mutation, populated-row semantics or audible
+  voice behavior. Existing aggregate data remained three private node records
+  and six READY translations, zero PENDING/FAILED translations and zero eligible
+  unprojected results; no content was printed or manually replayed. Log:
+  `build/voiceStudyMutationsDevRuntimeVerification.log`.
+- The normal signed app was installed and launched on the paired iPhone 16 Pro
+  with the existing `https://lowfidev.cloud` dev base URL, after checking zero
+  active calls and no injected XCTest artifacts. Logs:
+  `build/voiceStudyMutationsDeviceInstall.log` and
+  `build/voiceStudyMutationsDeviceLaunch.log`. Human confirmation of a long spoken
+  answer, an audible response afterward and intentional spoken topic changes
+  remains the separate end-to-end acceptance step.
