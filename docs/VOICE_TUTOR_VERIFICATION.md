@@ -73,10 +73,30 @@ Verification:
   Logs: `build/voiceTopicDiscoveryDeviceTestBuild-retry2.log` and
   `build/voiceTopicDiscoveryDeviceTests.log`.
 - The normal signed app rebuilt successfully; signature verification passed and
-  its bundle contains no injected XCTest plug-in/framework. Log:
-  `build/voiceTopicDiscoverySignedBuildFinal.log`. Installation/launch of this
-  normal bundle and the existing dev API refresh are recorded separately below
-  once performed.
+  its bundle contains no injected XCTest plug-in/framework. It was installed on
+  the paired iPhone 16 Pro and launched with the public dev base URL only after
+  another zero-active-call check. Logs:
+  `build/voiceTopicDiscoverySignedBuildFinal.log`,
+  `build/voiceTopicDiscoveryDeviceInstall.log`, and
+  `build/voiceTopicDiscoveryDeviceLaunch.log`.
+- The existing dev API container alone was recreated at revision
+  `d44df266f107e906e48496048828597a84981abf`, artifact SHA-256
+  `f80808aba1b376509196d872a7dda48eee21fb6af6de39da18f340a23edf67d6`.
+  It retained the `dev` profile, `buddystudy/dev` AWS secret identifier,
+  localhost-only 8080 binding, network, mounts, environment and resource limits.
+  The existing MySQL, Redis, LibreTranslate and backup containers retained their
+  exact IDs/start times; no persistent container was added.
+- The pre-V106 dev database backup is retained at
+  `build/voice-topic-discovery-db-backup-lotXA2/pre-v106.sql` (317,774,791 bytes,
+  mode 0600, SHA-256
+  `b9bcb5bfaeaa91b2657841f24c5f4c0c478c88c93f37a2c77f82e015e9900c94`).
+  Startup applied exactly V106 in 15 ms with no logged error. Post-start aggregate
+  checks found schema 106, four focus columns, all known legacy anchors
+  backfilled, zero active calls, no orphan canonical voice records, no fake
+  ordinary-question lifecycle and no eligible unfinished projection. The actual
+  context/projector focus SELECT templates parsed and returned no impossible-owner
+  rows. Local and public dev health checks returned 200. Report:
+  `build/voiceTopicDiscoveryDevRuntimeVerification.log`.
 
 These are source/fixture, device-contract and isolated migration checks, not a
 new human microphone-to-model conversation. Natural spoken disambiguation and
