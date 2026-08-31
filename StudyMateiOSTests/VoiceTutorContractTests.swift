@@ -642,106 +642,93 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(state.seal(responseID: "response-2"))
     }
 
-    func testWebRTCPlayoutDrainRequiresBothServerSignalsAndLatestRenderedPCM() throws {
-        var state = VoiceTutorWebRTCPlayoutDrainState()
-        state.responseStarted("response-1")
-        state.markResponseDone("response-1")
-        XCTAssertNil(state.drainDeadline(additionalLatency: 0.07))
-
-        state.markOutputBufferStopped("response-1", at: 11)
-        XCTAssertNil(state.drainDeadline(additionalLatency: 0.07))
-
-        state.rendered(at: 12)
-        let first = try XCTUnwrap(state.drainDeadline(additionalLatency: 0.07))
-        XCTAssertEqual(first.0, "response-1")
-        XCTAssertEqual(first.2, 12.07, accuracy: 0.0001)
-
-        state.rendered(at: 13)
-        XCTAssertFalse(state.isCurrent(responseID: first.0, generation: first.1))
-        let rescheduled = try XCTUnwrap(state.drainDeadline(additionalLatency: 0.07))
-        XCTAssertEqual(rescheduled.2, 13.07, accuracy: 0.0001)
-        XCTAssertTrue(
-            state.isCurrent(responseID: rescheduled.0, generation: rescheduled.1)
-        )
-    }
-
-    func testWebRTCPlayoutDrainIgnoresContinuousSilentBuffersAfterStop() throws {
-        var fixture = VoiceTutorContractRenderFixture()
-        fixture.drain.responseStarted("response-1")
-        fixture.render(try makeRenderBuffer([0, 1, 0, 0]), at: 10)
-        fixture.drain.markResponseDone("response-1")
-        fixture.drain.markOutputBufferStopped("response-1", at: 10.1)
-        let initial = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
-        let silence = try makeRenderBuffer(Array(repeating: 0, count: 480))
-
-        // Exercise the actual renderer callback path, not just a fabricated
-        // state input. Continuous 10ms NetEq silence must not starve the ACK.
-        for tick in 1...200 {
-            fixture.render(silence, at: 10.1 + Double(tick) * 0.01)
+    func testWebRTCResponseFinishesOnBothMatchingServerSignalsInEitherOrder() {
+        for stopFirst in [false, true] {
+            var state = VoiceTutorWebRTCResponseState()
+            state.responseStarted("response-1")
+            let first = stopFirst
+                ? state.markOutputBufferStopped("response-1")
+                : state.markResponseDone("response-1")
+            XCTAssertNil(first)
+            XCTAssertEqual(state.responseID, "response-1")
+            let second = stopFirst
+                ? state.markResponseDone("response-1")
+                : state.markOutputBufferStopped("response-1")
+            XCTAssertEqual(second, "response-1")
+            XCTAssertNil(state.responseID)
+            XCTAssertNil(state.markResponseDone("response-1"))
+            XCTAssertNil(state.markOutputBufferStopped("response-1"))
         }
-
-        let drained = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
-        XCTAssertEqual(fixture.callbackCount, 1)
-        XCTAssertEqual(drained.generation, initial.generation)
-        XCTAssertEqual(drained.deadline, 10.17, accuracy: 0.0001)
-        XCTAssertTrue(fixture.drain.markDrainDispatched(
-            responseID: drained.responseID,
-            generation: drained.generation,
-            renderedThrough: drained.renderedThrough
-        ))
     }
 
-    func testWebRTCPlayoutDrainPreservesLateQuietAudioAfterSilentBuffers() throws {
+    func testWebRTCResponseIsNotBlockedByContinuousNonzeroComfortNoise() throws {
         var fixture = VoiceTutorContractRenderFixture()
-        fixture.drain.responseStarted("response-1")
-        fixture.render(try makeRenderBuffer([100, 0]), at: 10)
-        fixture.drain.markResponseDone("response-1")
-        fixture.drain.markOutputBufferStopped("response-1", at: 10.1)
-        let earlier = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
+        fixture.response.responseStarted("response-1")
+        fixture.response.markOutputBufferStarted("response-1")
+        fixture.render(try makeRenderBuffer([0, 100, 0, 0]))
+        XCTAssertNil(fixture.response.markResponseDone("response-1"))
+        let comfortNoise = try makeRenderBuffer(Array(repeating: Int16(1), count: 480))
 
-        fixture.render(try makeRenderBuffer([0, 0]), at: 10.12)
-        fixture.render(try makeRenderBuffer([0, -1]), at: 10.16)
-        XCTAssertFalse(fixture.drain.markDrainDispatched(
-            responseID: earlier.responseID,
-            generation: earlier.generation,
-            renderedThrough: earlier.renderedThrough
-        ))
-        fixture.render(try makeRenderBuffer([0, 0]), at: 10.20)
-        let extended = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
-        XCTAssertEqual(fixture.callbackCount, 2)
-        XCTAssertEqual(extended.deadline, 10.23, accuracy: 0.0001)
-        XCTAssertEqual(extended.renderedThrough, 10.16, accuracy: 0.0001)
-    }
+        // Unlike an all-zero fixture, this reproduces the callbacks that kept
+        // cancelling the production drain task throughout the reported call.
+        for _ in 1...200 { fixture.render(comfortNoise) }
+        XCTAssertEqual(fixture.response.markOutputBufferStopped("response-1"), "response-1")
+        fixture.phase = .listening
+        for _ in 1...200 { fixture.render(comfortNoise) }
 
-    func testWebRTCInitialSilenceCannotSeedAnUnrenderedResponse() throws {
-        var fixture = VoiceTutorContractRenderFixture()
-        fixture.render(try makeRenderBuffer([0, 0]), at: 10)
-        fixture.drain.responseStarted("response-1")
-        fixture.drain.markOutputBufferStopped("response-1", at: 11)
-        fixture.drain.markResponseDone("response-1")
-        fixture.render(try makeRenderBuffer([0, 0]), at: 12)
-
-        XCTAssertNil(fixture.drain.drainDeadline(additionalLatency: 0.07))
+        XCTAssertEqual(fixture.callbackCount, 401)
+        XCTAssertNil(fixture.response.responseID)
         XCTAssertEqual(fixture.phase, .listening)
-        fixture.render(try makeRenderBuffer([1, 0]), at: 13)
-        let drain = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
-        XCTAssertEqual(drain.deadline, 13.07, accuracy: 0.0001)
-        XCTAssertEqual(fixture.phase, .speaking)
+        fixture.response.responseStarted("response-2")
+        XCTAssertNil(fixture.response.markResponseDone("response-2"))
+        XCTAssertEqual(fixture.response.markOutputBufferStopped("response-2"), "response-2")
     }
 
-    func testWebRTCRealRenderBeforeResponseCreatedSurvivesOutOfOrderSignals() throws {
+    func testWebRTCResponseCompletionDoesNotModifyLateQuietSamples() throws {
+        var fixture = VoiceTutorContractRenderFixture()
+        fixture.response.responseStarted("response-1")
+        fixture.response.markOutputBufferStarted("response-1")
+        fixture.render(try makeRenderBuffer([100, 0]))
+        XCTAssertNil(fixture.response.markResponseDone("response-1"))
+        XCTAssertEqual(fixture.response.markOutputBufferStopped("response-1"), "response-1")
+        fixture.phase = .listening
+        let quietTail = try makeRenderBuffer([0, -1])
+        fixture.render(try makeRenderBuffer([0, 0]))
+        fixture.render(quietTail)
+
+        XCTAssertEqual(fixture.callbackCount, 2, "The renderer still receives the late tail")
+        XCTAssertEqual(quietTail.frameLength, 2)
+        XCTAssertEqual(quietTail.int16ChannelData?[0][1], -1, "Completion is not a playback operation")
+        XCTAssertEqual(fixture.phase, .listening, "An old tail must not restart the speaking label")
+    }
+
+    func testWebRTCInitialSilenceIsNotShownAsSpeakingOrRequiredToEndAResponse() throws {
+        var fixture = VoiceTutorContractRenderFixture()
+        fixture.response.responseStarted("response-1")
+        fixture.response.markOutputBufferStarted("response-1")
+        fixture.render(try makeRenderBuffer([0, 0]))
+        XCTAssertEqual(fixture.phase, .listening, "Provider streaming alone is not a rendered sound")
+        fixture.render(try makeRenderBuffer([1, 0]))
+        XCTAssertEqual(fixture.phase, .speaking)
+        XCTAssertNil(fixture.response.markOutputBufferStopped("response-1"))
+        XCTAssertEqual(fixture.response.markResponseDone("response-1"), "response-1")
+    }
+
+    func testWebRTCEarlyMediaCannotStrandFirstOrSubsequentShortResponses() throws {
         var fixture = VoiceTutorContractRenderFixture()
         fixture.phase = .connecting
-        fixture.render(try makeRenderBuffer([0, 1]), at: 10)
-        fixture.render(try makeRenderBuffer([0, 0]), at: 10.5)
+        let shortAudio = try makeRenderBuffer([0, 1])
+        for turn in 1...3 {
+            // All of a short response's media can precede its sideband control
+            // messages. No subsequent PCM callback may be required to finish.
+            fixture.render(shortAudio)
+            let id = "response-\(turn)"
+            fixture.response.responseStarted(id)
+            XCTAssertNil(fixture.response.markOutputBufferStopped(id))
+            XCTAssertEqual(fixture.response.markResponseDone(id), id)
+        }
+        XCTAssertEqual(fixture.callbackCount, 3)
         XCTAssertEqual(fixture.phase, .connecting, "Early media must not break the startup phase guard")
-        fixture.drain.responseStarted("response-1")
-        fixture.drain.markOutputBufferStopped("response-1", at: 11)
-        fixture.drain.markResponseDone("response-1")
-
-        let drain = try XCTUnwrap(fixture.drain.drainDeadline(additionalLatency: 0.07))
-        XCTAssertEqual(drain.deadline, 11.07, accuracy: 0.0001)
-        XCTAssertEqual(drain.renderedThrough, 10, accuracy: 0.0001)
     }
 
     func testWebRTCRendererPreservesQuietSamplesInEveryStereoChannelLayout() throws {
@@ -790,73 +777,55 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(VoiceTutorDiagnosticError.fields(for: VoiceTutorRealtimeEventParser.ParseError.invalidJSON).contains("parser.invalidJSON"))
     }
 
-    func testWebRTCPlayoutDrainKeepsPCMThatArrivesBeforeResponseCreated() throws {
-        var state = VoiceTutorWebRTCPlayoutDrainState()
-
-        state.rendered(at: 12)
-        state.responseStarted("response-1")
-        state.markResponseDone("response-1")
-        state.markOutputBufferStopped("response-1", at: 11)
-
-        let drain = try XCTUnwrap(state.drainDeadline(additionalLatency: 0.07))
-        XCTAssertEqual(drain.responseID, "response-1")
-        XCTAssertEqual(drain.deadline, 12.07, accuracy: 0.0001)
-        XCTAssertEqual(drain.renderedThrough, 12, accuracy: 0.0001)
+    func testWebRTCResponseRejectsMissingStaleAndDuplicateCompletionSignals() {
+        var state = VoiceTutorWebRTCResponseState()
+        state.responseStarted("response-2")
+        XCTAssertNil(state.markResponseDone(nil))
+        XCTAssertNil(state.markOutputBufferStopped(nil))
+        XCTAssertNil(state.markResponseDone("response-1"))
+        XCTAssertNil(state.markOutputBufferStopped("response-1"))
+        XCTAssertFalse(state.responseDone)
+        XCTAssertFalse(state.outputBufferStopped)
+        XCTAssertNil(state.markResponseDone("response-2"))
+        XCTAssertNil(state.markResponseDone("response-2"))
+        state.responseStarted("response-2")
+        XCTAssertTrue(state.responseDone, "A repeated start must not erase a received completion")
+        XCTAssertEqual(state.markOutputBufferStopped("response-2"), "response-2")
+        XCTAssertNil(state.markOutputBufferStopped("response-2"))
     }
 
-    func testWebRTCPlayoutDrainDoesNotSeedNextResponseWithAcknowledgedPCM() throws {
-        var state = VoiceTutorWebRTCPlayoutDrainState()
-        state.responseStarted("response-1")
-        state.rendered(at: 10)
-        state.markResponseDone("response-1")
-        state.markOutputBufferStopped("response-1", at: 10.5)
-        let first = try XCTUnwrap(state.drainDeadline(additionalLatency: 0.07))
-        XCTAssertTrue(
-            state.markDrainDispatched(
-                responseID: first.responseID,
-                generation: first.generation,
-                renderedThrough: first.renderedThrough
-            )
-        )
-
+    func testWebRTCResponseResetAndPreviousResponseCannotFinishANewTurn() {
+        var state = VoiceTutorWebRTCResponseState()
+        state.responseStarted("response-old")
+        XCTAssertNil(state.markResponseDone("response-old"))
+        state.reset()
         state.responseStarted("response-2")
-        state.markResponseDone("response-2")
-        state.markOutputBufferStopped("response-2", at: 11)
-        XCTAssertNil(state.drainDeadline(additionalLatency: 0.07))
-
-        state.rendered(at: 12)
-        let second = try XCTUnwrap(state.drainDeadline(additionalLatency: 0.07))
-        XCTAssertEqual(second.responseID, "response-2")
-        XCTAssertEqual(second.deadline, 12.07, accuracy: 0.0001)
+        XCTAssertNil(state.markOutputBufferStopped("response-old"))
+        XCTAssertNil(state.markResponseDone("response-old"))
+        XCTAssertFalse(state.responseDone)
+        XCTAssertNil(state.markOutputBufferStopped("response-2"))
+        XCTAssertEqual(state.markResponseDone("response-2"), "response-2")
     }
 
-    func testWebRTCPlayoutDrainDoesNotSeedNextResponseWithLatePriorPCM() throws {
-        var state = VoiceTutorWebRTCPlayoutDrainState()
-        state.responseStarted("response-1")
-        state.rendered(at: 10)
-        state.markResponseDone("response-1")
-        state.markOutputBufferStopped("response-1", at: 10.5)
-        let first = try XCTUnwrap(state.drainDeadline(additionalLatency: 0.07))
-        XCTAssertTrue(
-            state.markDrainDispatched(
-                responseID: first.responseID,
-                generation: first.generation,
-                renderedThrough: first.renderedThrough
-            )
-        )
-
-        // RTP has no response identifier. A late buffer from the drained
-        // response must not become the next response's completion watermark.
-        state.rendered(at: 11)
-        state.responseStarted("response-2")
-        state.markResponseDone("response-2")
-        state.markOutputBufferStopped("response-2", at: 12)
-        XCTAssertNil(state.drainDeadline(additionalLatency: 0.07))
-
-        state.rendered(at: 13)
-        let second = try XCTUnwrap(state.drainDeadline(additionalLatency: 0.07))
-        XCTAssertEqual(second.responseID, "response-2")
-        XCTAssertEqual(second.deadline, 13.07, accuracy: 0.0001)
+    func testWebRTCRenderNoiseOutsideProviderStreamingCannotRestartSpeaking() throws {
+        var fixture = VoiceTutorContractRenderFixture()
+        let noise = try makeRenderBuffer([1, -1])
+        fixture.response.responseStarted("response-1")
+        fixture.render(noise)
+        XCTAssertEqual(fixture.phase, .listening)
+        fixture.response.markOutputBufferStarted("response-other")
+        fixture.render(noise)
+        XCTAssertEqual(fixture.phase, .listening)
+        fixture.response.markOutputBufferStarted("response-1")
+        fixture.render(noise)
+        XCTAssertEqual(fixture.phase, .speaking)
+        XCTAssertNil(fixture.response.markOutputBufferStopped("response-1"))
+        fixture.response.markOutputBufferStarted("response-1")
+        XCTAssertFalse(fixture.response.mayIndicateSpeaking, "A duplicate start cannot reopen stopped audio")
+        XCTAssertEqual(fixture.response.markResponseDone("response-1"), "response-1")
+        fixture.phase = .listening
+        fixture.render(noise)
+        XCTAssertEqual(fixture.phase, .listening)
     }
 
     func testLearnerOverlapContractHasNoClientCancelOrTruncationPath() throws {
@@ -882,7 +851,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(sources.contains(#""type":"output_audio_buffer.clear""#))
         XCTAssertTrue(sources.contains("completionCallbackType: .dataPlayedBack"))
         XCTAssertTrue(sources.contains("sendPlaybackCompleted"))
-        XCTAssertTrue(sources.contains("buddystudy.voice.playout.drained"))
+        XCTAssertFalse(sources.contains("sendPlayoutDrained"), "WebRTC PCM silence is not a response gate")
     }
 
     func testCompactVoiceCallUsesTheReservedSessionCountdownWhileLive() {
@@ -2857,7 +2826,7 @@ private struct VoiceTutorCompactCallSnapshot {
 }
 
 private struct VoiceTutorContractRenderFixture {
-    var drain = VoiceTutorWebRTCPlayoutDrainState()
+    var response = VoiceTutorWebRTCResponseState()
     var phase = VoiceTutorSessionPhase.listening
     private let renderer = VoiceTutorRemoteAudioRenderer()
     private let callbacks = VoiceTutorContractRenderCounter()
@@ -2869,12 +2838,11 @@ private struct VoiceTutorContractRenderFixture {
         renderer.onRenderedPCM = { _ in callbacks.increment() }
     }
 
-    mutating func render(_ buffer: AVAudioPCMBuffer, at uptime: TimeInterval) {
+    mutating func render(_ buffer: AVAudioPCMBuffer) {
         let previous = callbacks.count
         renderer.render(pcmBuffer: buffer)
         if callbacks.count > previous {
-            drain.rendered(at: uptime)
-            phase = phase.afterRenderedTutorAudio(assistantResponseActive: drain.responseID != nil)
+            phase = phase.afterRenderedTutorAudio(assistantResponseActive: response.mayIndicateSpeaking)
         }
     }
 }

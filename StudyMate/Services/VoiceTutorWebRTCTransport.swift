@@ -378,8 +378,9 @@ final class VoiceTutorRemoteAudioRenderer: NSObject, LKRTCAudioRenderer, @unchec
         let uptime = ProcessInfo.processInfo.systemUptime
         let containsAudio = Self.containsNonzeroSamples(pcmBuffer)
         onRenderedBuffer?(Int(pcmBuffer.frameLength), containsAudio, uptime)
-        // WebRTC also renders NetEq's digital silence after the last RTP
-        // audio. Those callbacks must not perpetually move the drain deadline.
+        // This callback is an activity/diagnostic hint only. NetEq may render
+        // nonzero comfort/concealment noise even after server audio has ended;
+        // neither nonzero PCM nor its absence is a response-completion fence.
         guard containsAudio else { return }
         onRenderedPCM?(uptime)
     }
@@ -403,8 +404,8 @@ final class VoiceTutorRemoteAudioRenderer: NSObject, LKRTCAudioRenderer, @unchec
             }
             return false
         }
-        // Use exact digital zero, not a loudness threshold: even a +/-1 Int16
-        // sample can be a genuine quiet tail and must postpone acknowledgement.
+        // Keep quiet samples observable; this inspection never changes samples
+        // or controls the continuous remote track's playback.
         switch buffer.format.commonFormat {
         case .pcmFormatInt16: return containsAudio(buffer.int16ChannelData)
         case .pcmFormatInt32: return containsAudio(buffer.int32ChannelData)

@@ -280,14 +280,15 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
             assertThat(commit.path("event_id").asText()).startsWith("buddystudy-internal-")
             emitProvider("""{"type":"input_audio_buffer.committed","item_id":"greeting-after-ready"}""")
             emitProvider(mapper.writeValueAsString(mapOf("type" to "response.done", "response" to response)))
-            emitProvider("""{"type":"output_audio_buffer.stopped","response_id":"response-opening"}""")
             assertThat(sent).hasSize(3)
-            controller.observeClientEvent(
-                """{"type":"buddystudy.voice.playout.drained","responseId":"response-opening"}""",
-            )
+            // The owned server buffer must drain; a device PCM-silence ACK is
+            // neither injected by this fixture nor needed to release the turn.
+            emitProvider("""{"type":"output_audio_buffer.stopped","response_id":"response-opening"}""")
             assertThat(sent).hasSize(4)
             assertThat(mapper.readTree(sent.last()).path("event_id").asText()).contains("turn-response")
-            assertThat(sent.joinToString()).doesNotContain("response.cancel", "conversation.item.truncate")
+            assertThat(sent.joinToString()).doesNotContain(
+                "response.cancel", "conversation.item.truncate", "output_audio_buffer.clear",
+            )
             assertThat(relay.isDisposed).isFalse()
         } finally {
             relay.dispose()

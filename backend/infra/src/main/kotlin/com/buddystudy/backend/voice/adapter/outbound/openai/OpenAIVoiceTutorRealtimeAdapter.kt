@@ -210,7 +210,6 @@ internal class VoiceTutorDuplexTurnController(
     private var providerResponseDone = false
     private var playbackCompleted = false
     private var providerOutputBufferStopped = false
-    private var clientPlayoutDrained = false
     private var playbackTimer: Disposable? = null
     private var responseTimer: Disposable? = null
     private var openingResponseRequested = false
@@ -266,12 +265,9 @@ internal class VoiceTutorDuplexTurnController(
                 true
             }
             VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT -> {
-                if (closed || transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) return true
-                val responseId = node.path("responseId").asText()
-                if (responseActive && responseId.isNotBlank() && responseId == activeResponseId) {
-                    clientPlayoutDrained = true
-                    advancePlaybackGate()
-                }
+                // Older iOS clients report an inferred PCM quiet period here.
+                // NetEq may keep rendering comfort noise after real audio ends,
+                // so this is optional compatibility telemetry, never a turn gate.
                 true
             }
             else -> false
@@ -510,7 +506,7 @@ internal class VoiceTutorDuplexTurnController(
             queuedCommittedTurn = false
         }
         // Opening speech uses the same response/playout gate as an ordinary turn.
-        // Keep any early learner commit queued until that entire sentence is heard.
+        // Keep any early learner commit queued until its transport completion gate.
         val responseEventId = internalEventId(if (opening) "opening-response" else "turn-response")
         beginResponse(responseEventId)
         emit(
@@ -550,7 +546,6 @@ internal class VoiceTutorDuplexTurnController(
         providerResponseDone = false
         playbackCompleted = false
         providerOutputBufferStopped = false
-        clientPlayoutDrained = false
         responseTimer?.dispose()
         val responseGeneration = activeResponseGeneration
         responseTimer = Mono.delay(responseTimeout)
@@ -643,7 +638,11 @@ internal class VoiceTutorDuplexTurnController(
     private fun advancePlaybackGate() {
         if (!responseActive || !providerResponseDone) return
         if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
-            if (providerOutputBufferStopped && clientPlayoutDrained) {
+            // The same response must finish successfully AND exhaust its server
+            // output buffer. Subsequent audio stays on the continuous RTP track;
+            // creating a response does not cancel, clear, or reset the old tail.
+            // This proves server completion, not that the device heard every sample.
+            if (providerOutputBufferStopped) {
                 finishActiveResponse()
             } else if (playbackTimer == null) {
                 val responseGeneration = activeResponseGeneration
@@ -734,7 +733,7 @@ internal class VoiceTutorDuplexTurnController(
             transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND ||
             !responseActive ||
             !providerResponseDone ||
-            (providerOutputBufferStopped && clientPlayoutDrained) ||
+            providerOutputBufferStopped ||
             responseGeneration != activeResponseGeneration ||
             responseId != activeResponseId
         ) {
@@ -780,7 +779,6 @@ internal class VoiceTutorDuplexTurnController(
         providerResponseDone = false
         playbackCompleted = false
         providerOutputBufferStopped = false
-        clientPlayoutDrained = false
         if (closed) return
         if (userSpeaking) {
             if (interventionDeadlineElapsedWhileResponseActive) {

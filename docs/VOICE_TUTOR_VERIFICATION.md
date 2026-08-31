@@ -13,7 +13,9 @@ production rollout or a measured ChatGPT-equivalent latency guarantee.
 - Learner overlap never triggers playback stop, response cancellation, or
   truncation. Each tutor response is one short complete sentence. The next
   answer requires completion of the same provider response, provider audio-buffer
-  drain, and device playout drain, plus a committed learner turn.
+  drain, and a committed learner turn. The continuous WebRTC track retains its
+  locally buffered tail; PCM silence is not a response gate or an acoustic EOS
+  acknowledgement. The legacy PCM fallback keeps its real playback callback.
 - TIER2/TIER3 default to 60 minutes per user's monthly window. Tier defaults and
   personal overrides are independently adjustable. One call has a separate
   configurable ceiling, capped at 60 minutes. V100 preserves non-seed operator
@@ -434,3 +436,95 @@ sentence handoff; exercise speaker/headphone route changes, network loss,
 background/lock termination, the full 60-minute boundary, recording export,
 upload recovery, playback, deletion, and cross-account isolation. Automated
 contracts and device launch alone do not establish those acoustic results.
+
+## Replies blocked after the opening: response boundary is not PCM silence
+
+This follow-up supersedes the earlier WebRTC client-playout-drain prerequisite.
+The earlier test results remain historical evidence, not the current turn gate.
+
+- A later 46-second call, explicitly ended by the user, had one tutor opening,
+  one completed response, and one matching provider output-buffer stop. Four
+  learner commits and four learner transcriptions were accepted, but no client
+  playout-drain acknowledgement was sent. Thus learner capture/commit was
+  working; the missing next reply was not explained by a missing user turn or
+  by Routingflare closing this call.
+- The phone reported 4,972 native render callbacks, 4,104 with nonzero PCM:
+  roughly 41 seconds of nonzero callbacks despite an approximately six-second
+  opening. The previous client timer moved its deadline on every nonzero
+  render, so continuing output could starve its acknowledgement indefinitely.
+  WebRTC's NetEq path can generate nonzero comfort/concealment noise after
+  speech. The observed counters identify this completion-gate failure; they
+  do not identify the speech type of each frame or prove acoustic end-of-speech.
+- The backend now waits for generation completion and the same response's
+  provider output-buffer stop, together with the existing committed learner
+  turn conditions, without requiring a client PCM-silence/drain message.
+  Explicit null provider turn detection and full-duplex learner capture remain
+  in effect. Starting the next response neither clears/truncates the current
+  output nor recreates the continuous native RTP stream; queued local audio
+  remains in that stream's existing playback order.
+- iOS uses the production `VoiceTutorWebRTCResponseState` to match the two
+  server completion signals in either order and complete that response once.
+  Native renders affect only the small speaking indication while that
+  response's server output is active. Continuing nonzero output cannot move
+  a completion deadline, withhold the next response, or restart the indication
+  after the provider stop. This is server-streaming/UI state, not a claim that
+  the final sample has already left the speaker. Acoustic tail integrity and
+  no-gap sentence handoff still require the physical verification below.
+
+### Verification at this checkpoint
+
+- The required generic `StudyMateiOS` build passed using the existing
+  `build/iOSDeviceDerivedData`. Log:
+  `build/voiceResponseContinuationGenericBuild.log`.
+- The physical iPhone passed all 74 explicitly selected non-purge contracts
+  with zero failures. They cover the response-state change and existing
+  native-boundary/local-speech contracts, not a three-turn provider call.
+  Log: `build/voiceResponseContinuationDeviceTests.log`.
+- The focused backend verification passed. Counting only the `VoiceTutor`
+  test classes gives 61 application and 168 infrastructure tests, 229 total;
+  unrelated or stale XML reports are not included in that count. Log:
+  `build/voiceResponseContinuationBackendVerified.log`.
+- The local JVM JAR build passed without building a Docker image. Log:
+  `build/voiceResponseContinuationBackendBuild.log`.
+- A separate opt-in native conversation test compiled. It is designed to
+  receive three real provider responses on a receive-only iPhone peer after
+  two fixed synthetic learner inputs, reuse the production renderer/response
+  state, and inspect stream continuity and available native CNG/flush counters.
+  It never creates a BuddyStudy session, consumes user voice quota, captures
+  the user's microphone, or writes a recording. Synthetic text input is not
+  microphone/ASR validation, and the fixture is not a sample-accurate acoustic
+  end-of-sentence test.
+- Its first device run failed before signaling reached the temporary host:
+  `NSURLErrorDomain -1009`, with the network path reporting
+  `Local network prohibited`. No provider call was created. The user was asked
+  to enable local-network access, and confirmation was still pending at this
+  checkpoint. This blocked attempt is not a passed native three-turn test,
+  device-CNG proof, or acoustic acceptance. Log:
+  `build/voiceResponseContinuationNativeConversation.log`.
+- The test's native completion closure was explicitly annotated `@Sendable`
+  after the compiler warning, and the signed iPhone test build passed again.
+  Log: `build/voiceResponseContinuationFinalTestBuild.log`. This compile-only
+  check did not repeat the permission-blocked provider test.
+  Normal-app reinstallation/launch and the existing 8080 dev
+  backend refresh for this response-continuation change were also still
+  pending at this checkpoint; build success is not deployment confirmation.
+
+### Separate OSS speech/turn-model investigation
+
+- A bounded offline experiment used pinned Silero VAD and Smart Turn v3.2 CPU
+  models with fixed Korean Yuna TTS plus seeded noise and digital silence.
+  Silero distinguished that noise/silence from speech, including hesitation
+  sounds. Speech presence is not a useful-utterance/filler classifier.
+- Smart Turn predicts turn completion, not whether an utterance is meaningful.
+  At the upstream example threshold, these synthetic fixtures included
+  completed predictions for hesitation-only input and incomplete predictions
+  for meaningful short replies/requests. Extra trailing silence changed some
+  decisions; it did not establish a reliable filler filter.
+- These are limited synthetic observations, not an accuracy benchmark for real
+  Korean callers or iPhone latency measurements. Neither model was installed
+  as a production turn-admission or response-completion gate by this research.
+  Artifacts: `build/voiceTurnModelProbe.py` and
+  `build/voiceTurnModelAssets/probe-results.json`; pinned hashes, revisions,
+  example thresholds, timing environment, and model licenses are recorded
+  with those local research artifacts. No user audio or provider call was used
+  in that experiment.

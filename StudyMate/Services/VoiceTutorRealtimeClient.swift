@@ -335,13 +335,6 @@ actor VoiceTutorWebSocketTransport {
         try await socketTask.send(.string(text))
     }
 
-    func sendPlayoutDrained(responseID: String) async throws {
-        try await sendJSON([
-            "type": "buddystudy.voice.playout.drained",
-            "responseId": responseID
-        ])
-    }
-
     func sendInputSpeechActivity(_ event: VoiceTutorLocalSpeechEvent, attemptID: UUID) async throws {
         guard localSpeechAttemptID == attemptID else { throw VoiceTutorLocalSpeechDeliveryError.staleAttempt }
         guard let socketTask else { throw TransportError.notConnected }

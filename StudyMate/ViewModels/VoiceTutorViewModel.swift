@@ -37,7 +37,7 @@ enum VoiceTutorSessionPhase: Equatable {
 private enum VoiceTutorStopSource: String {
     case startupFailure, user, backgroundOrDismissal, audioInterruption, mediaFailure
     case identityInvalidated, controlReceiveFailure, providerError, pcmPlaybackFailure
-    case outputBufferCleared, playoutAckFailure, localSpeechDeliveryFailure
+    case outputBufferCleared, localSpeechDeliveryFailure
 }
 
 enum VoiceTutorDiagnosticError {
@@ -191,110 +191,58 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
     }
 }
 
-struct VoiceTutorWebRTCPlayoutDrainState: Equatable {
+/// Control-stream state, not an acoustic playout acknowledgement. WebRTC keeps
+/// one ordered RTP track across responses, including any locally buffered tail.
+/// Its renderer also produces nonzero comfort/concealment noise indefinitely;
+/// waiting for PCM silence must never be a prerequisite for another response.
+struct VoiceTutorWebRTCResponseState: Equatable {
     private(set) var responseID: String?
     private(set) var responseDone = false
+    private(set) var outputBufferStarted = false
     private(set) var outputBufferStopped = false
-    private(set) var lastRenderUptime: TimeInterval?
-    private(set) var stoppedUptime: TimeInterval?
-    private(set) var latestObservedRenderUptime: TimeInterval?
-    private(set) var acknowledgedRenderUptime: TimeInterval?
-    private(set) var canSeedInitialUnassignedRender = true
-    private(set) var generation = 0
+
+    var mayIndicateSpeaking: Bool {
+        responseID != nil && outputBufferStarted && !outputBufferStopped
+    }
 
     mutating func responseStarted(_ responseID: String?) {
-        guard let responseID, !responseID.isEmpty else { return }
+        guard let responseID, !responseID.isEmpty, self.responseID != responseID else { return }
         self.responseID = responseID
         responseDone = false
+        outputBufferStarted = false
         outputBufferStopped = false
-        if canSeedInitialUnassignedRender,
-           let latestObservedRenderUptime,
-           acknowledgedRenderUptime.map({ latestObservedRenderUptime > $0 }) ?? true {
-            // RTP media and the sideband control socket are independently
-            // ordered. Preserve PCM that arrived before the session's first
-            // response.created. Later unassigned PCM may belong to the response
-            // that was just drained, so it must not seed a subsequent response.
-            lastRenderUptime = latestObservedRenderUptime
-        } else {
-            lastRenderUptime = nil
-        }
-        canSeedInitialUnassignedRender = false
-        stoppedUptime = nil
-        generation += 1
     }
 
-    mutating func rendered(at uptime: TimeInterval) {
-        guard responseID != nil else {
-            if canSeedInitialUnassignedRender {
-                latestObservedRenderUptime = max(latestObservedRenderUptime ?? uptime, uptime)
-            }
-            return
-        }
-        latestObservedRenderUptime = max(latestObservedRenderUptime ?? uptime, uptime)
-        lastRenderUptime = max(lastRenderUptime ?? uptime, uptime)
-        generation += 1
+    mutating func markOutputBufferStarted(_ responseID: String?) {
+        guard matches(responseID), !outputBufferStopped else { return }
+        outputBufferStarted = true
     }
 
-    mutating func markResponseDone(_ responseID: String?) {
-        guard matches(responseID) else { return }
+    mutating func markResponseDone(_ responseID: String?) -> String? {
+        guard matches(responseID) else { return nil }
         responseDone = true
-        generation += 1
+        return finishIfReady()
     }
 
-    mutating func markOutputBufferStopped(_ responseID: String?, at uptime: TimeInterval) {
-        guard matches(responseID) else { return }
+    mutating func markOutputBufferStopped(_ responseID: String?) -> String? {
+        guard matches(responseID) else { return nil }
         outputBufferStopped = true
-        stoppedUptime = uptime
-        generation += 1
+        return finishIfReady()
     }
 
-    func drainDeadline(
-        additionalLatency: TimeInterval
-    ) -> (responseID: String, generation: Int, deadline: TimeInterval, renderedThrough: TimeInterval)? {
-        guard responseDone,
-              outputBufferStopped,
-              let responseID,
-              let stoppedUptime,
-              let lastRenderUptime else {
-            return nil
-        }
-        let lastPCM = max(lastRenderUptime, stoppedUptime)
-        return (responseID, generation, lastPCM + max(0, additionalLatency), lastRenderUptime)
-    }
-
-    func isCurrent(responseID: String, generation: Int) -> Bool {
-        self.responseID == responseID && self.generation == generation
-            && responseDone && outputBufferStopped
-    }
-
-    mutating func markDrainDispatched(
-        responseID: String,
-        generation: Int,
-        renderedThrough: TimeInterval
-    ) -> Bool {
-        guard isCurrent(responseID: responseID, generation: generation) else {
-            return false
-        }
-        acknowledgedRenderUptime = max(
-            acknowledgedRenderUptime ?? renderedThrough,
-            renderedThrough
-        )
-        self.responseID = nil
-        responseDone = false
-        outputBufferStopped = false
-        lastRenderUptime = nil
-        stoppedUptime = nil
-        self.generation += 1
-        return true
+    private mutating func finishIfReady() -> String? {
+        guard responseDone, outputBufferStopped, let responseID else { return nil }
+        reset()
+        return responseID
     }
 
     mutating func reset() {
-        self = VoiceTutorWebRTCPlayoutDrainState()
+        self = VoiceTutorWebRTCResponseState()
     }
 
     private func matches(_ candidate: String?) -> Bool {
         guard let responseID else { return false }
-        return candidate == nil || candidate == responseID
+        return candidate == responseID
     }
 }
 
@@ -321,7 +269,6 @@ final class VoiceTutorViewModel: ObservableObject {
     private let transport: VoiceTutorWebSocketTransport
     private let recordingConsent: Bool
     private var webRTCTransport: VoiceTutorWebRTCTransport?
-    private var playoutDrainTask: Task<Void, Never>?
     private var recorder: VoiceTutorSessionRecorder?
     private var usesWebRTC = false
     private var receiveTask: Task<Void, Never>?
@@ -337,7 +284,7 @@ final class VoiceTutorViewModel: ObservableObject {
     private var hardEndsAt: Date?
     private var isFinalizing = false
     private var duplexPlaybackState = VoiceTutorDuplexPlaybackState()
-    private var webRTCDrainState = VoiceTutorWebRTCPlayoutDrainState()
+    private var webRTCResponseState = VoiceTutorWebRTCResponseState()
     private var connectionAttemptFence = VoiceTutorConnectionAttemptFence()
 
     init(
@@ -370,7 +317,7 @@ final class VoiceTutorViewModel: ObservableObject {
         captions = []
         assistantTranscriptDraft = ""
         duplexPlaybackState.reset()
-        webRTCDrainState.reset()
+        webRTCResponseState.reset()
         usesWebRTC = false
         isRecording = false
         phase = .requestingPermission
@@ -650,8 +597,6 @@ final class VoiceTutorViewModel: ObservableObject {
         // A socket failure reaches this method from receiveTask itself. Closing
         // the socket ends the receive loop without cancelling REST settlement.
         receiveTask = nil
-        playoutDrainTask?.cancel()
-        playoutDrainTask = nil
         webRTCTransport?.close()
         webRTCTransport = nil
         await transport.disconnect()
@@ -1019,7 +964,7 @@ final class VoiceTutorViewModel: ObservableObject {
                     isTutorIntervention: isTutorIntervention
                 )
                 if usesWebRTC {
-                    webRTCDrainState.responseStarted(responseID)
+                    webRTCResponseState.responseStarted(responseID)
                 }
             }
         case .responseFinished(let responseID):
@@ -1029,8 +974,7 @@ final class VoiceTutorViewModel: ObservableObject {
             commitAssistantTranscript(nil)
             if usesWebRTC {
                 logDiagnostic("event=response_done")
-                webRTCDrainState.markResponseDone(responseID)
-                scheduleWebRTCPlayoutDrainIfReady()
+                finishWebRTCResponseIfReady(webRTCResponseState.markResponseDone(responseID))
             } else if let responseID {
                 audioEngine.finishResponseAudio(responseID: responseID)
             }
@@ -1041,15 +985,12 @@ final class VoiceTutorViewModel: ObservableObject {
             }
             // Provider generation is not proof that the iPhone rendered audio.
             // The first nonzero local render changes the speaking indication.
+            webRTCResponseState.markOutputBufferStarted(responseID)
             logDiagnostic("event=provider_output_started")
         case .outputAudioBufferStopped(let responseID):
             guard usesWebRTC else { break }
             logDiagnostic("event=provider_output_stopped")
-            webRTCDrainState.markOutputBufferStopped(
-                responseID,
-                at: ProcessInfo.processInfo.systemUptime
-            )
-            scheduleWebRTCPlayoutDrainIfReady()
+            finishWebRTCResponseIfReady(webRTCResponseState.markOutputBufferStopped(responseID))
         case .outputAudioBufferCleared:
             guard usesWebRTC else { break }
             // A normal learner overlap must never clear tutor audio. Treat an
@@ -1078,66 +1019,19 @@ final class VoiceTutorViewModel: ObservableObject {
 
     private func handleWebRTCRenderedPCM(at uptime: TimeInterval) {
         guard usesWebRTC, phase.isLive else { return }
-        webRTCDrainState.rendered(at: uptime)
-        phase = phase.afterRenderedTutorAudio(assistantResponseActive: duplexPlaybackState.assistantResponseActive)
-        scheduleWebRTCPlayoutDrainIfReady()
+        phase = phase.afterRenderedTutorAudio(
+            assistantResponseActive: webRTCResponseState.mayIndicateSpeaking
+        )
     }
 
-    private func scheduleWebRTCPlayoutDrainIfReady() {
-        guard let connection = activeConnection, connection.isCurrent() else { return }
-        let attemptID = connectionAttemptFence.currentID
-        let audioSession = AVAudioSession.sharedInstance()
-        let latency = audioSession.outputLatency + audioSession.ioBufferDuration + 0.02
-        guard let drain = webRTCDrainState.drainDeadline(
-            additionalLatency: latency
-        ) else {
-            return
-        }
-        playoutDrainTask?.cancel()
-        playoutDrainTask = Task { [weak self] in
-            let remaining = max(0, drain.deadline - ProcessInfo.processInfo.systemUptime)
-            if remaining > 0 {
-                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-            }
-            guard let self,
-                  !Task.isCancelled,
-                  self.connectionAttemptFence.isCurrent(attemptID),
-                  connection.isCurrent(), self.phase.isLive,
-                  self.webRTCDrainState.markDrainDispatched(
-                    responseID: drain.responseID,
-                    generation: drain.generation,
-                    renderedThrough: drain.renderedThrough
-                  ) else {
-                return
-            }
-            await VoiceTutorAttemptDelivery.deliver(
-                isCurrent: {
-                    self.connectionAttemptFence.isCurrent(attemptID)
-                        && connection.isCurrent() && self.phase.isLive && !self.isFinalizing
-                },
-                operation: {
-                    do {
-                        try await self.transport.sendPlayoutDrained(responseID: drain.responseID)
-                        return true
-                    } catch {
-                        return false
-                    }
-                },
-                apply: { didSend in
-                    // This is the drain task itself. Detach its handle before
-                    // stop() cancels other tasks, preserving REST settlement.
-                    self.playoutDrainTask = nil
-                    guard didSend else {
-                        self.errorMessage = self.appState.strings.voiceTutorConnectionFailed
-                        await self.stop(shouldNotifyServerOverSocket: false, outcome: .failed, source: .playoutAckFailure)
-                        return
-                    }
-                    self.logDiagnostic("event=playout_drain_sent")
-                    guard self.duplexPlaybackState.responseFinished(responseID: drain.responseID) else { return }
-                    self.phase = .listening
-                }
-            )
-        }
+    private func finishWebRTCResponseIfReady(_ responseID: String?) {
+        guard let responseID, phase.isLive,
+              duplexPlaybackState.responseFinished(responseID: responseID) else { return }
+        // This ends only the UI's server-streaming state. Never stop/mute/clear
+        // the remote track: its remaining RTP samples play before the next
+        // response on the same continuous stream, even after these controls.
+        logDiagnostic("event=provider_response_stream_finished")
+        phase = .listening
     }
 
     private func finishFromServer(_ ended: VoiceTutorRealtimeEnded) async {
@@ -1149,8 +1043,6 @@ final class VoiceTutorViewModel: ObservableObject {
         isFinalizing = true
         phase = .ending
         audioEngine.stop()
-        playoutDrainTask?.cancel()
-        playoutDrainTask = nil
         webRTCTransport?.close()
         webRTCTransport = nil
         stopAudioSendPump()
@@ -1223,7 +1115,7 @@ final class VoiceTutorViewModel: ObservableObject {
             assistantTranscriptDraft = ""
         }
         duplexPlaybackState.reset()
-        webRTCDrainState.reset()
+        webRTCResponseState.reset()
         usesWebRTC = false
         isFinalizing = false
         clearSessionCountdown()

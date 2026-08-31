@@ -19,6 +19,7 @@
 		F81000000000000000000005 /* VoiceTutorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000006 /* VoiceTutorViewModel.swift */; };
 		F81000000000000000000007 /* VoiceTutorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000008 /* VoiceTutorView.swift */; };
 		F81000000000000000000009 /* VoiceTutorContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8100000000000000000000A /* VoiceTutorContractTests.swift */; };
+		F83000000000000000000001 /* VoiceTutorNativeConversationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F83000000000000000000002 /* VoiceTutorNativeConversationTests.swift */; };
 		F82000000000000000000001 /* VoiceTutorWebRTCTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000002 /* VoiceTutorWebRTCTransport.swift */; };
 		F82000000000000000000003 /* VoiceTutorRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000004 /* VoiceTutorRecording.swift */; };
 		F82000000000000000000005 /* LiveKitWebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F82000000000000000000006 /* LiveKitWebRTC */; };
@@ -436,6 +437,7 @@
 		120000000000000000000206 /* AvatarBuilderAssetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarBuilderAssetTests.swift; sourceTree = "<group>"; };
 		120000000000000000000208 /* QuestionGenerationFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionGenerationFlowTests.swift; sourceTree = "<group>"; };
 		F8100000000000000000000A /* VoiceTutorContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorContractTests.swift; sourceTree = "<group>"; };
+		F83000000000000000000002 /* VoiceTutorNativeConversationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorNativeConversationTests.swift; sourceTree = "<group>"; };
 		B90000000000000000000001 /* StudyMateDev.storekit */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StudyMateDev.storekit; sourceTree = "<group>"; };
 		F70000000000000000000020 /* AppControlPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppControlPolicyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -913,6 +915,7 @@
 				120000000000000000000206 /* AvatarBuilderAssetTests.swift */,
 				120000000000000000000208 /* QuestionGenerationFlowTests.swift */,
 				F8100000000000000000000A /* VoiceTutorContractTests.swift */,
+				F83000000000000000000002 /* VoiceTutorNativeConversationTests.swift */,
 			);
 			path = StudyMateiOSTests;
 			sourceTree = "<group>";
@@ -1357,6 +1360,7 @@
 				120000000000000000000207 /* AvatarBuilderAssetTests.swift in Sources */,
 				120000000000000000000209 /* QuestionGenerationFlowTests.swift in Sources */,
 				F81000000000000000000009 /* VoiceTutorContractTests.swift in Sources */,
+				F83000000000000000000001 /* VoiceTutorNativeConversationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
