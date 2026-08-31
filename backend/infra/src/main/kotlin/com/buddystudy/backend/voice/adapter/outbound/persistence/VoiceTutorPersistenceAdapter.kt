@@ -87,7 +87,7 @@ class VoiceTutorPersistenceAdapter(
     @Transactional(isolation = Isolation.READ_COMMITTED)
     override suspend fun reserve(
         userId: Long,
-        studyId: Long,
+        studyId: Long?,
         idempotencyKey: String,
         language: String,
         model: String,
@@ -119,7 +119,7 @@ class VoiceTutorPersistenceAdapter(
         if (active != null) {
             return ReserveVoiceTutorSessionResult.ActiveSession(active, quota.toSnapshot())
         }
-        val study = study(userId, studyId) ?: return ReserveVoiceTutorSessionResult.StudyNotFound
+        val study = studyId?.let { study(userId, it) ?: return ReserveVoiceTutorSessionResult.StudyNotFound }
         val secondsUntilReset = ceilSeconds(Duration.between(now, quota.periodEndsAt))
         val reservationSeconds = min(
             quota.remainingSeconds,
@@ -166,19 +166,24 @@ class VoiceTutorPersistenceAdapter(
             """.trimIndent(),
         ).bind("id", sessionId)
             .bind("userId", userId)
-            .bind("studyId", studyId)
-            .bind("acceptedStudyId", studyId)
             .bind("idempotencyKey", idempotencyKey)
             .bind("language", language)
             .bind("model", model)
             .bind("voice", voice)
-            .bind("topic", study.topic)
-            .bind("difficulty", study.difficulty)
+            // No synthetic saved node or usable difficulty is invented for a discovery call.
+            .bind("topic", study?.topic.orEmpty())
+            .bind("difficulty", study?.difficulty ?: 0)
             .bind("periodStartedAt", quota.periodStartedAt.utc())
             .bind("periodEndsAt", quota.periodEndsAt.utc())
             .bind("reservedSeconds", reservationSeconds)
             .bind("maxSessionSeconds", maxSessionSeconds)
             .bind("hardEndsAt", hardEndsAt.utc())
+        insert = if (studyId == null) {
+            insert.bindNull("studyId", java.lang.Long::class.java)
+                .bindNull("acceptedStudyId", java.lang.Long::class.java)
+        } else {
+            insert.bind("studyId", studyId).bind("acceptedStudyId", studyId)
+        }
         insert = if (recordingConsentedAt == null) {
             insert.bindNull("recordingConsentedAt", LocalDateTime::class.java)
         } else {
@@ -190,6 +195,12 @@ class VoiceTutorPersistenceAdapter(
             insert.bind("recordingConsentVersion", recordingConsentVersion)
         }
         insert.bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+        if (studyId != null) {
+            database.sql(
+                "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values (:sessionId, 0, :studyId, :now)",
+            ).bind("sessionId", sessionId).bind("studyId", studyId).bind("now", now.utc())
+                .fetch().rowsUpdated().awaitSingle()
+        }
 
         val session = findSessionRow(userId, sessionId, lock = false)
             ?: error("Reserved Voice Tutor session could not be loaded.")

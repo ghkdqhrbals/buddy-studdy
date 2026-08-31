@@ -91,6 +91,15 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
             )
         """.trimIndent())
         executeSchema("""
+            create table voice_tutor_lesson_focuses (
+                session_id varchar(36) not null, revision bigint not null,
+                study_id bigint not null, captured_at timestamp(6) not null,
+                primary key (session_id, revision),
+                foreign key (session_id) references voice_tutor_sessions(id) on delete cascade,
+                check (revision >= 0), check (study_id > 0)
+            )
+        """.trimIndent())
+        executeSchema("""
             create table voice_tutor_results (
                 session_id varchar(36) primary key, status varchar(24) not null,
                 summary_markdown clob, explorations_json clob, learning_records_projected_at timestamp(6),
@@ -753,6 +762,83 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
         assertThat(projected()).isTrue()
         assertThat(outbox.events()).isEmpty()
+    }
+
+    @Test
+    fun `discovery session without a selected lesson preserves summary and transcript without creating common records`(): Unit = runBlocking {
+        seed()
+        execute("update voice_tutor_sessions set study_id = null, accepted_study_id = null")
+
+        append()
+
+        assertThat(count("questions")).isZero()
+        assertThat(count("voice_study_learning_records")).isZero()
+        assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
+        assertThat(projected()).isTrue()
+        assertThat(outbox.events()).isEmpty()
+    }
+
+    @Test
+    fun `selected discovery lesson creates one canonical record with the original source and is replay safe`(): Unit = runBlocking {
+        seed()
+        execute("update voice_tutor_sessions set study_id = 11, accepted_study_id = null")
+        seedRevision(fixture.snapshots().last().copy(revision = 1))
+        seedFocus(11, 1)
+        execute("update voice_tutor_transcript_turns set lesson_revision = 1")
+
+        append()
+        val record = onlyRecord()
+        assertThat(record.studyId).isEqualTo(11)
+        assertThat(record.recordId).isNotNull()
+        assertThat(record.question).isEqualTo(fixture.turns().first().transcript)
+        assertThat(record.score).isEqualTo(85)
+        assertThat(count("questions")).isEqualTo(1)
+        assertThat(questions.saved.single().studyId).isEqualTo(11)
+        assertThat(questions.saved.single().id).isPositive().isEqualTo(record.recordId)
+        assertThat(outbox.events()).hasSize(2)
+
+        clearProjectionMarker()
+        append()
+        assertThat(onlyRecord()).isEqualTo(record)
+        assertThat(count("questions")).isEqualTo(1)
+        assertThat(outbox.events()).hasSize(2)
+    }
+
+    @Test
+    fun `common records keep per-question focus across two trees instead of using the session final study pointer`(): Unit = runBlocking {
+        seed()
+        val other = VoiceTutorStudySnapshot(90, null, "Message ordering", 7)
+        seedStudy(other)
+        seedSnapshot(other)
+        seedRevision(fixture.snapshots().last().copy(revision = 1))
+        seedRevision(other.copy(revision = 2))
+        seedFocus(11, 1)
+        seedFocus(90, 2)
+        execute("update voice_tutor_sessions set study_id = 90, accepted_study_id = null")
+        execute("update voice_tutor_transcript_turns set lesson_revision = case when id = 1 then 1 else 2 end")
+        val second = fixture.exploration().copy(topic = other.topic, studyId = 90, exchanges = listOf(fixture.learnerQuestion()))
+
+        append(listOf(fixture.exploration(), second))
+
+        val ids = database.sql("select id from voice_study_learning_records order by question_turn_id")
+            .map { row, _ -> (row.get("id") as Number).toLong() }.all().collectList().awaitSingle()
+        val records = adapter.findAllOwned(7, ids).sortedBy { it.questionTurnId }
+        assertThat(records.map { it.studyId }).containsExactly(11, 90)
+        assertThat(records.map { it.difficulty }).containsExactly(3, 7)
+        assertThat(records.map { it.recordId }.distinct()).hasSize(2).doesNotContainNull()
+        assertThat(records.first().answer).isEqualTo(fixture.turns()[1].transcript + "\n" + fixture.turns()[2].transcript)
+        assertThat(records.first().score).isEqualTo(85)
+        assertThat(records.last().score).isNull()
+        assertThat(questions.saved.map { it.studyId }).containsExactly(11, 90)
+        assertThat(count("questions")).isEqualTo(2)
+        assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
+        assertThat(outbox.events()).hasSize(4)
+    }
+
+    private suspend fun seedFocus(studyId: Long, revision: Long) {
+        database.sql("insert into voice_tutor_lesson_focuses(session_id, revision, study_id, captured_at) values (:sessionId, :revision, :studyId, :now)")
+            .bind("sessionId", fixture.SESSION_ID).bind("revision", revision).bind("studyId", studyId).bind("now", now.utc())
+            .fetch().rowsUpdated().awaitSingle()
     }
 
     private suspend fun seed(resultStatus: String = "COMPLETED") {

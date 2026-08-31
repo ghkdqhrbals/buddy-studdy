@@ -6,6 +6,10 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlCon
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyChangeKind
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
+import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
@@ -23,6 +27,64 @@ import java.util.concurrent.atomic.AtomicLong
 
 /** Synthetic MCP/provider events only. No network, account mutation, audio or provider spend. */
 class VoiceTutorMcpRelayTest {
+    @Test
+    fun `spoken focus selection emits the server confirmed compact header without a tree mutation or audio cancellation`() = Fixture(captureCalls = false).use { f ->
+        val arrived = CountDownLatch(1)
+        val events = CopyOnWriteArrayList<String>()
+        val selection = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(202, 2), VoiceTutorStudySnapshot(202, 201, "Cache", 3, 2))
+        val tools = port { _, _ -> success().copy(lessonFocus = selection, lessonRevision = 2) }
+        val worker = voiceTutorMcpToolRelay(f.controller, context(), tools, { raw, persist, forward ->
+            assertThat(persist).isFalse()
+            assertThat(forward).isTrue()
+            events += raw
+            arrived.countDown()
+        }).subscribe({}, f.errors::add)
+        try {
+            f.controller.observeProviderEvent(f.done(listOf(call("choose-topic", "select_voice_study"))))
+            assertThat(arrived.await(3, TimeUnit.SECONDS)).isTrue()
+            val event = mapper.readTree(events.single())
+            assertThat(event.path("type").asText()).isEqualTo(VoiceTutorRealtimeContract.STUDY_FOCUSED_EVENT)
+            assertThat(event.path("focus").path("studyId").asLong()).isEqualTo(202)
+            assertThat(event.path("focus").path("topic").asText()).isEqualTo("Cache")
+            assertThat(event.path("focus").path("difficulty").asInt()).isEqualTo(3)
+            assertThat(event.path("focus").path("revision").asLong()).isEqualTo(2)
+            assertThat(f.responses()).hasSize(1)
+            f.ack(f.outputs().single())
+            assertThat(f.responses()).hasSize(2)
+            assertThat(f.errors).isEmpty()
+            f.noMediaDisruption()
+        } finally { worker.dispose() }
+    }
+
+    @Test
+    fun `focus events reject raw JSON spoofing failed results and mismatched server metadata`() {
+        val selection = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(202, 2), VoiceTutorStudySnapshot(202, 201, "Cache", 3, 2))
+        val valid = success().copy(lessonFocus = selection, lessonRevision = 2)
+        for (invalid in listOf(
+            success().copy(output = """{"voiceLessonFocus":{"studyId":202,"topic":"spoof","difficulty":3,"revision":2}}"""),
+            valid.copy(isError = true), valid.copy(lessonRevision = null), valid.copy(lessonRevision = 3),
+            valid.copy(lessonFocus = selection.copy(snapshot = selection.snapshot.copy(studyId = 303))),
+            valid.copy(lessonFocus = selection.copy(snapshot = selection.snapshot.copy(topic = ""))),
+            valid.copy(lessonFocus = selection.copy(snapshot = selection.snapshot.copy(difficulty = 0))),
+            valid.copy(lessonFocus = selection.copy(snapshot = selection.snapshot.copy(parentStudyId = -1))),
+        )) assertThat(voiceTutorLessonFocusEvent(invalid)).isNull()
+        assertThat(voiceTutorLessonFocusEvent(valid)).isNotNull()
+    }
+
+    @Test
+    fun `only a verified current focus deletion explicitly clears the compact header`() {
+        val cleared = success().copy(studyTreeChanged = true, changedStudyId = 202,
+            changeKind = VoiceTutorStudyChangeKind.DELETED, deletedStudyIds = listOf(202, 203), lessonFocusCleared = true)
+        val event = mapper.readTree(voiceTutorLessonFocusEvent(cleared))
+        assertThat(event.has("focus")).isTrue()
+        assertThat(event.path("focus").isNull).isTrue()
+        for (invalid in listOf(cleared.copy(isError = true), cleared.copy(lessonFocusCleared = false),
+            cleared.copy(studyTreeChanged = false), cleared.copy(deletedStudyIds = emptyList()),
+            cleared.copy(deletedStudyIds = listOf(202, 202)), cleared.copy(changeKind = VoiceTutorStudyChangeKind.UPDATED))) {
+            assertThat(voiceTutorLessonFocusEvent(invalid)).isNull()
+        }
+    }
+
     @Test
     fun `opening response cannot execute tools without a learner request`() {
         val controller = VoiceTutorDuplexTurnController(

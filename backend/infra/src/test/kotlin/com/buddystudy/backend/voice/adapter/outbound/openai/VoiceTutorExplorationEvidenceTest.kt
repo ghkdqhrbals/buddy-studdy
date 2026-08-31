@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import com.buddystudy.voice.domain.VoiceTutorExploration
 import com.buddystudy.voice.domain.VoiceTutorLearningExchange
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
@@ -263,6 +264,55 @@ class VoiceTutorExplorationEvidenceTest {
             "85/1000." to 85, "Score: 8/10." to 8, "85ms." to 85,
             "The maximum score is 100. Your score is 85." to 100,
         ).forEach { (text, score) -> assertThat(VoiceTutorSpokenScoreEvidence.supports(text, score)).describedAs(text).isFalse() }
+    }
+
+    @Test
+    fun `discovery navigation before the first explicit focus is excluded even when its ASR and answers arrive later`() {
+        val discovery = session().copy(studyId = 43, acceptedStudyId = null, topic = snapshot.topic, difficulty = snapshot.difficulty)
+        val transcript = turns().map { if (it.id > 1) it.copy(lessonRevision = 1) else it }
+        val result = VoiceTutorExplorationEvidence.verified(
+            listOf(exploration()), discovery, transcript, listOf(snapshot, snapshot.copy(revision = 1)),
+            focuses = listOf(VoiceTutorLessonFocus(43, 1)),
+        )
+
+        assertThat(result).isEmpty()
+        assertThat(transcript.first().transcript).isEqualTo(turns().first().transcript)
+    }
+
+    @Test
+    fun `questions retain their earlier explicit focus while later learner questions may move to another saved tree`() {
+        val other = VoiceTutorStudySnapshot(90, null, "Message ordering", 4, revision = 2)
+        val discovery = session().copy(studyId = 90, acceptedStudyId = null, topic = other.topic, difficulty = other.difficulty)
+        val transcript = turns().map { it.copy(lessonRevision = if (it.id == 1L) 1 else 2) }
+        val deeper = exchange().copy(
+            kind = VoiceTutorExchangeKind.LEARNER_QUESTION, questionTurnId = 4,
+            answerTurnIds = listOf(5), feedbackTurnIds = emptyList(),
+        )
+        val result = VoiceTutorExplorationEvidence.verified(
+            listOf(exploration(), exploration().copy(topic = other.topic, studyId = 90, exchanges = listOf(deeper))),
+            discovery, transcript, listOf(snapshot, snapshot.copy(revision = 1), other.copy(revision = 0), other),
+            focuses = listOf(VoiceTutorLessonFocus(43, 1), VoiceTutorLessonFocus(90, 2)),
+        )
+
+        assertThat(result.map { it.studyId }).containsExactly(43, 90)
+        assertThat(result.map { it.difficulty }).containsExactly(7, 4)
+        assertThat(result.first().exchanges.single().score).isEqualTo(85)
+        assertThat(result.last().exchanges.single().score).isNull()
+        assertThat(result.last().exchanges.single().feedbackTurnIds).isEmpty()
+    }
+
+    @Test
+    fun `an explicit parent focus cannot authorize a child level without choosing that child`() {
+        val parent = VoiceTutorStudySnapshot(42, null, "Redis", 3, revision = 1)
+        val transcript = turns().map { it.copy(lessonRevision = 1) }
+        val result = VoiceTutorExplorationEvidence.verified(
+            listOf(exploration()), session(), transcript, listOf(snapshot, parent.copy(revision = 0), parent),
+            focuses = listOf(VoiceTutorLessonFocus(42, 1)),
+        ).single()
+
+        assertThat(result.studyId).isNull()
+        assertThat(result.difficulty).isNull()
+        assertThat(result.exchanges.single().questionTurnId).isEqualTo(1)
     }
 
     private fun verify(item: VoiceTutorExploration, transcript: List<VoiceTutorTranscriptTurn> = turns()) =

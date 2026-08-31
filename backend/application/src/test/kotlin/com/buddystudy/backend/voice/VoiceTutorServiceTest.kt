@@ -52,6 +52,48 @@ class VoiceTutorServiceTest {
     private val principal = Principal(7, "device-7", 70, anonymous = false)
 
     @Test
+    fun `discovery reserves a call without selecting a node and keeps the accepted language for ASR`(): Unit = runBlocking {
+        for (language in listOf("ko", "en", "ja")) {
+            val persistence = FakePersistence(now)
+            val requests = mutableListOf<VoiceTutorRealtimeRequest>()
+            val service = service(persistence, onRealtimeRequest = { requests += it })
+
+            val created = service.createSession(principal, null, language, "marin", "discovery-$language", false, null)
+            val context = service.connect(principal, created.sessionId)
+            service.relayProvider(principal, context, emptyFlow(), emptyFlow()) { _, _, _ -> false }
+
+            assertThat(persistence.reserveCalls).isEqualTo(1)
+            assertThat(persistence.session.studyId).isNull()
+            assertThat(persistence.session.acceptedStudyId).isNull()
+            assertThat(persistence.lastMaxSessionSeconds).isEqualTo(3_600)
+            assertThat(created.quota.reservedSeconds).isEqualTo(3_600)
+            assertThat(created.realtimeTransport).isEqualTo("WEBRTC")
+            assertThat(requests.single().language).isEqualTo(language)
+            val data = JsonMapperProvider.mapper.readTree(context.instructions.substringAfterLast('\n'))
+            assertThat(data.path("acceptedStudyId").isNull).isTrue()
+            assertThat(data.path("lessonFocus").isNull).isTrue()
+            assertThat(data.path("topic").isNull).isTrue()
+            assertThat(data.path("difficulty").isNull).isTrue()
+            assertThat(data.path("savedLessonTopics").size()).isZero()
+        }
+    }
+
+    @Test
+    fun `a supplied invalid study identity still fails before reserving discovery quota`(): Unit = runBlocking {
+        for (studyId in listOf(0L, -1L, Long.MIN_VALUE)) {
+            val persistence = FakePersistence(now)
+
+            val failure = runCatching {
+                service(persistence).createSession(principal, studyId, "ko", null, "invalid-study", false, null)
+            }.exceptionOrNull()
+
+            assertThat(failure).isInstanceOf(ApiException::class.java)
+            assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+            assertThat(persistence.reserveCalls).isZero()
+        }
+    }
+
+    @Test
     fun `each supported realtime voice is retained in the accepted session`() = runBlocking<Unit> {
         for (voice in listOf("alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar")) {
             val persistence = FakePersistence(now)
@@ -151,6 +193,11 @@ class VoiceTutorServiceTest {
         val trusted = instructions.substringBeforeLast('\n')
         val data = JsonMapperProvider.mapper.readTree(instructions.substringAfterLast('\n'))
         assertThat(trusted).doesNotContain(childTitle)
+        assertThat(data.path("acceptedStudyId").asLong()).isEqualTo(42)
+        assertThat(data.path("lessonFocus").path("studyId").asLong()).isEqualTo(42)
+        assertThat(data.path("lessonFocus").path("parentStudyId").asLong()).isEqualTo(7)
+        assertThat(data.path("lessonFocus").path("difficulty").asInt()).isEqualTo(5)
+        assertThat(data.path("lessonFocus").path("revision").asLong()).isZero()
         assertThat(data.path("savedLessonTopics").size()).isEqualTo(5)
         assertThat(data.path("savedLessonTopics")[1].path("topic").asText()).isEqualTo(childTitle)
         assertThat(data.path("savedLessonTopics")[1].path("difficulty").asInt()).isEqualTo(3)
@@ -198,7 +245,7 @@ class VoiceTutorServiceTest {
             .contains("Only exact studyId/parentStudyId edges establish tree membership")
             .contains("never match branches by title")
             .contains("Ancestors are orientation context, not permission to quiz on a parent or sibling")
-            .contains("Move outside the selected subtree or to another root only when the learner explicitly chooses")
+            .contains("Move outside the current focus subtree or to another root only when the learner explicitly chooses")
             .contains("do not automatically traverse its descendants")
             .contains("Going deeper means following the learner's actual saved study tree")
             .contains("tree depth, a good score or fluent speech never authorizes raising the level")
@@ -269,6 +316,12 @@ class VoiceTutorServiceTest {
 
     private fun failingStudyContext(failure: Exception) = object : VoiceTutorStudyContextPort {
         override suspend fun prepare(session: VoiceTutorSession): List<VoiceTutorStudySnapshot> = throw failure
+        override suspend fun remember(userId: Long, sessionId: String, studyIds: List<Long>) = error("Unexpected remember")
+        override suspend fun list(userId: Long, sessionId: String) = error("Unexpected list")
+    }
+
+    private fun fixedStudyContext(topics: List<VoiceTutorStudySnapshot>) = object : VoiceTutorStudyContextPort {
+        override suspend fun prepare(session: VoiceTutorSession) = topics
         override suspend fun remember(userId: Long, sessionId: String, studyIds: List<Long>) = error("Unexpected remember")
         override suspend fun list(userId: Long, sessionId: String) = error("Unexpected list")
     }
@@ -552,7 +605,7 @@ class VoiceTutorServiceTest {
     }
 
     @Test
-    fun `tutor greets first and waits for explicit readiness before teaching`() = runBlocking<Unit> {
+    fun `tutor opens topic discovery in the session language without a mandatory readiness exchange`(): Unit = runBlocking {
         for ((language, languageName) in listOf("ko" to "Korean", "en" to "English", "ja" to "Japanese")) {
             val persistence = FakePersistence(now).apply {
                 session = session.copy(language = language)
@@ -563,14 +616,93 @@ class VoiceTutorServiceTest {
 
             assertThat(trustedInstructions)
                 .contains("Your first response must warmly greet the learner as their AI tutor")
-                .contains("ask whether they are ready to start the lesson")
+                .contains("ask what topic they would like to talk about today")
+                .contains("without a predetermined topic, quiz or mandatory readiness question")
                 .contains("clearly agree or explicitly ask to start before teaching")
                 .contains("asking study questions, or assessing answers")
+                .contains("a topic lookup or merely naming a topic is not consent to start")
+                .contains("do not ask for the same consent again")
+                .contains("without repeatedly asking whether they are ready")
+                .contains("a contextual yes to that invitation is sufficient, without a second readiness check")
                 .contains("hello or 안녕")
                 .contains("never means the lesson has ended or is complete")
                 .contains("acknowledge that the lesson is starting")
                 .contains("exactly one short, complete sentence in each response")
                 .contains("Use $languageName throughout the greeting and conversation")
+                .doesNotContain("ask whether they are ready to start the lesson", "check readiness without starting the lesson")
+        }
+    }
+
+    @Test
+    fun `topic discovery resolves the saved tree and requires a successful focus selection before studying`(): Unit = runBlocking {
+        val persistence = FakePersistence(now).apply { session = session.copy(studyId = null, acceptedStudyId = null) }
+        val instructions = service(persistence).connect(principal, persistence.session.id).instructions
+
+        assertThat(instructions)
+            .contains("list_studies with query equal to that topic, limit 5 and offset 0")
+            .contains("get_study with an exact returned study_id")
+            .contains("parent_study_id equal to the exact node being explored")
+            .contains("instead of immediately quizzing on the broad concept")
+            .contains("exactly one verified matching root or next child branch")
+            .contains("at most three of those real child topics or matching roots")
+            .contains("A partial page is not proof there is only one branch")
+            .contains("Only a successful select_voice_study result's voiceLessonFocus")
+            .contains("call select_voice_study with study_id")
+            .contains("voiceLessonContextReady=false or voiceLessonTopics=[] is normal")
+            .contains("must not block selection")
+            .contains("let select_voice_study validate the complete owned path atomically")
+            .contains("Before selection, do not require voiceLessonTree or a frozen level")
+            .contains("Only if selection or an explicit settings-change preparation actually fails")
+            .contains("A read, name match, proposed branch or failed selection never changes focus")
+            .contains("never acceptedStudyId, as the current focus identity")
+            .contains("never invent a node, silently create a root")
+            .contains("scope=node, limit=3 and view=original")
+            .contains("not learning questions, answers, feedback or score evidence")
+            .contains("Never retroactively attribute them to a node selected later")
+            .contains("explain the limitation briefly and never pretend to have selected a topic")
+            .doesNotContain("with the selectedStudyId", "equal to selectedStudyId")
+    }
+
+    @Test
+    fun `initial prompt uses prepared current focus rather than immutable accepted metadata`(): Unit = runBlocking {
+        val persistence = FakePersistence(now).apply {
+            session = session.copy(studyId = 43, acceptedStudyId = 42, topic = "Original root", difficulty = 2)
+        }
+        val contexts = fixedStudyContext(listOf(
+            VoiceTutorStudySnapshot(42, null, "Original root", 2),
+            VoiceTutorStudySnapshot(43, 42, "Selected child", 7, revision = 2),
+        ))
+
+        val instructions = service(persistence, studyContexts = contexts).connect(principal, persistence.session.id).instructions
+        val data = JsonMapperProvider.mapper.readTree(instructions.substringAfterLast('\n'))
+
+        assertThat(data.path("acceptedStudyId").asLong()).isEqualTo(42)
+        assertThat(data.path("lessonFocus").path("studyId").asLong()).isEqualTo(43)
+        assertThat(data.path("lessonFocus").path("parentStudyId").asLong()).isEqualTo(42)
+        assertThat(data.path("lessonFocus").path("revision").asLong()).isEqualTo(2)
+        assertThat(data.path("topic").asText()).isEqualTo("Selected child")
+        assertThat(data.path("difficulty").asInt()).isEqualTo(7)
+        assertThat(data.path("lessonTree").path("selectedStudyId").asLong()).isEqualTo(43)
+        assertThat(data.has("selectedStudyId")).isFalse()
+    }
+
+    @Test
+    fun `reading saved candidates cannot invent a focus or expose placeholder lesson metadata`(): Unit = runBlocking {
+        for (liveStudyId in listOf(null, 99L)) {
+            val persistence = FakePersistence(now).apply {
+                session = session.copy(studyId = liveStudyId, acceptedStudyId = null, topic = "Placeholder", difficulty = 1)
+            }
+            val contexts = fixedStudyContext(listOf(VoiceTutorStudySnapshot(42, null, "Unselected candidate", 5)))
+
+            val instructions = service(persistence, studyContexts = contexts).connect(principal, persistence.session.id).instructions
+            val data = JsonMapperProvider.mapper.readTree(instructions.substringAfterLast('\n'))
+
+            assertThat(data.path("savedLessonTopics").size()).isEqualTo(1)
+            assertThat(data.path("acceptedStudyId").isNull).isTrue()
+            assertThat(data.path("lessonFocus").isNull).isTrue()
+            assertThat(data.path("topic").isNull).isTrue()
+            assertThat(data.path("difficulty").isNull).isTrue()
+            assertThat(instructions).doesNotContain("Placeholder")
         }
     }
 
@@ -1206,7 +1338,7 @@ class VoiceTutorServiceTest {
 
         override suspend fun reserve(
             userId: Long,
-            studyId: Long,
+            studyId: Long?,
             idempotencyKey: String,
             language: String,
             model: String,
@@ -1221,6 +1353,7 @@ class VoiceTutorServiceTest {
             lastMaxSessionSeconds = maxSessionSeconds
             session = session.copy(
                 studyId = studyId,
+                acceptedStudyId = studyId,
                 idempotencyKey = idempotencyKey,
                 language = language,
                 model = model,

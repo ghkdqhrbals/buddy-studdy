@@ -5,6 +5,7 @@ import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import io.r2dbc.spi.ConnectionFactories
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -72,7 +73,19 @@ class VoiceTutorStudyContextAdapterTest {
                 difficulty_snapshot int not null,
                 status varchar(20) not null,
                 hard_ends_at timestamp(6) not null,
-                ended_at timestamp(6)
+                ended_at timestamp(6),
+                updated_at timestamp(6) not null
+            )
+            """.trimIndent(),
+        )
+        execute(
+            """
+            create table voice_tutor_lesson_focuses (
+                session_id varchar(36) not null, revision bigint not null,
+                study_id bigint not null, captured_at timestamp(6) not null,
+                primary key (session_id, revision),
+                foreign key (session_id) references voice_tutor_sessions(id) on delete cascade,
+                check (revision >= 0), check (study_id > 0)
             )
             """.trimIndent(),
         )
@@ -650,6 +663,238 @@ class VoiceTutorStudyContextAdapterTest {
         assertThat(adapter.list(7, accepted.id).map { it.revision }).containsExactly(0, 0, 1, 2)
     }
 
+    @Test
+    fun `discovery has no invented topic and explicit focus atomically captures its owned frozen path`(): Unit = runBlocking {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        insertStudy(10, topic = "Root Redis", difficulty = 3)
+        insertStudy(11, parentId = 10, topic = "Cache", difficulty = 4)
+        insertStudy(12, parentId = 11, topic = "Expiry", difficulty = 5)
+
+        assertThat(transaction { adapter.prepare(discovery) }).isEmpty()
+        assertThat(adapter.history(7, discovery.id)).isEmpty()
+        assertThat(snapshotCount()).isZero()
+        val selected = transaction { requireNotNull(adapter.focus(7, discovery.id, 11)) }
+
+        assertThat(selected.focus).isEqualTo(VoiceTutorLessonFocus(11, 1))
+        assertThat(selected.snapshot).isEqualTo(VoiceTutorStudySnapshot(11, 10, "Cache", 4, 1))
+        assertThat(selected.revision).isEqualTo(1)
+        assertThat(adapter.currentRevision(7, discovery.id)).isEqualTo(1)
+        assertThat(adapter.history(7, discovery.id)).containsExactly(selected.focus)
+        assertThat(adapter.history(99, discovery.id)).isEmpty()
+        assertThat(focusHeader()).containsExactly(11L, null, "Cache", 4)
+        val context = transaction { adapter.prepare(discovery) }
+        assertThat(context).contains(VoiceTutorStudySnapshot(10, null, "Root Redis", 3))
+        assertThat(context).contains(VoiceTutorStudySnapshot(12, 11, "Expiry", 5))
+        assertThat(context.single { it.studyId == 11L }).isEqualTo(selected.snapshot)
+    }
+
+    @Test
+    fun `same explicit focus is idempotent without adopting live rename or downgrading metadata epoch`(): Unit = runBlocking {
+        val discovery = session(studyId = null)
+        insertSession(discovery)
+        insertStudy(10, topic = "Redis root", difficulty = 3)
+        insertStudy(11, parentId = 10, topic = "Frozen cache", difficulty = 4)
+        val initial = transaction { requireNotNull(adapter.focus(7, discovery.id, 11)) }
+        execute("update studies set topic = 'Changed live cache', difficulty_level = 9 where id = 11")
+        execute("update studies set difficulty_level = 7 where id = 10")
+        transaction { adapter.revise(7, discovery.id, 10) }
+
+        val repeated = transaction { requireNotNull(adapter.focus(7, discovery.id, 11)) }
+
+        assertThat(repeated.focus).isEqualTo(initial.focus)
+        assertThat(repeated.snapshot).isEqualTo(initial.snapshot)
+        assertThat(repeated.revision).isEqualTo(2)
+        assertThat(adapter.history(7, discovery.id)).containsExactly(initial.focus)
+        assertThat(revisionCount()).isEqualTo(2)
+        assertThat(focusHeader()).containsExactly(11L, null, "Frozen cache", 4)
+    }
+
+    @Test
+    fun `first explicit selection of the legacy anchor creates epoch one and later root selection preserves acceptance`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(10, topic = "Changed live Redis", difficulty = 9)
+        insertStudy(20, topic = "Kafka", difficulty = 2)
+        val first = transaction { requireNotNull(adapter.focus(7, accepted.id, 10)) }
+        assertThat(first.revision).isEqualTo(1)
+        assertThat(first.snapshot.topic).isEqualTo("Accepted Redis")
+        assertThat(first.snapshot.difficulty).isEqualTo(6)
+
+        val second = transaction { requireNotNull(adapter.focus(7, accepted.id, 20)) }
+        assertThat(second.revision).isEqualTo(2)
+        assertThat(focusHeader()).containsExactly(20L, 10L, "Kafka", 2)
+        val current = transaction { adapter.prepare(accepted) }
+        assertThat(current.single { it.studyId == 10L }.topic).isEqualTo("Accepted Redis")
+        assertThat(current.single { it.studyId == 20L }.topic).isEqualTo("Kafka")
+        assertThat(adapter.list(7, accepted.id).first { it.studyId == 10L }.revision).isZero()
+    }
+
+    @Test
+    fun `focus rejects foreign missing cyclic or unresolved ancestry without creating any metadata`(): Unit = runBlocking {
+        val discovery = session(studyId = null)
+        insertSession(discovery)
+        insertStudy(10)
+        insertStudy(20, userId = 99)
+        insertStudy(21, parentId = 20)
+        insertStudy(22, parentId = 23)
+        insertStudy(23, parentId = 22)
+        insertStudy(24, parentId = 999)
+
+        for (studyId in listOf(0L, -1L, 20L, 21L, 22L, 24L, 999L)) {
+            transaction { assertThat(adapter.focus(7, discovery.id, studyId)).isNull() }
+        }
+        transaction { assertThat(adapter.focus(99, discovery.id, 20)).isNull() }
+        transaction { assertThat(adapter.focus(7, "missing-call", 10)).isNull() }
+        execute("update voice_tutor_sessions set status = 'ENDING'")
+        transaction { assertThat(adapter.focus(7, discovery.id, 10)).isNull() }
+
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+        assertThat(focusHeader().first()).isNull()
+    }
+
+    @Test
+    fun `focus rechecks hard deadline after owned reads without changing the current lesson`(): Unit = runBlocking {
+        val discovery = session(studyId = null)
+        insertSession(discovery)
+        insertStudy(10)
+        var readings = 0
+        val expiring = VoiceTutorStudyContextAdapter(database, object : Clock() {
+            override fun getZone(): ZoneId = ZoneOffset.UTC
+            override fun withZone(zone: ZoneId): Clock = this
+            override fun instant(): Instant = if (readings++ == 0) now else discovery.hardEndsAt
+        })
+
+        transaction { assertThat(expiring.focus(7, discovery.id, 10)).isNull() }
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+    }
+
+    @Test
+    fun `focus and metadata edits share a thirty two revision cap and same-focus retry still succeeds at the cap`(): Unit = runBlocking {
+        val discovery = session(studyId = null)
+        insertSession(discovery)
+        insertStudy(11)
+        insertStudy(12)
+        transaction { requireNotNull(adapter.focus(7, discovery.id, 11)) }
+        execute("update studies set difficulty_level = 8 where id = 11")
+        transaction { adapter.revise(7, discovery.id, 11) }
+        for (revision in 3..32) {
+            val id = if (revision % 2 == 1) 12L else 11L
+            assertThat(transaction { requireNotNull(adapter.focus(7, discovery.id, id)) }.revision)
+                .isEqualTo(revision.toLong())
+        }
+
+        transaction { assertThat(adapter.focus(7, discovery.id, 12)).isNull() }
+        val repeated = transaction { requireNotNull(adapter.focus(7, discovery.id, 11)) }
+        assertThat(repeated.revision).isEqualTo(32)
+        assertThat(revisionCount()).isEqualTo(32)
+        assertThat(focusCount()).isEqualTo(31)
+        assertThat(snapshotCount()).isEqualTo(2)
+        assertThat(focusHeader()).containsExactly(11L, null, "Synthetic topic 11", 8)
+    }
+
+    @Test
+    fun `full snapshot cache rejects an uncaptured path but can select an already captured owned node`(): Unit = runBlocking {
+        val discovery = session(studyId = null)
+        insertSession(discovery)
+        for (id in 100L..164L) insertStudy(id)
+        transaction { adapter.remember(7, discovery.id, (100L..131L).toList()) }
+        transaction { adapter.remember(7, discovery.id, (132L..163L).toList()) }
+
+        transaction { assertThat(adapter.focus(7, discovery.id, 164)).isNull() }
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+        val selected = transaction { requireNotNull(adapter.focus(7, discovery.id, 100)) }
+        assertThat(selected.studyId).isEqualTo(100)
+        assertThat(selected.revision).isEqualTo(1)
+        assertThat(snapshotCount()).isEqualTo(64)
+    }
+
+    @Test
+    fun `rolled back focus never leaves a live pointer ledger or metadata epoch behind`(): Unit = runBlocking {
+        val discovery = session(studyId = null)
+        insertSession(discovery)
+        insertStudy(10)
+        val failure = runCatching {
+            transaction {
+                requireNotNull(adapter.focus(7, discovery.id, 10))
+                error("synthetic focus rollback")
+            }
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+        assertThat(focusHeader().first()).isNull()
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+    }
+
+    @Test
+    fun `concurrent focus writers serialize against the same session epoch without mixing pointers or metadata`(): Unit = runBlocking {
+        val discovery = session(studyId = null)
+        insertSession(discovery)
+        insertStudy(11)
+        insertStudy(12)
+        val captured = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val first = async(Dispatchers.Default) {
+            transaction {
+                val result = requireNotNull(adapter.focus(7, discovery.id, 11))
+                captured.complete(Unit)
+                release.await()
+                result
+            }
+        }
+        try {
+            withTimeout(5_000) { captured.await() }
+            val entered = CompletableDeferred<Unit>()
+            val second = async(Dispatchers.Default) {
+                transaction { entered.complete(Unit); requireNotNull(adapter.focus(7, discovery.id, 12)) }
+            }
+            withTimeout(5_000) { entered.await() }
+            assertThat(withTimeoutOrNull(100) { second.await() }).isNull()
+            release.complete(Unit)
+            assertThat(withTimeout(5_000) { first.await() }.revision).isEqualTo(1)
+            assertThat(withTimeout(5_000) { second.await() }.revision).isEqualTo(2)
+        } finally {
+            release.complete(Unit)
+        }
+        assertThat(adapter.history(7, discovery.id)).containsExactly(VoiceTutorLessonFocus(11, 1), VoiceTutorLessonFocus(12, 2))
+        assertThat(focusHeader()).containsExactly(12L, null, "Synthetic topic 12", 5)
+    }
+
+    @Test
+    fun `deleted current focus remains historical without becoming discovery and session deletion cascades both ledgers`(): Unit = runBlocking {
+        val discovery = session(studyId = null)
+        insertSession(discovery)
+        insertStudy(11)
+        val selected = transaction { requireNotNull(adapter.focus(7, discovery.id, 11)) }
+        execute("delete from studies where id = 11")
+        execute("update voice_tutor_sessions set study_id = null")
+
+        assertThat(adapter.history(7, discovery.id)).containsExactly(selected.focus)
+        assertThat(transaction { adapter.prepare(discovery) }).containsExactly(selected.snapshot)
+        transaction { assertThat(adapter.focus(7, discovery.id, 11)).isNull() }
+        execute("delete from voice_tutor_sessions")
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+    }
+
+    private suspend fun focusCount(): Long = database.sql("select count(*) as count from voice_tutor_lesson_focuses")
+        .map { row, _ -> (row.get("count") as Number).toLong() }.one().awaitSingle()
+
+    private suspend fun focusHeader(): List<Any?> = database.sql(
+        "select study_id, accepted_study_id, topic_snapshot, difficulty_snapshot from voice_tutor_sessions",
+    ).map { row, _ ->
+        listOf((row.get("study_id") as? Number)?.toLong(), (row.get("accepted_study_id") as? Number)?.toLong(),
+            row.get("topic_snapshot", String::class.java), (row.get("difficulty_snapshot") as Number).toInt())
+    }.one().awaitSingle()
+
     private suspend fun <T : Any> transaction(block: suspend () -> T): T =
         requireNotNull(transactions.executeAndAwait { block() })
 
@@ -689,12 +934,12 @@ class VoiceTutorStudyContextAdapterTest {
         var insert = database.sql(
             """
             insert into voice_tutor_sessions
-                (id, user_id, study_id, accepted_study_id, topic_snapshot, difficulty_snapshot, status, hard_ends_at, ended_at)
-            values (:id, :userId, :studyId, :acceptedStudyId, :topic, :difficulty, :status, :hardEndsAt, :endedAt)
+                (id, user_id, study_id, accepted_study_id, topic_snapshot, difficulty_snapshot, status, hard_ends_at, ended_at, updated_at)
+            values (:id, :userId, :studyId, :acceptedStudyId, :topic, :difficulty, :status, :hardEndsAt, :endedAt, :now)
             """.trimIndent(),
         ).bind("id", session.id).bind("userId", session.userId).bind("topic", session.topic)
             .bind("difficulty", session.difficulty).bind("status", session.status.name)
-            .bind("hardEndsAt", session.hardEndsAt.utc())
+            .bind("hardEndsAt", session.hardEndsAt.utc()).bind("now", now.utc())
         insert = session.studyId?.let { insert.bind("studyId", it) }
             ?: insert.bindNull("studyId", java.lang.Long::class.java)
         insert = session.acceptedStudyId?.let { insert.bind("acceptedStudyId", it) }

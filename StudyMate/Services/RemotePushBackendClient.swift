@@ -440,7 +440,7 @@ protocol RemotePushBackendClientProtocol {
 
     func createVoiceTutorSession(
         registration: RemotePushRegistration,
-        studyID: Int,
+        studyID: Int?,
         language: AppLanguage,
         voice: String?,
         idempotencyKey: String
@@ -448,7 +448,7 @@ protocol RemotePushBackendClientProtocol {
 
     func createVoiceTutorSession(
         registration: RemotePushRegistration,
-        studyID: Int,
+        studyID: Int?,
         language: AppLanguage,
         voice: String?,
         recordingConsent: Bool,
@@ -790,7 +790,7 @@ extension RemotePushBackendClientProtocol {
 
     func createVoiceTutorSession(
         registration: RemotePushRegistration,
-        studyID: Int,
+        studyID: Int?,
         language: AppLanguage,
         voice: String?,
         recordingConsent: Bool,
@@ -900,7 +900,7 @@ extension RemotePushBackendClientProtocol {
 
     func createVoiceTutorSession(
         registration: RemotePushRegistration,
-        studyID: Int,
+        studyID: Int?,
         language: AppLanguage,
         voice: String?,
         idempotencyKey: String
@@ -1649,7 +1649,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     func createVoiceTutorSession(
         registration: RemotePushRegistration,
-        studyID: Int,
+        studyID: Int?,
         language: AppLanguage,
         voice: String?,
         idempotencyKey: String
@@ -1674,7 +1674,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     func createVoiceTutorSession(
         registration: RemotePushRegistration,
-        studyID: Int,
+        studyID: Int?,
         language: AppLanguage,
         voice: String?,
         recordingConsent: Bool,
@@ -3482,7 +3482,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     private struct VoiceTutorSessionCreateRequest: Encodable {
-        var studyId: Int
+        var studyId: Int?
         var language: String
         var voice: String?
         var recordingConsent: Bool = false

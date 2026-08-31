@@ -23,6 +23,7 @@ import com.buddystudy.study.domain.entity.StudyRecordType
 import com.buddystudy.voice.domain.VoiceStudyLearningRecord
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import com.buddystudy.voice.domain.VoiceTutorExploration
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorStudyRevisionLimits
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
@@ -84,6 +85,7 @@ class VoiceStudyLearningRecordPersistenceAdapter(
             userId = userId, sessionId = header.id, acceptedStudyId = header.acceptedStudyId, language = header.language,
             explorations = explorations, transcript = transcript(sessionId), snapshots = snapshots,
             ownedStudyIds = ownedStudyIds, detectLanguage = languageDetector::detect,
+            focuses = focuses(userId, sessionId),
         )
         for (record in records) {
             val extensionId = insertExtension(record, now)
@@ -280,6 +282,17 @@ class VoiceStudyLearningRecordPersistenceAdapter(
             row.long("sequence_number"), row.instant("occurred_at"), row.long("lesson_revision"),
         )
     }.all().collectList().awaitSingle()
+
+    private suspend fun focuses(userId: Long, sessionId: String): List<VoiceTutorLessonFocus> = database.sql(
+        """
+        select focus.study_id, focus.revision from voice_tutor_lesson_focuses focus
+        join voice_tutor_sessions session on session.id = focus.session_id
+        where session.id = :sessionId and session.user_id = :userId
+        order by focus.revision limit ${VoiceTutorStudyRevisionLimits.MAX_REVISIONS + 1}
+        """.trimIndent(),
+    ).bind("sessionId", sessionId).bind("userId", userId)
+        .map { row, _ -> VoiceTutorLessonFocus(row.long("study_id"), row.long("revision")) }
+        .all().collectList().awaitSingle()
 
     private suspend fun insertExtension(record: VoiceStudyLearningRecord, now: Instant): Long {
         database.sql(

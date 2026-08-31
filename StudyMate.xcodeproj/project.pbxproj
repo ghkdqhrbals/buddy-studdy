@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F89000000000000000000001 /* VoiceTutorStudyFocus.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89000000000000000000002 /* VoiceTutorStudyFocus.swift */; };
+		F89000000000000000000003 /* AppStrings+VoiceTutorDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89000000000000000000004 /* AppStrings+VoiceTutorDiscovery.swift */; };
+		F89000000000000000000005 /* VoiceTutorDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89000000000000000000006 /* VoiceTutorDiscoveryTests.swift */; };
 		F88000000000000000000001 /* VoiceStudyRecordContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88000000000000000000002 /* VoiceStudyRecordContent.swift */; };
 		F88000000000000000000003 /* AppStrings+CommonRecords.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88000000000000000000004 /* AppStrings+CommonRecords.swift */; };
 		F88000000000000000000005 /* VoiceCommonRecordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88000000000000000000006 /* VoiceCommonRecordTests.swift */; };
@@ -320,6 +323,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F89000000000000000000002 /* VoiceTutorStudyFocus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorStudyFocus.swift; sourceTree = "<group>"; };
+		F89000000000000000000004 /* AppStrings+VoiceTutorDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStrings+VoiceTutorDiscovery.swift"; sourceTree = "<group>"; };
+		F89000000000000000000006 /* VoiceTutorDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorDiscoveryTests.swift; sourceTree = "<group>"; };
 		F88000000000000000000002 /* VoiceStudyRecordContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceStudyRecordContent.swift"; sourceTree = "<group>"; };
 		F88000000000000000000004 /* AppStrings+CommonRecords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStrings+CommonRecords.swift"; sourceTree = "<group>"; };
 		F88000000000000000000006 /* VoiceCommonRecordTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceCommonRecordTests.swift"; sourceTree = "<group>"; };
@@ -900,6 +906,8 @@
 		110000000000000000000063 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				F89000000000000000000002 /* VoiceTutorStudyFocus.swift */,
+				F89000000000000000000004 /* AppStrings+VoiceTutorDiscovery.swift */,
 				F86000000000000000000002 /* VoiceTutorVoice.swift */,
 				F86000000000000000000004 /* VoiceTutorVoiceStrings.swift */,
 				F86000000000000000000006 /* VoiceTutorExploration.swift */,
@@ -974,6 +982,7 @@
 		120000000000000000000066 /* StudyMateiOSTests */ = {
 			isa = PBXGroup;
 			children = (
+				F89000000000000000000006 /* VoiceTutorDiscoveryTests.swift */,
 				F8600000000000000000000A /* VoiceTutorVoiceSettingsTests.swift */,
 				F8600000000000000000000C /* VoiceTutorExplorationTests.swift */,
 				F8700000000000000000000A /* StudyLearningRecordsTests.swift */,
@@ -1440,6 +1449,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F89000000000000000000005 /* VoiceTutorDiscoveryTests.swift in Sources */,
 				F86000000000000000000009 /* VoiceTutorVoiceSettingsTests.swift in Sources */,
 				F8600000000000000000000B /* VoiceTutorExplorationTests.swift in Sources */,
 				F87000000000000000000009 /* StudyLearningRecordsTests.swift in Sources */,
@@ -1463,6 +1473,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F89000000000000000000001 /* VoiceTutorStudyFocus.swift in Sources */,
+				F89000000000000000000003 /* AppStrings+VoiceTutorDiscovery.swift in Sources */,
 				F86000000000000000000001 /* VoiceTutorVoice.swift in Sources */,
 				F86000000000000000000003 /* VoiceTutorVoiceStrings.swift in Sources */,
 				F86000000000000000000005 /* VoiceTutorExploration.swift in Sources */,

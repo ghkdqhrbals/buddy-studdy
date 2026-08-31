@@ -464,20 +464,30 @@ private final class VoiceSettingsURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        let reference = VoiceSettingsProtocolReference(self)
         Task { @MainActor in
+            let protocolInstance = reference.value
             do {
-                guard let handler = Self.handler(host: request.url?.host ?? "") else {
+                guard let handler = Self.handler(host: protocolInstance.request.url?.host ?? "") else {
                     throw URLError(.unsupportedURL)
                 }
-                let (response, data) = try handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
+                let (response, data) = try handler(protocolInstance.request)
+                protocolInstance.client?.urlProtocol(protocolInstance, didReceive: response, cacheStoragePolicy: .notAllowed)
+                protocolInstance.client?.urlProtocol(protocolInstance, didLoad: data)
+                protocolInstance.client?.urlProtocolDidFinishLoading(protocolInstance)
             } catch {
-                client?.urlProtocol(self, didFailWithError: error)
+                protocolInstance.client?.urlProtocol(protocolInstance, didFailWithError: error)
             }
         }
     }
 
     override func stopLoading() {}
+}
+
+/// The fixture's handler/callbacks run only on MainActor; stopLoading mutates no
+/// state. Carry the already-Sendable protocol reference explicitly across the
+/// Foundation override boundary rather than capturing inherited implicit self.
+private final class VoiceSettingsProtocolReference: @unchecked Sendable {
+    let value: VoiceSettingsURLProtocol
+    init(_ value: VoiceSettingsURLProtocol) { self.value = value }
 }

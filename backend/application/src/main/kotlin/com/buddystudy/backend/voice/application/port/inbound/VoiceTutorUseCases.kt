@@ -21,7 +21,7 @@ interface VoiceTutorUseCase {
 
     suspend fun createSession(
         principal: Principal,
-        studyId: Long,
+        studyId: Long?,
         language: String,
         voice: String?,
         idempotencyKey: String,

@@ -3,13 +3,87 @@
 Verification date: 2026-09-01. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [study-tree records, pacing and connected breaks](#study-tree-records-pacing-and-connected-breaks).
+Latest implementation: [spoken topic discovery through saved study trees](#spoken-topic-discovery-through-saved-study-trees).
 It extends the existing Silero/contextual-input, MCP and source-backed summary
 contracts; it does not change the ordinary overlap/playback policy or regrade
 past answers. Earlier checks below are historical and do not all describe the
 current implementation. Source/fixture tests, iPhone tests and actual dev runtime
 observations are recorded separately; none implies a new human microphone-to-
 tutor conversation unless that specific check is explicitly recorded.
+
+## Spoken topic discovery through saved study trees
+
+Implementation verified on 2026-09-01, branch `feature/2.0`.
+
+- A new start/retry omits `studyId` instead of opening a study picker or choosing
+  the first cached room. Eligibility, monthly seconds, active-session exclusion,
+  foreground lifecycle and explicit recording consent are unchanged. Legacy
+  numeric study requests remain compatible; supplied nonpositive IDs fail before
+  quota reservation.
+- The opening asks what to discuss in the accepted session language. The tutor
+  uses authenticated saved-study search and actual parent-scoped child pages,
+  narrows a broad topic with at most three real choices, and respects an already
+  exact spoken choice. No result means no invented ID or automatic study creation.
+  Topic lookup alone is not teaching consent; an explicit request to study an
+  unambiguous topic retains its consent while the tool resolves the saved ID.
+- The voice-only `select_voice_study` function verifies an accepted learner turn,
+  active owner, complete owned parent path and the bounded lesson cache. Its
+  transaction captures the saved level, advances the shared lesson epoch, stores
+  a historical focus and updates the live session focus. The original accepted
+  request remains unchanged for idempotency. Read-only browsing never freezes
+  candidate nodes, and suspended reads recheck authorization before returning.
+- Typed focus events alone change the compact title; stale attempts/epochs,
+  invalid metadata and deleted-node resurrection are rejected. Selection and
+  MCP continuation retain the existing exact tool-output acknowledgement,
+  meaningful-input and speech/playout gates. No microphone, VAD, RTP, playback
+  cancellation, transcription model/language or provider model change is made.
+- V106 adds only `voice_tutor_lesson_focuses` and backfills known legacy accepted
+  IDs at epoch zero. Summary evidence and canonical `VOICE_TUTOR` projection use
+  the question-time focus, not the final session topic. Pre-selection discovery
+  cannot become a saved-node exchange; earlier questions keep their original
+  focus/level after later selection. Existing Records, tree history, translations,
+  sharing, comments, answer drafts and ordinary-question quota remain shared or
+  untouched as appropriate.
+
+Verification:
+
+- Backend selection: **1,139 tests discovered, 1,137 passed, two opt-in live-model
+  probes skipped, zero failures/errors**, across 129 suites. Modules: domain 20,
+  application 343, infrastructure 760 (758 passed), tutor 16. The discovery audit
+  matched all **266 ordinary `@Test` methods in 11 changed fixtures** to reported
+  Jupiter tests, including the new HTTP, focus-index and migration fixtures.
+  Logs: `build/voiceTopicDiscoveryBackend-tests-retry3.log` and
+  `build/voiceTopicDiscoveryBackendAudit.json`.
+- Real MySQL **8.4.10**: V106 applied to a schema-only isolated database in the
+  existing MySQL container, with **16 assertions passed** for historical/live
+  anchors, missing focus, question-time epochs, constraints, cascades, unchanged
+  metering and no generated questions/notifications. No user rows were copied;
+  no container was created; the disposable schema was removed.
+  Report: `build/voiceTopicDiscoveryMySqlMigration.json`. V106 SHA-256:
+  `9bede8ba9a6aa4405a9b3ae4b800b0c0fa03b109d851f5de79fd292669a35633`.
+  This DDL/SQL check does not claim a live MySQL concurrency or full call test.
+- Required `StudyMateiOS` generic iOS Debug build passed with signing disabled;
+  the existing `build/iOSDeviceDerivedData` was reused. Log:
+  `build/voiceTopicDiscoveryGenericBuild.log`.
+- Paired iPhone 16 Pro: signed build-for-testing passed and **298 selected safe
+  tests passed**, including all 28 new discovery/request/focus tests and 270
+  existing call, Silero, pause, settings, summary, MCP and common-record checks.
+  Test helpers use isolated defaults and intercepted requests; they never open
+  media, call a provider, reserve real quota or purge account/recording data.
+  Logs: `build/voiceTopicDiscoveryDeviceTestBuild-retry2.log` and
+  `build/voiceTopicDiscoveryDeviceTests.log`.
+- The normal signed app rebuilt successfully; signature verification passed and
+  its bundle contains no injected XCTest plug-in/framework. Log:
+  `build/voiceTopicDiscoverySignedBuildFinal.log`. Installation/launch of this
+  normal bundle and the existing dev API refresh are recorded separately below
+  once performed.
+
+These are source/fixture, device-contract and isolated migration checks, not a
+new human microphone-to-model conversation. Natural spoken disambiguation and
+audible multi-turn traversal of a user's actual tree still need a real call.
+The backend-architecture and OpenAI-docs skills informed the transactional focus
+boundary and preservation of the existing [Realtime function-output
+acknowledgement flow](https://developers.openai.com/api/docs/guides/realtime-conversations).
 
 ## Contract
 

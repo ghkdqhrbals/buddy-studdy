@@ -45,6 +45,9 @@ internal fun voiceTutorMcpToolRelay(
         val validDeletion = kind != VoiceTutorStudyChangeKind.DELETED ||
             (result.deletedStudyIds.size in 1..128 && studyId in result.deletedStudyIds &&
                 result.deletedStudyIds.all { it > 0 } && result.deletedStudyIds.distinct().size == result.deletedStudyIds.size)
+        if (controller.acceptsInputEvents()) {
+            voiceTutorLessonFocusEvent(result)?.let { onProviderEvent(it, false, true) }
+        }
         if (!result.isError && result.studyTreeChanged && studyId != null && kind != null && validDeletion && controller.acceptsInputEvents()) {
             onProviderEvent(
                 JsonMapperProvider.mapper.writeValueAsString(
@@ -60,6 +63,32 @@ internal fun voiceTutorMcpToolRelay(
         }
     }.then()
 }, 1).then()
+
+/** Only typed, server-confirmed metadata reaches the UI; tool JSON is never an event authority. */
+internal fun voiceTutorLessonFocusEvent(result: VoiceTutorMcpToolResult): String? {
+    if (result.isError) return null
+    val focus = result.lessonFocus
+    if (focus != null && focus.studyId > 0 && focus.revision > 0 &&
+        focus.snapshot.studyId == focus.studyId && result.lessonRevision == focus.revision &&
+        focus.snapshot.topic.isNotBlank() && focus.snapshot.topic.length <= 255 &&
+        focus.snapshot.difficulty in 1..10 && focus.snapshot.parentStudyId?.let { it > 0 } != false
+    ) return JsonMapperProvider.mapper.writeValueAsString(mapOf(
+        "type" to VoiceTutorRealtimeContract.STUDY_FOCUSED_EVENT,
+        "focus" to mapOf(
+            "studyId" to focus.studyId, "parentStudyId" to focus.snapshot.parentStudyId,
+            "topic" to focus.snapshot.topic, "difficulty" to focus.snapshot.difficulty,
+            "revision" to focus.revision,
+        ),
+    ))
+    val deletedIds = result.deletedStudyIds
+    if (result.lessonFocusCleared && focus == null && result.studyTreeChanged &&
+        result.changeKind == VoiceTutorStudyChangeKind.DELETED && result.changedStudyId in deletedIds &&
+        deletedIds.size in 1..128 && deletedIds.all { it > 0 } && deletedIds.distinct().size == deletedIds.size
+    ) return JsonMapperProvider.mapper.writeValueAsString(mapOf(
+        "type" to VoiceTutorRealtimeContract.STUDY_FOCUSED_EVENT, "focus" to null,
+    ))
+    return null
+}
 
 private fun toolError(code: String, message: String) = VoiceTutorMcpToolResult(
     output = JsonMapperProvider.mapper.writeValueAsString(mapOf("error" to mapOf("code" to code, "message" to message))),

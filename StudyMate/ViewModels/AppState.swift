@@ -8295,7 +8295,7 @@ final class AppState: ObservableObject {
     }
 
     func createVoiceTutorConnection(
-        studyID: Int,
+        studyID: Int? = nil,
         voice: String? = nil,
         recordingConsent: Bool = false
     ) async throws -> VoiceTutorLiveConnection {

@@ -9,6 +9,9 @@ import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
@@ -323,6 +326,92 @@ class OpenAIVoiceTutorSummaryAdapterTest {
         assertThat(result.explorations.single().studyId).isNull()
         assertThat(result.explorations.single().difficulty).isNull()
         assertThat(result.explorations.single().exchanges.single().questionTurnId).isEqualTo(1)
+    }
+
+    @Test
+    fun `discovery summary receives null metadata and no focus instead of inventing a study or level`(): Unit = runBlocking {
+        var source: JsonNode? = null
+        val properties = properties()
+        val provider = OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties,
+            ExchangeFunction { request ->
+                val output = MockClientHttpRequest(request.method(), request.url())
+                request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                    output.bodyAsString.map {
+                        source = mapper.readTree(mapper.readTree(it).path("messages").last().path("content").textValue())
+                        response(envelope(result()))
+                    }
+                })
+            }, immutableContext(emptyList()), immutableFocuses(emptyList()),
+        )
+
+        val generated = provider.summarize(session().copy(studyId = null, acceptedStudyId = null, topic = "", difficulty = 0), transcript())
+
+        assertThat(source!!.path("topic").isNull).isTrue()
+        assertThat(source!!.path("difficulty").isNull).isTrue()
+        assertThat(source!!.path("initialStudyId").isNull).isTrue()
+        assertThat(source!!.path("knownTopics").size()).isZero()
+        assertThat(source!!.path("lessonFocuses").size()).isZero()
+        assertThat(generated.summaryMarkdown).isNotBlank()
+        assertThat(generated.explorations).isEmpty()
+    }
+
+    @Test
+    fun `focus-aware summary verification removes preselection navigation without rejecting the overall summary`(): Unit = runBlocking {
+        val selected = VoiceTutorStudySnapshot(43, 42, "Redis eviction", 7, 1)
+        val properties = properties()
+        val provider = OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties,
+            ExchangeFunction { Mono.just(response(envelope(lessonResult()))) },
+            immutableContext(listOf(selected.copy(revision = 0), selected)),
+            immutableFocuses(listOf(VoiceTutorLessonFocus(43, 1))),
+        )
+        val transcript = lessonTurns().map { if (it.id == 1L) it else it.copy(lessonRevision = 1) }
+
+        val generated = provider.summarize(session().copy(studyId = 43, acceptedStudyId = null), transcript)
+
+        assertThat(generated.summaryMarkdown).isEqualTo("합성 학습 요약")
+        assertThat(generated.explorations).isEmpty()
+    }
+
+    @Test
+    fun `final focus title is never paired with the immutable creation ID and earlier question evidence keeps its original focus`(): Unit = runBlocking {
+        val first = VoiceTutorStudySnapshot(43, 42, "Redis eviction", 7, 1)
+        val last = VoiceTutorStudySnapshot(90, null, "Final Kafka", 9, 2)
+        var source: JsonNode? = null
+        val properties = properties()
+        val provider = OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties,
+            ExchangeFunction { request ->
+                val output = MockClientHttpRequest(request.method(), request.url())
+                request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                    output.bodyAsString.map {
+                        source = mapper.readTree(mapper.readTree(it).path("messages").last().path("content").textValue())
+                        response(envelope(lessonResult()))
+                    }
+                })
+            }, immutableContext(listOf(first.copy(revision = 0), first, last.copy(revision = 0), last)),
+            immutableFocuses(listOf(VoiceTutorLessonFocus(43, 1), VoiceTutorLessonFocus(90, 2))),
+        )
+
+        val generated = provider.summarize(
+            session().copy(studyId = 90, acceptedStudyId = 42, topic = last.topic, difficulty = last.difficulty),
+            lessonTurns().map { it.copy(lessonRevision = if (it.id == 1L) 1 else 2) },
+        )
+
+        assertThat(source!!.path("knownTopics").map { it.path("studyId").longValue() }).doesNotContain(42)
+        assertThat(source!!.path("lessonFocuses").map { it.path("studyId").longValue() }).containsExactly(42, 43, 90)
+        assertThat(generated.explorations.single().studyId).isEqualTo(43)
+        assertThat(generated.explorations.single().difficulty).isEqualTo(7)
+        assertThat(generated.explorations.single().exchanges.single().score).isEqualTo(85)
+    }
+
+    private fun immutableFocuses(focuses: List<VoiceTutorLessonFocus>) = object : VoiceTutorLessonFocusPort {
+        override suspend fun focus(userId: Long, sessionId: String, studyId: Long): VoiceTutorLessonFocusSelection? =
+            error("Summary must never select a lesson or mutate focus history")
+
+        override suspend fun history(userId: Long, sessionId: String): List<VoiceTutorLessonFocus> {
+            assertThat(userId).isEqualTo(7)
+            assertThat(sessionId).isEqualTo(session().id)
+            return focuses
+        }
     }
 
     private fun assertProviderFailure(error: Throwable?) {

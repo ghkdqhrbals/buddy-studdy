@@ -92,7 +92,7 @@ class VoiceTutorController(
 
 data class CreateVoiceTutorSessionRequest(
     @field:Positive
-    var studyId: Long = 0,
+    var studyId: Long? = null,
     @field:NotBlank
     var language: String = "ko",
     var voice: String? = null,

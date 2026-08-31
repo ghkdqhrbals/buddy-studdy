@@ -92,6 +92,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case userSpeechStarted
     case userSpeechStopped
     case inputRetry
+    case studyFocused(VoiceTutorStudyFocus?)
     case studyTreeChanged(studyID: Int)
     case studyTreeUpdated(studyID: Int)
     case studyTreeDeleted(studyIDs: Set<Int>)
@@ -175,6 +176,31 @@ enum VoiceTutorRealtimeEventParser {
             return .heartbeatAcknowledged
         case "buddystudy.voice.input.retry":
             return .inputRetry
+        case "buddystudy.voice.study.focused":
+            // Only an explicit null clears the current topic. Missing or malformed
+            // metadata cannot impersonate discovery, a saved node, or a new epoch.
+            guard let value = object["focus"] else { return .ignored(type: type) }
+            if value is NSNull { return .studyFocused(nil) }
+            guard let fields = value as? [String: Any],
+                  let studyID = exactInteger("studyId", in: fields).flatMap({ Int(exactly: $0) }),
+                  let parent = fields["parentStudyId"],
+                  let topic = string("topic", in: fields),
+                  let difficulty = exactInteger("difficulty", in: fields).flatMap({ Int(exactly: $0) }),
+                  let revision = exactInteger("revision", in: fields) else { return .ignored(type: type) }
+            let parentStudyID: Int?
+            if parent is NSNull {
+                parentStudyID = nil
+            } else {
+                guard let id = exactInteger("parentStudyId", in: fields).flatMap({ Int(exactly: $0) }) else {
+                    return .ignored(type: type)
+                }
+                parentStudyID = id
+            }
+            guard let focus = VoiceTutorStudyFocus(
+                studyID: studyID, parentStudyID: parentStudyID, topic: topic,
+                difficulty: difficulty, revision: revision
+            ) else { return .ignored(type: type) }
+            return .studyFocused(focus)
         case "buddystudy.voice.study.changed":
             guard let number = object["studyId"] as? NSNumber,
                   CFGetTypeID(number) != CFBooleanGetTypeID(),
@@ -280,6 +306,12 @@ enum VoiceTutorRealtimeEventParser {
             return Int(value)
         }
         return nil
+    }
+
+    private static func exactInteger(_ key: String, in object: [String: Any]) -> Int64? {
+        guard let number = object[key] as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        return Int64(number.stringValue)
     }
 
     private static func boolean(_ key: String, in object: [String: Any]) -> Bool? {

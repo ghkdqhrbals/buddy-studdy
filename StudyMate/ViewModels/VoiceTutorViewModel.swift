@@ -265,7 +265,7 @@ final class VoiceTutorViewModel: ObservableObject {
     var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
     var quotaReservedSeconds: Int { sessionQuota.reservedSeconds }
 
-    @Published private(set) var study: BackendStudyRoom
+    @Published private(set) var studyFocus = VoiceTutorStudyFocusState()
 
     private let appState: AppState
     private let audioEngine: VoiceTutorAudioEngine
@@ -295,13 +295,14 @@ final class VoiceTutorViewModel: ObservableObject {
 
     init(
         appState: AppState,
-        study: BackendStudyRoom,
+        study _: BackendStudyRoom? = nil,
         recordingConsent: Bool = false,
         audioEngine: VoiceTutorAudioEngine = VoiceTutorAudioEngine(),
         transport: VoiceTutorWebSocketTransport = VoiceTutorWebSocketTransport()
     ) {
         self.appState = appState
-        self.study = study
+        // Legacy callers may supply a room, but every new attempt discovers its
+        // topic by voice. Never silently select that room or manufacture an ID.
         self.recordingConsent = recordingConsent
         self.audioEngine = audioEngine
         self.transport = transport
@@ -314,6 +315,7 @@ final class VoiceTutorViewModel: ObservableObject {
             return
         }
         let attemptID = connectionAttemptFence.begin()
+        studyFocus.beginAttempt(attemptID)
         summaryRequestID = UUID()
         summaryContextValidity = nil
         summaryRefreshState = .idle
@@ -367,7 +369,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 return
             }
             let connection = try await appState.createVoiceTutorConnection(
-                studyID: study.id,
+                studyID: nil,
                 recordingConsent: recordingConsent
             )
             guard connectionAttemptFence.isCurrent(attemptID),
@@ -1023,6 +1025,9 @@ final class VoiceTutorViewModel: ObservableObject {
             // This is not a disconnected call. Keep native capture/output alive
             // and show a small retry hint after the tutor finishes speaking.
             inputNeedsRepeat = true
+        case .studyFocused(let focus):
+            guard phase.isLive, !isFinalizing else { break }
+            studyFocus.apply(focus, attemptID: attemptID)
         case .studyTreeChanged(let studyID), .studyTreeUpdated(let studyID):
             // A confirmed server-side MCP write refreshes only that node's
             // metadata. Keep the socket receive/audio path non-blocking and
@@ -1037,10 +1042,8 @@ final class VoiceTutorViewModel: ObservableObject {
                             connection.isCurrent() && self?.phase.isLive == true && self?.isFinalizing == false
                     }
                 )
-                if self.connectionAttemptFence.isCurrent(attemptID), connection.isCurrent(), self.phase.isLive,
-                   self.study.id == studyID, let updated = self.appState.backendStudyRoom(id: studyID) {
-                    self.study = VoiceTutorCreatedStudyMetadata.merging(updated, with: self.study)
-                }
+                // The server emits a new focus epoch for a focused-node edit.
+                // This potentially delayed GET must not overwrite that snapshot.
             }
         case .studyTreeDeleted(let studyIDs):
             guard phase.isLive, connectionAttemptFence.isCurrent(attemptID),
@@ -1048,6 +1051,7 @@ final class VoiceTutorViewModel: ObservableObject {
             // Apply the tombstone immediately, before an older metadata fetch can
             // return. This is not a hang-up or a request to discard an answer draft.
             appState.applyVoiceTutorDeletedStudies(studyIDs: studyIDs)
+            studyFocus.remove(studyIDs: studyIDs, attemptID: attemptID)
         case .serviceError(let code, _, _):
             switch code?.uppercased() {
             case "VOICE_TUTOR_PRO_REQUIRED":

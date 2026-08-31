@@ -5,6 +5,7 @@ import com.buddystudy.backend.localization.application.policy.ContentSourceHashP
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import com.buddystudy.voice.domain.VoiceTutorExploration
 import com.buddystudy.voice.domain.VoiceTutorLearningExchange
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
@@ -280,6 +281,55 @@ class VoiceStudyLearningRecordProjectorTest {
         }
     }
 
+    @Test
+    fun `discovery before first focus does not create canonical node records from later supplied metadata`() {
+        val selected = fixture.snapshots().last().copy(revision = 1)
+        assertThat(project(
+            acceptedStudyId = null, snapshots = fixture.snapshots() + selected,
+            focuses = listOf(VoiceTutorLessonFocus(11, 1)),
+        )).isEmpty()
+    }
+
+    @Test
+    fun `each question uses its exact selected node even after cross-tree focus changes and late answers`() {
+        val other = VoiceTutorStudySnapshot(90, null, "Message ordering", 7, revision = 2)
+        val transcript = fixture.turns().map { it.copy(lessonRevision = if (it.id == 1L) 1 else 2) }
+        val history = fixture.snapshots() + listOf(fixture.snapshots().last().copy(revision = 1), other.copy(revision = 0), other)
+        val records = project(
+            explorations = listOf(fixture.exploration(), fixture.exploration().copy(
+                topic = other.topic, studyId = other.studyId, exchanges = listOf(fixture.learnerQuestion()),
+            )),
+            turns = transcript, snapshots = history, owned = setOf(11, 90), acceptedStudyId = null,
+            focuses = listOf(VoiceTutorLessonFocus(11, 1), VoiceTutorLessonFocus(90, 2)),
+        )
+
+        assertThat(records.map { it.studyId }).containsExactly(11, 90)
+        assertThat(records.map { it.difficulty }).containsExactly(3, 7)
+        assertThat(records.first().question).isEqualTo(fixture.turns().first().transcript)
+        assertThat(records.first().answer).isEqualTo(fixture.turns()[1].transcript + "\n" + fixture.turns()[2].transcript)
+        assertThat(records.first().score).isEqualTo(85)
+        assertThat(records.last().score).isNull()
+    }
+
+    @Test
+    fun `new explicit focus is exact node authority not permission to file every same-tree child`() {
+        val parent = fixture.snapshots().first { it.studyId == 10L }.copy(revision = 1)
+        assertThat(project(
+            turns = fixture.turns().map { it.copy(lessonRevision = 1) },
+            snapshots = fixture.snapshots() + parent,
+            focuses = listOf(VoiceTutorLessonFocus(10, 1)),
+        )).isEmpty()
+    }
+
+    @Test
+    fun `historical explicit focus cannot resurrect a deleted or no longer owned target`() {
+        assertThat(project(
+            turns = fixture.turns().map { it.copy(lessonRevision = 1) },
+            snapshots = fixture.snapshots() + fixture.snapshots().last().copy(revision = 1),
+            owned = emptySet(), acceptedStudyId = null, focuses = listOf(VoiceTutorLessonFocus(11, 1)),
+        )).isEmpty()
+    }
+
     private fun project(
         explorations: List<VoiceTutorExploration> = listOf(fixture.exploration()),
         turns: List<VoiceTutorTranscriptTurn> = fixture.turns(),
@@ -288,8 +338,9 @@ class VoiceStudyLearningRecordProjectorTest {
         acceptedStudyId: Long? = 10,
         language: String = "ko",
         detect: (String, String) -> String = { _, fallback -> fallback },
+        focuses: List<VoiceTutorLessonFocus> = emptyList(),
     ) = VoiceStudyLearningRecordProjector.project(
-        fixture.USER_ID, fixture.SESSION_ID, acceptedStudyId, language, explorations, turns, snapshots, owned, detect,
+        fixture.USER_ID, fixture.SESSION_ID, acceptedStudyId, language, explorations, turns, snapshots, owned, detect, focuses,
     )
 }
 

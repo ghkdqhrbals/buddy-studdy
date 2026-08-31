@@ -4,28 +4,19 @@ import SwiftUI
 
 struct VoiceTutorView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var selectedStudyID: Int?
     @State private var showsMembership = false
     @State private var recordingConsent = false
-    @State private var callStudy: BackendStudyRoom?
     @State private var callRecordingConsent = false
     @State private var showsCall = false
 
     private var strings: AppStrings { appState.strings }
-
-    private var selectedStudy: BackendStudyRoom? {
-        appState.voiceTutorStudies.first { $0.id == selectedStudyID }
-    }
 
     private var status: BackendVoiceTutorStatus? {
         appState.voiceTutorStatus
     }
 
     private var canStart: Bool {
-        status?.eligible == true
-            && (status?.quota.remainingSeconds ?? 0) > 0
-            && status?.activeSession == nil
-            && selectedStudy != nil
+        VoiceTutorCallStartPolicy.canStart(status: status)
     }
 
     var body: some View {
@@ -34,7 +25,7 @@ struct VoiceTutorView: View {
 
             if status?.activeSession != nil
                 || (status?.eligible == true && (status?.quota.remainingSeconds ?? 0) > 0) {
-                Section(strings.voiceTutorSelectTopic) {
+                Section(strings.voiceTutorCallTitle) {
                     if status?.activeSession != nil {
                         VStack(alignment: .leading, spacing: 8) {
                             Label(
@@ -52,19 +43,7 @@ struct VoiceTutorView: View {
                             .buttonStyle(.bordered)
                         }
                         .padding(.vertical, 3)
-                    } else if appState.voiceTutorStudies.isEmpty {
-                        Label(strings.voiceTutorNoTopics, systemImage: "books.vertical")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
                     } else {
-                        Picker(strings.voiceTutorSelectTopic, selection: $selectedStudyID) {
-                            ForEach(appState.voiceTutorStudies) { study in
-                                Text(study.topic)
-                                    .tag(Optional(study.id))
-                            }
-                        }
-                        .pickerStyle(.menu)
-
                         if status?.recording?.enabled == true {
                             VStack(alignment: .leading, spacing: 8) {
                                 Toggle(
@@ -89,19 +68,16 @@ struct VoiceTutorView: View {
                             .padding(.vertical, 4)
                         }
 
-                        if let selectedStudy {
-                            Button {
-                                // The destination must outlive quota reservation:
-                                // reserving the allowance removes this start row.
-                                callStudy = selectedStudy
-                                callRecordingConsent = recordingConsent
-                                showsCall = true
-                            } label: {
-                                Label(strings.voiceTutorCallStart, systemImage: "phone.fill")
-                                    .fontWeight(.semibold)
-                            }
-                            .disabled(!canStart)
+                        Button {
+                            // The destination must outlive quota reservation:
+                            // reserving the allowance removes this start row.
+                            callRecordingConsent = recordingConsent
+                            showsCall = true
+                        } label: {
+                            Label(strings.voiceTutorCallStart, systemImage: "phone.fill")
+                                .fontWeight(.semibold)
                         }
+                        .disabled(!canStart)
                     }
                 }
             }
@@ -158,30 +134,22 @@ struct VoiceTutorView: View {
         .navigationTitle(strings.voiceTutorTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $showsCall) {
-            if let callStudy {
-                VoiceTutorSessionView(
-                    appState: appState,
-                    study: callStudy,
-                    recordingConsent: callRecordingConsent,
-                    onRecordingConsentConsumed: { recordingConsent = false }
-                )
-            }
+            VoiceTutorSessionView(
+                appState: appState,
+                recordingConsent: callRecordingConsent,
+                onRecordingConsentConsumed: { recordingConsent = false }
+            )
         }
         .task {
             recordingConsent = false
             await appState.retryPendingVoiceTutorRecordingUploads()
             await appState.refreshVoiceTutorStatus()
             await appState.loadVoiceTutorSessions(reset: true)
-            selectFirstStudyIfNeeded()
         }
         .refreshable {
             recordingConsent = false
             await appState.refreshVoiceTutorStatus()
             await appState.loadVoiceTutorSessions(reset: true)
-            selectFirstStudyIfNeeded()
-        }
-        .onChange(of: appState.voiceTutorStudies.map(\.id)) { _, _ in
-            selectFirstStudyIfNeeded()
         }
         .onChange(of: status?.recording?.enabled) { _, isEnabled in
             if isEnabled != true {
@@ -260,12 +228,6 @@ struct VoiceTutorView: View {
         .padding(.vertical, 4)
     }
 
-    private func selectFirstStudyIfNeeded() {
-        guard selectedStudy == nil else {
-            return
-        }
-        selectedStudyID = appState.voiceTutorStudies.first?.id
-    }
 }
 
 private struct VoiceTutorQuotaView: View {
@@ -382,7 +344,7 @@ struct VoiceTutorSessionView: View {
 
     init(
         appState: AppState,
-        study: BackendStudyRoom,
+        study: BackendStudyRoom? = nil,
         recordingConsent: Bool,
         onRecordingConsentConsumed: @escaping () -> Void = {}
     ) {
@@ -399,7 +361,9 @@ struct VoiceTutorSessionView: View {
 
     var body: some View {
         VoiceTutorCallScreen(
-            topic: viewModel.study.topic,
+            topic: viewModel.studyFocus.focus?.topic ?? strings.voiceTutorDiscoveryTeacher,
+            discoveryPrompt: viewModel.studyFocus.focus == nil && viewModel.phase.isLive
+                ? strings.voiceTutorDiscoveryPrompt : nil,
             presentation: VoiceTutorCallPresentation(
                 phase: viewModel.phase,
                 isMuted: viewModel.isMuted,
@@ -568,6 +532,7 @@ struct VoiceTutorCallScreen: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsInformation = false
     let topic: String
+    var discoveryPrompt: String? = nil
     let presentation: VoiceTutorCallPresentation
     let strings: AppStrings
     var captions: [VoiceTutorCaption] = []
@@ -683,6 +648,16 @@ struct VoiceTutorCallScreen: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("voiceCall.topic")
+
+            if let discoveryPrompt {
+                Text(discoveryPrompt)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("voiceCall.discoveryPrompt")
+            }
 
             HStack(spacing: 6) {
                 if !showsConnectionFailure

@@ -55,7 +55,7 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
 
     suspend fun reserve(
         userId: Long,
-        studyId: Long,
+        studyId: Long?,
         idempotencyKey: String,
         language: String,
         model: String,

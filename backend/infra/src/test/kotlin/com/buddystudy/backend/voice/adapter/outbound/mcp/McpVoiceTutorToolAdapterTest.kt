@@ -15,6 +15,9 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyCon
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMutationConfirmationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyChangeKind
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
@@ -37,7 +40,9 @@ import java.time.ZoneOffset
 class McpVoiceTutorToolAdapterTest {
     @Test
     fun `successful study read returns the immutable lesson level alongside current app metadata`(): Unit = runBlocking {
-        val contextStore = ContextStore()
+        val contextStore = ContextStore().apply {
+            saved[102L] = VoiceTutorStudySnapshot(102, 101, "Cache", 3)
+        }
         val fixture = Fixture(studyContexts = contextStore).apply {
             handler = { _, _ -> success(mapOf("id" to 102L, "topic" to "Cache", "difficultyLevel" to 9)) }
         }
@@ -55,7 +60,7 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(tree.path("nodes").size()).isEqualTo(1)
         assertThat(tree.path("nodes")[0].path("studyId").asLong()).isEqualTo(102)
         assertThat(tree.path("nodes")[0].path("relationToSelected").asText()).isEqualTo("DESCENDANT")
-        assertThat(contextStore.remembered).containsExactly(listOf(102L))
+        assertThat(contextStore.remembered).isEmpty()
         assertThat(contextStore.listReads).isEqualTo(1)
         assertThat(result.studyTreeChanged).isFalse()
     }
@@ -89,8 +94,11 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `study pages capture only validated IDs from the returned bounded page`(): Unit = runBlocking {
-        val contextStore = ContextStore()
+    fun `study pages enrich only already frozen validated IDs without capturing browsing candidates`(): Unit = runBlocking {
+        val contextStore = ContextStore().apply {
+            saved[102L] = VoiceTutorStudySnapshot(102, 101, "Cache", 3)
+            saved[103L] = VoiceTutorStudySnapshot(103, 101, "Eviction", 4)
+        }
         val fixture = Fixture(studyContexts = contextStore).apply {
             handler = { _, _ -> success(mapOf("studies" to listOf(
                 mapOf("id" to 102L), mapOf("id" to 103L), mapOf("id" to -1),
@@ -99,8 +107,66 @@ class McpVoiceTutorToolAdapterTest {
         }
         val result = fixture.adapter.execute(context(), "list_studies", mapOf("parent_study_id" to 101L, "limit" to 10))
         assertThat(result.isError).isFalse()
-        assertThat(contextStore.remembered).containsExactly(listOf(102L, 103L))
+        assertThat(contextStore.remembered).isEmpty()
+        assertThat(json(result).path("voiceLessonTopics").map { it.path("studyId").asLong() }).containsExactly(102, 103)
         assertThat(json(result).path("totalCount").asInt()).isEqualTo(6)
+    }
+
+    @Test
+    fun `browsing many children and individual candidates after selection cannot exhaust the lesson cache`(): Unit = runBlocking {
+        val store = ContextStore()
+        val fixture = Fixture(studyContexts = store).apply {
+            handler = { name, args ->
+                if (name == "get_study") success(mapOf("id" to args.getValue("study_id"), "parentStudyId" to 101L))
+                else success(mapOf("studies" to (200L..229L).map { mapOf("id" to it, "parentStudyId" to 101L) }))
+            }
+        }
+        for (id in 200L..279L) {
+            val result = fixture.adapter.execute(context(), "get_study", mapOf("study_id" to id))
+            assertThat(result.isError).isFalse()
+            assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
+        }
+        val page = fixture.adapter.execute(context(), "list_studies", mapOf("parent_study_id" to 101L, "limit" to 30))
+        assertThat(page.isError).isFalse()
+        assertThat(json(page).path("studies").size()).isEqualTo(30)
+        assertThat(store.saved.keys).containsExactly(101L)
+        assertThat(store.remembered).isEmpty()
+        assertThat(store.revised).isEmpty()
+        assertThat(fixture.focusSelections).isEmpty()
+    }
+
+    @Test
+    fun `late study reads are suppressed when authorization expires during their handler`(): Unit = runBlocking {
+        for (name in listOf("get_study", "list_studies")) {
+            val store = ContextStore()
+            val fixture = Fixture(studyContexts = store).apply {
+                handler = { _, _ ->
+                    authorized = false
+                    success(mapOf("id" to 102L, "topic" to "private-late-topic",
+                        "studies" to listOf(mapOf("id" to 102L, "topic" to "private-late-topic"))))
+                }
+            }
+            val args = if (name == "get_study") mapOf("study_id" to 102L) else mapOf("limit" to 10)
+            val result = fixture.adapter.execute(context(), name, args)
+            assertCode(result, "CALL_NOT_AUTHORIZED")
+            assertThat(result.output).doesNotContain("private-late-topic")
+            assertThat(store.listReads).isZero()
+            assertThat(store.remembered).isEmpty()
+        }
+    }
+
+    @Test
+    fun `ending a call during read-only metadata enrichment suppresses the late response`(): Unit = runBlocking {
+        val store = ContextStore()
+        val fixture = Fixture(studyContexts = store).apply {
+            handler = { _, _ -> success(mapOf("id" to 101L, "topic" to "private-late-topic")) }
+        }
+        store.afterList = { fixture.persistedSession = session().copy(status = VoiceTutorSessionStatus.COMPLETED) }
+        val result = fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 101L))
+        assertCode(result, "CALL_NOT_AUTHORIZED")
+        assertThat(result.output).doesNotContain("private-late-topic")
+        assertThat(store.listReads).isEqualTo(1)
+        assertThat(store.remembered).isEmpty()
     }
 
     @Test
@@ -167,7 +233,7 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `topics beyond the capture batch stay readable without falsely claiming every page level is frozen`(): Unit = runBlocking {
+    fun `unscoped discovery pages stay readable without consuming the bounded lesson context cache`(): Unit = runBlocking {
         val contextStore = ContextStore()
         val fixture = Fixture(studyContexts = contextStore).apply {
             handler = { _, _ -> success(mapOf("studies" to (102L..141L).map { mapOf("id" to it) })) }
@@ -175,9 +241,9 @@ class McpVoiceTutorToolAdapterTest {
         val result = fixture.adapter.execute(context(), "list_studies", mapOf("limit" to 50))
         assertThat(result.isError).isFalse()
         assertThat(json(result).path("studies").size()).isEqualTo(40)
-        assertThat(json(result).path("voiceLessonTopics").size()).isEqualTo(32)
+        assertThat(json(result).path("voiceLessonTopics").size()).isZero()
         assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
-        assertThat(contextStore.remembered.single()).hasSize(32)
+        assertThat(contextStore.remembered).isEmpty()
     }
 
     @Test
@@ -200,7 +266,7 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `advertises only existing allowed schemas and resolves the MCP catalog lazily`() {
+    fun `advertises existing allowed schemas and the scoped voice focus tool while resolving MCP lazily`() {
         val fixture = Fixture()
         assertThat(fixture.catalogReads).isZero()
 
@@ -210,8 +276,9 @@ class McpVoiceTutorToolAdapterTest {
             "list_studies", "get_study", "update_study", "create_study_topic", "delete_study",
             "list_records", "get_record", "list_study_learning_records", "get_voice_learning_record",
             "get_topic_stats", "get_study_growth",
+            "select_voice_study",
         )
-        for (definition in definitions) {
+        for (definition in definitions.filterNot { it.name == "select_voice_study" }) {
             val original = fixture.catalog.single { it.tool().name() == definition.name }.tool()
             if (definition.name != "delete_study") assertThat(definition.parameters).isEqualTo(original.inputSchema())
             assertThat(definition.description).startsWith(original.description())
@@ -225,6 +292,131 @@ class McpVoiceTutorToolAdapterTest {
         fixture.adapter.definitions()
         assertThat(fixture.catalogReads).isEqualTo(1)
         assertThat(fixture.calls).isEmpty()
+        val focus = mapper.valueToTree<JsonNode>(definitions.single { it.name == "select_voice_study" }.parameters)
+        assertThat(focus.path("required").map { it.asText() }).containsExactly("study_id")
+        assertThat(focus.path("additionalProperties").asBoolean()).isFalse()
+        assertThat(focus.path("properties").fieldNames().asSequence().toList()).containsExactly("study_id")
+    }
+
+    @Test
+    fun `discovery can browse owned studies but cannot mutate or read lesson history before a chosen focus`(): Unit = runBlocking {
+        val store = ContextStore()
+        val fixture = Fixture(studyContexts = store).apply {
+            persistedSession = discoverySession()
+            handler = { name, _ -> if (name == "list_studies") success(mapOf("studies" to listOf(mapOf("id" to 101L))))
+                else success(mapOf("id" to 101L, "topic" to "Redis", "parentStudyId" to null)) }
+        }
+        val context = context().copy(session = discoverySession())
+        assertThat(fixture.adapter.execute(context, "list_studies", emptyMap()).isError).isFalse()
+        val read = fixture.adapter.execute(context, "get_study", mapOf("study_id" to 101L))
+        assertThat(read.isError).isFalse()
+        assertThat(json(read).path("voiceLessonContextReady").asBoolean()).isFalse()
+        assertThat(store.remembered).isEmpty()
+        for ((name, args) in listOf(
+            "create_study_topic" to mapOf("parent_study_id" to 101L, "topic" to "Cache"),
+            "update_study" to mapOf("study_id" to 101L, "difficulty_level" to 2),
+            "delete_study" to mapOf("study_id" to 101L, "confirm" to false),
+            "list_study_learning_records" to mapOf("study_id" to 101L),
+        )) assertCode(fixture.adapter.execute(context, name, args), "STUDY_SCOPE_DENIED")
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_studies", "get_study")
+        assertThat(fixture.focusSelections).isEmpty()
+    }
+
+    @Test
+    fun `spoken selection returns only persisted focus metadata and preserves the original nullable request`(): Unit = runBlocking {
+        val store = ContextStore().apply {
+            saved[101L] = VoiceTutorStudySnapshot(101, null, "Redis", 3)
+        }
+        val fixture = Fixture(studyContexts = store).apply {
+            persistedSession = discoverySession()
+            focusResult = focusSelection(101, 1)
+        }
+        val context = context().copy(session = discoverySession())
+        val result = fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L))
+        assertThat(result.isError).isFalse()
+        assertThat(result.studyTreeChanged).isFalse()
+        assertThat(result.lessonRevision).isEqualTo(1)
+        assertThat(result.lessonFocus).isEqualTo(fixture.focusResult)
+        assertThat(json(result).path("voiceLessonFocus").path("topic").asText()).isEqualTo("Redis")
+        assertThat(json(result).path("voiceLessonFocus").path("difficulty").asInt()).isEqualTo(3)
+        assertThat(json(result).path("voiceLessonTree").path("selectedStudyId").asLong()).isEqualTo(101)
+        assertThat(fixture.persistedSession?.acceptedStudyId).isNull()
+        assertThat(fixture.persistedSession?.studyId).isEqualTo(101)
+        assertThat(fixture.focusSelections).containsExactly(101L)
+        assertThat(fixture.calls).isEmpty() // no common study/question mutation
+        assertThat(fixture.adapter.execute(context, "list_studies", emptyMap()).isError).isFalse()
+    }
+
+    @Test
+    fun `focus selection rejects invalid identities and any caller supplied metadata`(): Unit = runBlocking {
+        val fixture = Fixture().apply { persistedSession = discoverySession(); focusResult = focusSelection(101, 1) }
+        val context = context().copy(session = discoverySession())
+        for (args in listOf(emptyMap(), mapOf("study_id" to 0), mapOf("study_id" to -1),
+            mapOf("study_id" to "101"), mapOf("study_id" to 101.5), mapOf("study_id" to true),
+            mapOf("study_id" to 101L, "topic" to "injected-title"), mapOf("study_id" to 101L, "revision" to 99))) {
+            assertCode(fixture.adapter.execute(context, "select_voice_study", args), "INVALID_ARGUMENTS")
+        }
+        assertThat(fixture.focusSelections).isEmpty()
+    }
+
+    @Test
+    fun `focus requires an accepted learner choice and a still authorized live call`(): Unit = runBlocking {
+        val fixture = Fixture().apply { persistedSession = discoverySession(); focusResult = focusSelection(101, 1) }
+        val context = context().copy(session = discoverySession())
+        fixture.learnerTurnId = null
+        assertCode(fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L)), "LEARNER_CHOICE_REQUIRED")
+        fixture.learnerTurnId = 11
+        fixture.authorized = false
+        assertCode(fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L)), "CALL_NOT_AUTHORIZED")
+        assertThat(fixture.focusSelections).isEmpty()
+        fixture.authorized = true
+        fixture.afterFocus = { fixture.authorized = false }
+        val late = fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L))
+        assertCode(late, "CALL_NOT_AUTHORIZED")
+        assertThat(late.lessonFocus).isNull()
+        assertThat(late.lessonRevision).isNull()
+    }
+
+    @Test
+    fun `failed or unverified focus never emits a successful focus or prepared level`(): Unit = runBlocking {
+        val fixture = Fixture().apply { persistedSession = discoverySession() }
+        val context = context().copy(session = discoverySession())
+        assertCode(fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L)), "LESSON_FOCUS_UNAVAILABLE")
+        for (invalid in listOf(focusSelection(101, 0), focusSelection(201, 1),
+            focusSelection(101, 1).let { it.copy(snapshot = it.snapshot.copy(difficulty = 0)) })) {
+            fixture.persistedSession = discoverySession()
+            fixture.focusHistory.clear()
+            fixture.focusResult = invalid
+            val result = fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L))
+            assertCode(result, "LESSON_FOCUS_UNCONFIRMED")
+            assertThat(result.lessonFocus).isNull()
+            assertThat(result.lessonRevision).isNull()
+        }
+    }
+
+    @Test
+    fun `focus enrichment failure cannot misreport a committed selection as a failed operation`(): Unit = runBlocking {
+        val fixture = Fixture(studyContexts = ContextStore().apply { failList = true }).apply {
+            persistedSession = discoverySession(); focusResult = focusSelection(101, 1)
+        }
+        val result = fixture.adapter.execute(context().copy(session = discoverySession()), "select_voice_study", mapOf("study_id" to 101L))
+        assertThat(result.isError).isFalse()
+        assertThat(json(result).path("voiceLessonFocus").path("studyId").asLong()).isEqualTo(101)
+        assertThat(result.output).doesNotContain("private-database-detail")
+        assertThat(fixture.focusSelections).hasSize(1)
+    }
+
+    @Test
+    fun `switching trees follows the persisted focus not the immutable initial request or a mere read`(): Unit = runBlocking {
+        val fixture = mutationFixture().apply { focusResult = focusSelection(201, 1) }
+        assertThat(fixture.adapter.execute(context(), "select_voice_study", mapOf("study_id" to 201L)).isError).isFalse()
+        assertThat(fixture.persistedSession?.acceptedStudyId).isEqualTo(101)
+        val original = fixture.handler
+        fixture.handler = { name, args -> if (name == "create_study_topic") success(mapOf("id" to 202L, "parentStudyId" to 201L))
+            else original(name, args) }
+        assertThat(fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 201L, "topic" to "Child")).isError).isFalse()
+        assertThat(fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 101L)).isError).isFalse()
+        assertCode(fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Wrong tree")), "STUDY_SCOPE_DENIED")
     }
 
     @Test
@@ -395,8 +587,10 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(calledId).isEqualTo(101L)
         assertThat(json(result).path("topic").asText()).isEqualTo("Redis")
         assertThat(result.output).doesNotContain("Authorization", "Bearer", "sessionId", "deviceId")
-        assertThat(fixture.authorizationCalls).isEqualTo(1)
-        assertThat(fixture.persistenceCalls).isEqualTo(1)
+        // Entry, handler completion and metadata completion each revalidate;
+        // the enrichment also reads the current (not originally accepted) focus.
+        assertThat(fixture.authorizationCalls).isEqualTo(3)
+        assertThat(fixture.persistenceCalls).isEqualTo(4)
     }
 
     @Test
@@ -433,8 +627,8 @@ class McpVoiceTutorToolAdapterTest {
 
         assertCode(fixture.adapter.execute(context(), "list_studies", emptyMap()), "CALL_NOT_AUTHORIZED")
 
-        assertThat(fixture.authorizationCalls).isEqualTo(2)
-        assertThat(fixture.persistenceCalls).isEqualTo(1)
+        assertThat(fixture.authorizationCalls).isEqualTo(4)
+        assertThat(fixture.persistenceCalls).isEqualTo(3)
         assertThat(fixture.calls).hasSize(1)
     }
 
@@ -914,6 +1108,10 @@ class McpVoiceTutorToolAdapterTest {
         var catalogReads = 0
         var learnerTurnId: Long? = 11
         var tutorTurnId: Long? = 10
+        var focusResult: VoiceTutorLessonFocusSelection? = null
+        var afterFocus: () -> Unit = {}
+        val focusSelections = mutableListOf<Long>()
+        val focusHistory = mutableListOf<VoiceTutorLessonFocus>()
         val calls = mutableListOf<Call>()
         var handler: (String, Map<String, Any>) -> McpSchema.CallToolResult = { _, _ -> success(mapOf("ok" to true)) }
         val catalog = BuddyStudyMcpAdapter(proxy<BuddyStudyMcpUseCase> { method, _ -> error("Unexpected direct call: $method") }, mapper).tools()
@@ -959,6 +1157,19 @@ class McpVoiceTutorToolAdapterTest {
                 override suspend fun latestLearnerTurnId(userId: Long, sessionId: String) = learnerTurnId
                 override suspend fun latestTutorTurnId(userId: Long, sessionId: String) = tutorTurnId
             },
+            lessonFocus = object : VoiceTutorLessonFocusPort {
+                override suspend fun history(userId: Long, sessionId: String) = focusHistory.toList()
+                override suspend fun focus(userId: Long, sessionId: String, studyId: Long): VoiceTutorLessonFocusSelection? {
+                    assertThat(userId).isEqualTo(principal.userId)
+                    assertThat(sessionId).isEqualTo(session().id)
+                    focusSelections += studyId
+                    val value = focusResult ?: return null
+                    focusHistory += value.focus
+                    persistedSession = persistedSession?.copy(studyId = value.studyId, topic = value.snapshot.topic, difficulty = value.snapshot.difficulty)
+                    afterFocus()
+                    return value
+                }
+            },
         )
     }
 
@@ -968,6 +1179,7 @@ class McpVoiceTutorToolAdapterTest {
         var fail = false
         var failList = false
         var listReads = 0
+        var afterList: () -> Unit = {}
         var revision = 0L
         var failRevision = false
         val revised = mutableListOf<Long>()
@@ -985,6 +1197,7 @@ class McpVoiceTutorToolAdapterTest {
             assertThat(sessionId).isEqualTo(session().id)
             listReads += 1
             if (failList) throw IllegalStateException("private-database-detail")
+            afterList()
             return saved.values.toList()
         }
         override suspend fun remember(userId: Long, sessionId: String, studyIds: List<Long>): List<VoiceTutorStudySnapshot> {
@@ -1012,6 +1225,11 @@ class McpVoiceTutorToolAdapterTest {
         val now: Instant = Instant.parse("2026-08-31T00:00:00Z")
         val principal = Principal(userId = 7L, deviceId = "synthetic-device", sessionId = 11L, anonymous = false)
         val mapper = jacksonObjectMapper().findAndRegisterModules()
+
+        fun discoverySession() = session().copy(studyId = null, acceptedStudyId = null, topic = "", difficulty = 0)
+        fun focusSelection(id: Long, revision: Long) = VoiceTutorLessonFocusSelection(
+            VoiceTutorLessonFocus(id, revision), VoiceTutorStudySnapshot(id, null, "Redis", 3, revision),
+        )
 
         fun context() = VoiceTutorWebRtcControlContext(
             session(), "rtc_synthetic_call", principal,

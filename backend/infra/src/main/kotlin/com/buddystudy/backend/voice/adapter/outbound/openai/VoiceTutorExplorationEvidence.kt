@@ -3,6 +3,8 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import com.buddystudy.voice.domain.VoiceTutorExploration
 import com.buddystudy.voice.domain.VoiceTutorLearningExchange
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
+import com.buddystudy.voice.domain.VoiceTutorLessonFocusIndex
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorStudyRevisionIndex
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
@@ -16,13 +18,18 @@ internal object VoiceTutorExplorationEvidence {
         session: VoiceTutorSession,
         transcript: List<VoiceTutorTranscriptTurn>,
         studies: List<VoiceTutorStudySnapshot>,
-    ): List<VoiceTutorExploration> = verifiedForSession(explorations, session.id, transcript, studies)
+        focuses: List<VoiceTutorLessonFocus> = emptyList(),
+    ): List<VoiceTutorExploration> = verifiedForSession(
+        explorations, session.id, transcript, studies, session.acceptedStudyId, focuses,
+    )
 
     fun verifiedForSession(
         explorations: List<VoiceTutorExploration>,
         sessionId: String,
         transcript: List<VoiceTutorTranscriptTurn>,
         studies: List<VoiceTutorStudySnapshot>,
+        acceptedStudyId: Long?,
+        focuses: List<VoiceTutorLessonFocus> = emptyList(),
     ): List<VoiceTutorExploration> {
         // Reject ambiguous IDs, foreign-session evidence and blank ASR instead of correlating by text.
         val turns = transcript.filter { it.sessionId == sessionId && it.id > 0 && it.transcript.isNotBlank() }
@@ -30,10 +37,16 @@ internal object VoiceTutorExplorationEvidence {
             .filterValues { it.size == 1 }
             .mapValues { it.value.single() }
         val snapshots = VoiceTutorStudyRevisionIndex(studies)
+        val focusIndex = VoiceTutorLessonFocusIndex(focuses, acceptedStudyId)
         val seenQuestions = mutableSetOf<Long>()
         return explorations.flatMap { exploration ->
             val exchanges = exploration.exchanges.mapNotNull { exchange ->
-                verifyExchange(exchange, turns)?.takeIf { seenQuestions.add(it.questionTurnId) }
+                verifyExchange(exchange, turns)?.takeIf {
+                    val revision = requireNotNull(turns[it.questionTurnId]).lessonRevision
+                    // Unfocused discovery/navigation is not a saved lesson. Unknown correlation
+                    // still survives as unlinked session history, never as a node record.
+                    (revision < 0 || focusIndex.at(revision) != null) && seenQuestions.add(it.questionTurnId)
+                }
             }
             if (exchanges.isEmpty()) return@flatMap emptyList()
             val topic = plain(exploration.topic)
@@ -46,7 +59,10 @@ internal object VoiceTutorExplorationEvidence {
                 snapshots.knownVersions(id).any { plain(it.topic) == topic }
             }
             exchanges.groupBy { exchange ->
-                knownStudyId?.let { snapshots.resolve(it, requireNotNull(turns[exchange.questionTurnId]).lessonRevision) }
+                val revision = requireNotNull(turns[exchange.questionTurnId]).lessonRevision
+                val focus = focusIndex.at(revision)
+                knownStudyId?.takeIf { focus != null && (focus.revision == 0L || focus.studyId == it) }
+                    ?.let { snapshots.resolve(it, revision) }
             }.map { (snapshot, versionExchanges) ->
                 exploration.copy(
                     topic = snapshot?.let { plain(it.topic) } ?: topic,

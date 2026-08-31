@@ -1,6 +1,10 @@
 package com.buddystudy.backend.voice.adapter.outbound.persistence
 
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
+import com.buddystudy.voice.domain.VoiceTutorLessonFocusIndex
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorStudyRevisionIndex
 import com.buddystudy.voice.domain.VoiceTutorStudyRevisionLimits
@@ -20,18 +24,27 @@ import java.time.ZoneOffset
 class VoiceTutorStudyContextAdapter(
     private val database: DatabaseClient,
     private val clock: Clock = Clock.systemUTC(),
-) : VoiceTutorStudyContextPort {
+) : VoiceTutorStudyContextPort, VoiceTutorLessonFocusPort {
     @Transactional
     override suspend fun prepare(session: VoiceTutorSession): List<VoiceTutorStudySnapshot> {
         val accepted = lockActive(session.userId, session.id) ?: return emptyList()
-        val studyId = accepted.acceptedStudyId ?: return emptyList()
+        val focus = VoiceTutorLessonFocusIndex(history(session.userId, session.id), accepted.acceptedStudyId).current
+            ?: return emptyList()
+        val studyId = focus.studyId
         val existing = currentView(session.userId, session.id)
         val selected = existing.firstOrNull { it.studyId == studyId }
-            ?: readOwned(session.userId, listOf(studyId)).firstOrNull()?.let {
+            ?: readOwned(session.userId, listOf(studyId)).firstOrNull()?.takeIf {
+                // Only an original selection can use the creation snapshot. Explicit focuses
+                // have an atomic revision entry and must never recover by mixing current text
+                // with a different accepted identity.
+                focus.revision == 0L && studyId == accepted.acceptedStudyId &&
+                    accepted.topic.isNotBlank() && accepted.difficulty in 1..10
+            }?.let {
                 VoiceTutorStudySnapshot(studyId, it.parentStudyId, accepted.topic, accepted.difficulty)
             }
             // A missing/foreign live node is not evidence that the selected node is a root.
             ?: return existing
+        if (accepted.studyId != studyId) return existing
         val children = database.sql(
             """
             select id, parent_study_id, topic, difficulty_level
@@ -46,6 +59,64 @@ class VoiceTutorStudyContextAdapter(
         )
         return currentView(session.userId, session.id)
     }
+
+    @Transactional
+    override suspend fun focus(userId: Long, sessionId: String, studyId: Long): VoiceTutorLessonFocusSelection? {
+        if (studyId <= 0) return null
+        val accepted = lockActive(userId, sessionId) ?: return null
+        val metadataHistory = list(userId, sessionId)
+        val revisions = VoiceTutorStudyRevisionIndex(metadataHistory)
+        val existing = revisions.currentView()
+        val previous = VoiceTutorLessonFocusIndex(history(userId, sessionId), accepted.acceptedStudyId)
+            .at(revisions.currentRevision)
+        val live = readOwned(userId, listOf(studyId)).singleOrNull()?.takeIf(::validMetadata) ?: return null
+        val selected = existing.firstOrNull { it.studyId == studyId } ?: if (
+            previous?.revision == 0L && accepted.acceptedStudyId == studyId && accepted.studyId == studyId &&
+            accepted.topic.isNotBlank() && accepted.difficulty in 1..10
+        ) live.copy(topic = accepted.topic, difficulty = accepted.difficulty) else live
+        // Verify the full frozen path against actual ownership before writing any capture. An
+        // unresolved/missing/foreign parent or cycle does not turn this candidate into a root.
+        val path = verifiedFocusPath(userId, selected, existing, live) ?: return null
+        val existingIds = existing.mapTo(mutableSetOf()) { it.studyId }
+        if (existing.size + path.count { it.studyId !in existingIds } > MAX_SNAPSHOTS) return null
+        val sameFocus = previous != null && previous.studyId == studyId && previous.revision > 0 && accepted.studyId == studyId
+        if (!sameFocus && (revisions.currentRevision >= MAX_REVISIONS || metadataHistory.count { it.revision > 0 } >= MAX_REVISIONS)) {
+            return null
+        }
+        if (!utcNow().isBefore(accepted.hardEndsAt)) return null
+        val captured = append(sessionId, path, existing, accepted.hardEndsAt)
+        check(path.all { candidate -> captured.any { it.studyId == candidate.studyId } }) {
+            "Voice lesson focus capture expired."
+        }
+        check(utcNow().isBefore(accepted.hardEndsAt)) { "Voice lesson focus lease expired." }
+        val frozen = captured.single { it.studyId == studyId }
+        if (sameFocus) {
+            return VoiceTutorLessonFocusSelection(requireNotNull(previous), frozen, revisions.currentRevision)
+        }
+        val revision = revisions.currentRevision + 1
+        val revised = frozen.copy(revision = revision)
+        insertRevision(sessionId, revised)
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values (:sessionId, :revision, :studyId, :now)",
+        ).bind("sessionId", sessionId).bind("revision", revision).bind("studyId", studyId)
+            .bind("now", utcNow()).fetch().rowsUpdated().awaitSingle()
+        check(updateCurrentMetadata(userId, sessionId, revised, accepted.hardEndsAt) == 1L) {
+            "Voice lesson focus is no longer available."
+        }
+        return VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(studyId, revision), revised)
+    }
+
+    override suspend fun history(userId: Long, sessionId: String): List<VoiceTutorLessonFocus> = database.sql(
+        """
+        select focus.study_id, focus.revision
+        from voice_tutor_lesson_focuses focus
+        join voice_tutor_sessions session on session.id = focus.session_id
+        where session.id = :sessionId and session.user_id = :userId
+        order by focus.revision limit ${MAX_REVISIONS + 1}
+        """.trimIndent(),
+    ).bind("sessionId", sessionId).bind("userId", userId)
+        .map { row, _ -> VoiceTutorLessonFocus((row.get("study_id") as Number).toLong(), (row.get("revision") as Number).toLong()) }
+        .all().collectList().awaitSingle()
 
     @Transactional
     override suspend fun remember(
@@ -85,6 +156,16 @@ class VoiceTutorStudyContextAdapter(
         }
         check(utcNow().isBefore(accepted.hardEndsAt)) { "Voice lesson revision lease expired." }
         val revised = live.copy(revision = index.currentRevision + 1)
+        insertRevision(sessionId, revised)
+        if (accepted.studyId == studyId) {
+            check(updateCurrentMetadata(userId, sessionId, revised, accepted.hardEndsAt) == 1L) {
+                "Voice lesson revision is no longer available."
+            }
+        }
+        return VoiceTutorStudyRevisionIndex(history + revised).currentView()
+    }
+
+    private suspend fun insertRevision(sessionId: String, revised: VoiceTutorStudySnapshot) {
         var insert = database.sql(
             """
             insert into voice_tutor_study_revisions
@@ -96,7 +177,6 @@ class VoiceTutorStudyContextAdapter(
         insert = revised.parentStudyId?.let { insert.bind("parentId", it) }
             ?: insert.bindNull("parentId", java.lang.Long::class.java)
         check(insert.fetch().rowsUpdated().awaitSingle() == 1L) { "Voice lesson revision was not saved." }
-        return VoiceTutorStudyRevisionIndex(history + revised).currentView()
     }
 
     override suspend fun currentRevision(userId: Long, sessionId: String): Long = database.sql(
@@ -137,7 +217,7 @@ class VoiceTutorStudyContextAdapter(
 
     private suspend fun lockActive(userId: Long, sessionId: String): AcceptedStudy? = database.sql(
         """
-        select accepted_study_id, topic_snapshot, difficulty_snapshot, hard_ends_at
+        select study_id, accepted_study_id, topic_snapshot, difficulty_snapshot, hard_ends_at
         from voice_tutor_sessions
         where id = :sessionId and user_id = :userId and status = 'ACTIVE'
           and ended_at is null and hard_ends_at > :now
@@ -146,12 +226,61 @@ class VoiceTutorStudyContextAdapter(
     ).bind("sessionId", sessionId).bind("userId", userId).bind("now", utcNow())
         .map { row, _ ->
             AcceptedStudy(
+                (row.get("study_id") as? Number)?.toLong(),
                 (row.get("accepted_study_id") as? Number)?.toLong(),
                 row.get("topic_snapshot", String::class.java).orEmpty(),
                 (row.get("difficulty_snapshot") as Number).toInt(),
                 requireNotNull(row.get("hard_ends_at", LocalDateTime::class.java)),
             )
         }.one().awaitSingleOrNull()
+
+    private suspend fun verifiedFocusPath(
+        userId: Long,
+        selected: VoiceTutorStudySnapshot,
+        existing: List<VoiceTutorStudySnapshot>,
+        liveSelected: VoiceTutorStudySnapshot,
+    ): List<VoiceTutorStudySnapshot>? {
+        val byId = existing.associateBy { it.studyId }
+        val path = mutableListOf<VoiceTutorStudySnapshot>()
+        val seen = mutableSetOf<Long>()
+        var candidate = selected
+        repeat(MAX_PARENT_EDGES + 1) {
+            if (!seen.add(candidate.studyId) || !validMetadata(candidate)) return null
+            val live = if (candidate.studyId == selected.studyId) liveSelected else {
+                readOwned(userId, listOf(candidate.studyId)).singleOrNull() ?: return null
+            }
+            if (!validMetadata(live)) return null
+            path += candidate
+            val parentId = candidate.parentStudyId ?: return path
+            candidate = byId[parentId] ?: readOwned(userId, listOf(parentId)).singleOrNull() ?: return null
+        }
+        return null
+    }
+
+    private fun validMetadata(snapshot: VoiceTutorStudySnapshot): Boolean =
+        snapshot.studyId > 0 && snapshot.topic.isNotBlank() && snapshot.difficulty in 1..10 &&
+            snapshot.parentStudyId.let { it == null || it > 0 }
+
+    private suspend fun updateCurrentMetadata(
+        userId: Long,
+        sessionId: String,
+        snapshot: VoiceTutorStudySnapshot,
+        hardEndsAt: LocalDateTime,
+    ): Long {
+        val now = utcNow()
+        check(now.isBefore(hardEndsAt)) { "Voice lesson focus lease expired." }
+        return database.sql(
+            """
+            update voice_tutor_sessions
+            set study_id = :studyId, topic_snapshot = :topic, difficulty_snapshot = :difficulty, updated_at = :now
+            where id = :sessionId and user_id = :userId and status = 'ACTIVE'
+              and ended_at is null and hard_ends_at > :now
+              and exists (select 1 from studies where id = :studyId and user_id = :userId)
+            """.trimIndent(),
+        ).bind("studyId", snapshot.studyId).bind("topic", snapshot.topic).bind("difficulty", snapshot.difficulty)
+            .bind("now", now).bind("sessionId", sessionId).bind("userId", userId)
+            .fetch().rowsUpdated().awaitSingle()
+    }
 
     private suspend fun readOwned(userId: Long, studyIds: List<Long>): List<VoiceTutorStudySnapshot> {
         if (studyIds.isEmpty()) return emptyList()
@@ -238,6 +367,7 @@ class VoiceTutorStudyContextAdapter(
     private fun utcNow(): LocalDateTime = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
 
     private data class AcceptedStudy(
+        val studyId: Long?,
         val acceptedStudyId: Long?,
         val topic: String,
         val difficulty: Int,

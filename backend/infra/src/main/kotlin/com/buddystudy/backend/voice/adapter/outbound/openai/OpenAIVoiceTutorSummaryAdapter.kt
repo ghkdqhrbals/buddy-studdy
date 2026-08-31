@@ -9,14 +9,18 @@ import com.buddystudy.backend.voice.adapter.outbound.InvalidVoiceTutorExploratio
 import com.buddystudy.backend.voice.adapter.outbound.VoiceTutorExplorationJsonCodec
 import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
+import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorLessonFocusPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSummaryPort
 import com.buddystudy.voice.domain.VoiceTutorSession
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorStudyRevisionLimits
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.node.NullNode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.reactor.awaitSingle
 import org.slf4j.LoggerFactory
@@ -36,20 +40,23 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
     private val properties: BuddyStudyProperties,
     private val client: WebClient,
     private val studyContext: VoiceTutorStudyContextPort,
+    private val lessonFocus: VoiceTutorLessonFocusPort,
 ) : VoiceTutorSummaryPort {
     @Autowired
     constructor(
         keys: UserContentOpenAIKeyProvider,
         properties: BuddyStudyProperties,
         studyContext: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
-    ) : this(keys, properties, client(), studyContext)
+        lessonFocus: VoiceTutorLessonFocusPort = UnavailableVoiceTutorLessonFocusPort,
+    ) : this(keys, properties, client(), studyContext, lessonFocus)
 
     internal constructor(
         keys: UserContentOpenAIKeyProvider,
         properties: BuddyStudyProperties,
         exchange: ExchangeFunction,
         studyContext: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
-    ) : this(keys, properties, client(exchange), studyContext)
+        lessonFocus: VoiceTutorLessonFocusPort = UnavailableVoiceTutorLessonFocusPort,
+    ) : this(keys, properties, client(exchange), studyContext, lessonFocus)
 
     private val mapper = JsonMapperProvider.mapper.copy()
         .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
@@ -70,7 +77,12 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
                 }
             }
         val history = studyContext.list(session.userId, session.id).take(VoiceTutorStudyRevisionLimits.MAX_HISTORY_SNAPSHOTS)
-        val selectedSnapshot = session.acceptedStudyId?.takeIf { id -> id > 0 && history.none { it.studyId == id } }?.let {
+        val focuses = lessonFocus.history(session.userId, session.id).take(VoiceTutorStudyRevisionLimits.MAX_REVISIONS + 1)
+        val selectedSnapshot = session.acceptedStudyId?.takeIf { id ->
+            id > 0 && history.none { it.studyId == id } && focuses.none { it.revision > 0 } &&
+                session.topic.isNotBlank() && session.difficulty in 1..10 &&
+                (session.studyId == null || session.studyId == id)
+        }?.let {
             VoiceTutorStudySnapshot(it, null, session.topic, session.difficulty)
         }
         val studies = (history + listOfNotNull(selectedSnapshot)).distinct().take(VoiceTutorStudyRevisionLimits.MAX_HISTORY_SNAPSHOTS)
@@ -87,6 +99,7 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
             "messages" to VoiceTutorSummaryPromptProvider.messages(
                 session, evidenceTurns, outputLanguage, studies,
                 transcriptTruncated = evidenceTurns.size != transcript.size,
+                focuses = focuses,
             ),
         )
         val response = try {
@@ -135,7 +148,7 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
         }
         val explorations = try {
             val extracted = VoiceTutorExplorationJsonCodec.decodeNode(result.path("explorations"))
-            VoiceTutorExplorationEvidence.verified(extracted, session, evidenceTurns, studies)
+            VoiceTutorExplorationEvidence.verified(extracted, session, evidenceTurns, studies, focuses)
                 .also { VoiceTutorExplorationJsonCodec.encode(it) }
         } catch (error: InvalidVoiceTutorExploration) {
             invalidResponse(error.reason)
@@ -203,6 +216,7 @@ internal object VoiceTutorSummaryPromptProvider {
         outputLanguage: String,
         studies: List<VoiceTutorStudySnapshot>,
         transcriptTruncated: Boolean = false,
+        focuses: List<VoiceTutorLessonFocus> = emptyList(),
     ): List<Map<String, String>> = listOf(
         mapOf(
             "role" to "system",
@@ -224,6 +238,12 @@ internal object VoiceTutorSummaryPromptProvider {
                 tutor question keeps its original name and difficulty even if settings change before the answer.
                 Split the same studyId into separate explorations when question revisions use different metadata;
                 do not merge old and new levels or apply the last known level to all questions.
+                lessonFocuses records explicit saved-node choices. At each question's lessonRevision, use the
+                last focus with revision <= that question's epoch, NOT the session's final topic or focus.
+                Before the first focus in a discovery call, saved-topic navigation is not learning: omit these
+                exchanges from explorations while preserving any relevant context in the overall summary.
+                A focus at revision > 0 authorizes only its exact studyId; another child or another tree needs
+                its own explicit focus first. A revision-zero initialStudyId retains the original call's tree scope.
                 lessonRevision=-1 or any epoch absent from knownTopics is unknown (zero is the legacy baseline):
                 preserve that exchange as unlinked session history with studyId=null and difficulty=null.
                 For an unsaved/uncertain topic, studyId and difficulty
@@ -259,8 +279,14 @@ internal object VoiceTutorSummaryPromptProvider {
             "role" to "user",
             "content" to mapper.writeValueAsString(
                 linkedMapOf(
-                    "topic" to session.topic,
-                    "difficulty" to session.difficulty,
+                    "topic" to (session.topic.takeIf(String::isNotBlank) ?: NullNode.instance),
+                    "difficulty" to (session.difficulty.takeIf { it in 1..10 } ?: NullNode.instance),
+                    "initialStudyId" to (session.acceptedStudyId ?: NullNode.instance),
+                    "lessonFocuses" to (focuses + if (focuses.none { it.revision == 0L }) {
+                        listOfNotNull(session.acceptedStudyId?.takeIf { it > 0 }?.let { VoiceTutorLessonFocus(it, 0) })
+                    } else emptyList()).sortedBy { it.revision }.map { focus ->
+                        mapOf("studyId" to focus.studyId, "revision" to focus.revision)
+                    },
                     "knownTopics" to studies.map { study ->
                         mapOf("studyId" to study.studyId, "parentStudyId" to study.parentStudyId, "topic" to study.topic, "difficulty" to study.difficulty, "revision" to study.revision)
                     },

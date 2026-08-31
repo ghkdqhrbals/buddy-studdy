@@ -218,7 +218,7 @@ protocol VoiceTutorRepository {
     func status(registration: RemotePushRegistration) async throws -> BackendVoiceTutorStatus
     func createSession(
         registration: RemotePushRegistration,
-        studyID: Int,
+        studyID: Int?,
         language: AppLanguage,
         voice: String?,
         recordingConsent: Bool,
@@ -271,7 +271,7 @@ struct RemoteVoiceTutorRepository: VoiceTutorRepository {
 
     func createSession(
         registration: RemotePushRegistration,
-        studyID: Int,
+        studyID: Int?,
         language: AppLanguage,
         voice: String?,
         recordingConsent: Bool,
@@ -376,7 +376,7 @@ struct VoiceTutorUseCase {
 
     func createSession(
         registration: RemotePushRegistration,
-        studyID: Int,
+        studyID: Int? = nil,
         language: AppLanguage,
         voice: String? = nil,
         recordingConsent: Bool = false,

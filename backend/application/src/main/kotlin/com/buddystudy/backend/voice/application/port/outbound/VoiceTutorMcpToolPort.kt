@@ -18,6 +18,9 @@ data class VoiceTutorMcpToolResult(
     val deletedStudyIds: List<Long> = emptyList(),
     // Server-owned context revision. A tool's JSON cannot set a response's lesson level.
     val lessonRevision: Long? = null,
+    // Only a verified persisted focus may update the compact call header; never parse model JSON for it.
+    val lessonFocus: VoiceTutorLessonFocusSelection? = null,
+    val lessonFocusCleared: Boolean = false,
 )
 
 enum class VoiceTutorStudyChangeKind { CREATED, UPDATED, DELETED }
