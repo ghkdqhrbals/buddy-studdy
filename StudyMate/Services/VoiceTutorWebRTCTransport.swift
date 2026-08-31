@@ -11,6 +11,7 @@ enum VoiceTutorWebRTCError: Error {
     case sdpExchangeFailed(Int)
     case mediaConnectionFailed
     case mediaConnectionTimedOut
+    case speechActivityUnavailable
 }
 
 enum VoiceTutorWebRTCMediaReadiness: Equatable {
@@ -18,6 +19,116 @@ enum VoiceTutorWebRTCMediaReadiness: Equatable {
     case connected
     case failed
     case timedOut
+}
+
+enum VoiceTutorLocalSpeechActivity: String, Equatable, Sendable {
+    case started, stopped
+}
+
+struct VoiceTutorLocalSpeechEvent: Equatable, Sendable {
+    let activity: VoiceTutorLocalSpeechActivity
+    /// One utterance owns one sequence: start N, stop N, then start N + 1.
+    let sequence: Int
+
+    var messageType: String { "buddystudy.voice.input.speech.\(activity.rawValue)" }
+}
+
+enum VoiceTutorSpeechSampleScale: Equatable, Sendable {
+    case normalizedFloat
+    case webRTCFloatS16
+}
+
+/// A display/transport-independent energy detector. It never changes microphone
+/// or tutor PCM, commits provider input, or uses the tutor's speaking state.
+struct VoiceTutorLocalSpeechDetector {
+    private(set) var isSpeaking = false
+    private(set) var sequence = 0
+    private var mediaReady = false
+    private var muted = false
+    private var closed = false
+    private var onsetDuration: TimeInterval = 0
+    private var silenceDuration: TimeInterval = 0
+    private var noiseRMS = 0.001
+
+    var isEnabled: Bool { mediaReady && !muted && !closed }
+
+    mutating func updateGate(mediaReady: Bool, muted: Bool) -> VoiceTutorLocalSpeechEvent? {
+        guard !closed else { return nil }
+        let wasEnabled = isEnabled
+        self.mediaReady = mediaReady
+        self.muted = muted
+        guard wasEnabled != isEnabled else { return nil }
+        onsetDuration = 0
+        silenceDuration = 0
+        noiseRMS = 0.001
+        guard !isEnabled, isSpeaking else { return nil }
+        isSpeaking = false
+        return VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: sequence)
+    }
+
+    mutating func process(normalizedRMS: Double, duration: TimeInterval) -> VoiceTutorLocalSpeechEvent? {
+        guard isEnabled, normalizedRMS.isFinite, (0...1).contains(normalizedRMS),
+              duration.isFinite, duration > 0, duration <= 0.25 else { return nil }
+
+        if isSpeaking {
+            let releaseThreshold = max(0.003, noiseRMS * 1.8)
+            silenceDuration = normalizedRMS < releaseThreshold ? silenceDuration + duration : 0
+            guard silenceDuration + 0.000_000_001 >= 0.7 else { return nil }
+            isSpeaking = false
+            onsetDuration = 0
+            silenceDuration = 0
+            return VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: sequence)
+        }
+
+        let onsetThreshold = max(0.006, noiseRMS * 3.5)
+        if normalizedRMS >= onsetThreshold {
+            onsetDuration += duration
+            guard onsetDuration + 0.000_000_001 >= 0.08, sequence < Int.max else { return nil }
+            sequence += 1
+            isSpeaking = true
+            onsetDuration = 0
+            silenceDuration = 0
+            return VoiceTutorLocalSpeechEvent(activity: .started, sequence: sequence)
+        }
+
+        onsetDuration = 0
+        // Learn the floor only outside a candidate utterance. Speech must not
+        // adapt its own threshold upward while the learner is still talking.
+        let adaptation = 1 - exp(-duration / 2)
+        noiseRMS = max(0.0001, min(0.02, noiseRMS + adaptation * (normalizedRMS - noiseRMS)))
+        return nil
+    }
+
+    mutating func close() {
+        self = VoiceTutorLocalSpeechDetector()
+        closed = true
+    }
+
+    mutating func reset() { self = VoiceTutorLocalSpeechDetector() }
+
+    static func normalizedRMS(samples: [Float], scale: VoiceTutorSpeechSampleScale) -> Double? {
+        samples.withUnsafeBufferPointer { normalizedRMS(samples: $0, scale: scale) }
+    }
+
+    static func normalizedRMS(
+        samples: UnsafeBufferPointer<Float>,
+        scale: VoiceTutorSpeechSampleScale
+    ) -> Double? {
+        guard !samples.isEmpty else { return nil }
+        // LKRTCAudioBuffer.rawBufferForChannel wraps AudioBuffer::channels().
+        // The bundled m144 implementation stores FloatS16, not [-1, 1]. See
+        // webrtc-sdk/webrtc/modules/audio_processing/audio_buffer.cc CopyFrom
+        // and common_audio/include/audio_util.h FloatS16ToFloat. Never infer
+        // the scale from amplitude: quiet native samples may themselves be < 1.
+        let divisor: Double = scale == .webRTCFloatS16 ? 32_768 : 1
+        var sum = 0.0
+        for sample in samples {
+            guard sample.isFinite else { return nil }
+            let normalized = max(-1, min(1, Double(sample) / divisor))
+            sum += normalized * normalized
+        }
+        return (sum / Double(samples.count)).squareRoot()
+    }
 }
 
 private struct VoiceTutorUncheckedSendable<Value>: @unchecked Sendable {
@@ -63,6 +174,77 @@ final class VoiceTutorAudioProcessingTap: NSObject, LKRTCAudioCustomProcessingDe
     }
 
     func audioProcessingRelease() {}
+}
+
+/// Installed for every WebRTC call, even without optional recording consent.
+/// Only transitions leave this realtime callback; microphone samples stay in
+/// the existing native media path and the explicitly consented recorder tap.
+final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessingDelegate,
+    @unchecked Sendable {
+    private let lock = NSLock()
+    private var detector = VoiceTutorLocalSpeechDetector()
+    private var sampleRate: Double = 0
+    private let recordingTap: VoiceTutorAudioProcessingTap?
+    private let onActivity: @Sendable (VoiceTutorLocalSpeechEvent) -> Void
+
+    init(
+        recordingTap: VoiceTutorAudioProcessingTap?,
+        onActivity: @escaping @Sendable (VoiceTutorLocalSpeechEvent) -> Void
+    ) {
+        self.recordingTap = recordingTap
+        self.onActivity = onActivity
+    }
+
+    func audioProcessingInitialize(sampleRate: Int, channels: Int) {
+        lock.lock()
+        self.sampleRate = sampleRate > 0 ? Double(sampleRate) : 0
+        lock.unlock()
+        recordingTap?.audioProcessingInitialize(sampleRate: sampleRate, channels: channels)
+    }
+
+    func audioProcessingProcess(audioBuffer: LKRTCAudioBuffer) {
+        recordingTap?.audioProcessingProcess(audioBuffer: audioBuffer)
+        lock.lock()
+        defer { lock.unlock() }
+        let frames = Int(audioBuffer.frames)
+        let channels = Int(audioBuffer.channels)
+        guard detector.isEnabled, sampleRate > 0, frames > 0,
+              channels > 0, channels <= 32 else { return }
+        let duration = Double(frames) / sampleRate
+        guard duration.isFinite, duration > 0, duration <= 0.25 else { return }
+        var rms = 0.0
+        for channel in 0..<channels {
+            let samples = UnsafeBufferPointer(start: audioBuffer.rawBuffer(forChannel: channel), count: frames)
+            guard let level = VoiceTutorLocalSpeechDetector.normalizedRMS(
+                samples: samples, scale: .webRTCFloatS16
+            ) else { return }
+            // A silent secondary channel must not dilute genuine learner audio.
+            rms = max(rms, level)
+        }
+        if let event = detector.process(normalizedRMS: rms, duration: duration) {
+            // The sole callback is a nonblocking bounded-stream yield. Keep it
+            // under the gate lock so a simultaneous mute cannot reorder stop N
+            // before start N. No network, actor hop, or disk work runs here.
+            onActivity(event)
+        }
+    }
+
+    func updateGate(mediaReady: Bool, muted: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let event = detector.updateGate(mediaReady: mediaReady, muted: muted) {
+            onActivity(event)
+        }
+    }
+
+    func close() {
+        lock.lock()
+        detector.close()
+        sampleRate = 0
+        lock.unlock()
+    }
+
+    func audioProcessingRelease() { recordingTap?.audioProcessingRelease() }
 }
 
 final class VoiceTutorRemoteAudioRenderer: NSObject, LKRTCAudioRenderer, @unchecked Sendable {
@@ -116,6 +298,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     }
     var onInterruption: (@Sendable () -> Void)?
     var onConnectionFailure: (@Sendable () -> Void)?
+    var onLocalSpeechActivity: (@Sendable (VoiceTutorLocalSpeechEvent) -> Void)?
     var onDiagnostic: (@Sendable (String) -> Void)?
 
     private let networkSession: URLSession
@@ -127,7 +310,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private var nonzeroBufferCount = 0
     private let audioSessionOwnerID = UUID()
     private let remoteRenderer = VoiceTutorRemoteAudioRenderer()
-    private var captureTap: VoiceTutorAudioProcessingTap?
+    private var captureTap: VoiceTutorLocalSpeechCaptureTap?
     private var renderTap: VoiceTutorAudioProcessingTap?
     private var audioProcessingModule: LKRTCDefaultAudioProcessingModule?
     private var factory: LKRTCPeerConnectionFactory?
@@ -138,6 +321,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private let stateLock = NSLock()
     private var isClosed = false
     private var sessionMediaReady = false
+    private var microphoneMuted = false
     private static let audioSessionOwnershipLock = NSLock()
     private nonisolated(unsafe) static var activeAudioSessionOwnerID: UUID?
 
@@ -169,14 +353,16 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         sdpRequest: URLRequest,
         recorder: VoiceTutorSessionRecorder?
     ) async throws {
+        guard let onLocalSpeechActivity else { throw VoiceTutorWebRTCError.speechActivityUnavailable }
         try configureAudioSession()
         try installInterruptionObserver()
         _ = LKRTCInitializeSSL()
         try ensureOpen()
 
-        let nextCaptureTap = recorder.map {
-            VoiceTutorAudioProcessingTap(participant: .learner, recorder: $0)
-        }
+        let nextCaptureTap = VoiceTutorLocalSpeechCaptureTap(
+            recordingTap: recorder.map { VoiceTutorAudioProcessingTap(participant: .learner, recorder: $0) },
+            onActivity: onLocalSpeechActivity
+        )
         let nextRenderTap = recorder.map {
             VoiceTutorAudioProcessingTap(participant: .tutor, recorder: $0)
         }
@@ -253,6 +439,9 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
 
     func setMuted(_ muted: Bool) {
         stateLock.lock()
+        guard !isClosed else { stateLock.unlock(); return }
+        microphoneMuted = muted
+        captureTap?.updateGate(mediaReady: sessionMediaReady, muted: muted)
         let peerFactory = factory
         stateLock.unlock()
         _ = peerFactory?.audioDeviceModule.setMicrophoneMuted(muted)
@@ -260,7 +449,9 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
 
     func setSessionMediaReady() {
         stateLock.lock()
+        guard !isClosed else { stateLock.unlock(); return }
         sessionMediaReady = true
+        captureTap?.updateGate(mediaReady: true, muted: microphoneMuted)
         let track = localAudioTrack
         stateLock.unlock()
         track?.isEnabled = true
@@ -273,7 +464,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         let localTrack: LKRTCAudioTrack?
         let peerFactory: LKRTCPeerConnectionFactory?
         let processingModule: LKRTCDefaultAudioProcessingModule?
-        let nextCaptureTap: VoiceTutorAudioProcessingTap?
+        let nextCaptureTap: VoiceTutorLocalSpeechCaptureTap?
         let nextRenderTap: VoiceTutorAudioProcessingTap?
         let observer: NSObjectProtocol?
         let shouldDeactivateAudioSession: Bool
@@ -281,6 +472,9 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         Self.audioSessionOwnershipLock.lock()
         stateLock.lock()
         isClosed = true
+        sessionMediaReady = false
+        microphoneMuted = true
+        captureTap?.close()
         shouldDeactivateAudioSession = Self.activeAudioSessionOwnerID == audioSessionOwnerID
         if shouldDeactivateAudioSession {
             Self.activeAudioSessionOwnerID = nil
@@ -368,7 +562,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     }
 
     private func installConnectionResources(
-        captureTap: VoiceTutorAudioProcessingTap?,
+        captureTap: VoiceTutorLocalSpeechCaptureTap?,
         renderTap: VoiceTutorAudioProcessingTap?,
         processingModule: LKRTCDefaultAudioProcessingModule,
         factory: LKRTCPeerConnectionFactory,
@@ -382,6 +576,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         }
         localAudioTrack.isEnabled = sessionMediaReady
         self.captureTap = captureTap
+        captureTap?.updateGate(mediaReady: sessionMediaReady, muted: microphoneMuted)
         self.renderTap = renderTap
         audioProcessingModule = processingModule
         self.factory = factory
@@ -510,7 +705,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
 
     static func sdpExchangeRequest(offer: String, authenticatedRequest: URLRequest) throws -> URLRequest {
         let offer = try validatedOfferSDP(offer)
-        var request = authenticatedRequest
+        var request = VoiceTutorLocalSpeechProtocol.addingCapability(to: authenticatedRequest)
         request.httpMethod = "POST"
         request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
         request.setValue("application/sdp", forHTTPHeaderField: "Accept")

@@ -8,4 +8,8 @@ internal object VoiceTutorRealtimeContract {
     const val PLAYBACK_COMPLETED_EVENT = "buddystudy.voice.playback.completed"
     const val PLAYOUT_DRAINED_EVENT = "buddystudy.voice.playout.drained"
     const val SIDEBAND_READY_EVENT = "buddystudy.provider.sideband.ready"
+    const val SPEECH_STARTED_EVENT = "buddystudy.voice.input.speech.started"
+    const val SPEECH_STOPPED_EVENT = "buddystudy.voice.input.speech.stopped"
+    const val TURN_PROTOCOL_HEADER = "X-Voice-Turn-Protocol"
+    const val LOCAL_VAD_TURN_PROTOCOL = "local-vad-v1"
 }

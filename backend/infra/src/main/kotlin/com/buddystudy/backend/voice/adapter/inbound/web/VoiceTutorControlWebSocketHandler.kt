@@ -44,7 +44,10 @@ class VoiceTutorControlWebSocketHandler(
     override fun getSubProtocols(): List<String> = listOf(CONTROL_PROTOCOL)
 
     override fun handle(session: WebSocketSession): Mono<Void> {
-        if (session.handshakeInfo.subProtocol != CONTROL_PROTOCOL) {
+        if (session.handshakeInfo.subProtocol != CONTROL_PROTOCOL ||
+            session.handshakeInfo.headers.getFirst(VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER) !=
+            VoiceTutorRealtimeContract.LOCAL_VAD_TURN_PROTOCOL
+        ) {
             return session.close(CloseStatus.PROTOCOL_ERROR)
         }
         return session.handshakeInfo.principal
@@ -218,6 +221,19 @@ class VoiceTutorControlWebSocketHandler(
                         val responseId = node.path("responseId").asText()
                         latency.observeDevicePlayoutDrained(responseId)
                         Mono.just(raw)
+                    }
+                    VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT,
+                    VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT -> {
+                        if (!sidebandReady.get()) {
+                            Mono.error(VoiceTutorClientProtocolException("Voice Tutor media is not ready."))
+                        } else {
+                            // Application controls, not provider API events. The
+                            // turn controller owns the eventual input commit.
+                            Mono.just(mapper.writeValueAsString(mapOf(
+                                "type" to type,
+                                "sequence" to node.path("sequence").longValue(),
+                            )))
+                        }
                     }
                     else -> Mono.error(
                         VoiceTutorClientProtocolException("Unsupported Voice Tutor WebRTC control event."),

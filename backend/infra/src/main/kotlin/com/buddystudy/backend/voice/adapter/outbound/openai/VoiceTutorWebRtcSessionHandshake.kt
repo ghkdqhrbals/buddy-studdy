@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.NullNode
 import org.slf4j.LoggerFactory
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
@@ -32,7 +33,7 @@ internal class VoiceTutorWebRtcSessionHandshake(
                         "session" to linkedMapOf(
                             "type" to "realtime",
                             "audio" to mapOf(
-                                "input" to mapOf("turn_detection" to voiceTutorServerOwnedTurnDetection()),
+                                "input" to mapOf("turn_detection" to voiceTutorManualWebRtcTurnDetection()),
                             ),
                         ),
                     ),
@@ -65,13 +66,17 @@ internal class VoiceTutorWebRtcSessionHandshake(
             session.path("turn_detection")
         }
         val sessionType = session.path("type").safeConfigurationName(SESSION_TYPES)
-        val turnDetectionType = turnDetection.path("type").safeConfigurationName(TURN_DETECTION_TYPES)
+        val turnDetectionType = if (schema == VoiceTutorWebRtcConfigurationSchema.GA && turnDetection.isNull) {
+            "manual"
+        } else {
+            turnDetection.path("type").safeConfigurationName(TURN_DETECTION_TYPES)
+        }
         val createResponse = turnDetection.path("create_response").explicitBoolean()
         val interruptResponse = turnDetection.path("interrupt_response").explicitBoolean()
         val requested = updateRequested.get()
         val verified = requested && eventType == "session.updated" &&
             schema == VoiceTutorWebRtcConfigurationSchema.GA && sessionType == "realtime" &&
-            turnDetectionType == "server_vad" && createResponse == false && interruptResponse == false
+            turnDetection.isNull
 
         onConfiguration(
             VoiceTutorWebRtcConfigurationSnapshot(
@@ -92,11 +97,13 @@ internal class VoiceTutorWebRtcSessionHandshake(
     }
 }
 
-internal fun voiceTutorServerOwnedTurnDetection(): Map<String, Any> = linkedMapOf(
-    "type" to "server_vad",
-    "create_response" to false,
-    "interrupt_response" to false,
-)
+/**
+ * WebRTC VAD can clear media even when response interruption is disabled.
+ * Keep media duplex, but accept utterance boundaries from the authenticated
+ * local-VAD client and let the server commit input and schedule responses.
+ * A NullNode preserves an explicit JSON null even with NON_NULL map inclusion.
+ */
+internal fun voiceTutorManualWebRtcTurnDetection(): JsonNode = NullNode.instance
 
 internal enum class VoiceTutorWebRtcConfigurationSchema { GA, LEGACY, MISSING }
 

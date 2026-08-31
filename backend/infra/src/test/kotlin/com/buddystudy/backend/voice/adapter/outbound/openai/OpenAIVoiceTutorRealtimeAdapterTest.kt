@@ -21,6 +21,8 @@ import java.util.concurrent.atomic.AtomicReference
 class OpenAIVoiceTutorRealtimeAdapterTest {
     private val mapper = JsonMapperProvider.mapper
     private val preparedProviderEvents = mutableMapOf<VoiceTutorDuplexTurnController, Flux<String>>()
+    private val controllerTransports = mutableMapOf<VoiceTutorDuplexTurnController, VoiceTutorRealtimeTransport>()
+    private val clientSpeechSequences = mutableMapOf<VoiceTutorDuplexTurnController, Long>()
 
     @Test
     fun `safety identifier is a stable keyed pseudonym rather than a bare user id hash`() {
@@ -131,12 +133,15 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
 
         StepVerifier.create(providerEvents(controller).take(2))
             .then {
-                controller.observeProviderEvent(event("input_audio_buffer.speech_started"))
-                controller.observeProviderEvent(event("input_audio_buffer.committed"))
+                controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                controller.observeProviderEvent(committedEvent("unsolicited-before-stop"))
                 controller.startOpeningResponse()
             }
             .expectNoEvent(Duration.ofMillis(10))
-            .then { controller.observeProviderEvent(event("input_audio_buffer.speech_stopped")) }
+            .then {
+                controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+                controller.observeProviderEvent(committedEvent("early-learner"))
+            }
             .assertNext { raw ->
                 openingControl.set(raw)
                 assertThat(mapper.readTree(raw).path("event_id").asText())
@@ -202,7 +207,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
 
         StepVerifier.create(providerEvents(controller).take(1))
             .then {
-                controller.observeProviderEvent(event("input_audio_buffer.speech_started"))
+                controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
                 controller.fireContinuousSpeechDeadline()
             }
             .expectNoEvent(Duration.ofMillis(10))
@@ -212,8 +217,8 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
             }
             .expectNoEvent(Duration.ofMillis(10))
             .then {
-                controller.observeProviderEvent(event("input_audio_buffer.speech_stopped"))
-                controller.observeProviderEvent(event("input_audio_buffer.committed"))
+                controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+                controller.observeProviderEvent(committedEvent("early-learner"))
             }
             .assertNext { raw ->
                 val node = mapper.readTree(raw)
@@ -682,13 +687,433 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
                 controller.observeProviderEvent(
                     responseEvent("response.created", "response-speaking", activeControl.get()),
                 )
-                controller.observeProviderEvent(event("input_audio_buffer.speech_started"))
+                controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 2))
             }
             .expectNoEvent(Duration.ofMillis(25))
             .thenCancel()
             .verify()
 
         controller.close()
+    }
+
+    @Test
+    fun `manual speech emits one reserved commit for the owned stop and waits for acknowledgement`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        try {
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(2))
+                .then {
+                    // An unowned stop cannot poison the next legitimate sequence.
+                    assertThat(controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 100))).isTrue()
+                    assertThat(controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))).isTrue()
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                    // Out-of-order starts must not replace the currently owned utterance.
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 2))
+                    controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 2))
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then {
+                    val stop = mapper.readTree(clientSpeechEvent(started = false, sequence = 1))
+                        .deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
+                    stop.put("event_id", "untrusted-client-id")
+                    stop.put("private", "untrusted-speech-payload")
+                    assertThat(controller.observeClientEvent(stop.toString())).isTrue()
+                    controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                }
+                .assertNext { raw ->
+                    assertServerOwnedInputCommit(raw)
+                    assertThat(raw).doesNotContain("sequence", "untrusted", "speech.stopped")
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeProviderEvent(committedEvent("manual-1")) }
+                .assertNext { raw ->
+                    assertThat(mapper.readTree(raw).path("type").asText()).isEqualTo("response.create")
+                }
+                .verifyComplete()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `new speech before an older commit acknowledgement retains its own pending count`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        try {
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(3))
+                .then {
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                    controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+                }
+                .assertNext(::assertServerOwnedInputCommit)
+                .then {
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 2))
+                    controller.observeProviderEvent(committedEvent("manual-1"))
+                    // The same provider ACK cannot finish the new live utterance.
+                    assertThat(controller.observeProviderEvent(committedEvent("manual-1")))
+                        .isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+                    controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 2)) }
+                .assertNext(::assertServerOwnedInputCommit)
+                .then {
+                    controller.observeProviderEvent(committedEvent("manual-1"))
+                    controller.fireInputCommitTimeout(1)
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeProviderEvent(committedEvent("manual-2")) }
+                .assertNext { raw ->
+                    assertThat(mapper.readTree(raw).path("type").asText()).isEqualTo("response.create")
+                }
+                .verifyComplete()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `multiple stopped utterances require every outstanding commit acknowledgement`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        try {
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(3))
+                .then {
+                    for (sequence in 1L..2L) {
+                        controller.observeClientEvent(clientSpeechEvent(started = true, sequence = sequence))
+                        controller.observeClientEvent(clientSpeechEvent(started = false, sequence = sequence))
+                    }
+                }
+                .assertNext(::assertServerOwnedInputCommit)
+                .assertNext(::assertServerOwnedInputCommit)
+                .then { controller.observeProviderEvent(committedEvent("manual-1")) }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeProviderEvent(committedEvent("manual-2")) }
+                .assertNext { raw ->
+                    assertThat(mapper.readTree(raw).path("type").asText()).isEqualTo("response.create")
+                }
+                .verifyComplete()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @TestFactory
+    fun `manual overlap waits for commit acknowledgement and every teacher playout gate in any order`() =
+        permutations(listOf("commit-ack", "done", "provider-stopped", "client-drained")).map { ordering ->
+            dynamicTest(ordering.joinToString(" -> ")) {
+                val controller = controller(
+                    transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+                    readyForLearnerTurns = false,
+                )
+                val opening = AtomicReference<String>()
+                fun applySignal(signal: String) {
+                    if (signal == "commit-ack") {
+                        controller.observeProviderEvent(committedEvent("overlapping-learner"))
+                    } else {
+                        applyWebRtcGateSignal(controller, opening.get(), signal)
+                    }
+                }
+                try {
+                    StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(3))
+                        .then { controller.startOpeningResponse() }
+                        .assertNext(opening::set)
+                        .then {
+                            controller.observeProviderEvent(responseEvent("response.created", "response-webrtc", opening.get()))
+                            controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                            controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+                        }
+                        .assertNext(::assertServerOwnedInputCommit)
+                        .then { applySignal(ordering[0]) }
+                        .expectNoEvent(Duration.ofMillis(5))
+                        .then { applySignal(ordering[1]) }
+                        .expectNoEvent(Duration.ofMillis(5))
+                        .then { applySignal(ordering[2]) }
+                        .expectNoEvent(Duration.ofMillis(5))
+                        .then { applySignal(ordering[3]) }
+                        .assertNext { raw ->
+                            assertThat(mapper.readTree(raw).path("event_id").asText())
+                                .startsWith("buddystudy-internal-duplex-turn-response-")
+                            assertThat(raw).doesNotContain("response.cancel", "output_audio_buffer.clear", "conversation.item.truncate")
+                        }
+                        .verifyComplete()
+                } finally {
+                    controller.close()
+                }
+            }
+        }
+
+    @Test
+    fun `manual continuous speech permits one complete intervention without committing live audio`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val intervention = AtomicReference<String>()
+        try {
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(3))
+                .then {
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                    controller.fireContinuousSpeechDeadline()
+                }
+                .assertNext { raw ->
+                    intervention.set(raw)
+                    val response = mapper.readTree(raw)
+                    assertThat(response.path("type").asText()).isEqualTo("response.create")
+                    assertThat(response.path("response").path("metadata").path(VoiceTutorRealtimeContract.TURN_METADATA_KEY).asText())
+                        .isEqualTo(VoiceTutorRealtimeContract.CONTINUOUS_INTERVENTION_TURN)
+                    assertThat(raw).doesNotContain("input_audio_buffer.commit", "response.cancel", "output_audio_buffer.clear")
+                }
+                .then {
+                    controller.observeProviderEvent(responseEvent("response.created", "intervention", intervention.get()))
+                    controller.fireContinuousSpeechDeadline()
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                    controller.fireContinuousSpeechDeadline()
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1)) }
+                .assertNext(::assertServerOwnedInputCommit)
+                .then {
+                    controller.observeProviderEvent(committedEvent("wrapped-up-learner"))
+                    controller.observeProviderEvent(responseEvent("response.done", "intervention", intervention.get()))
+                    controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "intervention"))
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeClientEvent(playoutDrainedEvent("intervention")) }
+                .assertNext { raw ->
+                    assertThat(mapper.readTree(raw).path("event_id").asText())
+                        .startsWith("buddystudy-internal-duplex-turn-response-")
+                }
+                .verifyComplete()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `manual pending intervention waits for the previous teacher sentence without an early commit`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val opening = AtomicReference<String>()
+        try {
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(2))
+                .then { controller.startOpeningResponse() }
+                .assertNext(opening::set)
+                .then {
+                    controller.observeProviderEvent(responseEvent("response.created", "opening", opening.get()))
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                    controller.fireContinuousSpeechDeadline()
+                    controller.observeProviderEvent(responseEvent("response.done", "opening", opening.get()))
+                    controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "opening"))
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeClientEvent(playoutDrainedEvent("opening")) }
+                .assertNext { raw ->
+                    assertThat(mapper.readTree(raw).path("event_id").asText())
+                        .startsWith("buddystudy-internal-duplex-continuous-response-")
+                    assertThat(raw).doesNotContain("input_audio_buffer.commit", "response.cancel", "output_audio_buffer.clear")
+                }
+                .verifyComplete()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `manual intervention waits for older committed input but never commits the new live utterance`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        try {
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(2))
+                .then {
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                    controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+                }
+                .assertNext(::assertServerOwnedInputCommit)
+                .then {
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 2))
+                    controller.fireContinuousSpeechDeadline()
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeProviderEvent(committedEvent("older-learner-utterance")) }
+                .assertNext { raw ->
+                    assertThat(mapper.readTree(raw).path("event_id").asText())
+                        .startsWith("buddystudy-internal-duplex-continuous-response-")
+                    assertThat(raw).doesNotContain("input_audio_buffer.commit", "response.cancel", "output_audio_buffer.clear")
+                }
+                .verifyComplete()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `manual input ignores provider VAD and unsolicited or replayed acknowledgements`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        try {
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(2))
+                .then {
+                    for (type in listOf("input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped")) {
+                        assertThat(controller.observeProviderEvent(event(type)))
+                            .isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+                    }
+                    assertThat(controller.observeProviderEvent(committedEvent("unsolicited")))
+                        .isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                    controller.observeProviderEvent(committedEvent("unsolicited-during-speech"))
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1)) }
+                .assertNext(::assertServerOwnedInputCommit)
+                .then {
+                    controller.observeProviderEvent(committedEvent("unsolicited"))
+                    controller.observeProviderEvent(committedEvent("unsolicited-during-speech"))
+                    controller.observeProviderEvent(event("input_audio_buffer.committed"))
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { controller.observeProviderEvent(committedEvent("actual-manual-commit")) }
+                .assertNext { raw -> assertThat(mapper.readTree(raw).path("type").asText()).isEqualTo("response.create") }
+                .verifyComplete()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `manual notification sequences must be positive integral Long values`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        try {
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(1))
+                .then {
+                    for (value in listOf("null", "0", "-1", "1.5", "\"1\"", "9223372036854775808", "true", "{}")) {
+                        for (type in listOf(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT)) {
+                            assertThat(controller.observeClientEvent("""{"type":"$type","sequence":$value}""")).isTrue()
+                        }
+                    }
+                    controller.observeClientEvent(event(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT))
+                    controller.observeClientEvent(event(VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT))
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then {
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = Long.MAX_VALUE))
+                    controller.observeClientEvent(clientSpeechEvent(started = false, sequence = Long.MAX_VALUE))
+                }
+                .assertNext(::assertServerOwnedInputCommit)
+                .verifyComplete()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `manual notification types do not change legacy provider VAD state or emit raw events`() {
+        val controller = controller()
+        try {
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true).take(1))
+                .then {
+                    assertThat(controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))).isTrue()
+                    assertThat(controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))).isTrue()
+                }
+                .expectNoEvent(Duration.ofMillis(10))
+                .then { learnerTurn(controller) }
+                .assertNext { raw -> assertThat(mapper.readTree(raw).path("type").asText()).isEqualTo("response.create") }
+                .verifyComplete()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `manual pending commit limit fails explicitly rather than dropping captured utterances`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val emitted = mutableListOf<String>()
+        val subscription = providerEvents(controller, includeInputCommits = true).subscribe(emitted::add)
+        try {
+            for (sequence in 1L..32L) {
+                controller.observeClientEvent(clientSpeechEvent(started = true, sequence = sequence))
+                controller.observeClientEvent(clientSpeechEvent(started = false, sequence = sequence))
+            }
+            assertThat(emitted).hasSize(32)
+            emitted.forEach(::assertServerOwnedInputCommit)
+            assertThatThrownBy {
+                controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 33))
+            }.isInstanceOf(VoiceTutorPendingInputCommitOverflowException::class.java)
+            assertThat(emitted).hasSize(32)
+        } finally {
+            subscription.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `manual commit acknowledgement timeout is terminal without sending a response cancellation`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        try {
+            StepVerifier.create(providerEvents(controller, includeInputCommits = true))
+                .then {
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                    controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+                }
+                .assertNext(::assertServerOwnedInputCommit)
+                .then { controller.fireInputCommitTimeout(1) }
+                .expectError(VoiceTutorProviderInputCommitTimeoutException::class.java)
+                .verify()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `additional manual commits cannot extend the oldest acknowledgement deadline`() {
+        val clock = AtomicLong(0)
+        lateinit var controller: VoiceTutorDuplexTurnController
+        try {
+            StepVerifier.withVirtualTime {
+                controller = this.controller(nanoTime = clock::get, transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+                providerEvents(controller, includeInputCommits = true)
+            }
+                .then {
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+                    controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+                }
+                .assertNext(::assertServerOwnedInputCommit)
+                .expectNoEvent(Duration.ofSeconds(59))
+                .then {
+                    clock.set(Duration.ofSeconds(59).toNanos())
+                    controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 2))
+                    controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 2))
+                }
+                .assertNext(::assertServerOwnedInputCommit)
+                .expectNoEvent(Duration.ofMillis(999))
+                .thenAwait(Duration.ofMillis(1))
+                .expectError(VoiceTutorProviderInputCommitTimeoutException::class.java)
+                .verify(Duration.ofSeconds(2))
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `terminal state ignores late manual stops starts acknowledgements and timeout callbacks`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val emitted = mutableListOf<String>()
+        val subscription = providerEvents(controller, includeInputCommits = true).subscribe(emitted::add)
+        try {
+            controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+            controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+            controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 2))
+            assertThat(emitted).hasSize(1)
+            assertServerOwnedInputCommit(emitted.single())
+            controller.close()
+
+            controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 2))
+            controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 3))
+            controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 3))
+            controller.observeProviderEvent(committedEvent("late-commit"))
+            controller.fireInputCommitTimeout(1)
+            controller.fireContinuousSpeechDeadline()
+            controller.startOpeningResponse()
+            assertThat(emitted).hasSize(1)
+        } finally {
+            subscription.dispose()
+            controller.close()
+        }
     }
 
     @Test
@@ -814,6 +1239,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
             nanoTime = nanoTime,
             transport = transport,
         )
+        controllerTransports[controller] = transport
         if (!readyForLearnerTurns) return controller
 
         // Mid-conversation tests enter through the real opening lifecycle, then
@@ -839,20 +1265,60 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         return controller
     }
 
-    private fun providerEvents(controller: VoiceTutorDuplexTurnController): Flux<String> =
-        preparedProviderEvents[controller] ?: controller.providerEvents()
+    private fun providerEvents(
+        controller: VoiceTutorDuplexTurnController,
+        includeInputCommits: Boolean = false,
+    ): Flux<String> {
+        val events = preparedProviderEvents[controller] ?: controller.providerEvents()
+        // Existing turn/playout assertions observe tutor controls. Dedicated
+        // manual-VAD tests below include and assert every real input commit too.
+        return if (includeInputCommits) events else events.filter {
+            mapper.readTree(it).path("type").asText() != "input_audio_buffer.commit"
+        }
+    }
 
     private fun queueOrdinaryResponse(controller: VoiceTutorDuplexTurnController) {
         learnerTurn(controller)
     }
 
     private fun learnerTurn(controller: VoiceTutorDuplexTurnController) {
+        if (controllerTransports[controller] == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+            val sequence = (clientSpeechSequences[controller] ?: 0L) + 1
+            clientSpeechSequences[controller] = sequence
+            controller.observeClientEvent(clientSpeechEvent(started = true, sequence = sequence))
+            controller.observeClientEvent(clientSpeechEvent(started = false, sequence = sequence))
+            controller.observeProviderEvent(committedEvent("fixture-learner-$sequence"))
+            return
+        }
         controller.observeProviderEvent(event("input_audio_buffer.speech_started"))
         controller.observeProviderEvent(event("input_audio_buffer.speech_stopped"))
         controller.observeProviderEvent(event("input_audio_buffer.committed"))
     }
 
     private fun event(type: String): String = """{"type":"$type"}"""
+
+    private fun clientSpeechEvent(started: Boolean, sequence: Long): String = mapper.writeValueAsString(
+        mapOf(
+            "type" to if (started) VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT else VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT,
+            "sequence" to sequence,
+        ),
+    )
+
+    private fun committedEvent(itemId: String): String = mapper.writeValueAsString(
+        mapOf("type" to "input_audio_buffer.committed", "item_id" to itemId),
+    )
+
+    private fun assertServerOwnedInputCommit(raw: String) {
+        val commit = mapper.readTree(raw)
+        assertThat(commit.path("type").asText()).isEqualTo("input_audio_buffer.commit")
+        assertThat(commit.path("event_id").asText()).startsWith("buddystudy-internal-duplex-input-commit-")
+        assertThat(commit.fieldNames().asSequence().toList()).containsExactlyInAnyOrder("event_id", "type")
+    }
+
+    private fun permutations(values: List<String>): List<List<String>> =
+        if (values.isEmpty()) listOf(emptyList()) else values.flatMap { first ->
+            permutations(values - first).map { listOf(first) + it }
+        }
 
     private fun responseEvent(
         type: String,

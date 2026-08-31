@@ -4,9 +4,11 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.application.model.VoiceTutorQuotaResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorRecordingResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
+import com.buddystudy.backend.voice.application.model.VoiceTutorStatusResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorRelayUseCase
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
@@ -19,6 +21,8 @@ import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.reactivestreams.Publisher
@@ -32,6 +36,7 @@ import org.springframework.web.reactive.socket.WebSocketMessage
 import org.springframework.web.reactive.socket.WebSocketSession
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
+import reactor.core.publisher.Sinks
 import java.lang.reflect.Proxy
 import java.net.URI
 import java.time.Duration
@@ -40,6 +45,52 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceTutorControlWebSocketHandlerTest {
+    @Test
+    fun `missing or unsupported local vad capability closes before claiming the provider call`() {
+        listOf(null, "", "local-vad-v0").forEach { capability ->
+            val closed = mutableListOf<CloseStatus>()
+            val handler = VoiceTutorControlWebSocketHandler(
+                proxy<VoiceTutorWebRtcUseCase> { _, _ -> error("Must not claim or open a provider call.") },
+                proxy<VoiceTutorRelayUseCase> { _, _ -> error("Must not mutate a session.") },
+                proxy<VoiceTutorUseCase> { _, _ -> error("Must not mutate quota.") },
+                VoiceTutorRealtimeMetrics(SimpleMeterRegistry()),
+            )
+            handler.handle(webSocket(
+                Principal(7, "device-7", 70, anonymous = false), Flux.never(), mutableListOf(),
+                turnProtocol = capability, onClose = { closed += it },
+            )).block(Duration.ofSeconds(1))
+            assertThat(closed).containsExactly(CloseStatus.PROTOCOL_ERROR)
+        }
+    }
+
+    @Test
+    fun `speech activity cannot reach the provider before confirmed media readiness`() {
+        val result = runControlScenario(
+            clientPayload = """{"type":"${VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT}","sequence":1}""",
+            provider = { _, terminal -> terminal.first() },
+        )
+        assertThat(result.failed).isTrue()
+        assertThat(result.reason).isEqualTo("CLIENT_PROTOCOL_ERROR")
+    }
+
+    @Test
+    fun `ready local speech pairs reach only the server turn controller without extra client fields`() {
+        val received = mutableListOf<String>()
+        val types = listOf(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT)
+        runControlScenario(
+            clientAfterReady = types.map { """{"type":"$it","sequence":1,"private":"PRIVATE_PAYLOAD"}""" },
+            provider = { events, _ -> received += events.take(2).toList() },
+        )
+        assertThat(received).hasSize(2)
+        received.zip(types).forEach { (raw, type) ->
+            val node = com.buddystudy.backend.common.application.json.JsonMapperProvider.mapper.readTree(raw)
+            assertThat(node.path("type").asText()).isEqualTo(type)
+            assertThat(node.path("sequence").longValue()).isEqualTo(1)
+            assertThat(node.size()).isEqualTo(2)
+            assertThat(raw).doesNotContain("PRIVATE_PAYLOAD", "input_audio_buffer.commit")
+        }
+    }
+
     @Test
     fun `provider cleared event stays failed when terminal send wins before receive throws`() {
         withControlLogs { logs ->
@@ -199,12 +250,16 @@ class VoiceTutorControlWebSocketHandlerTest {
         receive: Flux<WebSocketMessage>,
         sent: MutableList<String>,
         closeStatus: Mono<CloseStatus> = Mono.empty(),
+        turnProtocol: String? = VoiceTutorRealtimeContract.LOCAL_VAD_TURN_PROTOCOL,
+        onClose: (CloseStatus) -> Unit = {},
     ): WebSocketSession {
         val buffers = DefaultDataBufferFactory.sharedInstance
         val authentication = UsernamePasswordAuthenticationToken.authenticated(principal, "", emptyList())
         val handshake = HandshakeInfo(
             URI.create("https://api.example.test/api/v1/voice-tutor/sessions/$SESSION_ID/control"),
-            HttpHeaders(),
+            HttpHeaders().apply {
+                if (turnProtocol != null) set(VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER, turnProtocol)
+            },
             Mono.just(authentication),
             VoiceTutorControlWebSocketHandler.CONTROL_PROTOCOL,
         )
@@ -223,7 +278,10 @@ class VoiceTutorControlWebSocketHandlerTest {
                     .doOnNext { sent += it.payloadAsText }
                     .then()
                 "isOpen" -> true
-                "close" -> Mono.empty<Void>()
+                "close" -> {
+                    onClose(arguments?.firstOrNull() as? CloseStatus ?: CloseStatus.NORMAL)
+                    Mono.empty<Void>()
+                }
                 "closeStatus" -> closeStatus
                 "textMessage" -> WebSocketMessage(
                     WebSocketMessage.Type.TEXT,
@@ -248,12 +306,14 @@ class VoiceTutorControlWebSocketHandlerTest {
         clientCompletes: Boolean = false,
         closeStatus: Mono<CloseStatus> = Mono.empty(),
         providerEventBeforeCompletion: String? = null,
+        clientAfterReady: List<String> = emptyList(),
         provider: suspend (Flow<String>, Flow<VoiceTutorRelayTermination>) -> Unit,
     ): ControlResult {
         val now = Instant.now()
         val principal = Principal(7, "device-7", 70, anonymous = false)
         val session = activeSession(now)
         val result = ControlResult()
+        val afterReady = Sinks.many().unicast().onBackpressureBuffer<WebSocketMessage>()
         val webRtc = object : VoiceTutorWebRtcUseCase {
             override suspend fun negotiate(
                 principal: Principal,
@@ -273,6 +333,15 @@ class VoiceTutorControlWebSocketHandlerTest {
                 terminalEvents: Flow<VoiceTutorRelayTermination>,
                 onProviderEvent: suspend (String, Boolean, Boolean) -> Unit,
             ) {
+                if (clientAfterReady.isNotEmpty()) {
+                    onProviderEvent("""{"type":"${VoiceTutorRealtimeContract.SIDEBAND_READY_EVENT}"}""", false, false)
+                    clientAfterReady.forEach { raw ->
+                        assertThat(afterReady.tryEmitNext(WebSocketMessage(
+                            WebSocketMessage.Type.TEXT,
+                            DefaultDataBufferFactory.sharedInstance.wrap(raw.toByteArray()),
+                        ))).isEqualTo(Sinks.EmitResult.OK)
+                    }
+                }
                 if (providerEventBeforeCompletion != null) {
                     try {
                         onProviderEvent(providerEventBeforeCompletion, false, true)
@@ -298,9 +367,15 @@ class VoiceTutorControlWebSocketHandlerTest {
             }
         }
         val voiceTutor = proxy<VoiceTutorUseCase> { method, _ ->
-            error("Unexpected VoiceTutorUseCase call: $method")
+            when (method) {
+                "status" -> VoiceTutorStatusResponse(
+                    eligible = true, reason = null, tierCode = "TIER2", quota = detail(session, now).quota,
+                    maxSessionSeconds = 3_600, recording = detail(session, now).recording, activeSession = null,
+                )
+                else -> error("Unexpected VoiceTutorUseCase call: $method")
+            }
         }
-        val messages = clientPayload?.let {
+        val messages = if (clientAfterReady.isNotEmpty()) afterReady.asFlux() else clientPayload?.let {
             Flux.just(
                 WebSocketMessage(
                     WebSocketMessage.Type.TEXT,

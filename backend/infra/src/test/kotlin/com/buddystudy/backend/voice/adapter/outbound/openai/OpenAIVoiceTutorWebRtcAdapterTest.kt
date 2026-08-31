@@ -31,7 +31,7 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
     }
 
     @Test
-    fun `unified call configuration leaves media encoding to webrtc and disables auto response interruption`() {
+    fun `unified call configuration leaves media encoding to webrtc and disables provider turn detection`() {
         val session = mapper.readTree(
             adapter.webRtcSessionConfiguration(
                 VoiceTutorRealtimeRequest(
@@ -50,11 +50,8 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         assertThat(session.toString()).doesNotContain("audio/pcm", "24000")
 
         val turnDetection = session.path("audio").path("input").path("turn_detection")
-        assertThat(turnDetection.path("type").asText()).isEqualTo("server_vad")
-        assertThat(turnDetection.path("create_response").isBoolean).isTrue()
-        assertThat(turnDetection.path("create_response").asBoolean()).isFalse()
-        assertThat(turnDetection.path("interrupt_response").isBoolean).isTrue()
-        assertThat(turnDetection.path("interrupt_response").asBoolean()).isFalse()
+        assertThat(turnDetection.isNull).isTrue()
+        assertThat(session.path("audio").path("input").has("turn_detection")).isTrue()
     }
 
     @Test
@@ -246,9 +243,7 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         }
         val confirmedConfiguration = """{
             "type":"session.updated",
-            "session":{"type":"realtime","audio":{"input":{"turn_detection":{
-                "type":"server_vad","create_response":false,"interrupt_response":false
-            }}}}
+            "session":{"type":"realtime","audio":{"input":{"turn_detection":null}}}
         }""".trimIndent()
         try {
             assertThat(sent).hasSize(1)
@@ -277,13 +272,20 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
                 "metadata" to opening.path("response").path("metadata"),
             )
             emitProvider(mapper.writeValueAsString(mapOf("type" to "response.created", "response" to response)))
+            controller.observeClientEvent("""{"type":"buddystudy.voice.input.speech.started","sequence":1}""")
+            controller.observeClientEvent("""{"type":"buddystudy.voice.input.speech.stopped","sequence":1}""")
+            assertThat(sent).hasSize(3)
+            val commit = mapper.readTree(sent.last())
+            assertThat(commit.path("type").asText()).isEqualTo("input_audio_buffer.commit")
+            assertThat(commit.path("event_id").asText()).startsWith("buddystudy-internal-")
+            emitProvider("""{"type":"input_audio_buffer.committed","item_id":"greeting-after-ready"}""")
             emitProvider(mapper.writeValueAsString(mapOf("type" to "response.done", "response" to response)))
             emitProvider("""{"type":"output_audio_buffer.stopped","response_id":"response-opening"}""")
-            assertThat(sent).hasSize(2)
+            assertThat(sent).hasSize(3)
             controller.observeClientEvent(
                 """{"type":"buddystudy.voice.playout.drained","responseId":"response-opening"}""",
             )
-            assertThat(sent).hasSize(3)
+            assertThat(sent).hasSize(4)
             assertThat(mapper.readTree(sent.last()).path("event_id").asText()).contains("turn-response")
             assertThat(sent.joinToString()).doesNotContain("response.cancel", "conversation.item.truncate")
             assertThat(relay.isDisposed).isFalse()

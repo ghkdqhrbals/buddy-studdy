@@ -305,6 +305,20 @@ class VoiceTutorSidebandLifecycleTest {
     }
 
     @Test
+    fun `manual speech and provider truncation diagnostics keep only event counts`() {
+        val diagnostics = VoiceTutorSidebandDiagnostics(CALL_ID)
+        diagnostics.observeClientEvent("""{"type":"buddystudy.voice.input.speech.started","sequence":123,"private":"$PRIVATE_PAYLOAD"}""")
+        diagnostics.observeClientEvent("""{"type":"buddystudy.voice.input.speech.stopped","sequence":123,"private":"$PRIVATE_PAYLOAD"}""")
+        diagnostics.observeProviderEvent("""{"type":"conversation.item.truncated","item_id":"$PRIVATE_PAYLOAD"}""")
+        val snapshot = diagnostics.snapshot(VoiceTutorSidebandBranch.RECEIVE, VoiceTutorSidebandSignal.COMPLETE)
+        assertThat(snapshot.clientEventCounts).isEqualTo(mapOf(
+            "buddystudy.voice.input.speech.started" to 1L, "buddystudy.voice.input.speech.stopped" to 1L,
+        ))
+        assertThat(snapshot.providerEventCounts).isEqualTo(mapOf("conversation.item.truncated" to 1L))
+        assertThat(snapshot.toString()).doesNotContain(PRIVATE_PAYLOAD, CALL_ID, "sequence=")
+    }
+
+    @Test
     fun `default diagnostics logger excludes raw call payload close reason and exception`() {
         val logger = LoggerFactory.getLogger(
             "com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorSidebandLifecycle",

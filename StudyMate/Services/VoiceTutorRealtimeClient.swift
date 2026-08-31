@@ -1,6 +1,57 @@
 #if os(iOS)
 import Foundation
 
+enum VoiceTutorLocalSpeechDeliveryError: Error, Equatable {
+    case bufferOverflow
+    case invalidSequence
+    case staleAttempt
+}
+
+enum VoiceTutorLocalSpeechProtocol {
+    static let capabilityHeader = "X-Voice-Turn-Protocol"
+    static let capabilityValue = "local-vad-v1"
+
+    static func addingCapability(to request: URLRequest) -> URLRequest {
+        var request = request
+        request.setValue(capabilityValue, forHTTPHeaderField: capabilityHeader)
+        return request
+    }
+
+    static func payload(for event: VoiceTutorLocalSpeechEvent) throws -> [String: Any] {
+        guard event.sequence > 0 else { throw VoiceTutorLocalSpeechDeliveryError.invalidSequence }
+        return ["type": event.messageType, "sequence": event.sequence]
+    }
+}
+
+/// The capture callback only queues two tiny events per utterance. A slow or
+/// failed socket must not silently discard a start/stop edge and strand the
+/// server's input buffer; overflow is terminal and uses the existing teardown.
+struct VoiceTutorLocalSpeechEventStream: Sendable {
+    let stream: AsyncThrowingStream<VoiceTutorLocalSpeechEvent, Error>
+    private let continuation: AsyncThrowingStream<VoiceTutorLocalSpeechEvent, Error>.Continuation
+
+    init(capacity: Int = 32) {
+        let pair = AsyncThrowingStream<VoiceTutorLocalSpeechEvent, Error>.makeStream(
+            bufferingPolicy: .bufferingOldest(max(1, min(capacity, 128)))
+        )
+        stream = pair.stream
+        continuation = pair.continuation
+    }
+
+    func yield(_ event: VoiceTutorLocalSpeechEvent) {
+        switch continuation.yield(event) {
+        case .enqueued, .terminated:
+            break
+        case .dropped:
+            continuation.finish(throwing: VoiceTutorLocalSpeechDeliveryError.bufferOverflow)
+        @unknown default:
+            continuation.finish(throwing: VoiceTutorLocalSpeechDeliveryError.bufferOverflow)
+        }
+    }
+
+    func finish() { continuation.finish() }
+}
+
 struct VoiceTutorRealtimeQuotaUpdate: Equatable, Sendable {
     var limitSeconds: Int
     var usedSeconds: Int
@@ -220,6 +271,7 @@ actor VoiceTutorWebSocketTransport {
 
     private let session: URLSession
     private var socketTask: URLSessionWebSocketTask?
+    private var localSpeechAttemptID: UUID?
 
     init(configuration: URLSessionConfiguration = .ephemeral) {
         configuration.waitsForConnectivity = true
@@ -227,11 +279,12 @@ actor VoiceTutorWebSocketTransport {
         self.session = URLSession(configuration: configuration)
     }
 
-    func connect(request: URLRequest) throws {
+    func connect(request: URLRequest, localSpeechAttemptID: UUID? = nil) throws {
         guard socketTask == nil else {
             return
         }
         let task = session.webSocketTask(with: request)
+        self.localSpeechAttemptID = localSpeechAttemptID
         socketTask = task
         task.resume()
     }
@@ -289,6 +342,18 @@ actor VoiceTutorWebSocketTransport {
         ])
     }
 
+    func sendInputSpeechActivity(_ event: VoiceTutorLocalSpeechEvent, attemptID: UUID) async throws {
+        guard localSpeechAttemptID == attemptID else { throw VoiceTutorLocalSpeechDeliveryError.staleAttempt }
+        guard let socketTask else { throw TransportError.notConnected }
+        // Capture this attempt's socket before the first suspension. A delayed
+        // old pump can never send its utterance sequence to a retried call.
+        let data = try JSONSerialization.data(withJSONObject: VoiceTutorLocalSpeechProtocol.payload(for: event))
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8
+        }
+        try await socketTask.send(.string(text))
+    }
+
     func sendJSON(_ object: [String: Any]) async throws {
         guard let socketTask else {
             throw TransportError.notConnected
@@ -335,6 +400,7 @@ actor VoiceTutorWebSocketTransport {
     func disconnect(closeCode: URLSessionWebSocketTask.CloseCode = .normalClosure) {
         socketTask?.cancel(with: closeCode, reason: nil)
         socketTask = nil
+        localSpeechAttemptID = nil
     }
 }
 #endif

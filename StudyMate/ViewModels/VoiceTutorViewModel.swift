@@ -37,7 +37,7 @@ enum VoiceTutorSessionPhase: Equatable {
 private enum VoiceTutorStopSource: String {
     case startupFailure, user, backgroundOrDismissal, audioInterruption, mediaFailure
     case identityInvalidated, controlReceiveFailure, providerError, pcmPlaybackFailure
-    case outputBufferCleared, playoutAckFailure
+    case outputBufferCleared, playoutAckFailure, localSpeechDeliveryFailure
 }
 
 enum VoiceTutorDiagnosticError {
@@ -327,6 +327,8 @@ final class VoiceTutorViewModel: ObservableObject {
     private var receiveTask: Task<Void, Never>?
     private var audioSendTask: Task<Void, Never>?
     private var audioSendContinuation: AsyncStream<Data>.Continuation?
+    private var localSpeechEvents: VoiceTutorLocalSpeechEventStream?
+    private var localSpeechSendTask: Task<Void, Never>?
     private var serverEndContinuation: AsyncStream<VoiceTutorRealtimeEnded>.Continuation?
     private var heartbeatTask: Task<Void, Never>?
     private var countdownTask: Task<Void, Never>?
@@ -359,6 +361,7 @@ final class VoiceTutorViewModel: ObservableObject {
             return
         }
         let attemptID = connectionAttemptFence.begin()
+        stopLocalSpeechEventPump()
         sessionID = nil
         clearSessionCountdown()
         isMuted = false
@@ -423,6 +426,12 @@ final class VoiceTutorViewModel: ObservableObject {
             if let webRTCConnection = connection.webRTC {
                 let webRTCTransport = VoiceTutorWebRTCTransport()
                 self.webRTCTransport = webRTCTransport
+                let speechEvents = startLocalSpeechEventPump(attemptID: attemptID, connection: connection)
+                webRTCTransport.onLocalSpeechActivity = { event in
+                    // Called serially from the capture gate, with no actor hop
+                    // per audio frame and no microphone bytes in the queue.
+                    speechEvents.yield(event)
+                }
                 webRTCTransport.onRenderedPCM = { [weak self] uptime in
                     Task { @MainActor [weak self] in
                         guard self?.connectionAttemptFence.isCurrent(attemptID) == true else { return }
@@ -466,7 +475,10 @@ final class VoiceTutorViewModel: ObservableObject {
                 }
                 // The backend can claim /control only after SDP has attached
                 // the provider call and transitioned this session to ACTIVE.
-                try await transport.connect(request: webRTCConnection.controlRequest)
+                try await transport.connect(
+                    request: VoiceTutorLocalSpeechProtocol.addingCapability(to: webRTCConnection.controlRequest),
+                    localSpeechAttemptID: attemptID
+                )
             } else {
                 try await transport.connect(request: connection.request)
                 guard connectionAttemptFence.isCurrent(attemptID), connection.isCurrent() else {
@@ -514,6 +526,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 webRTCTransport?.close()
                 webRTCTransport = nil
                 stopAudioSendPump()
+                stopLocalSpeechEventPump()
                 stopHeartbeat()
                 await transport.disconnect(closeCode: .goingAway)
                 await finishRecordingIfNeeded()
@@ -527,6 +540,7 @@ final class VoiceTutorViewModel: ObservableObject {
             guard connectionAttemptFence.isCurrent(attemptID) else { return }
             webRTCTransport?.close()
             webRTCTransport = nil
+            stopLocalSpeechEventPump()
             return
         } catch {
             guard connectionAttemptFence.isCurrent(attemptID), !isFinalizing,
@@ -604,6 +618,7 @@ final class VoiceTutorViewModel: ObservableObject {
         } else {
             audioEngine.stop()
         }
+        stopLocalSpeechEventPump()
         await finishAudioSendPump()
         stopHeartbeat()
         clearSessionCountdown()
@@ -659,6 +674,7 @@ final class VoiceTutorViewModel: ObservableObject {
         audioEngine.stop()
         webRTCTransport?.close()
         stopAudioSendPump()
+        stopLocalSpeechEventPump()
         if isFinalizing {
             await transport.disconnect(closeCode: .goingAway)
             return
@@ -674,6 +690,67 @@ final class VoiceTutorViewModel: ObservableObject {
             }
             await self.receiveEvents(attemptID: attemptID)
         }
+    }
+
+    private func startLocalSpeechEventPump(
+        attemptID: UUID,
+        connection: VoiceTutorLiveConnection
+    ) -> VoiceTutorLocalSpeechEventStream {
+        stopLocalSpeechEventPump()
+        let events = VoiceTutorLocalSpeechEventStream()
+        localSpeechEvents = events
+        localSpeechSendTask = Task { [weak self] in
+            do {
+                for try await event in events.stream {
+                    guard let self, !Task.isCancelled,
+                          self.connectionAttemptFence.isCurrent(attemptID), connection.isCurrent(),
+                          self.phase.isLive, !self.isFinalizing else { return }
+                    switch event.activity {
+                    case .started:
+                        self.duplexPlaybackState.userSpeechStarted()
+                        if !self.duplexPlaybackState.assistantResponseActive {
+                            self.phase = .listening
+                        }
+                    case .stopped:
+                        self.duplexPlaybackState.userSpeechStopped()
+                    }
+                    // One consumer awaits each send before taking the next edge.
+                    // Backend alone commits input and creates the next response.
+                    try await self.transport.sendInputSpeechActivity(event, attemptID: attemptID)
+                    guard !Task.isCancelled, self.connectionAttemptFence.isCurrent(attemptID),
+                          connection.isCurrent(), self.phase.isLive, !self.isFinalizing else { return }
+                    self.logDiagnostic("event=local_speech_\(event.activity.rawValue) sequence=\(event.sequence)")
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self, !Task.isCancelled,
+                      self.connectionAttemptFence.isCurrent(attemptID), connection.isCurrent(),
+                      self.phase.isLive, !self.isFinalizing else { return }
+                self.logDiagnostic(
+                    "event=local_speech_delivery_failed \(VoiceTutorDiagnosticError.fields(for: error))",
+                    isWarning: true
+                )
+                // Preserve this task's settlement work when stop() cancels peers.
+                self.localSpeechSendTask = nil
+                self.localSpeechEvents?.finish()
+                self.localSpeechEvents = nil
+                self.errorMessage = self.appState.strings.voiceTutorConnectionFailed
+                await self.stop(
+                    shouldNotifyServerOverSocket: false,
+                    outcome: .failed,
+                    source: .localSpeechDeliveryFailure
+                )
+            }
+        }
+        return events
+    }
+
+    private func stopLocalSpeechEventPump() {
+        localSpeechEvents?.finish()
+        localSpeechEvents = nil
+        localSpeechSendTask?.cancel()
+        localSpeechSendTask = nil
     }
 
     private func startAudioSendPump() -> AsyncStream<Data>.Continuation {
@@ -1077,6 +1154,7 @@ final class VoiceTutorViewModel: ObservableObject {
         webRTCTransport?.close()
         webRTCTransport = nil
         stopAudioSendPump()
+        stopLocalSpeechEventPump()
         stopHeartbeat()
         clearSessionCountdown()
         // This method runs inside receiveTask. Cancelling it here would also cancel

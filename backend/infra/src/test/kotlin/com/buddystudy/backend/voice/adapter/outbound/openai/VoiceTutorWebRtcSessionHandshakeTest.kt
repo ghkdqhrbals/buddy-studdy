@@ -23,7 +23,7 @@ class VoiceTutorWebRtcSessionHandshakeTest {
     private val mapper = JsonMapperProvider.mapper
 
     @Test
-    fun `initial dispatch is one GA update with explicit false flags before readiness`() {
+    fun `initial dispatch is one GA update with explicit null turn detection before readiness`() {
         val handshake = newHandshake()
         val order = mutableListOf<String>()
         val updates = mutableListOf<String>()
@@ -49,16 +49,13 @@ class VoiceTutorWebRtcSessionHandshakeTest {
         assertThat(session.path("type").asText()).isEqualTo("realtime")
         assertThat(session.has("turn_detection")).isFalse()
         val detection = session.path("audio").path("input").path("turn_detection")
-        assertThat(detection.path("type").asText()).isEqualTo("server_vad")
-        for (field in listOf("create_response", "interrupt_response")) {
-            assertThat(detection.path(field).isBoolean).describedAs(field).isTrue()
-            assertThat(detection.path(field).booleanValue()).describedAs(field).isFalse()
-        }
+        assertThat(detection.isNull).isTrue()
+        assertThat(session.path("audio").path("input").has("turn_detection")).isTrue()
         assertThat(updates.single()).doesNotContain("response.create", "response.cancel", "output_audio_buffer.clear")
     }
 
     @Test
-    fun `created events never acknowledge configuration even with correct flags`() {
+    fun `created events never acknowledge configuration even with explicit null turn detection`() {
         lateinit var handshake: VoiceTutorWebRtcSessionHandshake
         StepVerifier.withVirtualTime {
             handshake = newHandshake()
@@ -69,7 +66,7 @@ class VoiceTutorWebRtcSessionHandshakeTest {
             .then {
                 assertThat(handshake.observeProviderEvent(validUpdated().replace("session.updated", "session.created"))).isTrue()
                 assertThat(handshake.observeProviderEvent(
-                    validUpdated().replace("session.updated", "session.created").replace(":false", ":true"),
+                    automaticUpdated().replace("session.updated", "session.created"),
                 )).isTrue()
             }
             .expectNoEvent(CONFIRMATION_TIMEOUT.minusMillis(1))
@@ -139,15 +136,15 @@ class VoiceTutorWebRtcSessionHandshakeTest {
         assertThat(snapshot.eventType).isEqualTo("session.updated")
         assertThat(snapshot.sessionType).isEqualTo("realtime")
         assertThat(snapshot.schema).isEqualTo(VoiceTutorWebRtcConfigurationSchema.GA)
-        assertThat(snapshot.turnDetectionType).isEqualTo("server_vad")
-        assertThat(snapshot.createResponse).isFalse()
-        assertThat(snapshot.interruptResponse).isFalse()
+        assertThat(snapshot.turnDetectionType).isEqualTo("manual")
+        assertThat(snapshot.createResponse).isNull()
+        assertThat(snapshot.interruptResponse).isNull()
         assertThat(snapshot.updateRequested).isTrue()
         assertThat(snapshot.verified).isTrue()
     }
 
     @TestFactory
-    fun `post-dispatch updated must contain genuine false booleans in the GA nested schema`() =
+    fun `post-dispatch updated must contain explicit null turn detection in the GA nested schema`() =
         invalidUpdates().map { (description, raw) ->
             dynamicTest(description) {
                 val snapshots = CopyOnWriteArrayList<VoiceTutorWebRtcConfigurationSnapshot>()
@@ -171,7 +168,7 @@ class VoiceTutorWebRtcSessionHandshakeTest {
         StepVerifier.create(handshake.awaitConfirmation()).expectComplete().verify(VERIFY_TIMEOUT)
 
         assertThatThrownBy {
-            handshake.observeProviderEvent(validUpdated().replace("\"interrupt_response\":false", "\"interrupt_response\":true"))
+            handshake.observeProviderEvent(automaticUpdated())
         }.isInstanceOf(VoiceTutorWebRtcSessionConfigurationException::class.java)
     }
 
@@ -223,7 +220,7 @@ class VoiceTutorWebRtcSessionHandshakeTest {
             Mono.firstWithSignal(
                 handshake.awaitConfirmation().doOnCancel { readyCancelled.set(true) },
                 Mono.fromRunnable<Void> {
-                    handshake.observeProviderEvent(validUpdated().replace("\"create_response\":false", "\"create_response\":true"))
+                    handshake.observeProviderEvent(automaticUpdated())
                 },
             ),
         )
@@ -285,31 +282,38 @@ class VoiceTutorWebRtcSessionHandshakeTest {
     }
 
     private fun validUpdated() =
-        """{"type":"session.updated","session":{"type":"realtime","audio":{"input":{"turn_detection":{"type":"server_vad","create_response":false,"interrupt_response":false}}}}}"""
+        """{"type":"session.updated","session":{"type":"realtime","audio":{"input":{"turn_detection":null}}}}"""
+
+    private fun automaticUpdated() = validUpdated().replace(
+        "null", """{"type":"server_vad","create_response":false,"interrupt_response":false}""",
+    )
 
     private fun invalidUpdates(): List<Pair<String, String>> {
         val valid = validUpdated()
+        val automatic = automaticUpdated()
         return listOf(
             "missing session" to """{"type":"session.updated"}""",
             "missing session type" to valid.replace("\"type\":\"realtime\",", ""),
             "wrong session type" to valid.replace("\"realtime\"", "\"transcription\""),
             "missing audio input" to """{"type":"session.updated","session":{"type":"realtime","audio":{}}}""",
             "missing turn detection" to """{"type":"session.updated","session":{"type":"realtime","audio":{"input":{}}}}""",
-            "null turn detection" to """{"type":"session.updated","session":{"type":"realtime","audio":{"input":{"turn_detection":null}}}}""",
-            "missing VAD type" to valid.replace("\"type\":\"server_vad\",", ""),
-            "semantic VAD" to valid.replace("server_vad", "semantic_vad"),
-            "missing create_response" to valid.replace("\"create_response\":false,", ""),
-            "missing interrupt_response" to valid.replace(",\"interrupt_response\":false", ""),
-            "automatic response enabled" to valid.replace("\"create_response\":false", "\"create_response\":true"),
-            "automatic interruption enabled" to valid.replace("\"interrupt_response\":false", "\"interrupt_response\":true"),
-            "string create_response" to valid.replace("\"create_response\":false", "\"create_response\":\"false\""),
-            "string interrupt_response" to valid.replace("\"interrupt_response\":false", "\"interrupt_response\":\"false\""),
-            "numeric create_response" to valid.replace("\"create_response\":false", "\"create_response\":0"),
-            "numeric interrupt_response" to valid.replace("\"interrupt_response\":false", "\"interrupt_response\":0"),
-            "null create_response" to valid.replace("\"create_response\":false", "\"create_response\":null"),
-            "null interrupt_response" to valid.replace("\"interrupt_response\":false", "\"interrupt_response\":null"),
+            "server VAD still enabled despite false flags" to automatic,
+            "missing VAD type" to automatic.replace("\"type\":\"server_vad\",", ""),
+            "semantic VAD" to automatic.replace("server_vad", "semantic_vad"),
+            "missing create_response" to automatic.replace("\"create_response\":false,", ""),
+            "missing interrupt_response" to automatic.replace(",\"interrupt_response\":false", ""),
+            "automatic response enabled" to automatic.replace("\"create_response\":false", "\"create_response\":true"),
+            "automatic interruption enabled" to automatic.replace("\"interrupt_response\":false", "\"interrupt_response\":true"),
+            "string create_response" to automatic.replace("\"create_response\":false", "\"create_response\":\"false\""),
+            "string interrupt_response" to automatic.replace("\"interrupt_response\":false", "\"interrupt_response\":\"false\""),
+            "numeric create_response" to automatic.replace("\"create_response\":false", "\"create_response\":0"),
+            "numeric interrupt_response" to automatic.replace("\"interrupt_response\":false", "\"interrupt_response\":0"),
+            "null create_response" to automatic.replace("\"create_response\":false", "\"create_response\":null"),
+            "null interrupt_response" to automatic.replace("\"interrupt_response\":false", "\"interrupt_response\":null"),
+            "string null is not disabled detection" to valid.replace("null", "\"null\""),
+            "empty detection object is not disabled detection" to valid.replace("null", "{}"),
             "legacy detection is not a GA confirmation" to
-                """{"type":"session.updated","session":{"type":"realtime","turn_detection":{"type":"server_vad","create_response":false,"interrupt_response":false}}}""",
+                """{"type":"session.updated","session":{"type":"realtime","turn_detection":null}}""",
         )
     }
 

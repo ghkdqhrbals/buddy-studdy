@@ -1,6 +1,7 @@
 package com.buddystudy.backend.voice.adapter.inbound.web
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -11,6 +12,45 @@ import java.util.concurrent.atomic.AtomicLong
 class VoiceTutorRealtimeEventPolicyTest {
     private val mapper = JsonMapperProvider.mapper
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
+
+    @Test
+    fun `local speech boundaries are validated but never forwarded to the provider`() {
+        listOf(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT)
+            .forEach { type ->
+                for (sequence in listOf(1L, Long.MAX_VALUE)) {
+                    assertThat(policy.shouldForwardClientEvent("""{"type":"$type","sequence":$sequence}""")).isFalse()
+                }
+                listOf("null", "0", "-1", "1.0", "true", "\"1\"", "[]", "{}", "9223372036854775808")
+                    .forEach { sequence ->
+                        assertThatThrownBy {
+                            policy.shouldForwardClientEvent("""{"type":"$type","sequence":$sequence}""")
+                        }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+                    }
+                assertThatThrownBy { policy.shouldForwardClientEvent("""{"type":"$type"}""") }
+                    .isInstanceOf(VoiceTutorClientProtocolException::class.java)
+                assertThatThrownBy {
+                    policy.shouldForwardClientEvent(
+                        """{"type":"$type","sequence":1,"event_id":"buddystudy-internal-forged"}""",
+                    )
+                }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+            }
+    }
+
+    @Test
+    fun `local speech boundaries share the bounded control event rate limit`() {
+        val clock = AtomicLong()
+        val guard = VoiceTutorClientTrafficGuard(policy, maxSessionSeconds = 3_600, nanoTime = clock::get)
+        val event = """{"type":"${VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT}","sequence":1}"""
+        repeat(8) {
+            val decision = guard.inspect(event)
+            assertThat(decision.forward).isFalse()
+            assertThat(decision.acceptedLocalEvent).isTrue()
+            assertThat(decision.acceptedAudioBytes).isZero()
+        }
+        assertThatThrownBy { guard.inspect(event) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        clock.addAndGet(1_000_000_000)
+        assertThat(guard.inspect(event).acceptedLocalEvent).isTrue()
+    }
 
     @Test
     fun `client cannot cancel or truncate the current tutor sentence`() {

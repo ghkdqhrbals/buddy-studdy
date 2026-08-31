@@ -7,6 +7,9 @@ production rollout or a measured ChatGPT-equivalent latency guarantee.
 
 - Direct iPhone/OpenAI WebRTC media, with authenticated backend-owned control;
   the bounded PCM WebSocket path remains a fallback.
+- WebRTC verifies explicit `turn_detection: null`. Automatic local microphone
+  speech edges are numbered start/stop pairs; the backend alone commits input
+  and schedules replies. Both SDP/control requests declare `local-vad-v1`.
 - Learner overlap never triggers playback stop, response cancellation, or
   truncation. Each tutor response is one short complete sentence. The next
   answer requires completion of the same provider response, provider audio-buffer
@@ -265,6 +268,70 @@ xcodebuild -project StudyMate.xcodeproj -scheme StudyMateiOS \
 - After confirming there were no active dev call sessions, the updated signed
   app was explicitly launched on the iPhone with `devicectl`. No call was
   started automatically.
+
+## Mid-sentence audio cut: verified provider reproduction and local turns
+
+This follow-up supersedes the earlier WebRTC `server_vad`/false-flags policy;
+the previous checks above remain a historical record, not the current policy.
+
+- A subsequent dev call still acknowledged both false flags, then received
+  provider `speech_started` and `output_audio_buffer.cleared` during its first
+  response. Its first terminal source was the provider event; the control
+  disconnect followed it. That is not evidence that Routingflare initiated
+  this cut, nor proof that the learner personally interrupted (echo/noise can
+  also be detected as speech).
+- Isolated, bounded real-provider probes used the same `gpt-realtime-2.1`
+  model/`marin` voice, direct WebRTC, and existing dev AWS-secret credential.
+  The learner input was a fixed synthetic greeting, never a user recording or
+  live microphone. No BuddyStudy session or monthly user quota was used.
+  Each provider call was explicitly hung up with HTTP 200.
+- With `server_vad` and both flags false, silence input allowed a complete
+  greeting. Overlapping the synthetic learner greeting instead caused a
+  matching provider clear/truncation, leaving about 0.7 seconds of audible RTP
+  although `response.done` reported `completed` and text finished. The same
+  overlap with `semantic_vad` and both false flags also cut audio. Simply
+  changing VAD type, trusting completed text, or ignoring the clear is not a
+  verified fix. Logs: `build/voiceProviderProbeOverlap.log` and
+  `build/voiceProviderProbeSemanticOverlap.log`.
+- With explicit null detection and server-owned input commit, the overlapping
+  input was acknowledged/transcribed while the first tutor sentence finished.
+  The next reply was requested only after the provider buffer stopped. Both
+  replies completed and stopped normally, with 602 nonzero received PCM frames,
+  no clear/truncation, and no provider error. The earlier one-turn probe's
+  completion timer could end during reply two; the corrected two-turn probe
+  waited for both drains. Log: `build/voiceProviderProbeManualTwoTurns.log`.
+- Implementation retains continuous WebRTC media and the sentence completion,
+  provider-buffer, and actual device-playout gates. It changes only how input
+  turn boundaries reach the server: an always-installed processed-capture
+  detector, 80 ms onset/700 ms release, explicit FloatS16 normalization, paired
+  sequence, bounded ordered delivery, and attempt/account/socket fences. The
+  server validates ready/capability/rate/sequence, emits one commit per matching
+  stop, deduplicates ACKs, and keeps the oldest pending commit timeout bounded.
+  Teacher overlap never mutes input. Genuine provider integrity errors still
+  fail; timeouts were not extended and failures were not hidden.
+- The full focused voice backend run passed 246 tests: 61 application and
+  185 infrastructure cases, with no failures or skips. This includes all 24
+  orderings of commit ACK/response done/provider stop/device drain, overlapping
+  utterances before an older ACK, replay/overflow/timeout/terminal fences,
+  long-monologue intervention, explicit-null configuration, and incompatible
+  client rejection before provider allocation. The JVM JAR build also passed.
+  Logs: `build/voiceManualTurnAllBackendTests.log` and
+  `build/voiceManualTurnBackendTests.log`.
+- The required generic iOS build passed. The signed physical iPhone 16 Pro
+  passed 66 selected non-mutating contracts with zero failures, including 21
+  new local-speech tests. Existing `build/iOSDeviceDerivedData` was reused;
+  recording/account purge tests and real device microphone/provider sessions
+  were excluded. Logs: `build/voiceManualTurnGenericBuild.log` and
+  `build/voiceManualTurnDeviceTests.log`.
+- These provider/contract tests do not prove acoustic end-to-end behavior of
+  the new detector on the user's microphone, noisy-room/echo performance,
+  route changes, or a complete 60-minute call. Those real-device release gates
+  remain below. The model, monthly/per-user limits, optional-recording consent,
+  provider key source, Docker infrastructure, and Routingflare were not changed.
+
+The manual-turn wire protocol follows [OpenAI's conversation guide](https://developers.openai.com/api/docs/guides/realtime-conversations);
+the observed interruption is distinguished from response completion using the
+[WebRTC output-buffer event contract](https://developers.openai.com/api/reference/resources/realtime/server-events#output_audio_buffer.cleared).
 
 ## Release gates
 

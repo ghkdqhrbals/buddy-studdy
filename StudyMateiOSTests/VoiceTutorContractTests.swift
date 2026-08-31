@@ -197,6 +197,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-token")
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Device-Id"), "fixture-device")
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Client-Secret"), "fixture-secret")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Voice-Turn-Protocol"), "local-vad-v1")
         XCTAssertEqual(request.httpBody, Data(offer.utf8))
         XCTAssertEqual(request.url, authenticatedRequest.url)
         XCTAssertEqual(request.timeoutInterval, authenticatedRequest.timeoutInterval)
@@ -1156,6 +1157,416 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(capturedPNGs.count, fixtures.count, "Each state must produce a distinct rendered screen")
     }
 
+    func testLocalVoiceActivitySilenceNeverStartsASpeakingTurn() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        XCTAssertNil(detector.updateGate(mediaReady: true, muted: false))
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 500).isEmpty)
+        XCTAssertFalse(detector.isSpeaking)
+        XCTAssertEqual(detector.sequence, 0)
+    }
+
+    func testLocalVoiceActivityRejectsShortSpikesWithoutAccumulatingAcrossQuietGaps() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        for _ in 0..<20 {
+            XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 7).isEmpty)
+            XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 10).isEmpty)
+        }
+        XCTAssertFalse(detector.isSpeaking)
+        XCTAssertEqual(detector.sequence, 0)
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8), [
+            VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
+        ])
+    }
+
+    func testLocalVoiceActivityStartsOnceAndStopsAfterSevenHundredMillisecondsOfQuiet() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 7).isEmpty)
+        XCTAssertFalse(detector.isSpeaking)
+        XCTAssertEqual(detector.process(normalizedRMS: 0.03, duration: 0.01),
+                       VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1))
+        XCTAssertTrue(detector.isSpeaking)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 200).isEmpty,
+                      "A sustained utterance starts only once")
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 69).isEmpty)
+        XCTAssertTrue(detector.isSpeaking, "A brief pause must not end a turn early")
+        XCTAssertEqual(detector.process(normalizedRMS: 0, duration: 0.01),
+                       VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1))
+        XCTAssertFalse(detector.isSpeaking)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 200).isEmpty)
+        XCTAssertEqual(detector.sequence, 1)
+    }
+
+    func testLocalVoiceActivityHysteresisPreservesQuietSpeechAndResetsTheSilenceHold() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8).count, 1)
+        // 0.004 is below the onset floor but above the release floor. Once
+        // speaking, it is quiet continuing speech rather than a new onset.
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.004, frames: 200).isEmpty)
+        XCTAssertTrue(detector.isSpeaking)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 60).isEmpty)
+        XCTAssertNil(detector.process(normalizedRMS: 0.004, duration: 0.01))
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 69).isEmpty,
+                      "Continuing speech restarts the complete 700ms silence hold")
+        XCTAssertEqual(detector.process(normalizedRMS: 0, duration: 0.01),
+                       VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1))
+    }
+
+    func testLocalVoiceActivityNormalizedAndNativeWebRTCSamplesProduceIdenticalEvents() throws {
+        var normalizedDetector = VoiceTutorLocalSpeechDetector()
+        var nativeDetector = VoiceTutorLocalSpeechDetector()
+        _ = normalizedDetector.updateGate(mediaReady: true, muted: false)
+        _ = nativeDetector.updateGate(mediaReady: true, muted: false)
+        let segments: [(Float, Int)] = [(0, 30), (0.012, 16), (0.004, 40), (0, 80), (0.02, 12), (0, 80)]
+        var normalizedEvents: [VoiceTutorLocalSpeechEvent] = []
+        var nativeEvents: [VoiceTutorLocalSpeechEvent] = []
+        for (amplitude, frames) in segments {
+            let normalizedSamples: [Float] = [amplitude, -amplitude, amplitude, -amplitude]
+            let nativeSamples = normalizedSamples.map { $0 * 32_768 }
+            let normalizedRMS = try XCTUnwrap(VoiceTutorLocalSpeechDetector.normalizedRMS(
+                samples: normalizedSamples, scale: .normalizedFloat
+            ))
+            let nativeRMS = try XCTUnwrap(VoiceTutorLocalSpeechDetector.normalizedRMS(
+                samples: nativeSamples, scale: .webRTCFloatS16
+            ))
+            XCTAssertEqual(normalizedRMS, nativeRMS, accuracy: 0.000_000_001)
+            normalizedEvents += localSpeechEvents(&normalizedDetector, rms: normalizedRMS, frames: frames)
+            nativeEvents += localSpeechEvents(&nativeDetector, rms: nativeRMS, frames: frames)
+        }
+        XCTAssertEqual(normalizedEvents, nativeEvents)
+        XCTAssertEqual(normalizedEvents, [
+            VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1),
+            VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1),
+            VoiceTutorLocalSpeechEvent(activity: .started, sequence: 2),
+            VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 2)
+        ])
+    }
+
+    func testLocalVoiceActivityQuietNativeFloatSamplesNeverGuessNormalizedScale() throws {
+        let samples: [Float] = [0.5, -0.5, 0.5, -0.5]
+        let nativeRMS = try XCTUnwrap(VoiceTutorLocalSpeechDetector.normalizedRMS(
+            samples: samples, scale: .webRTCFloatS16
+        ))
+        let normalizedRMS = try XCTUnwrap(VoiceTutorLocalSpeechDetector.normalizedRMS(
+            samples: samples, scale: .normalizedFloat
+        ))
+        XCTAssertEqual(nativeRMS, 0.5 / 32_768, accuracy: 0.000_000_000_001)
+        XCTAssertEqual(normalizedRMS, 0.5, accuracy: 0.000_000_001)
+        var detector = VoiceTutorLocalSpeechDetector()
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: nativeRMS, frames: 300).isEmpty)
+        XCTAssertFalse(detector.isSpeaking,
+                       "A native FloatS16 sample below one is not half-scale microphone audio")
+    }
+
+    func testLocalVoiceActivityRMSRejectsEmptyAndNonFiniteSamples() throws {
+        let invalidSamples: [[Float]] = [
+            [], [.nan], [.infinity], [-.infinity], [0, .nan, 0], [0.2, .infinity, -0.2]
+        ]
+        for scale in [VoiceTutorSpeechSampleScale.normalizedFloat, .webRTCFloatS16] {
+            for samples in invalidSamples {
+                XCTAssertNil(VoiceTutorLocalSpeechDetector.normalizedRMS(samples: samples, scale: scale))
+            }
+            XCTAssertEqual(VoiceTutorLocalSpeechDetector.normalizedRMS(samples: [0, 0, 0], scale: scale), 0)
+        }
+        let quiet = try XCTUnwrap(VoiceTutorLocalSpeechDetector.normalizedRMS(
+            samples: [Float.leastNonzeroMagnitude], scale: .normalizedFloat
+        ))
+        XCTAssertGreaterThan(quiet, 0, "Finite quiet samples must not become NaN or be discarded")
+    }
+
+    func testLocalVoiceActivityInvalidRMSAndDurationNeverAdvanceDetectionEvidence() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        let invalidRMS: [Double] = [.nan, .infinity, -.infinity, -1, 1.000_001, .greatestFiniteMagnitude]
+        let invalidDurations: [TimeInterval] = [0, -0.01, .nan, .infinity, -.infinity, 0.250_001]
+        for _ in 0..<10 {
+            for rms in invalidRMS {
+                XCTAssertNil(detector.process(normalizedRMS: rms, duration: 0.01))
+            }
+            for duration in invalidDurations {
+                XCTAssertNil(detector.process(normalizedRMS: 0.03, duration: duration))
+            }
+        }
+        XCTAssertFalse(detector.isSpeaking)
+        XCTAssertEqual(detector.sequence, 0)
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8), [
+            VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
+        ])
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 69).isEmpty)
+        for rms in invalidRMS {
+            XCTAssertNil(detector.process(normalizedRMS: rms, duration: 0.01))
+        }
+        for duration in invalidDurations {
+            XCTAssertNil(detector.process(normalizedRMS: 0, duration: duration))
+        }
+        XCTAssertTrue(detector.isSpeaking,
+                      "Invalid capture metadata is not evidence of silence or permission to stop")
+        XCTAssertEqual(detector.process(normalizedRMS: 0, duration: 0.01),
+                       VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1))
+    }
+
+    func testLocalVoiceActivityReadinessAndMuteGateDiscardPreReadyAudio() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.05, frames: 100).isEmpty)
+        XCTAssertNil(detector.updateGate(mediaReady: false, muted: false))
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.05, frames: 100).isEmpty)
+        XCTAssertNil(detector.updateGate(mediaReady: true, muted: true))
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.05, frames: 100).isEmpty)
+        XCTAssertEqual(detector.sequence, 0)
+        XCTAssertNil(detector.updateGate(mediaReady: true, muted: false))
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 7).isEmpty)
+        XCTAssertEqual(detector.process(normalizedRMS: 0.03, duration: 0.01),
+                       VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1))
+        XCTAssertEqual(detector.updateGate(mediaReady: false, muted: false),
+                       VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1))
+        XCTAssertNil(detector.updateGate(mediaReady: false, muted: false))
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.05, frames: 100).isEmpty)
+        XCTAssertFalse(detector.isSpeaking)
+    }
+
+    func testLocalVoiceActivityMuteStopsOnceAndUnmuteRequiresANewOnset() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8), [
+            VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
+        ])
+        XCTAssertEqual(detector.updateGate(mediaReady: true, muted: true),
+                       VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1))
+        XCTAssertNil(detector.updateGate(mediaReady: true, muted: true))
+        XCTAssertFalse(detector.isSpeaking)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.1, frames: 100).isEmpty)
+        XCTAssertNil(detector.updateGate(mediaReady: true, muted: false))
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 7).isEmpty)
+        XCTAssertEqual(detector.process(normalizedRMS: 0.03, duration: 0.01),
+                       VoiceTutorLocalSpeechEvent(activity: .started, sequence: 2))
+        XCTAssertNil(detector.updateGate(mediaReady: true, muted: false))
+        XCTAssertTrue(detector.isSpeaking, "Reasserting an open gate must not interrupt an utterance")
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0, frames: 70), [
+            VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 2)
+        ])
+    }
+
+    func testLocalVoiceActivityResetDiscardsPriorOnsetAndRestartsAttemptSequence() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 7).isEmpty)
+        detector.reset()
+        XCTAssertEqual(detector.sequence, 0)
+        XCTAssertFalse(detector.isSpeaking)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 100).isEmpty)
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 7).isEmpty)
+        XCTAssertEqual(detector.process(normalizedRMS: 0.03, duration: 0.01),
+                       VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1))
+        detector.reset()
+        XCTAssertFalse(detector.isSpeaking)
+        XCTAssertEqual(detector.sequence, 0)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 100).isEmpty)
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8), [
+            VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
+        ])
+    }
+
+    func testLocalVoiceActivityCloseRejectsLateCallbacksUntilAnExplicitReset() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8).count, 1)
+        detector.close()
+        XCTAssertFalse(detector.isSpeaking)
+        XCTAssertNil(detector.updateGate(mediaReady: true, muted: false))
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 100).isEmpty)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 100).isEmpty)
+        detector.close()
+        XCTAssertNil(detector.updateGate(mediaReady: true, muted: true))
+        detector.reset()
+        XCTAssertEqual(detector.sequence, 0)
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8), [
+            VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
+        ])
+    }
+
+    func testLocalVoiceActivityKeepsListeningWhileTheTutorFinishesTheCurrentSentence() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        var playback = VoiceTutorDuplexPlaybackState()
+        XCTAssertTrue(playback.responseStarted(responseID: "synthetic-tutor-sentence", isTutorIntervention: false))
+        XCTAssertTrue(playback.assistantAudioBegan(responseID: "synthetic-tutor-sentence"))
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8), [
+            VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
+        ])
+        playback.userSpeechStarted()
+        XCTAssertTrue(playback.isUserSpeaking)
+        XCTAssertTrue(playback.assistantResponseActive)
+        XCTAssertEqual(playback.activeResponseID, "synthetic-tutor-sentence")
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0, frames: 70), [
+            VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1)
+        ])
+        playback.userSpeechStopped()
+        XCTAssertFalse(playback.isUserSpeaking)
+        XCTAssertTrue(playback.assistantResponseActive,
+                      "Local speech edges never cancel, clear, or truncate tutor playback")
+        XCTAssertEqual(playback.activeResponseID, "synthetic-tutor-sentence")
+    }
+
+    func testLocalVoiceActivityMessagesPairEdgesWithPositiveIncreasingUtteranceSequences() {
+        var detector = VoiceTutorLocalSpeechDetector()
+        _ = detector.updateGate(mediaReady: true, muted: false)
+        var events: [VoiceTutorLocalSpeechEvent] = []
+        for _ in 0..<6 {
+            events += localSpeechEvents(&detector, rms: 0.03, frames: 8)
+            events += localSpeechEvents(&detector, rms: 0, frames: 70)
+        }
+        XCTAssertEqual(events.count, 12)
+        for (index, event) in events.enumerated() {
+            XCTAssertGreaterThan(event.sequence, 0)
+            XCTAssertEqual(event.sequence, index / 2 + 1)
+            XCTAssertEqual(event.activity, index.isMultiple(of: 2) ? .started : .stopped)
+            XCTAssertEqual(event.messageType, index.isMultiple(of: 2)
+                ? "buddystudy.voice.input.speech.started"
+                : "buddystudy.voice.input.speech.stopped")
+        }
+    }
+
+    func testLocalVoiceActivityPayloadContainsOnlyTheAppEventAndUtteranceSequence() throws {
+        for activity in [VoiceTutorLocalSpeechActivity.started, .stopped] {
+            for sequence in [1, 2, Int.max] {
+                let event = VoiceTutorLocalSpeechEvent(activity: activity, sequence: sequence)
+                let payload = try VoiceTutorLocalSpeechProtocol.payload(for: event)
+                XCTAssertEqual(Set(payload.keys), ["type", "sequence"])
+                XCTAssertEqual(payload["type"] as? String, event.messageType)
+                XCTAssertEqual(payload["sequence"] as? Int, sequence)
+                let serialized = try JSONSerialization.data(withJSONObject: payload)
+                XCTAssertLessThan(serialized.count, 128,
+                                  "Speech activity sends tiny metadata, never microphone audio or provider commands")
+                let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: serialized) as? [String: Any])
+                XCTAssertEqual(decoded["sequence"] as? Int, sequence)
+                XCTAssertEqual(decoded["type"] as? String, event.messageType)
+            }
+        }
+    }
+
+    func testLocalVoiceActivityPayloadRejectsNonpositiveUtteranceSequences() {
+        for activity in [VoiceTutorLocalSpeechActivity.started, .stopped] {
+            for sequence in [Int.min, -1, 0] {
+                XCTAssertThrowsError(try VoiceTutorLocalSpeechProtocol.payload(for:
+                    VoiceTutorLocalSpeechEvent(activity: activity, sequence: sequence)
+                )) { error in
+                    XCTAssertEqual(error as? VoiceTutorLocalSpeechDeliveryError, .invalidSequence)
+                }
+            }
+        }
+    }
+
+    func testLocalVoiceActivityCapabilityPreservesAuthenticatedControlRequests() throws {
+        var original = URLRequest(url: try XCTUnwrap(URL(
+            string: "wss://voice-tutor.test/api/v1/voice-tutor/sessions/synthetic/control"
+        )))
+        original.httpMethod = "GET"
+        original.timeoutInterval = 17
+        original.setValue("Bearer fixture-token", forHTTPHeaderField: "Authorization")
+        original.setValue("fixture-device", forHTTPHeaderField: "X-Device-Id")
+        original.setValue("fixture-secret", forHTTPHeaderField: "X-Client-Secret")
+        original.setValue("buddystudy.voice.control.v2", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        let prepared = VoiceTutorLocalSpeechProtocol.addingCapability(to: original)
+        XCTAssertEqual(VoiceTutorLocalSpeechProtocol.capabilityHeader, "X-Voice-Turn-Protocol")
+        XCTAssertEqual(VoiceTutorLocalSpeechProtocol.capabilityValue, "local-vad-v1")
+        XCTAssertEqual(prepared.value(forHTTPHeaderField: "X-Voice-Turn-Protocol"), "local-vad-v1")
+        XCTAssertNil(original.value(forHTTPHeaderField: "X-Voice-Turn-Protocol"))
+        XCTAssertEqual(prepared.url, original.url)
+        XCTAssertEqual(prepared.httpMethod, original.httpMethod)
+        XCTAssertEqual(prepared.timeoutInterval, original.timeoutInterval)
+        for name in ["Authorization", "X-Device-Id", "X-Client-Secret", "Sec-WebSocket-Protocol"] {
+            XCTAssertEqual(prepared.value(forHTTPHeaderField: name), original.value(forHTTPHeaderField: name))
+        }
+        XCTAssertEqual(VoiceTutorLocalSpeechProtocol.addingCapability(to: prepared), prepared)
+        var staleCapability = prepared
+        staleCapability.setValue("old-capability", forHTTPHeaderField: "X-Voice-Turn-Protocol")
+        XCTAssertEqual(VoiceTutorLocalSpeechProtocol.addingCapability(to: staleCapability), prepared)
+    }
+
+    func testLocalVoiceActivityBoundedStreamPreservesPairedFIFOOrder() async throws {
+        let events = [
+            VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1),
+            VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1),
+            VoiceTutorLocalSpeechEvent(activity: .started, sequence: 2),
+            VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 2)
+        ]
+        let pipe = VoiceTutorLocalSpeechEventStream(capacity: events.count)
+        for event in events { pipe.yield(event) }
+        pipe.finish()
+        var received: [VoiceTutorLocalSpeechEvent] = []
+        for try await event in pipe.stream { received.append(event) }
+        XCTAssertEqual(received, events)
+    }
+
+    func testLocalVoiceActivityBoundedStreamOverflowFailsInsteadOfSilentlyDroppingAnEdge() async {
+        let first = VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
+        let second = VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1)
+        let pipe = VoiceTutorLocalSpeechEventStream(capacity: 2)
+        pipe.yield(first)
+        pipe.yield(second)
+        pipe.yield(VoiceTutorLocalSpeechEvent(activity: .started, sequence: 2))
+        pipe.yield(VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 2))
+        // Always terminate the fixture even if overflow handling regresses, so
+        // the test fails rather than waiting indefinitely on a broken stream.
+        pipe.finish()
+        var received: [VoiceTutorLocalSpeechEvent] = []
+        do {
+            for try await event in pipe.stream { received.append(event) }
+            XCTFail("Overflow must explicitly fail delivery, not silently drop a speech edge")
+        } catch {
+            XCTAssertEqual(error as? VoiceTutorLocalSpeechDeliveryError, .bufferOverflow)
+        }
+        XCTAssertEqual(received, [first, second], "The earliest paired edges must not be replaced by newer ones")
+    }
+
+    func testLocalVoiceActivityStreamCapacityRemainsBoundedForInvalidAndHugeValues() async {
+        for (capacity, retainedCount) in [(Int.min, 1), (0, 1), (1, 1), (32, 32), (Int.max, 128)] {
+            let pipe = VoiceTutorLocalSpeechEventStream(capacity: capacity)
+            let sent = (0...retainedCount).map { index in
+                VoiceTutorLocalSpeechEvent(
+                    activity: index.isMultiple(of: 2) ? .started : .stopped,
+                    sequence: index / 2 + 1
+                )
+            }
+            for event in sent { pipe.yield(event) }
+            pipe.finish()
+            var received: [VoiceTutorLocalSpeechEvent] = []
+            do {
+                for try await event in pipe.stream { received.append(event) }
+                XCTFail("Capacity \(capacity) must stop at its bounded limit")
+            } catch {
+                XCTAssertEqual(error as? VoiceTutorLocalSpeechDeliveryError, .bufferOverflow)
+            }
+            XCTAssertEqual(received, Array(sent.prefix(retainedCount)))
+        }
+    }
+
+    func testLocalVoiceActivityFinishedStreamCannotDeliverLateEdgesIntoANewAttempt() async throws {
+        let oldPipe = VoiceTutorLocalSpeechEventStream(capacity: 2)
+        let newPipe = VoiceTutorLocalSpeechEventStream(capacity: 2)
+        let started = VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
+        let stopped = VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1)
+        oldPipe.yield(started)
+        oldPipe.finish()
+        oldPipe.yield(stopped)
+        oldPipe.yield(VoiceTutorLocalSpeechEvent(activity: .started, sequence: 2))
+        newPipe.yield(started)
+        newPipe.yield(stopped)
+        newPipe.finish()
+        var oldEvents: [VoiceTutorLocalSpeechEvent] = []
+        for try await event in oldPipe.stream { oldEvents.append(event) }
+        var newEvents: [VoiceTutorLocalSpeechEvent] = []
+        for try await event in newPipe.stream { newEvents.append(event) }
+        XCTAssertEqual(oldEvents, [started])
+        XCTAssertEqual(newEvents, [started, stopped])
+    }
+
     func testRecordingFailureCleanupRemovesEveryUnfinalizedSensitiveFile() throws {
         let sessionID = UUID().uuidString
         let directory = try VoiceTutorRecordingStore.recordingsDirectory()
@@ -1797,6 +2208,20 @@ final class VoiceTutorContractTests: XCTestCase {
 
         XCTAssertTrue(fixture.appState.voiceTutorSessionDetails.isEmpty)
         XCTAssertEqual(fixture.store.loadRemotePushRegistration(), registrationB)
+    }
+
+    private func localSpeechEvents(
+        _ detector: inout VoiceTutorLocalSpeechDetector,
+        rms: Double,
+        frames: Int
+    ) -> [VoiceTutorLocalSpeechEvent] {
+        var events: [VoiceTutorLocalSpeechEvent] = []
+        for _ in 0..<frames {
+            if let event = detector.process(normalizedRMS: rms, duration: 0.01) {
+                events.append(event)
+            }
+        }
+        return events
     }
 
     private func makeCompactCallDetail(

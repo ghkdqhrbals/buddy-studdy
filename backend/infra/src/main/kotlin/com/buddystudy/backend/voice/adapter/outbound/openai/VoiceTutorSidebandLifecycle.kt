@@ -107,7 +107,7 @@ internal class VoiceTutorSidebandDiagnostics(
             "response.output_audio_transcript.delta", "response.output_audio_transcript.done",
             "output_audio_buffer.started", "output_audio_buffer.stopped", "output_audio_buffer.cleared",
             "input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped", "input_audio_buffer.committed",
-            "conversation.item.created", "conversation.item.added", "conversation.item.done",
+            "conversation.item.created", "conversation.item.added", "conversation.item.done", "conversation.item.truncated",
             "conversation.item.input_audio_transcription.delta",
             "conversation.item.input_audio_transcription.completed",
             "conversation.item.input_audio_transcription.failed",
@@ -116,6 +116,8 @@ internal class VoiceTutorSidebandDiagnostics(
         val CLIENT_EVENT_TYPES = setOf(
             VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT,
             VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT,
+            VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT,
+            VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT,
             "buddystudy.voice.heartbeat", "buddystudy.voice.session.end",
         )
     }

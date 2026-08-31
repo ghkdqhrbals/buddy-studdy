@@ -30,6 +30,14 @@ internal class VoiceTutorRealtimeEventPolicy(
         ) {
             validatePlaybackCompletion(node)
         }
+        if (type == VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT ||
+            type == VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT
+        ) {
+            val sequence = node.path("sequence")
+            if (!sequence.isIntegralNumber || !sequence.canConvertToLong() || sequence.longValue() <= 0) {
+                throw VoiceTutorClientProtocolException("Voice Tutor speech sequence is invalid.")
+            }
+        }
         return type in ALLOWED_CLIENT_EVENTS
     }
 
@@ -258,6 +266,8 @@ internal class VoiceTutorRealtimeEventPolicy(
             CLIENT_HEARTBEAT_EVENT,
             VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT,
             VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT,
+            VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT,
+            VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT,
         )
         private val TUTOR_TRANSCRIPT_DELTA_PROVIDER_EVENTS = setOf(
             "response.output_audio_transcript.delta",
@@ -374,6 +384,8 @@ internal class VoiceTutorClientTrafficGuard(
         val RATE_LIMITED_CONTROL_EVENTS = setOf(
             VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT,
             VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT,
+            VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT,
+            VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT,
             "input_audio_buffer.commit",
         )
     }

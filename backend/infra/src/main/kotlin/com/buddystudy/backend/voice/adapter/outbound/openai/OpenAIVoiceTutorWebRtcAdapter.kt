@@ -250,7 +250,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
             "audio" to linkedMapOf(
                 "input" to linkedMapOf(
                     "transcription" to mapOf("model" to "gpt-4o-mini-transcribe"),
-                    "turn_detection" to voiceTutorServerOwnedTurnDetection(),
+                    "turn_detection" to voiceTutorManualWebRtcTurnDetection(),
                 ),
                 "output" to linkedMapOf(
                     "voice" to request.voice,
