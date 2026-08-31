@@ -1263,3 +1263,45 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   `132ab4935187010cf704cb76c545f3b076bce06c93f7adbe6eec297eaf098c22`.
   The dev refresh must synchronize that same SQL into the existing external
   Flyway directory along with the JAR; no Flyway configuration change is needed.
+
+### Existing dev runtime and device rollout
+
+- Implementation `c1fbe8c7` and the verified JAR/V103 SQL were installed into
+  the existing `backend-backend-1` API (`b97d78a70753`) on `127.0.0.1:8080`,
+  starting at 00:25:38 KST on September 1. The `dev` profile, AWS
+  `buddystudy/dev` configuration, every original environment value, mounts,
+  network and resource limits were preserved. Original database, Redis,
+  translation and backup container IDs/start times were unchanged. The previous
+  `341c90d1` JAR remains in the same artifact volume for rollback.
+- Active call count was zero during preflight, after staging and before the API
+  restart. Only transient, offline artifact-copy helpers and the existing API
+  were used; no new persistent service stack, Docker image build, database
+  repair, quota adjustment, production connection or deployment was performed.
+  Log: `build/voiceTreeRecordsDevRefresh.log`.
+- Flyway applied V103 through the unchanged external filesystem location;
+  MySQL reports all 23 record columns, 11 localization columns and the projection
+  marker. V101/V102 artifacts and applied versions are intact. Startup and
+  projection checks report zero ERROR/projection-failure entries. Manual local
+  and existing public dev health checks both returned HTTP 200; these are not
+  GitHub Actions health gates or proof of a live voice lesson.
+- The actual adapter SQL was exercised read-only against MySQL for node/subtree
+  scope, each with and without a keyset cursor, using an impossible owner and
+  receiving zero rows. This verifies runtime SQL syntax without reading any
+  user's question or answer; owner/ordering/content behavior is covered by the
+  isolated fixtures, not asserted from empty results.
+- Automatic recovery projected one previously completed structured call into
+  three private learning records under one saved node; no eligible structured
+  result remains unprojected. Six localizations entered the existing stream.
+  The first observation had two READY and four PENDING, later five READY and
+  one PENDING. Provider fallback/automatic retry handled the remaining Japanese
+  request; the final aggregate is **six READY, zero PENDING and zero FAILED**.
+  No manual event replay, content readout or source rewrite was used.
+  Logs: `build/voiceTreeRecordsDevRuntimeVerification.log`,
+  `build/voiceTreeRecordsDevRuntimeFinal.log` and
+  `build/voiceTreeRecordsDevRuntimeComplete.log` record aggregate metadata only.
+- The verified normal signed app was installed and launched on the paired
+  iPhone 16 Pro with the unchanged `https://lowfidev.cloud` dev base URL. Both
+  steps verified zero active calls and no injected test plug-ins/frameworks.
+  Logs: `build/voiceTreeRecordsDeviceInstall.log` and
+  `build/voiceTreeRecordsDeviceLaunch.log`. A human audible lesson and manual
+  inspection of its node feed remain a separate end-to-end acceptance check.
