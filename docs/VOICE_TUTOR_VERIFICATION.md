@@ -1569,3 +1569,38 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   account purge or real publication/comment mutation was used for these checks.
   Human inspection of a newly completed lesson and an intentional public comment
   remains an end-to-end acceptance check, not something these fixtures claim.
+
+### Existing dev API cutover and normal iPhone app
+
+- Implementation commit: `e3ad31dc558cf09171debca4f18f083993482517` on
+  `feature/2.0`. Only the existing `backend-backend-1` API was recreated with the
+  verified JAR; it remains on port 8080, the `dev` profile, AWS secret
+  `buddystudy/dev`, the existing network, mounts and unchanged environment.
+  No persistent Docker stack or image build was added. DB, Redis, LibreTranslate
+  and backup container IDs and start times are unchanged. Log:
+  `build/voiceCommonRecordsDevRefresh.log`.
+- Active calls were zero before staging and cutover. After stopping old API
+  writers and before swapping V105/JAR, a full database dump was saved to
+  `build/voice-common-records-db-backup-qcKoZl/pre-v105.sql` (313,516,000 bytes,
+  SHA-256 `176811844ec1286e9e74828fc2c0871f321cffd53b16f62779e9b3a305fb8980`).
+  Its directory is mode 0700 and file is 0600; the backup is retained locally,
+  ignored by Git, and its contents were not printed. The previous JAR is retained
+  in the artifact volume, but cannot be restored alone after this schema cutover.
+- V105 applied successfully. Read-only aggregate checks confirm five existing
+  voice extensions have exactly five owned canonical records, all still private,
+  zero orphan mappings, zero fabricated question lifecycles, 15 common search
+  rows and ten READY translations (zero PENDING/FAILED). The eight duplicate
+  core columns are gone; original content is in the common record, not discarded.
+  There were zero eligible unprojected results. Four node/subtree cursor and six
+  revision/history/confirmation SQL probes passed with impossible owners/sessions;
+  they do not claim live publication or comment mutation coverage.
+- Runtime source/embedded/mounted migration and JAR hashes match. Startup
+  observed zero ERROR entries/projection failures, and manual local/public dev
+  health requests returned 200. Log:
+  `build/voiceCommonRecordsDevRuntimeVerification.log`.
+- The normal signed app was installed and launched on the paired iPhone 16 Pro
+  with the existing `https://lowfidev.cloud` dev base URL. Both steps checked zero
+  active calls and zero injected XCTest artifacts. Logs:
+  `build/voiceCommonRecordsDeviceInstall.log` and
+  `build/voiceCommonRecordsDeviceLaunch.log`. Actual user content was neither
+  published nor commented on as part of verification.
