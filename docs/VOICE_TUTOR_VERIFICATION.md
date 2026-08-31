@@ -4,8 +4,9 @@ Verification date: 2026-08-31. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
 Latest implementation: [bundled Silero plus contextual meaningful-input
-assessment](#silero-and-contextual-meaningful-input-assessment) follows the
-response-continuation fix `c33f0fe4`. The earlier checks below are historical;
+assessment](#silero-and-contextual-meaningful-input-assessment), commit
+`9b1d30f0`, is running in the existing 8080 dev API and installed on the physical
+iPhone. It follows the response-continuation fix `c33f0fe4`. The earlier checks below are historical;
 they do not all describe the current implementation. The selected native
 three-turn test [passed after network
 approval](#physical-native-three-turn-verification-after-network-approval),
@@ -803,6 +804,31 @@ The earlier test results remain historical evidence, not the current turn gate.
   previously verified native receive/playout path. They do **not** constitute
   a human microphone → live ASR → backend admission → audible reply end-to-end
   pass or a guarantee that all natural Korean calls remain uninterrupted.
+
+### Existing dev API and normal app refresh
+
+- Implementation commit `9b1d30f0` was installed in the existing `backend`
+  Compose API on `127.0.0.1:8080` at 19:20 KST. The `dev` profile and AWS
+  `buddystudy/dev` secret configuration, all original environment values,
+  mounts, network and resource limits were preserved. The database, Redis,
+  translation and backup container IDs and start times were unchanged. No
+  additional service stack, Docker image build, tunnel or routing change was
+  introduced. Log: `build/voiceMeaningfulInputDevRefresh.log`.
+- The new JAR SHA-256 is
+  `d5a1bfbcd0c61a2dbd82f4725f481a789dfd3476d29d2c0cb78a81e8dc3717bb`.
+  The previous `c33f0fe4` JAR remains available for rollback. Active sessions
+  were checked before staging and immediately before the API restart; both
+  counts were zero. Manual local health/readiness and the existing public dev
+  health route returned HTTP 200. These checks are local verification, not
+  GitHub Actions runtime health gates or a live voice-call pass.
+- After testing, the normal signed iOS build succeeded. Its bundle contained
+  the compiled Silero model and MIT notice, with no injected XCTest plug-in or
+  test frameworks. It was installed and then launched on the physical iPhone
+  with the unchanged `https://lowfidev.cloud` dev base URL. No user recordings,
+  settings, app data or unrelated build directory was deleted. Logs:
+  `build/voiceMeaningfulInputSignedBuildFinal.log`,
+  `build/voiceMeaningfulInputDeviceInstall.log`, and
+  `build/voiceMeaningfulInputDeviceLaunch.log`.
 
 ### Post-call summary inspection (read-only)
 
