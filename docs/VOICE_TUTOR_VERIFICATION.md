@@ -1000,3 +1000,34 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   secret. Log: `build/voiceMcpSummaryFinalMainAotJar.log`. The final artifact
   is 330,667,522 bytes with SHA-256
   `8c73d7b8fc80ef0a5431add049b305458fde9213b4a266c1b5175ddf18379b7a`.
+
+### Existing dev API refresh and observed summary recovery
+
+- Implementation commit `4cfac5ee` was installed into the existing `backend`
+  Compose API on `127.0.0.1:8080` at 20:37:38 KST. The API container is
+  `ab409e0e9325`; its source and artifact labels match the committed source and
+  verified JAR above. The `dev` profile, AWS `buddystudy/dev` configuration and
+  all original environment values, mounts, network and resource limits were
+  preserved. Existing database, Redis, translation and backup container IDs
+  and start times remained unchanged. Log: `build/voiceMcpSummaryDevRefresh.log`.
+- Active call count was zero during the guarded preflight, before artifact
+  staging and immediately before the API restart. The previous `9b1d30f0` JAR
+  remains available for rollback. The refresh used only transient offline
+  artifact-copy helpers and recreated the existing API service; it did not
+  build a Docker image, add a service stack or change tunnels/routing.
+- Manual local and existing public dev health checks both returned HTTP 200.
+  Startup completed without bean-creation or schema ABI errors. These are
+  manual dev observations, not GitHub Actions runtime health gates or evidence
+  of a human voice call.
+- The existing scheduler recovered both previously identified legacy failed
+  results after restart: two ended calls now have `COMPLETED` result status,
+  a recorded model and nonempty summary content. Their historical failed call
+  state was not rewritten. The exact legacy-recoverable count is now zero;
+  active call count remained zero, and no summary generation/recovery failure
+  was observed in the new runtime log. Verification read only aggregate status,
+  model-presence and content-presence metadata, not transcript/summary text or
+  user/session IDs. No manual database repair, tool-created test study or quota
+  adjustment was performed.
+- The already verified normal iPhone app is installed with the same dev base
+  URL. A new human call exercising saved-topic lookup/creation and audible
+  continuation remains a separate user-device end-to-end check.
