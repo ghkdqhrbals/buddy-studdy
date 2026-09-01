@@ -3,13 +3,66 @@
 Verification date: 2026-09-01. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [single-orb call and spoken lesson end](#single-orb-call-and-spoken-lesson-end).
-It extends the existing topic-discovery, Silero/contextual-input, MCP and
-source-backed summary contracts; it does not regrade past answers. Earlier
-checks below are historical and do not all describe the current implementation.
+Latest implementation: [guided saved-tree descent](#guided-saved-tree-descent).
+It extends the existing topic-discovery, single-orb, Silero/contextual-input,
+MCP and source-backed summary contracts; it does not regrade past answers.
+Earlier checks below are historical and do not all describe the current
+implementation.
 Source/fixture tests, iPhone tests and actual dev runtime observations are
 recorded separately; none implies a new human microphone-to-tutor conversation
 unless that specific check is explicitly recorded.
+
+## Guided saved-tree descent
+
+Implementation verified on 2026-09-01, branch `feature/2.0`, commit
+`7c556753a1c7f3473253a37f5f1d097a3a5d9f87`.
+
+- Every iOS voice call now starts without a preselected `studyId`. The tutor asks
+  what topic to discuss, resolves the spoken answer only against the authenticated
+  user's saved tree, follows a verified one-child chain to its endpoint, and asks
+  once before beginning there. At a real branch it presents at most three actual
+  children instead of requiring a separate app-side topic picker.
+- `select_voice_study` owns the initial or explicitly named focus. The separate
+  `advance_voice_study` tool may move only from the persisted current focus to one
+  live direct child, after a fresh accepted meaningful learner turn. The server
+  locks the active session, rechecks ownership and parentage, and rejects sibling,
+  ancestor, other-root and skipped-descendant moves. A single learner turn can
+  authorize at most one non-idempotent focus change.
+- V107 adds the nullable positive `learner_turn_id` fence and a unique
+  `(session_id, learner_turn_id)` key to `voice_tutor_lesson_focuses`. Existing
+  revision-zero history remains valid. Silence cannot advance a lesson; deciding
+  that a completed answer/feedback should continue remains a tutor instruction,
+  while the saved-tree edge and turn fence are enforced transactionally.
+
+Verification:
+
+- Application focus tests: **52 passed, zero failures**. Selected infrastructure
+  MCP, relay, persistence and summary tests: **136 passed, zero failures**. Kotlin
+  compilation, Spring AOT processing and `:tutor:bootJar` passed. The JAR is
+  331,232,685 bytes with SHA-256
+  `847205a1b50054026c8034c15e93d68ffe4149ab9b581f1d88e392ce717d454d`.
+- Selected `StudyMateiOS` simulator regression: **50 passed, zero failures** in
+  `VoiceTutorDiscoveryTests`, `VoiceTutorVoiceSettingsTests` and the changed
+  contract cases. Result bundle:
+  `build/VoiceTutorGuidedDescentDerivedData/Logs/Test/Test-StudyMateiOS-2026.09.01_09-33-57-+0900.xcresult`.
+  The exact required unsigned generic `StudyMateiOS` Debug build also passed.
+- The selected physical-iPhone run could not start because the paired device was
+  locked (`xcodebuild` exit 70). No real microphone, provider speech or audible
+  multi-turn saved-tree traversal is claimed by the simulator and contract checks.
+- With zero active calls, only the existing `backend-backend-1` API was refreshed
+  on localhost port 8080. It retained the `dev` profile, `buddystudy/dev` AWS
+  Secrets Manager selector, external app/data volumes, existing network, read-only
+  root filesystem, dropped capabilities and 3 GiB/3 CPU limits. MySQL, Redis,
+  LibreTranslate and backup retained their exact container IDs and start times;
+  no persistent container or duplicate backend stack was added.
+- Dev uses `FLYWAY_LOCATIONS=filesystem:/app/db/migration-mysql`, so the embedded
+  V107 alone was intentionally not treated as proof of rollout. The same source
+  migration was placed in that existing mounted path (SHA-256
+  `e3509e5bfde95ac5ba158df7b9de0576e991840946614a9f89272c1560f7d54f`) and the
+  API alone was restarted. Startup loaded `buddystudy/dev`, applied exactly V107,
+  and reached schema 107. Read-only checks confirmed the column, unique index,
+  check constraint and successful Flyway row; active calls remained zero. Local
+  and public dev health both returned 200.
 
 ## Single-orb call and spoken lesson end
 
