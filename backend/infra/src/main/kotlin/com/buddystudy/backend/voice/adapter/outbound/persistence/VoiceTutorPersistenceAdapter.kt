@@ -9,6 +9,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorQuotaSnapshot
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionCursor
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorResultClaim
 import com.buddystudy.backend.voice.application.port.outbound.VoiceStudyLearningRecordAppendPort
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceStudyLearningRecordAppendPort
 import com.buddystudy.voice.domain.VoiceTutorResult
@@ -29,6 +30,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlin.math.min
 
@@ -542,8 +544,8 @@ class VoiceTutorPersistenceAdapter(
         promptVersion: String,
         now: Instant,
         processingLeaseSeconds: Long,
-    ): Boolean {
-        val session = findSessionRow(userId, sessionId, lock = true) ?: return false
+    ): VoiceTutorResultClaim? {
+        val session = findSessionRow(userId, sessionId, lock = true) ?: return null
         val existing = result(userId, sessionId)
         if (!voiceTutorSummaryCanBeClaimed(
                 session,
@@ -552,43 +554,52 @@ class VoiceTutorPersistenceAdapter(
                 now = now,
                 processingLeaseSeconds = processingLeaseSeconds,
             )
-        ) return false
+        ) return null
+        // MySQL stores result.updated_at as DATETIME(6). Carry that exact
+        // precision in the claim so an old binary that reclaims PROCESSING by
+        // changing only updated_at still invalidates this worker's terminal CAS.
+        val claimedAt = now.truncatedTo(ChronoUnit.MICROS)
+        val claim = VoiceTutorResultClaim(sessionId, UUID.randomUUID(), claimedAt)
         if (existing == null) {
             database.sql(
                 """
                 insert into voice_tutor_results (
-                    session_id, status, prompt_version, created_at, updated_at
-                ) values (:sessionId, 'PROCESSING', :promptVersion, :now, :now)
+                    session_id, status, claim_token, prompt_version, created_at, updated_at
+                ) values (:sessionId, 'PROCESSING', :claimToken, :promptVersion, :claimedAt, :claimedAt)
                 """.trimIndent(),
-            ).bind("sessionId", sessionId).bind("promptVersion", promptVersion).bind("now", now.utc())
+            ).bind("sessionId", sessionId).bind("claimToken", claim.claimToken.toString())
+                .bind("promptVersion", promptVersion).bind("claimedAt", claim.claimedAt.utc())
                 .fetch().rowsUpdated().awaitSingle()
         } else {
-            database.sql(
+            val updated = database.sql(
                 """
                 update voice_tutor_results
-                set status = 'PROCESSING', error_message = null, prompt_version = :promptVersion, updated_at = :now
+                set status = 'PROCESSING', claim_token = :claimToken, error_message = null,
+                    prompt_version = :promptVersion, updated_at = :claimedAt
                 where session_id = :sessionId and status in ('FAILED', 'PROCESSING')
                 """.trimIndent(),
-            ).bind("promptVersion", promptVersion).bind("now", now.utc()).bind("sessionId", sessionId)
+            ).bind("claimToken", claim.claimToken.toString()).bind("promptVersion", promptVersion)
+                .bind("claimedAt", claim.claimedAt.utc()).bind("sessionId", sessionId)
                 .fetch().rowsUpdated().awaitSingle()
+            check(updated == 1L) { "Voice Tutor result claim changed while holding the session lock." }
         }
         database.sql(
             "update voice_tutor_sessions set result_status = 'PROCESSING', updated_at = :now where id = :sessionId and user_id = :userId",
         ).bind("now", now.utc()).bind("sessionId", sessionId).bind("userId", userId)
             .fetch().rowsUpdated().awaitSingle()
-        return true
+        return claim
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     override suspend fun completeResult(
         userId: Long,
+        claim: VoiceTutorResultClaim,
         generated: VoiceTutorGeneratedResult,
-        sessionId: String,
         now: Instant,
     ) {
         // Use the same owner/session lock order as claim and failure. A late
-        // completion must not race a claim into overwriting a completed result.
-        findSessionRow(userId, sessionId, lock = true) ?: return
+        // completion from an expired claim must not overwrite its replacement.
+        findSessionRow(userId, claim.sessionId, lock = true) ?: return
         val updated = database.sql(
             """
             update voice_tutor_results result
@@ -602,9 +613,11 @@ class VoiceTutorPersistenceAdapter(
                 result.model = :model,
                 result.prompt_version = :promptVersion,
                 result.error_message = null,
+                result.claim_token = null,
                 result.updated_at = :now
             where result.session_id = :sessionId and session.user_id = :userId
-              and result.status = 'PROCESSING'
+              and result.status = 'PROCESSING' and result.claim_token = :claimToken
+              and result.updated_at = :claimedAt
             """.trimIndent(),
         ).bind("summary", generated.summaryMarkdown)
             .bind("strengths", mapper.writeValueAsString(generated.strengths))
@@ -612,47 +625,88 @@ class VoiceTutorPersistenceAdapter(
             .bind("nextSteps", mapper.writeValueAsString(generated.nextSteps))
             .bind("explorations", VoiceTutorExplorationJsonCodec.encode(generated.explorations))
             .bind("model", generated.model).bind("promptVersion", generated.promptVersion)
-            .bind("now", now.utc()).bind("sessionId", sessionId).bind("userId", userId)
+            .bind("claimToken", claim.claimToken.toString()).bind("claimedAt", claim.claimedAt.utc())
+            .bind("now", now.utc())
+            .bind("sessionId", claim.sessionId).bind("userId", userId)
             .fetch().rowsUpdated().awaitSingle()
         if (updated == 1L) {
             database.sql(
-                "update voice_tutor_sessions set result_status = 'COMPLETED', updated_at = :now where id = :sessionId and user_id = :userId",
-            ).bind("now", now.utc()).bind("sessionId", sessionId).bind("userId", userId)
+                "update voice_tutor_sessions set result_status = 'COMPLETED', updated_at = :now where id = :sessionId and user_id = :userId and result_status = 'PROCESSING'",
+            ).bind("now", now.utc()).bind("sessionId", claim.sessionId).bind("userId", userId)
                 .fetch().rowsUpdated().awaitSingle()
-            learningRecords.appendCompletedSession(userId, sessionId, generated.explorations, now)
+            learningRecords.appendCompletedSession(userId, claim.sessionId, generated.explorations, now)
         }
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    override suspend fun failResult(
+    override suspend fun failClaimedResult(
+        userId: Long,
+        claim: VoiceTutorResultClaim,
+        promptVersion: String,
+        error: String,
+        now: Instant,
+    ) {
+        findSessionRow(userId, claim.sessionId, lock = true) ?: return
+        val updated = database.sql(
+            """
+            update voice_tutor_results result
+            join voice_tutor_sessions session on session.id = result.session_id
+            set result.status = 'FAILED', result.claim_token = null,
+                result.prompt_version = :promptVersion, result.error_message = :error,
+                result.updated_at = :now
+            where result.session_id = :sessionId and session.user_id = :userId
+              and result.status = 'PROCESSING' and result.claim_token = :claimToken
+              and result.updated_at = :claimedAt
+            """.trimIndent(),
+        ).bind("sessionId", claim.sessionId).bind("userId", userId)
+            .bind("claimToken", claim.claimToken.toString()).bind("claimedAt", claim.claimedAt.utc())
+            .bind("promptVersion", promptVersion)
+            .bind("error", error.take(1000)).bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+        if (updated == 1L) {
+            database.sql(
+                "update voice_tutor_sessions set result_status = 'FAILED', updated_at = :now where id = :sessionId and user_id = :userId and result_status = 'PROCESSING'",
+            ).bind("now", now.utc()).bind("sessionId", claim.sessionId).bind("userId", userId)
+                .fetch().rowsUpdated().awaitSingle()
+        }
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    override suspend fun failUnclaimedResult(
         userId: Long,
         sessionId: String,
         promptVersion: String,
         error: String,
         now: Instant,
     ) {
-        val owned = findSessionRow(userId, sessionId, lock = true) ?: return
+        findSessionRow(userId, sessionId, lock = true) ?: return
+        val boundedError = error.take(1000)
         database.sql(
             """
-            insert into voice_tutor_results (
-                session_id, status, prompt_version, error_message, created_at, updated_at
+            insert ignore into voice_tutor_results (
+                session_id, status, claim_token, prompt_version, error_message, created_at, updated_at
             ) values (
-                :sessionId, 'FAILED', :promptVersion, :error, :now, :now
+                :sessionId, 'FAILED', null, :promptVersion, :error, :now, :now
             )
-            on duplicate key update
-                status = if(status = 'COMPLETED', status, 'FAILED'),
-                error_message = if(status = 'COMPLETED', error_message, values(error_message)),
-                prompt_version = if(status = 'COMPLETED', prompt_version, values(prompt_version)),
-                updated_at = if(status = 'COMPLETED', updated_at, values(updated_at))
             """.trimIndent(),
-        ).bind("sessionId", sessionId).bind("promptVersion", promptVersion).bind("error", error.take(1000))
+        ).bind("sessionId", sessionId).bind("promptVersion", promptVersion).bind("error", boundedError)
             .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
-        if (owned.resultStatus != VoiceTutorResultStatus.COMPLETED) {
-            database.sql(
-                "update voice_tutor_sessions set result_status = 'FAILED', updated_at = :now where id = :sessionId and user_id = :userId",
-            ).bind("now", now.utc()).bind("sessionId", sessionId).bind("userId", userId)
-                .fetch().rowsUpdated().awaitSingle()
-        }
+        // This path belongs only to transcript-free finalization. It may create
+        // or idempotently observe that exact failure, but it cannot disturb a
+        // PROCESSING claim, a genuine different failure, or a completed result.
+        database.sql(
+            """
+            update voice_tutor_sessions session
+            join voice_tutor_results result on result.session_id = session.id
+            set session.result_status = 'FAILED', session.updated_at = :now
+            where session.id = :sessionId and session.user_id = :userId
+              and session.result_status in ('PENDING', 'FAILED')
+              and result.status = 'FAILED' and result.claim_token is null and result.model is null
+              and binary result.prompt_version = binary :promptVersion
+              and binary result.error_message = binary :error
+            """.trimIndent(),
+        ).bind("now", now.utc()).bind("sessionId", sessionId).bind("userId", userId)
+            .bind("promptVersion", promptVersion).bind("error", boundedError)
+            .fetch().rowsUpdated().awaitSingle()
     }
 
     private suspend fun ensureQuota(userId: Long, createdAt: Instant, now: Instant): QuotaRow {

@@ -65,6 +65,7 @@ internal class VoiceTutorInputTurnCoordinator(
     }
 
     private val limits = limits.copy()
+    private val assessmentLifetimeNanos: Long
     private val pending = linkedMapOf<String, PendingItem>()
     private val recentItemIds = linkedSetOf<String>()
     private val earlyTranscripts = linkedMapOf<String, EarlyTranscript>()
@@ -88,10 +89,19 @@ internal class VoiceTutorInputTurnCoordinator(
 
     init {
         require(this.limits.timeoutMilliseconds in 1..15_000) { "Invalid voice input assessment timeout." }
+        require(this.limits.admissionTimeoutMilliseconds in 1..5_000) {
+            "Invalid voice input assessment admission timeout."
+        }
         require(this.limits.maxUtterances in 1..8) { "Invalid voice input assessment batch bound." }
         require(this.limits.maxTranscriptCharacters in 1..4_000) { "Invalid voice input assessment text bound." }
         require(this.limits.maxBatchTranscriptCharacters in 1..16_000) { "Invalid voice input assessment total text bound." }
         require(this.limits.maxTeacherContextCharacters in 0..4_000) { "Invalid voice input assessment context bound." }
+        // The use case can first wait for bounded process-wide admission and
+        // then spend its independent provider timeout. Start this lifetime at
+        // Action.Assess creation so a valid queued result is not expired by a
+        // shorter coordinator-only clock.
+        assessmentLifetimeNanos =
+            (this.limits.admissionTimeoutMilliseconds + this.limits.timeoutMilliseconds) * NANOS_PER_MILLISECOND
     }
 
     fun observeCommitted(
@@ -376,7 +386,7 @@ internal class VoiceTutorInputTurnCoordinator(
             }
         }
         val current = batch ?: return
-        if (!expired(current.startedAt, nowNanos, limits.timeoutMilliseconds * NANOS_PER_MILLISECOND)) return
+        if (!expired(current.startedAt, nowNanos, assessmentLifetimeNanos)) return
         batch = null
         if (!teacherContextReady || current.contextGeneration != contextGeneration) {
             restoreForCurrentContext(current, nowNanos)

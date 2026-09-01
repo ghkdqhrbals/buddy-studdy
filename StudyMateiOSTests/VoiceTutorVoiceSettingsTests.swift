@@ -126,11 +126,92 @@ final class VoiceTutorVoiceSettingsTests: XCTestCase {
             XCTAssertFalse(strings.voiceTutorVoiceSetting.isEmpty)
             XCTAssertFalse(strings.voiceTutorVoiceSettingHelp.isEmpty)
             XCTAssertFalse(strings.voiceTutorVoicePreviewDisclosure.isEmpty)
+            XCTAssertFalse(strings.voiceTutorVoicePreviewLoading.isEmpty)
             XCTAssertFalse(strings.voiceTutorVoicePreviewPlaying.isEmpty)
             XCTAssertFalse(strings.voiceTutorVoicePreviewFailed.isEmpty)
             XCTAssertEqual(strings.voiceTutorVoiceName(.marin), "Marin")
             XCTAssertEqual(strings.voiceTutorVoiceName(.cedar), "Cedar")
         }
+        XCTAssertEqual(AppStrings(language: .korean).voiceTutorVoicePreviewLoading, "미리듣기 불러오는 중")
+        XCTAssertEqual(AppStrings(language: .english).voiceTutorVoicePreviewLoading, "Loading preview")
+    }
+
+    func testPreviewCoordinatorSameLoadingVoiceCancelsWithoutRestarting() {
+        var coordinator = VoiceTutorVoicePreviewCoordinator()
+        let firstRequestID = UUID()
+        let ignoredReplacementID = UUID()
+
+        XCTAssertEqual(
+            coordinator.tap(.cedar, requestID: firstRequestID),
+            [.begin(voice: .cedar, requestID: firstRequestID)]
+        )
+        XCTAssertEqual(coordinator.loadingVoice, .cedar)
+        XCTAssertEqual(
+            coordinator.tap(.cedar, requestID: ignoredReplacementID),
+            [.cancelRequest]
+        )
+        XCTAssertEqual(coordinator.phase, .idle)
+    }
+
+    func testPreviewCoordinatorSwitchesImmediatelyFromLoadingVoiceAndRejectsStaleCompletion() {
+        var coordinator = VoiceTutorVoicePreviewCoordinator()
+        let firstRequestID = UUID()
+        let secondRequestID = UUID()
+        _ = coordinator.tap(.marin, requestID: firstRequestID)
+
+        XCTAssertEqual(
+            coordinator.tap(.cedar, requestID: secondRequestID),
+            [.cancelRequest, .begin(voice: .cedar, requestID: secondRequestID)]
+        )
+        XCTAssertFalse(coordinator.startPlayback(voice: .marin, requestID: firstRequestID))
+        XCTAssertTrue(coordinator.startPlayback(voice: .cedar, requestID: secondRequestID))
+        XCTAssertEqual(coordinator.playingVoice, .cedar)
+    }
+
+    func testPreviewCoordinatorSamePlayingVoiceStopsAndDifferentVoiceReplacesIt() {
+        var coordinator = VoiceTutorVoicePreviewCoordinator()
+        let firstRequestID = UUID()
+        _ = coordinator.tap(.ash, requestID: firstRequestID)
+        XCTAssertTrue(coordinator.startPlayback(voice: .ash, requestID: firstRequestID))
+
+        XCTAssertEqual(coordinator.tap(.ash, requestID: UUID()), [.stopPlayback])
+        XCTAssertEqual(coordinator.phase, .idle)
+
+        let replayRequestID = UUID()
+        _ = coordinator.tap(.ash, requestID: replayRequestID)
+        XCTAssertTrue(coordinator.startPlayback(voice: .ash, requestID: replayRequestID))
+        let replacementRequestID = UUID()
+        XCTAssertEqual(
+            coordinator.tap(.verse, requestID: replacementRequestID),
+            [.stopPlayback, .begin(voice: .verse, requestID: replacementRequestID)]
+        )
+        XCTAssertEqual(coordinator.loadingVoice, .verse)
+        XCTAssertFalse(coordinator.finishPlayback(voice: .ash, requestID: replayRequestID))
+    }
+
+    func testPreviewCoordinatorOnlyCurrentFailureOrCompletionClearsState() {
+        var coordinator = VoiceTutorVoicePreviewCoordinator()
+        let requestID = UUID()
+        _ = coordinator.tap(.coral, requestID: requestID)
+
+        XCTAssertFalse(coordinator.fail(voice: .coral, requestID: UUID()))
+        XCTAssertEqual(coordinator.loadingVoice, .coral)
+        XCTAssertTrue(coordinator.startPlayback(voice: .coral, requestID: requestID))
+        XCTAssertFalse(coordinator.finishPlayback(voice: .sage, requestID: requestID))
+        XCTAssertEqual(coordinator.playingVoice, .coral)
+        XCTAssertTrue(coordinator.fail(voice: .coral, requestID: requestID))
+        XCTAssertEqual(coordinator.phase, .idle)
+    }
+
+    func testPreviewCoordinatorPrecommittedPlaybackCannotBeStrandedByImmediateFailure() {
+        var coordinator = VoiceTutorVoicePreviewCoordinator()
+        let requestID = UUID()
+        _ = coordinator.tap(.shimmer, requestID: requestID)
+
+        XCTAssertTrue(coordinator.startPlayback(voice: .shimmer, requestID: requestID))
+        XCTAssertEqual(coordinator.playingVoice, .shimmer)
+        XCTAssertTrue(coordinator.fail(voice: .shimmer, requestID: requestID))
+        XCTAssertEqual(coordinator.phase, .idle)
     }
 
     func testVoicePreviewUsesAuthenticatedFixedVoiceAndLanguageWithoutStartingALesson() async throws {

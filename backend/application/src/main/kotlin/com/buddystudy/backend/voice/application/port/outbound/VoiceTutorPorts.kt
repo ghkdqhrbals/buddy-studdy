@@ -12,12 +12,29 @@ import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
+import java.util.UUID
 
 data class VoiceTutorPersonalization(
     val resumeMarkdown: String?,
     val interests: List<String>,
     val recentLearningEvidence: List<String>,
 )
+
+/**
+ * One exclusive attempt to generate a session result. The token and persisted
+ * claim epoch are deliberately absent from the public result model and must
+ * accompany every claimed terminal write so a worker whose lease was reclaimed
+ * cannot finish the newer attempt, including across mixed-version rollouts.
+ */
+data class VoiceTutorResultClaim(
+    val sessionId: String,
+    val claimToken: UUID,
+    /** Exact DATETIME(6) value persisted when this claim was acquired. */
+    val claimedAt: Instant,
+) {
+    override fun toString(): String =
+        "VoiceTutorResultClaim(sessionId=[redacted], claimToken=[redacted], claimedAt=[redacted])"
+}
 
 interface VoiceTutorQuotaQueryPort {
     suspend fun quota(userId: Long, now: Instant): VoiceTutorQuotaSnapshot?
@@ -123,9 +140,31 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
         promptVersion: String,
         now: Instant,
         processingLeaseSeconds: Long,
-    ): Boolean
-    suspend fun completeResult(userId: Long, generated: VoiceTutorGeneratedResult, sessionId: String, now: Instant)
-    suspend fun failResult(userId: Long, sessionId: String, promptVersion: String, error: String, now: Instant)
+    ): VoiceTutorResultClaim?
+
+    suspend fun completeResult(
+        userId: Long,
+        claim: VoiceTutorResultClaim,
+        generated: VoiceTutorGeneratedResult,
+        now: Instant,
+    )
+
+    suspend fun failClaimedResult(
+        userId: Long,
+        claim: VoiceTutorResultClaim,
+        promptVersion: String,
+        error: String,
+        now: Instant,
+    )
+
+    /** Records finalization with no transcript before any summary worker owns a claim. */
+    suspend fun failUnclaimedResult(
+        userId: Long,
+        sessionId: String,
+        promptVersion: String,
+        error: String,
+        now: Instant,
+    )
 }
 
 data class VoiceTutorRecordingSession(

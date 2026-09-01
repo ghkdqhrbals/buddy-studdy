@@ -696,20 +696,35 @@ final class VoiceTutorContractTests: XCTestCase {
         var state = VoiceTutorLocalPlayoutTailState()
         state.responseStarted("response-1")
         XCTAssertNil(state.responseCompleted("response-stale", at: 10))
-        state.rendered(at: 9.98)
-        let token = try XCTUnwrap(state.responseCompleted("response-1", at: 10))
+        state.rendered(at: 9.98, duration: 0.01)
+        let profile = VoiceTutorLocalPlayoutDrainProfile(
+            outputLatencySeconds: 0.08,
+            outputIOBufferDurationSeconds: 0.02
+        )
+        let token = try XCTUnwrap(state.responseCompleted(
+            "response-1",
+            at: 10,
+            drainProfile: profile
+        ))
 
         XCTAssertEqual(token.responseID, "response-1")
-        let recentRenderWait: TimeInterval = try XCTUnwrap(
+        XCTAssertEqual(
+            try XCTUnwrap(state.remainingWait(for: token, now: 10)),
+            VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds + 0.10,
+            accuracy: 0.000_001,
+            "A pre-stop callback must not contribute a renderer quantum to the spoken-end drain"
+        )
+        state.rendered(at: 10.02, duration: 0.01)
+        let postStopRenderWait: TimeInterval = try XCTUnwrap(
             state.remainingWait(for: token, now: 10)
         )
         XCTAssertEqual(
-            recentRenderWait,
-            VoiceTutorLocalPlayoutTailState.renderTailGraceSeconds,
+            postStopRenderWait,
+            VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds + 0.11,
             accuracy: 0.000_001
         )
-        XCTAssertNotNil(state.remainingWait(for: token, now: 10.449))
-        XCTAssertNil(state.remainingWait(for: token, now: 10.45))
+        XCTAssertNotNil(state.remainingWait(for: token, now: 11.359))
+        XCTAssertNil(state.remainingWait(for: token, now: 11.36))
 
         state.responseStarted("response-2")
         XCTAssertNil(
@@ -718,24 +733,99 @@ final class VoiceTutorContractTests: XCTestCase {
         )
     }
 
-    func testSpokenEndLocalPlayoutTailUsesPostStopRenderEvidenceWithoutFollowingComfortNoiseForever() throws {
+    func testSpokenEndLocalPlayoutTailKeepsProviderStopWindowDespiteImmediateContinuousComfortNoise() throws {
         var state = VoiceTutorLocalPlayoutTailState()
         state.responseStarted("response-1")
-        let token = try XCTUnwrap(state.responseCompleted("response-1", at: 20))
+        let profile = VoiceTutorLocalPlayoutDrainProfile(
+            outputLatencySeconds: 0.04,
+            outputIOBufferDurationSeconds: 0.01
+        )
+        let token = try XCTUnwrap(state.responseCompleted(
+            "response-1",
+            at: 20,
+            drainProfile: profile
+        ))
         let boundedWait: TimeInterval = try XCTUnwrap(
             state.remainingWait(for: token, now: 20)
         )
         XCTAssertEqual(
             boundedWait,
-            VoiceTutorLocalPlayoutTailState.maximumWaitSeconds,
+            VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds + 0.05,
             accuracy: 0.000_001
         )
 
-        state.rendered(at: 20.2)
-        state.rendered(at: 20.6) // continuous comfort noise cannot move the first evidence
-        let expectedDeadline = 20.2 + VoiceTutorLocalPlayoutTailState.renderTailGraceSeconds
+        // A continuous WebRTC track can immediately render comfort noise after
+        // provider stop. That callback must not collapse the network-tail fence
+        // to the old 450 ms grace. A plausible later tail inside the hard window
+        // still contributes its measured render quantum to Core Audio drain.
+        state.rendered(at: 20.01, duration: 0.01)
+        XCTAssertNotNil(
+            state.remainingWait(for: token, now: 20.8),
+            "Immediate comfort noise must not shorten the provider-stop network-tail window"
+        )
+        state.rendered(at: 21.1, duration: 0.02)
+        let expectedDeadline = 20
+            + VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds
+            + 0.07
         XCTAssertNotNil(state.remainingWait(for: token, now: expectedDeadline - 0.001))
         XCTAssertNil(state.remainingWait(for: token, now: expectedDeadline))
+
+        state.rendered(at: 21.3, duration: 0.25)
+        XCTAssertNil(
+            state.remainingWait(for: token, now: expectedDeadline),
+            "Callbacks outside the hard network window cannot extend the exact generation"
+        )
+    }
+
+    func testSpokenEndLocalPlayoutTailDrainsMeasuredQueueAfterLateRendererEvidence() throws {
+        var state = VoiceTutorLocalPlayoutTailState()
+        state.responseStarted("response-1")
+        let profile = VoiceTutorLocalPlayoutDrainProfile(
+            outputLatencySeconds: 0.12,
+            outputIOBufferDurationSeconds: 0.02
+        )
+        let token = try XCTUnwrap(state.responseCompleted(
+            "response-1",
+            at: 30,
+            drainProfile: profile
+        ))
+        state.rendered(at: 31.24, duration: 0.02)
+
+        XCTAssertNotNil(
+            state.remainingWait(for: token, now: 31.25),
+            "The old 1.25-second cap could close immediately after a late final buffer reached Core Audio"
+        )
+        let deadline = 30
+            + VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds
+            + 0.16
+        XCTAssertNotNil(state.remainingWait(for: token, now: deadline - 0.001))
+        XCTAssertNil(state.remainingWait(for: token, now: deadline))
+    }
+
+    func testLocalPlayoutDrainProfileUsesMeasuredValuesWithDefensiveBounds() {
+        let measured = VoiceTutorLocalPlayoutDrainProfile(
+            outputLatencySeconds: 0.12,
+            outputIOBufferDurationSeconds: 0.02
+        )
+        XCTAssertEqual(measured.queueDrainSeconds(renderQuantumSeconds: 0.01), 0.15, accuracy: 0.000_001)
+
+        let invalid = VoiceTutorLocalPlayoutDrainProfile(
+            outputLatencySeconds: .nan,
+            outputIOBufferDurationSeconds: -1
+        )
+        XCTAssertEqual(invalid.queueDrainSeconds(renderQuantumSeconds: .infinity), 0)
+
+        let bounded = VoiceTutorLocalPlayoutDrainProfile(
+            outputLatencySeconds: 100,
+            outputIOBufferDurationSeconds: 100
+        )
+        XCTAssertEqual(
+            bounded.queueDrainSeconds(renderQuantumSeconds: 100),
+            VoiceTutorLocalPlayoutDrainProfile.maximumOutputLatencySeconds
+                + VoiceTutorLocalPlayoutDrainProfile.maximumIOBufferDurationSeconds
+                + VoiceTutorLocalPlayoutDrainProfile.maximumRenderQuantumSeconds,
+            accuracy: 0.000_001
+        )
     }
 
     func testSpokenEndLocalPlayoutTailIsBoundedAndAbsentWithoutAnActiveResponse() throws {
@@ -749,14 +839,27 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertNotNil(
             state.remainingWait(
                 for: token,
-                now: 30 + VoiceTutorLocalPlayoutTailState.maximumWaitSeconds - 0.001
+                now: 30
+                    + VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds
+                    - 0.001
             )
         )
         XCTAssertNil(
             state.remainingWait(
                 for: token,
-                now: 30 + VoiceTutorLocalPlayoutTailState.maximumWaitSeconds
+                now: 30 + VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds
             )
+        )
+        state.rendered(
+            at: 30 + VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds + 0.001,
+            duration: VoiceTutorLocalPlayoutDrainProfile.maximumRenderQuantumSeconds
+        )
+        XCTAssertNil(
+            state.remainingWait(
+                for: token,
+                now: 30 + VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds + 0.001
+            ),
+            "A late render callback cannot resurrect an elapsed bounded drain"
         )
 
         XCTAssertEqual(
@@ -868,13 +971,18 @@ final class VoiceTutorContractTests: XCTestCase {
                 activeResponseID: response.responseID
             )
         )
-        playout.rendered(at: 49.98)
         let token = try XCTUnwrap(playout.responseCompleted(fallbackID, at: 50))
 
         XCTAssertEqual(token.responseID, "response-1")
         XCTAssertEqual(
             try XCTUnwrap(playout.remainingWait(for: token, now: 50)),
-            VoiceTutorLocalPlayoutTailState.renderTailGraceSeconds,
+            VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds,
+            accuracy: 0.000_001
+        )
+        playout.rendered(at: 50.01, duration: 0.01)
+        XCTAssertEqual(
+            try XCTUnwrap(playout.remainingWait(for: token, now: 50.01)),
+            VoiceTutorLocalPlayoutTailState.spokenEndNetworkTailWindowSeconds,
             accuracy: 0.000_001
         )
     }
@@ -970,6 +1078,19 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(VoiceTutorRemoteAudioRenderer.containsNonzeroSamples(floatBuffer))
         channels[1][1] = Float.leastNonzeroMagnitude
         XCTAssertTrue(VoiceTutorRemoteAudioRenderer.containsNonzeroSamples(floatBuffer))
+    }
+
+    func testWebRTCRendererReportsTheActualPCMQuantumDuration() throws {
+        let renderer = VoiceTutorRemoteAudioRenderer()
+        let observation = VoiceTutorContractRenderDurationObservation()
+        renderer.onRenderedBuffer = { frames, _, duration, _ in
+            observation.record(frames: frames, duration: duration)
+        }
+
+        renderer.render(pcmBuffer: try makeRenderBuffer(Array(repeating: Int16(0), count: 480)))
+
+        XCTAssertEqual(observation.frames, 480)
+        XCTAssertEqual(try XCTUnwrap(observation.duration), 0.01, accuracy: 0.000_001)
     }
 
     func testWebRTCRenderedAudioOnlyChangesAnActiveListeningIndication() {
@@ -1305,6 +1426,101 @@ final class VoiceTutorContractTests: XCTestCase {
             XCTAssertEqual(japanese.voiceTutorCallRemaining(seconds), "残り\(clock)")
             XCTAssertEqual(japanese.voiceTutorCallMonthlyRemaining(seconds), "今月の残り\(clock)")
         }
+    }
+
+    func testNewVoiceCallAttemptResetsTranscriptAndSummaryDisclosure() {
+        var disclosure = VoiceTutorCallDisclosureState(
+            showsTranscript: true,
+            showsSummary: true
+        )
+        disclosure.resetForNewAttempt()
+        XCTAssertFalse(disclosure.showsTranscript)
+        XCTAssertFalse(disclosure.showsSummary)
+    }
+
+    func testVoiceCallRetryResetsDisclosureBeforeStartingTheAttempt() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = root.appendingPathComponent("StudyMate/Views/VoiceTutorView.swift")
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw XCTSkip("Source-contract check requires the local repository.")
+        }
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let retryStart = try XCTUnwrap(source.range(of: "onRetry: {"))
+        let dismissStart = try XCTUnwrap(
+            source.range(of: "onDismiss:", range: retryStart.upperBound..<source.endIndex)
+        )
+        let retry = String(source[retryStart.lowerBound..<dismissStart.lowerBound])
+        let reset = try XCTUnwrap(retry.range(of: "disclosureState.resetForNewAttempt()"))
+        let start = try XCTUnwrap(retry.range(of: "viewModel.start()"))
+        XCTAssertLessThan(reset.lowerBound, start.lowerBound)
+    }
+
+    func testTranscriptFollowingIgnoresContentGrowthButPausesDuringUserInteraction() {
+        var state = VoiceTutorTranscriptFollowState()
+        let bottom = CGRect(x: 0, y: -250, width: 360, height: 610)
+        let appendedWithoutOffsetMovement = CGRect(x: 0, y: -250, width: 360, height: 690)
+
+        state.observeLayout(contentFrame: bottom, viewportHeight: 360)
+        XCTAssertTrue(state.followsLatest)
+        XCTAssertTrue(state.shouldAutoScrollForContentChange)
+
+        state.beginUserInteraction()
+        state.observeLayout(contentFrame: appendedWithoutOffsetMovement, viewportHeight: 360)
+        XCTAssertTrue(state.followsLatest, "Appending a draft changes height, not the learner-owned offset")
+        XCTAssertFalse(state.shouldAutoScrollForContentChange, "New deltas must not fight an active scroll")
+        XCTAssertTrue(state.endUserInteraction())
+        XCTAssertTrue(state.shouldAutoScrollForContentChange)
+    }
+
+    func testTranscriptFollowingCannotSettleWhileTheFingerIsStillDown() {
+        var state = VoiceTutorTranscriptFollowState()
+        state.beginUserInteraction()
+
+        XCTAssertFalse(
+            state.shouldScheduleSettlement(isGestureActive: true),
+            "A stationary finger is still an active drag and must keep caption auto-scroll suspended"
+        )
+        XCTAssertTrue(
+            state.shouldScheduleSettlement(isGestureActive: false),
+            "Only the gesture ending may start the deceleration settlement debounce"
+        )
+    }
+
+    func testTranscriptFollowingStopsForOlderHistoryAndResumesOnlyAtLatestEdge() {
+        var state = VoiceTutorTranscriptFollowState()
+        let bottom = CGRect(x: 0, y: -250, width: 360, height: 610)
+        let olderHistory = CGRect(x: 0, y: -190, width: 360, height: 610)
+
+        state.observeLayout(contentFrame: bottom, viewportHeight: 360)
+        state.beginUserInteraction()
+        state.observeLayout(contentFrame: olderHistory, viewportHeight: 360)
+        XCTAssertFalse(state.followsLatest)
+        XCTAssertFalse(state.endUserInteraction())
+        XCTAssertFalse(state.shouldAutoScrollForContentChange)
+
+        state.beginUserInteraction()
+        state.observeLayout(contentFrame: CGRect(x: 0, y: -220, width: 360, height: 610), viewportHeight: 360)
+        XCTAssertFalse(state.followsLatest, "Approaching the end is not the same as reaching it")
+        state.observeLayout(contentFrame: bottom, viewportHeight: 360)
+        XCTAssertTrue(state.followsLatest)
+        XCTAssertTrue(state.endUserInteraction())
+        XCTAssertTrue(state.shouldAutoScrollForContentChange)
+    }
+
+    func testTranscriptFollowingRecognizesVoiceOverOffsetChangesWithoutADragGesture() {
+        var state = VoiceTutorTranscriptFollowState()
+        let bottom = CGRect(x: 0, y: -250, width: 360, height: 610)
+        let olderHistory = CGRect(x: 0, y: -205, width: 360, height: 610)
+
+        state.observeLayout(contentFrame: bottom, viewportHeight: 360)
+        state.observeLayout(contentFrame: olderHistory, viewportHeight: 360)
+        XCTAssertFalse(state.followsLatest)
+        XCTAssertFalse(state.shouldAutoScrollForContentChange)
+        state.observeLayout(contentFrame: bottom, viewportHeight: 360)
+        XCTAssertTrue(state.followsLatest)
+        XCTAssertTrue(state.shouldAutoScrollForContentChange)
     }
 
     func testSingleOrbTranscriptGestureRequiresAnIntentionalVerticalSwipe() {
@@ -3267,6 +3483,31 @@ private final class VoiceTutorContractRenderCounter: @unchecked Sendable {
     func increment() {
         lock.lock()
         value += 1
+        lock.unlock()
+    }
+}
+
+private final class VoiceTutorContractRenderDurationObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedFrames: Int?
+    private var storedDuration: TimeInterval?
+
+    var frames: Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedFrames
+    }
+
+    var duration: TimeInterval? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedDuration
+    }
+
+    func record(frames: Int, duration: TimeInterval) {
+        lock.lock()
+        storedFrames = frames
+        storedDuration = duration
         lock.unlock()
     }
 }

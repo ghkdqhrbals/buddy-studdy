@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component
 data class VoiceTutorInputAssessmentProperties(
     var timeoutMilliseconds: Long = 5_000,
     var maxConcurrentAssessments: Int = 4,
+    var admissionTimeoutMilliseconds: Long = 1_500,
+    var maxQueuedAssessments: Int = 16,
     var maxUtterances: Int = 8,
     var maxTranscriptCharacters: Int = 4_000,
     var maxBatchTranscriptCharacters: Int = 16_000,

@@ -22,6 +22,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.TestPropertySource
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @SpringBootTest
@@ -53,25 +54,54 @@ class VoiceTutorPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
         val claims = List(2) {
             async(Dispatchers.Default) { voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt, 300) }
         }.awaitAll()
-        assertThat(claims.count { it }).isEqualTo(1)
+        assertThat(claims.count { it != null }).isEqualTo(1)
+        val expiredClaim = checkNotNull(claims.single { it != null })
         assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt.plusSeconds(299), 300).map { it.id })
             .doesNotContain(session.id)
         assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(299), 300))
-            .isFalse()
+            .isNull()
         assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt.plusSeconds(300), 300).map { it.id }).contains(session.id)
-        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(300), 300))
-            .isTrue()
+        val replacementClaim = checkNotNull(voiceTutor.beginResult(
+            session.userId,
+            session.id,
+            "summary-test-v1",
+            endedAt.plusSeconds(300),
+            300,
+        ))
+        assertThat(replacementClaim.claimToken).isNotEqualTo(expiredClaim.claimToken)
 
         val generated = VoiceTutorGeneratedResult("Saved synthetic summary", emptyList(), emptyList(), listOf("Review"), "gpt-test", "summary-test-v1")
-        voiceTutor.completeResult(session.userId, generated, session.id, endedAt.plusSeconds(301))
+        voiceTutor.completeResult(session.userId, expiredClaim, generated.copy(summaryMarkdown = "Expired worker result"), endedAt.plusSeconds(301))
+        voiceTutor.failClaimedResult(
+            session.userId,
+            expiredClaim,
+            "summary-test-v1",
+            "Expired worker failure",
+            endedAt.plusSeconds(302),
+        )
+        assertThat(voiceTutor.result(session.userId, session.id)!!.status).isEqualTo(VoiceTutorResultStatus.PROCESSING)
+        assertThat(voiceTutor.findSession(session.userId, session.id)!!.resultStatus).isEqualTo(VoiceTutorResultStatus.PROCESSING)
+
+        voiceTutor.completeResult(session.userId, replacementClaim, generated, endedAt.plusSeconds(303))
         val completed = voiceTutor.result(session.userId, session.id)!!
-        voiceTutor.completeResult(session.userId, generated.copy(summaryMarkdown = "Late obsolete result"), session.id, endedAt.plusSeconds(302))
-        voiceTutor.failResult(session.userId, session.id, "summary-test-v1", "Late failure", endedAt.plusSeconds(303))
-        voiceTutor.finalize(session.userId, session.id, "LATE_END", false, null, endedAt.plusSeconds(304))
+        voiceTutor.completeResult(
+            session.userId,
+            expiredClaim,
+            generated.copy(summaryMarkdown = "Late obsolete result"),
+            endedAt.plusSeconds(304),
+        )
+        voiceTutor.failClaimedResult(
+            session.userId,
+            expiredClaim,
+            "summary-test-v1",
+            "Late failure",
+            endedAt.plusSeconds(305),
+        )
+        voiceTutor.finalize(session.userId, session.id, "LATE_END", false, null, endedAt.plusSeconds(306))
 
         assertThat(voiceTutor.result(session.userId, session.id)).isEqualTo(completed)
         assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(900), 300))
-            .isFalse()
+            .isNull()
         assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt.plusSeconds(900), 300).map { it.id }).doesNotContain(session.id)
         val preserved = voiceTutor.findSession(session.userId, session.id)!!
         assertThat(preserved.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
@@ -84,23 +114,116 @@ class VoiceTutorPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `old binary reclaim changing only updated at fences the prior token owner`() = runBlocking<Unit> {
+        val firstClaimAt = Instant.parse("2031-08-31T10:30:00.123456789Z")
+        val session = failedSummarySession(firstClaimAt, transcript = true)
+        val staleClaim = checkNotNull(
+            voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", firstClaimAt, 300),
+        )
+        assertThat(staleClaim.claimedAt).isEqualTo(firstClaimAt.truncatedTo(ChronoUnit.MICROS))
+
+        // Emulate the pre-token binary's PROCESSING reclaim exactly: it renews
+        // updated_at but neither knows nor replaces V108's claim_token.
+        val oldBinaryReclaimedAt = firstClaimAt.plusSeconds(300)
+        val oldReclaimRows = database.sql(
+            """
+            update voice_tutor_results
+            set status = 'PROCESSING', error_message = null,
+                prompt_version = 'old-binary-v1', updated_at = :reclaimedAt
+            where session_id = :sessionId and status = 'PROCESSING'
+            """.trimIndent(),
+        ).bind("reclaimedAt", oldBinaryReclaimedAt).bind("sessionId", session.id)
+            .fetch().rowsUpdated().awaitSingle()
+        assertThat(oldReclaimRows).isEqualTo(1L)
+        val preservedToken = database.sql(
+            "select claim_token from voice_tutor_results where session_id = :sessionId",
+        ).bind("sessionId", session.id)
+            .map { row, _ -> row.get("claim_token", String::class.java)!! }
+            .one().awaitSingle()
+        assertThat(preservedToken).isEqualTo(staleClaim.claimToken.toString())
+
+        val generated = VoiceTutorGeneratedResult(
+            "Replacement summary",
+            emptyList(),
+            emptyList(),
+            listOf("Review"),
+            "gpt-test",
+            "summary-test-v1",
+        )
+        voiceTutor.completeResult(
+            session.userId,
+            staleClaim,
+            generated.copy(summaryMarkdown = "Stale completion"),
+            oldBinaryReclaimedAt.plusSeconds(1),
+        )
+        voiceTutor.failClaimedResult(
+            session.userId,
+            staleClaim,
+            "summary-test-v1",
+            "Stale failure",
+            oldBinaryReclaimedAt.plusSeconds(2),
+        )
+        assertThat(voiceTutor.result(session.userId, session.id)!!.status)
+            .isEqualTo(VoiceTutorResultStatus.PROCESSING)
+        assertThat(voiceTutor.findSession(session.userId, session.id)!!.resultStatus)
+            .isEqualTo(VoiceTutorResultStatus.PROCESSING)
+
+        val replacementClaim = checkNotNull(
+            voiceTutor.beginResult(
+                session.userId,
+                session.id,
+                "summary-test-v1",
+                oldBinaryReclaimedAt.plusSeconds(300),
+                300,
+            ),
+        )
+        assertThat(replacementClaim.claimToken).isNotEqualTo(staleClaim.claimToken)
+        assertThat(replacementClaim.claimedAt)
+            .isEqualTo(oldBinaryReclaimedAt.plusSeconds(300).truncatedTo(ChronoUnit.MICROS))
+
+        voiceTutor.completeResult(
+            session.userId,
+            replacementClaim,
+            generated,
+            oldBinaryReclaimedAt.plusSeconds(301),
+        )
+        assertThat(voiceTutor.result(session.userId, session.id)!!.summaryMarkdown)
+            .isEqualTo("Replacement summary")
+        assertThat(voiceTutor.findSession(session.userId, session.id)!!.resultStatus)
+            .isEqualTo(VoiceTutorResultStatus.COMPLETED)
+    }
+
+    @Test
     fun `summary recovery only retries the exact historical copied call failure once`() = runBlocking<Unit> {
         val endedAt = Instant.parse("2031-08-31T11:00:00Z")
         val session = failedSummarySession(endedAt, transcript = true)
         // Simulate the old settlement/service combination, only in the isolated
         // Testcontainers database. No real provider or existing user is involved.
-        voiceTutor.failResult(session.userId, session.id, "summary-test-v1", session.failureMessage!!, endedAt)
+        voiceTutor.failUnclaimedResult(session.userId, session.id, "summary-test-v1", session.failureMessage!!, endedAt)
         assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt, 300).map { it.id }).contains(session.id)
-        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt, 300)).isTrue()
+        val claim = voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt, 300)
+        assertThat(claim).isNotNull()
 
-        voiceTutor.failResult(session.userId, session.id, "summary-test-v1", "Voice Tutor summary generation failed.", endedAt.plusSeconds(1))
+        voiceTutor.failClaimedResult(
+            session.userId,
+            claim!!,
+            "summary-test-v1",
+            "Voice Tutor summary generation failed.",
+            endedAt.plusSeconds(1),
+        )
         assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt.plusSeconds(900), 300).map { it.id }).doesNotContain(session.id)
-        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(900), 300)).isFalse()
+        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(900), 300)).isNull()
         // MySQL's case-insensitive default collation must not broaden the
         // narrowly approved legacy recovery signature.
-        voiceTutor.failResult(session.userId, session.id, "summary-test-v1", session.failureMessage!!.lowercase(), endedAt.plusSeconds(901))
+        voiceTutor.failUnclaimedResult(
+            session.userId,
+            session.id,
+            "summary-test-v1",
+            session.failureMessage!!.lowercase(),
+            endedAt.plusSeconds(901),
+        )
         assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt.plusSeconds(902), 300).map { it.id }).doesNotContain(session.id)
-        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(902), 300)).isFalse()
+        assertThat(voiceTutor.beginResult(session.userId, session.id, "summary-test-v1", endedAt.plusSeconds(902), 300)).isNull()
     }
 
     @Test
@@ -110,8 +233,8 @@ class VoiceTutorPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
         val recorded = failedSummarySession(endedAt, transcript = true)
         assertThat(empty.resultStatus).isEqualTo(VoiceTutorResultStatus.FAILED)
         assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt, 300).map { it.id }).doesNotContain(empty.id)
-        assertThat(voiceTutor.beginResult(empty.userId, empty.id, "summary-test-v1", endedAt, 300)).isFalse()
-        assertThat(voiceTutor.beginResult(empty.userId, recorded.id, "summary-test-v1", endedAt, 300)).isFalse()
+        assertThat(voiceTutor.beginResult(empty.userId, empty.id, "summary-test-v1", endedAt, 300)).isNull()
+        assertThat(voiceTutor.beginResult(empty.userId, recorded.id, "summary-test-v1", endedAt, 300)).isNull()
         assertThat(voiceTutor.findSession(recorded.userId, recorded.id)!!.resultStatus).isEqualTo(VoiceTutorResultStatus.PENDING)
     }
 

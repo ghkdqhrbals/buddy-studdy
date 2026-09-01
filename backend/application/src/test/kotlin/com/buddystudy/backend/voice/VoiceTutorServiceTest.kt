@@ -15,6 +15,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorSessionCursor
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersonalization
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersonalizationPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorResultClaim
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSummaryPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
@@ -27,6 +28,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtime
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAuthorizationPort
 import com.buddystudy.backend.voice.application.service.VoiceTutorService
+import com.buddystudy.backend.voice.application.service.voiceTutorSummaryRetryDelayMillis
 import com.buddystudy.voice.domain.VoiceTutorResult
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
@@ -40,14 +42,39 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.boot.context.properties.bind.Bindable
+import org.springframework.boot.context.properties.bind.Binder
+import org.springframework.boot.context.properties.source.MapConfigurationPropertySource
 import org.springframework.http.HttpStatus
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.UUID
 import kotlin.reflect.full.declaredMemberFunctions
 import kotlin.reflect.full.findAnnotation
 
 class VoiceTutorServiceTest {
+    @Test
+    fun `summary retry delay saturates instead of overflowing`() {
+        assertThat(voiceTutorSummaryRetryDelayMillis(2, Long.MAX_VALUE / 2 + 1, Long.MAX_VALUE))
+            .isEqualTo(Long.MAX_VALUE)
+        assertThat(voiceTutorSummaryRetryDelayMillis(Int.MAX_VALUE, 1, 10_000))
+            .isEqualTo(10_000)
+    }
+
+    @Test
+    fun `summary retry settings bind through Spring relaxed property names`() {
+        val bound = Binder(MapConfigurationPropertySource(mapOf(
+            "buddystudy.voice-tutor.summary-max-attempts" to "4",
+            "buddystudy.voice-tutor.summary-retry-initial-delay-ms" to "250",
+            "buddystudy.voice-tutor.summary-retry-max-delay-ms" to "1500",
+        ))).bind("buddystudy", Bindable.of(BuddyStudyProperties::class.java)).get()
+
+        assertThat(bound.voiceTutor.summaryMaxAttempts).isEqualTo(4)
+        assertThat(bound.voiceTutor.summaryRetryInitialDelayMs).isEqualTo(250)
+        assertThat(bound.voiceTutor.summaryRetryMaxDelayMs).isEqualTo(1_500)
+    }
+
     private val now = Instant.parse("2026-08-30T00:00:00Z")
     private val principal = Principal(7, "device-7", 70, anonymous = false)
 
@@ -1006,7 +1033,37 @@ class VoiceTutorServiceTest {
     }
 
     @Test
-    fun `a real summary provider failure is terminal and never copies private exception content`() = runBlocking<Unit> {
+    fun `a transient summary provider failure is retried before completing the learning result`() = runBlocking<Unit> {
+        val persistence = summaryFixture()
+        var calls = 0
+        val service = service(persistence, summaries = object : VoiceTutorSummaryPort {
+            override suspend fun summarize(
+                session: VoiceTutorSession,
+                transcript: List<VoiceTutorTranscriptTurn>,
+            ): VoiceTutorGeneratedResult {
+                calls += 1
+                if (calls < 2) throw IllegalStateException("Synthetic transient provider outage.")
+                return VoiceTutorGeneratedResult(
+                    summaryMarkdown = "재시도 후 학습 요약",
+                    strengths = emptyList(),
+                    improvements = emptyList(),
+                    nextSteps = emptyList(),
+                    model = "summary-test",
+                    promptVersion = "summary-v1",
+                )
+            }
+        })
+
+        service.recoverPendingResults(10)
+
+        assertThat(calls).isEqualTo(2)
+        assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+        assertThat(persistence.completedResult?.summaryMarkdown).isEqualTo("재시도 후 학습 요약")
+        assertThat(persistence.failedResultCalls).isZero()
+    }
+
+    @Test
+    fun `an exhausted summary provider failure is terminal and never copies private exception content`() = runBlocking<Unit> {
         val persistence = summaryFixture()
         var calls = 0
         val service = service(persistence, summaries = object : VoiceTutorSummaryPort {
@@ -1019,7 +1076,7 @@ class VoiceTutorServiceTest {
         service.recoverPendingResults(10)
         service.recoverPendingResults(10)
 
-        assertThat(calls).isEqualTo(1)
+        assertThat(calls).isEqualTo(3)
         assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.FAILED)
         assertThat(persistence.storedResult?.errorMessage).isEqualTo("Voice Tutor summary generation failed.")
         assertThat(persistence.storedResult?.errorMessage).doesNotContain("PRIVATE_PROVIDER_BODY")
@@ -1221,6 +1278,9 @@ class VoiceTutorServiceTest {
         voiceTutor.maxSessionSeconds = 3_600
         voiceTutor.model = "gpt-realtime-2.1"
         voiceTutor.voice = "marin"
+        voiceTutor.summaryMaxAttempts = 3
+        voiceTutor.summaryRetryInitialDelayMs = 0
+        voiceTutor.summaryRetryMaxDelayMs = 0
     }
 
     private class FakeSummary : VoiceTutorSummaryPort {
@@ -1342,6 +1402,7 @@ class VoiceTutorServiceTest {
         var lastReadyTimeoutSeconds = 0L
         var lastHeartbeatLeaseSeconds = 0L
         private var resultClaimed = false
+        private var activeResultClaim: VoiceTutorResultClaim? = null
 
         override suspend fun reconcileExpired(
             userId: Long,
@@ -1538,24 +1599,28 @@ class VoiceTutorServiceTest {
             promptVersion: String,
             now: Instant,
             processingLeaseSeconds: Long,
-        ): Boolean {
-            if (resultClaimed || session.resultStatus == VoiceTutorResultStatus.COMPLETED) return false
+        ): VoiceTutorResultClaim? {
+            if (resultClaimed || session.resultStatus == VoiceTutorResultStatus.COMPLETED) return null
             resultClaimed = true
+            val claim = VoiceTutorResultClaim(sessionId, UUID.randomUUID(), now)
+            activeResultClaim = claim
             session = session.copy(resultStatus = VoiceTutorResultStatus.PROCESSING)
-            return true
+            return claim
         }
 
         override suspend fun completeResult(
             userId: Long,
+            claim: VoiceTutorResultClaim,
             generated: VoiceTutorGeneratedResult,
-            sessionId: String,
             now: Instant,
         ) {
+            if (activeResultClaim != claim) return
             completeResultError?.let { throw it }
             completedResult = generated
+            activeResultClaim = null
             session = session.copy(resultStatus = VoiceTutorResultStatus.COMPLETED)
             storedResult = VoiceTutorResult(
-                sessionId,
+                claim.sessionId,
                 VoiceTutorResultStatus.COMPLETED,
                 generated.summaryMarkdown,
                 generated.strengths,
@@ -1569,9 +1634,32 @@ class VoiceTutorServiceTest {
             )
         }
 
-        override suspend fun failResult(userId: Long, sessionId: String, promptVersion: String, error: String, now: Instant) {
+        override suspend fun failClaimedResult(
+            userId: Long,
+            claim: VoiceTutorResultClaim,
+            promptVersion: String,
+            error: String,
+            now: Instant,
+        ) {
             failedResultCalls += 1
-            if (session.resultStatus == VoiceTutorResultStatus.COMPLETED) return
+            if (activeResultClaim != claim) return
+            activeResultClaim = null
+            session = session.copy(resultStatus = VoiceTutorResultStatus.FAILED)
+            storedResult = VoiceTutorResult(
+                claim.sessionId, VoiceTutorResultStatus.FAILED, null, emptyList(), emptyList(), emptyList(),
+                null, promptVersion, error, now, now,
+            )
+        }
+
+        override suspend fun failUnclaimedResult(
+            userId: Long,
+            sessionId: String,
+            promptVersion: String,
+            error: String,
+            now: Instant,
+        ) {
+            failedResultCalls += 1
+            if (activeResultClaim != null || session.resultStatus == VoiceTutorResultStatus.COMPLETED) return
             session = session.copy(resultStatus = VoiceTutorResultStatus.FAILED)
             storedResult = VoiceTutorResult(
                 sessionId, VoiceTutorResultStatus.FAILED, null, emptyList(), emptyList(), emptyList(),

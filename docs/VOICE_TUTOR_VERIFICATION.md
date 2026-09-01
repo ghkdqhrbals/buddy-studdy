@@ -1996,3 +1996,73 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   build against the paired iPhone 16 Pro reached device selection but could not
   proceed because the phone was locked; no install, launch or live microphone/
   provider call is claimed by this verification.
+
+## 2026-09-01 — Unified voice call and topicless saved-tree entry
+
+### User flow
+
+- A new iOS voice session never preselects the locally selected study, even when
+  both the local and server study trees are already populated. It starts as one
+  collapsed voice orb and opens with the localized question “어떤 주제로
+  이야기해 볼까요?”. Retry resets transcript and summary disclosure to the
+  same compact state.
+- The first topic-bearing learner turn is discovery only. The tutor reads the
+  actual owned study tree, follows each proved one-child edge without repeatedly
+  asking the learner to choose intermediate nodes, and stops at the saved leaf or
+  first real branch. A branch may offer only actual returned children; the exact
+  saved endpoint is bound only after a fresh learner confirmation.
+- The expanded transcript remains pinned while the learner follows the newest
+  turn, but an intentional scroll toward older content suspends auto-follow until
+  the latest edge is reached again. Voice previews support tap-to-play,
+  tap-to-stop and immediate replacement with explicit loading state. Spoken
+  lesson termination preserves a bounded measured local playback drain before
+  WebRTC teardown; the red end button remains immediate.
+
+### Verification
+
+- The combined simulator run executed **185 selected tests**: **183 passed**, zero
+  failed, and **two** intentional hardware-only opt-in tests skipped. It covers
+  the unified orb, pause/disclosure gestures, transcript following, voice preview races, local
+  playback-tail fencing and topicless discovery. The discovery suite was rerun
+  after adding a populated local/server tree fixture: **28 tests, zero failures**.
+  Result bundle: `build/VoiceTutorFinalAudit.xcresult`; rendered snapshots:
+  `build/VoiceTutorUnifiedUIFinal2Attachments`.
+- Focused backend voice suites passed with zero failures: input assessment
+  (**15**), service (**55**), session creation (**4**), MCP voice tools (**70**),
+  meaningful-input relay (**39**) and input-turn coordination (**40**). Five
+  focused MySQL 8.4 result tests also passed: three recovery cases, one mixed-old/
+  new-claim fence and one V107-to-V108 migration invariant. They cover bounded
+  assessment admission, summary retry/cancellation, topicless creation, saved-tree
+  focus authority and stale-worker result fencing.
+- The required unsigned generic iOS device build and a normal signed iPhone build
+  passed. The signed app passed deep/strict signature verification, contained no
+  XCTest plug-ins, and was installed and launched on the paired iPhone. This is
+  not a claim that an automated test placed a live microphone/provider call.
+- `:tutor:bootJar` passed. The verified JAR is 331,385,739 bytes, SHA-256
+  `87173a6720c1bffd1359327f352940402a535c602d4503193010a1a098899235`.
+  V108 is one atomic, start-first-compatible expand ALTER: legacy `PROCESSING`
+  rows may remain NULL, while a non-NULL 36-character claim token is permitted
+  only on `PROCESSING`. A token-aware claim also carries the exact stored
+  microsecond timestamp so a mixed-version reclaim that changes only `updated_at`
+  still invalidates the older worker. The V108 source SHA-256 is
+  `9d47ec74c98c4c579b05c6ec6d128d2d8017743d10be85e45611d50a07ca5e8f`.
+
+### Existing dev API refresh
+
+- Before refresh there were zero READY/ACTIVE/ENDING voice sessions and zero
+  `PROCESSING` voice results. Only the JAR and V108 migration in the existing
+  `backend-backend-1` application volume were replaced and that same 8080 API
+  container restarted. Its `dev` profile, AWS-secret resolution,
+  environment, mounts and network are unchanged; the existing MySQL, Redis,
+  LibreTranslate and backup containers were neither recreated nor replaced.
+- Flyway applied V108 successfully and the deployed JAR/migration hashes match the
+  verified sources. The immediately previous JAR remains as a hard link for
+  recovery, and every transient staging container was removed. During local V108
+  reconciliation, the first restart correctly rejected a strict-version backup
+  SQL whose filename still matched Flyway's migration pattern; no migration ran
+  in that attempt. The backup was moved outside the migration location and the
+  final startup then completed with zero ERROR entries. Local
+  `127.0.0.1:8080` and public dev dependency-health requests both returned HTTP
+  200.
+- The new opening and tree traversal apply to a **new** voice session. Existing
+  sessions retain the immutable instructions captured when they were created.

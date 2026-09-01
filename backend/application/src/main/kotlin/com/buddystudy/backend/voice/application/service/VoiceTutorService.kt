@@ -44,12 +44,14 @@ import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
+import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import org.springframework.http.HttpStatus
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -470,7 +472,7 @@ class VoiceTutorService(
                 properties.voiceTutor.transcriptMaxCharacters.coerceIn(1, MAX_TRANSCRIPT_CHARACTERS),
             ).none { it.transcript.isNotBlank() }
         ) {
-            persistence.failResult(
+            persistence.failUnclaimedResult(
                 registered.userId,
                 sessionId,
                 properties.voiceTutor.summaryPromptVersion,
@@ -483,18 +485,18 @@ class VoiceTutorService(
 
     private suspend fun summarize(userId: Long, session: VoiceTutorSession) {
         val now = clock.instant()
-        if (!persistence.beginResult(
-                userId,
-                session.id,
-                properties.voiceTutor.summaryPromptVersion,
-                now,
-                properties.voiceTutor.summaryProcessingLeaseSeconds.coerceIn(30, 3_600),
-            )
-        ) return
+        val claim = persistence.beginResult(
+            userId,
+            session.id,
+            properties.voiceTutor.summaryPromptVersion,
+            now,
+            properties.voiceTutor.summaryProcessingLeaseSeconds.coerceIn(30, 3_600),
+        ) ?: return
         val transcript = persistence.transcript(userId, session.id, properties.voiceTutor.transcriptMaxCharacters)
         if (transcript.isEmpty()) {
             persistence.completeResult(
                 userId,
+                claim,
                 VoiceTutorGeneratedResult(
                     summaryMarkdown = emptyTranscriptSummary(session.language),
                     strengths = emptyList(),
@@ -503,22 +505,21 @@ class VoiceTutorService(
                     model = "system",
                     promptVersion = properties.voiceTutor.summaryPromptVersion,
                 ),
-                session.id,
                 clock.instant(),
             )
             return
         }
         val generated = try {
-            summaries.summarize(session, transcript)
+            summarizeWithRetry(session, transcript)
         } catch (error: CancellationException) {
             // Retain PROCESSING for the existing lease recovery. Cancellation
             // of a worker is not evidence that the provider rejected the lesson.
             throw error
         } catch (error: Exception) {
             logger.warn("voice_tutor_summary_generation_failed errorType={}", error.javaClass.simpleName)
-            persistence.failResult(
+            persistence.failClaimedResult(
                 userId,
-                session.id,
+                claim,
                 properties.voiceTutor.summaryPromptVersion,
                 "Voice Tutor summary generation failed.",
                 clock.instant(),
@@ -527,7 +528,43 @@ class VoiceTutorService(
         }
         // A persistence error also leaves the processing lease recoverable;
         // never label a successful model result as a provider failure.
-        persistence.completeResult(userId, generated, session.id, clock.instant())
+        persistence.completeResult(userId, claim, generated, clock.instant())
+    }
+
+    private suspend fun summarizeWithRetry(
+        session: VoiceTutorSession,
+        transcript: List<VoiceTutorTranscriptTurn>,
+    ): VoiceTutorGeneratedResult {
+        val maxAttempts = properties.voiceTutor.summaryMaxAttempts.coerceIn(1, MAX_SUMMARY_ATTEMPTS)
+        val initialDelayMs = properties.voiceTutor.summaryRetryInitialDelayMs.coerceIn(0, MAX_SUMMARY_RETRY_DELAY_MS)
+        val maximumDelayMs = properties.voiceTutor.summaryRetryMaxDelayMs
+            .coerceIn(initialDelayMs, MAX_SUMMARY_RETRY_DELAY_MS)
+        var lastFailure: Exception? = null
+        repeat(maxAttempts) { zeroBasedAttempt ->
+            try {
+                return summaries.summarize(session, transcript)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                lastFailure = error
+                val attempt = zeroBasedAttempt + 1
+                if (attempt >= maxAttempts) return@repeat
+                val retryDelayMs = voiceTutorSummaryRetryDelayMillis(
+                    failedAttempt = attempt,
+                    initialDelayMs = initialDelayMs,
+                    maximumDelayMs = maximumDelayMs,
+                )
+                logger.warn(
+                    "voice_tutor_summary_generation_retry attempt={} maxAttempts={} delayMs={} errorType={}",
+                    attempt,
+                    maxAttempts,
+                    retryDelayMs,
+                    error.javaClass.simpleName,
+                )
+                if (retryDelayMs > 0) delay(retryDelayMs)
+            }
+        }
+        throw checkNotNull(lastFailure) { "Voice Tutor summary retry loop completed without a result or failure." }
     }
 
     private suspend fun detail(userId: Long, sessionId: String): VoiceTutorSessionDetailResponse {
@@ -937,10 +974,31 @@ class VoiceTutorService(
         const val MAX_TRANSCRIPT_TURNS = 2_000
         const val MAX_ACCEPTED_AUDIO_BATCH_BYTES = 480_000L
         const val MAX_CONTEXT_CHARACTERS = 20_000
+        const val MAX_SUMMARY_ATTEMPTS = 5
+        const val MAX_SUMMARY_RETRY_DELAY_MS = 10_000L
         const val RECORDING_CONSENT_VERSION = "voice-recording-v1"
         const val RECORDING_CONTENT_TYPE = "audio/mp4"
         val SUPPORTED_VOICES = setOf("alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar")
         val UUID_PATTERN = Regex("[0-9a-fA-F-]{36}")
         val WEBRTC_PROVIDER_CALL_ID = Regex("rtc_[A-Za-z0-9_-]{1,187}")
     }
+}
+
+internal fun voiceTutorSummaryRetryDelayMillis(
+    failedAttempt: Int,
+    initialDelayMs: Long,
+    maximumDelayMs: Long,
+): Long {
+    val initial = initialDelayMs.coerceAtLeast(0)
+    val maximum = maximumDelayMs.coerceAtLeast(initial)
+    if (failedAttempt <= 0 || initial == 0L) return 0L
+    var candidate = initial
+    repeat((failedAttempt - 1).coerceAtMost(30)) {
+        candidate = if (candidate >= maximum || candidate > maximum / 2) {
+            maximum
+        } else {
+            candidate * 2
+        }
+    }
+    return candidate.coerceAtMost(maximum)
 }

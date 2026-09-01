@@ -244,34 +244,59 @@ class VoiceTutorInputTurnCoordinatorTest {
     fun `assessment expires exactly at deadline and late successful callback cannot publish`() {
         val coordinator = VoiceTutorInputTurnCoordinator()
         val assessment = registered(coordinator, "item-one", "응")
-        assertThat(coordinator.expire(ms(4_999))).isEmpty()
-        assertThat(coordinator.expire(ms(5_000))).containsExactly(
+        assertThat(coordinator.expire(ms(6_499))).isEmpty()
+        assertThat(coordinator.expire(ms(6_500))).containsExactly(
             Action.Retry(RetryReason.ASSESSMENT_TIMEOUT), Action.Delete("item-one"),
         )
-        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(5_001))).isEmpty()
-        assertThat(coordinator.expire(ms(5_001))).isEmpty()
-        assertThat(coordinator.confirmDeleted("item-one", ms(5_002))).isEmpty()
+        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(6_501))).isEmpty()
+        assertThat(coordinator.expire(ms(6_501))).isEmpty()
+        assertThat(coordinator.confirmDeleted("item-one", ms(6_502))).isEmpty()
     }
 
     @Test
     fun `callback at expired assessment deadline cannot bypass missing timer tick`() {
         val coordinator = VoiceTutorInputTurnCoordinator()
         val assessment = registered(coordinator, "item-one", "응")
-        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(5_000))).containsExactly(
+        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(6_500))).containsExactly(
             Action.Retry(RetryReason.ASSESSMENT_TIMEOUT), Action.Delete("item-one"),
         )
-        assertThat(coordinator.expire(ms(5_000))).isEmpty()
+        assertThat(coordinator.expire(ms(6_500))).isEmpty()
         assertThat(coordinator.hasPending).isTrue()
+    }
+
+    @Test
+    fun `meaningful result survives one point four second admission wait plus normal provider work`() {
+        val coordinator = VoiceTutorInputTurnCoordinator(
+            VoiceTutorInputAssessmentProperties(
+                timeoutMilliseconds = 5_000,
+                admissionTimeoutMilliseconds = 1_500,
+            ),
+        )
+        val assessment = registered(coordinator, "item-one", "Redis 캐시를 설명할게")
+
+        // The action was created at t=0. The use case waited 1.4 seconds for
+        // admission, then returned normally after 4 seconds of provider work.
+        // Both phases remain inside their independent configured bounds.
+        val completedAt = ms(1_400 + 4_000)
+        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), completedAt))
+            .containsExactly(
+                Action.Publish(
+                    "item-one",
+                    raw("item-one", "Redis 캐시를 설명할게"),
+                    sequence = 1,
+                ),
+            )
+        assertThat(coordinator.confirmPublished("item-one", completedAt + 1)).containsExactly(Action.Ready(1, false))
     }
 
     @Test
     fun `success before deadline cancels batch expiry and starts a separate publication lease`() {
         val coordinator = VoiceTutorInputTurnCoordinator()
         val assessment = registered(coordinator, "item-one", "응")
-        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(4_999)))
+        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(6_499)))
             .containsExactly(Action.Publish("item-one", raw("item-one", "응"), sequence = 1))
-        assertThat(coordinator.expire(ms(5_000))).isEmpty()
-        assertThat(coordinator.confirmPublished("item-one", ms(5_001))).containsExactly(Action.Ready(1, false))
+        assertThat(coordinator.expire(ms(6_500))).isEmpty()
+        assertThat(coordinator.confirmPublished("item-one", ms(6_501))).containsExactly(Action.Ready(1, false))
         assertThat(coordinator.expire(ms(20_000))).isEmpty()
     }
 
@@ -342,10 +367,10 @@ class VoiceTutorInputTurnCoordinatorTest {
         val coordinator = VoiceTutorInputTurnCoordinator()
         val first = registered(coordinator, "item-one", "2")
         coordinator.teacherResponseStarted()
-        assertThat(coordinator.expire(ms(5_000))).isEmpty()
-        val second = assess(coordinator.teacherResponseCompleted("다음 항목을 선택해 주세요.", ms(5_001)))
+        assertThat(coordinator.expire(ms(6_500))).isEmpty()
+        val second = assess(coordinator.teacherResponseCompleted("다음 항목을 선택해 주세요.", ms(6_501)))
         assertThat(second.token).isGreaterThan(first.token)
-        assertThat(coordinator.completeAssessment(first.token, meaningful(first), ms(5_002))).isEmpty()
+        assertThat(coordinator.completeAssessment(first.token, meaningful(first), ms(6_502))).isEmpty()
     }
 
     @Test
@@ -532,15 +557,20 @@ class VoiceTutorInputTurnCoordinatorTest {
     }
 
     @Test
-    fun `configured limits are snapshotted and assessment deadline follows configured service budget`() {
-        val limits = VoiceTutorInputAssessmentProperties(timeoutMilliseconds = 2_000, maxUtterances = 1)
+    fun `configured limits are snapshotted and deadline includes admission plus provider budgets`() {
+        val limits = VoiceTutorInputAssessmentProperties(
+            timeoutMilliseconds = 2_000,
+            admissionTimeoutMilliseconds = 400,
+            maxUtterances = 1,
+        )
         val coordinator = VoiceTutorInputTurnCoordinator(limits)
         limits.timeoutMilliseconds = 15_000
+        limits.admissionTimeoutMilliseconds = 5_000
         limits.maxUtterances = 8
         val assessment = preparedBatch(coordinator, listOf("응", "2"))
         assertThat(assessment.utterances).hasSize(1)
-        assertThat(coordinator.expire(ms(1_999))).isEmpty()
-        assertThat(coordinator.expire(ms(2_000))).containsExactly(
+        assertThat(coordinator.expire(ms(2_399))).isEmpty()
+        assertThat(coordinator.expire(ms(2_400))).containsExactly(
             Action.Retry(RetryReason.ASSESSMENT_TIMEOUT), Action.Delete("item-0"),
         )
     }

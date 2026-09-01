@@ -102,7 +102,7 @@ final class VoiceTutorNativeConversationTests: XCTestCase {
             module.renderPreProcessingDelegate = nil
             withExtendedLifetime((factory, peer, renderer, module, forbiddenCapture, remoteTrack)) {}
         }
-        renderer.onRenderedBuffer = { frames, nonzero, _ in
+        renderer.onRenderedBuffer = { frames, nonzero, _, _ in
             counters.rendered(frames: frames, nonzero: nonzero)
         }
         renderer.onRenderedPCM = { [weak observation] _ in

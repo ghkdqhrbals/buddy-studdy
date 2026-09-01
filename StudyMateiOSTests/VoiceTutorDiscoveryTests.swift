@@ -233,9 +233,9 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
 
     func testDiscoveryLabelsAreLocalizedWithoutInventingATopic() {
         let expected: [AppLanguage: (String, String)] = [
-            .korean: ("AI 선생님", "주제를 이야기해 주세요"),
-            .english: ("AI tutor", "Tell me what you'd like to discuss"),
-            .japanese: ("AI先生", "話したいテーマを教えてください")
+            .korean: ("AI 선생님", "어떤 주제로 이야기해 볼까요?"),
+            .english: ("AI tutor", "What topic would you like to talk about?"),
+            .japanese: ("AI先生", "どのテーマについて話しましょうか？")
         ]
         for language in AppLanguage.allCases {
             let strings = AppStrings(language: language)
@@ -277,6 +277,23 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
             XCTAssertTrue(connection.isCurrent())
             fixture.assertDraftsUnchanged()
         }
+    }
+
+    func testLoadedLocalAndServerStudyTreesNeverPreselectANewVoiceSession() async throws {
+        let fixture = try VoiceDiscoveryAppFixture()
+        defer { fixture.close() }
+
+        XCTAssertEqual(fixture.appState.settings.selectedStudyCategoryID, "42")
+        XCTAssertFalse(fixture.appState.settings.studyCategories.isEmpty)
+        await fixture.loadServerStudyTree()
+        XCTAssertEqual(fixture.appState.voiceTutorStudies.map(\.id), [42, 43])
+
+        let studiesBeforeCall = fixture.appState.voiceTutorStudies
+        _ = try await fixture.appState.createVoiceTutorConnection()
+        let body = try XCTUnwrap(fixture.creationBodies.first)
+        XCTAssertFalse(body.keys.contains("studyId"))
+        XCTAssertEqual(fixture.appState.voiceTutorStudies, studiesBeforeCall)
+        fixture.assertDraftsUnchanged()
     }
 
     func testTopiclessRecordingConsentIsExplicitAndIndependent() async throws {
@@ -373,7 +390,13 @@ private final class VoiceDiscoveryAppFixture {
             topic: "기존 합성 선택", difficulty: Difficulty(level: 6), appLanguage: language,
             language: language.studyLanguage, voiceTutorVoice: .sage, customPrompt: "합성 설정 보존",
             intervalMinutes: 27, isQuestionPublic: false,
-            studyCategories: [StudyCategory(id: "42", title: "기존 합성 선택", difficulty: .level6)],
+            studyCategories: [StudyCategory(
+                id: "42",
+                title: "기존 합성 선택",
+                difficulty: .level6,
+                customPrompt: "합성 설정 보존",
+                openAIModel: "gpt-5.4"
+            )],
             selectedStudyCategoryID: "42"
         )
         store.saveSettings(originalSettings)
@@ -426,6 +449,10 @@ private final class VoiceDiscoveryAppFixture {
         XCTAssertNil(appState.questionQuota, file: file, line: line)
     }
 
+    func loadServerStudyTree() async {
+        await appState.refreshVisibleData()
+    }
+
     func close() {
         session.invalidateAndCancel()
         VoiceDiscoveryURLProtocol.remove(host: host)
@@ -435,18 +462,16 @@ private final class VoiceDiscoveryAppFixture {
 
     private func respond(to request: URLRequest) throws -> (HTTPURLResponse, Data) {
         requests.append(request)
-        guard request.httpMethod == "POST" else {
-            XCTFail("Unexpected synthetic discovery method")
-            throw URLError(.unsupportedURL)
-        }
         let body: String
         var status = 200
-        switch request.url?.path {
-        case "/api/v1/auth/token":
+        switch (request.httpMethod, request.url?.path) {
+        case ("GET", "/api/v1/studies"):
+            body = Self.serverStudyTreeResponse
+        case ("POST", "/api/v1/auth/token"):
             body = """
             {"accessToken":"\(registration.accessToken!)","accessTokenExpiresAt":"2100-01-01T00:00:00Z"}
             """
-        case "/api/v1/voice-tutor/sessions":
+        case ("POST", "/api/v1/voice-tutor/sessions"):
             creationBodies.append(try Self.requestBody(request))
             if expireFirstCreate, creationBodies.count == 1 {
                 status = 401
@@ -460,7 +485,7 @@ private final class VoiceDiscoveryAppFixture {
                 """
             }
         default:
-            XCTFail("Discovery fixtures must not request studies, provider media, quotas or drafts")
+            XCTFail("Discovery fixtures must not request provider media, quotas or drafts")
             throw URLError(.unsupportedURL)
         }
         return (try XCTUnwrap(HTTPURLResponse(
@@ -489,6 +514,49 @@ private final class VoiceDiscoveryAppFixture {
         }
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
+
+    private static let serverStudyTreeResponse = #"""
+    {
+      "studies": [
+        {
+          "id": 42,
+          "topic": "기존 합성 선택",
+          "parentStudyId": null,
+          "sortOrder": 0,
+          "difficultyLevel": 6,
+          "intervalMinutes": 27,
+          "enabled": true,
+          "activeForQuestions": true,
+          "notificationSound": "default",
+          "customPrompt": "합성 설정 보존",
+          "openaiModel": "gpt-5.4",
+          "maxHistoryCount": 100,
+          "createdAt": "2026-08-01T00:00:00Z",
+          "updatedAt": "2026-09-01T00:00:00Z"
+        },
+        {
+          "id": 43,
+          "topic": "하위 합성 주제",
+          "parentStudyId": 42,
+          "sortOrder": 1,
+          "difficultyLevel": 7,
+          "intervalMinutes": 27,
+          "enabled": true,
+          "activeForQuestions": true,
+          "notificationSound": "default",
+          "customPrompt": "",
+          "openaiModel": "gpt-5.4",
+          "maxHistoryCount": 100,
+          "createdAt": "2026-08-02T00:00:00Z",
+          "updatedAt": "2026-09-01T00:00:00Z"
+        }
+      ],
+      "totalCount": 2,
+      "limit": 500,
+      "offset": 0,
+      "serverTime": "2026-09-01T00:00:00Z"
+    }
+    """#
 }
 
 @MainActor

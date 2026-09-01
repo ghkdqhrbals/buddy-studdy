@@ -90,6 +90,9 @@ buddystudy:
     summary-recovery-initial-delay-ms: ${VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS:5000}
     summary-recovery-batch-size: ${VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE:10}
     summary-processing-lease-seconds: ${VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS:300}
+    summary-max-attempts: ${VOICE_TUTOR_SUMMARY_MAX_ATTEMPTS:3}
+    summary-retry-initial-delay-ms: ${VOICE_TUTOR_SUMMARY_RETRY_INITIAL_DELAY_MS:400}
+    summary-retry-max-delay-ms: ${VOICE_TUTOR_SUMMARY_RETRY_MAX_DELAY_MS:2000}
     transcript-max-characters: ${VOICE_TUTOR_TRANSCRIPT_MAX_CHARS:100000}
     transcript-max-turns: ${VOICE_TUTOR_TRANSCRIPT_MAX_TURNS:2000}
     public-base-url: ${VOICE_TUTOR_PUBLIC_BASE_URL:}

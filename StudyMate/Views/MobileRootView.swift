@@ -11515,10 +11515,9 @@ private struct MobileVoiceTutorVoiceSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @StateObject private var previewPlayer = VoiceTutorVoicePreviewPlayer()
-    @State private var requestedVoice: VoiceTutorVoice?
+    @State private var previewCoordinator = VoiceTutorVoicePreviewCoordinator()
     @State private var previewError: String?
     @State private var previewTask: Task<Void, Never>?
-    @State private var previewRequestID: UUID?
 
     private var strings: AppStrings { appState.settingsEditorStrings }
 
@@ -11534,10 +11533,10 @@ private struct MobileVoiceTutorVoiceSettingsView: View {
                             selectAndPreview(voice)
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: previewPlayer.activeVoice == voice
+                                Image(systemName: previewCoordinator.playingVoice == voice
                                     ? "speaker.wave.2.fill" : "waveform.circle")
                                     .font(.title3)
-                                    .foregroundStyle(previewPlayer.activeVoice == voice ? Color.accentColor : .secondary)
+                                    .foregroundStyle(previewCoordinator.playingVoice == voice ? Color.accentColor : .secondary)
                                     .frame(width: 30)
 
                                 Text(strings.voiceTutorVoiceName(voice))
@@ -11545,10 +11544,10 @@ private struct MobileVoiceTutorVoiceSettingsView: View {
 
                                 Spacer(minLength: 12)
 
-                                if requestedVoice == voice {
+                                if previewCoordinator.loadingVoice == voice {
                                     ProgressView()
                                         .controlSize(.small)
-                                } else if previewPlayer.activeVoice == voice {
+                                } else if previewCoordinator.playingVoice == voice {
                                     Text(strings.voiceTutorVoicePreviewPlaying)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -11564,11 +11563,8 @@ private struct MobileVoiceTutorVoiceSettingsView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .disabled(
-                            (requestedVoice != nil && requestedVoice != voice)
-                                || (previewPlayer.activeVoice != nil && previewPlayer.activeVoice != voice)
-                        )
                         .accessibilityLabel(strings.voiceTutorVoiceName(voice))
+                        .accessibilityValue(previewAccessibilityValue(for: voice))
                         .accessibilityHint(strings.voiceTutorVoiceSettingHelp)
                         .accessibilityAddTraits(
                             appState.draftSettings.voiceTutorVoice == voice ? .isSelected : []
@@ -11611,40 +11607,61 @@ private struct MobileVoiceTutorVoiceSettingsView: View {
             }
         }
         .onDisappear {
+            previewCoordinator.reset()
             previewTask?.cancel()
             previewTask = nil
-            previewRequestID = nil
-            requestedVoice = nil
             previewPlayer.stop()
         }
     }
 
     private func selectAndPreview(_ voice: VoiceTutorVoice) {
         appState.setDraftVoiceTutorVoice(voice)
-        previewTask?.cancel()
-        previewTask = nil
-        previewRequestID = nil
-        previewPlayer.stop()
         previewError = nil
+        let effects = previewCoordinator.tap(voice, requestID: UUID())
+        for effect in effects {
+            applyPreviewEffect(effect)
+        }
+    }
+
+    private func applyPreviewEffect(_ effect: VoiceTutorVoicePreviewCoordinator.Effect) {
+        switch effect {
+        case .cancelRequest:
+            previewTask?.cancel()
+            previewTask = nil
+        case .stopPlayback:
+            previewPlayer.stop()
+        case let .begin(voice, requestID):
+            beginPreview(voice: voice, requestID: requestID)
+        }
+    }
+
+    private func beginPreview(voice: VoiceTutorVoice, requestID: UUID) {
         guard appState.isCommunitySessionActive else {
-            requestedVoice = nil
+            _ = previewCoordinator.fail(voice: voice, requestID: requestID)
             previewError = strings.voiceTutorSignInRequired
             return
         }
 
-        let requestID = UUID()
-        previewRequestID = requestID
-        requestedVoice = voice
-        do {
-            if try previewPlayer.playCached(voice: voice) {
-                previewRequestID = nil
-                requestedVoice = nil
+        let completion: @MainActor (VoiceTutorVoicePreviewPlaybackResult) -> Void = { result in
+            guard previewCoordinator.finishPlayback(voice: voice, requestID: requestID) else {
                 return
             }
-        } catch {
-            previewRequestID = nil
-            requestedVoice = nil
-            previewError = strings.voiceTutorVoicePreviewFailed
+            if result == .failed {
+                previewError = strings.voiceTutorVoicePreviewFailed
+            }
+        }
+
+        if previewPlayer.hasCachedAudio(for: voice) {
+            guard previewCoordinator.startPlayback(voice: voice, requestID: requestID) else {
+                return
+            }
+            do {
+                try previewPlayer.playCached(voice: voice, completion: completion)
+            } catch {
+                if previewCoordinator.fail(voice: voice, requestID: requestID) {
+                    previewError = strings.voiceTutorVoicePreviewFailed
+                }
+            }
             return
         }
         let language = appState.draftSettings.appLanguage
@@ -11655,25 +11672,131 @@ private struct MobileVoiceTutorVoiceSettingsView: View {
                     language: language
                 )
                 try Task.checkCancellation()
-                guard previewRequestID == requestID else { return }
-                try previewPlayer.play(data: data, voice: voice)
+                guard previewCoordinator.isLoading(voice: voice, requestID: requestID) else {
+                    return
+                }
+                guard previewCoordinator.startPlayback(voice: voice, requestID: requestID) else {
+                    return
+                }
+                try previewPlayer.play(data: data, voice: voice, completion: completion)
                 previewTask = nil
-                previewRequestID = nil
-                requestedVoice = nil
             } catch is CancellationError {
-                guard previewRequestID == requestID else { return }
-                previewTask = nil
-                previewRequestID = nil
-                requestedVoice = nil
+                if previewCoordinator.cancelLoading(voice: voice, requestID: requestID) {
+                    previewTask = nil
+                }
             } catch {
-                guard previewRequestID == requestID else { return }
-                previewTask = nil
-                previewRequestID = nil
-                requestedVoice = nil
-                previewError = appState.voiceTutorVoicePreviewDisplayMessage(for: error)
+                if previewCoordinator.fail(voice: voice, requestID: requestID) {
+                    previewTask = nil
+                    previewError = appState.voiceTutorVoicePreviewDisplayMessage(for: error)
+                }
             }
         }
     }
+
+    private func previewAccessibilityValue(for voice: VoiceTutorVoice) -> String {
+        if previewCoordinator.loadingVoice == voice {
+            return strings.voiceTutorVoicePreviewLoading
+        }
+        if previewCoordinator.playingVoice == voice {
+            return strings.voiceTutorVoicePreviewPlaying
+        }
+        return ""
+    }
+}
+
+struct VoiceTutorVoicePreviewCoordinator: Equatable {
+    enum Phase: Equatable {
+        case idle
+        case loading(voice: VoiceTutorVoice, requestID: UUID)
+        case playing(voice: VoiceTutorVoice, requestID: UUID)
+    }
+
+    enum Effect: Equatable {
+        case cancelRequest
+        case stopPlayback
+        case begin(voice: VoiceTutorVoice, requestID: UUID)
+    }
+
+    private(set) var phase: Phase = .idle
+
+    var loadingVoice: VoiceTutorVoice? {
+        guard case let .loading(voice, _) = phase else { return nil }
+        return voice
+    }
+
+    var playingVoice: VoiceTutorVoice? {
+        guard case let .playing(voice, _) = phase else { return nil }
+        return voice
+    }
+
+    mutating func tap(_ voice: VoiceTutorVoice, requestID: UUID) -> [Effect] {
+        switch phase {
+        case let .loading(currentVoice, _) where currentVoice == voice:
+            phase = .idle
+            return [.cancelRequest]
+        case let .playing(currentVoice, _) where currentVoice == voice:
+            phase = .idle
+            return [.stopPlayback]
+        case .idle:
+            phase = .loading(voice: voice, requestID: requestID)
+            return [.begin(voice: voice, requestID: requestID)]
+        case .loading:
+            phase = .loading(voice: voice, requestID: requestID)
+            return [.cancelRequest, .begin(voice: voice, requestID: requestID)]
+        case .playing:
+            phase = .loading(voice: voice, requestID: requestID)
+            return [.stopPlayback, .begin(voice: voice, requestID: requestID)]
+        }
+    }
+
+    func isLoading(voice: VoiceTutorVoice, requestID: UUID) -> Bool {
+        phase == .loading(voice: voice, requestID: requestID)
+    }
+
+    @discardableResult
+    mutating func startPlayback(voice: VoiceTutorVoice, requestID: UUID) -> Bool {
+        guard isLoading(voice: voice, requestID: requestID) else { return false }
+        phase = .playing(voice: voice, requestID: requestID)
+        return true
+    }
+
+    @discardableResult
+    mutating func cancelLoading(voice: VoiceTutorVoice, requestID: UUID) -> Bool {
+        guard isLoading(voice: voice, requestID: requestID) else { return false }
+        phase = .idle
+        return true
+    }
+
+    @discardableResult
+    mutating func fail(voice: VoiceTutorVoice, requestID: UUID) -> Bool {
+        let isCurrent: Bool
+        switch phase {
+        case let .loading(currentVoice, currentRequestID),
+             let .playing(currentVoice, currentRequestID):
+            isCurrent = currentVoice == voice && currentRequestID == requestID
+        default:
+            isCurrent = false
+        }
+        guard isCurrent else { return false }
+        phase = .idle
+        return true
+    }
+
+    @discardableResult
+    mutating func finishPlayback(voice: VoiceTutorVoice, requestID: UUID) -> Bool {
+        guard phase == .playing(voice: voice, requestID: requestID) else { return false }
+        phase = .idle
+        return true
+    }
+
+    mutating func reset() {
+        phase = .idle
+    }
+}
+
+private enum VoiceTutorVoicePreviewPlaybackResult: Equatable {
+    case finished
+    case failed
 }
 
 @MainActor
@@ -11681,14 +11804,27 @@ private final class VoiceTutorVoicePreviewPlayer: NSObject, ObservableObject, AV
     @Published private(set) var activeVoice: VoiceTutorVoice?
     private var player: AVAudioPlayer?
     private var cachedAudio: [VoiceTutorVoice: Data] = [:]
+    private var completion: (@MainActor (VoiceTutorVoicePreviewPlaybackResult) -> Void)?
 
-    func playCached(voice: VoiceTutorVoice) throws -> Bool {
-        guard let data = cachedAudio[voice] else { return false }
-        try play(data: data, voice: voice)
-        return true
+    func hasCachedAudio(for voice: VoiceTutorVoice) -> Bool {
+        cachedAudio[voice] != nil
     }
 
-    func play(data: Data, voice: VoiceTutorVoice) throws {
+    func playCached(
+        voice: VoiceTutorVoice,
+        completion: @escaping @MainActor (VoiceTutorVoicePreviewPlaybackResult) -> Void
+    ) throws {
+        guard let data = cachedAudio[voice] else {
+            throw VoiceTutorVoicePreviewPlaybackError.cachedAudioMissing
+        }
+        try play(data: data, voice: voice, completion: completion)
+    }
+
+    func play(
+        data: Data,
+        voice: VoiceTutorVoice,
+        completion: @escaping @MainActor (VoiceTutorVoicePreviewPlaybackResult) -> Void
+    ) throws {
         stop()
         let audioSession = AVAudioSession.sharedInstance()
         do {
@@ -11701,11 +11837,14 @@ private final class VoiceTutorVoicePreviewPlayer: NSObject, ObservableObject, AV
                 throw VoiceTutorVoicePreviewPlaybackError.unableToPlay
             }
             self.player = player
+            self.completion = completion
             cachedAudio[voice] = data
             activeVoice = voice
         } catch {
             player?.stop()
             player = nil
+            self.completion = nil
+            cachedAudio.removeValue(forKey: voice)
             activeVoice = nil
             try? audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
             throw error
@@ -11717,6 +11856,7 @@ private final class VoiceTutorVoicePreviewPlayer: NSObject, ObservableObject, AV
         player?.delegate = nil
         player?.stop()
         player = nil
+        completion = nil
         activeVoice = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
     }
@@ -11729,7 +11869,13 @@ private final class VoiceTutorVoicePreviewPlayer: NSObject, ObservableObject, AV
                 let currentPlayer = self.player,
                 currentPlayer === finishedPlayer.player
             else { return }
+            let voice = self.activeVoice
+            let completion = self.completion
+            if !flag, let voice {
+                self.cachedAudio.removeValue(forKey: voice)
+            }
             self.stop()
+            completion?(flag ? .finished : .failed)
         }
     }
 
@@ -11741,7 +11887,13 @@ private final class VoiceTutorVoicePreviewPlayer: NSObject, ObservableObject, AV
                 let currentPlayer = self.player,
                 currentPlayer === failedPlayer.player
             else { return }
+            let voice = self.activeVoice
+            let completion = self.completion
+            if let voice {
+                self.cachedAudio.removeValue(forKey: voice)
+            }
             self.stop()
+            completion?(.failed)
         }
     }
 }
@@ -11758,6 +11910,7 @@ private final class VoiceTutorVoicePreviewPlayerReference: @unchecked Sendable {
 }
 
 private enum VoiceTutorVoicePreviewPlaybackError: Error {
+    case cachedAudioMissing
     case unableToPlay
 }
 

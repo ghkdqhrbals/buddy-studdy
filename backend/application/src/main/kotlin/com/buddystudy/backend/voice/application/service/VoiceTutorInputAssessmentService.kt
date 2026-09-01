@@ -14,6 +14,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withTimeoutOrNull
 import org.springframework.stereotype.Service
+import java.util.concurrent.atomic.AtomicInteger
 
 @Service
 class VoiceTutorInputAssessmentService(
@@ -22,16 +23,20 @@ class VoiceTutorInputAssessmentService(
 ) : VoiceTutorInputAssessmentUseCase {
     private val limits = properties.copy()
     private val permits: Semaphore
+    private val queuedAssessments = AtomicInteger()
 
     init {
         require(limits.timeoutMilliseconds in 1..15_000) { "Invalid voice input assessment timeout." }
         require(limits.maxConcurrentAssessments in 1..16) { "Invalid voice input assessment concurrency." }
+        require(limits.admissionTimeoutMilliseconds in 1..5_000) { "Invalid voice input assessment admission timeout." }
+        require(limits.maxQueuedAssessments in 0..64) { "Invalid voice input assessment queue bound." }
         require(limits.maxUtterances in 1..8) { "Invalid voice input assessment batch bound." }
         require(limits.maxTranscriptCharacters in 1..4_000) { "Invalid voice input assessment text bound." }
         require(limits.maxBatchTranscriptCharacters in 1..16_000) { "Invalid voice input assessment total text bound." }
         require(limits.maxTeacherContextCharacters in 0..4_000) { "Invalid voice input assessment context bound." }
         // One singleton service shares admission across all users/calls in this
-        // process. There is deliberately no unbounded queue or implicit retry.
+        // process. A small bounded wait absorbs ordinary turn-boundary bursts;
+        // it is neither an unbounded request queue nor a provider retry.
         permits = Semaphore(limits.maxConcurrentAssessments)
     }
 
@@ -48,7 +53,7 @@ class VoiceTutorInputAssessmentService(
             })
         })
         validate(snapshot)
-        if (!permits.tryAcquire()) throw failure(VoiceTutorInputAssessmentFailure.BUSY)
+        if (!acquirePermit()) throw failure(VoiceTutorInputAssessmentFailure.BUSY)
         try {
             val result = withTimeoutOrNull(limits.timeoutMilliseconds) {
                 provider.assess(snapshot).correlatedTo(snapshot.utterances)
@@ -65,6 +70,43 @@ class VoiceTutorInputAssessmentService(
             throw failure(VoiceTutorInputAssessmentFailure.UNAVAILABLE)
         } finally {
             permits.release()
+        }
+    }
+
+    private suspend fun acquirePermit(): Boolean {
+        if (permits.tryAcquire()) return true
+        if (limits.maxQueuedAssessments == 0) return false
+        val queued = queuedAssessments.incrementAndGet()
+        if (queued > limits.maxQueuedAssessments) {
+            queuedAssessments.decrementAndGet()
+            return false
+        }
+        var acquired = false
+        return try {
+            val admitted = withTimeoutOrNull(limits.admissionTimeoutMilliseconds) {
+                permits.acquire()
+                acquired = true
+                true
+            } ?: false
+            // A timeout can race with successful resource acquisition. When
+            // withTimeoutOrNull discards the block result, return the permit
+            // here because assess() will not enter its provider finally block.
+            if (!admitted && acquired) {
+                permits.release()
+                acquired = false
+            }
+            admitted
+        } catch (error: CancellationException) {
+            // The same race is possible when the parent/session is cancelled
+            // while a queued acquire resumes. Cancellation must never strand
+            // one of the process-wide permits.
+            if (acquired) {
+                permits.release()
+                acquired = false
+            }
+            throw error
+        } finally {
+            queuedAssessments.decrementAndGet()
         }
     }
 

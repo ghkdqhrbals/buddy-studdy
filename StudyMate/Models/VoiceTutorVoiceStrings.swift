@@ -33,6 +33,14 @@ extension AppStrings {
         }
     }
 
+    var voiceTutorVoicePreviewLoading: String {
+        switch language {
+        case .korean: "미리듣기 불러오는 중"
+        case .english: "Loading preview"
+        case .japanese: "プレビューを読み込み中"
+        }
+    }
+
     var voiceTutorVoicePreviewFailed: String {
         switch language {
         case .korean: "목소리를 불러오지 못했어요. 잠시 후 다시 눌러주세요."

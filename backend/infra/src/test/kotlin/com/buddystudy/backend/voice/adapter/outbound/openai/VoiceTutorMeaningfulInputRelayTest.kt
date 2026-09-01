@@ -1138,7 +1138,9 @@ class VoiceTutorMeaningfulInputRelayTest {
     fun `expired assessment and terminal cleanup failure cannot start late paid work`(): Unit = fixture().use { f ->
         f.utterance(1, "learner", "저는 준비됐어요")
         val batch = f.assessments().single()
-        f.now.addAndGet(Duration.ofSeconds(5).toNanos())
+        // The coordinator owns the same full lifetime as the use case:
+        // bounded admission (1.5 s) followed by provider work (5 s).
+        f.now.addAndGet(Duration.ofMillis(6_500).toNanos())
         assertThat(f.controller.canAssessInput(batch.token)).isFalse()
         assertThat(f.deletions()).hasSize(1)
         f.now.addAndGet(Duration.ofSeconds(5).toNanos())

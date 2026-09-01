@@ -417,6 +417,9 @@ deployment.
   `VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS`,
   `VOICE_TUTOR_SUMMARY_RECOVERY_BATCH_SIZE`,
   `VOICE_TUTOR_SUMMARY_PROCESSING_LEASE_SECONDS`,
+  `VOICE_TUTOR_SUMMARY_MAX_ATTEMPTS`,
+  `VOICE_TUTOR_SUMMARY_RETRY_INITIAL_DELAY_MS`,
+  `VOICE_TUTOR_SUMMARY_RETRY_MAX_DELAY_MS`,
   `VOICE_TUTOR_TRANSCRIPT_MAX_CHARS`, `VOICE_TUTOR_TRANSCRIPT_MAX_TURNS`, optional
   `VOICE_TUTOR_PUBLIC_BASE_URL`, `VOICE_TUTOR_RECORDING_ENABLED`,
   `VOICE_TUTOR_RECORDING_BUCKET`, `VOICE_TUTOR_RECORDING_REGION`, optional
@@ -435,8 +438,8 @@ deployment.
   each repository variable explicitly to `true`. Enabling recording without a
   bucket fails deployment validation. The remaining deployment defaults mirror the application contract:
   `gpt-realtime-2.1`, `marin`, `3600`, `15`, `60`, `12`, `5000`, `5000`, `100`,
-  `gpt-5.4`, `voice-tutor-summary-v1`, `5000`, `5000`, `10`, `300`,
-  `100000`, `2000`, an empty public base URL, an empty private bucket,
+  `gpt-5.4`, `voice-tutor-summary-v2`, `5000`, `5000`, `10`, `300`, `3`, `400`,
+  `2000`, `100000`, `2000`, an empty public base URL, an empty private bucket,
   `ap-northeast-2`, SSE-S3 when no KMS key is supplied, `30`, `300`,
   `134217728`, `true`, `100`, `1000`, `300`, `0 * * * * *`, and `UTC`, in that
   order. The 3,600-second call ceiling follows

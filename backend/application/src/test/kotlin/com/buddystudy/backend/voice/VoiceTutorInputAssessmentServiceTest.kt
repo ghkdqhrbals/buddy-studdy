@@ -258,7 +258,7 @@ class VoiceTutorInputAssessmentServiceTest {
     }
 
     @Test
-    fun `four global permits cover distinct users and fifth request fails without queue or retry`() = runBlocking<Unit> {
+    fun `a bounded admission wait preserves a fifth users meaningful turn during a short burst`() = runBlocking<Unit> {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val calls = AtomicInteger()
@@ -270,14 +270,51 @@ class VoiceTutorInputAssessmentServiceTest {
         val requests = (1L..4L).map { user -> async { service.assess(request().copy(userId = user)) } }
         entered.await()
 
-        val failure = runCatching { service.assess(request().copy(userId = 5)) }.exceptionOrNull()
-        assertThat((failure as VoiceTutorInputAssessmentException).reason).isEqualTo(VoiceTutorInputAssessmentFailure.BUSY)
+        val fifth = async(start = CoroutineStart.UNDISPATCHED) {
+            service.assess(request().copy(userId = 5))
+        }
         assertThat(calls).hasValue(4)
 
         release.complete(Unit)
         requests.forEach { assertThat(it.await().decisions).hasSize(1) }
-        service.assess(request().copy(userId = 5))
+        assertThat(fifth.await().decisions).hasSize(1)
         assertThat(calls).hasValue(5)
+    }
+
+    @Test
+    fun `assessment admission queue is size bounded and times out as busy`() = runBlocking<Unit> {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val calls = AtomicInteger()
+        val service = VoiceTutorInputAssessmentService(
+            VoiceTutorInputAssessmentPort {
+                calls.incrementAndGet()
+                entered.complete(Unit)
+                release.await()
+                result(it)
+            },
+            VoiceTutorInputAssessmentProperties(
+                maxConcurrentAssessments = 1,
+                admissionTimeoutMilliseconds = 25,
+                maxQueuedAssessments = 1,
+            ),
+        )
+        val active = async { service.assess(request().copy(userId = 1)) }
+        entered.await()
+        val queued = async(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { service.assess(request().copy(userId = 2)) }.exceptionOrNull()
+        }
+
+        val overflow = runCatching { service.assess(request().copy(userId = 3)) }.exceptionOrNull()
+        assertThat((overflow as VoiceTutorInputAssessmentException).reason)
+            .isEqualTo(VoiceTutorInputAssessmentFailure.BUSY)
+        assertThat(calls).hasValue(1)
+        val timedOut = queued.await()
+        assertThat((timedOut as VoiceTutorInputAssessmentException).reason)
+            .isEqualTo(VoiceTutorInputAssessmentFailure.BUSY)
+
+        release.complete(Unit)
+        assertThat(active.await().decisions).hasSize(1)
     }
 
     @Test
@@ -321,6 +358,41 @@ class VoiceTutorInputAssessmentServiceTest {
         assertThat(canceled).isTrue()
         stalled = false
         assertThat(service.assess(request()).decisions).hasSize(1)
+    }
+
+    @Test
+    fun `queued caller cancellation does not consume a permit or queue slot`() = runBlocking<Unit> {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val calls = AtomicInteger()
+        val service = VoiceTutorInputAssessmentService(
+            VoiceTutorInputAssessmentPort {
+                calls.incrementAndGet()
+                entered.complete(Unit)
+                release.await()
+                result(it)
+            },
+            VoiceTutorInputAssessmentProperties(
+                maxConcurrentAssessments = 1,
+                admissionTimeoutMilliseconds = 1_000,
+                maxQueuedAssessments = 1,
+            ),
+        )
+        val active = async { service.assess(request().copy(userId = 1)) }
+        entered.await()
+        val queued = async(start = CoroutineStart.UNDISPATCHED) {
+            service.assess(request().copy(userId = 2))
+        }
+
+        queued.cancelAndJoin()
+        val replacement = async(start = CoroutineStart.UNDISPATCHED) {
+            service.assess(request().copy(userId = 3))
+        }
+        release.complete(Unit)
+
+        assertThat(active.await().decisions).hasSize(1)
+        assertThat(replacement.await().decisions).hasSize(1)
+        assertThat(calls).hasValue(2)
     }
 
     @Test
@@ -379,10 +451,14 @@ class VoiceTutorInputAssessmentServiceTest {
         val bound = Binder(MapConfigurationPropertySource(mapOf(
             "buddystudy.voice-tutor.input-assessment.timeout-milliseconds" to "1200",
             "buddystudy.voice-tutor.input-assessment.max-concurrent-assessments" to "2",
+            "buddystudy.voice-tutor.input-assessment.admission-timeout-milliseconds" to "900",
+            "buddystudy.voice-tutor.input-assessment.max-queued-assessments" to "7",
         ))).bind("buddystudy.voice-tutor.input-assessment", Bindable.of(VoiceTutorInputAssessmentProperties::class.java)).get()
 
         assertThat(bound.timeoutMilliseconds).isEqualTo(1_200)
         assertThat(bound.maxConcurrentAssessments).isEqualTo(2)
+        assertThat(bound.admissionTimeoutMilliseconds).isEqualTo(900)
+        assertThat(bound.maxQueuedAssessments).isEqualTo(7)
         assertThat(bound.maxUtterances).isEqualTo(8)
         assertThat(bound.maxTranscriptCharacters).isEqualTo(4_000)
     }

@@ -333,12 +333,21 @@ private struct VoiceTutorSessionRow: View {
     }
 }
 
+struct VoiceTutorCallDisclosureState: Equatable {
+    var showsTranscript = false
+    var showsSummary = false
+
+    mutating func resetForNewAttempt() {
+        showsTranscript = false
+        showsSummary = false
+    }
+}
+
 struct VoiceTutorSessionView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: VoiceTutorViewModel
-    @State private var showsTranscript = false
-    @State private var showsSummary = false
+    @State private var disclosureState = VoiceTutorCallDisclosureState()
     private let strings: AppStrings
     private let onRecordingConsentConsumed: () -> Void
 
@@ -379,13 +388,13 @@ struct VoiceTutorSessionView: View {
             captions: viewModel.captions,
             assistantTranscriptDraft: viewModel.assistantTranscriptDraft,
             errorMessage: viewModel.errorMessage,
-            showsTranscript: $showsTranscript,
-            showsSummary: $showsSummary,
+            showsTranscript: $disclosureState.showsTranscript,
+            showsSummary: $disclosureState.showsSummary,
             onMute: { viewModel.toggleMute() },
             onPause: { Task { await viewModel.togglePause() } },
             onEnd: { Task { await viewModel.stopForUser() } },
             onRetry: {
-                showsSummary = false
+                disclosureState.resetForNewAttempt()
                 Task { await viewModel.start() }
             },
             onDismiss: { dismiss() },
@@ -617,6 +626,67 @@ struct VoiceTutorCallTranscriptGesture {
     }
 }
 
+/// Keeps live captions pinned only while the learner is actually following the
+/// newest turn. Appending text grows `height`/`maxY` before ScrollViewReader can
+/// restore the bottom anchor, so edge distance alone cannot be treated as an
+/// intentional departure. A move toward an older offset (`minY` increasing) is
+/// the user-owned signal; this also observes VoiceOver scrolls that do not emit a
+/// SwiftUI DragGesture.
+struct VoiceTutorTranscriptFollowState: Equatable {
+    static let offsetTolerance: CGFloat = 2
+
+    private(set) var followsLatest = true
+    private(set) var isUserInteracting = false
+    private var lastContentMinY: CGFloat?
+
+    var shouldAutoScrollForContentChange: Bool {
+        followsLatest && !isUserInteracting
+    }
+
+    func shouldScheduleSettlement(isGestureActive: Bool) -> Bool {
+        isUserInteracting && !isGestureActive
+    }
+
+    mutating func reset() {
+        followsLatest = true
+        isUserInteracting = false
+        lastContentMinY = nil
+    }
+
+    mutating func beginUserInteraction() {
+        isUserInteracting = true
+    }
+
+    mutating func observeLayout(contentFrame: CGRect, viewportHeight: CGFloat) {
+        guard contentFrame.isUsableForGestureRouting,
+              contentFrame.minY.isFinite,
+              viewportHeight.isFinite, viewportHeight > 0 else { return }
+
+        let previousMinY = lastContentMinY
+        lastContentMinY = contentFrame.minY
+        if VoiceTutorCallTranscriptGesture.transcriptIsAtLatest(
+            contentFrame: contentFrame,
+            viewportHeight: viewportHeight
+        ) {
+            followsLatest = true
+            return
+        }
+
+        // New caption/draft content changes height while preserving minY. Only
+        // movement toward older content may suspend following.
+        if let previousMinY,
+           contentFrame.minY > previousMinY + Self.offsetTolerance {
+            followsLatest = false
+        }
+    }
+
+    @discardableResult
+    mutating func endUserInteraction() -> Bool {
+        isUserInteracting = false
+        return followsLatest
+    }
+}
+
 private extension CGRect {
     var isUsableForGestureRouting: Bool {
         !isNull && !isInfinite && width > 0 && height > 0
@@ -688,12 +758,15 @@ struct VoiceTutorCallScreen: View {
     @State private var transcriptFrame = CGRect.null
     @State private var transcriptContentFrame = CGRect.null
     @State private var transcriptViewportHeight: CGFloat = 0
+    @State private var transcriptFollowState = VoiceTutorTranscriptFollowState()
+    @State private var transcriptScrollSettleTask: Task<Void, Never>?
     @State private var expandedContentFrame = CGRect.null
     @State private var expandedViewportHeight: CGFloat = 0
     @State private var expandedDragHasStarted = false
     @State private var transcriptWasAtLatestWhenExpandedDragStarted = false
     @State private var expandedScrollWasAtLatestWhenDragStarted = false
     @GestureState private var expandedDragIsActive = false
+    @GestureState private var transcriptDragIsActive = false
     let topic: String
     var discoveryPrompt: String? = nil
     let presentation: VoiceTutorCallPresentation
@@ -741,11 +814,18 @@ struct VoiceTutorCallScreen: View {
             transcriptFrame = .null
             transcriptContentFrame = .null
             transcriptViewportHeight = 0
+            transcriptScrollSettleTask?.cancel()
+            transcriptScrollSettleTask = nil
+            transcriptFollowState.reset()
             expandedContentFrame = .null
             expandedViewportHeight = 0
             expandedDragHasStarted = false
             transcriptWasAtLatestWhenExpandedDragStarted = false
             expandedScrollWasAtLatestWhenDragStarted = false
+        }
+        .onDisappear {
+            transcriptScrollSettleTask?.cancel()
+            transcriptScrollSettleTask = nil
         }
         .onChange(of: expandedDragIsActive) { wasActive, isActive in
             guard wasActive, !isActive else { return }
@@ -1039,21 +1119,96 @@ struct VoiceTutorCallScreen: View {
                 }
             }
             .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
-            .onAppear { proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom) }
+            .simultaneousGesture(transcriptFollowGesture, including: .all)
+            .onAppear {
+                transcriptFollowState.reset()
+                proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom)
+            }
             .onChange(of: captions.last?.id) { _, _ in
+                guard transcriptFollowState.shouldAutoScrollForContentChange else { return }
                 proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom)
             }
             .onChange(of: assistantTranscriptDraft) { _, _ in
+                guard transcriptFollowState.shouldAutoScrollForContentChange else { return }
+                proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom)
+            }
+            .onChange(of: transcriptDragIsActive) { wasActive, isActive in
+                guard wasActive, !isActive else { return }
+                observeTranscriptLayout()
+                scheduleTranscriptScrollSettlement(using: proxy)
+            }
+            .onPreferenceChange(VoiceTutorTranscriptContentFramePreferenceKey.self) { frame in
+                transcriptContentFrame = frame
+                observeTranscriptLayout()
+                if transcriptFollowState.shouldScheduleSettlement(
+                    isGestureActive: transcriptDragIsActive
+                ) {
+                    scheduleTranscriptScrollSettlement(using: proxy)
+                }
+            }
+            .onPreferenceChange(VoiceTutorTranscriptViewportHeightPreferenceKey.self) { height in
+                transcriptViewportHeight = height
+                observeTranscriptLayout()
+                if transcriptFollowState.shouldScheduleSettlement(
+                    isGestureActive: transcriptDragIsActive
+                ) {
+                    scheduleTranscriptScrollSettlement(using: proxy)
+                }
+            }
+        }
+        .accessibilityIdentifier("voiceCall.transcript")
+    }
+
+    private var transcriptFollowGesture: some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .named(transcriptScrollCoordinateSpace))
+            .updating($transcriptDragIsActive) { _, isActive, _ in
+                isActive = true
+            }
+            .onChanged { _ in
+                if !transcriptFollowState.isUserInteracting {
+                    observeTranscriptLayout()
+                    transcriptFollowState.beginUserInteraction()
+                }
+                transcriptScrollSettleTask?.cancel()
+                transcriptScrollSettleTask = nil
+            }
+            .onEnded { _ in
+                observeTranscriptLayout()
+            }
+    }
+
+    private func observeTranscriptLayout() {
+        transcriptFollowState.observeLayout(
+            contentFrame: transcriptContentFrame,
+            viewportHeight: transcriptViewportHeight
+        )
+    }
+
+    private func scheduleTranscriptScrollSettlement(using proxy: ScrollViewProxy) {
+        guard transcriptFollowState.shouldScheduleSettlement(
+            isGestureActive: transcriptDragIsActive
+        ) else { return }
+        transcriptScrollSettleTask?.cancel()
+        transcriptScrollSettleTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 180_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            guard transcriptFollowState.shouldScheduleSettlement(
+                isGestureActive: transcriptDragIsActive
+            ) else {
+                transcriptScrollSettleTask = nil
+                return
+            }
+            observeTranscriptLayout()
+            let shouldRestoreLatest = transcriptFollowState.endUserInteraction()
+            transcriptScrollSettleTask = nil
+            if shouldRestoreLatest {
                 proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom)
             }
         }
-        .onPreferenceChange(VoiceTutorTranscriptContentFramePreferenceKey.self) { frame in
-            transcriptContentFrame = frame
-        }
-        .onPreferenceChange(VoiceTutorTranscriptViewportHeightPreferenceKey.self) { height in
-            transcriptViewportHeight = height
-        }
-        .accessibilityIdentifier("voiceCall.transcript")
     }
 
     private func transcriptAffordance(expanded: Bool) -> some View {
@@ -1264,6 +1419,9 @@ struct VoiceTutorCallScreen: View {
     }
 
     private func resetExpandedGestureRouting() {
+        transcriptScrollSettleTask?.cancel()
+        transcriptScrollSettleTask = nil
+        transcriptFollowState.reset()
         expandedDragHasStarted = false
         transcriptWasAtLatestWhenExpandedDragStarted = false
         expandedScrollWasAtLatestWhenDragStarted = false
