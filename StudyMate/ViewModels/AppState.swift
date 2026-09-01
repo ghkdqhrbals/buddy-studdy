@@ -8330,11 +8330,10 @@ final class AppState: ObservableObject {
     }
 
     func createVoiceTutorConnection(
-        studyID: Int? = nil,
         voice: String? = nil,
         recordingConsent: Bool = false
     ) async throws -> VoiceTutorLiveConnection {
-        // Freeze the saved selection before registration/recovery can suspend.
+        // Freeze call settings before registration/recovery can suspend.
         // A settings edit cannot change this call or its idempotent retry.
         let requestedVoice = voice ?? settings.voiceTutorVoice.apiValue
         let context = try makeVoiceTutorRequestContext()
@@ -8365,7 +8364,9 @@ final class AppState: ObservableObject {
                 operation: { recoveredRegistration in
                     let created = try await currentVoiceTutorUseCase.createSession(
                         registration: recoveredRegistration,
-                        studyID: studyID,
+                        // Current iOS calls always discover the saved tree by voice.
+                        // The backend keeps nullable/numeric compatibility for older apps.
+                        studyID: nil,
                         language: self.settings.appLanguage,
                         voice: requestedVoice,
                         recordingConsent: recordingConsent,

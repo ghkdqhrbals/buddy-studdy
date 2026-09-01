@@ -68,18 +68,30 @@ class McpVoiceTutorToolAdapter(
             },
             parameters = if (tool.name() == DELETE_STUDY) voiceDeletionSchema(tool.inputSchema().toMap()) else tool.inputSchema().toMap(),
         )
-    } + VoiceTutorMcpToolDefinition(
-        name = SELECT_STUDY,
-        description = "Set the current spoken lesson focus to the exact saved study the learner chose. " +
-            "First find the owned node and its real parent path with list_studies/get_study; clarify ambiguous topics. " +
-            "Use this before teaching a newly chosen root or child, never merely because a search returned it. " +
-            "The returned voiceLessonFocus and frozen level apply to the next new question only. " +
-            "This does not create/edit a study, start teaching, submit an answer, or consume question quota.",
-        parameters = mapOf(
-            "type" to "object", "additionalProperties" to false,
-            "properties" to mapOf("study_id" to mapOf("type" to "integer", "minimum" to 1,
-                "description" to "Exact owned saved study ID chosen in the conversation, not a title or list position.")),
-            "required" to listOf("study_id"),
+    } + listOf(
+        VoiceTutorMcpToolDefinition(
+            name = SELECT_STUDY,
+            description = "Set the initial or explicitly changed spoken lesson focus to an exact saved study the learner agreed to. " +
+                "First find the owned node and its real parent path with list_studies/get_study; clarify ambiguous topics. " +
+                "The exact target may be learner-named, or the verified endpoint of an unambiguous single-child path from the learner's broad topic after one contextual agreement. " +
+                "Use this before teaching that saved node, never merely because an ambiguous search returned it. " +
+                "For teacher-guided movement from the current focus into one real direct child, use advance_voice_study instead. " +
+                "The returned voiceLessonFocus and frozen level apply to the next new question only. " +
+                "This does not create/edit a study, start teaching, submit an answer, or consume question quota.",
+            parameters = focusParameters(
+                "Exact owned saved study ID named by the learner or contextually agreed as the verified single-child endpoint, not a title or list position."
+            ),
+        ),
+        VoiceTutorMcpToolDefinition(
+            name = ADVANCE_STUDY,
+            description = "Advance a consented tree-guided lesson by exactly one verified parent-child edge. " +
+                "Use only after the learner asks or agrees to continue and after the current question and feedback are complete. " +
+                "First read the current focus's direct children with parent-scoped list_studies. " +
+                "The target must be a real direct child of the persisted current focus; siblings, ancestors, deeper jumps and other roots are rejected. " +
+                "The returned voiceLessonFocus and frozen child level apply to the next new question only.",
+            parameters = focusParameters(
+                "Exact owned direct-child study ID selected for the next guided lesson step."
+            ),
         ),
     )
 
@@ -94,6 +106,7 @@ class McpVoiceTutorToolAdapter(
                 return failure("INVALID_ARGUMENTS", "Tool arguments are too large.")
             }
             if (toolName == SELECT_STUDY) return selectStudy(context, arguments)
+            if (toolName == ADVANCE_STUDY) return advanceStudy(context, arguments)
             val specification = specifications[toolName]
                 ?: return failure("MCP_UNAVAILABLE", "This study tool is currently unavailable.")
             // Use the SDK's existing validator, not its logging wrapper: validation errors
@@ -220,17 +233,84 @@ class McpVoiceTutorToolAdapter(
         context: VoiceTutorWebRtcControlContext,
         arguments: Map<String, Any>,
     ): VoiceTutorMcpToolResult {
-        val id = arguments["study_id"]?.let { positiveId(objectMapper.valueToTree(it)) }
-        if (arguments.keys != setOf("study_id") || id == null) {
-            return failure("INVALID_ARGUMENTS", "Choose one exact positive saved study_id.")
+        val id = focusStudyId(arguments)
+            ?: return failure("INVALID_ARGUMENTS", "Choose one exact positive saved study_id.")
+        return focusStudy(context, id, guidedAdvance = false)
+    }
+
+    private suspend fun advanceStudy(
+        context: VoiceTutorWebRtcControlContext,
+        arguments: Map<String, Any>,
+    ): VoiceTutorMcpToolResult {
+        val id = focusStudyId(arguments)
+            ?: return failure("INVALID_ARGUMENTS", "Choose one exact positive direct-child study_id.")
+        if (!isAuthorized(context)) return inactiveCall()
+        val currentId = currentStudyAnchor(context)
+            ?: return failure(
+                "GUIDED_FOCUS_REQUIRED",
+                "Select the learner's initial saved topic before trying to move down its tree.",
+            )
+        if (id == currentId) {
+            return failure("GUIDED_CHILD_REQUIRED", "The next guided focus must be a direct child of the current focus.")
+        }
+        val readStudy = specifications["get_study"]
+            ?: return failure("MCP_UNAVAILABLE", "The child study could not be verified.")
+        val result = invoke(
+            context.principal!!,
+            readStudy,
+            mapOf("study_id" to id, "language" to context.session.language),
+        )
+        if (result.isError() == true || result.structuredContent() == null) {
+            return failure("GUIDED_CHILD_UNAVAILABLE", "The requested saved child could not be verified.")
+        }
+        val child = objectMapper.valueToTree<JsonNode>(result.structuredContent())
+        if (positiveId(child.path("id")) != id || positiveId(child.path("parentStudyId")) != currentId) {
+            return failure(
+                "GUIDED_DESCENT_OUT_OF_SCOPE",
+                "Teacher-guided progression can move only to one real direct child of the current focus.",
+            )
         }
         if (!isAuthorized(context)) return inactiveCall()
-        if (confirmations.latestLearnerTurnId(context.session.userId, context.session.id) == null) {
-            return failure("LEARNER_CHOICE_REQUIRED", "Ask what the learner wants to discuss and wait for their meaningful reply before selecting a study.")
+        return focusStudy(context, id, guidedAdvance = true, expectedParentStudyId = currentId)
+    }
+
+    private suspend fun focusStudy(
+        context: VoiceTutorWebRtcControlContext,
+        id: Long,
+        guidedAdvance: Boolean,
+        expectedParentStudyId: Long? = null,
+    ): VoiceTutorMcpToolResult {
+        if (!isAuthorized(context)) return inactiveCall()
+        val learnerTurnId = confirmations.latestLearnerTurnId(context.session.userId, context.session.id)
+        if (learnerTurnId == null || learnerTurnId <= 0) {
+            return failure(
+                if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
+                if (guidedAdvance) {
+                    "Wait for the learner's meaningful request or agreement to continue before moving down the saved tree."
+                } else {
+                    "Ask what the learner wants to discuss and wait for their meaningful reply before selecting a study."
+                },
+            )
         }
         if (!isAuthorized(context)) return inactiveCall()
-        val selection = lessonFocus.focus(context.session.userId, context.session.id, id)
-            ?: return failure("LESSON_FOCUS_UNAVAILABLE", "This owned saved topic and its complete parent path could not be prepared; no focus was selected. Read saved topics or ask one brief clarification instead of guessing or creating a replacement.")
+        val selection = if (guidedAdvance) {
+            lessonFocus.advance(
+                context.session.userId,
+                context.session.id,
+                requireNotNull(expectedParentStudyId),
+                id,
+                learnerTurnId,
+            )
+        } else {
+            lessonFocus.focus(context.session.userId, context.session.id, id, learnerTurnId)
+        } ?: return failure(
+            "LESSON_FOCUS_UNAVAILABLE",
+            if (guidedAdvance) {
+                "This learner turn was already used or the saved child is no longer the current focus's direct child. Wait for the learner's next meaningful continuation or read the current branch again."
+            } else {
+                "This owned saved topic and its complete parent path could not be prepared; no focus was selected. Read saved topics or ask one brief clarification instead of guessing or creating a replacement."
+            },
+        )
         if (selection.studyId != id || selection.snapshot.studyId != id || selection.revision <= 0 ||
             selection.snapshot.topic.isBlank() || selection.snapshot.topic.length > 255 ||
             selection.snapshot.difficulty !in 1..10 || selection.snapshot.parentStudyId?.let { it > 0 } == false
@@ -252,7 +332,12 @@ class McpVoiceTutorToolAdapter(
                 "selected" to true, "voiceLessonContextReady" to true,
                 "voiceLessonFocus" to focus, "voiceLessonTopics" to listOf(focus),
                 "voiceLessonTree" to VoiceTutorLessonTreeContext.metadata(id, saved, listOf(id)),
-                "notice" to "The saved lesson focus is confirmed. Use its frozen level for the next new question, review only its node history first, and wait for clear learner agreement before teaching; prior questions and navigation turns keep their original context.",
+                "voiceLessonFocusChange" to if (guidedAdvance) "GUIDED_DIRECT_CHILD" else "EXPLICIT_SELECTION",
+                "notice" to if (guidedAdvance) {
+                    "The next direct child focus is confirmed. Review only its node history, then ask one question at its frozen level; do not skip another edge or append a second question."
+                } else {
+                    "The saved lesson focus is confirmed. Use its frozen level for the next new question, review only its node history first, and wait for clear learner agreement before teaching; prior questions and navigation turns keep their original context."
+                },
             )),
             isError = false, lessonRevision = selection.revision, lessonFocus = selection,
         )
@@ -263,6 +348,10 @@ class McpVoiceTutorToolAdapter(
         "topic" to selection.snapshot.topic, "difficulty" to selection.snapshot.difficulty,
         "revision" to selection.revision,
     )
+
+    private fun focusStudyId(arguments: Map<String, Any>): Long? = arguments["study_id"]
+        ?.let { positiveId(objectMapper.valueToTree(it)) }
+        ?.takeIf { arguments.keys == setOf("study_id") }
 
     private suspend fun parentIsWithinCallStudy(context: VoiceTutorWebRtcControlContext, parentStudyId: Long): Boolean {
         val callStudyId = currentStudyAnchor(context) ?: return false
@@ -613,6 +702,7 @@ class McpVoiceTutorToolAdapter(
 
     private companion object {
         const val SELECT_STUDY = "select_voice_study"
+        const val ADVANCE_STUDY = "advance_voice_study"
         const val CREATE_TOPIC = "create_study_topic"
         const val UPDATE_STUDY = "update_study"
         const val DELETE_STUDY = "delete_study"
@@ -626,13 +716,23 @@ class McpVoiceTutorToolAdapter(
             "list_studies", "get_study", CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY,
             "list_records", "get_record", LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD,
             "get_topic_stats", "get_study_growth",
-            SELECT_STUDY,
+            SELECT_STUDY, ADVANCE_STUDY,
         )
         val LEARNING_HISTORY_TOOLS = setOf(LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD)
         val STUDY_CONTEXT_TOOLS = setOf("list_studies", "get_study", CREATE_TOPIC, UPDATE_STUDY)
         val DELETE_ARGUMENTS = setOf("study_id", "confirm", "confirmation_token")
         val CREATED_TOPIC_FIELDS = listOf(
             "id", "parentStudyId", "topic", "sortOrder", "difficultyLevel", "activeForQuestions", "enabled",
+        )
+
+        fun focusParameters(description: String): Map<String, Any?> = mapOf(
+            "type" to "object", "additionalProperties" to false,
+            "properties" to mapOf(
+                "study_id" to mapOf(
+                    "type" to "integer", "minimum" to 1, "description" to description,
+                ),
+            ),
+            "required" to listOf("study_id"),
         )
     }
 }

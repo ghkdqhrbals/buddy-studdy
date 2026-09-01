@@ -337,14 +337,11 @@ final class VoiceTutorViewModel: ObservableObject {
 
     init(
         appState: AppState,
-        study _: BackendStudyRoom? = nil,
         recordingConsent: Bool = false,
         audioEngine: VoiceTutorAudioEngine = VoiceTutorAudioEngine(),
         transport: VoiceTutorWebSocketTransport = VoiceTutorWebSocketTransport()
     ) {
         self.appState = appState
-        // Legacy callers may supply a room, but every new attempt discovers its
-        // topic by voice. Never silently select that room or manufacture an ID.
         self.recordingConsent = recordingConsent
         self.audioEngine = audioEngine
         self.transport = transport
@@ -412,7 +409,6 @@ final class VoiceTutorViewModel: ObservableObject {
                 return
             }
             let connection = try await appState.createVoiceTutorConnection(
-                studyID: nil,
                 recordingConsent: recordingConsent
             )
             guard connectionAttemptFence.isCurrent(attemptID),

@@ -344,14 +344,12 @@ struct VoiceTutorSessionView: View {
 
     init(
         appState: AppState,
-        study: BackendStudyRoom? = nil,
         recordingConsent: Bool,
         onRecordingConsentConsumed: @escaping () -> Void = {}
     ) {
         _viewModel = StateObject(
             wrappedValue: VoiceTutorViewModel(
                 appState: appState,
-                study: study,
                 recordingConsent: recordingConsent
             )
         )

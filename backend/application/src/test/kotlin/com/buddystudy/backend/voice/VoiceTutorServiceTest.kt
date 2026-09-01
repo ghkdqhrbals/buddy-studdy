@@ -218,7 +218,7 @@ class VoiceTutorServiceTest {
         val instructions = service(persistence).connect(principal, persistence.session.id).instructions
         assertThat(instructions)
             .contains("comfortable, tree-guided lesson at the saved node's configured level")
-            .contains("at most three of those real child topics")
+            .contains("At the first branch with several real children, briefly offer at most three")
             .contains("not a parent's difficulty")
             .contains("1-to-10 scale")
             .contains("never fall back to mutable live difficultyLevel fields")
@@ -238,24 +238,31 @@ class VoiceTutorServiceTest {
     }
 
     @Test
-    fun `lesson depth means an explicitly chosen saved branch without raising level or advancing after feedback`() = runBlocking<Unit> {
+    fun `lesson depth follows verified saved children one learner-authorized edge at a time`() = runBlocking<Unit> {
         val persistence = FakePersistence(now)
         val instructions = service(persistence).connect(principal, persistence.session.id).instructions
         assertThat(instructions)
             .contains("Only exact studyId/parentStudyId edges establish tree membership")
             .contains("never match branches by title")
             .contains("Ancestors are orientation context, not permission to quiz on a parent or sibling")
-            .contains("Move outside the current focus subtree or to another root only when the learner explicitly chooses")
-            .contains("do not automatically traverse its descendants")
-            .contains("Going deeper means following the learner's actual saved study tree")
+            .contains("the learner does not need to issue a separate selection command for every child")
+            .contains("Never skip an edge, move twice on one learner turn, or move because of silence")
+            .contains("Move to a sibling, ancestor, unrelated descendant or another root only when the learner explicitly names")
+            .contains("Going deeper means following the learner's actual saved study tree through verified direct-child focus changes")
             .contains("tree depth, a good score or fluent speech never authorizes raising the level")
             .contains("childrenMayBeIncomplete=true")
             .contains("Only when the learner explicitly asks to add a child topic")
-            .doesNotContain("Deepen the same topic with why, how", "After feedback, offer one related deeper question")
+            .doesNotContain(
+                "do not automatically traverse its descendants",
+                "Deepen the same topic with why, how",
+                "After feedback, offer one related deeper question",
+            )
         assertThat(instructions)
             .contains("After an explanation or assessment, finish that brief response and listen")
             .contains("do not append the next substantive question")
             .contains("a contextual yes or an explicit request to continue can resume the agreed topic")
+            .contains("when the learner meaningfully says to continue, inspect its direct children and advance by at most one real edge")
+            .contains("With one direct child, advance naturally without another menu")
             .contains("Silence, elapsed time and the completion of your explanation or feedback are not permission to continue")
             .contains("wait without repeated readiness prompts, a countdown or pressure")
             .contains("a pause is not an instruction to end the call or mark learning complete")
@@ -634,32 +641,37 @@ class VoiceTutorServiceTest {
     }
 
     @Test
-    fun `topic discovery resolves the saved tree and requires a successful focus selection before studying`(): Unit = runBlocking {
+    fun `topic discovery resolves the saved tree and separates explicit selection from guided descent`(): Unit = runBlocking {
         val persistence = FakePersistence(now).apply { session = session.copy(studyId = null, acceptedStudyId = null) }
         val instructions = service(persistence).connect(principal, persistence.session.id).instructions
 
         assertThat(instructions)
-            .contains("list_studies with query equal to that topic, limit 5 and offset 0")
+            .contains("list_studies with query equal to that topic, limit 10 and offset 0")
+            .contains("continue the same query with the next offset for at most three bounded pages")
+            .contains("never claim the topic is absent from a partial page")
             .contains("get_study with an exact returned study_id")
             .contains("parent_study_id equal to the exact node being explored")
             .contains("instead of immediately quizzing on the broad concept")
-            .contains("exactly one verified matching root or next child branch")
-            .contains("at most three of those real child topics or matching roots")
+            .contains("Follow a complete single-child chain through real parent-scoped reads")
+            .contains("without selecting intermediate nodes")
+            .contains("ask once whether to study it")
+            .contains("At the first branch with several real children, briefly offer at most three")
             .contains("A partial page is not proof there is only one branch")
-            .contains("Only a successful select_voice_study result's voiceLessonFocus")
-            .contains("call select_voice_study with study_id")
+            .contains("Only a successful select_voice_study or advance_voice_study result's voiceLessonFocus")
+            .contains("call advance_voice_study with one verified direct child")
+            .contains("Use advance_voice_study only for one exact direct child")
             .contains("voiceLessonContextReady=false or voiceLessonTopics=[] is normal")
-            .contains("must not block selection")
+            .contains("must not block focus preparation")
             .contains("let select_voice_study validate the complete owned path atomically")
             .contains("Before selection, do not require voiceLessonTree or a frozen level")
-            .contains("Only if selection or an explicit settings-change preparation actually fails")
-            .contains("A read, name match, proposed branch or failed selection never changes focus")
+            .contains("Only if focus preparation or an explicit settings-change preparation actually fails")
+            .contains("A read, ambiguous name match, proposed branch or failed focus result never changes focus")
             .contains("never acceptedStudyId, as the current focus identity")
             .contains("never invent a node, silently create a root")
             .contains("scope=node, limit=3 and view=original")
             .contains("not learning questions, answers, feedback or score evidence")
             .contains("Never retroactively attribute them to a node selected later")
-            .contains("explain the limitation briefly and never pretend to have selected a topic")
+            .contains("explain the limitation briefly and never pretend to have selected or advanced a topic")
             .doesNotContain("with the selectedStudyId", "equal to selectedStudyId")
     }
 

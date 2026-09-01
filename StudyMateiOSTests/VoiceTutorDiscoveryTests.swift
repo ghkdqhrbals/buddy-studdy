@@ -267,7 +267,7 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
             let fixture = try VoiceDiscoveryAppFixture(language: language)
             defer { fixture.close() }
             XCTAssertTrue(fixture.appState.voiceTutorStudies.isEmpty)
-            let connection = try await fixture.appState.createVoiceTutorConnection(studyID: nil)
+            let connection = try await fixture.appState.createVoiceTutorConnection()
             let body = try XCTUnwrap(fixture.creationBodies.first)
             XCTAssertFalse(body.keys.contains("studyId"))
             XCTAssertEqual(body["language"] as? String, language.backendCode)
@@ -283,7 +283,7 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
         for consent in [false, true] {
             let fixture = try VoiceDiscoveryAppFixture()
             defer { fixture.close() }
-            _ = try await fixture.appState.createVoiceTutorConnection(studyID: nil, recordingConsent: consent)
+            _ = try await fixture.appState.createVoiceTutorConnection(recordingConsent: consent)
             let body = try XCTUnwrap(fixture.creationBodies.first)
             XCTAssertNil(body["studyId"])
             XCTAssertEqual(body["recordingConsent"] as? Bool, consent)
@@ -296,21 +296,13 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
         let fixture = try VoiceDiscoveryAppFixture()
         defer { fixture.close() }
         fixture.expireFirstCreate = true
-        _ = try await fixture.appState.createVoiceTutorConnection(studyID: nil)
+        _ = try await fixture.appState.createVoiceTutorConnection()
         XCTAssertEqual(fixture.creationBodies.count, 2)
         XCTAssertTrue(fixture.creationBodies.allSatisfy { !$0.keys.contains("studyId") })
         let creates = fixture.requests.filter { $0.url?.path == "/api/v1/voice-tutor/sessions" }
         let keys = creates.compactMap { $0.value(forHTTPHeaderField: "Idempotency-Key") }
         XCTAssertEqual(keys.count, 2)
         XCTAssertEqual(Set(keys).count, 1)
-        fixture.assertDraftsUnchanged()
-    }
-
-    func testLegacyNumericStudyRequestRemainsCompatible() async throws {
-        let fixture = try VoiceDiscoveryAppFixture()
-        defer { fixture.close() }
-        _ = try await fixture.appState.createVoiceTutorConnection(studyID: 42)
-        XCTAssertEqual(fixture.creationBodies.first?["studyId"] as? Int, 42)
         fixture.assertDraftsUnchanged()
     }
 

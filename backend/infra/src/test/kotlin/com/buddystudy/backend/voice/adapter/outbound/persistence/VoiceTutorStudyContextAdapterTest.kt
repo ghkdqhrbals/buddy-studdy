@@ -82,10 +82,12 @@ class VoiceTutorStudyContextAdapterTest {
             """
             create table voice_tutor_lesson_focuses (
                 session_id varchar(36) not null, revision bigint not null,
-                study_id bigint not null, captured_at timestamp(6) not null,
+                study_id bigint not null, learner_turn_id bigint, captured_at timestamp(6) not null,
                 primary key (session_id, revision),
+                unique (session_id, learner_turn_id),
                 foreign key (session_id) references voice_tutor_sessions(id) on delete cascade,
-                check (revision >= 0), check (study_id > 0)
+                check (revision >= 0), check (study_id > 0),
+                check (learner_turn_id is null or learner_turn_id > 0)
             )
             """.trimIndent(),
         )
@@ -687,6 +689,58 @@ class VoiceTutorStudyContextAdapterTest {
         assertThat(context).contains(VoiceTutorStudySnapshot(10, null, "Root Redis", 3))
         assertThat(context).contains(VoiceTutorStudySnapshot(12, 11, "Expiry", 5))
         assertThat(context.single { it.studyId == 11L }).isEqualTo(selected.snapshot)
+    }
+
+    @Test
+    fun `guided advance atomically accepts only the persisted current focus direct child`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertStudy(11, parentId = 10, topic = "Cache", difficulty = 4)
+        insertStudy(12, parentId = 11, topic = "Expiry", difficulty = 5)
+        insertStudy(13, parentId = 10, topic = "PubSub", difficulty = 6)
+
+        val child = transaction { requireNotNull(adapter.advance(7, accepted.id, 10, 11, learnerTurnId = 11)) }
+
+        assertThat(child.focus).isEqualTo(VoiceTutorLessonFocus(11, 1))
+        assertThat(child.snapshot).isEqualTo(VoiceTutorStudySnapshot(11, 10, "Cache", 4, 1))
+        assertThat(focusHeader()).containsExactly(11L, 10L, "Cache", 4)
+        transaction { assertThat(adapter.advance(7, accepted.id, 11, 13, learnerTurnId = 12)).isNull() }
+        transaction { assertThat(adapter.advance(7, accepted.id, 10, 12, learnerTurnId = 12)).isNull() }
+        transaction { assertThat(adapter.advance(7, accepted.id, 11, 11, learnerTurnId = 12)).isNull() }
+        transaction { assertThat(adapter.advance(7, accepted.id, 11, 12, learnerTurnId = 11)).isNull() }
+        assertThat(adapter.history(7, accepted.id)).containsExactly(child.focus)
+    }
+
+    @Test
+    fun `guided advance fails closed when the direct child edge changes before the locked focus write`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertStudy(11, parentId = 10, topic = "Cache", difficulty = 4)
+        execute("update studies set parent_study_id = null where id = 11")
+
+        transaction { assertThat(adapter.advance(7, accepted.id, 10, 11, learnerTurnId = 11)).isNull() }
+
+        assertThat(adapter.history(7, accepted.id)).isEmpty()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusHeader()).containsExactly(10L, 10L, "Accepted Redis", 6)
+    }
+
+    @Test
+    fun `one accepted learner turn cannot select two different lesson focuses`(): Unit = runBlocking {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertStudy(20, topic = "Kafka", difficulty = 4)
+
+        val first = transaction { requireNotNull(adapter.focus(7, discovery.id, 10, learnerTurnId = 11)) }
+        transaction { assertThat(adapter.focus(7, discovery.id, 20, learnerTurnId = 11)).isNull() }
+        val second = transaction { requireNotNull(adapter.focus(7, discovery.id, 20, learnerTurnId = 12)) }
+
+        assertThat(first.focus).isEqualTo(VoiceTutorLessonFocus(10, 1))
+        assertThat(second.focus).isEqualTo(VoiceTutorLessonFocus(20, 2))
+        assertThat(adapter.history(7, discovery.id)).containsExactly(first.focus, second.focus)
     }
 
     @Test

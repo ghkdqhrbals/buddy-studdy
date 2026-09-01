@@ -2565,7 +2565,7 @@ final class VoiceTutorContractTests: XCTestCase {
             releaseResponse.open()
             fixture.close()
         }
-        let creation = Task { try await fixture.appState.createVoiceTutorConnection(studyID: 42) }
+        let creation = Task { try await fixture.appState.createVoiceTutorConnection() }
         defer { creation.cancel() }
         let bootstrapWait = await XCTWaiter.fulfillment(of: [bootstrapArrived], timeout: 5)
         XCTAssertEqual(bootstrapWait, .completed)
@@ -3143,7 +3143,7 @@ final class VoiceTutorContractTests: XCTestCase {
         defer { fixture.close() }
 
         do {
-            _ = try await fixture.appState.createVoiceTutorConnection(studyID: 42)
+            _ = try await fixture.appState.createVoiceTutorConnection()
             XCTFail("Cross-origin \(invalidField) must fail after session creation")
         } catch VoiceTutorPreparationError.invalidWebSocketURL {
             // The original contract failure survives a best-effort end failure.

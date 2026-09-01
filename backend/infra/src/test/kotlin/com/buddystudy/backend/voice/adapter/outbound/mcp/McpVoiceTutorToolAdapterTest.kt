@@ -276,9 +276,9 @@ class McpVoiceTutorToolAdapterTest {
             "list_studies", "get_study", "update_study", "create_study_topic", "delete_study",
             "list_records", "get_record", "list_study_learning_records", "get_voice_learning_record",
             "get_topic_stats", "get_study_growth",
-            "select_voice_study",
+            "select_voice_study", "advance_voice_study",
         )
-        for (definition in definitions.filterNot { it.name == "select_voice_study" }) {
+        for (definition in definitions.filterNot { it.name in setOf("select_voice_study", "advance_voice_study") }) {
             val original = fixture.catalog.single { it.tool().name() == definition.name }.tool()
             if (definition.name != "delete_study") assertThat(definition.parameters).isEqualTo(original.inputSchema())
             assertThat(definition.description).startsWith(original.description())
@@ -292,10 +292,16 @@ class McpVoiceTutorToolAdapterTest {
         fixture.adapter.definitions()
         assertThat(fixture.catalogReads).isEqualTo(1)
         assertThat(fixture.calls).isEmpty()
-        val focus = mapper.valueToTree<JsonNode>(definitions.single { it.name == "select_voice_study" }.parameters)
-        assertThat(focus.path("required").map { it.asText() }).containsExactly("study_id")
-        assertThat(focus.path("additionalProperties").asBoolean()).isFalse()
-        assertThat(focus.path("properties").fieldNames().asSequence().toList()).containsExactly("study_id")
+        for (name in listOf("select_voice_study", "advance_voice_study")) {
+            val focus = mapper.valueToTree<JsonNode>(definitions.single { it.name == name }.parameters)
+            assertThat(focus.path("required").map { it.asText() }).containsExactly("study_id")
+            assertThat(focus.path("additionalProperties").asBoolean()).isFalse()
+            assertThat(focus.path("properties").fieldNames().asSequence().toList()).containsExactly("study_id")
+        }
+        assertThat(definitions.single { it.name == "select_voice_study" }.description)
+            .contains("initial or explicitly changed")
+        assertThat(definitions.single { it.name == "advance_voice_study" }.description)
+            .contains("exactly one verified parent-child edge")
     }
 
     @Test
@@ -357,6 +363,125 @@ class McpVoiceTutorToolAdapterTest {
             assertCode(fixture.adapter.execute(context, "select_voice_study", args), "INVALID_ARGUMENTS")
         }
         assertThat(fixture.focusSelections).isEmpty()
+    }
+
+    @Test
+    fun `guided progression advances exactly one verified direct child with frozen metadata`(): Unit = runBlocking {
+        val store = ContextStore().apply {
+            saved[102L] = VoiceTutorStudySnapshot(102, 101, "Eviction", 6, revision = 2)
+        }
+        val child = VoiceTutorLessonFocusSelection(
+            VoiceTutorLessonFocus(102, 2),
+            VoiceTutorStudySnapshot(102, 101, "Eviction", 6, revision = 2),
+        )
+        val fixture = Fixture(studyContexts = store).apply {
+            focusResult = child
+            handler = { name, args ->
+                if (name == "get_study" && args["study_id"] == 102L) {
+                    success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Eviction"))
+                } else {
+                    failure("UNEXPECTED_TOOL")
+                }
+            }
+        }
+
+        val result = fixture.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 102L))
+
+        assertThat(result.isError).isFalse()
+        assertThat(result.lessonFocus).isEqualTo(child)
+        assertThat(result.lessonRevision).isEqualTo(2)
+        assertThat(json(result).path("voiceLessonFocusChange").asText()).isEqualTo("GUIDED_DIRECT_CHILD")
+        assertThat(json(result).path("voiceLessonFocus").path("parentStudyId").asLong()).isEqualTo(101)
+        assertThat(json(result).path("voiceLessonFocus").path("difficulty").asInt()).isEqualTo(6)
+        assertThat(fixture.calls.map { it.name }).containsExactly("get_study")
+        assertThat(fixture.focusSelections).containsExactly(102L)
+        assertThat(fixture.persistedSession?.studyId).isEqualTo(102)
+    }
+
+    @Test
+    fun `guided progression consumes one accepted learner turn before another tree edge`(): Unit = runBlocking {
+        val fixture = Fixture().apply {
+            focusResult = VoiceTutorLessonFocusSelection(
+                VoiceTutorLessonFocus(102, 2),
+                VoiceTutorStudySnapshot(102, 101, "Cache", 4, revision = 2),
+            )
+            handler = { name, args -> if (name == "get_study") {
+                val id = args["study_id"] as Long
+                success(mapOf("id" to id, "parentStudyId" to if (id == 102L) 101L else 102L, "topic" to "Child"))
+            } else failure("UNEXPECTED_TOOL") }
+        }
+        assertThat(fixture.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 102L)).isError)
+            .isFalse()
+        fixture.focusResult = VoiceTutorLessonFocusSelection(
+            VoiceTutorLessonFocus(103, 3),
+            VoiceTutorStudySnapshot(103, 102, "Eviction", 5, revision = 3),
+        )
+
+        assertCode(
+            fixture.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 103L)),
+            "LESSON_FOCUS_UNAVAILABLE",
+        )
+        fixture.learnerTurnId = 12
+        assertThat(fixture.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 103L)).isError)
+            .isFalse()
+        assertThat(fixture.focusSelections).containsExactly(102L, 103L)
+    }
+
+    @Test
+    fun `guided progression rejects siblings deeper jumps other roots and missing continuation`(): Unit = runBlocking {
+        for (parent in listOf<Long?>(null, 999L, 102L)) {
+            val fixture = Fixture().apply {
+                focusResult = VoiceTutorLessonFocusSelection(
+                    VoiceTutorLessonFocus(103, 2),
+                    VoiceTutorStudySnapshot(103, parent, "Wrong branch", 5, revision = 2),
+                )
+                handler = { name, _ -> if (name == "get_study") {
+                    success(mapOf("id" to 103L, "parentStudyId" to parent, "topic" to "Wrong branch"))
+                } else failure("UNEXPECTED_TOOL") }
+            }
+            assertCode(
+                fixture.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 103L)),
+                "GUIDED_DESCENT_OUT_OF_SCOPE",
+            )
+            assertThat(fixture.focusSelections).isEmpty()
+        }
+
+        val noContinuation = Fixture().apply {
+            learnerTurnId = null
+            focusResult = VoiceTutorLessonFocusSelection(
+                VoiceTutorLessonFocus(102, 2),
+                VoiceTutorStudySnapshot(102, 101, "Child", 4, revision = 2),
+            )
+            handler = { name, _ -> if (name == "get_study") {
+                success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Child"))
+            } else failure("UNEXPECTED_TOOL") }
+        }
+        assertCode(
+            noContinuation.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 102L)),
+            "LEARNER_CONTINUATION_REQUIRED",
+        )
+        assertThat(noContinuation.focusSelections).isEmpty()
+    }
+
+    @Test
+    fun `guided progression requires an existing focus and rejects caller supplied metadata`(): Unit = runBlocking {
+        val discovery = Fixture().apply { persistedSession = discoverySession() }
+        assertCode(
+            discovery.adapter.execute(
+                context().copy(session = discoverySession()),
+                "advance_voice_study",
+                mapOf("study_id" to 102L),
+            ),
+            "GUIDED_FOCUS_REQUIRED",
+        )
+        assertCode(
+            Fixture().adapter.execute(
+                context(),
+                "advance_voice_study",
+                mapOf("study_id" to 102L, "parent_study_id" to 101L),
+            ),
+            "INVALID_ARGUMENTS",
+        )
     }
 
     @Test
@@ -1108,6 +1233,7 @@ class McpVoiceTutorToolAdapterTest {
         var catalogReads = 0
         var learnerTurnId: Long? = 11
         var tutorTurnId: Long? = 10
+        var lastFocusLearnerTurnId = 0L
         var focusResult: VoiceTutorLessonFocusSelection? = null
         var afterFocus: () -> Unit = {}
         val focusSelections = mutableListOf<Long>()
@@ -1159,7 +1285,38 @@ class McpVoiceTutorToolAdapterTest {
             },
             lessonFocus = object : VoiceTutorLessonFocusPort {
                 override suspend fun history(userId: Long, sessionId: String) = focusHistory.toList()
-                override suspend fun focus(userId: Long, sessionId: String, studyId: Long): VoiceTutorLessonFocusSelection? {
+                override suspend fun focus(
+                    userId: Long,
+                    sessionId: String,
+                    studyId: Long,
+                    learnerTurnId: Long?,
+                ): VoiceTutorLessonFocusSelection? {
+                    assertThat(learnerTurnId).isEqualTo(this@Fixture.learnerTurnId)
+                    val selected = selectFocus(userId, sessionId, studyId)
+                    if (selected != null && learnerTurnId != null) lastFocusLearnerTurnId = learnerTurnId
+                    return selected
+                }
+
+                override suspend fun advance(
+                    userId: Long,
+                    sessionId: String,
+                    currentStudyId: Long,
+                    childStudyId: Long,
+                    learnerTurnId: Long,
+                ): VoiceTutorLessonFocusSelection? {
+                    assertThat(persistedSession?.studyId).isEqualTo(currentStudyId)
+                    assertThat(learnerTurnId).isEqualTo(this@Fixture.learnerTurnId)
+                    if (learnerTurnId <= lastFocusLearnerTurnId) return null
+                    val selected = selectFocus(userId, sessionId, childStudyId)
+                    if (selected != null) lastFocusLearnerTurnId = learnerTurnId
+                    return selected
+                }
+
+                private fun selectFocus(
+                    userId: Long,
+                    sessionId: String,
+                    studyId: Long,
+                ): VoiceTutorLessonFocusSelection? {
                     assertThat(userId).isEqualTo(principal.userId)
                     assertThat(sessionId).isEqualTo(session().id)
                     focusSelections += studyId

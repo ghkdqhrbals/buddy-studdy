@@ -18,13 +18,36 @@ data class VoiceTutorLessonFocusSelection(
 
 interface VoiceTutorLessonFocusPort {
     /** Select an owned saved node in an active call; no topic/question creation or quota mutation. */
-    suspend fun focus(userId: Long, sessionId: String, studyId: Long): VoiceTutorLessonFocusSelection?
+    suspend fun focus(
+        userId: Long,
+        sessionId: String,
+        studyId: Long,
+        learnerTurnId: Long? = null,
+    ): VoiceTutorLessonFocusSelection?
+
+    /**
+     * Move from the persisted current focus to one live direct child in the same transaction.
+     * A preceding read is only a hint: the parent edge is checked again while the active call
+     * row is locked so a concurrent reparent cannot authorize a tree jump.
+     */
+    suspend fun advance(
+        userId: Long,
+        sessionId: String,
+        currentStudyId: Long,
+        childStudyId: Long,
+        learnerTurnId: Long,
+    ): VoiceTutorLessonFocusSelection? = null
 
     /** Bounded immutable selection history, including the initial legacy selection at revision zero. */
     suspend fun history(userId: Long, sessionId: String): List<VoiceTutorLessonFocus>
 }
 
 object UnavailableVoiceTutorLessonFocusPort : VoiceTutorLessonFocusPort {
-    override suspend fun focus(userId: Long, sessionId: String, studyId: Long): VoiceTutorLessonFocusSelection? = null
+    override suspend fun focus(
+        userId: Long,
+        sessionId: String,
+        studyId: Long,
+        learnerTurnId: Long?,
+    ): VoiceTutorLessonFocusSelection? = null
     override suspend fun history(userId: Long, sessionId: String): List<VoiceTutorLessonFocus> = emptyList()
 }

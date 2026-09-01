@@ -228,11 +228,11 @@ final class VoiceTutorVoiceSettingsTests: XCTestCase {
         for voice in VoiceTutorVoice.allCases where voice != .serverDefault {
             let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: voice))
             defer { fixture.close() }
-            let connection = try await fixture.appState.createVoiceTutorConnection(studyID: 42)
+            let connection = try await fixture.appState.createVoiceTutorConnection()
             let body = try XCTUnwrap(fixture.creationBodies.first)
             XCTAssertEqual(fixture.creationBodies.count, 1)
             XCTAssertEqual(body["voice"] as? String, voice.apiValue)
-            XCTAssertEqual(body["studyId"] as? Int, 42)
+            XCTAssertFalse(body.keys.contains("studyId"))
             XCTAssertEqual(body["language"] as? String, "ja")
             XCTAssertEqual(body["recordingConsent"] as? Bool, false)
             XCTAssertNil(body["recordingConsentVersion"])
@@ -247,7 +247,7 @@ final class VoiceTutorVoiceSettingsTests: XCTestCase {
     func testDefaultVoiceOmitsPOSTFieldInsteadOfPinningCurrentServerVoice() async throws {
         let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: .serverDefault))
         defer { fixture.close() }
-        _ = try await fixture.appState.createVoiceTutorConnection(studyID: 42)
+        _ = try await fixture.appState.createVoiceTutorConnection()
         let body = try XCTUnwrap(fixture.creationBodies.first)
         XCTAssertFalse(body.keys.contains("voice"), "Default must remain a server-owned choice, not an encoded null or literal default")
     }
@@ -257,7 +257,7 @@ final class VoiceTutorVoiceSettingsTests: XCTestCase {
         defer { fixture.close() }
         fixture.appState.beginSettingsEditing()
         fixture.appState.setDraftVoiceTutorVoice(.coral)
-        _ = try await fixture.appState.createVoiceTutorConnection(studyID: 42)
+        _ = try await fixture.appState.createVoiceTutorConnection()
         XCTAssertEqual(fixture.creationBodies.first?["voice"] as? String, "ash")
         XCTAssertEqual(fixture.appState.draftSettings.voiceTutorVoice, .coral)
         XCTAssertEqual(fixture.storage.store.loadSettings().voiceTutorVoice, .ash)
@@ -271,7 +271,7 @@ final class VoiceTutorVoiceSettingsTests: XCTestCase {
         fixture.onTokenRequest = { [weak fixture] in
             fixture?.appState.settings.voiceTutorVoice = .cedar
         }
-        _ = try await fixture.appState.createVoiceTutorConnection(studyID: 42)
+        _ = try await fixture.appState.createVoiceTutorConnection()
         XCTAssertEqual(fixture.creationBodies.first?["voice"] as? String, "echo")
         XCTAssertEqual(fixture.appState.settings.voiceTutorVoice, .cedar)
         XCTAssertEqual(fixture.requests.map { $0.url?.path }, [
@@ -286,14 +286,14 @@ final class VoiceTutorVoiceSettingsTests: XCTestCase {
         fixture.onTokenRequest = { [weak fixture] in
             fixture?.appState.settings.voiceTutorVoice = .marin
         }
-        let firstConnection = try await fixture.appState.createVoiceTutorConnection(studyID: 42)
+        let firstConnection = try await fixture.appState.createVoiceTutorConnection()
         XCTAssertEqual(fixture.creationBodies.count, 2)
         XCTAssertEqual(fixture.creationBodies.compactMap { $0["voice"] as? String }, ["verse", "verse"])
         let createRequests = fixture.requests.filter { $0.url?.path == "/api/v1/voice-tutor/sessions" }
         XCTAssertEqual(createRequests.first?.value(forHTTPHeaderField: "Idempotency-Key"),
                        createRequests.last?.value(forHTTPHeaderField: "Idempotency-Key"))
 
-        _ = try await fixture.appState.createVoiceTutorConnection(studyID: 42)
+        _ = try await fixture.appState.createVoiceTutorConnection()
         XCTAssertEqual(fixture.creationBodies.last?["voice"] as? String, "marin")
         XCTAssertTrue(firstConnection.isCurrent(), "Choosing the next voice does not invalidate an existing call")
         XCTAssertFalse(fixture.requests.contains { $0.url?.path.hasSuffix("/end") == true })
@@ -303,7 +303,7 @@ final class VoiceTutorVoiceSettingsTests: XCTestCase {
     func testExplicitVoiceAndRecordingConsentRemainIndependent() async throws {
         let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: .sage))
         defer { fixture.close() }
-        _ = try await fixture.appState.createVoiceTutorConnection(studyID: 42, voice: "shimmer", recordingConsent: true)
+        _ = try await fixture.appState.createVoiceTutorConnection(voice: "shimmer", recordingConsent: true)
         let body = try XCTUnwrap(fixture.creationBodies.first)
         XCTAssertEqual(body["voice"] as? String, "shimmer")
         XCTAssertEqual(body["recordingConsent"] as? Bool, true)

@@ -404,7 +404,12 @@ class OpenAIVoiceTutorSummaryAdapterTest {
     }
 
     private fun immutableFocuses(focuses: List<VoiceTutorLessonFocus>) = object : VoiceTutorLessonFocusPort {
-        override suspend fun focus(userId: Long, sessionId: String, studyId: Long): VoiceTutorLessonFocusSelection? =
+        override suspend fun focus(
+            userId: Long,
+            sessionId: String,
+            studyId: Long,
+            learnerTurnId: Long?,
+        ): VoiceTutorLessonFocusSelection? =
             error("Summary must never select a lesson or mutate focus history")
 
         override suspend fun history(userId: Long, sessionId: String): List<VoiceTutorLessonFocus> {

@@ -57,6 +57,40 @@ class VoiceTutorMcpRelayTest {
     }
 
     @Test
+    fun `guided child advance emits only its server confirmed focus after output acknowledgement`() = Fixture(captureCalls = false).use { f ->
+        val arrived = CountDownLatch(1)
+        val events = CopyOnWriteArrayList<String>()
+        val selection = VoiceTutorLessonFocusSelection(
+            VoiceTutorLessonFocus(203, 3),
+            VoiceTutorStudySnapshot(203, 202, "TTL", 6, 3),
+        )
+        val tools = port { name, _ ->
+            assertThat(name).isEqualTo("advance_voice_study")
+            success().copy(lessonFocus = selection, lessonRevision = 3)
+        }
+        val worker = voiceTutorMcpToolRelay(f.controller, context(), tools, { raw, persist, forward ->
+            assertThat(persist).isFalse()
+            assertThat(forward).isTrue()
+            events += raw
+            arrived.countDown()
+        }).subscribe({}, f.errors::add)
+        try {
+            f.controller.observeProviderEvent(f.done(listOf(call("advance-child", "advance_voice_study", "{\"study_id\":203}"))))
+            assertThat(arrived.await(3, TimeUnit.SECONDS)).isTrue()
+            val event = mapper.readTree(events.single())
+            assertThat(event.path("type").asText()).isEqualTo(VoiceTutorRealtimeContract.STUDY_FOCUSED_EVENT)
+            assertThat(event.path("focus").path("studyId").asLong()).isEqualTo(203)
+            assertThat(event.path("focus").path("parentStudyId").asLong()).isEqualTo(202)
+            assertThat(event.path("focus").path("difficulty").asInt()).isEqualTo(6)
+            assertThat(f.responses()).hasSize(1)
+            f.ack(f.outputs().single())
+            assertThat(f.responses()).hasSize(2)
+            assertThat(f.errors).isEmpty()
+            f.noMediaDisruption()
+        } finally { worker.dispose() }
+    }
+
+    @Test
     fun `focus events reject raw JSON spoofing failed results and mismatched server metadata`() {
         val selection = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(202, 2), VoiceTutorStudySnapshot(202, 201, "Cache", 3, 2))
         val valid = success().copy(lessonFocus = selection, lessonRevision = 2)
