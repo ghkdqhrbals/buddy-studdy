@@ -6,8 +6,13 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentF
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetSingleChildEdge
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorInputAssessmentPort
 import com.buddystudy.backend.voice.application.service.VoiceTutorInputAssessmentService
 import kotlinx.coroutines.CancellationException
@@ -103,6 +108,15 @@ class VoiceTutorInputAssessmentServiceTest {
             base.copy(utterances = listOf(VoiceTutorInputUtterance("", "네"))),
             base.copy(utterances = listOf(VoiceTutorInputUtterance("a".repeat(257), "네"))),
             base.copy(utterances = listOf(VoiceTutorInputUtterance("item\n1", "네"))),
+            base.copy(utterances = listOf(VoiceTutorInputUtterance(
+                "item", "네", checkpoint = true, sameSpeechContext = "이전 답변\n네",
+            ))),
+            base.copy(utterances = listOf(VoiceTutorInputUtterance(
+                "item", "네", sameSpeechContext = "이전 답변\n아니",
+            ))),
+            base.copy(utterances = listOf(VoiceTutorInputUtterance(
+                "item", "네", sameSpeechContext = "가".repeat(4_001) + "네",
+            ))),
             base.copy(utterances = listOf(base.utterances[0], base.utterances[0])),
         )
         for (candidate in cases) {
@@ -111,6 +125,136 @@ class VoiceTutorInputAssessmentServiceTest {
                 .isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
         }
         assertThat(calls).hasValue(0)
+    }
+
+    @Test
+    fun `invalid or unbounded server target offers never reach the provider`() = runBlocking<Unit> {
+        val calls = AtomicInteger()
+        val service = service { calls.incrementAndGet(); result(it) }
+        val valid = VoiceTutorStudyTargetOffer(
+            offerId = 1,
+            lessonRevision = 0,
+            tutorResponseGeneration = 1,
+            tutorSpeechStoppedOrder = 1,
+            currentFocusStudyId = null,
+            candidates = listOf(VoiceTutorStudyTargetCandidate(101, null, "Redis")),
+            tutorAudioTranscript = "Redis 주제로 이야기해 볼까요?",
+            candidateTraversals = mapOf(101L to VoiceTutorStudyTargetTraversal()),
+        )
+        val invalidOffers = listOf(
+            valid.copy(offerId = 0),
+            valid.copy(lessonRevision = -1),
+            valid.copy(tutorResponseGeneration = 0),
+            valid.copy(tutorSpeechStoppedOrder = 0),
+            valid.copy(currentFocusStudyId = 0),
+            valid.copy(tutorAudioTranscript = " "),
+            valid.copy(tutorAudioTranscript = "x".repeat(4_001)),
+            valid.copy(candidates = emptyList()),
+            valid.copy(candidates = List(17) { index ->
+                VoiceTutorStudyTargetCandidate((index + 1).toLong(), null, "Topic $index")
+            }),
+            valid.copy(candidates = listOf(
+                VoiceTutorStudyTargetCandidate(101, null, "Redis"),
+                VoiceTutorStudyTargetCandidate(101, null, "Duplicate"),
+            )),
+            valid.copy(candidates = listOf(VoiceTutorStudyTargetCandidate(0, null, "Redis"))),
+            valid.copy(candidates = listOf(VoiceTutorStudyTargetCandidate(101, 0, "Redis"))),
+            valid.copy(candidates = listOf(VoiceTutorStudyTargetCandidate(101, null, " "))),
+            valid.copy(candidates = listOf(VoiceTutorStudyTargetCandidate(101, null, "x".repeat(256)))),
+            valid.copy(candidateTraversals = emptyMap()),
+            valid.copy(candidateTraversals = mapOf(
+                202L to VoiceTutorStudyTargetTraversal(),
+            )),
+            valid.copy(candidateTraversals = mapOf(
+                101L to VoiceTutorStudyTargetTraversal(
+                    singleChildEdges = listOf(
+                        VoiceTutorStudyTargetSingleChildEdge(1, 2),
+                        VoiceTutorStudyTargetSingleChildEdge(3, 101),
+                    ),
+                    terminalLeafStudyId = 101,
+                ),
+            )),
+            valid.copy(candidateTraversals = mapOf(
+                101L to VoiceTutorStudyTargetTraversal(terminalLeafStudyId = 202),
+            )),
+            valid.copy(candidateTraversals = mapOf(
+                101L to VoiceTutorStudyTargetTraversal(
+                    singleChildEdges = listOf(VoiceTutorStudyTargetSingleChildEdge(1, 101)),
+                    terminalLeafStudyId = 101,
+                ),
+            )),
+            valid.copy(
+                candidates = listOf(VoiceTutorStudyTargetCandidate(101, 101, "Redis")),
+                candidateTraversals = mapOf(101L to VoiceTutorStudyTargetTraversal()),
+            ),
+        )
+
+        for (offer in invalidOffers) {
+            val candidate = request().copy(utterances = listOf(
+                VoiceTutorInputUtterance("item", "응", targetOffer = offer),
+            ))
+            val error = runCatching { service.assess(candidate) }.exceptionOrNull()
+            assertThat((error as VoiceTutorInputAssessmentException).reason)
+                .isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
+        }
+        assertThat(calls).hasValue(0)
+    }
+
+    @Test
+    fun `a target candidate must also be semantically attested as spoken in the final tutor audio`() = runBlocking<Unit> {
+        val offer = VoiceTutorStudyTargetOffer(
+            offerId = 1,
+            lessonRevision = 0,
+            tutorResponseGeneration = 1,
+            tutorSpeechStoppedOrder = 1,
+            currentFocusStudyId = null,
+            candidates = listOf(
+                VoiceTutorStudyTargetCandidate(101, null, "Redis"),
+                VoiceTutorStudyTargetCandidate(202, null, "PostgreSQL"),
+            ),
+            tutorAudioTranscript = "Redis 주제로 이야기해 볼까요?",
+            candidateTraversals = mapOf(
+                101L to VoiceTutorStudyTargetTraversal(),
+                202L to VoiceTutorStudyTargetTraversal(),
+            ),
+        )
+        val request = request().copy(utterances = listOf(
+            VoiceTutorInputUtterance("item", "PostgreSQL로 할게", targetOffer = offer),
+        ))
+        val invalid = listOf(
+            VoiceTutorInputItemAssessment(
+                "item", VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.SELECT_SAVED_TOPIC,
+                targetStudyId = 202, spokenCandidateStudyIds = emptyList(),
+            ),
+            VoiceTutorInputItemAssessment(
+                "item", VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.SELECT_SAVED_TOPIC,
+                targetStudyId = 202, spokenCandidateStudyIds = listOf(101),
+            ),
+            VoiceTutorInputItemAssessment(
+                "item", VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.SELECT_SAVED_TOPIC,
+                targetStudyId = 202, spokenCandidateStudyIds = listOf(999),
+            ),
+            VoiceTutorInputItemAssessment(
+                "item", VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE,
+                spokenCandidateStudyIds = listOf(101),
+            ),
+        )
+
+        for (assessment in invalid) {
+            val error = runCatching {
+                service { VoiceTutorInputAssessmentResult(listOf(assessment)) }.assess(request)
+            }.exceptionOrNull()
+            assertThat((error as VoiceTutorInputAssessmentException).reason)
+                .describedAs("assessment: %s", assessment)
+                .isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_RESULT)
+        }
+
+        val valid = VoiceTutorInputItemAssessment(
+            "item", VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.SELECT_SAVED_TOPIC,
+            targetStudyId = 101, spokenCandidateStudyIds = listOf(101),
+        )
+        assertThat(service { VoiceTutorInputAssessmentResult(listOf(valid)) }.assess(request).decisions.single())
+            .isEqualTo(valid)
     }
 
     @Test

@@ -1116,7 +1116,7 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   Input classification, accepted-transcript persistence and filler-deletion
   acknowledgement remain independent gates. No cancel, buffer-clear, truncate,
   microphone reset or RTP restart was added.
-- Each call allows at most eight tools per response, six tool rounds per learner
+- Each call allows at most eight tools per response, seven tool rounds per learner
   turn and 256 tool-call IDs per session. Arguments/results are valid JSON
   bounded to 16 KiB; execution and output ACK have separate 15-second deadlines.
   Duplicate IDs cannot repeat writes, and an uncertain timed-out mutation is
@@ -1931,3 +1931,68 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   zero active calls. Logs: `build/voiceInputLanguageDeviceInstall.log` and
   `build/voiceInputLanguageDeviceLaunch.log`. The server-side language fix applies
   when the next call is configured; existing transcript text remains unchanged.
+
+## 2026-09-01 — Start voice lessons by traversing the saved study tree
+
+### Guided discovery and exact focus authority
+
+- A new call remains topicless and opens with one compact “what topic should we
+  discuss?” question. The learner's first topic-bearing utterance is discovery
+  only: it cannot immediately select a study or start a quiz.
+- Every owner-checked page slice is validated against its exact query or parent,
+  limit, offset and stable total. An exact offset-zero page with more than one
+  result proves a real branch and can offer only its actual contiguous returned
+  prefix, bounded to 16. Only an exact offset-zero zero/one result proves a leaf
+  or single-child edge; later, gapped, truncated and unscoped pages cannot.
+  Proven one-child edges are followed to the saved leaf or first real branch,
+  without selecting intermediate broad nodes.
+- One final tutor audio transcript must semantically attest which returned
+  candidates were actually proposed. Only the next final meaningful learner item
+  can bind one of those spoken IDs. Candidate metadata, MCP arguments/results,
+  the original discovery utterance, checkpoints, filler and stale persistence
+  acknowledgements cannot mint or revive focus authority.
+- Initial focus and guided descent carry per-candidate single-child/leaf evidence.
+  The write transaction locks the exact device authorization and active provider
+  call, then rechecks revision, focus, metadata, path and every proved child range.
+  Concurrent logout, rename, reparent, deletion, sibling/endpoint-child insertion,
+  a deeper jump or a replayed learner turn cannot interleave into an accepted move.
+- A guided child move additionally carries the exact persisted tutor-question,
+  semantic learner-answer, fully spoken tutor-feedback, spoken navigation-offer
+  and learner-continuation provider item IDs. Feedback and the offer may share one
+  response or be two consecutive responses, but their exact rows/order and output
+  stop boundary must precede the continuation. A greeting, unrelated tutor row,
+  unanswered new question or answer-turn tool call cannot stand in for the exchange.
+
+### Verification
+
+- All selected application voice tests passed: **132 tests, zero failures or
+  errors**. All selected infrastructure voice tests passed: **616 tests, zero
+  failures/errors, two opt-in live-provider tests skipped**. Two additional
+  MySQL 8.4 integration tests passed with zero failures/errors.
+- Focused regressions cover complete root-to-single-child-to-leaf traversal,
+  genuine branches, unspoken/partial/unscoped candidates, stale publication
+  callbacks, exact question/answer/feedback boundary propagation, exchange-order
+  rejection, rename/reparent/auth-revocation races, one-shot authorization and
+  the maximum verified parent path. The MySQL tests exercise concurrent sibling
+  insertion at a proved single-child edge and child insertion at a proved leaf,
+  confirming both writes serialize after the focus transaction.
+- Event-order regressions cover `output_audio_buffer.stopped`, immediate learner
+  start/stop, then `response.done`: the final tutor item, spoken candidate offer
+  and exact question/answer/feedback identities are backfilled before the input
+  commit. Long-speech regressions retain only meaningful, publish-acknowledged
+  checkpoint ASR as bounded same-sequence assessment context; original persisted
+  items stay unchanged and deleted/non-communicative noise is excluded.
+- A mixed native input buffer that contains speech from both before and after the
+  tutor's output-stop boundary now settles every reserved speech slot in one
+  commit while discarding all topic-selection, question/answer, feedback and
+  navigation-offer authority. A stale spacing timer cannot flush that buffer while
+  a newer learner segment is still active, so it cannot promote old consent or
+  leave the response gate waiting on a lost slot.
+- Normal Spring AOT processing and `:tutor:bootJar` passed. The verified JAR is
+  331,370,615 bytes (`316 MiB` display), SHA-256
+  `acd84a86eaa8301b7b14ee91efbf7c34f4244071559a55fc62c6ee02edf22db8`.
+  No database migration was added or changed.
+- The unsigned generic `StudyMateiOS` Debug device build passed. A normal signed
+  build against the paired iPhone 16 Pro reached device selection but could not
+  proceed because the phone was locked; no install, launch or live microphone/
+  provider call is claimed by this verification.

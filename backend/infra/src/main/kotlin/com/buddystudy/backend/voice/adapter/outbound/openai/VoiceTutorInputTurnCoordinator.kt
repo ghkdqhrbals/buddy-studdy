@@ -7,6 +7,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentR
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
 import com.buddystudy.backend.voice.application.model.correlatedTo
 
 /**
@@ -37,6 +38,8 @@ internal class VoiceTutorInputTurnCoordinator(
             val sequence: Long,
             val checkpoint: Boolean = false,
             val intent: VoiceTutorInputIntent = VoiceTutorInputIntent.NONE,
+            val targetStudyId: Long? = null,
+            val targetOfferId: Long? = null,
         ) : Action {
             override fun toString(): String = "Publish(itemId=[redacted], eventCharacters=${rawEvent.length})"
         }
@@ -65,6 +68,7 @@ internal class VoiceTutorInputTurnCoordinator(
     private val pending = linkedMapOf<String, PendingItem>()
     private val recentItemIds = linkedSetOf<String>()
     private val earlyTranscripts = linkedMapOf<String, EarlyTranscript>()
+    private val checkpointContextBySequence = linkedMapOf<Long, String>()
     private var batch: AssessmentBatch? = null
     private var nextBatchToken = 1L
     private var contextGeneration = 0L
@@ -95,13 +99,14 @@ internal class VoiceTutorInputTurnCoordinator(
         sequence: Long,
         checkpoint: Boolean,
         nowNanos: Long,
+        targetOffer: VoiceTutorStudyTargetOffer? = null,
     ): List<Action> {
         if (isClosed || itemId in pending || itemId in recentItemIds) return emptyList()
         if (!validItemId(itemId) || sequence <= 0) fail(VoiceTutorInputTurnCoordinatorFailure.INVALID_COMMITTED_ITEM)
         val actions = mutableListOf<Action>()
         expireStages(nowNanos, actions)
         if (pending.size >= MAX_PENDING_ITEMS) fail(VoiceTutorInputTurnCoordinatorFailure.PENDING_CAPACITY_EXCEEDED)
-        val item = PendingItem(itemId, sequence, checkpoint, Stage.WAITING_TRANSCRIPT, nowNanos)
+        val item = PendingItem(itemId, sequence, checkpoint, Stage.WAITING_TRANSCRIPT, nowNanos, targetOffer)
         pending[itemId] = item
         remember(itemId)
         earlyTranscripts.remove(itemId)?.let { applyTranscript(item, it, nowNanos, actions) }
@@ -198,7 +203,8 @@ internal class VoiceTutorInputTurnCoordinator(
                             item.stage = Stage.WAITING_PUBLISH
                             item.stageStartedAt = nowNanos
                             actions += Action.Publish(
-                                item.itemId, requireNotNull(item.rawEvent), item.sequence, item.checkpoint, decision.intent,
+                                item.itemId, requireNotNull(item.rawEvent), item.sequence, item.checkpoint,
+                                decision.intent, decision.targetStudyId, item.targetOffer?.offerId,
                             )
                         }
                         VoiceTutorInputDecision.NON_COMMUNICATIVE -> delete(item, nowNanos, actions)
@@ -215,6 +221,11 @@ internal class VoiceTutorInputTurnCoordinator(
         val actions = mutableListOf<Action>()
         expireStages(nowNanos, actions)
         val item = pending.remove(itemId) ?: return actions
+        if (item.checkpoint) {
+            rememberCheckpointContext(item.sequence, requireNotNull(item.transcript))
+        } else {
+            checkpointContextBySequence.remove(item.sequence)
+        }
         actions += Action.Ready(item.sequence, item.checkpoint)
         startAssessmentIfPossible(nowNanos, actions)
         return actions
@@ -224,9 +235,18 @@ internal class VoiceTutorInputTurnCoordinator(
         if (isClosed || pending[itemId]?.stage != Stage.WAITING_DELETE) return emptyList()
         val actions = mutableListOf<Action>()
         expireStages(nowNanos, actions)
-        pending.remove(itemId)
+        pending.remove(itemId)?.takeUnless { it.checkpoint }?.let {
+            checkpointContextBySequence.remove(it.sequence)
+        }
         startAssessmentIfPossible(nowNanos, actions)
         return actions
+    }
+
+    /** Releases assessment-only checkpoint text after an exact final empty-buffer outcome. */
+    fun discardSpeechSequence(sequence: Long) {
+        if (!isClosed && sequence > 0 && pending.values.none { it.sequence == sequence }) {
+            checkpointContextBySequence.remove(sequence)
+        }
     }
 
     fun expire(nowNanos: Long): List<Action> {
@@ -241,6 +261,7 @@ internal class VoiceTutorInputTurnCoordinator(
         isClosed = true
         pending.clear()
         earlyTranscripts.clear()
+        checkpointContextBySequence.clear()
         recentItemIds.clear()
         batch = null
         teacherContext = ""
@@ -294,22 +315,40 @@ internal class VoiceTutorInputTurnCoordinator(
     private fun startAssessmentIfPossible(nowNanos: Long, actions: MutableList<Action>) {
         if (isClosed || !teacherContextReady || batch != null) return
         val selected = mutableListOf<PendingItem>()
+        val semanticContexts = linkedMapOf<String, String?>()
         var characters = 0
         // Preserve acknowledged turn order, including ASR arriving out of order.
         // An older unpersisted/deleting item cannot be overtaken by a new batch.
         for (item in pending.values) {
             if (item.stage != Stage.WAITING_ASSESSMENT) break
             val text = requireNotNull(item.transcript)
-            if (selected.size == limits.maxUtterances || characters + text.length > limits.maxBatchTranscriptCharacters) break
+            val offerCharacters = item.targetOffer?.tutorAudioTranscript?.length ?: 0
+            val remainingAfterTranscript =
+                limits.maxBatchTranscriptCharacters - characters - text.length - offerCharacters
+            if (selected.size == limits.maxUtterances || remainingAfterTranscript < 0) break
+            val sameSpeechContext = if (item.checkpoint) {
+                null
+            } else {
+                completedSpeechContext(item.sequence, text, minOf(limits.maxTranscriptCharacters, remainingAfterTranscript))
+            }
             selected += item
-            characters += text.length
+            semanticContexts[item.itemId] = sameSpeechContext
+            characters += text.length + offerCharacters + (sameSpeechContext?.length ?: 0)
         }
         if (selected.isEmpty()) return
         if (nextBatchToken <= 0 || nextBatchToken == Long.MAX_VALUE) {
             fail(VoiceTutorInputTurnCoordinatorFailure.BATCH_TOKEN_EXHAUSTED)
         }
         val token = nextBatchToken++
-        val utterances = selected.map { VoiceTutorInputUtterance(it.itemId, requireNotNull(it.transcript)) }
+        val utterances = selected.map {
+            VoiceTutorInputUtterance(
+                it.itemId,
+                requireNotNull(it.transcript),
+                checkpoint = it.checkpoint,
+                targetOffer = it.targetOffer,
+                sameSpeechContext = semanticContexts[it.itemId],
+            )
+        }
         selected.forEach {
             it.stage = Stage.ASSESSING
             it.stageStartedAt = nowNanos
@@ -391,6 +430,22 @@ internal class VoiceTutorInputTurnCoordinator(
         if (recentItemIds.size > MAX_RECENT_ITEMS) recentItemIds.remove(recentItemIds.first())
     }
 
+    private fun rememberCheckpointContext(sequence: Long, transcript: String) {
+        val previous = checkpointContextBySequence.remove(sequence)
+        val combined = if (previous.isNullOrEmpty()) transcript else "$previous\n$transcript"
+        checkpointContextBySequence[sequence] = combined.takeLast(limits.maxTranscriptCharacters)
+        while (checkpointContextBySequence.size > MAX_CHECKPOINT_CONTEXTS) {
+            checkpointContextBySequence.remove(checkpointContextBySequence.keys.first())
+        }
+    }
+
+    private fun completedSpeechContext(sequence: Long, transcript: String, maxCharacters: Int): String? {
+        val checkpoint = checkpointContextBySequence[sequence]?.takeIf { it.isNotBlank() } ?: return null
+        if (maxCharacters <= transcript.length + 1) return null
+        val prefixBudget = maxCharacters - transcript.length - 1
+        return checkpoint.takeLast(prefixBudget) + "\n" + transcript
+    }
+
     private fun fail(reason: VoiceTutorInputTurnCoordinatorFailure): Nothing {
         close()
         throw VoiceTutorInputTurnCoordinatorException(reason)
@@ -411,6 +466,7 @@ internal class VoiceTutorInputTurnCoordinator(
         val checkpoint: Boolean,
         var stage: Stage,
         var stageStartedAt: Long,
+        val targetOffer: VoiceTutorStudyTargetOffer? = null,
         var transcript: String? = null,
         var rawEvent: String? = null,
     )
@@ -433,6 +489,7 @@ internal class VoiceTutorInputTurnCoordinator(
         const val MAX_PENDING_ITEMS = 16
         const val MAX_EARLY_TRANSCRIPTS = 16
         const val MAX_RECENT_ITEMS = 64
+        const val MAX_CHECKPOINT_CONTEXTS = 16
         const val MAX_ITEM_ID_CHARACTERS = 256
         const val MAX_RAW_EVENT_CHARACTERS = 64_000
         const val NANOS_PER_MILLISECOND = 1_000_000L

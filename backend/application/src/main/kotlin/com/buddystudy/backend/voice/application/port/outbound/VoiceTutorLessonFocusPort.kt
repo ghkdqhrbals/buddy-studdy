@@ -2,6 +2,9 @@ package com.buddystudy.backend.voice.application.port.outbound
 
 import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
+import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
 
 /** A successful selection and the frozen metadata returned in the SAME transaction. */
 data class VoiceTutorLessonFocusSelection(
@@ -16,6 +19,13 @@ data class VoiceTutorLessonFocusSelection(
     val difficulty: Int get() = snapshot.difficulty
 }
 
+/** Server-owned identities that must still authorize the exact realtime call at focus commit. */
+data class VoiceTutorFocusCommitAuthority(
+    val deviceId: String,
+    val authSessionId: Long,
+    val providerCallId: String,
+)
+
 interface VoiceTutorLessonFocusPort {
     /** Select an owned saved node in an active call; no topic/question creation or quota mutation. */
     suspend fun focus(
@@ -23,6 +33,11 @@ interface VoiceTutorLessonFocusPort {
         sessionId: String,
         studyId: Long,
         learnerTurnId: Long? = null,
+        expectedCurrentRevision: Long? = null,
+        authorization: VoiceTutorFocusAuthorization? = null,
+        expectedCandidate: VoiceTutorStudyTargetCandidate? = null,
+        commitAuthority: VoiceTutorFocusCommitAuthority? = null,
+        expectedTraversal: VoiceTutorStudyTargetTraversal? = null,
     ): VoiceTutorLessonFocusSelection?
 
     /**
@@ -36,6 +51,11 @@ interface VoiceTutorLessonFocusPort {
         currentStudyId: Long,
         childStudyId: Long,
         learnerTurnId: Long,
+        expectedCurrentRevision: Long? = null,
+        authorization: VoiceTutorFocusAuthorization? = null,
+        expectedCandidate: VoiceTutorStudyTargetCandidate? = null,
+        commitAuthority: VoiceTutorFocusCommitAuthority? = null,
+        expectedTraversal: VoiceTutorStudyTargetTraversal? = null,
     ): VoiceTutorLessonFocusSelection? = null
 
     /** Bounded immutable selection history, including the initial legacy selection at revision zero. */
@@ -48,6 +68,11 @@ object UnavailableVoiceTutorLessonFocusPort : VoiceTutorLessonFocusPort {
         sessionId: String,
         studyId: Long,
         learnerTurnId: Long?,
+        expectedCurrentRevision: Long?,
+        authorization: VoiceTutorFocusAuthorization?,
+        expectedCandidate: VoiceTutorStudyTargetCandidate?,
+        commitAuthority: VoiceTutorFocusCommitAuthority?,
+        expectedTraversal: VoiceTutorStudyTargetTraversal?,
     ): VoiceTutorLessonFocusSelection? = null
     override suspend fun history(userId: Long, sessionId: String): List<VoiceTutorLessonFocus> = emptyList()
 }

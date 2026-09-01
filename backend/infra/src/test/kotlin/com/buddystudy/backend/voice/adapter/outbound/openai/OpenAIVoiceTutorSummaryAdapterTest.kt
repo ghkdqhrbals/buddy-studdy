@@ -10,6 +10,7 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
+import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
 import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
@@ -409,6 +410,11 @@ class OpenAIVoiceTutorSummaryAdapterTest {
             sessionId: String,
             studyId: Long,
             learnerTurnId: Long?,
+            expectedCurrentRevision: Long?,
+            authorization: VoiceTutorFocusAuthorization?,
+            expectedCandidate: com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate?,
+            commitAuthority: com.buddystudy.backend.voice.application.port.outbound.VoiceTutorFocusCommitAuthority?,
+            expectedTraversal: com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal?,
         ): VoiceTutorLessonFocusSelection? =
             error("Summary must never select a lesson or mutate focus history")
 

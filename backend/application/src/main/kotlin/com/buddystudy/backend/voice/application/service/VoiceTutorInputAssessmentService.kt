@@ -37,7 +37,16 @@ class VoiceTutorInputAssessmentService(
 
     override suspend fun assess(request: VoiceTutorInputAssessmentRequest): VoiceTutorInputAssessmentResult {
         currentCoroutineContext().ensureActive()
-        val snapshot = request.copy(utterances = request.utterances.take(limits.maxUtterances + 1))
+        val snapshot = request.copy(utterances = request.utterances.take(limits.maxUtterances + 1).map { utterance ->
+            utterance.copy(targetOffer = utterance.targetOffer?.let { offer ->
+                offer.copy(
+                    candidates = offer.candidates.toList(),
+                    candidateTraversals = offer.candidateTraversals.mapValues { (_, traversal) ->
+                        traversal.copy(singleChildEdges = traversal.singleChildEdges.toList())
+                    },
+                )
+            })
+        })
         validate(snapshot)
         if (!permits.tryAcquire()) throw failure(VoiceTutorInputAssessmentFailure.BUSY)
         try {
@@ -70,9 +79,34 @@ class VoiceTutorInputAssessmentService(
         for (utterance in request.utterances) {
             if (utterance.itemId.isBlank() || utterance.itemId.length > 256 ||
                 utterance.itemId.any(Char::isISOControl) || !ids.add(utterance.itemId) ||
-                utterance.transcript.length > limits.maxTranscriptCharacters
+                utterance.transcript.length > limits.maxTranscriptCharacters ||
+                utterance.sameSpeechContext?.let { context ->
+                    utterance.checkpoint || context.isBlank() ||
+                        context.length > limits.maxTranscriptCharacters || !context.endsWith(utterance.transcript)
+                } == true
             ) throw failure(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
+            utterance.targetOffer?.let { offer ->
+                val candidates = offer.candidates
+                if (offer.offerId <= 0 || offer.lessonRevision < 0 ||
+                    offer.tutorResponseGeneration <= 0 || offer.tutorSpeechStoppedOrder <= 0 ||
+                    offer.currentFocusStudyId?.let { it <= 0 } == true ||
+                    offer.tutorAudioTranscript.isBlank() ||
+                    offer.tutorAudioTranscript.length > MAX_TUTOR_OFFER_TRANSCRIPT_CHARACTERS ||
+                    candidates.size !in 1..MAX_TARGET_OFFER_CANDIDATES ||
+                    candidates.map { it.studyId }.distinct().size != candidates.size ||
+                    candidates.any { candidate ->
+                        candidate.studyId <= 0 || candidate.parentStudyId?.let { it <= 0 } == true ||
+                            candidate.topic.isBlank() || candidate.topic.length > MAX_TARGET_TOPIC_CHARACTERS
+                    } ||
+                    offer.candidateTraversals.keys != candidates.mapTo(linkedSetOf()) { it.studyId } ||
+                    candidates.any { candidate ->
+                        offer.candidateTraversals[candidate.studyId]?.isValidFor(candidate) != true
+                    }
+                ) throw failure(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
+                characters += offer.tutorAudioTranscript.length
+            }
             characters += utterance.transcript.length
+            characters += utterance.sameSpeechContext?.length ?: 0
         }
         if (characters > limits.maxBatchTranscriptCharacters) {
             throw failure(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
@@ -82,4 +116,10 @@ class VoiceTutorInputAssessmentService(
     }
 
     private fun failure(reason: VoiceTutorInputAssessmentFailure) = VoiceTutorInputAssessmentException(reason)
+
+    private companion object {
+        const val MAX_TARGET_OFFER_CANDIDATES = 16
+        const val MAX_TARGET_TOPIC_CHARACTERS = 255
+        const val MAX_TUTOR_OFFER_TRANSCRIPT_CHARACTERS = 4_000
+    }
 }

@@ -7,6 +7,12 @@ import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
+import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateReadKind
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
@@ -14,9 +20,11 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAut
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMutationConfirmationPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearnerTurnAuthorization
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyChangeKind
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorFocusCommitAuthority
 import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
@@ -110,6 +118,311 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(contextStore.remembered).isEmpty()
         assertThat(json(result).path("voiceLessonTopics").map { it.path("studyId").asLong() }).containsExactly(102, 103)
         assertThat(json(result).path("totalCount").asInt()).isEqualTo(6)
+    }
+
+    @Test
+    fun `successful study reads attest exact IDs and validated query or parent pages`(): Unit = runBlocking {
+        val fixture = Fixture(studyContexts = ContextStore()).apply {
+            handler = { name, arguments ->
+                when (name) {
+                    "get_study" -> success(mapOf(
+                        "id" to 202L,
+                        "parentStudyId" to 201L,
+                        "topic" to "Returned cache",
+                    ))
+                    "list_studies" -> if ("query" in arguments) {
+                        success(mapOf(
+                            "studies" to listOf(
+                                mapOf("id" to 301L, "parentStudyId" to null, "topic" to "Databases"),
+                                mapOf("id" to 302L, "parentStudyId" to 301L, "topic" to "Redis"),
+                            ),
+                            "totalCount" to 2,
+                            "limit" to 10,
+                            "offset" to 0,
+                        ))
+                    } else {
+                        success(mapOf(
+                            "studies" to listOf(
+                                mapOf("id" to 302L, "parentStudyId" to 301L, "topic" to "Redis"),
+                            ),
+                            "totalCount" to 1,
+                            "limit" to 10,
+                            "offset" to 0,
+                        ))
+                    }
+                    else -> failure("UNEXPECTED_TOOL")
+                }
+            }
+        }
+
+        val getResult = fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 202L))
+        val getDiscovery = requireNotNull(getResult.candidateDiscovery)
+        assertThat(getDiscovery.source).isEqualTo(VoiceTutorCandidateReadKind.GET_STUDY)
+        assertThat(getDiscovery.lessonRevision).isZero()
+        assertThat(getDiscovery.currentFocusStudyId).isEqualTo(101L)
+        assertThat(getDiscovery.scope).isEqualTo(VoiceTutorCandidateDiscoveryScope.ExactStudy(202L))
+        assertThat(getDiscovery.candidates).containsExactly(
+            VoiceTutorStudyTargetCandidate(202L, 201L, "Returned cache"),
+        )
+
+        val listResult = fixture.adapter.execute(
+            context(), "list_studies", mapOf("query" to "Redis", "limit" to 10, "offset" to 0),
+        )
+        val listDiscovery = requireNotNull(listResult.candidateDiscovery)
+        assertThat(listDiscovery.source).isEqualTo(VoiceTutorCandidateReadKind.LIST_STUDIES)
+        assertThat(listDiscovery.lessonRevision).isZero()
+        assertThat(listDiscovery.currentFocusStudyId).isEqualTo(101L)
+        assertThat(listDiscovery.scope).isEqualTo(
+            VoiceTutorCandidateDiscoveryScope.CompleteQueryPage("Redis", 0, 10, 2),
+        )
+        assertThat(listDiscovery.candidates).containsExactly(
+            VoiceTutorStudyTargetCandidate(301L, null, "Databases"),
+            VoiceTutorStudyTargetCandidate(302L, 301L, "Redis"),
+        )
+
+        val childrenResult = fixture.adapter.execute(
+            context(), "list_studies", mapOf("parent_study_id" to 301L, "limit" to 10, "offset" to 0),
+        )
+        val childrenDiscovery = requireNotNull(childrenResult.candidateDiscovery)
+        assertThat(childrenDiscovery.scope).isEqualTo(
+            VoiceTutorCandidateDiscoveryScope.CompleteDirectChildrenPage(301, 0, 10, 1),
+        )
+        assertThat(childrenDiscovery.candidates).containsExactly(
+            VoiceTutorStudyTargetCandidate(302L, 301L, "Redis"),
+        )
+    }
+
+    @Test
+    fun `validated paginated slices retain exact query and direct child scope`(): Unit = runBlocking {
+        val queryCandidates = (201L..211L).map { candidate(it, null) }
+        val childCandidates = (301L..311L).map { candidate(it, 101L) }
+        val fixture = Fixture(studyContexts = ContextStore()).apply {
+            handler = { _, arguments ->
+                val offset = (arguments.getValue("offset") as Number).toInt()
+                val candidates = if ("query" in arguments) queryCandidates else childCandidates
+                success(completePage(
+                    studies = candidates.drop(offset).take(10),
+                    totalCount = candidates.size,
+                    limit = 10,
+                    offset = offset,
+                ))
+            }
+        }
+
+        val queryFirst = fixture.adapter.execute(
+            context(), "list_studies", mapOf("query" to "cache", "limit" to 10, "offset" to 0),
+        ).candidateDiscovery
+        val queryLast = fixture.adapter.execute(
+            context(), "list_studies", mapOf("query" to "cache", "limit" to 10, "offset" to 10),
+        ).candidateDiscovery
+        val childFirst = fixture.adapter.execute(
+            context(), "list_studies", mapOf("parent_study_id" to 101L, "limit" to 10, "offset" to 0),
+        ).candidateDiscovery
+        val childLast = fixture.adapter.execute(
+            context(), "list_studies", mapOf("parent_study_id" to 101L, "limit" to 10, "offset" to 10),
+        ).candidateDiscovery
+
+        assertThat(queryFirst?.scope).isEqualTo(
+            VoiceTutorCandidateDiscoveryScope.CompleteQueryPage("cache", 0, 10, 11),
+        )
+        assertThat(queryFirst?.candidates).hasSize(10)
+        assertThat(queryLast?.scope).isEqualTo(
+            VoiceTutorCandidateDiscoveryScope.CompleteQueryPage("cache", 10, 10, 11),
+        )
+        assertThat(queryLast?.candidates).containsExactly(
+            VoiceTutorStudyTargetCandidate(211L, null, "Topic 211"),
+        )
+        assertThat(childFirst?.scope).isEqualTo(
+            VoiceTutorCandidateDiscoveryScope.CompleteDirectChildrenPage(101, 0, 10, 11),
+        )
+        assertThat(childFirst?.candidates).hasSize(10)
+        assertThat(childLast?.scope).isEqualTo(
+            VoiceTutorCandidateDiscoveryScope.CompleteDirectChildrenPage(101, 10, 10, 11),
+        )
+        assertThat(childLast?.candidates).containsExactly(
+            VoiceTutorStudyTargetCandidate(311L, 101L, "Topic 311"),
+        )
+    }
+
+    @Test
+    fun `only exact validated list slices attest candidates while provider output remains available`(): Unit = runBlocking {
+        suspend fun assertNoDiscovery(
+            description: String,
+            toolName: String,
+            arguments: Map<String, Any>,
+            payload: Map<String, Any?>,
+        ) {
+            val fixture = Fixture(studyContexts = ContextStore()).apply {
+                handler = { _, _ -> success(payload) }
+            }
+            val result = fixture.adapter.execute(context(), toolName, arguments)
+            assertThat(result.isError).describedAs(description).isFalse()
+            assertThat(result.candidateDiscovery).describedAs(description).isNull()
+            assertThat(json(result).isObject).describedAs("$description provider output").isTrue()
+        }
+
+        assertNoDiscovery(
+            "GET response ID differs from the requested ID",
+            "get_study",
+            mapOf("study_id" to 201L),
+            mapOf("id" to 202L, "parentStudyId" to null, "topic" to "Redis"),
+        )
+        assertNoDiscovery(
+            "LIST has neither query nor parent scope",
+            "list_studies",
+            mapOf("limit" to 10, "offset" to 0),
+            completePage(listOf(candidate(201L, null)), totalCount = 1, limit = 10),
+        )
+        assertNoDiscovery(
+            "LIST mixes query and parent scope",
+            "list_studies",
+            mapOf("query" to "Redis", "parent_study_id" to 101L, "limit" to 10, "offset" to 0),
+            completePage(listOf(candidate(201L, 101L)), totalCount = 1, limit = 10),
+        )
+        assertNoDiscovery(
+            "truncated first page",
+            "list_studies",
+            mapOf("query" to "Redis", "limit" to 10, "offset" to 0),
+            completePage(listOf(candidate(201L, null)), totalCount = 2, limit = 10),
+        )
+        assertNoDiscovery(
+            "nonzero page",
+            "list_studies",
+            mapOf("query" to "Redis", "limit" to 10, "offset" to 1),
+            completePage(listOf(candidate(201L, null)), totalCount = 1, limit = 10, offset = 1),
+        )
+        assertNoDiscovery(
+            "response offset differs from request",
+            "list_studies",
+            mapOf("query" to "Redis", "limit" to 10, "offset" to 0),
+            completePage(listOf(candidate(201L, null)), totalCount = 1, limit = 10, offset = 1),
+        )
+        assertNoDiscovery(
+            "response limit differs from request",
+            "list_studies",
+            mapOf("query" to "Redis", "limit" to 10, "offset" to 0),
+            completePage(listOf(candidate(201L, null)), totalCount = 1, limit = 11),
+        )
+        assertNoDiscovery(
+            "complete page exceeds discovery bound",
+            "list_studies",
+            mapOf("query" to "Redis", "limit" to 17, "offset" to 0),
+            completePage((201L..217L).map { candidate(it, null) }, totalCount = 17, limit = 17),
+        )
+        assertNoDiscovery(
+            "result set exceeds bounded discovery authority",
+            "list_studies",
+            mapOf("query" to "Redis", "limit" to 10, "offset" to 0),
+            completePage((201L..210L).map { candidate(it, null) }, totalCount = 61, limit = 10),
+        )
+        assertNoDiscovery(
+            "direct child belongs to another parent",
+            "list_studies",
+            mapOf("parent_study_id" to 101L, "limit" to 10, "offset" to 0),
+            completePage(listOf(candidate(201L, 999L)), totalCount = 1, limit = 10),
+        )
+    }
+
+    @Test
+    fun `an empty complete direct child page remains typed leaf evidence`(): Unit = runBlocking {
+        val fixture = Fixture(studyContexts = ContextStore()).apply {
+            handler = { _, _ -> success(completePage(emptyList(), totalCount = 0, limit = 10)) }
+        }
+
+        val result = fixture.adapter.execute(
+            context(), "list_studies", mapOf("parent_study_id" to 101L, "limit" to 10, "offset" to 0),
+        )
+
+        val discovery = requireNotNull(result.candidateDiscovery)
+        assertThat(discovery.source).isEqualTo(VoiceTutorCandidateReadKind.LIST_STUDIES)
+        assertThat(discovery.scope).isEqualTo(
+            VoiceTutorCandidateDiscoveryScope.CompleteDirectChildrenPage(101, 0, 10, 0),
+        )
+        assertThat(discovery.candidates).isEmpty()
+        assertThat(json(result).path("studies")).isEmpty()
+    }
+
+    @Test
+    fun `failed malformed ambiguous oversized and revision raced reads cannot attest candidates`(): Unit = runBlocking {
+        suspend fun assertNoDiscovery(
+            description: String,
+            toolName: String,
+            arguments: Map<String, Any>,
+            rawResult: McpSchema.CallToolResult,
+        ) {
+            val fixture = Fixture(studyContexts = ContextStore()).apply { handler = { _, _ -> rawResult } }
+            val result = fixture.adapter.execute(context(), toolName, arguments)
+            assertThat(result.candidateDiscovery).describedAs(description).isNull()
+        }
+
+        assertNoDiscovery(
+            "error result",
+            "get_study",
+            mapOf("study_id" to 201L),
+            failure("READ_FAILED"),
+        )
+        assertNoDiscovery(
+            "invalid candidate identity",
+            "get_study",
+            mapOf("study_id" to 201L),
+            success(mapOf("id" to 0L, "parentStudyId" to null, "topic" to "Invalid")),
+        )
+        assertNoDiscovery(
+            "invalid blank topic",
+            "get_study",
+            mapOf("study_id" to 201L),
+            success(mapOf("id" to 201L, "parentStudyId" to null, "topic" to " ")),
+        )
+        assertNoDiscovery(
+            "missing parent field",
+            "get_study",
+            mapOf("study_id" to 201L),
+            success(mapOf("id" to 201L, "topic" to "Missing parent")),
+        )
+        assertNoDiscovery(
+            "duplicate list identity",
+            "list_studies",
+            emptyMap(),
+            success(mapOf("studies" to listOf(
+                mapOf("id" to 201L, "parentStudyId" to null, "topic" to "First"),
+                mapOf("id" to 201L, "parentStudyId" to null, "topic" to "Duplicate"),
+            ))),
+        )
+        assertNoDiscovery(
+            "inconsistent list page bounds",
+            "list_studies",
+            emptyMap(),
+            success(mapOf(
+                "studies" to listOf(
+                    mapOf("id" to 201L, "parentStudyId" to null, "topic" to "Redis"),
+                ),
+                "totalCount" to 1,
+                "limit" to 1,
+                "offset" to 1,
+            )),
+        )
+        assertNoDiscovery(
+            "seventeen candidates",
+            "list_studies",
+            emptyMap(),
+            success(mapOf("studies" to (201L..217L).map { id ->
+                mapOf("id" to id, "parentStudyId" to null, "topic" to "Topic $id")
+            })),
+        )
+
+        val racingStore = ContextStore()
+        val racingFixture = Fixture(studyContexts = racingStore).apply {
+            handler = { _, _ -> success(mapOf(
+                "id" to 202L,
+                "parentStudyId" to 101L,
+                "topic" to "Raced candidate",
+            )) }
+        }
+        racingStore.afterList = { racingStore.revision = 1L }
+        val raced = racingFixture.adapter.execute(context(), "get_study", mapOf("study_id" to 202L))
+        assertThat(racingStore.listReads).isEqualTo(1)
+        assertThat(racingStore.revision).isEqualTo(1L)
+        assertThat(raced.candidateDiscovery).describedAs("lesson revision changed during read").isNull()
     }
 
     @Test
@@ -337,7 +650,8 @@ class McpVoiceTutorToolAdapterTest {
             persistedSession = discoverySession()
             focusResult = focusSelection(101, 1)
         }
-        val context = context().copy(session = discoverySession())
+        val traversal = VoiceTutorStudyTargetTraversal(terminalLeafStudyId = 101)
+        val context = context(targetTraversal = traversal).copy(session = discoverySession())
         val result = fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L))
         assertThat(result.isError).isFalse()
         assertThat(result.studyTreeChanged).isFalse()
@@ -349,6 +663,7 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(fixture.persistedSession?.acceptedStudyId).isNull()
         assertThat(fixture.persistedSession?.studyId).isEqualTo(101)
         assertThat(fixture.focusSelections).containsExactly(101L)
+        assertThat(fixture.lastExpectedTraversal).isEqualTo(traversal)
         assertThat(fixture.calls).isEmpty() // no common study/question mutation
         assertThat(fixture.adapter.execute(context, "list_studies", emptyMap()).isError).isFalse()
     }
@@ -363,6 +678,53 @@ class McpVoiceTutorToolAdapterTest {
             assertCode(fixture.adapter.execute(context, "select_voice_study", args), "INVALID_ARGUMENTS")
         }
         assertThat(fixture.focusSelections).isEmpty()
+    }
+
+    @Test
+    fun `focus tools reject a tool target different from the learner attested target without writing focus`(): Unit = runBlocking {
+        val selection = Fixture().apply {
+            persistedSession = discoverySession()
+            focusResult = focusSelection(101L, 1L)
+        }
+        val selectResult = selection.adapter.execute(
+            context(targetStudyId = 202L).copy(session = discoverySession()),
+            "select_voice_study",
+            mapOf("study_id" to 101L),
+        )
+        assertCode(selectResult, "LEARNER_TARGET_MISMATCH")
+        assertThat(selection.focusSelections).isEmpty()
+
+        val missingTraversal = Fixture().apply {
+            persistedSession = discoverySession()
+            focusResult = focusSelection(101L, 1L)
+        }
+        val missingTraversalResult = missingTraversal.adapter.execute(
+            context(targetTraversal = null).copy(session = discoverySession()),
+            "select_voice_study",
+            mapOf("study_id" to 101L),
+        )
+        assertCode(missingTraversalResult, "LEARNER_TARGET_MISMATCH")
+        assertThat(missingTraversal.focusSelections).isEmpty()
+
+        val advance = Fixture().apply {
+            focusResult = VoiceTutorLessonFocusSelection(
+                VoiceTutorLessonFocus(102L, 1L),
+                VoiceTutorStudySnapshot(102L, 101L, "Child", 4, revision = 1L),
+            )
+            handler = { name, _ -> if (name == "get_study") {
+                success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Child"))
+            } else failure("UNEXPECTED_TOOL") }
+        }
+        val advanceResult = advance.adapter.execute(
+            context(VoiceTutorInputIntent.CONTINUE_TREE, targetStudyId = 103L),
+            "advance_voice_study",
+            mapOf("study_id" to 102L),
+        )
+        assertCode(advanceResult, "LEARNER_TARGET_MISMATCH")
+        // Reject the model-supplied mismatch before it can trigger an arbitrary
+        // child lookup; only the learner-attested target may be re-read.
+        assertThat(advance.calls).isEmpty()
+        assertThat(advance.focusSelections).isEmpty()
     }
 
     @Test
@@ -385,7 +747,11 @@ class McpVoiceTutorToolAdapterTest {
             }
         }
 
-        val result = fixture.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 102L))
+        val result = fixture.adapter.execute(
+            context(VoiceTutorInputIntent.CONTINUE_TREE, targetTopic = "Eviction"),
+            "advance_voice_study",
+            mapOf("study_id" to 102L),
+        )
 
         assertThat(result.isError).isFalse()
         assertThat(result.lessonFocus).isEqualTo(child)
@@ -395,6 +761,7 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(json(result).path("voiceLessonFocus").path("difficulty").asInt()).isEqualTo(6)
         assertThat(fixture.calls.map { it.name }).containsExactly("get_study")
         assertThat(fixture.focusSelections).containsExactly(102L)
+        assertThat(fixture.lastExpectedTraversal).isEqualTo(VoiceTutorStudyTargetTraversal())
         assertThat(fixture.persistedSession?.studyId).isEqualTo(102)
     }
 
@@ -407,10 +774,16 @@ class McpVoiceTutorToolAdapterTest {
             )
             handler = { name, args -> if (name == "get_study") {
                 val id = args["study_id"] as Long
-                success(mapOf("id" to id, "parentStudyId" to if (id == 102L) 101L else 102L, "topic" to "Child"))
+                success(mapOf(
+                    "id" to id,
+                    "parentStudyId" to if (id == 102L) 101L else 102L,
+                    "topic" to if (id == 102L) "Cache" else "Eviction",
+                ))
             } else failure("UNEXPECTED_TOOL") }
         }
-        assertThat(fixture.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 102L)).isError)
+        assertThat(fixture.adapter.execute(
+            context(VoiceTutorInputIntent.CONTINUE_TREE), "advance_voice_study", mapOf("study_id" to 102L),
+        ).isError)
             .isFalse()
         fixture.focusResult = VoiceTutorLessonFocusSelection(
             VoiceTutorLessonFocus(103, 3),
@@ -418,11 +791,27 @@ class McpVoiceTutorToolAdapterTest {
         )
 
         assertCode(
-            fixture.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 103L)),
+            fixture.adapter.execute(
+                context(
+                    VoiceTutorInputIntent.CONTINUE_TREE,
+                    targetStudyId = 103L,
+                    targetParentStudyId = 102L,
+                    targetTopic = "Eviction",
+                ),
+                "advance_voice_study", mapOf("study_id" to 103L),
+            ),
             "LESSON_FOCUS_UNAVAILABLE",
         )
         fixture.learnerTurnId = 12
-        assertThat(fixture.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 103L)).isError)
+        assertThat(fixture.adapter.execute(
+            context(
+                VoiceTutorInputIntent.CONTINUE_TREE,
+                targetStudyId = 103L,
+                targetParentStudyId = 102L,
+                targetTopic = "Eviction",
+            ),
+            "advance_voice_study", mapOf("study_id" to 103L),
+        ).isError)
             .isFalse()
         assertThat(fixture.focusSelections).containsExactly(102L, 103L)
     }
@@ -440,7 +829,15 @@ class McpVoiceTutorToolAdapterTest {
                 } else failure("UNEXPECTED_TOOL") }
             }
             assertCode(
-                fixture.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 103L)),
+                fixture.adapter.execute(
+                    context(
+                        VoiceTutorInputIntent.CONTINUE_TREE,
+                        targetStudyId = 103L,
+                        targetParentStudyId = parent,
+                        targetTopic = "Wrong branch",
+                    ),
+                    "advance_voice_study", mapOf("study_id" to 103L),
+                ),
                 "GUIDED_DESCENT_OUT_OF_SCOPE",
             )
             assertThat(fixture.focusSelections).isEmpty()
@@ -457,7 +854,10 @@ class McpVoiceTutorToolAdapterTest {
             } else failure("UNEXPECTED_TOOL") }
         }
         assertCode(
-            noContinuation.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 102L)),
+            noContinuation.adapter.execute(
+                context(VoiceTutorInputIntent.CONTINUE_TREE, targetTopic = "Child"),
+                "advance_voice_study", mapOf("study_id" to 102L),
+            ),
             "LEARNER_CONTINUATION_REQUIRED",
         )
         assertThat(noContinuation.focusSelections).isEmpty()
@@ -485,7 +885,7 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `focus requires an accepted learner choice and a still authorized live call`(): Unit = runBlocking {
+    fun `focus rejects revoked calls before commit but preserves the committed epoch when revoke follows it`(): Unit = runBlocking {
         val fixture = Fixture().apply { persistedSession = discoverySession(); focusResult = focusSelection(101, 1) }
         val context = context().copy(session = discoverySession())
         fixture.learnerTurnId = null
@@ -497,22 +897,123 @@ class McpVoiceTutorToolAdapterTest {
         fixture.authorized = true
         fixture.afterFocus = { fixture.authorized = false }
         val late = fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L))
-        assertCode(late, "CALL_NOT_AUTHORIZED")
-        assertThat(late.lessonFocus).isNull()
-        assertThat(late.lessonRevision).isNull()
+        assertThat(late.isError).isFalse()
+        assertThat(late.lessonFocus?.studyId).isEqualTo(101)
+        assertThat(late.lessonRevision).isEqualTo(1)
+        assertThat(json(late).path("voiceLessonFocus").path("revision").asLong()).isEqualTo(1)
+    }
+
+    @Test
+    fun `focus tools require the server classified intent for their exact persisted turn`(): Unit = runBlocking {
+        val selection = Fixture().apply {
+            persistedSession = discoverySession()
+            focusResult = focusSelection(101, 1)
+        }
+        assertCode(
+            selection.adapter.execute(
+                context(VoiceTutorInputIntent.CONTINUE_TREE).copy(session = discoverySession()),
+                "select_voice_study",
+                mapOf("study_id" to 101L),
+            ),
+            "LEARNER_CHOICE_REQUIRED",
+        )
+        assertCode(
+            selection.adapter.execute(
+                context(providerItemId = "different-user-item").copy(session = discoverySession()),
+                "select_voice_study",
+                mapOf("study_id" to 101L),
+            ),
+            "LEARNER_CHOICE_REQUIRED",
+        )
+        assertThat(selection.focusSelections).isEmpty()
+
+        val advance = Fixture().apply {
+            focusResult = VoiceTutorLessonFocusSelection(
+                VoiceTutorLessonFocus(102, 1),
+                VoiceTutorStudySnapshot(102, 101, "Child", 4, revision = 1),
+            )
+            handler = { name, _ -> if (name == "get_study") {
+                success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Child"))
+            } else failure("UNEXPECTED_TOOL") }
+        }
+        assertCode(
+            advance.adapter.execute(context(), "advance_voice_study", mapOf("study_id" to 102L)),
+            "LEARNER_CONTINUATION_REQUIRED",
+        )
+        advance.completedExchange = false
+        assertCode(
+            advance.adapter.execute(
+                context(VoiceTutorInputIntent.CONTINUE_TREE, targetTopic = "Child"),
+                "advance_voice_study",
+                mapOf("study_id" to 102L),
+            ),
+            "CURRENT_EXCHANGE_INCOMPLETE",
+        )
+        advance.completedExchange = true
+        val readinessOnly = context(VoiceTutorInputIntent.CONTINUE_TREE, targetTopic = "Child").let { base ->
+            base.copy(dialogueBoundary = base.dialogueBoundary?.copy(
+                precedingTutorFeedbackForStudyAnswer = false,
+            ))
+        }
+        assertCode(
+            advance.adapter.execute(readinessOnly, "advance_voice_study", mapOf("study_id" to 102L)),
+            "CURRENT_EXCHANGE_INCOMPLETE",
+        )
+        assertThat(advance.focusSelections).isEmpty()
+    }
+
+    @Test
+    fun `focus tools reject stale lesson intent and continuation before spoken feedback drains`(): Unit = runBlocking {
+        val store = ContextStore().apply { revision = 1 }
+        val fixture = Fixture(studyContexts = store).apply {
+            acceptedLessonRevision = 1
+            focusResult = VoiceTutorLessonFocusSelection(
+                VoiceTutorLessonFocus(102, 2),
+                VoiceTutorStudySnapshot(102, 101, "Child", 4, revision = 2),
+            )
+            handler = { name, _ -> if (name == "get_study") {
+                success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Child"))
+            } else failure("UNEXPECTED_TOOL") }
+        }
+        assertCode(
+            fixture.adapter.execute(
+                context(VoiceTutorInputIntent.CONTINUE_TREE, lessonRevision = 0, targetTopic = "Child"),
+                "advance_voice_study",
+                mapOf("study_id" to 102L),
+            ),
+            "LEARNER_CONTINUATION_REQUIRED",
+        )
+        val overlapping = context(
+            VoiceTutorInputIntent.CONTINUE_TREE,
+            lessonRevision = 1,
+            targetTopic = "Child",
+        ).let { base ->
+            base.copy(dialogueBoundary = base.dialogueBoundary?.copy(
+                latestAcceptedLearnerSpeechStartedOrder = 2,
+                precedingTutorSpeechStoppedOrder = 2,
+            ))
+        }
+        assertCode(
+            fixture.adapter.execute(overlapping, "advance_voice_study", mapOf("study_id" to 102L)),
+            "CURRENT_EXCHANGE_INCOMPLETE",
+        )
+        assertThat(fixture.focusSelections).isEmpty()
     }
 
     @Test
     fun `failed or unverified focus never emits a successful focus or prepared level`(): Unit = runBlocking {
         val fixture = Fixture().apply { persistedSession = discoverySession() }
-        val context = context().copy(session = discoverySession())
-        assertCode(fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L)), "LESSON_FOCUS_UNAVAILABLE")
+        assertCode(fixture.adapter.execute(
+            context().copy(session = discoverySession()), "select_voice_study", mapOf("study_id" to 101L),
+        ), "LESSON_FOCUS_UNAVAILABLE")
         for (invalid in listOf(focusSelection(101, 0), focusSelection(201, 1),
             focusSelection(101, 1).let { it.copy(snapshot = it.snapshot.copy(difficulty = 0)) })) {
             fixture.persistedSession = discoverySession()
             fixture.focusHistory.clear()
             fixture.focusResult = invalid
-            val result = fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L))
+            val result = fixture.adapter.execute(
+                context().copy(session = discoverySession()), "select_voice_study", mapOf("study_id" to 101L),
+            )
             assertCode(result, "LESSON_FOCUS_UNCONFIRMED")
             assertThat(result.lessonFocus).isNull()
             assertThat(result.lessonRevision).isNull()
@@ -534,7 +1035,9 @@ class McpVoiceTutorToolAdapterTest {
     @Test
     fun `switching trees follows the persisted focus not the immutable initial request or a mere read`(): Unit = runBlocking {
         val fixture = mutationFixture().apply { focusResult = focusSelection(201, 1) }
-        assertThat(fixture.adapter.execute(context(), "select_voice_study", mapOf("study_id" to 201L)).isError).isFalse()
+        assertThat(fixture.adapter.execute(
+            context(targetStudyId = 201L), "select_voice_study", mapOf("study_id" to 201L),
+        ).isError).isFalse()
         assertThat(fixture.persistedSession?.acceptedStudyId).isEqualTo(101)
         val original = fixture.handler
         fixture.handler = { name, args -> if (name == "create_study_topic") success(mapOf("id" to 202L, "parentStudyId" to 201L))
@@ -714,8 +1217,8 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(result.output).doesNotContain("Authorization", "Bearer", "sessionId", "deviceId")
         // Entry, handler completion and metadata completion each revalidate;
         // the enrichment also reads the current (not originally accepted) focus.
-        assertThat(fixture.authorizationCalls).isEqualTo(3)
-        assertThat(fixture.persistenceCalls).isEqualTo(4)
+        assertThat(fixture.authorizationCalls).isEqualTo(5)
+        assertThat(fixture.persistenceCalls).isEqualTo(7)
     }
 
     @Test
@@ -748,12 +1251,17 @@ class McpVoiceTutorToolAdapterTest {
     fun `revoked device authorization is checked afresh for each tool`(): Unit = runBlocking {
         val fixture = Fixture()
         assertThat(fixture.adapter.execute(context(), "list_studies", emptyMap()).isError).isFalse()
+        val authorizationCallsAfterSuccess = fixture.authorizationCalls
+        val persistenceCallsAfterSuccess = fixture.persistenceCalls
         fixture.authorized = false
 
         assertCode(fixture.adapter.execute(context(), "list_studies", emptyMap()), "CALL_NOT_AUTHORIZED")
 
-        assertThat(fixture.authorizationCalls).isEqualTo(4)
-        assertThat(fixture.persistenceCalls).isEqualTo(3)
+        // The revoked follow-up performs a fresh device check and stops before
+        // another persistence read or MCP handler invocation. Exact successful
+        // read recheck counts are deliberately not part of this contract.
+        assertThat(fixture.authorizationCalls).isGreaterThan(authorizationCallsAfterSuccess)
+        assertThat(fixture.persistenceCalls).isEqualTo(persistenceCallsAfterSuccess)
         assertThat(fixture.calls).hasSize(1)
     }
 
@@ -1233,9 +1741,13 @@ class McpVoiceTutorToolAdapterTest {
         var catalogReads = 0
         var learnerTurnId: Long? = 11
         var tutorTurnId: Long? = 10
+        var completedExchange = true
+        var acceptedProviderItemId = "accepted-user-item"
+        var acceptedLessonRevision = 0L
         var lastFocusLearnerTurnId = 0L
         var focusResult: VoiceTutorLessonFocusSelection? = null
         var afterFocus: () -> Unit = {}
+        var lastExpectedTraversal: VoiceTutorStudyTargetTraversal? = null
         val focusSelections = mutableListOf<Long>()
         val focusHistory = mutableListOf<VoiceTutorLessonFocus>()
         val calls = mutableListOf<Call>()
@@ -1282,6 +1794,18 @@ class McpVoiceTutorToolAdapterTest {
             confirmations = object : VoiceTutorMutationConfirmationPort {
                 override suspend fun latestLearnerTurnId(userId: Long, sessionId: String) = learnerTurnId
                 override suspend fun latestTutorTurnId(userId: Long, sessionId: String) = tutorTurnId
+                override suspend fun learnerTurnAuthorization(
+                    userId: Long,
+                    sessionId: String,
+                    providerItemId: String,
+                    lessonRevision: Long,
+                    expectedQuestionProviderItemId: String?,
+                    expectedAnswerProviderItemId: String?,
+                    expectedTutorFeedbackProviderItemId: String?,
+                    expectedTutorNavigationOfferProviderItemId: String?,
+                ): VoiceTutorLearnerTurnAuthorization? = learnerTurnId?.takeIf {
+                    providerItemId == acceptedProviderItemId && lessonRevision == acceptedLessonRevision
+                }?.let { VoiceTutorLearnerTurnAuthorization(it, completedExchange) }
             },
             lessonFocus = object : VoiceTutorLessonFocusPort {
                 override suspend fun history(userId: Long, sessionId: String) = focusHistory.toList()
@@ -1290,8 +1814,19 @@ class McpVoiceTutorToolAdapterTest {
                     sessionId: String,
                     studyId: Long,
                     learnerTurnId: Long?,
+                    expectedCurrentRevision: Long?,
+                    authorization: VoiceTutorFocusAuthorization?,
+                    expectedCandidate: VoiceTutorStudyTargetCandidate?,
+                    commitAuthority: VoiceTutorFocusCommitAuthority?,
+                    expectedTraversal: VoiceTutorStudyTargetTraversal?,
                 ): VoiceTutorLessonFocusSelection? {
                     assertThat(learnerTurnId).isEqualTo(this@Fixture.learnerTurnId)
+                    assertThat(expectedCurrentRevision).isEqualTo(acceptedLessonRevision)
+                    assertThat(commitAuthority).isEqualTo(VoiceTutorFocusCommitAuthority(
+                        principal.deviceId, principal.sessionId, session().providerSessionId!!,
+                    ))
+                    lastExpectedTraversal = expectedTraversal
+                    if (authorization?.consume() != true) return null
                     val selected = selectFocus(userId, sessionId, studyId)
                     if (selected != null && learnerTurnId != null) lastFocusLearnerTurnId = learnerTurnId
                     return selected
@@ -1303,9 +1838,20 @@ class McpVoiceTutorToolAdapterTest {
                     currentStudyId: Long,
                     childStudyId: Long,
                     learnerTurnId: Long,
+                    expectedCurrentRevision: Long?,
+                    authorization: VoiceTutorFocusAuthorization?,
+                    expectedCandidate: VoiceTutorStudyTargetCandidate?,
+                    commitAuthority: VoiceTutorFocusCommitAuthority?,
+                    expectedTraversal: VoiceTutorStudyTargetTraversal?,
                 ): VoiceTutorLessonFocusSelection? {
                     assertThat(persistedSession?.studyId).isEqualTo(currentStudyId)
                     assertThat(learnerTurnId).isEqualTo(this@Fixture.learnerTurnId)
+                    assertThat(expectedCurrentRevision).isEqualTo(acceptedLessonRevision)
+                    assertThat(commitAuthority).isEqualTo(VoiceTutorFocusCommitAuthority(
+                        principal.deviceId, principal.sessionId, session().providerSessionId!!,
+                    ))
+                    lastExpectedTraversal = expectedTraversal
+                    if (authorization?.consume() != true) return null
                     if (learnerTurnId <= lastFocusLearnerTurnId) return null
                     val selected = selectFocus(userId, sessionId, childStudyId)
                     if (selected != null) lastFocusLearnerTurnId = learnerTurnId
@@ -1369,6 +1915,24 @@ class McpVoiceTutorToolAdapterTest {
     private data class Call(val name: String, val arguments: Map<String, Any>, val principal: Principal?)
 
     private companion object {
+        fun candidate(id: Long, parentStudyId: Long?): Map<String, Any?> = mapOf(
+            "id" to id,
+            "parentStudyId" to parentStudyId,
+            "topic" to "Topic $id",
+        )
+
+        fun completePage(
+            studies: List<Map<String, Any?>>,
+            totalCount: Int,
+            limit: Int,
+            offset: Int = 0,
+        ): Map<String, Any?> = mapOf(
+            "studies" to studies,
+            "totalCount" to totalCount,
+            "limit" to limit,
+            "offset" to offset,
+        )
+
         fun learningRecordPayload(studyId: Long): Map<String, Any?> = linkedMapOf(
             "id" to "91", "sessionId" to "synthetic-prior-session", "studyId" to studyId,
             "parentStudyId" to 101L, "topic" to "Redis", "difficulty" to 3, "kind" to "TUTOR_QUESTION",
@@ -1388,11 +1952,48 @@ class McpVoiceTutorToolAdapterTest {
             VoiceTutorLessonFocus(id, revision), VoiceTutorStudySnapshot(id, null, "Redis", 3, revision),
         )
 
-        fun context() = VoiceTutorWebRtcControlContext(
+        fun context(
+            inputIntent: VoiceTutorInputIntent = VoiceTutorInputIntent.SELECT_SAVED_TOPIC,
+            lessonRevision: Long = 0,
+            providerItemId: String? = "accepted-user-item",
+            targetStudyId: Long? = when (inputIntent) {
+                VoiceTutorInputIntent.SELECT_SAVED_TOPIC -> 101L
+                VoiceTutorInputIntent.CONTINUE_TREE -> 102L
+                else -> null
+            },
+            targetParentStudyId: Long? = 101L.takeIf { inputIntent == VoiceTutorInputIntent.CONTINUE_TREE },
+            targetTopic: String = if (inputIntent == VoiceTutorInputIntent.CONTINUE_TREE) "Cache" else "Redis",
+            targetTraversal: VoiceTutorStudyTargetTraversal? = targetStudyId?.let {
+                VoiceTutorStudyTargetTraversal()
+            },
+        ) = VoiceTutorWebRtcControlContext(
             session(), "rtc_synthetic_call", principal,
             dialogueBoundary = VoiceTutorDialogueBoundary(
                 responseGeneration = 2, latestAcceptedLearnerSpeechStartedOrder = 3,
                 precedingTutorSpeechStoppedOrder = 2, precedingSpokenResponseGeneration = 1,
+                latestAcceptedLearnerProviderItemId = providerItemId,
+                latestAcceptedLearnerLessonRevision = lessonRevision,
+                latestAcceptedLearnerIntent = inputIntent,
+                precedingTutorFeedbackForStudyAnswer = inputIntent == VoiceTutorInputIntent.CONTINUE_TREE,
+                precedingQuestionProviderItemId = "accepted-question-item"
+                    .takeIf { inputIntent == VoiceTutorInputIntent.CONTINUE_TREE },
+                precedingAnswerProviderItemId = "accepted-answer-item"
+                    .takeIf { inputIntent == VoiceTutorInputIntent.CONTINUE_TREE },
+                precedingTutorFeedbackProviderItemId = "accepted-feedback-item"
+                    .takeIf { inputIntent == VoiceTutorInputIntent.CONTINUE_TREE },
+                precedingTutorNavigationOfferProviderItemId = "accepted-offer-item"
+                    .takeIf { inputIntent == VoiceTutorInputIntent.CONTINUE_TREE },
+                latestAcceptedLearnerTargetStudyId = targetStudyId,
+                latestAcceptedLearnerTargetOfferId = targetStudyId?.let { 1L },
+                latestAcceptedLearnerTargetCandidate = targetStudyId?.let { id ->
+                    VoiceTutorStudyTargetCandidate(
+                        studyId = id,
+                        parentStudyId = targetParentStudyId,
+                        topic = targetTopic,
+                    )
+                },
+                latestAcceptedLearnerTargetTraversal = targetTraversal,
+                focusAuthorization = targetStudyId?.let { VoiceTutorFocusAuthorization() },
             ),
         )
 

@@ -1,6 +1,7 @@
 package com.buddystudy.backend.voice.application.port.outbound
 
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 
 data class VoiceTutorMcpToolDefinition(
     val name: String,
@@ -21,14 +22,65 @@ data class VoiceTutorMcpToolResult(
     // Only a verified persisted focus may update the compact call header; never parse model JSON for it.
     val lessonFocus: VoiceTutorLessonFocusSelection? = null,
     val lessonFocusCleared: Boolean = false,
+    /** Trusted call-local metadata; never serialized into provider function output. */
+    val candidateDiscovery: VoiceTutorCandidateDiscovery? = null,
+)
+
+enum class VoiceTutorCandidateReadKind { LIST_STUDIES, GET_STUDY }
+
+/** Exact server-validated read scope. Only complete pages can reach the realtime candidate registry. */
+sealed interface VoiceTutorCandidateDiscoveryScope {
+    data class ExactStudy(val requestedStudyId: Long) : VoiceTutorCandidateDiscoveryScope
+
+    data class CompleteQueryPage(
+        val query: String,
+        val offset: Long,
+        val limit: Long,
+        val totalCount: Long,
+    ) : VoiceTutorCandidateDiscoveryScope
+
+    data class CompleteDirectChildrenPage(
+        val parentStudyId: Long,
+        val offset: Long,
+        val limit: Long,
+        val totalCount: Long,
+    ) : VoiceTutorCandidateDiscoveryScope
+
+    /** Compatibility only for non-production fixtures; the MCP adapter never emits this scope. */
+    data object Unscoped : VoiceTutorCandidateDiscoveryScope
+}
+
+data class VoiceTutorCandidateDiscovery(
+    val source: VoiceTutorCandidateReadKind,
+    val lessonRevision: Long,
+    val currentFocusStudyId: Long?,
+    val candidates: List<VoiceTutorStudyTargetCandidate>,
+    val scope: VoiceTutorCandidateDiscoveryScope = VoiceTutorCandidateDiscoveryScope.Unscoped,
 )
 
 enum class VoiceTutorStudyChangeKind { CREATED, UPDATED, DELETED }
+
+data class VoiceTutorLearnerTurnAuthorization(
+    val turnId: Long,
+    /** Exact persisted question, answer, feedback, navigation offer and continuation form one ordered exchange. */
+    val completedExchange: Boolean,
+)
 
 /** Only persisted, accepted learner speech can advance a destructive-action confirmation. */
 interface VoiceTutorMutationConfirmationPort {
     suspend fun latestLearnerTurnId(userId: Long, sessionId: String): Long?
     suspend fun latestTutorTurnId(userId: Long, sessionId: String): Long?
+    suspend fun learnerTurnAuthorization(
+        userId: Long,
+        sessionId: String,
+        providerItemId: String,
+        lessonRevision: Long,
+        expectedQuestionProviderItemId: String?,
+        expectedAnswerProviderItemId: String?,
+        expectedTutorFeedbackProviderItemId: String?,
+        /** Same item as feedback for a combined response; the next TUTOR item for a separate offer. */
+        expectedTutorNavigationOfferProviderItemId: String? = expectedTutorFeedbackProviderItemId,
+    ): VoiceTutorLearnerTurnAuthorization? = null
 }
 
 object UnavailableVoiceTutorMutationConfirmationPort : VoiceTutorMutationConfirmationPort {

@@ -387,6 +387,58 @@ class VoiceTutorInputTurnCoordinatorTest {
     }
 
     @Test
+    fun `final tail assessment receives bounded same speech checkpoint context without rewriting either item`() {
+        val coordinator = VoiceTutorInputTurnCoordinator(
+            VoiceTutorInputAssessmentProperties(maxTranscriptCharacters = 32, maxBatchTranscriptCharacters = 64),
+        )
+        coordinator.observeCommitted("checkpoint", 7, checkpoint = true, nowNanos = 0)
+        val checkpoint = assess(coordinator.observeTranscript(
+            "checkpoint", "Redis는 메모리 데이터 저장소예요", "checkpoint-original", 1,
+        ))
+        assertThat(checkpoint.utterances.single().sameSpeechContext).isNull()
+        assertThat(coordinator.completeAssessment(checkpoint.token, meaningful(checkpoint), 2)).containsExactly(
+            Action.Publish("checkpoint", "checkpoint-original", sequence = 7, checkpoint = true),
+        )
+        coordinator.confirmPublished("checkpoint", 3)
+
+        coordinator.observeCommitted("tail", 7, checkpoint = false, nowNanos = 4)
+        val completed = assess(coordinator.observeTranscript("tail", "음…", "tail-original", 5))
+        val utterance = completed.utterances.single()
+        assertThat(utterance.transcript).isEqualTo("음…")
+        assertThat(utterance.sameSpeechContext)
+            .endsWith("Redis는 메모리 데이터 저장소예요\n음…")
+            .hasSizeLessThanOrEqualTo(32)
+
+        val result = Result.success(VoiceTutorInputAssessmentResult(listOf(
+            VoiceTutorInputItemAssessment(
+                "tail", VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION,
+            ),
+        )))
+        assertThat(coordinator.completeAssessment(completed.token, result, 6)).containsExactly(
+            Action.Publish(
+                "tail", "tail-original", sequence = 7,
+                intent = VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION,
+            ),
+        )
+    }
+
+    @Test
+    fun `rejected checkpoint noise never becomes semantic context for the final tail`() {
+        val coordinator = VoiceTutorInputTurnCoordinator()
+        coordinator.observeCommitted("noise-checkpoint", 8, checkpoint = true, nowNanos = 0)
+        val noise = assess(coordinator.observeTranscript("noise-checkpoint", "어… 음…", "noise-original", 1))
+        assertThat(coordinator.completeAssessment(noise.token, nonCommunicative(noise), 2)).containsExactly(
+            Action.Delete("noise-checkpoint"),
+        )
+        coordinator.confirmDeleted("noise-checkpoint", 3)
+
+        coordinator.observeCommitted("final-tail", 8, checkpoint = false, nowNanos = 4)
+        val completed = assess(coordinator.observeTranscript("final-tail", "Redis", "tail-original", 5))
+        assertThat(completed.utterances.single().transcript).isEqualTo("Redis")
+        assertThat(completed.utterances.single().sameSpeechContext).isNull()
+    }
+
+    @Test
     fun `oversized individual transcript or raw event retries and deletes rather than truncating`() {
         for ((text, event) in listOf("x".repeat(4_001) to "raw", "응" to "x".repeat(64_001))) {
             val coordinator = VoiceTutorInputTurnCoordinator()

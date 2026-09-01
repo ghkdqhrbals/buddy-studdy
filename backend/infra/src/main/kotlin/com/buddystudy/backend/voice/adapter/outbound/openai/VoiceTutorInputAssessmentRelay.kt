@@ -49,7 +49,10 @@ internal fun voiceTutorInputAssessmentRelay(
                 // tutor response. Never rephrase it or replay a rejected item.
                 if (controller.canPublishInput(action.itemId)) {
                     val persisted = onProviderEvent(controller.providerEventForRelay(action.rawEvent), true, true)
-                    controller.confirmInputPublished(action.itemId, persisted)
+                    controller.confirmInputPublished(
+                        action.itemId,
+                        persisted,
+                    )
                 }
             }
             is VoiceTutorInputTurnCoordinator.Action.Retry -> {

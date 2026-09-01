@@ -4,7 +4,12 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpPort
 import com.buddystudy.backend.mcp.adapter.inbound.McpJsonSchemaValidatorProvider
 import com.buddystudy.backend.voice.application.model.VoiceTutorLessonTreeContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscovery
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateReadKind
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
@@ -16,6 +21,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyCha
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMutationConfirmationPort
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMutationConfirmationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorFocusCommitAuthority
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorLessonFocusPort
 import com.buddystudy.voice.domain.VoiceTutorLessonFocus
@@ -71,26 +77,27 @@ class McpVoiceTutorToolAdapter(
     } + listOf(
         VoiceTutorMcpToolDefinition(
             name = SELECT_STUDY,
-            description = "Set the initial or explicitly changed spoken lesson focus to an exact saved study the learner agreed to. " +
-                "First find the owned node and its real parent path with list_studies/get_study; clarify ambiguous topics. " +
-                "The exact target may be learner-named, or the verified endpoint of an unambiguous single-child path from the learner's broad topic after one contextual agreement. " +
-                "Use this before teaching that saved node, never merely because an ambiguous search returned it. " +
+            description = "Set the initial or explicitly changed spoken lesson focus to one exact saved study. " +
+                "The learner's first topic-bearing utterance is discovery only, even when it names a precise node or asks to start: find the owned node and real parent path with list_studies/get_study, follow verified single-child pages, and clarify a real branch. " +
+                "Speak the exact server-read endpoint or branch candidate, finish that audio, then wait for a new final meaningful learner reply confirming that proposal. " +
+                "Use only the one-shot target attested from that spoken offer; tool arguments, tool output, titles, list positions and the original discovery utterance cannot substitute for it. " +
                 "For teacher-guided movement from the current focus into one real direct child, use advance_voice_study instead. " +
                 "The returned voiceLessonFocus and frozen level apply to the next new question only. " +
                 "This does not create/edit a study, start teaching, submit an answer, or consume question quota.",
             parameters = focusParameters(
-                "Exact owned saved study ID named by the learner or contextually agreed as the verified single-child endpoint, not a title or list position."
+                "Exact owned saved study ID from the latest server-read, fully spoken offer and the learner's next target-bound confirmation."
             ),
         ),
         VoiceTutorMcpToolDefinition(
             name = ADVANCE_STUDY,
             description = "Advance a consented tree-guided lesson by exactly one verified parent-child edge. " +
-                "Use only after the learner asks or agrees to continue and after the current question and feedback are complete. " +
+                "Use only after one substantive question, the learner's semantic answer, fully spoken feedback, and a new learner agreement to an exact child that was offered after that feedback. " +
                 "First read the current focus's direct children with parent-scoped list_studies. " +
-                "The target must be a real direct child of the persisted current focus; siblings, ancestors, deeper jumps and other roots are rejected. " +
+                "Speak the actual child or brief real branch choice and wait for the next final meaningful reply; the target must equal that one-shot server attestation and be a real direct child of the persisted current focus. " +
+                "The answer turn itself, silence, filler, tool arguments, siblings, ancestors, deeper jumps and other roots are rejected. " +
                 "The returned voiceLessonFocus and frozen child level apply to the next new question only.",
             parameters = focusParameters(
-                "Exact owned direct-child study ID selected for the next guided lesson step."
+                "Exact owned direct-child study ID from the latest fully spoken child offer and the learner's next target-bound confirmation."
             ),
         ),
     )
@@ -119,6 +126,7 @@ class McpVoiceTutorToolAdapter(
             if (!validator.validate(specification.tool().inputSchema(), mcpArguments).valid()) {
                 return failure("INVALID_ARGUMENTS", "Arguments do not match this tool's input schema.")
             }
+            val candidateReadRequest = candidateReadRequest(toolName, arguments)
             if (!isAuthorized(context)) return inactiveCall()
             if (toolName == UPDATE_STUDY || toolName == DELETE_STUDY) {
                 val studyId = (arguments.getValue("study_id") as Number).toLong()
@@ -157,6 +165,9 @@ class McpVoiceTutorToolAdapter(
                 // a mutation, including logout/end events during those reads.
                 if (!isAuthorized(context)) return inactiveCall()
             }
+            val candidateRevisionBefore = candidateReadRequest?.let {
+                runCatching { studyContexts.currentRevision(context.session.userId, context.session.id) }.getOrNull()
+            }
             val result = invoke(context.principal!!, specification, arguments)
             val readOnly = toolName !in setOf(CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY)
             // A saved-study search is private too. Ending a call or revoking a device
@@ -188,7 +199,10 @@ class McpVoiceTutorToolAdapter(
                 }
             }
             val enriched = withLessonContext(context, boundedResult(result, toolName), toolName, arguments)
-            return if (readOnly && !isAuthorized(context)) inactiveCall() else enriched
+            if (readOnly && !isAuthorized(context)) return inactiveCall()
+            return attachCandidateDiscovery(
+                context, enriched, result, candidateReadRequest, candidateRevisionBefore,
+            )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -196,6 +210,141 @@ class McpVoiceTutorToolAdapter(
             return failure("MCP_UNAVAILABLE", "The study tool could not complete. Do not assume the action succeeded.")
         }
     }
+
+    private fun candidateReadRequest(toolName: String, arguments: Map<String, Any>): CandidateReadRequest? {
+        return when (toolName) {
+            "get_study" -> positiveId(objectMapper.valueToTree(arguments["study_id"]))
+                ?.let(CandidateReadRequest::ExactStudy)
+            "list_studies" -> {
+                val parent = arguments["parent_study_id"]?.let { positiveId(objectMapper.valueToTree(it)) }
+                val query = (arguments["query"] as? String)?.takeIf { it.isNotBlank() && it.length <= 200 }
+                if ((parent == null) == (query == null)) return null
+                val offset = arguments["offset"]?.let { nonNegativeLong(objectMapper.valueToTree(it)) } ?: 0L
+                val limit = arguments["limit"]?.let { positiveId(objectMapper.valueToTree(it)) } ?: DEFAULT_STUDY_PAGE_LIMIT
+                if (offset > Int.MAX_VALUE || limit > MAX_STUDY_PAGE_LIMIT) return null
+                if (parent != null) CandidateReadRequest.DirectChildren(parent, offset, limit)
+                else CandidateReadRequest.Query(requireNotNull(query), offset, limit)
+            }
+            else -> null
+        }
+    }
+
+    private suspend fun attachCandidateDiscovery(
+        context: VoiceTutorWebRtcControlContext,
+        result: VoiceTutorMcpToolResult,
+        rawResult: McpSchema.CallToolResult,
+        request: CandidateReadRequest?,
+        revisionBefore: Long?,
+    ): VoiceTutorMcpToolResult {
+        if (result.isError || request == null || revisionBefore == null || revisionBefore < 0 ||
+            rawResult.isError() == true || !isAuthorized(context)
+        ) return result
+        val revisionAfter = runCatching {
+            studyContexts.currentRevision(context.session.userId, context.session.id)
+        }.getOrNull() ?: return result
+        if (revisionAfter != revisionBefore) return result
+        val payload = rawResult.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) } ?: return result
+        val verified = verifiedTargetCandidates(request, payload) ?: return result
+        val currentFocusStudyId = currentStudyAnchor(context)
+        if (!isAuthorized(context) ||
+            studyContexts.currentRevision(context.session.userId, context.session.id) != revisionBefore
+        ) return result
+        return result.copy(candidateDiscovery = VoiceTutorCandidateDiscovery(
+            source = request.kind,
+            lessonRevision = revisionBefore,
+            currentFocusStudyId = currentFocusStudyId,
+            candidates = verified.candidates,
+            scope = verified.scope,
+        ))
+    }
+
+    private fun verifiedTargetCandidates(
+        request: CandidateReadRequest,
+        payload: JsonNode,
+    ): VerifiedCandidateDiscovery? {
+        return when (request) {
+            is CandidateReadRequest.ExactStudy -> {
+                val candidate = payload.takeIf { it.isObject }?.let(::verifiedTargetCandidate) ?: return null
+                if (candidate.studyId != request.studyId) return null
+                VerifiedCandidateDiscovery(
+                    VoiceTutorCandidateDiscoveryScope.ExactStudy(request.studyId),
+                    listOf(candidate),
+                )
+            }
+            is CandidateReadRequest.Query -> {
+                val page = verifiedCompleteCandidatePage(payload, request.offset, request.limit) ?: return null
+                val candidates = verifiedTargetCandidateList(page.nodes) ?: return null
+                VerifiedCandidateDiscovery(
+                    VoiceTutorCandidateDiscoveryScope.CompleteQueryPage(
+                        request.query, request.offset, request.limit, page.totalCount,
+                    ),
+                    candidates,
+                )
+            }
+            is CandidateReadRequest.DirectChildren -> {
+                val page = verifiedCompleteCandidatePage(payload, request.offset, request.limit) ?: return null
+                val candidates = verifiedTargetCandidateList(page.nodes) ?: return null
+                if (candidates.any { it.parentStudyId != request.parentStudyId }) return null
+                VerifiedCandidateDiscovery(
+                    VoiceTutorCandidateDiscoveryScope.CompleteDirectChildrenPage(
+                        request.parentStudyId, request.offset, request.limit, page.totalCount,
+                    ),
+                    candidates,
+                )
+            }
+        }
+    }
+
+    private fun verifiedTargetCandidateList(nodes: List<JsonNode>): List<VoiceTutorStudyTargetCandidate>? {
+        val candidates = nodes.map { verifiedTargetCandidate(it) ?: return null }
+        return candidates.takeIf { values -> values.map { it.studyId }.distinct().size == values.size }
+    }
+
+    private fun verifiedTargetCandidate(node: JsonNode): VoiceTutorStudyTargetCandidate? {
+        val id = positiveId(node.path("id")) ?: return null
+        val parent = node.path("parentStudyId").let { parentNode ->
+            when {
+                parentNode.isNull -> null
+                parentNode.isIntegralNumber && parentNode.canConvertToLong() && parentNode.longValue() > 0 ->
+                    parentNode.longValue()
+                else -> return null
+            }
+        }
+        val topic = node.path("topic").takeIf { it.isTextual }?.textValue()
+            ?.takeIf { it.isNotBlank() && it.length <= 255 } ?: return null
+        return VoiceTutorStudyTargetCandidate(id, parent, topic)
+    }
+
+    private fun verifiedCompleteCandidatePage(
+        payload: JsonNode,
+        requestedOffset: Long,
+        requestedLimit: Long,
+    ): VerifiedCandidatePage? {
+        if (!payload.isObject) return null
+        val studies = payload.path("studies").takeIf {
+            it.isArray && it.size() in 0..MAX_TARGET_CANDIDATES
+        } ?: return null
+        val totalCount = nonNegativeLong(payload.path("totalCount")) ?: return null
+        val offset = nonNegativeLong(payload.path("offset")) ?: return null
+        val limit = positiveId(payload.path("limit"))?.takeIf { it <= MAX_STUDY_PAGE_LIMIT } ?: return null
+        val size = studies.size().toLong()
+        // Each slice must itself be the exact full server page. The realtime
+        // graph may use an exact offset-zero multi-result slice to prove a real
+        // branch, but zero/one results prove a leaf/single edge only at offset 0;
+        // later pages merely extend the stable contiguous offer prefix.
+        if (offset != requestedOffset || limit != requestedLimit ||
+            totalCount > MAX_DISCOVERY_RESULT_CANDIDATES || requestedOffset % requestedLimit != 0L ||
+            (totalCount == 0L && requestedOffset != 0L) ||
+            (totalCount > 0L && requestedOffset >= totalCount)
+        ) return null
+        val expectedSize = minOf(requestedLimit, totalCount - requestedOffset)
+        if (size != expectedSize || size > limit) return null
+        return VerifiedCandidatePage(studies.toList(), totalCount)
+    }
+
+    private fun nonNegativeLong(node: JsonNode): Long? = node.takeIf {
+        it.isIntegralNumber && it.canConvertToLong() && it.longValue() >= 0
+    }?.longValue()
 
     private suspend fun isAuthorized(context: VoiceTutorWebRtcControlContext): Boolean {
         val principal = context.principal ?: return false
@@ -253,6 +402,9 @@ class McpVoiceTutorToolAdapter(
         if (id == currentId) {
             return failure("GUIDED_CHILD_REQUIRED", "The next guided focus must be a direct child of the current focus.")
         }
+        focusRequestFailure(context, id, guidedAdvance = true, expectedParentStudyId = currentId)?.let {
+            return it
+        }
         val readStudy = specifications["get_study"]
             ?: return failure("MCP_UNAVAILABLE", "The child study could not be verified.")
         val result = invoke(
@@ -264,14 +416,79 @@ class McpVoiceTutorToolAdapter(
             return failure("GUIDED_CHILD_UNAVAILABLE", "The requested saved child could not be verified.")
         }
         val child = objectMapper.valueToTree<JsonNode>(result.structuredContent())
-        if (positiveId(child.path("id")) != id || positiveId(child.path("parentStudyId")) != currentId) {
+        val verifiedChild = verifiedTargetCandidate(child)
+        val attestedChild = context.dialogueBoundary?.latestAcceptedLearnerTargetCandidate
+        if (verifiedChild == null || verifiedChild.studyId != id || verifiedChild.parentStudyId != currentId ||
+            attestedChild == null || verifiedChild != attestedChild
+        ) {
             return failure(
                 "GUIDED_DESCENT_OUT_OF_SCOPE",
-                "Teacher-guided progression can move only to one real direct child of the current focus.",
+                "Teacher-guided progression can move only to the unchanged direct child the learner just confirmed.",
             )
         }
         if (!isAuthorized(context)) return inactiveCall()
         return focusStudy(context, id, guidedAdvance = true, expectedParentStudyId = currentId)
+    }
+
+    private fun focusRequestFailure(
+        context: VoiceTutorWebRtcControlContext,
+        id: Long,
+        guidedAdvance: Boolean,
+        expectedParentStudyId: Long?,
+    ): VoiceTutorMcpToolResult? {
+        val requiredIntent = if (guidedAdvance) {
+            VoiceTutorInputIntent.CONTINUE_TREE
+        } else {
+            VoiceTutorInputIntent.SELECT_SAVED_TOPIC
+        }
+        val dialogue = context.dialogueBoundary
+        val providerItemId = dialogue?.latestAcceptedLearnerProviderItemId
+        if (dialogue == null || providerItemId.isNullOrBlank() || providerItemId.length > 191 ||
+            dialogue.latestAcceptedLearnerIntent != requiredIntent ||
+            dialogue.focusAuthorization?.isActive() != true
+        ) {
+            return failure(
+                if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
+                if (guidedAdvance) {
+                    "Wait for a newly persisted learner request or contextual agreement to continue down the saved tree."
+                } else {
+                    "Ask what the learner wants to discuss and wait for their newly persisted explicit topic choice."
+                },
+            )
+        }
+        val attestedTarget = dialogue.latestAcceptedLearnerTargetStudyId
+        if (attestedTarget == null || dialogue.latestAcceptedLearnerTargetOfferId?.let { it > 0 } != true) {
+            return failure(
+                if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
+                "Wait for the learner to confirm one exact saved topic that was actually offered in this call.",
+            )
+        }
+        if (attestedTarget != id) {
+            return failure(
+                "LEARNER_TARGET_MISMATCH",
+                "The requested study_id is not the exact saved topic confirmed by the learner. Read and offer the branch again.",
+            )
+        }
+        val candidate = dialogue.latestAcceptedLearnerTargetCandidate?.takeIf {
+            it.studyId == id && it.studyId == attestedTarget &&
+                it.parentStudyId?.let { parent -> parent > 0 } != false &&
+                it.topic.isNotBlank() && it.topic.length <= 255
+        } ?: return failure(
+            "LEARNER_TARGET_MISMATCH",
+            "The confirmed saved topic metadata is missing or stale. Read it, speak the exact candidate again, and wait for a fresh reply.",
+        )
+        dialogue.latestAcceptedLearnerTargetTraversal?.takeIf { it.isValidFor(candidate) }
+            ?: return failure(
+                "LEARNER_TARGET_MISMATCH",
+                "The confirmed saved topic path is missing or stale. Read it, speak the exact candidate again, and wait for a fresh reply.",
+            )
+        if (guidedAdvance && candidate.parentStudyId != expectedParentStudyId) {
+            return failure(
+                "GUIDED_DESCENT_OUT_OF_SCOPE",
+                "Teacher-guided progression can move only to one direct child of the current focus.",
+            )
+        }
+        return null
     }
 
     private suspend fun focusStudy(
@@ -281,18 +498,55 @@ class McpVoiceTutorToolAdapter(
         expectedParentStudyId: Long? = null,
     ): VoiceTutorMcpToolResult {
         if (!isAuthorized(context)) return inactiveCall()
-        val learnerTurnId = confirmations.latestLearnerTurnId(context.session.userId, context.session.id)
-        if (learnerTurnId == null || learnerTurnId <= 0) {
+        focusRequestFailure(context, id, guidedAdvance, expectedParentStudyId)?.let { return it }
+        val dialogue = requireNotNull(context.dialogueBoundary)
+        val providerItemId = requireNotNull(dialogue.latestAcceptedLearnerProviderItemId)
+        val attestedCandidate = requireNotNull(dialogue.latestAcceptedLearnerTargetCandidate)
+        val attestedTraversal = requireNotNull(dialogue.latestAcceptedLearnerTargetTraversal)
+        val currentRevision = studyContexts.currentRevision(context.session.userId, context.session.id)
+        if (currentRevision < 0 || dialogue.latestAcceptedLearnerLessonRevision != currentRevision) {
             return failure(
                 if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
-                if (guidedAdvance) {
-                    "Wait for the learner's meaningful request or agreement to continue before moving down the saved tree."
-                } else {
-                    "Ask what the learner wants to discuss and wait for their meaningful reply before selecting a study."
-                },
+                "The learner's topic intent belongs to an older lesson focus. Wait for a fresh reply in the current topic.",
             )
         }
+        val authorization = confirmations.learnerTurnAuthorization(
+            context.session.userId,
+            context.session.id,
+            providerItemId,
+            currentRevision,
+            dialogue.precedingQuestionProviderItemId,
+            dialogue.precedingAnswerProviderItemId,
+            dialogue.precedingTutorFeedbackProviderItemId,
+            dialogue.precedingTutorNavigationOfferProviderItemId,
+        ) ?: return failure(
+            if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
+            "The exact learner topic intent was not durably accepted. Wait for a fresh reply instead of guessing.",
+        )
+        if (guidedAdvance && (!authorization.completedExchange ||
+                !dialogue.precedingTutorFeedbackForStudyAnswer ||
+                dialogue.precedingSpokenResponseGeneration <= 0 ||
+                dialogue.responseGeneration <= dialogue.precedingSpokenResponseGeneration ||
+                dialogue.precedingTutorSpeechStoppedOrder <= 0 ||
+                dialogue.latestAcceptedLearnerSpeechStartedOrder <= dialogue.precedingTutorSpeechStoppedOrder
+            )
+        ) {
+            return failure(
+                "CURRENT_EXCHANGE_INCOMPLETE",
+                "Finish the current saved-topic question, learner answer and spoken feedback before offering one deeper child.",
+            )
+        }
+        val learnerTurnId = authorization.turnId.takeIf { it > 0 } ?: return failure(
+            if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
+            "The exact learner topic intent was not durably accepted. Wait for a fresh reply instead of guessing.",
+        )
         if (!isAuthorized(context)) return inactiveCall()
+        val principal = requireNotNull(context.principal)
+        val commitAuthority = VoiceTutorFocusCommitAuthority(
+            deviceId = principal.deviceId,
+            authSessionId = principal.sessionId,
+            providerCallId = context.callId,
+        )
         val selection = if (guidedAdvance) {
             lessonFocus.advance(
                 context.session.userId,
@@ -300,9 +554,24 @@ class McpVoiceTutorToolAdapter(
                 requireNotNull(expectedParentStudyId),
                 id,
                 learnerTurnId,
+                expectedCurrentRevision = currentRevision,
+                authorization = dialogue.focusAuthorization,
+                expectedCandidate = attestedCandidate,
+                commitAuthority = commitAuthority,
+                expectedTraversal = attestedTraversal,
             )
         } else {
-            lessonFocus.focus(context.session.userId, context.session.id, id, learnerTurnId)
+            lessonFocus.focus(
+                context.session.userId,
+                context.session.id,
+                id,
+                learnerTurnId = learnerTurnId,
+                expectedCurrentRevision = currentRevision,
+                authorization = dialogue.focusAuthorization,
+                expectedCandidate = attestedCandidate,
+                commitAuthority = commitAuthority,
+                expectedTraversal = attestedTraversal,
+            )
         } ?: return failure(
             "LESSON_FOCUS_UNAVAILABLE",
             if (guidedAdvance) {
@@ -315,17 +584,20 @@ class McpVoiceTutorToolAdapter(
             selection.snapshot.topic.isBlank() || selection.snapshot.topic.length > 255 ||
             selection.snapshot.difficulty !in 1..10 || selection.snapshot.parentStudyId?.let { it > 0 } == false
         ) return failure("LESSON_FOCUS_UNCONFIRMED", "The saved focus result could not be verified; do not begin teaching or repeat a selection automatically.")
-        if (!isAuthorized(context)) return inactiveCall()
         // Selection already committed. Optional tree enrichment must not turn it into an
-        // uncertain failed selection or cause a duplicate focus epoch on retry.
-        val saved = try {
-            currentSnapshots(studyContexts.list(context.session.userId, context.session.id))
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
+        // uncertain failed selection or cause a duplicate focus epoch on retry. In particular,
+        // logout/revocation after the atomic commit must not hide the new realtime lesson epoch.
+        val saved = if (isAuthorized(context)) {
+            try {
+                currentSnapshots(studyContexts.list(context.session.userId, context.session.id))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                listOf(selection.snapshot)
+            }
+        } else {
             listOf(selection.snapshot)
         }
-        if (!isAuthorized(context)) return inactiveCall()
         val focus = focusMetadata(selection)
         return VoiceTutorMcpToolResult(
             output = objectMapper.writeValueAsString(linkedMapOf(
@@ -700,6 +972,29 @@ class McpVoiceTutorToolAdapter(
         isError = true,
     )
 
+    private sealed interface CandidateReadRequest {
+        val kind: VoiceTutorCandidateReadKind
+
+        data class ExactStudy(val studyId: Long) : CandidateReadRequest {
+            override val kind = VoiceTutorCandidateReadKind.GET_STUDY
+        }
+
+        data class Query(val query: String, val offset: Long, val limit: Long) : CandidateReadRequest {
+            override val kind = VoiceTutorCandidateReadKind.LIST_STUDIES
+        }
+
+        data class DirectChildren(val parentStudyId: Long, val offset: Long, val limit: Long) : CandidateReadRequest {
+            override val kind = VoiceTutorCandidateReadKind.LIST_STUDIES
+        }
+    }
+
+    private data class VerifiedCandidateDiscovery(
+        val scope: VoiceTutorCandidateDiscoveryScope,
+        val candidates: List<VoiceTutorStudyTargetCandidate>,
+    )
+
+    private data class VerifiedCandidatePage(val nodes: List<JsonNode>, val totalCount: Long)
+
     private companion object {
         const val SELECT_STUDY = "select_voice_study"
         const val ADVANCE_STUDY = "advance_voice_study"
@@ -712,6 +1007,13 @@ class McpVoiceTutorToolAdapter(
         // Function results are themselves JSON-escaped inside a provider event.
         const val MAX_OUTPUT_BYTES = 16 * 1_024
         const val MAX_ANCESTOR_READS = 32
+        const val MAX_TARGET_CANDIDATES = 16
+        // Six normal ten-row child pages plus the initial query fit in the
+        // seven-round learner-turn budget. Wider trees must be narrowed with a
+        // fresh exact query/read before they can be offered.
+        const val MAX_DISCOVERY_RESULT_CANDIDATES = 60L
+        const val MAX_STUDY_PAGE_LIMIT = 500L
+        const val DEFAULT_STUDY_PAGE_LIMIT = 100L
         val ALLOWED_TOOLS = setOf(
             "list_studies", "get_study", CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY,
             "list_records", "get_record", LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD,

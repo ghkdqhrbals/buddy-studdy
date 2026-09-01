@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice.application.model
 
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.backend.auth.Principal
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class VoiceTutorWebRtcControlContext(
     val session: VoiceTutorSession,
@@ -20,4 +21,38 @@ data class VoiceTutorDialogueBoundary(
     val latestAcceptedLearnerSpeechStartedOrder: Long,
     val precedingTutorSpeechStoppedOrder: Long,
     val precedingSpokenResponseGeneration: Long,
+    /** Exact accepted USER item held only by the server-side controller. */
+    val latestAcceptedLearnerProviderItemId: String? = null,
+    val latestAcceptedLearnerLessonRevision: Long = -1,
+    val latestAcceptedLearnerIntent: VoiceTutorInputIntent = VoiceTutorInputIntent.NONE,
+    /** The tutor audio immediately before this learner turn was a response to a classified study answer. */
+    val precedingTutorFeedbackForStudyAnswer: Boolean = false,
+    /** Exact persisted question, answer, feedback, and spoken navigation-offer items for this continuation. */
+    val precedingQuestionProviderItemId: String? = null,
+    val precedingAnswerProviderItemId: String? = null,
+    val precedingTutorFeedbackProviderItemId: String? = null,
+    val precedingTutorNavigationOfferProviderItemId: String? = null,
+    val latestAcceptedLearnerTargetStudyId: Long? = null,
+    val latestAcceptedLearnerTargetOfferId: Long? = null,
+    /** Frozen server-read metadata for the exact candidate the learner confirmed. */
+    val latestAcceptedLearnerTargetCandidate: VoiceTutorStudyTargetCandidate? = null,
+    /** Exact server-private topology proof paired with that confirmed candidate. */
+    val latestAcceptedLearnerTargetTraversal: VoiceTutorStudyTargetTraversal? = null,
+    /** One-shot server-owned lease; a newer speech edge invalidates even an in-flight focus tool. */
+    val focusAuthorization: VoiceTutorFocusAuthorization? = null,
 )
+
+class VoiceTutorFocusAuthorization {
+    private val active = AtomicBoolean(true)
+
+    fun invalidate() {
+        active.set(false)
+    }
+
+    /** Linearization point immediately before the persistent focus write. */
+    fun consume(): Boolean = active.compareAndSet(true, false)
+
+    fun isActive(): Boolean = active.get()
+
+    override fun toString(): String = "VoiceTutorFocusAuthorization(active=${active.get()})"
+}

@@ -72,7 +72,10 @@ internal class VoiceTutorMcpTurnCoordinator(
         calls.forEach { call ->
             seenCallIds.add(call.callId)
             // Realtime conversation item ids have a 32-character ceiling.
-            pending[call.callId] = Pending(outputItemId = "vtmcp_${UUID.randomUUID().toString().replace("-", "").take(26)}")
+            pending[call.callId] = Pending(
+                outputItemId = "vtmcp_${UUID.randomUUID().toString().replace("-", "").take(26)}",
+                toolName = call.name,
+            )
         }
         return calls
     }
@@ -83,6 +86,10 @@ internal class VoiceTutorMcpTurnCoordinator(
         call.started = true
         return true
     }
+
+    fun startedToolName(callId: String): String? = pending[callId]
+        ?.takeIf { !closed && it.started }
+        ?.toolName
 
     fun complete(callId: String, result: VoiceTutorMcpToolResult, nowNanos: Long): Map<String, Any?>? {
         val call = pending[callId] ?: return null
@@ -146,6 +153,7 @@ internal class VoiceTutorMcpTurnCoordinator(
 
     private data class Pending(
         val outputItemId: String,
+        val toolName: String,
         var started: Boolean = false,
         var acknowledgementDeadline: Long? = null,
     )
@@ -153,7 +161,10 @@ internal class VoiceTutorMcpTurnCoordinator(
     companion object {
         const val MAX_CALLS_PER_RESPONSE = 8
         const val MAX_CALLS_PER_SESSION = 256
-        const val MAX_TOOL_ROUNDS = 6
+        // A legal catalog path can contain one root plus five descendants.
+        // Discovery needs one query and one complete child read for every node,
+        // including the endpoint's empty leaf page.
+        const val MAX_TOOL_ROUNDS = 7
         const val MAX_ARGUMENT_BYTES = 16 * 1024
         const val MAX_OUTPUT_BYTES = 16 * 1024
         const val MAX_PROVIDER_EVENT_BYTES = 65_536

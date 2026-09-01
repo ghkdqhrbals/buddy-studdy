@@ -1,6 +1,11 @@
 package com.buddystudy.backend.voice.adapter.outbound.persistence
 
 import com.buddystudy.backend.voice.application.model.VoiceTutorLessonTreeContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetSingleChildEdge
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorFocusCommitAuthority
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
@@ -51,6 +56,19 @@ class VoiceTutorStudyContextAdapterTest {
     fun setUp(): Unit = runBlocking {
         execute(
             """
+            create table user_devices (
+                id bigint primary key,
+                user_id bigint not null,
+                device_id varchar(191) not null,
+                session_expires_at timestamp(6),
+                logged_out_at timestamp(6),
+                revoked_at timestamp(6)
+            )
+            """.trimIndent(),
+        )
+        execute("insert into user_devices(id, user_id, device_id) values (11, 7, 'synthetic-device')")
+        execute(
+            """
             create table studies (
                 id bigint primary key,
                 user_id bigint not null,
@@ -71,6 +89,7 @@ class VoiceTutorStudyContextAdapterTest {
                 accepted_study_id bigint,
                 topic_snapshot varchar(255) not null,
                 difficulty_snapshot int not null,
+                provider_session_id varchar(191),
                 status varchar(20) not null,
                 hard_ends_at timestamp(6) not null,
                 ended_at timestamp(6),
@@ -88,6 +107,20 @@ class VoiceTutorStudyContextAdapterTest {
                 foreign key (session_id) references voice_tutor_sessions(id) on delete cascade,
                 check (revision >= 0), check (study_id > 0),
                 check (learner_turn_id is null or learner_turn_id > 0)
+            )
+            """.trimIndent(),
+        )
+        execute(
+            """
+            create table voice_tutor_transcript_turns (
+                id bigint primary key,
+                session_id varchar(36) not null,
+                provider_item_id varchar(191) not null,
+                role varchar(16) not null,
+                sequence_number bigint not null,
+                unique (session_id, provider_item_id, role),
+                unique (session_id, sequence_number),
+                foreign key (session_id) references voice_tutor_sessions(id) on delete cascade
             )
             """.trimIndent(),
         )
@@ -699,17 +732,292 @@ class VoiceTutorStudyContextAdapterTest {
         insertStudy(11, parentId = 10, topic = "Cache", difficulty = 4)
         insertStudy(12, parentId = 11, topic = "Expiry", difficulty = 5)
         insertStudy(13, parentId = 10, topic = "PubSub", difficulty = 6)
+        insertTranscriptTurn(11, accepted.id)
 
-        val child = transaction { requireNotNull(adapter.advance(7, accepted.id, 10, 11, learnerTurnId = 11)) }
+        val child = transaction { requireNotNull(adapter.advance(
+            7, accepted.id, 10, 11, learnerTurnId = 11, authorization = authorization(),
+            commitAuthority = commitAuthority(),
+        )) }
 
         assertThat(child.focus).isEqualTo(VoiceTutorLessonFocus(11, 1))
         assertThat(child.snapshot).isEqualTo(VoiceTutorStudySnapshot(11, 10, "Cache", 4, 1))
         assertThat(focusHeader()).containsExactly(11L, 10L, "Cache", 4)
-        transaction { assertThat(adapter.advance(7, accepted.id, 11, 13, learnerTurnId = 12)).isNull() }
-        transaction { assertThat(adapter.advance(7, accepted.id, 10, 12, learnerTurnId = 12)).isNull() }
-        transaction { assertThat(adapter.advance(7, accepted.id, 11, 11, learnerTurnId = 12)).isNull() }
-        transaction { assertThat(adapter.advance(7, accepted.id, 11, 12, learnerTurnId = 11)).isNull() }
+        insertTranscriptTurn(12, accepted.id)
+        transaction { assertThat(adapter.advance(7, accepted.id, 11, 13, 12, authorization = authorization(), commitAuthority = commitAuthority())).isNull() }
+        transaction { assertThat(adapter.advance(7, accepted.id, 10, 12, 12, authorization = authorization(), commitAuthority = commitAuthority())).isNull() }
+        transaction { assertThat(adapter.advance(7, accepted.id, 11, 11, 12, authorization = authorization(), commitAuthority = commitAuthority())).isNull() }
+        transaction { assertThat(adapter.advance(7, accepted.id, 11, 12, 11, authorization = authorization(), commitAuthority = commitAuthority())).isNull() }
         assertThat(adapter.history(7, accepted.id)).containsExactly(child.focus)
+    }
+
+    @Test
+    fun `learner focus locks and revalidates the exact auth session and provider call before consuming its lease`(): Unit = runBlocking {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertTranscriptTurn(11, discovery.id)
+
+        val wrongAuthLease = authorization()
+        transaction {
+            assertThat(adapter.focus(
+                7, discovery.id, 10, 11, authorization = wrongAuthLease,
+                commitAuthority = commitAuthority().copy(authSessionId = 12),
+            )).isNull()
+        }
+        assertThat(wrongAuthLease.isActive()).isTrue()
+
+        val wrongCallLease = authorization()
+        transaction {
+            assertThat(adapter.focus(
+                7, discovery.id, 10, 11, authorization = wrongCallLease,
+                commitAuthority = commitAuthority("rtc_other_call"),
+            )).isNull()
+        }
+        assertThat(wrongCallLease.isActive()).isTrue()
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+        assertThat(focusHeader()).containsExactly(null, null, "", 0)
+    }
+
+    @Test
+    fun `auth expiry is rechecked before lease consumption while permanent sessions remain valid`(): Unit = runBlocking {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertTranscriptTurn(11, discovery.id)
+        val expiryUpdated = database.sql("update user_devices set session_expires_at = :expiresAt where id = 11")
+            .bind("expiresAt", now.plusSeconds(1).utc()).fetch().rowsUpdated().awaitSingle()
+        assertThat(expiryUpdated).isEqualTo(1)
+        var readings = 0
+        val expiring = VoiceTutorStudyContextAdapter(database, object : Clock() {
+            override fun getZone(): ZoneId = ZoneOffset.UTC
+            override fun withZone(zone: ZoneId): Clock = this
+            override fun instant(): Instant = if (readings++ < 3) now else now.plusSeconds(2)
+        })
+        val expiringLease = authorization()
+
+        transaction {
+            assertThat(expiring.focus(
+                7, discovery.id, 10, 11, authorization = expiringLease,
+                commitAuthority = commitAuthority(),
+            )).isNull()
+        }
+
+        assertThat(expiringLease.isActive()).isTrue()
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+
+        execute("update user_devices set session_expires_at = null where id = 11")
+        val permanentLease = authorization()
+        val permanent = VoiceTutorStudyContextAdapter(
+            database,
+            Clock.fixed(now.plusSeconds(2), ZoneOffset.UTC),
+        )
+
+        val selected = transaction {
+            requireNotNull(permanent.focus(
+                7, discovery.id, 10, 11, authorization = permanentLease,
+                commitAuthority = commitAuthority(),
+            ))
+        }
+
+        assertThat(selected.studyId).isEqualTo(10)
+        assertThat(permanentLease.isActive()).isFalse()
+        assertThat(focusCount()).isEqualTo(1)
+    }
+
+    @Test
+    fun `concurrent logout that wins the auth row lock prevents focus commit without consuming its lease`(): Unit = runBlocking {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertTranscriptTurn(11, discovery.id)
+        val lease = authorization()
+        val logoutUpdated = CompletableDeferred<Unit>()
+        val releaseLogout = CompletableDeferred<Unit>()
+        val logout = async(Dispatchers.Default) {
+            transaction {
+                val updated = database.sql(
+                    "update user_devices set logged_out_at = :now where id = 11",
+                ).bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+                assertThat(updated).isEqualTo(1)
+                logoutUpdated.complete(Unit)
+                releaseLogout.await()
+            }
+        }
+        try {
+            withTimeout(5_000) { logoutUpdated.await() }
+            val focusEnteredTransaction = CompletableDeferred<Unit>()
+            val focus = async(Dispatchers.Default) {
+                transaction {
+                    focusEnteredTransaction.complete(Unit)
+                    listOf(adapter.focus(
+                        7, discovery.id, 10, 11, authorization = lease,
+                        commitAuthority = commitAuthority(),
+                    ))
+                }
+            }
+            withTimeout(5_000) { focusEnteredTransaction.await() }
+            assertThat(withTimeoutOrNull(100) { focus.await() }).isNull()
+            releaseLogout.complete(Unit)
+            withTimeout(5_000) { logout.await() }
+            assertThat(withTimeout(5_000) { focus.await() }.single()).isNull()
+        } finally {
+            releaseLogout.complete(Unit)
+        }
+
+        assertThat(lease.isActive()).isTrue()
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+        assertThat(focusHeader()).containsExactly(null, null, "", 0)
+    }
+
+    @Test
+    fun `focus rejects renamed or reparented metadata after the spoken offer without consuming its lease`(): Unit = runBlocking {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertStudy(11, parentId = 10, topic = "Cache", difficulty = 4)
+        insertTranscriptTurn(11, discovery.id)
+        val offered = VoiceTutorStudyTargetCandidate(11, 10, "Cache")
+        execute("update studies set topic = 'Renamed cache' where id = 11")
+        val renameLease = authorization()
+
+        transaction {
+            assertThat(adapter.focus(
+                7, discovery.id, 11, 11, 0, renameLease, offered, commitAuthority(),
+            )).isNull()
+        }
+
+        assertThat(renameLease.isActive()).isTrue()
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+
+        execute("update studies set topic = 'Cache', parent_study_id = null where id = 11")
+        val reparentLease = authorization()
+        transaction {
+            assertThat(adapter.focus(
+                7, discovery.id, 11, 11, 0, reparentLease, offered, commitAuthority(),
+            )).isNull()
+        }
+        assertThat(reparentLease.isActive()).isTrue()
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+    }
+
+    @Test
+    fun `focus rejects a stale automatic descent topology without consuming its lease`(): Unit = runBlocking {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertStudy(11, parentId = 10, topic = "Cache", difficulty = 4)
+        insertStudy(12, parentId = 11, topic = "Expiry", difficulty = 5)
+        insertTranscriptTurn(11, discovery.id)
+        val offered = VoiceTutorStudyTargetCandidate(12, 11, "Expiry")
+        val traversal = VoiceTutorStudyTargetTraversal(
+            singleChildEdges = listOf(
+                VoiceTutorStudyTargetSingleChildEdge(10, 11),
+                VoiceTutorStudyTargetSingleChildEdge(11, 12),
+            ),
+            terminalLeafStudyId = 12,
+        )
+
+        // The spoken single-child path is no longer single: a fresh branch must be offered.
+        insertStudy(13, parentId = 10, topic = "PubSub", difficulty = 4)
+        val branchLease = authorization()
+        transaction {
+            assertThat(adapter.focus(
+                7, discovery.id, 12, 11, 0, branchLease, offered, commitAuthority(), traversal,
+            )).isNull()
+        }
+        assertThat(branchLease.isActive()).isTrue()
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+
+        // The endpoint was offered as a leaf, so a newly added child also invalidates that offer.
+        execute("delete from studies where id = 13")
+        insertStudy(14, parentId = 12, topic = "TTL", difficulty = 6)
+        val leafLease = authorization()
+        transaction {
+            assertThat(adapter.focus(
+                7, discovery.id, 12, 11, 0, leafLease, offered, commitAuthority(), traversal,
+            )).isNull()
+        }
+        assertThat(leafLease.isActive()).isTrue()
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+    }
+
+    @Test
+    fun `deepest allowed thirty two edge focus locks all thirty three owned nodes`(): Unit = runBlocking {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        var parentId: Long? = null
+        for (id in 100L..132L) {
+            insertStudy(id, parentId = parentId, topic = "Depth $id")
+            parentId = id
+        }
+
+        val selected = transaction { requireNotNull(adapter.focus(7, discovery.id, 132)) }
+
+        assertThat(selected.studyId).isEqualTo(132)
+        assertThat(snapshotCount()).isEqualTo(33)
+        assertThat(adapter.history(7, discovery.id)).containsExactly(VoiceTutorLessonFocus(132, 1))
+    }
+
+    @Test
+    fun `guided advance rejects a stale expected lesson revision while holding the session lock`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertStudy(11, parentId = 10, topic = "Cache", difficulty = 4)
+        insertStudy(12, parentId = 11, topic = "Expiry", difficulty = 5)
+        insertTranscriptTurn(11, accepted.id)
+        val first = transaction {
+            requireNotNull(adapter.advance(
+                7, accepted.id, 10, 11, 11, expectedCurrentRevision = 0, authorization = authorization(),
+                commitAuthority = commitAuthority(),
+            ))
+        }
+        insertTranscriptTurn(12, accepted.id)
+
+        transaction {
+            assertThat(
+                adapter.advance(7, accepted.id, 11, 12, 12, 0, authorization(), commitAuthority = commitAuthority()),
+            ).isNull()
+        }
+
+        assertThat(adapter.currentRevision(7, accepted.id)).isEqualTo(1)
+        assertThat(adapter.history(7, accepted.id)).containsExactly(first.focus)
+        assertThat(revisionCount()).isEqualTo(1)
+        assertThat(focusHeader()).containsExactly(11L, 10L, "Cache", 4)
+    }
+
+    @Test
+    fun `focus rejects an authorized learner turn when a newer transcript already exists at the locked write`(): Unit = runBlocking {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertTranscriptTurn(11, discovery.id)
+        insertTranscriptTurn(12, discovery.id, role = "TUTOR")
+
+        transaction {
+            assertThat(
+                adapter.focus(7, discovery.id, 10, 11, 0, authorization(), commitAuthority = commitAuthority()),
+            ).isNull()
+        }
+
+        assertThat(adapter.currentRevision(7, discovery.id)).isZero()
+        assertThat(adapter.history(7, discovery.id)).isEmpty()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusHeader()).containsExactly(null, null, "", 0)
     }
 
     @Test
@@ -719,11 +1027,125 @@ class VoiceTutorStudyContextAdapterTest {
         insertStudy(10, topic = "Redis", difficulty = 3)
         insertStudy(11, parentId = 10, topic = "Cache", difficulty = 4)
         execute("update studies set parent_study_id = null where id = 11")
+        insertTranscriptTurn(11, accepted.id)
 
-        transaction { assertThat(adapter.advance(7, accepted.id, 10, 11, learnerTurnId = 11)).isNull() }
+        transaction { assertThat(adapter.advance(
+            7, accepted.id, 10, 11, 11, authorization = authorization(),
+            commitAuthority = commitAuthority(),
+        )).isNull() }
 
         assertThat(adapter.history(7, accepted.id)).isEmpty()
         assertThat(revisionCount()).isZero()
+        assertThat(focusHeader()).containsExactly(10L, 10L, "Accepted Redis", 6)
+    }
+
+    @Test
+    fun `concurrent reparent wins before the locked path check and guided advance fails closed`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertStudy(11, parentId = 10, topic = "Cache", difficulty = 4)
+        insertTranscriptTurn(11, accepted.id)
+        val reparentedButUncommitted = CompletableDeferred<Unit>()
+        val releaseReparent = CompletableDeferred<Unit>()
+        val reparent = async(Dispatchers.Default) {
+            transaction {
+                val updated = database.sql("update studies set parent_study_id = null where id = 11")
+                    .fetch().rowsUpdated().awaitSingle()
+                assertThat(updated).isEqualTo(1)
+                reparentedButUncommitted.complete(Unit)
+                releaseReparent.await()
+            }
+        }
+        try {
+            withTimeout(5_000) { reparentedButUncommitted.await() }
+            val advanceEnteredTransaction = CompletableDeferred<Unit>()
+            val advance = async(Dispatchers.Default) {
+                transaction {
+                    advanceEnteredTransaction.complete(Unit)
+                    // A list keeps the async result non-null, so timeout and the expected
+                    // null focus result remain distinguishable below.
+                    listOf(adapter.advance(
+                        7, accepted.id, 10, 11, 11, authorization = authorization(),
+                        commitAuthority = commitAuthority(),
+                    ))
+                }
+            }
+            withTimeout(5_000) { advanceEnteredTransaction.await() }
+            // The reparent transaction and focus transaction use separate connections.
+            // The focus must wait for the child row lock instead of authorizing the old edge.
+            assertThat(withTimeoutOrNull(100) { advance.await() }).isNull()
+            releaseReparent.complete(Unit)
+            withTimeout(5_000) { reparent.await() }
+            assertThat(withTimeout(5_000) { advance.await() }.single()).isNull()
+        } finally {
+            releaseReparent.complete(Unit)
+        }
+
+        assertThat(
+            database.sql("select count(*) as count from studies where id = 11 and parent_study_id is null")
+                .map { row, _ -> (row.get("count") as Number).toLong() }.one().awaitSingle(),
+        ).isEqualTo(1)
+        assertThat(adapter.history(7, accepted.id)).isEmpty()
+        assertThat(snapshotCount()).isZero()
+        assertThat(adapter.currentRevision(7, accepted.id)).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
+        assertThat(focusHeader()).containsExactly(10L, 10L, "Accepted Redis", 6)
+    }
+
+    @Test
+    fun `new speech invalidates an in flight guided focus while its study row is locked`(): Unit = runBlocking {
+        val accepted = session()
+        insertSession(accepted)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertStudy(11, parentId = 10, topic = "Cache", difficulty = 4)
+        insertTranscriptTurn(11, accepted.id)
+        val focusAuthorization = authorization()
+        val studyRowLocked = CompletableDeferred<Unit>()
+        val releaseStudyRow = CompletableDeferred<Unit>()
+        val blocker = async(Dispatchers.Default) {
+            transaction {
+                val lockedId = database.sql("select id from studies where id = 11 for update")
+                    .map { row, _ -> (row.get("id") as Number).toLong() }.one().awaitSingle()
+                assertThat(lockedId).isEqualTo(11)
+                studyRowLocked.complete(Unit)
+                releaseStudyRow.await()
+            }
+        }
+        try {
+            withTimeout(5_000) { studyRowLocked.await() }
+            val advanceEnteredTransaction = CompletableDeferred<Unit>()
+            val advance = async(Dispatchers.Default) {
+                transaction {
+                    advanceEnteredTransaction.complete(Unit)
+                    // Keep timeout distinct from the expected nullable selection result.
+                    listOf(adapter.advance(
+                        7, accepted.id, 10, 11, 11,
+                        expectedCurrentRevision = 0,
+                        authorization = focusAuthorization,
+                        commitAuthority = commitAuthority(),
+                    ))
+                }
+            }
+            withTimeout(5_000) { advanceEnteredTransaction.await() }
+            assertThat(withTimeoutOrNull(100) { advance.await() }).isNull()
+
+            // Models a newer speech_started edge while the old tool invocation is still
+            // waiting to authorize its path on another database connection.
+            focusAuthorization.invalidate()
+            assertThat(focusAuthorization.isActive()).isFalse()
+            releaseStudyRow.complete(Unit)
+            withTimeout(5_000) { blocker.await() }
+            assertThat(withTimeout(5_000) { advance.await() }.single()).isNull()
+        } finally {
+            releaseStudyRow.complete(Unit)
+        }
+
+        assertThat(adapter.history(7, accepted.id)).isEmpty()
+        assertThat(snapshotCount()).isZero()
+        assertThat(revisionCount()).isZero()
+        assertThat(focusCount()).isZero()
         assertThat(focusHeader()).containsExactly(10L, 10L, "Accepted Redis", 6)
     }
 
@@ -733,10 +1155,21 @@ class VoiceTutorStudyContextAdapterTest {
         insertSession(discovery)
         insertStudy(10, topic = "Redis", difficulty = 3)
         insertStudy(20, topic = "Kafka", difficulty = 4)
+        insertTranscriptTurn(11, discovery.id)
 
-        val first = transaction { requireNotNull(adapter.focus(7, discovery.id, 10, learnerTurnId = 11)) }
-        transaction { assertThat(adapter.focus(7, discovery.id, 20, learnerTurnId = 11)).isNull() }
-        val second = transaction { requireNotNull(adapter.focus(7, discovery.id, 20, learnerTurnId = 12)) }
+        val first = transaction { requireNotNull(adapter.focus(
+            7, discovery.id, 10, 11, authorization = authorization(),
+            commitAuthority = commitAuthority(),
+        )) }
+        transaction { assertThat(adapter.focus(
+            7, discovery.id, 20, 11, authorization = authorization(),
+            commitAuthority = commitAuthority(),
+        )).isNull() }
+        insertTranscriptTurn(12, discovery.id)
+        val second = transaction { requireNotNull(adapter.focus(
+            7, discovery.id, 20, 12, authorization = authorization(),
+            commitAuthority = commitAuthority(),
+        )) }
 
         assertThat(first.focus).isEqualTo(VoiceTutorLessonFocus(10, 1))
         assertThat(second.focus).isEqualTo(VoiceTutorLessonFocus(20, 2))
@@ -952,6 +1385,14 @@ class VoiceTutorStudyContextAdapterTest {
     private suspend fun <T : Any> transaction(block: suspend () -> T): T =
         requireNotNull(transactions.executeAndAwait { block() })
 
+    private fun authorization() = VoiceTutorFocusAuthorization()
+
+    private fun commitAuthority(providerCallId: String = "rtc_synthetic_call") = VoiceTutorFocusCommitAuthority(
+        deviceId = "synthetic-device",
+        authSessionId = 11,
+        providerCallId = providerCallId,
+    )
+
     private suspend fun execute(sql: String) {
         database.sql(sql).fetch().rowsUpdated().awaitSingle()
     }
@@ -988,12 +1429,16 @@ class VoiceTutorStudyContextAdapterTest {
         var insert = database.sql(
             """
             insert into voice_tutor_sessions
-                (id, user_id, study_id, accepted_study_id, topic_snapshot, difficulty_snapshot, status, hard_ends_at, ended_at, updated_at)
-            values (:id, :userId, :studyId, :acceptedStudyId, :topic, :difficulty, :status, :hardEndsAt, :endedAt, :now)
+                (id, user_id, study_id, accepted_study_id, topic_snapshot, difficulty_snapshot,
+                 provider_session_id, status, hard_ends_at, ended_at, updated_at)
+            values (:id, :userId, :studyId, :acceptedStudyId, :topic, :difficulty,
+                    :providerCallId, :status, :hardEndsAt, :endedAt, :now)
             """.trimIndent(),
         ).bind("id", session.id).bind("userId", session.userId).bind("topic", session.topic)
             .bind("difficulty", session.difficulty).bind("status", session.status.name)
             .bind("hardEndsAt", session.hardEndsAt.utc()).bind("now", now.utc())
+        insert = session.providerSessionId?.let { insert.bind("providerCallId", it) }
+            ?: insert.bindNull("providerCallId", String::class.java)
         insert = session.studyId?.let { insert.bind("studyId", it) }
             ?: insert.bindNull("studyId", java.lang.Long::class.java)
         insert = session.acceptedStudyId?.let { insert.bind("acceptedStudyId", it) }
@@ -1001,6 +1446,22 @@ class VoiceTutorStudyContextAdapterTest {
         insert = session.endedAt?.let { insert.bind("endedAt", it.utc()) }
             ?: insert.bindNull("endedAt", LocalDateTime::class.java)
         insert.fetch().rowsUpdated().awaitSingle()
+    }
+
+    private suspend fun insertTranscriptTurn(
+        id: Long,
+        sessionId: String,
+        role: String = "USER",
+        sequenceNumber: Long = id,
+    ) {
+        database.sql(
+            """
+            insert into voice_tutor_transcript_turns(id, session_id, provider_item_id, role, sequence_number)
+            values (:id, :sessionId, :providerItemId, :role, :sequenceNumber)
+            """.trimIndent(),
+        ).bind("id", id).bind("sessionId", sessionId).bind("providerItemId", "item-$id")
+            .bind("role", role).bind("sequenceNumber", sequenceNumber)
+            .fetch().rowsUpdated().awaitSingle()
     }
 
     private fun session(
@@ -1012,7 +1473,7 @@ class VoiceTutorStudyContextAdapterTest {
         endedAt: Instant? = null,
     ) = VoiceTutorSession(
         id = id, userId = userId, studyId = studyId, idempotencyKey = "synthetic-idempotency-$id",
-        providerSessionId = null, status = status, resultStatus = VoiceTutorResultStatus.PENDING,
+        providerSessionId = "rtc_synthetic_call", status = status, resultStatus = VoiceTutorResultStatus.PENDING,
         language = "ko", model = "synthetic-realtime", voice = "synthetic-voice",
         topic = "Accepted Redis", difficulty = 6,
         periodStartedAt = now.minusSeconds(60), periodEndsAt = now.plusSeconds(3_600),

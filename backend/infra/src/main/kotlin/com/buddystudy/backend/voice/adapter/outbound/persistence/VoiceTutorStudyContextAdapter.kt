@@ -2,6 +2,10 @@ package com.buddystudy.backend.voice.adapter.outbound.persistence
 
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorFocusCommitAuthority
+import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
 import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorLessonFocusIndex
@@ -66,8 +70,24 @@ class VoiceTutorStudyContextAdapter(
         sessionId: String,
         studyId: Long,
         learnerTurnId: Long?,
+        expectedCurrentRevision: Long?,
+        authorization: VoiceTutorFocusAuthorization?,
+        expectedCandidate: VoiceTutorStudyTargetCandidate?,
+        commitAuthority: VoiceTutorFocusCommitAuthority?,
+        expectedTraversal: VoiceTutorStudyTargetTraversal?,
     ): VoiceTutorLessonFocusSelection? =
-        focusLocked(userId, sessionId, studyId, expectedParentStudyId = null, learnerTurnId = learnerTurnId)
+        focusLocked(
+            userId,
+            sessionId,
+            studyId,
+            expectedParentStudyId = null,
+            learnerTurnId = learnerTurnId,
+            expectedCurrentRevision = expectedCurrentRevision,
+            authorization = authorization,
+            expectedCandidate = expectedCandidate,
+            commitAuthority = commitAuthority,
+            expectedTraversal = expectedTraversal,
+        )
 
     @Transactional
     override suspend fun advance(
@@ -76,6 +96,11 @@ class VoiceTutorStudyContextAdapter(
         currentStudyId: Long,
         childStudyId: Long,
         learnerTurnId: Long,
+        expectedCurrentRevision: Long?,
+        authorization: VoiceTutorFocusAuthorization?,
+        expectedCandidate: VoiceTutorStudyTargetCandidate?,
+        commitAuthority: VoiceTutorFocusCommitAuthority?,
+        expectedTraversal: VoiceTutorStudyTargetTraversal?,
     ): VoiceTutorLessonFocusSelection? =
         focusLocked(
             userId,
@@ -83,6 +108,11 @@ class VoiceTutorStudyContextAdapter(
             childStudyId,
             expectedParentStudyId = currentStudyId,
             learnerTurnId = learnerTurnId,
+            expectedCurrentRevision = expectedCurrentRevision,
+            authorization = authorization,
+            expectedCandidate = expectedCandidate,
+            commitAuthority = commitAuthority,
+            expectedTraversal = expectedTraversal,
         )
 
     private suspend fun focusLocked(
@@ -91,27 +121,68 @@ class VoiceTutorStudyContextAdapter(
         studyId: Long,
         expectedParentStudyId: Long?,
         learnerTurnId: Long?,
+        expectedCurrentRevision: Long?,
+        authorization: VoiceTutorFocusAuthorization?,
+        expectedCandidate: VoiceTutorStudyTargetCandidate?,
+        commitAuthority: VoiceTutorFocusCommitAuthority?,
+        expectedTraversal: VoiceTutorStudyTargetTraversal?,
     ): VoiceTutorLessonFocusSelection? {
-        if (studyId <= 0 || learnerTurnId?.let { it <= 0 } == true) return null
-        val accepted = lockActive(userId, sessionId) ?: return null
+        if (studyId <= 0 || learnerTurnId?.let { it <= 0 } == true ||
+            (learnerTurnId != null && (authorization == null || commitAuthority == null)) ||
+            commitAuthority?.let {
+                it.authSessionId <= 0 || it.deviceId.isBlank() || it.deviceId.length > 191 ||
+                    it.providerCallId.isBlank() || it.providerCallId.length > 191
+            } == true ||
+            expectedCandidate?.let {
+                it.studyId != studyId || it.studyId <= 0 ||
+                    it.parentStudyId?.let { parent -> parent <= 0 } == true ||
+                    it.topic.isBlank() || it.topic.length > 255
+            } == true || expectedTraversal?.let { traversal ->
+                expectedCandidate?.let(traversal::isValidFor) != true
+            } == true
+        ) return null
+        val lockedCommit = when {
+            commitAuthority != null -> lockAuthorizedActiveCall(userId, sessionId, commitAuthority)
+            learnerTurnId == null -> lockActive(userId, sessionId)?.let(::LockedFocusCommit)
+            else -> null
+        } ?: return null
+        val accepted = lockedCommit.accepted
         val metadataHistory = list(userId, sessionId)
         val revisions = VoiceTutorStudyRevisionIndex(metadataHistory)
+        if (expectedCurrentRevision != null && revisions.currentRevision != expectedCurrentRevision) return null
+        if (learnerTurnId != null && !isLatestPersistedLearnerTurn(sessionId, learnerTurnId)) return null
         val existing = revisions.currentView()
         val previous = VoiceTutorLessonFocusIndex(history(userId, sessionId), accepted.acceptedStudyId)
             .at(revisions.currentRevision)
         val live = readOwned(userId, listOf(studyId)).singleOrNull()?.takeIf(::validMetadata) ?: return null
+        if (expectedCandidate != null && (
+                live.parentStudyId != expectedCandidate.parentStudyId ||
+                    live.topic != expectedCandidate.topic
+            )
+        ) return null
         if (expectedParentStudyId != null && (
                 accepted.studyId != expectedParentStudyId || previous?.studyId != expectedParentStudyId ||
                     live.parentStudyId != expectedParentStudyId || learnerTurnId == null
             )
         ) return null
-        val selected = existing.firstOrNull { it.studyId == studyId } ?: if (
+        val legacyAcceptedSnapshot =
             previous?.revision == 0L && accepted.acceptedStudyId == studyId && accepted.studyId == studyId &&
             accepted.topic.isNotBlank() && accepted.difficulty in 1..10
+        val selected = existing.firstOrNull { it.studyId == studyId } ?: if (
+            legacyAcceptedSnapshot
         ) live.copy(topic = accepted.topic, difficulty = accepted.difficulty) else live
         // Verify the full frozen path against actual ownership before writing any capture. An
         // unresolved/missing/foreign parent or cycle does not turn this candidate into a root.
         val path = verifiedFocusPath(userId, selected, existing, live) ?: return null
+        if (!lockAndRecheckFocusPath(
+                userId, path, existing,
+                immutableMetadataIds = if (legacyAcceptedSnapshot) setOf(studyId) else emptySet(),
+                expectedCandidate = expectedCandidate,
+            )
+        ) return null
+        if (expectedTraversal != null && expectedCandidate != null &&
+            !lockAndRecheckTargetTraversal(userId, expectedCandidate, expectedTraversal)
+        ) return null
         val existingIds = existing.mapTo(mutableSetOf()) { it.studyId }
         if (existing.size + path.count { it.studyId !in existingIds } > MAX_SNAPSHOTS) return null
         val sameFocus = previous != null && previous.studyId == studyId && previous.revision > 0 && accepted.studyId == studyId
@@ -120,6 +191,10 @@ class VoiceTutorStudyContextAdapter(
             return null
         }
         if (!utcNow().isBefore(accepted.hardEndsAt)) return null
+        // Natural expiry needs no row update, so validate the timestamp read from the locked exact
+        // authorization row again at the one-shot consumption boundary.
+        if (lockedCommit.authSessionExpiresAt?.let { !utcNow().isBefore(it) } == true) return null
+        if (learnerTurnId != null && authorization?.consume() != true) return null
         val captured = append(sessionId, path, existing, accepted.hardEndsAt)
         check(path.all { candidate -> captured.any { it.studyId == candidate.studyId } }) {
             "Voice lesson focus capture expired."
@@ -148,6 +223,20 @@ class VoiceTutorStudyContextAdapter(
         }
         return VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(studyId, revision), revised)
     }
+
+    private suspend fun isLatestPersistedLearnerTurn(sessionId: String, learnerTurnId: Long): Boolean = database.sql(
+        """
+        select id, role
+        from voice_tutor_transcript_turns
+        where session_id = :sessionId
+        order by sequence_number desc, id desc
+        limit 1
+        """.trimIndent(),
+    ).bind("sessionId", sessionId)
+        .map { row, _ ->
+            (row.get("id") as Number).toLong() == learnerTurnId &&
+                row.get("role", String::class.java) == "USER"
+        }.one().awaitSingleOrNull() == true
 
     private suspend fun latestFocusLearnerTurn(sessionId: String): Long = database.sql(
         """
@@ -270,16 +359,51 @@ class VoiceTutorStudyContextAdapter(
                 )
             }.all().collectList().awaitSingle()
 
-    private suspend fun lockActive(userId: Long, sessionId: String): AcceptedStudy? = database.sql(
+    /**
+     * Lock the exact device authorization before the call row. Logout/revocation updates the same
+     * user_devices row, so it linearizes either before this validation or after the focus commit.
+     */
+    private suspend fun lockAuthorizedActiveCall(
+        userId: Long,
+        sessionId: String,
+        authority: VoiceTutorFocusCommitAuthority,
+    ): LockedFocusCommit? {
+        val authorization = database.sql(
+            """
+            select session_expires_at
+            from user_devices
+            where id = :authSessionId and user_id = :userId and device_id = :deviceId
+              and logged_out_at is null and revoked_at is null
+              and (session_expires_at is null or session_expires_at > :now)
+            for update
+            """.trimIndent(),
+        ).bind("authSessionId", authority.authSessionId).bind("userId", userId)
+            .bind("deviceId", authority.deviceId).bind("now", utcNow())
+            .map { row, _ ->
+                LockedAuthorization(row.get("session_expires_at", LocalDateTime::class.java))
+            }.one().awaitSingleOrNull() ?: return null
+        val accepted = lockActive(userId, sessionId, authority.providerCallId) ?: return null
+        return LockedFocusCommit(accepted, authorization.sessionExpiresAt)
+    }
+
+    private suspend fun lockActive(
+        userId: Long,
+        sessionId: String,
+        providerCallId: String? = null,
+    ): AcceptedStudy? {
+        val providerPredicate = if (providerCallId == null) "" else "and provider_session_id = :providerCallId"
+        var query = database.sql(
         """
         select study_id, accepted_study_id, topic_snapshot, difficulty_snapshot, hard_ends_at
         from voice_tutor_sessions
         where id = :sessionId and user_id = :userId and status = 'ACTIVE'
           and ended_at is null and hard_ends_at > :now
+          $providerPredicate
         for update
         """.trimIndent(),
     ).bind("sessionId", sessionId).bind("userId", userId).bind("now", utcNow())
-        .map { row, _ ->
+        if (providerCallId != null) query = query.bind("providerCallId", providerCallId)
+        return query.map { row, _ ->
             AcceptedStudy(
                 (row.get("study_id") as? Number)?.toLong(),
                 (row.get("accepted_study_id") as? Number)?.toLong(),
@@ -288,6 +412,7 @@ class VoiceTutorStudyContextAdapter(
                 requireNotNull(row.get("hard_ends_at", LocalDateTime::class.java)),
             )
         }.one().awaitSingleOrNull()
+    }
 
     private suspend fun verifiedFocusPath(
         userId: Long,
@@ -311,6 +436,77 @@ class VoiceTutorStudyContextAdapter(
         }
         return null
     }
+
+    /**
+     * The exploratory reads above discover a bounded path but cannot authorize a write. Lock every
+     * live row in stable ID order, then recheck every edge before appending the focus revision.
+     * Concurrent reparent/update/delete therefore linearizes either before this check or after the
+     * focus transaction, never between the verified direct edge and the focus write.
+     */
+    private suspend fun lockAndRecheckFocusPath(
+        userId: Long,
+        path: List<VoiceTutorStudySnapshot>,
+        existing: List<VoiceTutorStudySnapshot>,
+        immutableMetadataIds: Set<Long> = emptySet(),
+        expectedCandidate: VoiceTutorStudyTargetCandidate? = null,
+    ): Boolean {
+        val ids = path.map { it.studyId }.distinct().sorted()
+        if (ids.size != path.size) return false
+        val locked = readOwned(userId, ids, forUpdate = true)
+        if (locked.size != ids.size) return false
+        val lockedById = locked.associateBy { it.studyId }
+        val frozenIds = existing.mapTo(mutableSetOf()) { it.studyId }.apply { addAll(immutableMetadataIds) }
+        return path.all { candidate ->
+            val live = lockedById[candidate.studyId] ?: return@all false
+            val offeredMetadataStillExact = expectedCandidate?.takeIf { it.studyId == candidate.studyId }?.let {
+                live.parentStudyId == it.parentStudyId && live.topic == it.topic
+            } ?: true
+            validMetadata(live) && offeredMetadataStillExact && live.parentStudyId == candidate.parentStudyId &&
+                (candidate.studyId in frozenIds ||
+                    (live.topic == candidate.topic && live.difficulty == candidate.difficulty))
+        }
+    }
+
+    /**
+     * Recheck the exact topology that justified automatic descent. The indexed child-range reads
+     * use `FOR UPDATE`: on MySQL/InnoDB they also hold the matching next-key gap until commit, so a
+     * sibling insertion or endpoint-child insertion linearizes outside this focus decision.
+     */
+    private suspend fun lockAndRecheckTargetTraversal(
+        userId: Long,
+        candidate: VoiceTutorStudyTargetCandidate,
+        traversal: VoiceTutorStudyTargetTraversal,
+    ): Boolean {
+        if (!traversal.isValidFor(candidate, MAX_PARENT_EDGES)) return false
+        val expectedSingleChildren = traversal.singleChildEdges.associate {
+            it.parentStudyId to it.childStudyId
+        }
+        if (expectedSingleChildren.size != traversal.singleChildEdges.size) return false
+        val parents = (expectedSingleChildren.keys + listOfNotNull(traversal.terminalLeafStudyId))
+            .distinct().sorted()
+        for (parentStudyId in parents) {
+            val children = lockDirectChildren(userId, parentStudyId)
+            val expectedChild = expectedSingleChildren[parentStudyId]
+            if (expectedChild != null) {
+                if (children != listOf(expectedChild)) return false
+            } else if (children.isNotEmpty()) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private suspend fun lockDirectChildren(userId: Long, parentStudyId: Long): List<Long> = database.sql(
+        """
+        select id
+        from studies
+        where user_id = :userId and parent_study_id = :parentStudyId
+        order by sort_order, id
+        limit 2 for update
+        """.trimIndent(),
+    ).bind("userId", userId).bind("parentStudyId", parentStudyId)
+        .map { row, _ -> (row.get("id") as Number).toLong() }
+        .all().collectList().awaitSingle()
 
     private fun validMetadata(snapshot: VoiceTutorStudySnapshot): Boolean =
         snapshot.studyId > 0 && snapshot.topic.isNotBlank() && snapshot.difficulty in 1..10 &&
@@ -337,13 +533,18 @@ class VoiceTutorStudyContextAdapter(
             .fetch().rowsUpdated().awaitSingle()
     }
 
-    private suspend fun readOwned(userId: Long, studyIds: List<Long>): List<VoiceTutorStudySnapshot> {
+    private suspend fun readOwned(
+        userId: Long,
+        studyIds: List<Long>,
+        forUpdate: Boolean = false,
+    ): List<VoiceTutorStudySnapshot> {
         if (studyIds.isEmpty()) return emptyList()
         return database.sql(
             """
             select id, parent_study_id, topic, difficulty_level
             from studies where user_id = :userId and id in (:studyIds)
-            order by sort_order, id limit $MAX_CAPTURE_BATCH
+            order by ${if (forUpdate) "id" else "sort_order, id"}
+            limit $MAX_READ_BATCH${if (forUpdate) " for update" else ""}
             """.trimIndent(),
         ).bind("userId", userId).bind("studyIds", studyIds)
             .map { row, _ -> ownedSnapshot(row) }.all().collectList().awaitSingle()
@@ -429,12 +630,23 @@ class VoiceTutorStudyContextAdapter(
         val hardEndsAt: LocalDateTime,
     )
 
+    private data class LockedAuthorization(val sessionExpiresAt: LocalDateTime?)
+
+    private data class LockedFocusCommit(
+        val accepted: AcceptedStudy,
+        val authSessionExpiresAt: LocalDateTime? = null,
+    )
+
     private companion object {
         const val INITIAL_CHILDREN = 10
+        const val MAX_PARENT_EDGES = 32
         const val MAX_CAPTURE_BATCH = 32
+        // A valid path may contain MAX_PARENT_EDGES + 1 nodes. Keep only the
+        // stable-ID verification read wide enough to lock the deepest path;
+        // ordinary snapshot capture retains its established 32-node batch bound.
+        const val MAX_READ_BATCH = MAX_PARENT_EDGES + 1
         const val MAX_SNAPSHOTS = VoiceTutorStudyRevisionLimits.MAX_BASE_SNAPSHOTS
         const val MAX_REVISIONS = VoiceTutorStudyRevisionLimits.MAX_REVISIONS
         const val MAX_HISTORY_SNAPSHOTS = VoiceTutorStudyRevisionLimits.MAX_HISTORY_SNAPSHOTS
-        const val MAX_PARENT_EDGES = 32
     }
 }
