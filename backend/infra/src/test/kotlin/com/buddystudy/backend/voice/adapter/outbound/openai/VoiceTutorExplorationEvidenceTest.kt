@@ -75,6 +75,44 @@ class VoiceTutorExplorationEvidenceTest {
     }
 
     @Test
+    fun `feedback ids must link to the exact answer and cannot cite setup next question or another revision`() {
+        val invalidFeedbackRows = listOf(
+            turn(3, VoiceTutorTranscriptRole.TUTOR, "85점입니다."),
+            turn(3, VoiceTutorTranscriptRole.TUTOR, "85점입니다.").copy(studyAnswerTurnId = 999),
+            turn(3, VoiceTutorTranscriptRole.TUTOR, "다음 질문입니다.")
+                .copy(studyAnswerTurnId = 2, isStudyQuestion = true),
+            turn(3, VoiceTutorTranscriptRole.TUTOR, "레벨을 바꿀까요?"),
+            turn(3, VoiceTutorTranscriptRole.TUTOR, "85점입니다.")
+                .copy(studyAnswerTurnId = 2, lessonRevision = 2),
+        )
+        invalidFeedbackRows.forEach { feedback ->
+            val transcript = turns().map { if (it.id == 3L) feedback else it }
+            assertThat(verify(exploration(), transcript)).isEmpty()
+        }
+    }
+
+    @Test
+    fun `an intervening tutor invalidates an old question link but a user checkpoint does not`() {
+        val userCheckpoint = turn(6, VoiceTutorTranscriptRole.USER, "음, 생각 중").copy(sequenceNumber = 2)
+        val answerAfterCheckpoint = turns().map { turn ->
+            when (turn.id) {
+                1L -> turn.copy(sequenceNumber = 1)
+                2L -> turn.copy(sequenceNumber = 3)
+                3L -> turn.copy(sequenceNumber = 4)
+                4L -> turn.copy(sequenceNumber = 5)
+                else -> turn.copy(sequenceNumber = 6)
+            }
+        } + userCheckpoint
+        assertThat(verify(exploration(), answerAfterCheckpoint)).hasSize(1)
+
+        val tutorSetup = userCheckpoint.copy(
+            id = 7, providerItemId = "item-7", role = VoiceTutorTranscriptRole.TUTOR,
+            transcript = "학습을 시작할까요?",
+        )
+        assertThat(verify(exploration(), answerAfterCheckpoint.filterNot { it.id == 6L } + tutorSetup)).isEmpty()
+    }
+
+    @Test
     fun `duplicate source IDs and duplicated generated questions cannot multiply assessments`() {
         assertThat(verify(exploration(), turns() + turns()[1])).isEmpty()
         assertThat(verify(exploration().copy(exchanges = listOf(exchange(), exchange()))).single().exchanges).hasSize(1)
@@ -84,6 +122,37 @@ class VoiceTutorExplorationEvidenceTest {
     fun `blank ASR cannot be an assessed answer`() {
         val transcript = turns().map { if (it.id == 2L) it.copy(transcript = "  ") else it }
         assertThat(verify(exploration(), transcript)).isEmpty()
+    }
+
+    @Test
+    fun `a forged setup reply linked to an earlier question invalidates that incomplete answer set`() {
+        val setupQuestion = turn(6, VoiceTutorTranscriptRole.TUTOR, "Spring 루트를 만들까요?")
+        val setupAnswer = turn(7, VoiceTutorTranscriptRole.USER, "네, 만들어 주세요.")
+            .copy(studyQuestionTurnId = 1)
+        val setupExchange = exchange().copy(
+            questionTurnId = 6, answerTurnIds = listOf(7), feedbackTurnIds = emptyList(),
+            question = setupQuestion.transcript, answer = setupAnswer.transcript,
+            score = null, strengths = emptyList(), improvements = emptyList(),
+        )
+
+        val result = verify(
+            exploration().copy(exchanges = listOf(exchange(), setupExchange)),
+            turns() + setupQuestion + setupAnswer,
+        )
+
+        assertThat(result).isEmpty()
+    }
+
+    @Test
+    fun `a verified answer mixed with an unlinked setup reply rejects the whole tutor exchange`() {
+        val setupReply = turn(6, VoiceTutorTranscriptRole.USER, "네, 설정해 주세요.")
+        val contaminated = exchange().copy(
+            answer = "메모리를 확보합니다. 네, 설정해 주세요.",
+            answerTurnIds = listOf(2, 6), feedbackTurnIds = emptyList(),
+            score = null, strengths = emptyList(), improvements = emptyList(),
+        )
+
+        assertThat(verify(exploration().copy(exchanges = listOf(contaminated)), turns() + setupReply)).isEmpty()
     }
 
     @Test
@@ -110,15 +179,8 @@ class VoiceTutorExplorationEvidenceTest {
     }
 
     @Test
-    fun `unanswered question cannot retain model-completed answer or assessment`() {
-        val result = verify(exploration().copy(exchanges = listOf(exchange().copy(answerTurnIds = emptyList())))).single().exchanges.single()
-
-        assertThat(result.answer).isEmpty()
-        assertThat(result.answerTurnIds).isEmpty()
-        assertThat(result.score).isNull()
-        assertThat(result.strengths).isEmpty()
-        assertThat(result.improvements).isEmpty()
-        assertThat(result.feedbackTurnIds).isEmpty()
+    fun `unanswered tutor question is not a verified learning exchange`() {
+        assertThat(verify(exploration().copy(exchanges = listOf(exchange().copy(answerTurnIds = emptyList()))))).isEmpty()
     }
 
     @Test
@@ -131,6 +193,86 @@ class VoiceTutorExplorationEvidenceTest {
         assertThat(result.strengths).isEmpty()
         assertThat(result.improvements).isEmpty()
         assertThat(result.feedbackTurnIds).isEmpty()
+    }
+
+    @Test
+    fun `setup topic and configuration questions are not learner explorations beside a valid answer`() {
+        val setupQuestion = turn(6, VoiceTutorTranscriptRole.USER, "Spring 루트를 만들고 레벨을 바꿀 수 있나요?")
+        val setupReply = turn(7, VoiceTutorTranscriptRole.TUTOR, "루트와 레벨 설정을 도와드릴게요.")
+        val claimed = exchange().copy(
+            kind = VoiceTutorExchangeKind.LEARNER_QUESTION,
+            questionTurnId = 6,
+            answerTurnIds = listOf(7),
+            feedbackTurnIds = emptyList(),
+            score = null,
+            strengths = emptyList(),
+            improvements = emptyList(),
+        )
+
+        val result = verify(exploration().copy(exchanges = listOf(exchange(), claimed)), turns() + setupQuestion + setupReply)
+
+        assertThat(result.single().exchanges.map { it.questionTurnId }).containsExactly(1L)
+    }
+
+    @Test
+    fun `attested learner question requires the complete directly following tutor answer run`() {
+        val question = turn(6, VoiceTutorTranscriptRole.USER, "LFU의 시간 복잡도는 어떻게 되나요?")
+            .copy(askedStudyQuestion = true)
+        val firstAnswer = turn(7, VoiceTutorTranscriptRole.TUTOR, "일반적으로 빈도 갱신은 상수 시간으로 설계합니다.")
+        val secondAnswer = turn(8, VoiceTutorTranscriptRole.TUTOR, "최소 빈도 그룹 추적도 함께 필요합니다.")
+        val exchange = exchange().copy(
+            kind = VoiceTutorExchangeKind.LEARNER_QUESTION,
+            questionTurnId = 6,
+            answerTurnIds = listOf(7, 8),
+            feedbackTurnIds = emptyList(),
+            score = null,
+            strengths = emptyList(),
+            improvements = emptyList(),
+        )
+        val transcript = turns() + question + firstAnswer + secondAnswer
+
+        assertThat(verify(exploration().copy(exchanges = listOf(exchange)), transcript).single().exchanges.single().answerTurnIds)
+            .containsExactly(7L, 8L)
+        assertThat(verify(exploration().copy(exchanges = listOf(exchange.copy(answerTurnIds = listOf(7)))), transcript))
+            .isEmpty()
+    }
+
+    @Test
+    fun `tutor question requires the exact complete ordered durable multipart answer set`() {
+        val transcript = listOf(
+            turn(1, VoiceTutorTranscriptRole.TUTOR, "DI의 장점은 무엇인가요?")
+                .copy(isStudyQuestion = true),
+            turn(2, VoiceTutorTranscriptRole.USER, "결합도를 낮추고")
+                .copy(studyQuestionTurnId = 1),
+            turn(3, VoiceTutorTranscriptRole.USER, "음…"),
+            turn(4, VoiceTutorTranscriptRole.USER, "테스트를 쉽게 합니다.")
+                .copy(studyQuestionTurnId = 1),
+            turn(5, VoiceTutorTranscriptRole.TUTOR, "정확합니다.")
+                .copy(studyAnswerTurnId = 4),
+        )
+        val complete = exchange().copy(
+            question = "DI의 장점은 무엇인가요?",
+            answer = "결합도를 낮추고 테스트를 쉽게 합니다.",
+            questionTurnId = 1,
+            answerTurnIds = listOf(2, 4),
+            feedbackTurnIds = listOf(5),
+            score = null,
+            strengths = emptyList(),
+            improvements = emptyList(),
+        )
+
+        assertThat(verify(exploration().copy(exchanges = listOf(complete)), transcript)
+            .single().exchanges.single().answerTurnIds).containsExactly(2L, 4L)
+        listOf(listOf(2L), listOf(4L), listOf(4L, 2L), listOf(2L, 2L, 4L)).forEach { ids ->
+            assertThat(verify(
+                exploration().copy(exchanges = listOf(complete.copy(answerTurnIds = ids))),
+                transcript,
+            )).isEmpty()
+        }
+        val earlierPartFeedback = transcript.map { turn ->
+            if (turn.id == 5L) turn.copy(studyAnswerTurnId = 2) else turn
+        }
+        assertThat(verify(exploration().copy(exchanges = listOf(complete)), earlierPartFeedback)).isEmpty()
     }
 
     @Test
@@ -152,17 +294,14 @@ class VoiceTutorExplorationEvidenceTest {
     }
 
     @Test
-    fun `a pending tutor question retains its original name and level when answer and feedback arrive after a change`() {
+    fun `a tutor question rejects answer and feedback arriving in another lesson revision`() {
         val revised = snapshot.copy(topic = "Renamed eviction", difficulty = 9, revision = 1)
         val transcript = turns().map { if (it.id > 1) it.copy(lessonRevision = 1) else it }
-        val result = VoiceTutorExplorationEvidence.verified(
-            listOf(exploration().copy(topic = revised.topic, difficulty = 9)), session(), transcript, listOf(snapshot, revised),
-        ).single()
 
-        assertThat(result.topic).isEqualTo(snapshot.topic)
-        assertThat(result.difficulty).isEqualTo(7)
-        assertThat(result.exchanges.single()).isEqualTo(exchange())
-        assertThat(result.exchanges.single().score).isEqualTo(85)
+        assertThat(VoiceTutorExplorationEvidence.verified(
+            listOf(exploration().copy(topic = revised.topic, difficulty = 9)),
+            session(), transcript, listOf(snapshot, revised),
+        )).isEmpty()
     }
 
     @Test
@@ -172,7 +311,7 @@ class VoiceTutorExplorationEvidenceTest {
             kind = VoiceTutorExchangeKind.LEARNER_QUESTION, questionTurnId = 4, answerTurnIds = listOf(5),
             feedbackTurnIds = emptyList(), score = null, strengths = emptyList(), improvements = emptyList(),
         )
-        val transcript = turns().map { if (it.id >= 2) it.copy(lessonRevision = 1) else it }
+        val transcript = turns().map { if (it.id >= 4) it.copy(lessonRevision = 1) else it }
         val result = VoiceTutorExplorationEvidence.verified(
             listOf(exploration().copy(topic = revised.topic, exchanges = listOf(exchange(), deeper))),
             session(), transcript, listOf(snapshot, revised),
@@ -195,9 +334,9 @@ class VoiceTutorExplorationEvidenceTest {
             listOf(exploration().copy(exchanges = listOf(exchange(), futureQuestion))), session(), transcript, history,
         )
 
-        assertThat(result).hasSize(2)
-        assertThat(result.map { it.difficulty }).containsExactly(7, 7)
-        assertThat(result.map { it.exchanges.single().questionTurnId }).containsExactly(1, 6)
+        assertThat(result).hasSize(1)
+        assertThat(result.map { it.difficulty }).containsExactly(7)
+        assertThat(result.map { it.exchanges.single().questionTurnId }).containsExactly(1)
     }
 
     @Test
@@ -214,7 +353,7 @@ class VoiceTutorExplorationEvidenceTest {
 
     @Test
     fun `negative question epoch retains source exchange but cannot bind any saved level`() {
-        val transcript = turns().map { if (it.id == 1L) it.copy(lessonRevision = -1) else it }
+        val transcript = turns().map { if (it.id <= 3L) it.copy(lessonRevision = -1) else it }
         val result = verify(exploration(), transcript).single()
         assertThat(result.studyId).isNull()
         assertThat(result.difficulty).isNull()
@@ -224,7 +363,7 @@ class VoiceTutorExplorationEvidenceTest {
     @Test
     fun `a future question epoch never falls back to the latest known level`() {
         val revised = snapshot.copy(difficulty = 9, revision = 1)
-        val transcript = turns().map { if (it.id == 1L) it.copy(lessonRevision = 2) else it }
+        val transcript = turns().map { if (it.id <= 3L) it.copy(lessonRevision = 2) else it }
         val result = VoiceTutorExplorationEvidence.verified(listOf(exploration()), session(), transcript, listOf(snapshot, revised)).single()
         assertThat(result.studyId).isNull()
         assertThat(result.difficulty).isNull()
@@ -269,7 +408,7 @@ class VoiceTutorExplorationEvidenceTest {
     @Test
     fun `discovery navigation before the first explicit focus is excluded even when its ASR and answers arrive later`() {
         val discovery = session().copy(studyId = 43, acceptedStudyId = null, topic = snapshot.topic, difficulty = snapshot.difficulty)
-        val transcript = turns().map { if (it.id > 1) it.copy(lessonRevision = 1) else it }
+        val transcript = turns().map { if (it.id >= 4) it.copy(lessonRevision = 1) else it }
         val result = VoiceTutorExplorationEvidence.verified(
             listOf(exploration()), discovery, transcript, listOf(snapshot, snapshot.copy(revision = 1)),
             focuses = listOf(VoiceTutorLessonFocus(43, 1)),
@@ -283,7 +422,7 @@ class VoiceTutorExplorationEvidenceTest {
     fun `questions retain their earlier explicit focus while later learner questions may move to another saved tree`() {
         val other = VoiceTutorStudySnapshot(90, null, "Message ordering", 4, revision = 2)
         val discovery = session().copy(studyId = 90, acceptedStudyId = null, topic = other.topic, difficulty = other.difficulty)
-        val transcript = turns().map { it.copy(lessonRevision = if (it.id == 1L) 1 else 2) }
+        val transcript = turns().map { it.copy(lessonRevision = if (it.id <= 3L) 1 else 2) }
         val deeper = exchange().copy(
             kind = VoiceTutorExchangeKind.LEARNER_QUESTION, questionTurnId = 4,
             answerTurnIds = listOf(5), feedbackTurnIds = emptyList(),
@@ -326,10 +465,14 @@ class VoiceTutorExplorationEvidenceTest {
     )
 
     private fun turns() = listOf(
-        turn(1, VoiceTutorTranscriptRole.TUTOR, "캐시는 왜 키를 제거하나요?"),
-        turn(2, VoiceTutorTranscriptRole.USER, "메모리가 가득 찼을 때 공간을 확보하려고요."),
-        turn(3, VoiceTutorTranscriptRole.TUTOR, "85점입니다. 메모리 한도를 이해했어요. 교체 정책 차이는 더 설명해주세요."),
-        turn(4, VoiceTutorTranscriptRole.USER, "LRU와 LFU는 어떻게 달라요?"),
+        turn(1, VoiceTutorTranscriptRole.TUTOR, "캐시는 왜 키를 제거하나요?")
+            .copy(isStudyQuestion = true),
+        turn(2, VoiceTutorTranscriptRole.USER, "메모리가 가득 찼을 때 공간을 확보하려고요.")
+            .copy(studyQuestionTurnId = 1),
+        turn(3, VoiceTutorTranscriptRole.TUTOR, "85점입니다. 메모리 한도를 이해했어요. 교체 정책 차이는 더 설명해주세요.")
+            .copy(studyAnswerTurnId = 2),
+        turn(4, VoiceTutorTranscriptRole.USER, "LRU와 LFU는 어떻게 달라요?")
+            .copy(askedStudyQuestion = true),
         turn(5, VoiceTutorTranscriptRole.TUTOR, "최근 사용 시점과 사용 빈도의 차이입니다."),
     )
 

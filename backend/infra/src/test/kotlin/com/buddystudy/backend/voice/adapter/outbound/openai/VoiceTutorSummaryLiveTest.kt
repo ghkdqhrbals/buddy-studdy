@@ -179,6 +179,10 @@ class VoiceTutorSummaryLiveTest {
             VoiceTutorTranscriptTurn(
                 id = id, sessionId = sessionId, providerItemId = "synthetic-summary-turn-$id",
                 role = role, transcript = text, sequenceNumber = id, occurredAt = FIXTURE_TIME.plusSeconds(id),
+                studyQuestionTurnId = if (id == 4L) 3L else null,
+                studyAnswerTurnId = if (id == 5L) 4L else null,
+                askedStudyQuestion = id == 6L,
+                isStudyQuestion = id == 3L || id == 8L,
             )
         }
     }

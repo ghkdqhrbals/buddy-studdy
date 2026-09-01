@@ -3252,7 +3252,11 @@ struct AppStrings {
         )
     }
     var voiceTutorSummaryEmpty: String {
-        text("저장된 학습 요약이 없습니다.", "No learning summary was saved.", "保存された学習要約はありません。")
+        text(
+            "학습 질문과 답변이 없어 학습 요약을 저장하지 않았습니다.",
+            "No learning summary was saved because there was no study question and answer.",
+            "学習の質問と回答がなかったため、学習要約は保存されませんでした。"
+        )
     }
     func voiceTutorCallRemaining(_ seconds: Int) -> String {
         let duration = voiceTutorCallClock(seconds)

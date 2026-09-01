@@ -5,6 +5,8 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.config.VoiceTutorInputAssessmentProperties
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorSpokenFeedbackAssessmentRequest
+import com.buddystudy.backend.voice.application.model.VoiceTutorSpokenQuestionAssessmentRequest
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
@@ -13,6 +15,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcAnswer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcPort
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.reactor.asFlux
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -217,6 +220,20 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 onProviderEvent(raw, persist, forward)
                 Unit
             })
+            val spokenQuestionWork = voiceTutorSpokenQuestionAssessmentRelay(
+                controller = turnController,
+                userId = context.session.userId,
+                language = context.session.language,
+                assessment = inputAssessment,
+                onProviderEvent = onProviderEvent,
+            )
+            val spokenFeedbackWork = voiceTutorSpokenFeedbackAssessmentRelay(
+                controller = turnController,
+                userId = context.session.userId,
+                language = context.session.language,
+                assessment = inputAssessment,
+                onProviderEvent = onProviderEvent,
+            )
             val clientControls = turnController.clientEvents().concatMap { raw ->
                 mono { onProviderEvent(raw, false, true) }.then()
             }.then()
@@ -230,6 +247,8 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 turnController.inputFailure(),
                 inputWork,
                 toolWork,
+                spokenQuestionWork,
+                spokenFeedbackWork,
                 clientControls,
                 serverLifecycle,
             )
@@ -302,6 +321,101 @@ class OpenAIVoiceTutorWebRtcAdapter(
         )
     }
 }
+
+/** Semantic question attestation is off the provider receive loop and fails closed before persistence. */
+internal fun voiceTutorSpokenQuestionAssessmentRelay(
+    controller: VoiceTutorDuplexTurnController,
+    userId: Long,
+    language: String,
+    assessment: VoiceTutorInputAssessmentUseCase,
+    onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
+): Mono<Void> = controller.spokenQuestionAssessmentActions().concatMap { action ->
+    mono {
+        val result = try {
+            Result.success(
+                assessment.assessSpokenQuestion(
+                    VoiceTutorSpokenQuestionAssessmentRequest(
+                        userId = userId,
+                        language = language,
+                        focusTopic = action.focusTopic,
+                        focusDifficulty = action.focusDifficulty,
+                        transcript = action.transcript,
+                    ),
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+        controller.completeSpokenQuestionAssessment(action.token, result)
+    }.flatMap { boundary ->
+        Flux.fromIterable(boundary.tutorTranscriptEvents)
+            .concatMap { transcript ->
+                mono {
+                    if (!onProviderEvent(transcript, true, false)) {
+                        throw VoiceTutorTutorTranscriptPersistenceException()
+                    }
+                }.then()
+            }
+            .then(
+                Mono.fromRunnable {
+                    if (!controller.acknowledgePostRelayBoundary(boundary.token) &&
+                        controller.acceptsInputEvents()
+                    ) throw VoiceTutorProviderProtocolException()
+                },
+            )
+    }
+}.then()
+
+/** Exact answer-feedback attestation is off the provider loop and fails closed before persistence. */
+internal fun voiceTutorSpokenFeedbackAssessmentRelay(
+    controller: VoiceTutorDuplexTurnController,
+    userId: Long,
+    language: String,
+    assessment: VoiceTutorInputAssessmentUseCase,
+    onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
+): Mono<Void> = controller.spokenFeedbackAssessmentActions().concatMap { action ->
+    mono {
+        val result = try {
+            Result.success(
+                assessment.assessSpokenFeedback(
+                    VoiceTutorSpokenFeedbackAssessmentRequest(
+                        userId = userId,
+                        language = language,
+                        focusTopic = action.focusTopic,
+                        focusDifficulty = action.focusDifficulty,
+                        questionTranscript = action.questionTranscript,
+                        answerTranscript = action.answerTranscript,
+                        feedbackTranscript = action.feedbackTranscript,
+                        allowsNavigationOffer = action.allowsNavigationOffer,
+                    ),
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+        controller.completeSpokenFeedbackAssessment(action.token, result)
+    }.flatMap { boundary ->
+        Flux.fromIterable(boundary.tutorTranscriptEvents)
+            .concatMap { transcript ->
+                mono {
+                    if (!onProviderEvent(transcript, true, false)) {
+                        throw VoiceTutorTutorTranscriptPersistenceException()
+                    }
+                }.then()
+            }
+            .then(
+                Mono.fromRunnable {
+                    if (!controller.acknowledgePostRelayBoundary(boundary.token) &&
+                        controller.acceptsInputEvents()
+                    ) throw VoiceTutorProviderProtocolException()
+                },
+            )
+    }
+}.then()
 
 /**
  * Ordered production boundary for a single sideband event. Observation and

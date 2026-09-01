@@ -63,7 +63,7 @@ class VoiceTutorSettlementPolicyTest {
     }
 
     @Test
-    fun `transcript persistence truncates the final turn at the configured session character boundary`() {
+    fun `transcript persistence rejects a final turn that would cross the configured character boundary`() {
         val bounded = boundedVoiceTutorTranscript(
             transcript = "1234567890",
             capacity = TranscriptCapacity(turnCount = 8, characterCount = 96),
@@ -71,7 +71,7 @@ class VoiceTutorSettlementPolicyTest {
             maxSessionTurns = 10,
         )
 
-        assertThat(bounded).isEqualTo("1234")
+        assertThat(bounded).isNull()
     }
 
     @Test

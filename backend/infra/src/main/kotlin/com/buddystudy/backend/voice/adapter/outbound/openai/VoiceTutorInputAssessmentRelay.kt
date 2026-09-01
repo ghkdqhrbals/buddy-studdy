@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentRequest
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.reactor.mono
@@ -48,7 +49,21 @@ internal fun voiceTutorInputAssessmentRelay(
                 // The exact accepted ASR is persisted before it can release a
                 // tutor response. Never rephrase it or replay a rejected item.
                 if (controller.canPublishInput(action.itemId)) {
-                    val persisted = onProviderEvent(controller.providerEventForRelay(action.rawEvent), true, true)
+                    val persisted = onProviderEvent(
+                        controller.providerEventForRelay(
+                            action.rawEvent,
+                            verifiedStudyAnswer = !action.checkpoint &&
+                                action.intent == VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION,
+                            verifiedLearnerQuestion = !action.checkpoint &&
+                                action.intent == VoiceTutorInputIntent.ASK_STUDY_QUESTION,
+                            speechSequence = action.sequence,
+                            checkpoint = action.checkpoint,
+                            currentTranscriptAnswersStudyQuestion =
+                                action.currentTranscriptAnswersStudyQuestion,
+                        ),
+                        true,
+                        true,
+                    )
                     controller.confirmInputPublished(
                         action.itemId,
                         persisted,

@@ -258,7 +258,7 @@ class VoiceTutorServiceTest {
             .contains("distinguish this learner-led exploration from a graded answer")
             .contains("never claim an unanswered question was assessed")
             .contains("do not squeeze a long explanation plus several new questions")
-            .contains("Do not create root studies except through the explicit confirmed create_root_study flow")
+            .contains("Do not create root studies except from an explicit direct learner command through create_root_study")
             .contains("submit answers to the standard question workflow")
             .contains("does not prohibit spoken lesson questions or spoken feedback and scores")
             .contains("clearly agree or explicitly ask to start before teaching")
@@ -318,23 +318,21 @@ class VoiceTutorServiceTest {
     }
 
     @Test
-    fun `voice root creation is a create only preview with fresh confirmation and separate lesson consent`() =
+    fun `voice root creation writes on the direct command and keeps separate lesson consent`() =
         runBlocking<Unit> {
             val persistence = FakePersistence(now)
             val instructions = service(persistence).connect(principal, persistence.session.id).instructions
 
             assertThat(instructions)
                 .contains("direct request to create one new root")
-                .contains("call create_root_study with confirm=false")
-                .contains("This preview writes nothing")
-                .contains("speak the exact topic and level")
-                .contains("wait for one NEW explicit affirmative learner reply")
-                .contains("confirm=true with the unchanged topic, level and exact confirmation_token")
-                .contains("operative restatement of that exact same topic and level may confirm it")
-                .contains("If the learner changes either field, including 'not A; create B'")
-                .contains("never consume A's token")
-                .contains("call confirm=false for the newly requested B")
-                .contains("Never read the token aloud")
+                .contains("call create_root_study once immediately")
+                .contains("Include difficulty_level only when the learner explicitly requested")
+                .contains("server applies exactly the default level 5")
+                .contains("direct command is already final permission")
+                .contains("never preview it, ask '만들까요?'/'shall I create it?' or any equivalent confirmation question")
+                .contains("A generic yes")
+                .contains("never authorizes creation")
+                .contains("one-shot write to the exact topic and effective level")
                 .contains("saved in My Studies but is not yet the lesson focus")
                 .contains("does not by itself start learning")
                 .contains("After created=true, call get_study with the returned id")
@@ -583,6 +581,7 @@ class VoiceTutorServiceTest {
     @Test
     fun `status recovers a completed session whose summary was not started before a process exit`() = runBlocking<Unit> {
         val persistence = FakePersistence(now).apply {
+            verifiedLearningExchange = true
             session = session.copy(
                 status = VoiceTutorSessionStatus.COMPLETED,
                 resultStatus = VoiceTutorResultStatus.PENDING,
@@ -951,10 +950,19 @@ class VoiceTutorServiceTest {
     }
 
     @Test
-    fun `end is idempotent and learning summary is generated once`() = runBlocking<Unit> {
+    fun `verified study question and learner answer generate one normal learning summary`() = runBlocking<Unit> {
         val persistence = FakePersistence(now).apply {
+            verifiedLearningExchange = true
             turns = listOf(
-                VoiceTutorTranscriptTurn(1, session.id, "item-1", VoiceTutorTranscriptRole.USER, "actor가 무엇인가요?", 1, now),
+                VoiceTutorTranscriptTurn(
+                    1, session.id, "study-question", VoiceTutorTranscriptRole.TUTOR,
+                    "Spring의 의존성 주입은 무엇인가요?", 1, now.minusSeconds(2), lessonRevision = 1,
+                ),
+                VoiceTutorTranscriptTurn(
+                    2, session.id, "study-answer", VoiceTutorTranscriptRole.USER,
+                    "객체가 의존 객체를 직접 만들지 않고 외부에서 받는 방식입니다.", 2, now.minusSeconds(1),
+                    lessonRevision = 1,
+                ),
             )
         }
         val summaries = FakeSummary()
@@ -969,6 +977,67 @@ class VoiceTutorServiceTest {
         assertThat(second.state).isEqualTo(VoiceTutorSessionStatus.COMPLETED)
         assertThat(summaries.calls).isEqualTo(1)
         assertThat(persistence.finalizeCalls).isEqualTo(1)
+        assertThat(persistence.completedResult?.summaryMarkdown).isEqualTo("학습 요약")
+        assertThat(persistence.transcriptCharacterLimits).contains(1_000_000)
+    }
+
+    @Test
+    fun `topic setup conversation completes without generating a learning summary`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now).apply {
+            session = session.copy(connectedAt = now.minusSeconds(40))
+            // This looks like an ordinary TUTOR -> USER exchange, but it has no
+            // durable final-assessment link proving a substantive study answer.
+            turns = listOf(
+                VoiceTutorTranscriptTurn(
+                    1, session.id, "setup-question", VoiceTutorTranscriptRole.TUTOR,
+                    "Spring을 새 루트로 만들까요?", 1, now.minusSeconds(2), lessonRevision = 0,
+                ),
+                VoiceTutorTranscriptTurn(
+                    2, session.id, "setup-answer", VoiceTutorTranscriptRole.USER,
+                    "그냥 만들어줘.", 2, now.minusSeconds(1), lessonRevision = 0,
+                ),
+            )
+            verifiedLearningExchange = false
+        }
+        val summaries = FakeSummary()
+        val service = service(persistence, summaries = summaries)
+
+        val ended = service.endSession(principal, persistence.session.id)
+        persistence.awaiting = listOf(persistence.session)
+        service.recoverPendingResults(10)
+
+        assertThat(summaries.calls).isZero()
+        assertThat(ended.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+        assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+        assertThat(persistence.completedResult?.summaryMarkdown).isEmpty()
+        assertThat(persistence.completedResult?.explorations).isEmpty()
+    }
+
+    @Test
+    fun `learner follow-up and tutor response alone complete without generating a learning summary`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now).apply {
+            session = session.copy(connectedAt = now.minusSeconds(40))
+            turns = listOf(
+                VoiceTutorTranscriptTurn(
+                    1, session.id, "learner-question", VoiceTutorTranscriptRole.USER,
+                    "LFU는 빈도를 어떻게 추적하나요?", 1, now.minusSeconds(2), lessonRevision = 1,
+                    askedStudyQuestion = true,
+                ),
+                VoiceTutorTranscriptTurn(
+                    2, session.id, "tutor-response", VoiceTutorTranscriptRole.TUTOR,
+                    "빈도별 연결 목록을 사용합니다.", 2, now.minusSeconds(1), lessonRevision = 1,
+                ),
+            )
+            verifiedLearningExchange = false
+        }
+        val summaries = FakeSummary()
+
+        val ended = service(persistence, summaries = summaries).endSession(principal, persistence.session.id)
+
+        assertThat(summaries.calls).isZero()
+        assertThat(ended.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+        assertThat(persistence.completedResult?.summaryMarkdown).isEmpty()
+        assertThat(persistence.completedResult?.explorations).isEmpty()
     }
 
     @Test
@@ -1123,6 +1192,7 @@ class VoiceTutorServiceTest {
     }
 
     private fun summaryFixture() = FakePersistence(now).apply {
+        verifiedLearningExchange = true
         session = session.copy(
             status = VoiceTutorSessionStatus.COMPLETED,
             connectedAt = now.minusSeconds(109),
@@ -1257,6 +1327,18 @@ class VoiceTutorServiceTest {
             principal, blank.session.id, "blank", VoiceTutorTranscriptRole.USER, " ", now,
         )).isFalse()
         assertThat(blank.transcriptAppendCalls).isZero()
+
+        val learnerQuestion = FakePersistence(now)
+        assertThat(service(learnerQuestion).appendTranscript(
+            principal, learnerQuestion.session.id, "learner-question", VoiceTutorTranscriptRole.USER,
+            "LFU는 빈도를 어떻게 추적하나요?", now, lessonRevision = 2, askedStudyQuestion = true,
+        )).isTrue()
+        assertThat(learnerQuestion.lastAskedStudyQuestion).isTrue()
+        assertThat(service(learnerQuestion).appendTranscript(
+            principal, learnerQuestion.session.id, "tutor", VoiceTutorTranscriptRole.TUTOR,
+            "빈도별 목록을 사용합니다.", now, lessonRevision = 2, askedStudyQuestion = true,
+        )).isTrue()
+        assertThat(learnerQuestion.lastAskedStudyQuestion).isFalse()
     }
 
     private fun service(
@@ -1415,7 +1497,11 @@ class VoiceTutorServiceTest {
         var failedResultCalls = 0
         var transcriptAppendResult = true
         var transcriptAppendCalls = 0
+        val transcriptCharacterLimits = mutableListOf<Int>()
         var lastTranscriptLessonRevision: Long? = null
+        var lastStudyQuestionProviderItemId: String? = null
+        var lastAskedStudyQuestion = false
+        var verifiedLearningExchange = false
         var reserveOverride: ReserveVoiceTutorSessionResult? = null
         var reserveCalls = 0
         var finalizeCalls = 0
@@ -1587,13 +1673,25 @@ class VoiceTutorServiceTest {
             maxSessionCharacters: Int,
             maxSessionTurns: Int,
             lessonRevision: Long,
+            studyQuestionProviderItemId: String?,
+            studyAnswerProviderItemId: String?,
+            askedStudyQuestion: Boolean,
+            isStudyQuestion: Boolean,
+            studyAnswerProviderItemIds: List<String>,
         ): Boolean {
             transcriptAppendCalls += 1
             lastTranscriptLessonRevision = lessonRevision
+            lastStudyQuestionProviderItemId = studyQuestionProviderItemId
+            lastAskedStudyQuestion = askedStudyQuestion
             return transcriptAppendResult
         }
 
-        override suspend fun transcript(userId: Long, sessionId: String, maxCharacters: Int) = turns
+        override suspend fun transcript(userId: Long, sessionId: String, maxCharacters: Int) = turns.also {
+            transcriptCharacterLimits += maxCharacters
+        }
+
+        override suspend fun hasVerifiedLearningExchange(userId: Long, sessionId: String) =
+            verifiedLearningExchange
 
         override suspend fun result(userId: Long, sessionId: String) = storedResult
 

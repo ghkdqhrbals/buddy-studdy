@@ -31,6 +31,11 @@ class VoiceTutorTranscriptMetadataPolicyTest {
             val raw = mapper.writeValueAsString(mapOf(
                 "type" to type, "item_id" to "owned-item", "response_id" to "owned-response",
                 field to "원문 그대로", VoiceTutorTranscriptMetadata.LESSON_REVISION to 3,
+                VoiceTutorTranscriptMetadata.STUDY_QUESTION_PROVIDER_ITEM_ID to "private-question-item",
+                VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID to "private-answer-item",
+                VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS to
+                    listOf("private-answer-part-1", "private-answer-part-2"),
+                VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION to true,
             ))
 
             val decision = policy.providerDecision(raw, "session", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
@@ -38,9 +43,18 @@ class VoiceTutorTranscriptMetadataPolicyTest {
 
             assertThat(decision.terminate).isFalse()
             assertThat(payload.has(VoiceTutorTranscriptMetadata.LESSON_REVISION)).isFalse()
+            assertThat(payload.has(VoiceTutorTranscriptMetadata.STUDY_QUESTION_PROVIDER_ITEM_ID)).isFalse()
+            assertThat(payload.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID)).isFalse()
+            assertThat(payload.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS)).isFalse()
+            assertThat(payload.has(VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION)).isFalse()
             assertThat(payload.path(field).asText()).isEqualTo("원문 그대로")
             assertThat(payload.path("response_id").asText()).isEqualTo("owned-response")
             assertThat(VoiceTutorTranscriptMetadata.lessonRevision(mapper.readTree(raw))).isEqualTo(3)
+            assertThat(VoiceTutorTranscriptMetadata.studyQuestionProviderItemId(mapper.readTree(raw)))
+                .isEqualTo("private-question-item")
+            assertThat(VoiceTutorTranscriptMetadata.studyAnswerProviderItemIds(mapper.readTree(raw)))
+                .containsExactly("private-answer-part-1", "private-answer-part-2")
+            assertThat(VoiceTutorTranscriptMetadata.askedStudyQuestion(mapper.readTree(raw))).isTrue()
         }
     }
 
@@ -58,14 +72,43 @@ class VoiceTutorTranscriptMetadataPolicyTest {
         assertThat(VoiceTutorTranscriptMetadata.lessonRevision(mapper.readTree(
             """{"${VoiceTutorTranscriptMetadata.LESSON_REVISION}":0}""",
         ))).isZero()
+        assertThat(VoiceTutorTranscriptMetadata.askedStudyQuestion(mapper.readTree(
+            """{"${VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION}":"true"}""",
+        ))).isFalse()
+
+        val answerPartsField = VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS
+        listOf(
+            "{}",
+            """{"$answerPartsField":null}""",
+            """{"$answerPartsField":"part"}""",
+            """{"$answerPartsField":[]}""",
+            """{"$answerPartsField":["same","same"]}""",
+            """{"$answerPartsField":["part",3]}""",
+            """{"$answerPartsField":[""]}""",
+            mapper.writeValueAsString(mapOf(answerPartsField to (1..33).map { "part-$it" })),
+        ).forEach { raw ->
+            assertThat(VoiceTutorTranscriptMetadata.studyAnswerProviderItemIds(mapper.readTree(raw))).isEmpty()
+        }
+        assertThat(VoiceTutorTranscriptMetadata.studyAnswerProviderItemIds(mapper.readTree(
+            """{"$answerPartsField":["part-1","part-2"]}""",
+        ))).containsExactly("part-1", "part-2")
     }
 
     @Test
     fun `both server handlers pass known and unassigned epochs to transcript persistence unchanged`(): Unit {
         val received = mutableListOf<Triple<VoiceTutorTranscriptRole, String, Long>>()
+        val questionEvidence = mutableListOf<String?>()
+        val learnerQuestionEvidence = mutableListOf<Boolean>()
+        val answerFeedbackEvidence = mutableListOf<String?>()
+        val answerPartEvidence = mutableListOf<List<String>>()
         val relay = proxy<VoiceTutorRelayUseCase> { method, args ->
             check(method == "appendTranscript")
             received += Triple(args[3] as VoiceTutorTranscriptRole, args[4] as String, args[6] as Long)
+            questionEvidence += args[7] as String?
+            answerFeedbackEvidence += args[8] as String?
+            learnerQuestionEvidence += args[9] as Boolean
+            @Suppress("UNCHECKED_CAST")
+            answerPartEvidence += args[11] as List<String>
             true
         }
         val voiceTutor = proxy<VoiceTutorUseCase> { _, _ -> error("No quota or session request is expected.") }
@@ -83,9 +126,14 @@ class VoiceTutorTranscriptMetadataPolicyTest {
             ).apply { isAccessible = true }
             val events = listOf(
                 mapOf("type" to "response.output_audio_transcript.done", "response_id" to "tutor", "item_id" to "tutor-item",
-                    "transcript" to "기존 질문 원문", VoiceTutorTranscriptMetadata.LESSON_REVISION to 4),
+                    "transcript" to "기존 질문 원문", VoiceTutorTranscriptMetadata.LESSON_REVISION to 4,
+                    VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID to "exact-answer"),
                 mapOf("type" to "conversation.item.input_audio_transcription.completed", "item_id" to "learner-item",
-                    "transcript" to "불확정 발화 원문", VoiceTutorTranscriptMetadata.LESSON_REVISION to -1),
+                    "transcript" to "불확정 발화 원문", VoiceTutorTranscriptMetadata.LESSON_REVISION to -1,
+                    VoiceTutorTranscriptMetadata.STUDY_QUESTION_PROVIDER_ITEM_ID to "exact-study-question",
+                    VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS to
+                        listOf("exact-answer-part-1", "learner-item"),
+                    VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION to true),
                 mapOf("type" to "conversation.item.input_audio_transcription.completed", "item_id" to "missing-epoch",
                     "transcript" to "메타데이터 없는 원문"),
             )
@@ -102,6 +150,22 @@ class VoiceTutorTranscriptMetadataPolicyTest {
             Triple(VoiceTutorTranscriptRole.TUTOR, "기존 질문 원문", 4L),
             Triple(VoiceTutorTranscriptRole.USER, "불확정 발화 원문", -1L),
             Triple(VoiceTutorTranscriptRole.USER, "메타데이터 없는 원문", -1L),
+        )
+        assertThat(questionEvidence).containsExactly(
+            null, "exact-study-question", null,
+            null, "exact-study-question", null,
+        )
+        assertThat(learnerQuestionEvidence).containsExactly(
+            false, true, false,
+            false, true, false,
+        )
+        assertThat(answerFeedbackEvidence).containsExactly(
+            "exact-answer", null, null,
+            "exact-answer", null, null,
+        )
+        assertThat(answerPartEvidence).containsExactly(
+            emptyList(), listOf("exact-answer-part-1", "learner-item"), emptyList(),
+            emptyList(), listOf("exact-answer-part-1", "learner-item"), emptyList(),
         )
     }
 

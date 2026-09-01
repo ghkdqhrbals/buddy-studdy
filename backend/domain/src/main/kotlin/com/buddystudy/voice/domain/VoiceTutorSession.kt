@@ -95,6 +95,14 @@ data class VoiceTutorTranscriptTurn(
     val occurredAt: Instant,
     /** Server-owned response/input epoch; legacy is zero and an explicitly unknown binding is -1. */
     val lessonRevision: Long = 0,
+    /** Server-persisted proof that this USER turn answered the exact TUTOR study-question row. */
+    val studyQuestionTurnId: Long? = null,
+    /** Server-persisted proof that this TUTOR feedback evaluates one exact linked USER answer. */
+    val studyAnswerTurnId: Long? = null,
+    /** Server semantic attestation that this USER turn asked about its saved lesson focus. */
+    val askedStudyQuestion: Boolean = false,
+    /** Server-owned proof that this completed TUTOR item was issued for a substantive study question. */
+    val isStudyQuestion: Boolean = false,
 )
 
 data class VoiceTutorResult(

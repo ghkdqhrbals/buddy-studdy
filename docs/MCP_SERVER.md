@@ -116,16 +116,23 @@ rollout gate.
   Active call/device authorization is rechecked across suspended reads before
   returning private history. This additional call-tree restriction applies to
   these two tools; general MCP reads remain owner-scoped.
-- Root creation requires a persisted direct learner request, then a non-writing
-  preview of the exact trimmed topic and requested 1–10 level (default 5 only
-  when omitted). The tutor must speak that preview and receive a newer explicit
-  affirmative turn before the short-lived call/account/device-bound token can
-  be consumed. The owner-scoped common write is create-only: a normalized exact
-  root duplicate is returned unchanged, while a matching child conflicts. It
-  never generates a question or consumes question quota, and its result never
-  selects or starts a lesson. The tutor must call `get_study` with the returned
-  ID, speak that exact saved root as a separate start offer, receive fresh consent
-  and then call `select_voice_study`.
+- Root creation requires one final, meaningful, durably persisted direct learner
+  command. That command itself is approval: semantic assessment extracts the
+  exact learner-spoken topic and requested 1–10 level, or default 5 only when the
+  level was omitted, and binds that tuple to a call-local one-shot write lease.
+  The tutor calls `create_root_study` immediately and must not add a preview,
+  “만들까요?” prompt or contextual-yes round. Generic agreement, a tutor
+  proposal, checkpoint, mismatched tool arguments, failed persistence and newer
+  speech cannot grant or reuse the lease. The owner-scoped common write is
+  create-only: a normalized exact root duplicate is returned unchanged, while a
+  matching child conflicts. It never generates a question or consumes question
+  quota, and its result never selects or starts a lesson. After that result, the
+  server bridge schedules `get_study` for the trusted returned ID and blocks the
+  spoken acknowledgment until both function outputs are acknowledged and the
+  exact root readback succeeds. Failed or mismatched readback cannot claim a
+  saved outcome and never retries the create automatically. The tutor then speaks
+  the exact read-back root as a separate start offer, receives fresh consent and
+  calls `select_voice_study`.
 - Child creation requires an explicit learner request and an unambiguous parent
   inside the call's selected study subtree. Schema validation, active identity,
   parent scope and the existing use-case permissions are all enforced before
@@ -139,9 +146,15 @@ rollout gate.
   retain compact verified study-tree metadata.
 - Live audio frames and binary recordings are not passed through MCP. Persisted
   transcript-derived questions, answers and feedback are private history tool
-  results, not new learner answers or consent to start a lesson. Successful child
-  metadata refreshes never replace the active question or answer draft. Logs
-  expose counts, fixed error codes and types only, not arguments or result bodies.
+  results, not new learner answers or consent to start a lesson. Topic discovery,
+  root/topic mutation, selection, consent, settings and other setup dialogue never
+  become learning records. A new record requires a server-authorized substantive
+  tutor question and its exact complete learner answer; multipart answer evidence
+  is accepted only as the complete ordered durable set. Optional score/feedback
+  evidence must link the exact final answer part in the same lesson revision with
+  no later linked answer or intervening tutor turn. Successful child metadata
+  refreshes never replace the active question or answer draft. Logs expose counts,
+  fixed error codes and types only, not arguments or result bodies.
 
 See [OpenAI's Realtime tool guidance](https://developers.openai.com/api/docs/guides/realtime-mcp)
 for the distinction between server-owned functions and a provider-hosted remote
@@ -347,12 +360,21 @@ create_root_study(topic, difficulty_level=5)
 ```
 
 The external HTTP MCP tool performs that create-only operation directly. During
-a live voice call, the server-side bridge adds a separate `confirm=false`
-preview and fresh-spoken-confirmation gate before invoking it. Either
-`created=true` or `created=false` remains only a saved-study result; lesson focus
-still requires `get_study(returned id)`, a spoken start offer, a new learner
-agreement and `select_voice_study`. Only a real new row is eligible for the
-existing live `buddystudy.voice.study.changed` hint. Its sanitized wire payload
+a live voice call, one final persisted explicit learner command invokes it
+immediately; the bridge does not add a preview or ask for contextual agreement.
+Semantic input assessment binds the exact learner-spoken topic and effective
+level to a one-shot server lease, rejects different tool arguments and consumes
+the lease immediately before the write. Generic “yes”, tutor suggestions,
+checkpoints and newer speech cannot authorize creation. Either `created=true`
+or `created=false` remains only a saved-study result. The voice bridge takes the
+trusted positive readback ID from that result, schedules an exact server-owned
+`get_study` call, and does not schedule spoken acknowledgment until both outputs
+are acknowledged and the readback proves the exact root. A missing or mismatched
+readback produces only an unverified-outcome message and does not retry the
+mutation. Lesson focus still requires the verified read-back root to be spoken as
+a new start offer, a new learner agreement and `select_voice_study`. Only a real
+new row is eligible for the existing live `buddystudy.voice.study.changed` hint.
+Its sanitized wire payload
 contains only the event type, positive study ID, server-owned change kind and a
 bounded deleted-ID list (empty for creation); it never forwards tool output,
 topic text, levels, prompts or credentials. If the call is still valid and the

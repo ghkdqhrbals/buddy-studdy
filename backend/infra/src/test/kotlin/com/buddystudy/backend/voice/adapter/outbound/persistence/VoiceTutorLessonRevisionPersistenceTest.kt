@@ -51,7 +51,22 @@ class VoiceTutorLessonRevisionPersistenceTest {
                 provider_item_id varchar(191) not null, role varchar(16) not null, transcript text not null,
                 sequence_number bigint not null, occurred_at timestamp not null, created_at timestamp not null,
                 lesson_revision bigint not null default 0 check (lesson_revision >= -1),
+                study_question_turn_id bigint null,
+                study_answer_turn_id bigint null,
+                asked_study_question boolean not null default false,
+                is_study_question boolean not null default false,
+                check (study_question_turn_id is null or role = 'USER'),
+                check (study_question_turn_id is null or asked_study_question = false),
+                check (study_answer_turn_id is null or role = 'TUTOR'),
+                check (is_study_question = false or role = 'TUTOR'),
                 unique (session_id, provider_item_id, role)
+            )
+        """.trimIndent())
+        execute("""
+            create table voice_tutor_lesson_focuses (
+                session_id varchar(36) not null references voice_tutor_sessions(id) on delete cascade,
+                revision bigint not null, study_id bigint not null, captured_at timestamp not null,
+                primary key (session_id, revision)
             )
         """.trimIndent())
         seedSession("owned", userId = 7, studyId = 42)
@@ -142,8 +157,420 @@ class VoiceTutorLessonRevisionPersistenceTest {
         assertThat(adapter.findSession(7, "owned")!!.status.name).isEqualTo("ACTIVE")
     }
 
-    private suspend fun append(id: String, role: VoiceTutorTranscriptRole, text: String, revision: Long): Boolean =
-        adapter.appendTranscript(7, "owned", id, role, text, now, 4_000, 20, lessonRevision = revision)
+    @Test
+    fun `only a final assessed answer linked to an exact focused tutor question becomes learning evidence`(): Unit = runBlocking {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 1, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("study-question", VoiceTutorTranscriptRole.TUTOR, "DI의 장점은 무엇인가요?", 1, true)).isTrue()
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isFalse()
+
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "study-answer", VoiceTutorTranscriptRole.USER,
+                "결합도를 낮추고 테스트를 쉽게 합니다.", now, 4_000, 20, lessonRevision = 1,
+                studyQuestionProviderItemId = "study-question",
+                studyAnswerProviderItemIds = listOf("study-answer"),
+            ),
+        ).isTrue()
+
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isTrue()
+        assertThat(adapter.hasVerifiedLearningExchange(8, "owned")).isFalse()
+        assertThat(count("select count(*) from voice_tutor_transcript_turns where study_question_turn_id is not null"))
+            .isEqualTo(1)
+        val turns = adapter.transcript(7, "owned", 4_000)
+        assertThat(turns.single { it.providerItemId == "study-question" }.isStudyQuestion).isTrue()
+        assertThat(turns.single { it.providerItemId == "study-question" }.studyQuestionTurnId).isNull()
+        assertThat(turns.single { it.providerItemId == "study-answer" }.studyQuestionTurnId)
+            .isEqualTo(turns.single { it.providerItemId == "study-question" }.id)
+    }
+
+    @Test
+    fun `answer link allows user checkpoints but rejects any intervening tutor after the exact question`() = runBlocking {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 1, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("question", VoiceTutorTranscriptRole.TUTOR, "DI가 무엇인가요?", 1, true)).isTrue()
+        assertThat(append("checkpoint", VoiceTutorTranscriptRole.USER, "외부에서", 1)).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "answer", VoiceTutorTranscriptRole.USER, "외부에서 의존성을 주입합니다.", now,
+            4_000, 20, lessonRevision = 1, studyQuestionProviderItemId = "question",
+            studyAnswerProviderItemIds = listOf("answer"),
+        )).isTrue()
+        assertThat(adapter.transcript(7, "owned", 4_000).last().studyQuestionTurnId).isNotNull()
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isTrue()
+
+        assertThat(append("next-question", VoiceTutorTranscriptRole.TUTOR, "설정 확인입니다.", 1)).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "late-answer", VoiceTutorTranscriptRole.USER, "이전 질문의 늦은 답입니다.", now,
+            4_000, 20, lessonRevision = 1, studyQuestionProviderItemId = "question",
+            studyAnswerProviderItemIds = listOf("late-answer"),
+        )).isFalse()
+        assertThat(adapter.transcript(7, "owned", 4_000).map { it.providerItemId })
+            .doesNotContain("late-answer")
+    }
+
+    @Test
+    fun `final filler atomically promotes the exact ordered durable answer parts and feedback anchors the last part`() =
+        runBlocking {
+            database.sql(
+                "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) " +
+                    "values ('owned', 1, 42, :now)",
+            ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+            assertThat(append("multipart-question", VoiceTutorTranscriptRole.TUTOR, "DI의 장점은?", 1, true))
+                .isTrue()
+            assertThat(append("answer-part-1", VoiceTutorTranscriptRole.USER, "결합도를 낮추고", 1)).isTrue()
+            assertThat(append("answer-part-2", VoiceTutorTranscriptRole.USER, "테스트를 쉽게 합니다.", 1)).isTrue()
+
+            assertThat(adapter.appendTranscript(
+                7, "owned", "filler-tail", VoiceTutorTranscriptRole.USER, "음…", now,
+                4_000, 20, lessonRevision = 1,
+                studyQuestionProviderItemId = "multipart-question",
+                studyAnswerProviderItemIds = listOf("answer-part-1", "answer-part-2"),
+            )).isTrue()
+
+            val turns = adapter.transcript(7, "owned", 4_000)
+            val questionId = turns.single { it.providerItemId == "multipart-question" }.id
+            assertThat(turns.filter { it.studyQuestionTurnId == questionId }.map { it.providerItemId })
+                .containsExactly("answer-part-1", "answer-part-2")
+            assertThat(turns.single { it.providerItemId == "filler-tail" }.studyQuestionTurnId).isNull()
+            assertThat(adapter.appendTranscript(
+                7, "owned", "multipart-feedback", VoiceTutorTranscriptRole.TUTOR,
+                "정확합니다. 두 장점을 잘 설명했습니다.", now, 4_000, 20,
+                lessonRevision = 1, studyAnswerProviderItemId = "answer-part-2",
+            )).isTrue()
+            val withFeedback = adapter.transcript(7, "owned", 4_000)
+            assertThat(withFeedback.single { it.providerItemId == "multipart-feedback" }.studyAnswerTurnId)
+                .isEqualTo(withFeedback.single { it.providerItemId == "answer-part-2" }.id)
+        }
+
+    @Test
+    fun `feedback cannot anchor an earlier durable part of a multipart answer`() = runBlocking {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) " +
+                "values ('owned', 1, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("multipart-question", VoiceTutorTranscriptRole.TUTOR, "DI의 장점은?", 1, true))
+            .isTrue()
+        assertThat(append("answer-part-1", VoiceTutorTranscriptRole.USER, "결합도를 낮추고", 1)).isTrue()
+        assertThat(append("answer-part-2", VoiceTutorTranscriptRole.USER, "테스트를 쉽게 합니다.", 1)).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "filler-tail", VoiceTutorTranscriptRole.USER, "음…", now,
+            4_000, 20, lessonRevision = 1,
+            studyQuestionProviderItemId = "multipart-question",
+            studyAnswerProviderItemIds = listOf("answer-part-1", "answer-part-2"),
+        )).isTrue()
+
+        assertThat(adapter.appendTranscript(
+            7, "owned", "earlier-part-feedback", VoiceTutorTranscriptRole.TUTOR,
+            "85점입니다. 결합도를 잘 설명했습니다.", now, 4_000, 20,
+            lessonRevision = 1, studyAnswerProviderItemId = "answer-part-1",
+        )).isTrue()
+
+        val turns = adapter.transcript(7, "owned", 4_000)
+        assertThat(turns.single { it.providerItemId == "earlier-part-feedback" }.studyAnswerTurnId).isNull()
+    }
+
+    @Test
+    fun `duplicate reverse missing and revision mismatched promotion proofs fail without partial links`() =
+        runBlocking {
+            database.sql(
+                "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) " +
+                    "values ('owned', 1, 42, :now)",
+            ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+            assertThat(append("strict-question", VoiceTutorTranscriptRole.TUTOR, "DI를 설명해 보세요.", 1, true))
+                .isTrue()
+            assertThat(append("strict-part-1", VoiceTutorTranscriptRole.USER, "외부에서", 1)).isTrue()
+            assertThat(append("strict-part-2", VoiceTutorTranscriptRole.USER, "주입합니다.", 1)).isTrue()
+
+            val invalidProofs = listOf(
+                listOf("strict-part-1", "strict-part-1"),
+                listOf("strict-part-2", "strict-part-1"),
+                listOf("missing-part"),
+            )
+            invalidProofs.forEachIndexed { index, proof ->
+                assertThat(adapter.appendTranscript(
+                    7, "owned", "invalid-final-$index", VoiceTutorTranscriptRole.USER, "음…", now,
+                    4_000, 20, lessonRevision = 1,
+                    studyQuestionProviderItemId = "strict-question",
+                    studyAnswerProviderItemIds = proof,
+                )).isFalse()
+            }
+            assertThat(adapter.appendTranscript(
+                7, "owned", "wrong-revision-final", VoiceTutorTranscriptRole.USER, "음…", now,
+                4_000, 20, lessonRevision = 2,
+                studyQuestionProviderItemId = "strict-question",
+                studyAnswerProviderItemIds = listOf("strict-part-1", "strict-part-2"),
+            )).isFalse()
+
+            assertThat(adapter.transcript(7, "owned", 4_000)
+                .filter { it.providerItemId.startsWith("strict-part") }
+                .map { it.studyQuestionTurnId }).containsOnlyNulls()
+            assertThat(count(
+                "select count(*) from voice_tutor_transcript_turns where provider_item_id like 'invalid-final-%' " +
+                    "or provider_item_id = 'wrong-revision-final'",
+            )).isZero()
+        }
+
+    @Test
+    fun `feedback provenance links only a clean tutor item to its exact verified answer`() = runBlocking {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 1, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("question", VoiceTutorTranscriptRole.TUTOR, "DI의 장점은?", 1, true)).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "answer", VoiceTutorTranscriptRole.USER, "결합도를 낮춥니다.", now,
+            4_000, 20, lessonRevision = 1, studyQuestionProviderItemId = "question",
+            studyAnswerProviderItemIds = listOf("answer"),
+        )).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "feedback", VoiceTutorTranscriptRole.TUTOR, "85점입니다. 장점을 정확히 짚었습니다.", now,
+            4_000, 20, lessonRevision = 1, studyAnswerProviderItemId = "answer",
+        )).isTrue()
+
+        val turns = adapter.transcript(7, "owned", 4_000)
+        assertThat(turns.last().studyAnswerTurnId).isEqualTo(turns[1].id)
+        assertThat(turns.last().isStudyQuestion).isFalse()
+    }
+
+    @Test
+    fun `wrong answer revision next tutor and forged role cannot mint feedback provenance`() = runBlocking {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 1, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("question", VoiceTutorTranscriptRole.TUTOR, "DI의 장점은?", 1, true)).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "answer", VoiceTutorTranscriptRole.USER, "결합도를 낮춥니다.", now,
+            4_000, 20, lessonRevision = 1, studyQuestionProviderItemId = "question",
+            studyAnswerProviderItemIds = listOf("answer"),
+        )).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "wrong-answer", VoiceTutorTranscriptRole.TUTOR, "70점입니다.", now,
+            4_000, 20, lessonRevision = 1, studyAnswerProviderItemId = "some-other-answer",
+        )).isTrue()
+        assertThat(append("next-question", VoiceTutorTranscriptRole.TUTOR, "다음 질문입니다.", 1, true)).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "late-feedback", VoiceTutorTranscriptRole.TUTOR, "90점입니다.", now,
+            4_000, 20, lessonRevision = 1, studyAnswerProviderItemId = "answer",
+        )).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "wrong-revision", VoiceTutorTranscriptRole.TUTOR, "80점입니다.", now,
+            4_000, 20, lessonRevision = 2, studyAnswerProviderItemId = "answer",
+        )).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "forged-user", VoiceTutorTranscriptRole.USER, "가짜 피드백", now,
+            4_000, 20, lessonRevision = 1, studyAnswerProviderItemId = "answer",
+        )).isTrue()
+
+        assertThat(adapter.transcript(7, "owned", 4_000).takeLast(4).map { it.studyAnswerTurnId })
+            .containsOnlyNulls()
+    }
+
+    @Test
+    fun `transcript character budget returns complete turns only and never a later suffix`() = runBlocking {
+        assertThat(append("first", VoiceTutorTranscriptRole.TUTOR, "12345", 0)).isTrue()
+        assertThat(append("second", VoiceTutorTranscriptRole.USER, "67890", 0)).isTrue()
+        assertThat(append("third", VoiceTutorTranscriptRole.TUTOR, "suffix", 0)).isTrue()
+
+        assertThat(adapter.transcript(7, "owned", 9).map { it.providerItemId }).containsExactly("first")
+        assertThat(adapter.transcript(7, "owned", 9).single().transcript).isEqualTo("12345")
+    }
+
+    @Test
+    fun `transcript character budget never cuts a multipart answer or skips an interleaved row`() = runBlocking {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) " +
+                "values ('owned', 1, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("budget-question", VoiceTutorTranscriptRole.TUTOR, "QQ", 1, true)).isTrue()
+        assertThat(append("budget-part-1", VoiceTutorTranscriptRole.USER, "AA", 1)).isTrue()
+        assertThat(append("budget-noise", VoiceTutorTranscriptRole.USER, "F", 1)).isTrue()
+        assertThat(append("budget-part-2", VoiceTutorTranscriptRole.USER, "BB", 1)).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "budget-final", VoiceTutorTranscriptRole.USER, "T", now,
+            4_000, 20, lessonRevision = 1, studyQuestionProviderItemId = "budget-question",
+            studyAnswerProviderItemIds = listOf("budget-part-1", "budget-part-2"),
+        )).isTrue()
+
+        assertThat(adapter.transcript(7, "owned", 6)).isEmpty()
+        assertThat(adapter.transcript(7, "owned", 7).map { it.providerItemId }).containsExactly(
+            "budget-question", "budget-part-1", "budget-noise", "budget-part-2",
+        )
+    }
+
+    @Test
+    fun `focused but unverified tutor speech cannot be linked as a study question`() = runBlocking<Unit> {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 1, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("setup-in-focus", VoiceTutorTranscriptRole.TUTOR, "좋아요, 학습을 시작하겠습니다.", 1)).isTrue()
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "forced-answer", VoiceTutorTranscriptRole.USER,
+                "강제로 답변으로 분류된 설정 응답", now, 4_000, 20,
+                lessonRevision = 1, studyQuestionProviderItemId = "setup-in-focus",
+                studyAnswerProviderItemIds = listOf("forced-answer"),
+            ),
+        ).isFalse()
+
+        val turns = adapter.transcript(7, "owned", 4_000)
+        assertThat(turns.single { it.providerItemId == "setup-in-focus" }.isStudyQuestion).isFalse()
+        assertThat(turns.map { it.providerItemId }).doesNotContain("forced-answer")
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isFalse()
+    }
+
+    @Test
+    fun `the latest earlier focus carries forward to later lesson revisions for both learning attestations`(): Unit = runBlocking {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 1, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("carried-question", VoiceTutorTranscriptRole.TUTOR, "캐시 무효화가 왜 어려운가요?", 2, true)).isTrue()
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "carried-answer", VoiceTutorTranscriptRole.USER,
+                "원본과 캐시의 일관성을 유지해야 하기 때문입니다.", now, 4_000, 20,
+                lessonRevision = 2, studyQuestionProviderItemId = "carried-question", askedStudyQuestion = true,
+                studyAnswerProviderItemIds = listOf("carried-answer"),
+            ),
+        ).isTrue()
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "carried-learner-question", VoiceTutorTranscriptRole.USER,
+                "TTL은 언제 사용하는 게 좋나요?", now, 4_000, 20,
+                lessonRevision = 2, askedStudyQuestion = true,
+            ),
+        ).isTrue()
+
+        val turns = adapter.transcript(7, "owned", 4_000)
+        val question = turns.single { it.providerItemId == "carried-question" }
+        assertThat(turns.single { it.providerItemId == "carried-answer" }.studyQuestionTurnId).isEqualTo(question.id)
+        assertThat(turns.single { it.providerItemId == "carried-answer" }.askedStudyQuestion).isFalse()
+        assertThat(turns.single { it.providerItemId == "carried-learner-question" }.askedStudyQuestion).isTrue()
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isTrue()
+    }
+
+    @Test
+    fun `a future focus never attests an earlier tutor answer or learner question`(): Unit = runBlocking {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 3, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("past-question", VoiceTutorTranscriptRole.TUTOR, "아직 선택되지 않은 주제 질문", 2, true)).isTrue()
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "past-answer", VoiceTutorTranscriptRole.USER,
+                "미래 선택으로 인증되면 안 됩니다.", now, 4_000, 20,
+                lessonRevision = 2, studyQuestionProviderItemId = "past-question",
+                studyAnswerProviderItemIds = listOf("past-answer"),
+            ),
+        ).isFalse()
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "past-learner-question", VoiceTutorTranscriptRole.USER,
+                "이 질문도 미래 선택에 기대면 안 되나요?", now, 4_000, 20,
+                lessonRevision = 2, askedStudyQuestion = true,
+            ),
+        ).isTrue()
+
+        val turns = adapter.transcript(7, "owned", 4_000)
+        assertThat(turns.map { it.providerItemId }).doesNotContain("past-answer")
+        assertThat(turns.single { it.providerItemId == "past-learner-question" }.askedStudyQuestion).isFalse()
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isFalse()
+    }
+
+    @Test
+    fun `setup replies and mismatched question identities never become verified learning exchanges`(): Unit = runBlocking {
+        assertThat(append("setup-question", VoiceTutorTranscriptRole.TUTOR, "새 루트를 만들까요?", 0, true)).isTrue()
+        assertThat(append("setup-answer", VoiceTutorTranscriptRole.USER, "만들어줘.", 0)).isTrue()
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "unfocused-answer", VoiceTutorTranscriptRole.USER,
+                "네.", now, 4_000, 20, lessonRevision = 0,
+                studyQuestionProviderItemId = "setup-question",
+                studyAnswerProviderItemIds = listOf("unfocused-answer"),
+            ),
+        ).isFalse()
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "unknown-answer", VoiceTutorTranscriptRole.USER,
+                "응답입니다.", now, 4_000, 20, lessonRevision = 2,
+                studyQuestionProviderItemId = "missing-question",
+                studyAnswerProviderItemIds = listOf("unknown-answer"),
+            ),
+        ).isFalse()
+
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isFalse()
+        assertThat(count("select count(*) from voice_tutor_transcript_turns where study_question_turn_id is not null"))
+            .isZero()
+        assertThat(adapter.transcript(7, "owned", 4_000).map { it.providerItemId })
+            .doesNotContain("unfocused-answer", "unknown-answer")
+    }
+
+    @Test
+    fun `learner follow-up alone does not qualify until a focused tutor question has a verified answer`(): Unit = runBlocking {
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "unfocused-question", VoiceTutorTranscriptRole.USER,
+                "왜 그런가요?", now, 4_000, 20, lessonRevision = 2, askedStudyQuestion = true,
+            ),
+        ).isTrue()
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 3, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "focused-question", VoiceTutorTranscriptRole.USER,
+                "LFU는 빈도를 어떻게 추적하나요?", now, 4_000, 20,
+                lessonRevision = 3, askedStudyQuestion = true,
+            ),
+        ).isTrue()
+        assertThat(append("focused-answer", VoiceTutorTranscriptRole.TUTOR, "빈도별 연결 목록을 사용합니다.", 3)).isTrue()
+
+        val turns = adapter.transcript(7, "owned", 4_000)
+        assertThat(turns.single { it.providerItemId == "unfocused-question" }.askedStudyQuestion).isFalse()
+        assertThat(turns.single { it.providerItemId == "focused-question" }.askedStudyQuestion).isTrue()
+        assertThat(turns.single { it.providerItemId == "focused-answer" }.askedStudyQuestion).isFalse()
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isFalse()
+
+        assertThat(append("study-question", VoiceTutorTranscriptRole.TUTOR, "LFU와 LRU의 차이는 무엇인가요?", 3, true)).isTrue()
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "study-answer", VoiceTutorTranscriptRole.USER,
+                "LFU는 사용 빈도를, LRU는 최근 사용 시점을 기준으로 제거합니다.", now, 4_000, 20,
+                lessonRevision = 3, studyQuestionProviderItemId = "study-question",
+                studyAnswerProviderItemIds = listOf("study-answer"),
+            ),
+        ).isTrue()
+
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isTrue()
+    }
+
+    @Test
+    fun `replay cannot upgrade an unverified learner row into an attested study question`(): Unit = runBlocking {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 4, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("replayed-question", VoiceTutorTranscriptRole.USER, "설정 질문입니다.", 4)).isTrue()
+        assertThat(
+            adapter.appendTranscript(
+                7, "owned", "replayed-question", VoiceTutorTranscriptRole.USER,
+                "바뀐 텍스트", now, 4_000, 20, lessonRevision = 4, askedStudyQuestion = true,
+            ),
+        ).isFalse()
+
+        assertThat(adapter.transcript(7, "owned", 4_000).single().askedStudyQuestion).isFalse()
+    }
+
+    private suspend fun append(
+        id: String,
+        role: VoiceTutorTranscriptRole,
+        text: String,
+        revision: Long,
+        isStudyQuestion: Boolean = false,
+    ): Boolean = adapter.appendTranscript(
+        7, "owned", id, role, text, now, 4_000, 20,
+        lessonRevision = revision,
+        isStudyQuestion = isStudyQuestion,
+    )
 
     private suspend fun seedSession(id: String, userId: Long, studyId: Long) {
         database.sql("""
@@ -157,4 +584,7 @@ class VoiceTutorLessonRevisionPersistenceTest {
     }
 
     private suspend fun execute(sql: String) { database.sql(sql).fetch().rowsUpdated().awaitSingle() }
+
+    private suspend fun count(sql: String): Long = database.sql(sql)
+        .map { row, _ -> row.get(0, java.lang.Long::class.java)!!.toLong() }.one().awaitSingle()
 }

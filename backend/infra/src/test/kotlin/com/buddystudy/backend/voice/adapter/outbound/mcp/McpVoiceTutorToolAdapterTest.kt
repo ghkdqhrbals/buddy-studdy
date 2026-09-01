@@ -11,8 +11,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
-import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationOffer
-import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyConfirmationAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationAuthorization
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateReadKind
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMcpToolPort
@@ -595,7 +594,7 @@ class McpVoiceTutorToolAdapterTest {
         )
         for (definition in definitions.filterNot { it.name in setOf("select_voice_study", "advance_voice_study") }) {
             val original = fixture.catalog.single { it.tool().name() == definition.name }.tool()
-            if (definition.name !in setOf("create_root_study", "delete_study")) {
+            if (definition.name != "delete_study") {
                 assertThat(definition.parameters).isEqualTo(original.inputSchema())
             }
             assertThat(definition.description).startsWith(original.description())
@@ -603,14 +602,14 @@ class McpVoiceTutorToolAdapterTest {
         val rootCreation = mapper.valueToTree<JsonNode>(
             definitions.single { it.name == "create_root_study" }.parameters,
         )
-        assertThat(rootCreation.path("required").map { it.asText() }).containsExactly("topic", "confirm")
+        assertThat(rootCreation.path("required").map { it.asText() }).containsExactly("topic")
         assertThat(rootCreation.path("additionalProperties").asBoolean()).isFalse()
         assertThat(rootCreation.path("properties").fieldNames().asSequence().toList()).containsExactly(
-            "topic", "difficulty_level", "confirm", "confirmation_token",
+            "topic", "difficulty_level",
         )
         assertThat(rootCreation.path("properties").has("interval_minutes")).isFalse()
         assertThat(definitions.single { it.name == "create_root_study" }.description)
-            .contains("two-step create-only action", "never selects a lesson or creates a question")
+            .contains("call this once immediately", "Do not ask for confirmation", "never selects a lesson or creates a question")
         assertThat(definitions.single { it.name == "create_study_topic" }.description).contains("descendants")
         val deletion = mapper.valueToTree<JsonNode>(definitions.single { it.name == "delete_study" }.parameters)
         assertThat(deletion.path("properties").has("confirmation_token")).isTrue()
@@ -633,13 +632,13 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `root creation previews without writing then requires a newer spoken confirmation and writes exactly once`(): Unit =
+    fun `persisted direct root command writes immediately exactly once without preview or lesson focus`(): Unit =
         runBlocking {
             val store = ContextStore().apply {
                 saved[501L] = VoiceTutorStudySnapshot(501, null, "운영체제", 6)
             }
             val fixture = Fixture(studyContexts = store).apply {
-                handler = { name, arguments ->
+                handler = { name, _ ->
                     if (name == "create_root_study") success(linkedMapOf(
                         "created" to true,
                         "id" to 501L,
@@ -651,48 +650,23 @@ class McpVoiceTutorToolAdapterTest {
                     )) else failure("UNEXPECTED_TOOL")
                 }
             }
-            val requested = context(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
-            val preview = fixture.adapter.execute(
-                requested,
+            val command = context(
+                VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+                rootTopic = "운영체제",
+                rootDifficulty = 6,
+            )
+            val created = fixture.adapter.execute(
+                command,
                 "create_root_study",
-                mapOf("topic" to "운영체제", "difficulty_level" to 6, "confirm" to false),
+                mapOf("topic" to "운영체제", "difficulty_level" to 6),
             )
-
-            assertThat(preview.isError).isFalse()
-            assertThat(preview.rootStudyCreationPreview).isNotNull()
-            assertThat(preview.rootStudyCreationPreview!!.topic).isEqualTo("운영체제")
-            assertThat(preview.rootStudyCreationPreview!!.difficulty).isEqualTo(6)
-            assertThat(preview.rootStudyCreationPreview!!.previewResponseGeneration).isEqualTo(2)
-            assertThat(json(preview).path("requiresConfirmation").asBoolean()).isTrue()
-            assertThat(json(preview).path("topic").asText()).isEqualTo("운영체제")
-            assertThat(json(preview).path("difficultyLevel").asInt()).isEqualTo(6)
-            assertThat(json(preview).path("notice").asText()).contains(
-                "Speak this exact root topic and level", "NEW explicit affirmative learner turn",
-                "wrote nothing", "does not start a lesson", "Never read the token aloud",
-            )
-            assertThat(fixture.calls).isEmpty()
-            assertThat(store.remembered).isEmpty()
-
-            val arguments = mapOf(
-                "topic" to "운영체제",
-                "difficulty_level" to 6,
-                "confirm" to true,
-                "confirmation_token" to json(preview).path("confirmation_token").asText(),
-            )
-            assertCode(
-                fixture.adapter.execute(requested, "create_root_study", arguments),
-                "ROOT_CREATION_CONFIRMATION_REQUIRED",
-            )
-            assertThat(fixture.calls).isEmpty()
-
-            fixture.learnerTurnId = 12
-            val created = fixture.adapter.execute(rootConfirmationContext(), "create_root_study", arguments)
 
             assertThat(created.isError).isFalse()
             assertThat(created.studyTreeChanged).isTrue()
             assertThat(created.createdStudyId).isEqualTo(501L)
             assertThat(created.changedStudyId).isEqualTo(501L)
             assertThat(created.changeKind).isEqualTo(VoiceTutorStudyChangeKind.CREATED)
+            assertThat(created.rootStudyReadbackId).isEqualTo(501L)
             assertThat(created.lessonFocus).isNull()
             assertThat(json(created).path("parentStudyId").isNull).isTrue()
             assertThat(json(created).path("voiceLessonContextReady").asBoolean()).isFalse()
@@ -704,12 +678,17 @@ class McpVoiceTutorToolAdapterTest {
             assertThat(fixture.calls.single().arguments).containsExactlyInAnyOrderEntriesOf(
                 mapOf("topic" to "운영체제", "difficulty_level" to 6),
             )
+            assertThat(fixture.calls.single().principal).isEqualTo(principal)
             assertThat(fixture.focusSelections).isEmpty()
             assertThat(store.remembered).containsExactly(listOf(501L))
 
             assertCode(
-                fixture.adapter.execute(rootConfirmationContext(), "create_root_study", arguments),
-                "ROOT_CREATION_CONFIRMATION_REQUIRED",
+                fixture.adapter.execute(
+                    command,
+                    "create_root_study",
+                    mapOf("topic" to "운영체제", "difficulty_level" to 6),
+                ),
+                "ROOT_CREATION_REQUEST_REQUIRED",
             )
             assertThat(fixture.calls).hasSize(1)
         }
@@ -730,22 +709,14 @@ class McpVoiceTutorToolAdapterTest {
                 )) else failure("UNEXPECTED_TOOL")
             }
         }
-        val requested = context(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
-        val preview = fixture.adapter.execute(
-            requested,
-            "create_root_study",
-            mapOf("topic" to " redis streams ", "difficulty_level" to 9, "confirm" to false),
-        )
-        fixture.learnerTurnId = 12
         val result = fixture.adapter.execute(
-            rootConfirmationContext("redis streams", 9),
-            "create_root_study",
-            mapOf(
-                "topic" to " redis streams ",
-                "difficulty_level" to 9,
-                "confirm" to true,
-                "confirmation_token" to json(preview).path("confirmation_token").asText(),
+            context(
+                VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+                rootTopic = "redis streams",
+                rootDifficulty = 5,
             ),
+            "create_root_study",
+            mapOf("topic" to " redis streams "),
         )
 
         assertThat(result.isError).isFalse()
@@ -759,100 +730,123 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(result.studyTreeChanged).isFalse()
         assertThat(result.createdStudyId).isNull()
         assertThat(result.changedStudyId).isNull()
+        assertThat(result.rootStudyReadbackId).isEqualTo(701L)
         assertThat(result.lessonFocus).isNull()
         assertThat(store.remembered).isEmpty()
         assertThat(fixture.focusSelections).isEmpty()
         assertThat(fixture.calls).hasSize(1)
         assertThat(fixture.calls.single().arguments).containsExactlyInAnyOrderEntriesOf(
-            mapOf("topic" to "redis streams", "difficulty_level" to 9),
+            mapOf("topic" to "redis streams", "difficulty_level" to 5),
         )
     }
 
     @Test
-    fun `direct replacement cannot consume old confirmation and can preview only the new root`() = runBlocking {
-        val fixture = Fixture(studyContexts = ContextStore())
-        val first = fixture.adapter.execute(
-            context(VoiceTutorInputIntent.CREATE_ROOT_STUDY),
-            "create_root_study",
-            mapOf("topic" to "운영체제", "difficulty_level" to 6, "confirm" to false),
-        )
-        val firstToken = json(first).path("confirmation_token").asText()
-        fixture.learnerTurnId = 12
-        val correction = context(VoiceTutorInputIntent.CREATE_ROOT_STUDY).copy(
-            dialogueBoundary = context(VoiceTutorInputIntent.CREATE_ROOT_STUDY).dialogueBoundary!!.copy(
-                responseGeneration = 4,
-                latestAcceptedLearnerSpeechStartedOrder = 7,
-                precedingTutorSpeechStoppedOrder = 6,
-                precedingSpokenResponseGeneration = 3,
-                precedingTutorProviderItemId = "root-preview-3",
-                latestAcceptedLearnerProviderItemId = "accepted-user-item",
-                latestAcceptedLearnerRootStudyCreationOffer = rootOffer(
-                    "운영체제", 6, 2, 3, 6, "root-preview-3",
-                ),
+    fun `a child name conflict is preserved without a root tree event or lesson focus`(): Unit = runBlocking {
+        val store = ContextStore()
+        val fixture = Fixture(studyContexts = store).apply {
+            handler = { name, _ ->
+                if (name == "create_root_study") failure("STUDY_TOPIC_CONFLICT")
+                else failure("UNEXPECTED_TOOL")
+            }
+        }
+
+        val result = fixture.adapter.execute(
+            context(
+                VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+                rootTopic = "Cache",
+                rootDifficulty = 5,
             ),
+            "create_root_study",
+            mapOf("topic" to "Cache"),
         )
+
+        assertCode(result, "STUDY_TOPIC_CONFLICT")
+        assertThat(result.studyTreeChanged).isFalse()
+        assertThat(result.createdStudyId).isNull()
+        assertThat(result.changedStudyId).isNull()
+        assertThat(result.rootStudyReadbackId).isNull()
+        assertThat(result.lessonFocus).isNull()
+        assertThat(fixture.calls).hasSize(1)
+        assertThat(fixture.calls.single().principal).isEqualTo(principal)
+        assertThat(fixture.calls.single().arguments).containsExactlyInAnyOrderEntriesOf(
+            mapOf("topic" to "Cache", "difficulty_level" to 5),
+        )
+        assertThat(store.remembered).isEmpty()
+        assertThat(fixture.focusSelections).isEmpty()
+    }
+
+    @Test
+    fun `direct root authorization is exact tuple bound and a mismatched call cannot consume it`() = runBlocking {
+        val store = ContextStore().apply {
+            saved[801L] = VoiceTutorStudySnapshot(801, null, "Spring", 7)
+        }
+        val fixture = Fixture(studyContexts = store).apply {
+            handler = { name, _ ->
+                if (name == "create_root_study") success(linkedMapOf(
+                    "created" to true,
+                    "id" to 801L,
+                    "parentStudyId" to null,
+                    "topic" to "Spring",
+                    "difficultyLevel" to 7,
+                    "enabled" to true,
+                    "activeForQuestions" to true,
+                )) else failure("UNEXPECTED_TOOL")
+            }
+        }
+        val command = context(
+            VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+            rootTopic = "Spring",
+            rootDifficulty = 7,
+        )
+
         assertCode(
             fixture.adapter.execute(
-                correction,
+                command,
                 "create_root_study",
-                mapOf(
-                    "topic" to "운영체제", "difficulty_level" to 6, "confirm" to true,
-                    "confirmation_token" to firstToken,
-                ),
+                mapOf("topic" to "Redis", "difficulty_level" to 9),
             ),
-            "ROOT_CREATION_CONFIRMATION_REQUIRED",
+            "ROOT_CREATION_REQUEST_MISMATCH",
         )
-
-        val replacement = fixture.adapter.execute(
-            correction,
-            "create_root_study",
-            mapOf("topic" to "Redis", "difficulty_level" to 8, "confirm" to false),
-        )
-        assertThat(replacement.isError).isFalse()
-        assertThat(replacement.rootStudyCreationPreview?.topic).isEqualTo("Redis")
-        assertThat(replacement.rootStudyCreationPreview?.difficulty).isEqualTo(8)
-        assertThat(replacement.rootStudyCreationPreview?.previewResponseGeneration).isEqualTo(4)
-        assertThat(json(replacement).path("confirmation_token").asText()).isNotEqualTo(firstToken)
         assertThat(fixture.calls).isEmpty()
+        assertThat(command.dialogueBoundary!!.rootStudyCreationAuthorization!!.isActive()).isTrue()
+
+        val created = fixture.adapter.execute(
+            command,
+            "create_root_study",
+            mapOf("topic" to "Spring", "difficulty_level" to 7),
+        )
+        assertThat(created.isError).isFalse()
+        assertThat(fixture.calls.map { it.name }).containsExactly("create_root_study")
+        assertThat(command.dialogueBoundary!!.rootStudyCreationAuthorization!!.isActive()).isFalse()
     }
 
     @Test
-    fun `newer speech during persisted confirmation lookup revokes root write before invocation`() = runBlocking {
+    fun `newer speech during persisted direct command lookup revokes root write before invocation`() = runBlocking {
         val fixture = Fixture(studyContexts = ContextStore())
-        val preview = fixture.adapter.execute(
-            context(VoiceTutorInputIntent.CREATE_ROOT_STUDY),
-            "create_root_study",
-            mapOf("topic" to "운영체제", "difficulty_level" to 6, "confirm" to false),
-        )
         val arguments = mapOf(
             "topic" to "운영체제",
             "difficulty_level" to 6,
-            "confirm" to true,
-            "confirmation_token" to json(preview).path("confirmation_token").asText(),
         )
-        fixture.learnerTurnId = 12
-        val lease = VoiceTutorRootStudyConfirmationAuthorization()
+        val lease = VoiceTutorRootStudyCreationAuthorization("운영체제", 6)
         fixture.duringLearnerAuthorization = { lease.invalidate() }
 
         assertCode(
             fixture.adapter.execute(
-                rootConfirmationContext(authorization = lease),
+                context(VoiceTutorInputIntent.CREATE_ROOT_STUDY).copy(
+                    dialogueBoundary = context(VoiceTutorInputIntent.CREATE_ROOT_STUDY).dialogueBoundary!!.copy(
+                        rootStudyCreationAuthorization = lease,
+                    ),
+                ),
                 "create_root_study",
                 arguments,
             ),
-            "ROOT_CREATION_CONFIRMATION_REQUIRED",
-        )
-        assertThat(fixture.calls).isEmpty()
-        fixture.duringLearnerAuthorization = {}
-        assertCode(
-            fixture.adapter.execute(rootConfirmationContext(), "create_root_study", arguments),
-            "ROOT_CREATION_CONFIRMATION_REQUIRED",
+            "ROOT_CREATION_REQUEST_REQUIRED",
         )
         assertThat(fixture.calls).isEmpty()
     }
 
     @Test
-    fun `unverified root result fails closed and consumed confirmation cannot replay the write`(): Unit = runBlocking {
+    fun `unverified root result fails closed and consumed direct command cannot replay the write`(): Unit = runBlocking {
         val fixture = Fixture(studyContexts = ContextStore()).apply {
             handler = { name, _ ->
                 if (name == "create_root_study") success(linkedMapOf(
@@ -866,30 +860,27 @@ class McpVoiceTutorToolAdapterTest {
                 )) else failure("UNEXPECTED_TOOL")
             }
         }
-        val requested = context(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
-        val preview = fixture.adapter.execute(
-            requested,
-            "create_root_study",
-            mapOf("topic" to "운영체제", "difficulty_level" to 6, "confirm" to false),
-        )
         val arguments = mapOf(
             "topic" to "운영체제",
             "difficulty_level" to 6,
-            "confirm" to true,
-            "confirmation_token" to json(preview).path("confirmation_token").asText(),
         )
-        fixture.learnerTurnId = 12
+        val command = context(
+            VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+            rootTopic = "운영체제",
+            rootDifficulty = 6,
+        )
 
-        val uncertain = fixture.adapter.execute(rootConfirmationContext(), "create_root_study", arguments)
+        val uncertain = fixture.adapter.execute(command, "create_root_study", arguments)
 
         assertCode(uncertain, "ROOT_CREATION_RESULT_UNCONFIRMED")
         assertThat(uncertain.studyTreeChanged).isFalse()
         assertThat(uncertain.createdStudyId).isNull()
+        assertThat(uncertain.rootStudyReadbackId).isNull()
         assertThat(uncertain.output).doesNotContain("Different root")
         assertThat(fixture.calls).hasSize(1)
         assertCode(
-            fixture.adapter.execute(rootConfirmationContext(), "create_root_study", arguments),
-            "ROOT_CREATION_CONFIRMATION_REQUIRED",
+            fixture.adapter.execute(command, "create_root_study", arguments),
+            "ROOT_CREATION_REQUEST_REQUIRED",
         )
         assertThat(fixture.calls).hasSize(1)
     }
@@ -899,17 +890,22 @@ class McpVoiceTutorToolAdapterTest {
         for ((context, arguments, code) in listOf(
             Triple(
                 context(VoiceTutorInputIntent.DISCOVER_SAVED_TOPIC),
-                mapOf<String, Any>("topic" to "운영체제", "confirm" to false),
+                mapOf<String, Any>("topic" to "운영체제"),
+                "ROOT_CREATION_REQUEST_REQUIRED",
+            ),
+            Triple(
+                context(VoiceTutorInputIntent.NONE),
+                mapOf<String, Any>("topic" to "운영체제"),
                 "ROOT_CREATION_REQUEST_REQUIRED",
             ),
             Triple(
                 context(VoiceTutorInputIntent.CREATE_ROOT_STUDY),
-                mapOf<String, Any>("topic" to "운영체제", "confirm" to false, "enabled" to false),
+                mapOf<String, Any>("topic" to "운영체제", "enabled" to false),
                 "INVALID_ARGUMENTS",
             ),
             Triple(
                 context(VoiceTutorInputIntent.CREATE_ROOT_STUDY),
-                mapOf<String, Any>("topic" to "운영체제", "confirm" to false, "confirmation_token" to "forged"),
+                mapOf<String, Any>("topic" to "운영체제", "confirm" to true, "confirmation_token" to "forged"),
                 "INVALID_ARGUMENTS",
             ),
         )) {
@@ -2012,51 +2008,6 @@ class McpVoiceTutorToolAdapterTest {
         precedingTutorSpeechStoppedOrder = 6, precedingSpokenResponseGeneration = 3,
     ))
 
-    private fun rootConfirmationContext(
-        topic: String = "운영체제",
-        difficulty: Int = 6,
-        previewGeneration: Long = 2,
-        tutorGeneration: Long = 3,
-        stoppedOrder: Long = 6,
-        responseGeneration: Long = 4,
-        authorization: VoiceTutorRootStudyConfirmationAuthorization =
-            VoiceTutorRootStudyConfirmationAuthorization(),
-    ) = context(VoiceTutorInputIntent.CONFIRM_ROOT_STUDY).copy(
-        dialogueBoundary = VoiceTutorDialogueBoundary(
-            responseGeneration = responseGeneration,
-            latestAcceptedLearnerSpeechStartedOrder = stoppedOrder + 1,
-            precedingTutorSpeechStoppedOrder = stoppedOrder,
-            precedingSpokenResponseGeneration = tutorGeneration,
-            precedingTutorProviderItemId = "root-preview-$tutorGeneration",
-            latestAcceptedLearnerProviderItemId = "accepted-user-item",
-            latestAcceptedLearnerLessonRevision = 0,
-            latestAcceptedLearnerIntent = VoiceTutorInputIntent.CONFIRM_ROOT_STUDY,
-            latestAcceptedLearnerRootStudyCreationOffer = rootOffer(
-                topic, difficulty, previewGeneration, tutorGeneration, stoppedOrder,
-                "root-preview-$tutorGeneration",
-            ),
-            rootStudyConfirmationAuthorization = authorization,
-        ),
-    )
-
-    private fun rootOffer(
-        topic: String,
-        difficulty: Int,
-        previewGeneration: Long,
-        tutorGeneration: Long,
-        stoppedOrder: Long,
-        tutorItemId: String,
-    ) = VoiceTutorRootStudyCreationOffer(
-        topic = topic,
-        difficulty = difficulty,
-        lessonRevision = 0,
-        previewResponseGeneration = previewGeneration,
-        tutorResponseGeneration = tutorGeneration,
-        tutorSpeechStoppedOrder = stoppedOrder,
-        tutorProviderItemId = tutorItemId,
-        tutorAudioTranscript = "$topic 주제를 레벨 $difficulty 루트로 만들까요?",
-    )
-
     private fun mutationFixture(studyContexts: VoiceTutorStudyContextPort = ContextStore()) = Fixture(studyContexts = studyContexts).apply {
         handler = { name, args ->
             when (name) {
@@ -2317,6 +2268,8 @@ class McpVoiceTutorToolAdapterTest {
             targetTraversal: VoiceTutorStudyTargetTraversal? = targetStudyId?.let {
                 VoiceTutorStudyTargetTraversal()
             },
+            rootTopic: String = "운영체제",
+            rootDifficulty: Int = 6,
         ) = VoiceTutorWebRtcControlContext(
             session(), "rtc_synthetic_call", principal,
             dialogueBoundary = VoiceTutorDialogueBoundary(
@@ -2345,6 +2298,11 @@ class McpVoiceTutorToolAdapterTest {
                 },
                 latestAcceptedLearnerTargetTraversal = targetTraversal,
                 focusAuthorization = targetStudyId?.let { VoiceTutorFocusAuthorization() },
+                rootStudyCreationAuthorization = if (inputIntent == VoiceTutorInputIntent.CREATE_ROOT_STUDY) {
+                    VoiceTutorRootStudyCreationAuthorization(rootTopic, rootDifficulty)
+                } else {
+                    null
+                },
             ),
         )
 

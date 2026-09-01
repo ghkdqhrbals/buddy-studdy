@@ -83,6 +83,11 @@ class VoiceTutorLegacySpokenLessonEndTest {
                 transcript: String,
                 occurredAt: Instant,
                 lessonRevision: Long,
+                studyQuestionProviderItemId: String?,
+                studyAnswerProviderItemId: String?,
+                askedStudyQuestion: Boolean,
+                isStudyQuestion: Boolean,
+                studyAnswerProviderItemIds: List<String>,
             ): Boolean = error("Internal end must not be persisted as transcript.")
 
             override suspend fun finish(

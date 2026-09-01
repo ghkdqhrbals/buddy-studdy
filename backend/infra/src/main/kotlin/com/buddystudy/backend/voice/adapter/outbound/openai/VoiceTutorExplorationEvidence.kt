@@ -36,12 +36,15 @@ internal object VoiceTutorExplorationEvidence {
             .groupBy(VoiceTutorTranscriptTurn::id)
             .filterValues { it.size == 1 }
             .mapValues { it.value.single() }
+        val orderedTurns = turns.values.sortedWith(
+            compareBy<VoiceTutorTranscriptTurn> { it.sequenceNumber }.thenBy { it.id },
+        )
         val snapshots = VoiceTutorStudyRevisionIndex(studies)
         val focusIndex = VoiceTutorLessonFocusIndex(focuses, acceptedStudyId)
         val seenQuestions = mutableSetOf<Long>()
         return explorations.flatMap { exploration ->
             val exchanges = exploration.exchanges.mapNotNull { exchange ->
-                verifyExchange(exchange, turns)?.takeIf {
+                verifyExchange(exchange, turns, orderedTurns)?.takeIf {
                     val revision = requireNotNull(turns[it.questionTurnId]).lessonRevision
                     // Unfocused discovery/navigation is not a saved lesson. Unknown correlation
                     // still survives as unlinked session history, never as a node record.
@@ -79,6 +82,7 @@ internal object VoiceTutorExplorationEvidence {
     private fun verifyExchange(
         exchange: VoiceTutorLearningExchange,
         turns: Map<Long, VoiceTutorTranscriptTurn>,
+        orderedTurns: List<VoiceTutorTranscriptTurn>,
     ): VoiceTutorLearningExchange? {
         val questionTurn = turns[exchange.questionTurnId] ?: return null
         val questionRole = when (exchange.kind) {
@@ -87,15 +91,42 @@ internal object VoiceTutorExplorationEvidence {
         }
         val answerRole = if (questionRole == VoiceTutorTranscriptRole.TUTOR) VoiceTutorTranscriptRole.USER else VoiceTutorTranscriptRole.TUTOR
         if (questionTurn.role != questionRole) return null
+        if (exchange.kind == VoiceTutorExchangeKind.TUTOR_QUESTION && !questionTurn.isStudyQuestion) return null
         val question = plain(exchange.question).takeIf(String::isNotBlank) ?: return null
         val answers = orderedEvidence(exchange.answerTurnIds, turns, answerRole, questionTurn.sequenceNumber) ?: return null
         val answer = plain(exchange.answer)
+        if (exchange.kind == VoiceTutorExchangeKind.TUTOR_QUESTION) {
+            val completeDurableAnswer = orderedTurns.filter { turn ->
+                turn.role == VoiceTutorTranscriptRole.USER &&
+                    turn.studyQuestionTurnId == questionTurn.id
+            }
+            if (
+                answers.map(VoiceTutorTranscriptTurn::id) !=
+                    completeDurableAnswer.map(VoiceTutorTranscriptTurn::id) ||
+                answers.isEmpty() || answers.any {
+                    it.studyQuestionTurnId != questionTurn.id ||
+                        it.lessonRevision != questionTurn.lessonRevision ||
+                        hasInterveningTutor(questionTurn, it, orderedTurns)
+                }
+            ) {
+                // Lesson-level eligibility is insufficient: every answer row used by an assessed
+                // tutor question needs a server-persisted semantic link to this exact question row.
+                // Exact equality also prevents the model from grading only a convenient prefix,
+                // suffix, duplicate or reordered subset of one durable multipart answer.
+                return null
+            }
+        }
+        if (exchange.kind == VoiceTutorExchangeKind.LEARNER_QUESTION &&
+            (!questionTurn.askedStudyQuestion || answers.isEmpty())
+        ) return null
         if (answers.isEmpty()) {
             // Do not turn a later unrelated utterance or a model-completed answer into learner performance.
             return exchange.copy(question = question, answer = "", score = null, strengths = emptyList(), improvements = emptyList(), feedbackTurnIds = emptyList())
         }
         if (answer.isBlank()) return null
         if (exchange.kind == VoiceTutorExchangeKind.LEARNER_QUESTION) {
+            val directTutorAnswerRun = directTutorAnswerRun(questionTurn, orderedTurns) ?: return null
+            if (answers.map { it.id } != directTutorAnswerRun.map { it.id }) return null
             return exchange.copy(question = question, answer = answer, score = null, strengths = emptyList(), improvements = emptyList(), feedbackTurnIds = emptyList())
         }
         val feedback = orderedEvidence(exchange.feedbackTurnIds, turns, VoiceTutorTranscriptRole.TUTOR, answers.last().sequenceNumber)
@@ -103,6 +134,13 @@ internal object VoiceTutorExplorationEvidence {
         if (feedback.isEmpty()) {
             return exchange.copy(question = question, answer = answer, score = null, strengths = emptyList(), improvements = emptyList())
         }
+        val exactAnswer = answers.last()
+        if (feedback.any {
+                it.studyAnswerTurnId != exactAnswer.id || it.lessonRevision != exactAnswer.lessonRevision ||
+                    it.isStudyQuestion || it.studyQuestionTurnId != null || it.askedStudyQuestion ||
+                    hasInterveningTutor(exactAnswer, it, orderedTurns)
+            }
+        ) return null
         val score = exchange.score
         val scoreSupported = score == null || feedback.any { VoiceTutorSpokenScoreEvidence.supports(it.transcript, score) }
         return exchange.copy(
@@ -129,6 +167,42 @@ internal object VoiceTutorExplorationEvidence {
             previous = turn.sequenceNumber
             turn
         }
+    }
+
+    /**
+     * Transcript inserts are serialized by the locked session row and the sideband controller persists a
+     * completed tutor batch before releasing later learner work. The full consecutive TUTOR run is therefore
+     * the only response that can belong to this attested learner question; a gap, another USER turn, a focus
+     * revision change or ambiguous sequence fails closed.
+     */
+    private fun directTutorAnswerRun(
+        question: VoiceTutorTranscriptTurn,
+        orderedTurns: List<VoiceTutorTranscriptTurn>,
+    ): List<VoiceTutorTranscriptTurn>? {
+        if (orderedTurns.groupingBy { it.sequenceNumber }.eachCount().any { it.value != 1 }) return null
+        val following = orderedTurns.dropWhile { it.sequenceNumber <= question.sequenceNumber }
+        val first = following.firstOrNull() ?: return null
+        if (first.sequenceNumber != question.sequenceNumber + 1 ||
+            first.role != VoiceTutorTranscriptRole.TUTOR ||
+            first.lessonRevision != question.lessonRevision
+        ) return null
+        val run = following.takeWhile {
+            it.role == VoiceTutorTranscriptRole.TUTOR && it.lessonRevision == question.lessonRevision
+        }
+        if (run.isEmpty() || run.withIndex().any { (index, turn) ->
+                turn.sequenceNumber != question.sequenceNumber + index + 1
+            }
+        ) return null
+        return run
+    }
+
+    private fun hasInterveningTutor(
+        before: VoiceTutorTranscriptTurn,
+        after: VoiceTutorTranscriptTurn,
+        orderedTurns: List<VoiceTutorTranscriptTurn>,
+    ): Boolean = orderedTurns.any { turn ->
+        turn.role == VoiceTutorTranscriptRole.TUTOR &&
+            turn.sequenceNumber > before.sequenceNumber && turn.sequenceNumber < after.sequenceNumber
     }
 
     private fun plain(value: String) = VoiceTutorLearningResultSanitizer.plainText(value)

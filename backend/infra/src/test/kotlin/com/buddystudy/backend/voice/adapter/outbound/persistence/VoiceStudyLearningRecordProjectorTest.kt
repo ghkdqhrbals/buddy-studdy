@@ -50,7 +50,13 @@ class VoiceStudyLearningRecordProjectorTest {
 
     @Test
     fun `source sequence not numeric turn id or input list order establishes chronology`() {
-        val turns = fixture.turns().map { if (it.id == 1L) it.copy(id = 100) else it }.reversed()
+        val turns = fixture.turns().map {
+            when (it.id) {
+                1L -> it.copy(id = 100)
+                2L, 3L -> it.copy(studyQuestionTurnId = 100)
+                else -> it
+            }
+        }.reversed()
         val exploration = fixture.exploration().copy(exchanges = listOf(fixture.exchange().copy(questionTurnId = 100)))
         val record = project(listOf(exploration), turns).single()
         assertThat(record.questionTurnId).isEqualTo(100)
@@ -89,6 +95,33 @@ class VoiceStudyLearningRecordProjectorTest {
     }
 
     @Test
+    fun `a valid study answer cannot carry a setup pair or unlinked reply into canonical records`() {
+        val setupQuestion = fixture.turn(7, VoiceTutorTranscriptRole.TUTOR, "Spring 루트를 만들까요?")
+        val setupAnswer = fixture.turn(8, VoiceTutorTranscriptRole.USER, "네, 만들어 주세요.")
+        val setupExchange = fixture.exchange().copy(
+            questionTurnId = 7, answerTurnIds = listOf(8), feedbackTurnIds = emptyList(),
+            score = null, strengths = emptyList(), improvements = emptyList(),
+        )
+        val mixedAnswer = fixture.exchange().copy(
+            answerTurnIds = listOf(2, 8), feedbackTurnIds = emptyList(),
+            score = null, strengths = emptyList(), improvements = emptyList(),
+        )
+        val turns = fixture.turns() + setupQuestion + setupAnswer
+
+        val withSetupPair = project(
+            listOf(fixture.exploration().copy(exchanges = listOf(fixture.exchange(), setupExchange))),
+            turns,
+        )
+        val withMixedReply = project(
+            listOf(fixture.exploration().copy(exchanges = listOf(mixedAnswer))),
+            turns,
+        )
+
+        assertThat(withSetupPair.map { it.questionTurnId }).containsExactly(1L)
+        assertThat(withMixedReply).isEmpty()
+    }
+
+    @Test
     fun `only an actually spoken score survives and quantities cannot create a new evaluation`() {
         val ungraded = project(turns = fixture.turns().map {
             if (it.id == 4L) it.copy(transcript = "캐시 응답은 85ms이고 적중률은 100%입니다.") else it
@@ -121,22 +154,27 @@ class VoiceStudyLearningRecordProjectorTest {
     }
 
     @Test
-    fun `unanswered questions retain their source without accepting a model written answer or grade`() {
+    fun `unanswered tutor questions do not create canonical learning records`() {
         val exploration = fixture.exploration().copy(exchanges = listOf(fixture.exchange().copy(answerTurnIds = emptyList())))
-        val record = project(listOf(exploration)).single()
-        assertThat(record.question).isEqualTo(fixture.turns()[0].transcript)
-        assertThat(record.answer).isNull()
-        assertThat(record.score).isNull()
-        assertThat(record.feedback).isNull()
-        assertThat(record.strengths).isEmpty()
-        assertThat(record.translatableFields()).containsOnlyKeys("question", "depthSummary")
+        assertThat(project(listOf(exploration))).isEmpty()
     }
 
     @Test
     fun `short meaningful answers remain exact original answers without a length threshold`() {
         for (answer in listOf("응", "아니", "2", "Redis")) {
-            val exploration = fixture.exploration().copy(exchanges = listOf(fixture.exchange().copy(answerTurnIds = listOf(2))))
-            val turns = fixture.turns().map { if (it.id == 2L) it.copy(transcript = answer) else it }
+            val exploration = fixture.exploration().copy(exchanges = listOf(fixture.exchange().copy(
+                answerTurnIds = listOf(2), feedbackTurnIds = emptyList(), score = null,
+                strengths = emptyList(), improvements = emptyList(),
+            )))
+            val turns = fixture.turns().map {
+                when (it.id) {
+                    2L -> it.copy(transcript = answer)
+                    // This case intentionally models one exact short answer,
+                    // not a model-selected prefix of the fixture's multipart answer.
+                    3L -> it.copy(studyQuestionTurnId = null)
+                    else -> it
+                }
+            }
             assertThat(project(listOf(exploration), turns).single().answer).isEqualTo(answer)
         }
     }
@@ -183,7 +221,8 @@ class VoiceStudyLearningRecordProjectorTest {
     @Test
     fun `large valid extraction is bounded to forty eight distinct records without inventing or merging evidence`() {
         val turns = (0L..48L).flatMap { index ->
-            listOf(fixture.turn(100 + index * 2, VoiceTutorTranscriptRole.USER, "질문 $index"),
+            listOf(fixture.turn(100 + index * 2, VoiceTutorTranscriptRole.USER, "질문 $index")
+                .copy(askedStudyQuestion = true),
                 fixture.turn(101 + index * 2, VoiceTutorTranscriptRole.TUTOR, "답변 $index"))
         }
         val exchanges = (0L..48L).map { index -> fixture.learnerQuestion().copy(
@@ -218,23 +257,15 @@ class VoiceStudyLearningRecordProjectorTest {
     }
 
     @Test
-    fun `old pending question and new question on the same node keep different captured levels and verbatim sources`() {
+    fun `cross revision tutor answer cannot create a canonical learning record`() {
         val revised = fixture.snapshots().last().copy(topic = "Renamed eviction", difficulty = 8, revision = 1)
         val turns = fixture.turns().map { if (it.id >= 2) it.copy(lessonRevision = 1) else it }
-        val merged = fixture.exploration().copy(topic = revised.topic, exchanges = listOf(fixture.exchange(), fixture.learnerQuestion()))
 
-        val records = project(listOf(merged), turns, snapshots = fixture.snapshots() + revised)
-
-        assertThat(records).hasSize(2)
-        assertThat(records.map { it.studyId }).containsExactly(11, 11)
-        assertThat(records.map { it.topic }).containsExactly(fixture.TOPIC, revised.topic)
-        assertThat(records.map { it.difficulty }).containsExactly(3, 8)
-        assertThat(records.map { it.questionTurnId }).containsExactly(1, 5)
-        assertThat(records.first().question).isEqualTo(fixture.turns()[0].transcript)
-        assertThat(records.first().answer).isEqualTo(fixture.turns()[1].transcript + "\n" + fixture.turns()[2].transcript)
-        assertThat(records.first().score).isEqualTo(85)
-        assertThat(records.last().question).isEqualTo(fixture.turns()[4].transcript)
-        assertThat(records.last().score).isNull()
+        assertThat(project(
+            listOf(fixture.exploration().copy(topic = revised.topic, exchanges = listOf(fixture.exchange()))),
+            turns,
+            snapshots = fixture.snapshots() + revised,
+        )).isEmpty()
     }
 
     @Test
@@ -276,7 +307,9 @@ class VoiceStudyLearningRecordProjectorTest {
     @Test
     fun `unknown and future question epochs cannot create ordinary node records`() {
         for (revision in listOf(-1L, 1L, Long.MAX_VALUE)) {
-            assertThat(project(turns = fixture.turns().map { if (it.id == 1L) it.copy(lessonRevision = revision) else it }))
+            assertThat(project(turns = fixture.turns().map {
+                if (it.id <= 4L) it.copy(lessonRevision = revision) else it
+            }))
                 .describedAs("unbound epoch $revision").isEmpty()
         }
     }
@@ -293,7 +326,7 @@ class VoiceStudyLearningRecordProjectorTest {
     @Test
     fun `each question uses its exact selected node even after cross-tree focus changes and late answers`() {
         val other = VoiceTutorStudySnapshot(90, null, "Message ordering", 7, revision = 2)
-        val transcript = fixture.turns().map { it.copy(lessonRevision = if (it.id == 1L) 1 else 2) }
+        val transcript = fixture.turns().map { it.copy(lessonRevision = if (it.id <= 4L) 1 else 2) }
         val history = fixture.snapshots() + listOf(fixture.snapshots().last().copy(revision = 1), other.copy(revision = 0), other)
         val records = project(
             explorations = listOf(fixture.exploration(), fixture.exploration().copy(
@@ -372,11 +405,14 @@ internal object VoiceStudyLearningRecordTestFixture {
     )
 
     fun turns() = listOf(
-        turn(1, VoiceTutorTranscriptRole.TUTOR, "  캐시에서 **LRU**는 어떤 키를 제거하나요?\n원문 질문입니다. "),
-        turn(2, VoiceTutorTranscriptRole.USER, "  오래전에 쓴 키부터요.\n"),
-        turn(3, VoiceTutorTranscriptRole.USER, "빈도보다는 최근 사용 시점으로 판단해요. \n"),
-        turn(4, VoiceTutorTranscriptRole.TUTOR, "85점입니다. 최근 사용 기준을 잘 짚었고, 접근 시점 갱신을 덧붙이면 좋아요. "),
-        turn(5, VoiceTutorTranscriptRole.USER, "LFU랑은 어떻게 달라요?"),
+        turn(1, VoiceTutorTranscriptRole.TUTOR, "  캐시에서 **LRU**는 어떤 키를 제거하나요?\n원문 질문입니다. ")
+            .copy(isStudyQuestion = true),
+        turn(2, VoiceTutorTranscriptRole.USER, "  오래전에 쓴 키부터요.\n").copy(studyQuestionTurnId = 1),
+        turn(3, VoiceTutorTranscriptRole.USER, "빈도보다는 최근 사용 시점으로 판단해요. \n").copy(studyQuestionTurnId = 1),
+        turn(4, VoiceTutorTranscriptRole.TUTOR, "85점입니다. 최근 사용 기준을 잘 짚었고, 접근 시점 갱신을 덧붙이면 좋아요. ")
+            .copy(studyAnswerTurnId = 3),
+        turn(5, VoiceTutorTranscriptRole.USER, "LFU랑은 어떻게 달라요?")
+            .copy(askedStudyQuestion = true),
         turn(6, VoiceTutorTranscriptRole.TUTOR, "LFU는 사용 빈도가 낮은 키를 먼저 제거해요."),
     )
 

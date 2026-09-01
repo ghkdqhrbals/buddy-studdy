@@ -132,9 +132,18 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
                 id bigint primary key, session_id varchar(36) not null, provider_item_id varchar(191) not null,
                 role varchar(16) not null, transcript clob not null, sequence_number bigint not null,
                 occurred_at timestamp(6) not null, lesson_revision bigint not null default 0,
+                study_question_turn_id bigint,
+                study_answer_turn_id bigint,
+                asked_study_question boolean not null default false,
+                is_study_question boolean not null default false,
                 unique (session_id, provider_item_id, role), unique (session_id, sequence_number),
                 foreign key (session_id) references voice_tutor_sessions(id) on delete cascade,
-                check (role in ('USER', 'TUTOR')), check (lesson_revision >= -1)
+                check (role in ('USER', 'TUTOR')), check (lesson_revision >= -1),
+                check (study_question_turn_id is null or study_question_turn_id > 0),
+                check (study_question_turn_id is null or role = 'USER'),
+                check (study_question_turn_id is null or asked_study_question = false),
+                check (study_answer_turn_id is null or role = 'TUTOR'),
+                check (is_study_question = false or role = 'TUTOR')
             )
         """.trimIndent())
         executeSchema("""
@@ -698,8 +707,9 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         val revised = fixture.snapshots().last().copy(topic = "Renamed eviction", difficulty = 8, revision = 1)
         seedRevision(revised)
         execute("update studies set topic = 'Renamed eviction', difficulty_level = 8 where id = 11")
-        // The first tutor question was created at epoch zero; every subsequent event is newer.
-        execute("update voice_tutor_transcript_turns set lesson_revision = 1 where id >= 2")
+        // The first complete tutor-question exchange remains at epoch zero;
+        // only the later learner-question exchange belongs to the renamed focus.
+        execute("update voice_tutor_transcript_turns set lesson_revision = 1 where id >= 5")
         val merged = fixture.exploration().copy(topic = revised.topic, exchanges = listOf(fixture.exchange(), fixture.learnerQuestion()))
         append(listOf(merged))
         val ids = database.sql("select id from voice_study_learning_records order by question_turn_id")
@@ -779,6 +789,42 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
     }
 
     @Test
+    fun `completed technical result without verified learning exchanges creates no canonical record`() = runBlocking {
+        seed()
+
+        adapter.appendCompletedSession(fixture.USER_ID, fixture.SESSION_ID, emptyList(), now)
+
+        assertThat(count("questions")).isZero()
+        assertThat(count("voice_study_learning_records")).isZero()
+        assertThat(outbox.events()).isEmpty()
+        assertThat(projected()).isTrue()
+    }
+
+    @Test
+    fun `one verified lesson answer does not let a setup confirmation become a canonical record`() = runBlocking {
+        seed()
+        execute(
+            """
+            insert into voice_tutor_transcript_turns
+                (id, session_id, provider_item_id, role, transcript, sequence_number, occurred_at, lesson_revision, study_question_turn_id)
+            values
+                (7, '${fixture.SESSION_ID}', 'setup-question', 'TUTOR', 'Spring 루트를 만들까요?', 7, current_timestamp, 0, null),
+                (8, '${fixture.SESSION_ID}', 'setup-answer', 'USER', '네, 만들어 주세요.', 8, current_timestamp, 0, 1)
+            """.trimIndent(),
+        )
+        val setup = fixture.exchange().copy(
+            questionTurnId = 7, answerTurnIds = listOf(8), feedbackTurnIds = emptyList(),
+            score = null, strengths = emptyList(), improvements = emptyList(),
+        )
+
+        append(listOf(fixture.exploration().copy(exchanges = listOf(fixture.exchange(), setup))))
+
+        assertThat(onlyRecord().questionTurnId).isEqualTo(1)
+        assertThat(count("voice_study_learning_records")).isEqualTo(1)
+        assertThat(count("questions")).isEqualTo(1)
+    }
+
+    @Test
     fun `selected discovery lesson creates one canonical record with the original source and is replay safe`(): Unit = runBlocking {
         seed()
         execute("update voice_tutor_sessions set study_id = 11, accepted_study_id = null")
@@ -815,7 +861,7 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         seedFocus(11, 1)
         seedFocus(90, 2)
         execute("update voice_tutor_sessions set study_id = 90, accepted_study_id = null")
-        execute("update voice_tutor_transcript_turns set lesson_revision = case when id = 1 then 1 else 2 end")
+        execute("update voice_tutor_transcript_turns set lesson_revision = case when id <= 4 then 1 else 2 end")
         val second = fixture.exploration().copy(topic = other.topic, studyId = 90, exchanges = listOf(fixture.learnerQuestion()))
 
         append(listOf(fixture.exploration(), second))
@@ -847,12 +893,19 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         seedHeader(fixture.SESSION_ID, resultStatus)
         for (snapshot in fixture.snapshots()) seedSnapshot(snapshot)
         for (turn in fixture.turns()) {
-            database.sql("""
-                insert into voice_tutor_transcript_turns(id, session_id, provider_item_id, role, transcript, sequence_number, occurred_at, lesson_revision)
-                values (:id, :sessionId, :provider, :role, :text, :sequence, :occurred, :revision)
+            var insert = database.sql("""
+                insert into voice_tutor_transcript_turns(id, session_id, provider_item_id, role, transcript, sequence_number, occurred_at, lesson_revision, study_question_turn_id, study_answer_turn_id, asked_study_question, is_study_question)
+                values (:id, :sessionId, :provider, :role, :text, :sequence, :occurred, :revision, :studyQuestionTurnId, :studyAnswerTurnId, :askedStudyQuestion, :isStudyQuestion)
             """.trimIndent()).bind("id", turn.id).bind("sessionId", fixture.SESSION_ID).bind("provider", turn.providerItemId)
                 .bind("role", turn.role.name).bind("text", turn.transcript).bind("sequence", turn.sequenceNumber)
-                .bind("occurred", turn.occurredAt.utc()).bind("revision", turn.lessonRevision).fetch().rowsUpdated().awaitSingle()
+                .bind("occurred", turn.occurredAt.utc()).bind("revision", turn.lessonRevision)
+                .bind("askedStudyQuestion", turn.askedStudyQuestion)
+                .bind("isStudyQuestion", turn.isStudyQuestion)
+            insert = turn.studyQuestionTurnId?.let { insert.bind("studyQuestionTurnId", it) }
+                ?: insert.bindNull("studyQuestionTurnId", java.lang.Long::class.java)
+            insert = turn.studyAnswerTurnId?.let { insert.bind("studyAnswerTurnId", it) }
+                ?: insert.bindNull("studyAnswerTurnId", java.lang.Long::class.java)
+            insert.fetch().rowsUpdated().awaitSingle()
         }
     }
 

@@ -180,7 +180,7 @@ class VoiceTutorLongSpeechCheckpointTest {
     }
 
     @Test
-    fun `an empty later checkpoint and empty tail cannot erase an earlier accepted chunk`(): Unit = Fixture().use { f ->
+    fun `an accepted checkpoint with no final transcript stays unresponsive`(): Unit = Fixture().use { f ->
         f.start(1)
         f.checkpoint()
         f.accept("accepted", "실제 답변이 포함된 긴 설명입니다")
@@ -190,7 +190,7 @@ class VoiceTutorLongSpeechCheckpointTest {
         f.advance(Duration.ofSeconds(1))
         f.stop(1)
         f.emptyCommit(f.commits().last().path("event_id").asText())
-        assertThat(f.responses()).hasSize(1)
+        assertThat(f.responses()).isEmpty()
         assertThat(f.publications().map { it.itemId }).containsExactly("accepted")
         assertThat(f.actions.filterIsInstance<VoiceTutorInputTurnCoordinator.Action.Retry>()).isEmpty()
         f.assertNoInterventionOrAudioDisruption()

@@ -13,7 +13,8 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
-import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationOffer
+import com.buddystudy.backend.voice.application.model.VoiceTutorSpokenFeedbackAssessmentRequest
+import com.buddystudy.backend.voice.application.model.VoiceTutorSpokenQuestionAssessmentRequest
 import com.buddystudy.backend.voice.application.service.VoiceTutorInputAssessmentService
 import com.fasterxml.jackson.databind.JsonNode
 import kotlinx.coroutines.CoroutineStart
@@ -36,6 +37,122 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class OpenAIVoiceTutorInputAssessmentAdapterTest {
     private val mapper = JsonMapperProvider.mapper
+
+    @Test
+    fun `spoken feedback proof is a separate strict exact answer contract`() {
+        val request = VoiceTutorSpokenFeedbackAssessmentRequest(
+            userId = 7,
+            language = "ko",
+            focusTopic = "Spring",
+            focusDifficulty = 7,
+            questionTranscript = "DI가 결합도를 낮추는 이유는 무엇인가요?",
+            answerTranscript = "구현체 생성을 외부에 맡기기 때문입니다.",
+            feedbackTranscript = "85점입니다. 의존성 역전을 짚은 점이 좋고 테스트 격리 설명을 보완해 보세요.",
+        )
+        val body = mapper.valueToTree<JsonNode>(VoiceTutorSpokenFeedbackPromptProvider.requestBody(request, "gpt-5.4"))
+        val instruction = body.path("messages")[0].path("content").asText()
+        val evidence = mapper.readTree(body.path("messages")[1].path("content").asText())
+        val schema = body.path("response_format").path("json_schema").path("schema")
+
+        assertThat(instruction).contains(
+            "feedback evaluating", "exact answer", "score", "what was done well",
+            "topic/root/subtopic creation", "next-question", "serverAllowsNavigationOffer", "UNTRUSTED JSON",
+        )
+        assertThat(evidence.path("exactTutorStudyQuestion").asText()).isEqualTo(request.questionTranscript)
+        assertThat(evidence.path("exactLearnerAnswer").asText()).isEqualTo(request.answerTranscript)
+        assertThat(evidence.path("completedTutorTranscript").asText()).isEqualTo(request.feedbackTranscript)
+        assertThat(evidence.path("serverAllowsNavigationOffer").booleanValue()).isFalse()
+        val navigationEvidence = mapper.readTree(
+            mapper.valueToTree<JsonNode>(
+                VoiceTutorSpokenFeedbackPromptProvider.requestBody(
+                    request.copy(allowsNavigationOffer = true),
+                    "gpt-5.4",
+                ),
+            ).path("messages")[1].path("content").asText(),
+        )
+        assertThat(navigationEvidence.path("serverAllowsNavigationOffer").booleanValue()).isTrue()
+        assertThat(schema.path("required").map { it.asText() }).containsExactly("isAnswerFeedback")
+        assertThat(schema.path("additionalProperties").booleanValue()).isFalse()
+        assertThat(body.path("store").booleanValue()).isFalse()
+        assertThat(body.has("tools")).isFalse()
+    }
+
+    @Test
+    fun `spoken feedback proof parses pure approval and mixed rejection and fails closed`() {
+        assertThat(VoiceTutorSpokenFeedbackPromptProvider.parseResponse(
+            envelope("""{"isAnswerFeedback":true}"""),
+        )).isTrue()
+        assertThat(VoiceTutorSpokenFeedbackPromptProvider.parseResponse(
+            envelope("""{"isAnswerFeedback":false}"""),
+        )).isFalse()
+        listOf("{}", "null", "[]", """{"isAnswerFeedback":"true"}""",
+            """{"isAnswerFeedback":true,"reason":"85점... Spring 루트 만들까요?"}""").forEach { content ->
+            val error = runCatching {
+                VoiceTutorSpokenFeedbackPromptProvider.parseResponse(envelope(content))
+            }.exceptionOrNull() as VoiceTutorInputAssessmentException
+            assertThat(error.reason).isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_RESULT)
+        }
+    }
+
+    @Test
+    fun `spoken question semantic proof is a separate strict focus-bound contract`() {
+        val request = VoiceTutorSpokenQuestionAssessmentRequest(
+            userId = 7,
+            language = "ko",
+            focusTopic = "Redis",
+            focusDifficulty = 6,
+            transcript = "Redis의 active expiration은 어떤 문제를 해결하나요?",
+        )
+        val body = mapper.valueToTree<JsonNode>(VoiceTutorSpokenQuestionPromptProvider.requestBody(request, "gpt-5.4"))
+        val instruction = body.path("messages")[0].path("content").asText()
+        val evidence = mapper.readTree(body.path("messages")[1].path("content").asText())
+        val schema = body.path("response_format").path("json_schema").path("schema")
+
+        assertThat(instruction).contains(
+            "exactly one substantive study question", "confirmed saved focus", "readiness/start/permission",
+            "setup or configuration", "multiple questions", "UNTRUSTED JSON",
+        )
+        assertThat(evidence.path("confirmedFocusTopic").asText()).isEqualTo("Redis")
+        assertThat(evidence.path("confirmedFocusDifficulty").asInt()).isEqualTo(6)
+        assertThat(evidence.path("completedTutorTranscript").asText()).isEqualTo(request.transcript)
+        assertThat(schema.path("additionalProperties").booleanValue()).isFalse()
+        assertThat(schema.path("required").map { it.asText() }).containsExactly("isStudyQuestion")
+        assertThat(body.path("max_completion_tokens").asInt()).isEqualTo(128)
+        assertThat(body.path("store").booleanValue()).isFalse()
+        assertThat(body.has("tools")).isFalse()
+    }
+
+    @Test
+    fun `spoken question semantic proof parses one boolean and fails closed on refusal or malformed output`() {
+        assertThat(VoiceTutorSpokenQuestionPromptProvider.parseResponse(
+            envelope("""{"isStudyQuestion":true}"""),
+        )).isTrue()
+        assertThat(VoiceTutorSpokenQuestionPromptProvider.parseResponse(
+            envelope("""{"isStudyQuestion":false}"""),
+        )).isFalse()
+
+        for (content in listOf(
+            "{}", "null", "[]", """{"isStudyQuestion":"true"}""",
+            """{"isStudyQuestion":true,"reason":"question"}""",
+            """{"isStudyQuestion":true}{"isStudyQuestion":false}""",
+        )) {
+            val error = runCatching {
+                VoiceTutorSpokenQuestionPromptProvider.parseResponse(envelope(content))
+            }.exceptionOrNull()
+            assertThat(error).isInstanceOf(VoiceTutorInputAssessmentException::class.java)
+            assertThat((error as VoiceTutorInputAssessmentException).reason)
+                .isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_RESULT)
+        }
+        val refusal = mapper.writeValueAsString(mapOf("choices" to listOf(mapOf(
+            "finish_reason" to "stop",
+            "message" to mapOf("role" to "assistant", "refusal" to "private", "content" to null),
+        ))))
+        val refused = runCatching {
+            VoiceTutorSpokenQuestionPromptProvider.parseResponse(refusal)
+        }.exceptionOrNull() as VoiceTutorInputAssessmentException
+        assertThat(refused.reason).isEqualTo(VoiceTutorInputAssessmentFailure.REFUSED)
+        assertThat(refused.toString()).doesNotContain("private")
+    }
 
     @Test
     fun `actual HTTP request uses configured summary GPT and existing user content key only`() = runBlocking<Unit> {
@@ -93,16 +210,33 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         assertThat(rows.path("maxItems").intValue()).isEqualTo(2)
         assertThat(item.path("additionalProperties").booleanValue()).isFalse()
         assertThat(item.path("required").map { it.asText() })
-            .containsExactly("itemId", "decision", "intent", "targetStudyId", "spokenCandidateStudyIds")
+            .containsExactly(
+                "itemId", "decision", "intent", "currentTranscriptAnswersStudyQuestion",
+                "targetStudyId", "spokenCandidateStudyIds",
+                "rootStudyTopic", "rootStudyDifficulty", "rootStudyEvidenceSource",
+                "rootStudyCommandEvidence", "rootStudyTopicEvidence", "rootStudyDifficultyEvidence",
+                "rootStudyDifficultyOmitted",
+            )
         assertThat(item.path("properties").path("itemId").path("enum").map { it.asText() }).containsExactly("item_a", "item_b")
         assertThat(item.path("properties").path("decision").path("enum").map { it.asText() })
             .containsExactly("MEANINGFUL", "NON_COMMUNICATIVE")
         assertThat(item.path("properties").path("intent").path("enum").map { it.asText() })
             .containsExactly(
-                "NONE", "END_CURRENT_VOICE_LESSON", "CREATE_ROOT_STUDY", "CONFIRM_ROOT_STUDY",
+                "NONE", "END_CURRENT_VOICE_LESSON", "CREATE_ROOT_STUDY",
                 "SELECT_SAVED_TOPIC", "CONTINUE_TREE",
-                "DISCOVER_SAVED_TOPIC", "ANSWER_TO_STUDY_QUESTION",
+                "DISCOVER_SAVED_TOPIC", "ANSWER_TO_STUDY_QUESTION", "ASK_STUDY_QUESTION", "CONTINUE_STUDY",
             )
+        assertThat(item.path("properties").path("currentTranscriptAnswersStudyQuestion").path("type").asText())
+            .isEqualTo("boolean")
+        assertThat(item.path("properties").path("rootStudyTopic").path("maxLength").asInt()).isEqualTo(255)
+        assertThat(item.path("properties").path("rootStudyDifficulty").path("enum").map {
+            it.takeUnless(JsonNode::isNull)?.asInt()
+        }).containsExactly(null, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+        assertThat(item.path("properties").path("rootStudyEvidenceSource").path("enum").map {
+            it.takeUnless(JsonNode::isNull)?.asText()
+        }).containsExactly(null, "TRANSCRIPT", "SAME_SPEECH_CONTEXT")
+        assertThat(item.path("properties").path("rootStudyDifficultyOmitted").path("type").asText())
+            .isEqualTo("boolean")
         assertThat(item.path("properties").path("targetStudyId").path("type").asText()).isEqualTo("null")
         assertThat(item.path("properties").path("spokenCandidateStudyIds").path("maxItems").intValue()).isZero()
         assertThat(body.path("max_completion_tokens").intValue()).isEqualTo(2_048)
@@ -162,8 +296,11 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             "topic, section, answer, task or example", "tutor/tool text", "SELECT_SAVED_TOPIC", "CONTINUE_TREE",
             "new unanswered study question", "contextual yes", "brief feedback", "before that navigation offer",
             "ANSWER_TO_STUDY_QUESTION", "substantive question", "CREATE_ROOT_STUDY",
-            "top-level saved study", "CONFIRM_ROOT_STUDY", "not A; create B", "exact same topic",
-            "differs at all from the offer", "separately", "begin a lesson")
+            "ASK_STUDY_QUESTION", "follow-up or deeper content question", "microphone, call, UI",
+            "CONTINUE_STUDY", "next substantive", "generic acknowledgement",
+            "top-level saved study", "not A; create B", "exact requested new root name",
+            "Contextual yes/approval is never CREATE_ROOT_STUDY", "server alone applies level 5",
+            "separately", "begin a lesson")
         assertThat(instruction).doesNotContain(original, context)
         assertThat(data.path("utterances")[0].path("transcript").asText()).isEqualTo(original)
         assertThat(data.path("teacherContext").asText()).isEqualTo(context)
@@ -193,6 +330,48 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         assertThat(utterance.path("transcript").asText()).isEqualTo("음…")
         assertThat(utterance.path("sameSpeechContext").asText())
             .isEqualTo("Redis는 메모리 데이터 저장소예요\n음…")
+    }
+
+    @Test
+    fun `current transcript answer contribution is strict and independent from same speech context`() {
+        val request = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+            itemId = "final-tail",
+            transcript = "음…",
+            sameSpeechContext = "의존성을 외부에서 주입해 결합도를 낮춥니다.\n음…",
+        )))
+        val parsed = VoiceTutorInputAssessmentPromptProvider.parseResponse(
+            request,
+            envelope(decisionsWithIntent(
+                id = "final-tail",
+                decision = "MEANINGFUL",
+                intent = "ANSWER_TO_STUDY_QUESTION",
+                currentTranscriptAnswersStudyQuestion = false,
+            )),
+        )
+        assertThat(parsed.decisions.single().intent)
+            .isEqualTo(VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION)
+        assertThat(parsed.decisions.single().currentTranscriptAnswersStudyQuestion).isFalse()
+
+        assertReason(
+            request,
+            envelope(decisionsWithIntent(
+                id = "final-tail",
+                decision = "MEANINGFUL",
+                intent = "NONE",
+                currentTranscriptAnswersStudyQuestion = true,
+            )),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+        val missingField = mapper.readTree(decisionsWithIntent(
+            "final-tail", "MEANINGFUL", "ANSWER_TO_STUDY_QUESTION",
+        ))
+        (missingField.path("decisions")[0] as com.fasterxml.jackson.databind.node.ObjectNode)
+            .remove("currentTranscriptAnswersStudyQuestion")
+        assertReason(
+            request,
+            envelope(mapper.writeValueAsString(missingField)),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
     }
 
     @Test
@@ -238,25 +417,66 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
     }
 
     @Test
-    fun `root creation intent is targetless meaningful and never accepted from checkpoints`() {
+    fun `direct root creation extracts exact tuple and applies level five only when omitted`() {
+        val explicit = request().copy(utterances = listOf(
+            VoiceTutorInputUtterance("item_1", "Spring을 레벨 7 루트로 만들어 줘"),
+        ))
         val parsed = VoiceTutorInputAssessmentPromptProvider.parseResponse(
-            request().copy(utterances = listOf(VoiceTutorInputUtterance("item_1", "운영체제를 새 루트로 만들어 줘"))),
-            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CREATE_ROOT_STUDY")),
+            explicit,
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "Spring", rootStudyDifficulty = 7,
+                rootStudyEvidenceSource = "TRANSCRIPT",
+                rootStudyCommandEvidence = "Spring을 레벨 7 루트로 만들어 줘",
+                rootStudyTopicEvidence = "Spring",
+                rootStudyDifficultyEvidence = "7",
+            )),
         )
 
         assertThat(parsed.decisions.single().intent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
         assertThat(parsed.decisions.single().targetStudyId).isNull()
         assertThat(parsed.decisions.single().spokenCandidateStudyIds).isEmpty()
+        assertThat(parsed.decisions.single().rootStudyCreationRequest?.topic).isEqualTo("Spring")
+        assertThat(parsed.decisions.single().rootStudyCreationRequest?.difficulty).isEqualTo(7)
+
+        val omitted = request().copy(utterances = listOf(
+            VoiceTutorInputUtterance("item_1", "운영체제를 새 루트로 만들어 줘"),
+        ))
+        val defaulted = VoiceTutorInputAssessmentPromptProvider.parseResponse(
+            omitted,
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "운영체제", rootStudyDifficulty = null,
+                rootStudyEvidenceSource = "TRANSCRIPT",
+                rootStudyCommandEvidence = "운영체제를 새 루트로 만들어 줘",
+                rootStudyTopicEvidence = "운영체제",
+                rootStudyDifficultyOmitted = true,
+            )),
+        )
+        assertThat(defaulted.decisions.single().rootStudyCreationRequest?.difficulty).isEqualTo(5)
+
         assertReason(
-            request(),
-            envelope(decisionsWithIntent("item_1", "NON_COMMUNICATIVE", "CREATE_ROOT_STUDY")),
+            explicit,
+            envelope(decisionsWithIntent(
+                "item_1", "NON_COMMUNICATIVE", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "Spring", rootStudyDifficulty = 7,
+                rootStudyEvidenceSource = "TRANSCRIPT",
+                rootStudyCommandEvidence = "Spring을 레벨 7 루트로 만들어 줘",
+                rootStudyTopicEvidence = "Spring",
+                rootStudyDifficultyEvidence = "7",
+            )),
             VoiceTutorInputAssessmentFailure.INVALID_RESULT,
         )
         assertReason(
-            request().copy(utterances = listOf(VoiceTutorInputUtterance(
-                "item_1", "운영체제를 새 루트로 만들어 줘", checkpoint = true,
-            ))),
-            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CREATE_ROOT_STUDY")),
+            explicit.copy(utterances = listOf(explicit.utterances.single().copy(checkpoint = true))),
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "Spring", rootStudyDifficulty = 7,
+                rootStudyEvidenceSource = "TRANSCRIPT",
+                rootStudyCommandEvidence = "Spring을 레벨 7 루트로 만들어 줘",
+                rootStudyTopicEvidence = "Spring",
+                rootStudyDifficultyEvidence = "7",
+            )),
             VoiceTutorInputAssessmentFailure.INVALID_RESULT,
         )
         assertReason(
@@ -267,54 +487,210 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
     }
 
     @Test
-    fun `root confirmation is distinct and requires the exact server owned spoken offer`() {
-        val offered = rootOfferedRequest("운영체제를 레벨 6으로 만들어 줘")
-        val parsed = VoiceTutorInputAssessmentPromptProvider.parseResponse(
-            offered,
-            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CONFIRM_ROOT_STUDY")),
+    fun `root tuple requires exact command topic and level evidence from learner source`() {
+        val multiword = request().copy(
+            teacherContext = "Spring 레벨 6 루트를 만들까요?",
+            utterances = listOf(VoiceTutorInputUtterance(
+                "item_1", "Spring Boot를 레벨 7 루트로 만들어 줘",
+            )),
         )
-        assertThat(parsed.decisions.single().intent).isEqualTo(VoiceTutorInputIntent.CONFIRM_ROOT_STUDY)
-
-        val body = mapper.valueToTree<JsonNode>(
-            VoiceTutorInputAssessmentPromptProvider.requestBody(offered, "gpt-5.4"),
-        )
-        val rootOffer = mapper.readTree(body.path("messages")[1].path("content").asText())
-            .path("utterances")[0].path("rootStudyCreationOffer")
-        assertThat(rootOffer.path("topic").asText()).isEqualTo("운영체제")
-        assertThat(rootOffer.path("difficultyLevel").asInt()).isEqualTo(6)
-        assertThat(rootOffer.path("tutorAudioTranscript").asText())
-            .isEqualTo("운영체제를 레벨 6 루트 주제로 만들까요?")
-        assertThat(rootOffer.fieldNames().asSequence().toSet())
-            .containsExactlyInAnyOrder("topic", "difficultyLevel", "tutorAudioTranscript")
-
         assertReason(
-            request(),
-            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CONFIRM_ROOT_STUDY")),
+            multiword,
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "Spring",
+                rootStudyDifficulty = 7,
+                rootStudyEvidenceSource = "TRANSCRIPT",
+                rootStudyCommandEvidence = "Spring Boot를 레벨 7 루트로 만들어 줘",
+                rootStudyTopicEvidence = "Spring Boot",
+                rootStudyDifficultyEvidence = "7",
+            )),
             VoiceTutorInputAssessmentFailure.INVALID_RESULT,
         )
         assertReason(
-            offered.copy(utterances = listOf(offered.utterances.single().copy(checkpoint = true))),
-            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CONFIRM_ROOT_STUDY")),
+            multiword,
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "Spring Boot",
+                rootStudyDifficulty = 6,
+                rootStudyEvidenceSource = "TRANSCRIPT",
+                rootStudyCommandEvidence = "Spring Boot를 레벨 7 루트로 만들어 줘",
+                rootStudyTopicEvidence = "Spring Boot",
+                rootStudyDifficultyEvidence = "7",
+            )),
             VoiceTutorInputAssessmentFailure.INVALID_RESULT,
         )
         assertReason(
-            offered,
-            envelope(decisionsWithIntent("item_1", "NON_COMMUNICATIVE", "CONFIRM_ROOT_STUDY")),
+            multiword.copy(utterances = listOf(VoiceTutorInputUtterance("item_1", "네"))),
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "Spring",
+                rootStudyDifficulty = 6,
+                rootStudyEvidenceSource = "TRANSCRIPT",
+                rootStudyCommandEvidence = "Spring 레벨 6 루트를 만들까요?",
+                rootStudyTopicEvidence = "Spring",
+                rootStudyDifficultyEvidence = "6",
+            )),
             VoiceTutorInputAssessmentFailure.INVALID_RESULT,
         )
     }
 
     @Test
-    fun `exact offered tuple can confirm while a changed tuple remains a direct create request`() {
-        val exact = rootOfferedRequest("운영체제를 레벨 6으로 만들어 줘")
-        val replacement = rootOfferedRequest("운영체제 말고 Redis를 레벨 8로 만들어 줘")
+    fun `independent root attestation rejects a jointly narrowed multiword proposal`() = runBlocking<Unit> {
+        val direct = request().copy(utterances = listOf(
+            VoiceTutorInputUtterance("item_1", "Spring Boot를 레벨 7 루트로 만들어 줘"),
+        ))
+        val calls = AtomicInteger()
+        var attestationBody: JsonNode? = null
+        val adapter = adapter(properties(), ExchangeFunction { request ->
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map { rawBody ->
+                    if (calls.incrementAndGet() == 1) {
+                        response(envelope(decisionsWithIntent(
+                            "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                            rootStudyTopic = "Spring",
+                            rootStudyDifficulty = 7,
+                            rootStudyEvidenceSource = "TRANSCRIPT",
+                            rootStudyCommandEvidence = "Spring Boot를 레벨 7 루트로 만들어 줘",
+                            rootStudyTopicEvidence = "Spring",
+                            rootStudyDifficultyEvidence = "7",
+                        )))
+                    } else {
+                        attestationBody = mapper.readTree(rawBody)
+                        response(envelope("""{"attestations":[{"itemId":"item_1","exact":false}]}"""))
+                    }
+                }
+            })
+        })
 
-        assertThat(VoiceTutorInputAssessmentPromptProvider.parseResponse(
-            exact, envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CONFIRM_ROOT_STUDY")),
-        ).decisions.single().intent).isEqualTo(VoiceTutorInputIntent.CONFIRM_ROOT_STUDY)
-        assertThat(VoiceTutorInputAssessmentPromptProvider.parseResponse(
-            replacement, envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CREATE_ROOT_STUDY")),
-        ).decisions.single().intent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+        val result = adapter.assess(direct)
+
+        assertThat(calls).hasValue(2)
+        assertThat(result.decisions.single().decision).isEqualTo(VoiceTutorInputDecision.MEANINGFUL)
+        assertThat(result.decisions.single().intent).isEqualTo(VoiceTutorInputIntent.NONE)
+        assertThat(result.decisions.single().rootStudyCreationRequest).isNull()
+        val evidence = mapper.readTree(
+            attestationBody!!.path("messages")[1].path("content").asText(),
+        )
+        assertThat(evidence.path("items")[0].path("learnerSource").asText())
+            .isEqualTo("Spring Boot를 레벨 7 루트로 만들어 줘")
+        assertThat(attestationBody.toString()).doesNotContain(direct.teacherContext)
+    }
+
+    @Test
+    fun `root attestation contract is exact cardinality and fails closed`() {
+        val source = "Spring 레벨 7 루트로 만들어 줘"
+        val primary = VoiceTutorInputAssessmentPromptProvider.parseResponse(
+            request().copy(utterances = listOf(VoiceTutorInputUtterance("item_1", source))),
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "Spring",
+                rootStudyDifficulty = 7,
+                rootStudyEvidenceSource = "TRANSCRIPT",
+                rootStudyCommandEvidence = source,
+                rootStudyTopicEvidence = "Spring",
+                rootStudyDifficultyEvidence = "7",
+            )),
+        )
+        val attestation = requireNotNull(VoiceTutorRootCreationAttestationPromptProvider.request(
+            request().copy(utterances = listOf(VoiceTutorInputUtterance("item_1", source))),
+            primary,
+        ))
+        val body = mapper.valueToTree<JsonNode>(
+            VoiceTutorRootCreationAttestationPromptProvider.requestBody(attestation, "gpt-5.4"),
+        )
+        assertThat(body.path("messages")[0].path("content").asText())
+            .contains("entire requested root name", "strict subset", "difficultyOmitted", "untrusted evidence")
+        assertThat(body.path("response_format").path("json_schema").path("schema")
+            .path("additionalProperties").booleanValue()).isFalse()
+        assertThat(VoiceTutorRootCreationAttestationPromptProvider.parseResponse(
+            attestation,
+            envelope("""{"attestations":[{"itemId":"item_1","exact":true}]}"""),
+        )).containsExactly("item_1")
+        assertThat(VoiceTutorRootCreationAttestationPromptProvider.parseResponse(
+            attestation,
+            envelope("""{"attestations":[{"itemId":"item_1","exact":false}]}"""),
+        )).isEmpty()
+        assertReasonForRootAttestation(
+            attestation,
+            envelope("""{"attestations":[{"itemId":"other","exact":true}]}"""),
+        )
+    }
+
+    @Test
+    fun `root tuple must come from learner speech and generic yes cannot inherit tutor context`() {
+        val genericYes = request().copy(
+            teacherContext = "Spring을 레벨 7 루트로 만들까요?",
+            utterances = listOf(VoiceTutorInputUtterance("item_1", "네")),
+        )
+        assertReason(
+            genericYes,
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "Spring", rootStudyDifficulty = 7,
+                rootStudyEvidenceSource = "TRANSCRIPT",
+                rootStudyCommandEvidence = "Spring을 레벨 7 루트로 만들어 줘",
+                rootStudyTopicEvidence = "Spring",
+                rootStudyDifficultyEvidence = "7",
+            )),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+        for ((speech, inventedTopic) in listOf("네" to "네", "yes" to "yes", "네 네" to "네")) {
+            assertReason(
+                genericYes.copy(utterances = listOf(VoiceTutorInputUtterance("item_1", speech))),
+                envelope(decisionsWithIntent(
+                    "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                    rootStudyTopic = inventedTopic, rootStudyDifficulty = null,
+                    rootStudyEvidenceSource = "TRANSCRIPT",
+                    rootStudyCommandEvidence = "$inventedTopic 루트로 만들어줘",
+                    rootStudyTopicEvidence = inventedTopic,
+                    rootStudyDifficultyOmitted = true,
+                )),
+                VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+            )
+        }
+
+        val checkpointContext = genericYes.copy(utterances = listOf(
+            VoiceTutorInputUtterance(
+                "item_1",
+                "음…",
+                sameSpeechContext = "Spring을 레벨 7 루트로 만들어 줘\n음…",
+            ),
+        ))
+        val accepted = VoiceTutorInputAssessmentPromptProvider.parseResponse(
+            checkpointContext,
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "Spring", rootStudyDifficulty = 7,
+                rootStudyEvidenceSource = "SAME_SPEECH_CONTEXT",
+                rootStudyCommandEvidence = "Spring을 레벨 7 루트로 만들어 줘",
+                rootStudyTopicEvidence = "Spring",
+                rootStudyDifficultyEvidence = "7",
+            )),
+        )
+        assertThat(accepted.decisions.single().rootStudyCreationRequest?.topic).isEqualTo("Spring")
+
+        assertReason(
+            checkpointContext,
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                rootStudyTopic = "Redis", rootStudyDifficulty = 7,
+                rootStudyEvidenceSource = "SAME_SPEECH_CONTEXT",
+                rootStudyCommandEvidence = "Spring을 레벨 7 루트로 만들어 줘",
+                rootStudyTopicEvidence = "Redis",
+                rootStudyDifficultyEvidence = "7",
+            )),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+        assertReason(
+            genericYes,
+            envelope(decisionsWithIntent(
+                "item_1", "MEANINGFUL", "NONE",
+                rootStudyTopic = "Spring", rootStudyDifficulty = 7,
+            )),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
     }
 
     @Test
@@ -322,6 +698,8 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         for ((value, expected) in listOf(
             "DISCOVER_SAVED_TOPIC" to VoiceTutorInputIntent.DISCOVER_SAVED_TOPIC,
             "ANSWER_TO_STUDY_QUESTION" to VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION,
+            "ASK_STUDY_QUESTION" to VoiceTutorInputIntent.ASK_STUDY_QUESTION,
+            "CONTINUE_STUDY" to VoiceTutorInputIntent.CONTINUE_STUDY,
         )) {
             val parsed = VoiceTutorInputAssessmentPromptProvider.parseResponse(
                 request(), envelope(decisionsWithIntent("item_1", "MEANINGFUL", value)),
@@ -333,6 +711,16 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 VoiceTutorInputAssessmentFailure.INVALID_RESULT,
             )
         }
+        assertReason(
+            request().copy(utterances = listOf(VoiceTutorInputUtterance("item_1", "왜 그런가요?", checkpoint = true))),
+            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "ASK_STUDY_QUESTION")),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+        assertReason(
+            request().copy(utterances = listOf(VoiceTutorInputUtterance("item_1", "다음 질문 해줘.", checkpoint = true))),
+            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CONTINUE_STUDY")),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
         for ((value, expected, request) in listOf(
             Triple("SELECT_SAVED_TOPIC", VoiceTutorInputIntent.SELECT_SAVED_TOPIC, offeredRequest(101, null, null)),
             Triple("CONTINUE_TREE", VoiceTutorInputIntent.CONTINUE_TREE, offeredRequest(102, 101, 101)),
@@ -560,6 +948,18 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         return error
     }
 
+    private fun assertReasonForRootAttestation(
+        request: VoiceTutorRootCreationAttestationRequest,
+        raw: String,
+    ) {
+        val error = runCatching {
+            VoiceTutorRootCreationAttestationPromptProvider.parseResponse(request, raw)
+        }.exceptionOrNull()
+        assertThat(error).isInstanceOf(VoiceTutorInputAssessmentException::class.java)
+        assertThat((error as VoiceTutorInputAssessmentException).reason)
+            .isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_RESULT)
+    }
+
     private fun properties() = BuddyStudyProperties().apply {
         openai.userContentApiKey = "private-test-user-key"
         openai.systemApiKey = "private-test-system-key"
@@ -611,24 +1011,6 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         )),
     )
 
-    private fun rootOfferedRequest(learnerTranscript: String) = request().copy(
-        teacherContext = "운영체제를 레벨 6 루트 주제로 만들까요?",
-        utterances = listOf(VoiceTutorInputUtterance(
-            itemId = "item_1",
-            transcript = learnerTranscript,
-            rootStudyCreationOffer = VoiceTutorRootStudyCreationOffer(
-                topic = "운영체제",
-                difficulty = 6,
-                lessonRevision = 0,
-                previewResponseGeneration = 2,
-                tutorResponseGeneration = 3,
-                tutorSpeechStoppedOrder = 6,
-                tutorProviderItemId = "root-preview-3",
-                tutorAudioTranscript = "운영체제를 레벨 6 루트 주제로 만들까요?",
-            ),
-        )),
-    )
-
     private fun adapter(properties: BuddyStudyProperties, exchange: ExchangeFunction) =
         OpenAIVoiceTutorInputAssessmentAdapter(UserContentOpenAIKeyProvider(properties), properties, exchange)
 
@@ -641,8 +1023,16 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "itemId" to id,
                 "decision" to decision,
                 "intent" to "NONE",
+                "currentTranscriptAnswersStudyQuestion" to false,
                 "targetStudyId" to null,
                 "spokenCandidateStudyIds" to emptyList<Long>(),
+                "rootStudyTopic" to null,
+                "rootStudyDifficulty" to null,
+                "rootStudyEvidenceSource" to null,
+                "rootStudyCommandEvidence" to null,
+                "rootStudyTopicEvidence" to null,
+                "rootStudyDifficultyEvidence" to null,
+                "rootStudyDifficultyOmitted" to false,
             )
         },
     ))
@@ -653,14 +1043,30 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         intent: String,
         targetStudyId: Long? = null,
         spokenCandidateStudyIds: List<Long> = targetStudyId?.let(::listOf).orEmpty(),
+        rootStudyTopic: String? = null,
+        rootStudyDifficulty: Int? = null,
+        rootStudyEvidenceSource: String? = null,
+        rootStudyCommandEvidence: String? = null,
+        rootStudyTopicEvidence: String? = null,
+        rootStudyDifficultyEvidence: String? = null,
+        rootStudyDifficultyOmitted: Boolean = false,
+        currentTranscriptAnswersStudyQuestion: Boolean = false,
     ): String =
         mapper.writeValueAsString(mapOf(
             "decisions" to listOf(mapOf(
                 "itemId" to id,
                 "decision" to decision,
                 "intent" to intent,
+                "currentTranscriptAnswersStudyQuestion" to currentTranscriptAnswersStudyQuestion,
                 "targetStudyId" to targetStudyId,
                 "spokenCandidateStudyIds" to spokenCandidateStudyIds,
+                "rootStudyTopic" to rootStudyTopic,
+                "rootStudyDifficulty" to rootStudyDifficulty,
+                "rootStudyEvidenceSource" to rootStudyEvidenceSource,
+                "rootStudyCommandEvidence" to rootStudyCommandEvidence,
+                "rootStudyTopicEvidence" to rootStudyTopicEvidence,
+                "rootStudyDifficultyEvidence" to rootStudyDifficultyEvidence,
+                "rootStudyDifficultyOmitted" to rootStudyDifficultyOmitted,
             )),
         ))
 

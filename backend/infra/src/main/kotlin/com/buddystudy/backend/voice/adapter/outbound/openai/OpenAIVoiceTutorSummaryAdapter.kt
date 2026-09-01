@@ -67,17 +67,21 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
         session: VoiceTutorSession,
         transcript: List<VoiceTutorTranscriptTurn>,
     ): VoiceTutorGeneratedResult {
-        var remainingCharacters = properties.voiceTutor.transcriptMaxCharacters.coerceIn(1, 1_000_000)
-        val evidenceTurns = transcript.filter { it.sessionId == session.id && it.id > 0 }
-            .take(2_000).takeWhile { turn ->
-                // Only complete supplied turns are evidence. A cut sentence must not acquire a grade.
-                if (turn.transcript.length > remainingCharacters) false else {
-                    remainingCharacters -= turn.transcript.length
-                    true
-                }
-            }
         val history = studyContext.list(session.userId, session.id).take(VoiceTutorStudyRevisionLimits.MAX_HISTORY_SNAPSHOTS)
         val focuses = lessonFocus.history(session.userId, session.id).take(VoiceTutorStudyRevisionLimits.MAX_REVISIONS + 1)
+        val projectedEvidence = VoiceTutorSummaryTranscriptEvidence.verified(
+            session.id, session.acceptedStudyId, transcript, focuses,
+        )
+        val boundedEvidence = VoiceTutorSummaryTranscriptEvidence.completeExchangePrefix(
+            projectedEvidence,
+            properties.voiceTutor.transcriptMaxCharacters.coerceIn(1, 1_000_000),
+        )
+        // Re-project after the character bound so a question whose attested answer fell outside the
+        // complete prefix cannot be presented to GPT as an unanswered learning exchange.
+        val evidenceTurns = VoiceTutorSummaryTranscriptEvidence.verified(
+            session.id, session.acceptedStudyId, boundedEvidence, focuses,
+        )
+        if (evidenceTurns.isEmpty()) return emptyLearningResult()
         val selectedSnapshot = session.acceptedStudyId?.takeIf { id ->
             id > 0 && history.none { it.studyId == id } && focuses.none { it.revision > 0 } &&
                 session.topic.isNotBlank() && session.difficulty in 1..10 &&
@@ -98,7 +102,7 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
             "max_completion_tokens" to 16_384,
             "messages" to VoiceTutorSummaryPromptProvider.messages(
                 session, evidenceTurns, outputLanguage, studies,
-                transcriptTruncated = evidenceTurns.size != transcript.size,
+                transcriptTruncated = evidenceTurns.size != projectedEvidence.size,
                 focuses = focuses,
             ),
         )
@@ -153,6 +157,7 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
         } catch (error: InvalidVoiceTutorExploration) {
             invalidResponse(error.reason)
         }
+        if (explorations.isEmpty()) return emptyLearningResult()
         val summary = VoiceTutorLearningResultSanitizer.plainText(result.path("summaryMarkdown").asText())
         if (summary.isEmpty()) {
             throw ApiException(
@@ -171,6 +176,15 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
             explorations = explorations,
         )
     }
+
+    private fun emptyLearningResult() = VoiceTutorGeneratedResult(
+        summaryMarkdown = "",
+        strengths = emptyList(),
+        improvements = emptyList(),
+        nextSteps = emptyList(),
+        model = "system",
+        promptVersion = properties.voiceTutor.summaryPromptVersion,
+    )
 
     private fun com.fasterxml.jackson.databind.JsonNode.stringList(field: String): List<String> =
         path(field).takeIf { it.isArray }?.mapNotNull { node ->
@@ -253,13 +267,23 @@ internal object VoiceTutorSummaryPromptProvider {
                 never grade a learner for asking a question. Preserve short but meaningful answers, including yes/no,
                 names and numbers. Do not turn greetings, readiness checks, microphone setup, hesitation or noise into
                 assessed study questions. If there was no learning exchange, explorations must be empty.
+                Server-owned transcript evidence is authoritative. A TUTOR_QUESTION is eligible only when its
+                TUTOR turn has isStudyQuestion=true and answerTurnIds are exactly every durable USER turn whose
+                studyQuestionTurnId equals that exact TUTOR questionTurnId, once each and in chronological order.
+                Never cite only a prefix, suffix or selected subset of a multipart answer. A LEARNER_QUESTION is
+                eligible only when its USER question turn has askedStudyQuestion=true and answerTurnIds are the full,
+                immediately following uninterrupted run of TUTOR turns at the same lessonRevision. Setup, topic-tree,
+                level, consent, navigation, call and configuration questions have askedStudyQuestion=false and must be
+                omitted even if they resemble questions. Never infer or repair either attestation from transcript text.
                 Give every exchange the exact numeric questionTurnId and chronologically ordered answerTurnIds from
                 transcriptTurns. Roles must match the kind. Answer turns must follow the question. For a tutor question,
-                feedbackTurnIds can contain only later TUTOR turns after the learner answer. Never reuse one question ID
-                as multiple exchanges or cite an unrelated turn just to supply a missing answer or grade.
+                feedbackTurnIds can contain only later TUTOR turns whose studyAnswerTurnId equals the final
+                answerTurnId. Never reuse one question ID as multiple exchanges or cite an unrelated turn just to
+                supply a missing answer or grade.
                 question and answer may be short faithful restatements/translations of those turns; do not improve a
                 wrong answer, answer an unanswered question, or add knowledge the speakers did not say. An unanswered
-                study question is allowed only with answer="", answerTurnIds=[], score=null and empty feedback arrays.
+                TUTOR_QUESTION is allowed only with answer="", answerTurnIds=[], score=null and empty feedback arrays;
+                an unanswered LEARNER_QUESTION must be omitted because no direct tutor-answer run exists.
                 score is an integer 0..100 ONLY when those feedback turns explicitly assessed that answer with that
                 numeric score. Copy that spoken score; do not grade now, infer it from praise or correctness, round a
                 fractional grade, convert another scale, or mistake a technical number/100-point denominator for a score.
@@ -292,7 +316,16 @@ internal object VoiceTutorSummaryPromptProvider {
                     },
                     "transcriptTruncated" to transcriptTruncated,
                     "transcriptTurns" to transcript.map { turn ->
-                        mapOf("id" to turn.id, "role" to turn.role.name, "transcript" to turn.transcript, "lessonRevision" to turn.lessonRevision)
+                        mapOf(
+                            "id" to turn.id,
+                            "role" to turn.role.name,
+                            "transcript" to turn.transcript,
+                            "lessonRevision" to turn.lessonRevision,
+                            "studyQuestionTurnId" to (turn.studyQuestionTurnId ?: NullNode.instance),
+                            "studyAnswerTurnId" to (turn.studyAnswerTurnId ?: NullNode.instance),
+                            "askedStudyQuestion" to turn.askedStudyQuestion,
+                            "isStudyQuestion" to turn.isStudyQuestion,
+                        )
                     },
                 ),
             ),

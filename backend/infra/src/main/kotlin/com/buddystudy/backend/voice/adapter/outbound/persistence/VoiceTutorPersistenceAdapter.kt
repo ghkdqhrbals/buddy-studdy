@@ -444,6 +444,11 @@ class VoiceTutorPersistenceAdapter(
         maxSessionCharacters: Int,
         maxSessionTurns: Int,
         lessonRevision: Long,
+        studyQuestionProviderItemId: String?,
+        studyAnswerProviderItemId: String?,
+        askedStudyQuestion: Boolean,
+        isStudyQuestion: Boolean,
+        studyAnswerProviderItemIds: List<String>,
     ): Boolean {
         require(lessonRevision >= -1) { "Voice Tutor lesson revision was invalid." }
         val owned = database.sql(
@@ -471,20 +476,214 @@ class VoiceTutorPersistenceAdapter(
             "select coalesce(max(sequence_number), 0) + 1 as next_sequence from voice_tutor_transcript_turns where session_id = :sessionId",
         ).bind("sessionId", sessionId)
             .map { row, _ -> row.long("next_sequence") }.one().awaitSingle()
-        val inserted = database.sql(
+        val verifiedIsStudyQuestion = isStudyQuestion && role == VoiceTutorTranscriptRole.TUTOR &&
+            lessonRevision >= 0 && database.sql(
+                "select count(*) as focus_count from voice_tutor_lesson_focuses " +
+                    "where session_id = :sessionId and revision <= :lessonRevision",
+            ).bind("sessionId", sessionId).bind("lessonRevision", lessonRevision)
+                .map { row, _ -> row.long("focus_count") > 0L }.one().awaitSingle()
+        val answerAttestationSupplied = studyQuestionProviderItemId != null || studyAnswerProviderItemIds.isNotEmpty()
+        val answerPromotion = if (!answerAttestationSupplied) {
+            null
+        } else {
+            if (role != VoiceTutorTranscriptRole.USER || lessonRevision < 0 ||
+                studyQuestionProviderItemId.isNullOrBlank() || studyQuestionProviderItemId.length > 191 ||
+                studyAnswerProviderItemIds.size !in 1..MAX_STUDY_ANSWER_PARTS ||
+                studyAnswerProviderItemIds.any { it.isBlank() || it.length > 191 } ||
+                studyAnswerProviderItemIds.distinct().size != studyAnswerProviderItemIds.size
+            ) return false
+            val question = database.sql(
+                """
+                select question.id, question.sequence_number
+                from voice_tutor_transcript_turns question
+                where question.session_id = :sessionId
+                  and question.provider_item_id = :providerItemId
+                  and question.role = 'TUTOR'
+                  and question.is_study_question = true
+                  and question.lesson_revision = :lessonRevision
+                  and question.sequence_number < :answerSequence
+                  and not exists (
+                      select 1
+                      from voice_tutor_transcript_turns intervening_tutor
+                      where intervening_tutor.session_id = question.session_id
+                        and intervening_tutor.role = 'TUTOR'
+                        and intervening_tutor.sequence_number > question.sequence_number
+                        and intervening_tutor.sequence_number < :answerSequence
+                  )
+                  and exists (
+                      select 1
+                      from voice_tutor_lesson_focuses focus
+                      where focus.session_id = question.session_id
+                        and focus.revision <= question.lesson_revision
+                  )
+                limit 1
+                """.trimIndent(),
+            ).bind("sessionId", sessionId).bind("providerItemId", studyQuestionProviderItemId)
+                .bind("lessonRevision", lessonRevision).bind("answerSequence", sequence)
+                .map { row, _ -> StudyAnswerQuestion(row.long("id"), row.long("sequence_number")) }
+                .one().awaitSingleOrNull() ?: return false
+            val priorTurnIds = mutableListOf<Long>()
+            var previousSequence = question.sequenceNumber
+            var linksCurrentTurn = false
+            studyAnswerProviderItemIds.forEachIndexed { index, answerProviderItemId ->
+                if (answerProviderItemId == providerItemId) {
+                    if (index != studyAnswerProviderItemIds.lastIndex) return false
+                    linksCurrentTurn = true
+                } else {
+                    val part = database.sql(
+                        """
+                        select id, role, lesson_revision, sequence_number, study_question_turn_id,
+                               study_answer_turn_id, asked_study_question, is_study_question
+                        from voice_tutor_transcript_turns
+                        where session_id = :sessionId and provider_item_id = :providerItemId
+                          and role = 'USER'
+                        limit 1
+                        """.trimIndent(),
+                    ).bind("sessionId", sessionId).bind("providerItemId", answerProviderItemId)
+                        .map { row, _ ->
+                            StudyAnswerPart(
+                                id = row.long("id"),
+                                role = VoiceTutorTranscriptRole.valueOf(row.string("role")),
+                                lessonRevision = row.long("lesson_revision"),
+                                sequenceNumber = row.long("sequence_number"),
+                                studyQuestionTurnId = row.nullableLong("study_question_turn_id"),
+                                studyAnswerTurnId = row.nullableLong("study_answer_turn_id"),
+                                askedStudyQuestion =
+                                    row.get("asked_study_question", java.lang.Boolean::class.java) == true,
+                                isStudyQuestion =
+                                    row.get("is_study_question", java.lang.Boolean::class.java) == true,
+                            )
+                        }.one().awaitSingleOrNull() ?: return false
+                    if (part.role != VoiceTutorTranscriptRole.USER ||
+                        part.lessonRevision != lessonRevision ||
+                        part.sequenceNumber <= previousSequence || part.sequenceNumber >= sequence ||
+                        part.studyQuestionTurnId != null || part.studyAnswerTurnId != null ||
+                        part.askedStudyQuestion || part.isStudyQuestion
+                    ) return false
+                    previousSequence = part.sequenceNumber
+                    priorTurnIds += part.id
+                }
+            }
+            StudyAnswerPromotion(question.id, priorTurnIds, linksCurrentTurn)
+        }
+        val verifiedStudyQuestionTurnId = answerPromotion
+            ?.takeIf(StudyAnswerPromotion::linksCurrentTurn)
+            ?.questionTurnId
+        val verifiedAskedStudyQuestion = answerPromotion == null && askedStudyQuestion &&
+            role == VoiceTutorTranscriptRole.USER && lessonRevision >= 0 &&
+            database.sql(
+                "select count(*) as focus_count from voice_tutor_lesson_focuses " +
+                    "where session_id = :sessionId and revision <= :lessonRevision",
+            ).bind("sessionId", sessionId).bind("lessonRevision", lessonRevision)
+                .map { row, _ -> row.long("focus_count") > 0L }.one().awaitSingle()
+        val verifiedStudyAnswerTurnId = studyAnswerProviderItemId
+            ?.takeIf {
+                role == VoiceTutorTranscriptRole.TUTOR && !verifiedIsStudyQuestion && lessonRevision >= 0 &&
+                    it.isNotBlank() && it.length <= 191
+            }
+            ?.let { answerProviderItemId ->
+                database.sql(
+                    """
+                    select answer.id
+                    from voice_tutor_transcript_turns answer
+                    join voice_tutor_transcript_turns question
+                      on question.id = answer.study_question_turn_id
+                     and question.session_id = answer.session_id
+                     and question.role = 'TUTOR'
+                     and question.is_study_question = true
+                     and question.lesson_revision = answer.lesson_revision
+                     and question.sequence_number < answer.sequence_number
+                    where answer.session_id = :sessionId
+                      and answer.provider_item_id = :answerProviderItemId
+                      and answer.role = 'USER'
+                      and answer.lesson_revision = :lessonRevision
+                      and answer.study_question_turn_id is not null
+                      and answer.sequence_number < :feedbackSequence
+                      and not exists (
+                          select 1
+                          from voice_tutor_transcript_turns later_answer
+                          where later_answer.session_id = answer.session_id
+                            and later_answer.role = 'USER'
+                            and later_answer.study_question_turn_id = answer.study_question_turn_id
+                            and later_answer.sequence_number > answer.sequence_number
+                            and later_answer.sequence_number < :feedbackSequence
+                      )
+                      and not exists (
+                          select 1
+                          from voice_tutor_transcript_turns intervening_question_tutor
+                          where intervening_question_tutor.session_id = answer.session_id
+                            and intervening_question_tutor.role = 'TUTOR'
+                            and intervening_question_tutor.sequence_number > question.sequence_number
+                            and intervening_question_tutor.sequence_number < answer.sequence_number
+                      )
+                      and not exists (
+                          select 1
+                          from voice_tutor_transcript_turns intervening_feedback_tutor
+                          where intervening_feedback_tutor.session_id = answer.session_id
+                            and intervening_feedback_tutor.role = 'TUTOR'
+                            and intervening_feedback_tutor.sequence_number > answer.sequence_number
+                            and intervening_feedback_tutor.sequence_number < :feedbackSequence
+                      )
+                      and exists (
+                          select 1
+                          from voice_tutor_lesson_focuses focus
+                          where focus.session_id = answer.session_id
+                            and focus.revision <= answer.lesson_revision
+                      )
+                    limit 1
+                    """.trimIndent(),
+                ).bind("sessionId", sessionId).bind("answerProviderItemId", answerProviderItemId)
+                    .bind("lessonRevision", lessonRevision).bind("feedbackSequence", sequence)
+                    .map { row, _ -> row.long("id") }.one().awaitSingleOrNull()
+            }
+        var insert = database.sql(
             """
             insert ignore into voice_tutor_transcript_turns (
-                session_id, provider_item_id, role, transcript, sequence_number, occurred_at, created_at, lesson_revision
+                session_id, provider_item_id, role, transcript, sequence_number, occurred_at, created_at,
+                lesson_revision, study_question_turn_id, study_answer_turn_id,
+                asked_study_question, is_study_question
             ) values (
-                :sessionId, :providerItemId, :role, :transcript, :sequenceNumber, :occurredAt, :occurredAt, :lessonRevision
+                :sessionId, :providerItemId, :role, :transcript, :sequenceNumber, :occurredAt, :occurredAt,
+                :lessonRevision, :studyQuestionTurnId, :studyAnswerTurnId,
+                :askedStudyQuestion, :isStudyQuestion
             )
             """.trimIndent(),
         ).bind("sessionId", sessionId).bind("providerItemId", providerItemId)
             .bind("role", role.name).bind("transcript", boundedTranscript).bind("sequenceNumber", sequence)
             .bind("occurredAt", occurredAt.utc())
             .bind("lessonRevision", lessonRevision)
-            .fetch().rowsUpdated().awaitSingle()
-        return inserted == 1L
+            .bind("askedStudyQuestion", verifiedAskedStudyQuestion)
+            .bind("isStudyQuestion", verifiedIsStudyQuestion)
+        insert = if (verifiedStudyQuestionTurnId == null) {
+            insert.bindNull("studyQuestionTurnId", java.lang.Long::class.java)
+        } else {
+            insert.bind("studyQuestionTurnId", verifiedStudyQuestionTurnId)
+        }
+        insert = if (verifiedStudyAnswerTurnId == null) {
+            insert.bindNull("studyAnswerTurnId", java.lang.Long::class.java)
+        } else {
+            insert.bind("studyAnswerTurnId", verifiedStudyAnswerTurnId)
+        }
+        val inserted = insert.fetch().rowsUpdated().awaitSingle()
+        if (inserted != 1L) return false
+        answerPromotion?.priorTurnIds?.forEach { answerTurnId ->
+            val promoted = database.sql(
+                """
+                update voice_tutor_transcript_turns
+                set study_question_turn_id = :questionTurnId
+                where id = :answerTurnId and session_id = :sessionId and role = 'USER'
+                  and lesson_revision = :lessonRevision and study_question_turn_id is null
+                  and study_answer_turn_id is null and asked_study_question = false
+                  and is_study_question = false
+                """.trimIndent(),
+            ).bind("questionTurnId", answerPromotion.questionTurnId)
+                .bind("answerTurnId", answerTurnId)
+                .bind("sessionId", sessionId)
+                .bind("lessonRevision", lessonRevision)
+                .fetch().rowsUpdated().awaitSingle()
+            check(promoted == 1L) { "Voice Tutor answer part changed while holding the session lock." }
+        }
+        return true
     }
 
     override suspend fun transcript(
@@ -503,14 +702,44 @@ class VoiceTutorPersistenceAdapter(
             """.trimIndent(),
         ).bind("sessionId", sessionId).bind("userId", userId)
             .map { row, _ -> row.turn() }.all().collectList().awaitSingle()
-        var remaining = maxCharacters.coerceAtLeast(0)
-        return turns.mapNotNull { turn ->
-            if (remaining <= 0) return@mapNotNull null
-            val content = turn.transcript.take(remaining)
-            remaining -= content.length
-            turn.copy(transcript = content)
-        }
+        return completeVoiceTutorTranscriptPrefix(turns, maxCharacters)
     }
+
+    override suspend fun hasVerifiedLearningExchange(userId: Long, sessionId: String): Boolean = database.sql(
+        """
+        select count(*) as verified_count from (
+            select answer.id
+            from voice_tutor_transcript_turns answer
+            join voice_tutor_transcript_turns question
+              on question.id = answer.study_question_turn_id
+             and question.session_id = answer.session_id
+             and question.role = 'TUTOR'
+             and question.is_study_question = true
+             and question.lesson_revision = answer.lesson_revision
+             and question.sequence_number < answer.sequence_number
+            join voice_tutor_sessions session on session.id = answer.session_id
+            where answer.session_id = :sessionId
+              and session.user_id = :userId
+              and answer.role = 'USER'
+              and answer.study_question_turn_id is not null
+              and not exists (
+                  select 1
+                  from voice_tutor_transcript_turns intervening_tutor
+                  where intervening_tutor.session_id = answer.session_id
+                    and intervening_tutor.role = 'TUTOR'
+                    and intervening_tutor.sequence_number > question.sequence_number
+                    and intervening_tutor.sequence_number < answer.sequence_number
+              )
+              and exists (
+                  select 1
+                  from voice_tutor_lesson_focuses focus
+                  where focus.session_id = answer.session_id
+                    and focus.revision <= answer.lesson_revision
+              )
+        ) verified
+        """.trimIndent(),
+    ).bind("sessionId", sessionId).bind("userId", userId)
+        .map { row, _ -> row.long("verified_count") > 0 }.one().awaitSingle()
 
     override suspend fun result(userId: Long, sessionId: String): VoiceTutorResult? = database.sql(
         """
@@ -939,6 +1168,10 @@ class VoiceTutorPersistenceAdapter(
         sequenceNumber = long("sequence_number"),
         occurredAt = instant("occurred_at"),
         lessonRevision = long("lesson_revision"),
+        studyQuestionTurnId = nullableLong("study_question_turn_id"),
+        studyAnswerTurnId = nullableLong("study_answer_turn_id"),
+        askedStudyQuestion = get("asked_study_question", java.lang.Boolean::class.java) == true,
+        isStudyQuestion = get("is_study_question", java.lang.Boolean::class.java) == true,
     )
 
     private fun Row.result() = VoiceTutorResult(
@@ -1077,6 +1310,28 @@ internal data class TranscriptCapacity(
     val characterCount: Int,
 )
 
+private data class StudyAnswerQuestion(
+    val id: Long,
+    val sequenceNumber: Long,
+)
+
+private data class StudyAnswerPart(
+    val id: Long,
+    val role: VoiceTutorTranscriptRole,
+    val lessonRevision: Long,
+    val sequenceNumber: Long,
+    val studyQuestionTurnId: Long?,
+    val studyAnswerTurnId: Long?,
+    val askedStudyQuestion: Boolean,
+    val isStudyQuestion: Boolean,
+)
+
+private data class StudyAnswerPromotion(
+    val questionTurnId: Long,
+    val priorTurnIds: List<Long>,
+    val linksCurrentTurn: Boolean,
+)
+
 internal fun boundedVoiceTutorTranscript(
     transcript: String,
     capacity: TranscriptCapacity,
@@ -1085,8 +1340,96 @@ internal fun boundedVoiceTutorTranscript(
 ): String? {
     if (capacity.turnCount >= maxSessionTurns) return null
     val remainingCharacters = (maxSessionCharacters - capacity.characterCount).coerceAtLeast(0)
-    if (remainingCharacters == 0) return null
-    return transcript.take(remainingCharacters).takeIf(String::isNotEmpty)
+    if (remainingCharacters == 0 || transcript.length > remainingCharacters) return null
+    return transcript.takeIf(String::isNotEmpty)
+}
+
+/**
+ * Bounds a durable transcript only between complete, contiguous exchanges.
+ *
+ * A study question, every USER part linked to it, and feedback linked to the
+ * final answer part are one atomic evidence component. Any unlinked turns
+ * interleaved between linked members join the same contiguous span so this
+ * method remains a true prefix and never exposes a later suffix. Learner
+ * follow-up questions and their immediately adjacent tutor run are treated the
+ * same way. If a component does not fit, neither it nor anything after it is
+ * returned.
+ */
+internal fun completeVoiceTutorTranscriptPrefix(
+    turns: List<VoiceTutorTranscriptTurn>,
+    maxCharacters: Int,
+): List<VoiceTutorTranscriptTurn> {
+    if (turns.isEmpty() || maxCharacters <= 0) return emptyList()
+    val ordered = turns.sortedWith(
+        compareBy<VoiceTutorTranscriptTurn> { it.sequenceNumber }.thenBy { it.id },
+    )
+    if (ordered.any { it.id <= 0 || it.sequenceNumber <= 0 } ||
+        ordered.groupingBy(VoiceTutorTranscriptTurn::id).eachCount().any { it.value != 1 } ||
+        ordered.groupingBy(VoiceTutorTranscriptTurn::sequenceNumber).eachCount().any { it.value != 1 }
+    ) return emptyList()
+
+    val indexById = ordered.withIndex().associate { (index, turn) -> turn.id to index }
+    val parent = IntArray(ordered.size) { it }
+    fun root(index: Int): Int {
+        var current = index
+        while (parent[current] != current) current = parent[current]
+        var compress = index
+        while (parent[compress] != current) {
+            val next = parent[compress]
+            parent[compress] = current
+            compress = next
+        }
+        return current
+    }
+    fun union(left: Int, right: Int) {
+        val leftRoot = root(left)
+        val rightRoot = root(right)
+        if (leftRoot != rightRoot) parent[rightRoot] = leftRoot
+    }
+
+    ordered.forEachIndexed { index, turn ->
+        turn.studyQuestionTurnId?.let(indexById::get)?.let { union(it, index) }
+        turn.studyAnswerTurnId?.let(indexById::get)?.let { union(it, index) }
+    }
+    ordered.forEachIndexed { index, turn ->
+        if (turn.role != VoiceTutorTranscriptRole.USER || !turn.askedStudyQuestion) return@forEachIndexed
+        var following = index + 1
+        while (following < ordered.size) {
+            val candidate = ordered[following]
+            if (candidate.role != VoiceTutorTranscriptRole.TUTOR ||
+                candidate.lessonRevision != turn.lessonRevision
+            ) break
+            union(index, following)
+            following++
+        }
+    }
+
+    val componentEnd = IntArray(ordered.size) { it }
+    ordered.indices.forEach { index ->
+        val componentRoot = root(index)
+        componentEnd[componentRoot] = maxOf(componentEnd[componentRoot], index)
+    }
+    val endAtIndex = IntArray(ordered.size) { index -> componentEnd[root(index)] }
+    var remaining = maxCharacters
+    val selected = mutableListOf<VoiceTutorTranscriptTurn>()
+    var start = 0
+    while (start < ordered.size) {
+        var end = endAtIndex[start]
+        var cursor = start
+        // Closing over every component encountered in this interval keeps the
+        // selected rows contiguous even when an unlinked filler is interleaved.
+        while (cursor <= end) {
+            end = maxOf(end, endAtIndex[cursor])
+            cursor++
+        }
+        val componentCharacters = (start..end).sumOf { ordered[it].transcript.length }
+        if (componentCharacters > remaining) break
+        selected += ordered.subList(start, end + 1)
+        remaining -= componentCharacters
+        start = end + 1
+    }
+    return selected
 }
 
 internal const val PCM_BYTES_PER_SECOND = 48_000L
+private const val MAX_STUDY_ANSWER_PARTS = 32

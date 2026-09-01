@@ -13,9 +13,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandi
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetSingleChildEdge
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
-import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationOffer
-import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationPreview
-import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyConfirmationAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationAuthorization
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscovery
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
@@ -256,6 +254,8 @@ internal class VoiceTutorDuplexTurnController(
     private var activeSpeechPrecedingTutorStopOrder = 0L
     private var activeSpeechPrecedingSpokenGeneration = 0L
     private var activeSpeechPrecedingTutorProviderItemId: String? = null
+    private var activeSpeechPrecedingTutorStudyQuestionEligible = false
+    private var activeSpeechPrecedingTutorContinuationEligible = false
     private var activeSpeechPrecedingTutorFeedbackForStudyAnswer = false
     private var activeSpeechPrecedingQuestionProviderItemId: String? = null
     private var activeSpeechPrecedingAnswerProviderItemId: String? = null
@@ -267,29 +267,36 @@ internal class VoiceTutorDuplexTurnController(
     private var nextTargetOfferId = 1L
     private var candidateDiscoveryGraph: CandidateDiscoveryGraph? = null
     private var activeResponseCandidateDiscovery: CandidateOfferPool? = null
+    private var activeResponseHadCandidateNavigation = false
     private var activeTargetOffer: VoiceTutorStudyTargetOffer? = null
     private var activeTargetOfferExchangeEvidence: TargetOfferExchangeEvidence? = null
     private var activeSpeechTargetOffer: VoiceTutorStudyTargetOffer? = null
     private val toolDiscoveryFences = linkedMapOf<String, ToolDiscoveryFence>()
-    private val rootPreviewFences = linkedMapOf<String, ToolDiscoveryFence>()
-    private var pendingRootStudyCreationPreview: VoiceTutorRootStudyCreationPreview? = null
-    private var activeRootStudyCreationOffer: VoiceTutorRootStudyCreationOffer? = null
-    private var activeSpeechRootStudyCreationOffer: VoiceTutorRootStudyCreationOffer? = null
     private var lastTutorSpeechStoppedOrder = 0L
     private var lastSpokenResponseGeneration = 0L
     private var lastSpokenTutorProviderItemId: String? = null
     private var lastSpokenTutorProviderItemGeneration = 0L
+    private var lastSpokenStudyQuestion: SpokenTutorPurposeEvidence? = null
+    private var lastSpokenContinuationAnchor: SpokenTutorPurposeEvidence? = null
+    private var confirmedStudyFocus: ConfirmedStudyFocus? = null
+    private var pendingStudyQuestionPurpose: StudyQuestionPurpose? = null
     private var lastSpokenStudyAnswer: StudyAnswerIdentity? = null
     private var completedStudyAnswerFeedback: StudyAnswerFeedbackEvidence? = null
     private var pendingNavigationFeedback: StudyAnswerFeedbackEvidence? = null
     private var activeResponseRespondsToStudyAnswer = false
     private var activeResponseStudyAnswer: StudyAnswerIdentity? = null
+    private var activeResponseRespondsToLearnerQuestion = false
+    private var activeResponseStudyQuestionPurpose: StudyQuestionPurpose? = null
     private var activeResponseTutorContext = ""
     private var activeResponseTutorContextForAssessment = ""
     private val controls = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<String>(MAX_BUFFERED_CONTROLS).get())
     private val inputWork = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<VoiceTutorInputTurnCoordinator.Action>(MAX_BUFFERED_CONTROLS).get())
+    private val spokenQuestionAssessmentWork = Sinks.many().unicast()
+        .onBackpressureBuffer(Queues.get<VoiceTutorSpokenQuestionAssessmentAction>(1).get())
+    private val spokenFeedbackAssessmentWork = Sinks.many().unicast()
+        .onBackpressureBuffer(Queues.get<VoiceTutorSpokenFeedbackAssessmentAction>(1).get())
     private val clientControls = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<String>(MAX_BUFFERED_CONTROLS).get())
     private val serverLifecycle = Sinks.many().unicast()
@@ -311,6 +318,12 @@ internal class VoiceTutorDuplexTurnController(
     private val terminalInputFailure = Sinks.one<Throwable>()
     /** Assessment evidence is frozen here; an async persistence receipt carries only item identity. */
     private val pendingInputPublications = linkedMapOf<String, VoiceTutorInputTurnCoordinator.Action.Publish>()
+    /**
+     * A checkpoint is durable context only. Its semantic answer contribution is
+     * cached by speech sequence and promoted only by the exact final publication.
+     */
+    private val persistedStudyAnswerSequences = linkedMapOf<Long, PersistedStudyAnswerSequence>()
+    private val pendingStudyAnswerGroups = linkedMapOf<String, PendingStudyAnswerGroup>()
     private val pendingLessonEndPublications = linkedMapOf<String, Long>()
     private var inputAssessmentTimer: Disposable? = null
     private var inputCheckpointSequence: Long? = null
@@ -323,6 +336,7 @@ internal class VoiceTutorDuplexTurnController(
     private val activeTutorTranscripts = linkedMapOf<String, String>()
     private val activeTutorFinalTranscriptEvents = linkedMapOf<String, StagedTutorTranscript>()
     private val activeTutorTranscriptItemIds = linkedSetOf<String>()
+    private var activeTutorTranscriptOverflow = false
     private var inputCheckpointTimer: Disposable? = null
     private var inputCheckpointTimerGeneration = 0L
     private var userSpeaking = false
@@ -331,6 +345,7 @@ internal class VoiceTutorDuplexTurnController(
     private var activeResponseCreateEventId: String? = null
     private var activeResponseId: String? = null
     private var activeResponseAllowsTools = false
+    private var activeResponseInstructionOverride: String? = null
     private var activeResponseAudioBytes = 0L
     private var earliestResponsePlaybackEndNanos: Long? = null
     private var providerResponseDone = false
@@ -340,9 +355,16 @@ internal class VoiceTutorDuplexTurnController(
     private var providerAudioObserved = false
     private var toolOnlyResponse = false
     private var activeResponseAcceptedToolCalls = false
+    private var activeResponseToolNames: Set<String> = emptySet()
+    private val eligibleFocusToolCallIds = linkedSetOf<String>()
     private var activeResponseRetryAttempt = 0
     private var activeResponseBoundaryCheckpoint: TutorBoundaryCheckpoint? = null
     private var pendingProviderResponseRetry: PendingProviderResponseRetry? = null
+    private var rootStudyCreationFollowupPending = false
+    /** Exact server-owned get_study calls required before a root acknowledgement may speak. */
+    private val rootStudyReadbackCalls = linkedMapOf<String, Long>()
+    /** Aggregates create/readback uncertainty without ever replaying the write. */
+    private var rootStudyReadbackFailed = false
     private var pendingPostRelayBoundary: PendingPostRelayBoundary? = null
     private var nextPostRelayBoundaryToken = 1L
     private val recentFailedResponseCreateEventIds = LinkedHashSet<String>()
@@ -368,6 +390,12 @@ internal class VoiceTutorDuplexTurnController(
     fun providerEvents(): Flux<String> = controls.asFlux().filter { !closed }
 
     fun inputActions(): Flux<VoiceTutorInputTurnCoordinator.Action> = inputWork.asFlux().filter { !closed }
+
+    fun spokenQuestionAssessmentActions(): Flux<VoiceTutorSpokenQuestionAssessmentAction> =
+        spokenQuestionAssessmentWork.asFlux().filter { !closed }
+
+    fun spokenFeedbackAssessmentActions(): Flux<VoiceTutorSpokenFeedbackAssessmentAction> =
+        spokenFeedbackAssessmentWork.asFlux().filter { !closed }
 
     fun clientEvents(): Flux<String> = clientControls.asFlux().filter { !closed }
 
@@ -402,12 +430,9 @@ internal class VoiceTutorDuplexTurnController(
         latestAcceptedLearnerTargetTraversal = latestFocusIntentBinding?.let { binding ->
             binding.targetStudyId?.let { target -> binding.targetOffer?.candidateTraversals?.get(target) }
         },
-        latestAcceptedLearnerRootStudyCreationOffer = latestFocusIntentBinding?.takeIf {
-            it.inputIntent == VoiceTutorInputIntent.CONFIRM_ROOT_STUDY
-        }?.rootStudyCreationOffer,
         focusAuthorization = latestFocusIntentBinding?.focusAuthorization?.takeIf { it.isActive() },
-        rootStudyConfirmationAuthorization = latestFocusIntentBinding
-            ?.rootStudyConfirmationAuthorization?.takeIf { it.isActive() },
+        rootStudyCreationAuthorization = latestFocusIntentBinding
+            ?.rootStudyCreationAuthorization?.takeIf { it.isActive() },
     )
 
     @Synchronized
@@ -424,14 +449,6 @@ internal class VoiceTutorDuplexTurnController(
                 responseGeneration = activeResponseGeneration,
             )
         }
-        if (toolName == ROOT_STUDY_TOOL_NAME) {
-            rootPreviewFences[callId] = ToolDiscoveryFence(
-                toolName = toolName,
-                lessonRevision = currentLessonRevision,
-                learnerSpeechSequence = lastClientSpeechSequence,
-                responseGeneration = activeResponseGeneration,
-            )
-        }
         return true
     }
 
@@ -439,6 +456,8 @@ internal class VoiceTutorDuplexTurnController(
     fun completeToolExecution(callId: String, result: VoiceTutorMcpToolResult): Boolean {
         if (closed) return false
         val startedToolName = toolCoordinator?.startedToolName(callId) ?: return false
+        val serverOwnedToolName = toolCoordinator.startedServerToolName(callId)
+        val eligibleFocusCall = eligibleFocusToolCallIds.remove(callId)
         val event = try {
             toolCoordinator?.complete(callId, result, nanoTime()) ?: return false
         } catch (error: Exception) {
@@ -446,7 +465,6 @@ internal class VoiceTutorDuplexTurnController(
             return false
         }
         val discoveryFence = toolDiscoveryFences.remove(callId)
-        val rootPreviewFence = rootPreviewFences.remove(callId)
         result.candidateDiscovery?.takeIf { discovery ->
             !result.isError && discoveryFence != null &&
                 candidateReadKind(discoveryFence.toolName) == discovery.source &&
@@ -456,36 +474,119 @@ internal class VoiceTutorDuplexTurnController(
                 activeClientSpeechSequence == null &&
                 discoveryFence.responseGeneration == activeResponseGeneration
         }?.let(::mergePendingCandidateDiscovery)
-        result.rootStudyCreationPreview?.takeIf { preview ->
-            !result.isError && startedToolName == ROOT_STUDY_TOOL_NAME && rootPreviewFence != null &&
-                rootPreviewFence.toolName == ROOT_STUDY_TOOL_NAME &&
-                preview.lessonRevision == rootPreviewFence.lessonRevision &&
-                preview.lessonRevision == currentLessonRevision &&
-                preview.previewResponseGeneration == rootPreviewFence.responseGeneration &&
-                rootPreviewFence.learnerSpeechSequence == lastClientSpeechSequence &&
-                activeClientSpeechSequence == null &&
-                rootPreviewFence.responseGeneration == activeResponseGeneration &&
-                validRootStudyCreationPreview(preview)
-        }?.let { pendingRootStudyCreationPreview = it }
         if (!result.isError) {
             // Only a matched, server-executed result advances future responses.
             // Existing response IDs and speech/commit slots keep their old epoch.
             result.lessonRevision?.takeIf { it >= 0 }?.let { revision ->
                 if (revision != currentLessonRevision) {
                     latestFocusIntentBinding?.focusAuthorization?.invalidate()
-                    latestFocusIntentBinding?.rootStudyConfirmationAuthorization?.invalidate()
+                    latestFocusIntentBinding?.rootStudyCreationAuthorization?.invalidate()
                     latestFocusIntentBinding = null
+                    persistedStudyAnswerSequences.clear()
+                    pendingStudyAnswerGroups.clear()
                     clearTargetDiscovery()
                 }
                 currentLessonRevision = maxOf(currentLessonRevision, revision)
             }
         }
+        val confirmedFocus = result.lessonFocus?.takeIf { focus ->
+            !result.isError && startedToolName in STUDY_FOCUS_TOOLS &&
+                focus.studyId > 0 && focus.revision > 0 &&
+                focus.snapshot.studyId == focus.studyId && result.lessonRevision == focus.revision &&
+                focus.snapshot.topic.isNotBlank() && focus.snapshot.topic.length <= 255 &&
+                focus.snapshot.difficulty in 1..10 &&
+                focus.snapshot.parentStudyId?.let { it > 0 } != false
+        }
+        when {
+            !result.isError && result.lessonFocusCleared && result.studyTreeChanged &&
+                result.changeKind == com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyChangeKind.DELETED &&
+                result.changedStudyId in result.deletedStudyIds -> {
+                confirmedStudyFocus = null
+                discardStudyQuestionPurpose()
+            }
+            confirmedFocus != null -> {
+                confirmedStudyFocus = ConfirmedStudyFocus(
+                    confirmedFocus.studyId,
+                    confirmedFocus.revision,
+                    confirmedFocus.topic,
+                    confirmedFocus.difficulty,
+                )
+                pendingStudyQuestionPurpose = StudyQuestionPurpose(
+                    confirmedFocus.revision,
+                    StudyQuestionPurposeSource.FOCUS_TOOL,
+                ).takeIf { eligibleFocusCall }
+            }
+            result.isError || startedToolName !in SAFE_PURPOSE_PRESERVING_READ_TOOLS ->
+                discardStudyQuestionPurpose()
+        }
+        var scheduledRootReadback: VoiceTutorScheduledMcpCall? = null
+        if (serverOwnedToolName == CREATE_ROOT_STUDY_TOOL && startedToolName == CREATE_ROOT_STUDY_TOOL) {
+            // Creation authority is already consumed before the write starts.
+            // A successful result owns exactly one independent readback; an
+            // uncertain result can only produce a non-confirming spoken status.
+            rootStudyCreationFollowupPending = true
+            val readbackId = trustedRootStudyReadbackId(result)
+            if (readbackId == null) {
+                rootStudyReadbackFailed = true
+            } else {
+                scheduledRootReadback = try {
+                    requireNotNull(toolCoordinator).scheduleServerCall(
+                        name = GET_STUDY_TOOL,
+                        arguments = linkedMapOf("study_id" to readbackId),
+                        nowNanos = nanoTime(),
+                    ).also { scheduled ->
+                        rootStudyReadbackCalls[scheduled.callId] = readbackId
+                    }
+                } catch (_: VoiceTutorMcpProtocolException) {
+                    // The create may already have committed. Never turn a
+                    // scheduling failure into permission to retry that write.
+                    rootStudyReadbackFailed = true
+                    null
+                }
+            }
+        }
+        if (serverOwnedToolName == GET_STUDY_TOOL && startedToolName == GET_STUDY_TOOL) {
+            rootStudyReadbackCalls.remove(callId)?.let { expectedId ->
+                if (!confirmsExactRootStudyReadback(result, expectedId)) {
+                    rootStudyReadbackFailed = true
+                }
+            }
+        }
         emit(event)
+        scheduledRootReadback?.let { emit(it.providerEvent) }
+        ensureToolAcknowledgementTimer()
+        return !closed
+    }
+
+    private fun trustedRootStudyReadbackId(result: VoiceTutorMcpToolResult): Long? {
+        if (result.isError) return null
+        val id = result.rootStudyReadbackId?.takeIf { it > 0 } ?: return null
+        if (result.createdStudyId?.let { it != id } == true || result.changedStudyId?.let { it != id } == true) {
+            return null
+        }
+        if (result.studyTreeChanged &&
+            (result.createdStudyId != id || result.changedStudyId != id ||
+                result.changeKind != com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyChangeKind.CREATED)
+        ) return null
+        return id
+    }
+
+    private fun confirmsExactRootStudyReadback(result: VoiceTutorMcpToolResult, expectedId: Long): Boolean {
+        if (result.isError) return false
+        val discovery = result.candidateDiscovery ?: return false
+        val scope = discovery.scope as? VoiceTutorCandidateDiscoveryScope.ExactStudy ?: return false
+        val candidate = discovery.candidates.singleOrNull() ?: return false
+        return discovery.source == VoiceTutorCandidateReadKind.GET_STUDY &&
+            discovery.lessonRevision == currentLessonRevision &&
+            scope.requestedStudyId == expectedId && candidate.studyId == expectedId &&
+            candidate.parentStudyId == null && candidate.topic.isNotBlank() && candidate.topic.length <= 255
+    }
+
+    private fun ensureToolAcknowledgementTimer() {
         if (!closed && toolAcknowledgementTimer == null) {
             toolAcknowledgementTimer = Flux.interval(INPUT_DEADLINE_POLL_INTERVAL)
                 .subscribe { expireToolAcknowledgements() }
         }
-        return !closed
     }
 
     private fun candidateReadKind(toolName: String): VoiceTutorCandidateReadKind? = when (toolName) {
@@ -542,16 +643,7 @@ internal class VoiceTutorDuplexTurnController(
         activeTargetOfferExchangeEvidence = null
         activeSpeechTargetOffer = null
         toolDiscoveryFences.clear()
-        rootPreviewFences.clear()
-        pendingRootStudyCreationPreview = null
-        activeRootStudyCreationOffer = null
-        activeSpeechRootStudyCreationOffer = null
     }
-
-    private fun validRootStudyCreationPreview(preview: VoiceTutorRootStudyCreationPreview): Boolean =
-        preview.topic.isNotBlank() && preview.topic == preview.topic.trim() && preview.topic.length <= 255 &&
-            preview.difficulty in 1..10 && preview.lessonRevision >= 0 &&
-            preview.previewResponseGeneration > 0
 
     @Synchronized
     internal fun expireToolAcknowledgements() {
@@ -574,9 +666,17 @@ internal class VoiceTutorDuplexTurnController(
 
     /** Called only after the controller accepted a final transcript for relay/persistence. */
     @Synchronized
-    fun providerEventForRelay(raw: String): String {
+    fun providerEventForRelay(
+        raw: String,
+        verifiedStudyAnswer: Boolean = false,
+        verifiedLearnerQuestion: Boolean = false,
+        speechSequence: Long? = null,
+        checkpoint: Boolean = false,
+        currentTranscriptAnswersStudyQuestion: Boolean = false,
+    ): String {
         val node = mapper.readTree(raw)
-        val revision = when (node.path("type").asText()) {
+        val eventType = node.path("type").asText()
+        val revision = when (eventType) {
             "response.output_audio_transcript.done" -> responseLessonRevisions[node.path("response_id").asText()]
                 ?: -1L
             "conversation.item.input_audio_transcription.completed" ->
@@ -590,7 +690,123 @@ internal class VoiceTutorDuplexTurnController(
         // it must neither terminate a call nor falsely revert a lesson to zero.
         (node as com.fasterxml.jackson.databind.node.ObjectNode)
             .put(VoiceTutorTranscriptMetadata.LESSON_REVISION, revision)
+            .remove(VoiceTutorTranscriptMetadata.STUDY_QUESTION_PROVIDER_ITEM_ID)
+        node.remove(VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION)
+        node.remove(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION)
+        node.remove(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID)
+        node.remove(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS)
+        val providerItemId = node.path("item_id").takeIf { it.isTextual }?.textValue()
+        providerItemId?.let(pendingStudyAnswerGroups::remove)
+        if (eventType == "conversation.item.input_audio_transcription.completed" &&
+            verifiedStudyAnswer && !checkpoint && speechSequence != null
+        ) {
+            completedStudyAnswerGroup(
+                speechSequence = speechSequence,
+                providerItemId = providerItemId,
+                binding = providerItemId?.let(inputLessonBindings::get),
+                currentTranscript = node.path("transcript").takeIf { it.isTextual }?.textValue(),
+                currentTranscriptAnswersStudyQuestion = currentTranscriptAnswersStudyQuestion,
+            )?.let { group ->
+                node.put(
+                    VoiceTutorTranscriptMetadata.STUDY_QUESTION_PROVIDER_ITEM_ID,
+                    group.questionProviderItemId,
+                )
+                node.putArray(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS).also { ids ->
+                    group.answerParts.forEach { ids.add(it.providerItemId) }
+                }
+                rememberBoundedBinding(pendingStudyAnswerGroups, requireNotNull(providerItemId), group)
+            }
+        }
+        if (eventType == "conversation.item.input_audio_transcription.completed" && !checkpoint) {
+            speechSequence?.let(persistedStudyAnswerSequences::remove)
+        }
+        if (eventType == "conversation.item.input_audio_transcription.completed" && verifiedLearnerQuestion) {
+            node.put(VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION, true)
+        }
         return mapper.writeValueAsString(node)
+    }
+
+    private fun completedStudyAnswerGroup(
+        speechSequence: Long,
+        providerItemId: String?,
+        binding: InputLessonBinding?,
+        currentTranscript: String?,
+        currentTranscriptAnswersStudyQuestion: Boolean,
+    ): PendingStudyAnswerGroup? {
+        if (speechSequence <= 0 || speechSequence != lastClientSpeechSequence ||
+            providerItemId.isNullOrBlank() || providerItemId.length > MAX_PROVIDER_ITEM_ID_CHARACTERS ||
+            binding == null || !binding.precedingTutorStudyQuestionEligible
+        ) return null
+        val questionProviderItemId = binding.precedingTutorProviderItemId
+            ?.takeIf { it.isNotBlank() && it.length <= MAX_PROVIDER_ITEM_ID_CHARACTERS }
+            ?: return null
+        val cached = persistedStudyAnswerSequences[speechSequence]
+        if (cached?.invalid == true || cached?.lessonRevision?.let { it != binding.lessonRevision } == true ||
+            cached?.questionProviderItemId?.let { it != questionProviderItemId } == true
+        ) return null
+        val parts = cached?.answerParts.orEmpty().toMutableList()
+        if (currentTranscriptAnswersStudyQuestion) {
+            val exactCurrent = currentTranscript?.trim()?.takeIf(String::isNotBlank) ?: return null
+            if (parts.any { it.providerItemId == providerItemId } ||
+                parts.size == VoiceTutorTranscriptMetadata.MAX_STUDY_ANSWER_PARTS
+            ) return null
+            parts += PersistedStudyAnswerPart(providerItemId, exactCurrent)
+        }
+        if (parts.isEmpty() || parts.size > VoiceTutorTranscriptMetadata.MAX_STUDY_ANSWER_PARTS ||
+            parts.map(PersistedStudyAnswerPart::providerItemId).distinct().size != parts.size
+        ) return null
+        return PendingStudyAnswerGroup(
+            lessonRevision = binding.lessonRevision,
+            questionProviderItemId = questionProviderItemId,
+            answerParts = parts.toList(),
+        )
+    }
+
+    private fun rememberPersistedStudyAnswerCheckpoint(
+        publication: VoiceTutorInputTurnCoordinator.Action.Publish,
+        binding: InputLessonBinding?,
+        persisted: Boolean,
+    ) {
+        if (!publication.checkpoint || !publication.currentTranscriptAnswersStudyQuestion ||
+            publication.sequence <= 0 || publication.sequence != lastClientSpeechSequence
+        ) return
+        val questionProviderItemId = binding?.precedingTutorProviderItemId
+            ?.takeIf {
+                binding.precedingTutorStudyQuestionEligible && it.isNotBlank() &&
+                    it.length <= MAX_PROVIDER_ITEM_ID_CHARACTERS
+            }
+        val transcript = runCatching {
+            mapper.readTree(publication.rawEvent).path("transcript")
+                .takeIf { it.isTextual }?.textValue()?.trim()
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+        val valid = persisted && binding != null && questionProviderItemId != null && transcript != null
+        val state = persistedStudyAnswerSequences[publication.sequence]
+        if (!valid || state?.lessonRevision?.let { it != binding?.lessonRevision } == true ||
+            state?.questionProviderItemId?.let { it != questionProviderItemId } == true
+        ) {
+            persistedStudyAnswerSequences[publication.sequence] = PersistedStudyAnswerSequence(
+                lessonRevision = binding?.lessonRevision ?: -1,
+                questionProviderItemId = questionProviderItemId.orEmpty(),
+                invalid = true,
+            )
+            return
+        }
+        val accepted = state ?: PersistedStudyAnswerSequence(
+            lessonRevision = binding.lessonRevision,
+            questionProviderItemId = questionProviderItemId,
+        )
+        if (accepted.invalid || accepted.answerParts.any { it.providerItemId == publication.itemId } ||
+            accepted.answerParts.size == VoiceTutorTranscriptMetadata.MAX_STUDY_ANSWER_PARTS
+        ) {
+            accepted.answerParts.clear()
+            accepted.invalid = true
+        } else {
+            accepted.answerParts += PersistedStudyAnswerPart(publication.itemId, transcript)
+        }
+        persistedStudyAnswerSequences[publication.sequence] = accepted
+        while (persistedStudyAnswerSequences.size > MAX_PERSISTED_STUDY_ANSWER_SEQUENCES) {
+            persistedStudyAnswerSequences.remove(persistedStudyAnswerSequences.keys.first())
+        }
     }
 
     @Synchronized
@@ -614,6 +830,7 @@ internal class VoiceTutorDuplexTurnController(
         if (closed) return
         val publication = pendingInputPublications.remove(itemId) ?: return
         val binding = inputLessonBindings.remove(itemId)
+        val studyAnswerGroup = pendingStudyAnswerGroups.remove(itemId)
         val lessonEndSequence = pendingLessonEndPublications.remove(itemId)
         val acceptedLessonEnd = persisted && lessonEndSequence != null &&
             lessonEndSequence == lastClientSpeechSequence && activeClientSpeechSequence == null
@@ -627,6 +844,10 @@ internal class VoiceTutorDuplexTurnController(
             confirmPublished(itemId, nanoTime()).also { actions ->
                 val ready = actions.filterIsInstance<VoiceTutorInputTurnCoordinator.Action.Ready>().singleOrNull()
                 if (ready != null) {
+                    if (ready.checkpoint) {
+                        rememberPersistedStudyAnswerCheckpoint(publication, binding, persisted)
+                        return@also
+                    }
                     // Consume a handled input exactly once even if storage
                     // is full or already contains it; this must not disconnect
                     // or re-assess/re-answer the same item. Mutation consent,
@@ -642,21 +863,33 @@ internal class VoiceTutorDuplexTurnController(
                         binding, publication.intent, publication.targetStudyId, publication.targetOfferId,
                     )
                     val rootCreationIntentCurrent = focusPublicationCurrent && binding != null &&
-                        publication.intent in setOf(
-                            VoiceTutorInputIntent.CREATE_ROOT_STUDY,
-                            VoiceTutorInputIntent.CONFIRM_ROOT_STUDY,
-                        )
+                        publication.intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY &&
+                        publication.rootStudyCreationRequest?.isValid() == true
                     latestFocusIntentBinding?.focusAuthorization?.invalidate()
-                    latestFocusIntentBinding?.rootStudyConfirmationAuthorization?.invalidate()
+                    latestFocusIntentBinding?.rootStudyCreationAuthorization?.invalidate()
                     val focusAuthorization = VoiceTutorFocusAuthorization().takeIf {
                         persisted && !ready.checkpoint && focusTargetValid
                     }
-                    val rootStudyConfirmationAuthorization =
-                        VoiceTutorRootStudyConfirmationAuthorization().takeIf {
-                            persisted && !ready.checkpoint && rootCreationIntentCurrent &&
-                                publication.intent == VoiceTutorInputIntent.CONFIRM_ROOT_STUDY &&
-                                binding?.rootStudyCreationOffer != null
+                    val rootStudyCreationAuthorization = publication.rootStudyCreationRequest
+                        ?.takeIf {
+                            persisted && !ready.checkpoint && rootCreationIntentCurrent
                         }
+                        ?.let { VoiceTutorRootStudyCreationAuthorization(it.topic, it.difficulty) }
+                    val exactAnswerTranscript = studyAnswerGroup
+                        ?.takeIf {
+                            persisted && publication.intent ==
+                                VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION &&
+                                binding?.lessonRevision == it.lessonRevision &&
+                                binding.precedingTutorProviderItemId == it.questionProviderItemId
+                        }
+                        ?.answerParts
+                        ?.joinToString("\n", transform = PersistedStudyAnswerPart::transcript)
+                    val exactQuestionTranscript = lastSpokenStudyQuestion?.takeIf { question ->
+                        exactAnswerTranscript != null &&
+                            binding?.precedingTutorStudyQuestionEligible == true &&
+                            binding.precedingTutorProviderItemId == question.providerItemId &&
+                            binding.lessonRevision == question.lessonRevision
+                    }?.transcript
                     latestAcceptedInputBinding = if (persisted && !ready.checkpoint && binding != null) {
                         binding.copy(
                             providerItemId = itemId,
@@ -664,17 +897,52 @@ internal class VoiceTutorDuplexTurnController(
                             targetStudyId = publication.targetStudyId.takeIf { focusTargetValid },
                             targetOfferId = publication.targetOfferId.takeIf { focusTargetValid },
                             focusAuthorization = focusAuthorization,
-                            rootStudyConfirmationAuthorization = rootStudyConfirmationAuthorization,
+                            rootStudyCreationAuthorization = rootStudyCreationAuthorization,
+                            studyQuestionTranscript = exactQuestionTranscript,
+                            inputTranscript = exactAnswerTranscript,
+                            studyAnswerProviderItemId = studyAnswerGroup
+                                ?.answerParts?.lastOrNull()?.providerItemId
+                                ?.takeIf { exactAnswerTranscript != null },
                         )
                     } else {
                         null
                     }
+                    if (persisted && !ready.checkpoint && binding != null) {
+                        val focus = confirmedStudyFocus
+                        pendingStudyQuestionPurpose = if (
+                            publication.intent == VoiceTutorInputIntent.CONTINUE_STUDY &&
+                            binding.precedingTutorContinuationEligible &&
+                            binding.precedingTutorProviderItemId != null &&
+                            focus != null && focus.revision == currentLessonRevision &&
+                            binding.lessonRevision == focus.revision
+                        ) {
+                            StudyQuestionPurpose(focus.revision, StudyQuestionPurposeSource.CONTINUE_STUDY)
+                        } else {
+                            null
+                        }
+                        if (publication.intent == VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION &&
+                            studyAnswerGroup != null && exactAnswerTranscript != null &&
+                            binding.precedingTutorStudyQuestionEligible &&
+                            binding.precedingTutorProviderItemId == lastSpokenStudyQuestion?.providerItemId
+                        ) {
+                            lastSpokenStudyQuestion = null
+                        }
+                        // A final meaningful learner turn consumes the exact preceding
+                        // feedback/learner-question-answer continuation anchor whether
+                        // or not its semantics authorize another study question.
+                        if (binding.precedingTutorContinuationEligible) {
+                            lastSpokenContinuationAnchor = null
+                        }
+                    }
                     // Keep only the newest persisted tool-mutation intent. Saved-topic focus
-                    // retains its one-shot candidate lease; root creation has no candidate ID
-                    // and is separately fenced by its exact preview/confirmation ticket and offer.
+                    // retains its one-shot candidate lease; direct root creation carries a
+                    // separately one-shot authorization bound to assessor-extracted fields.
                     latestFocusIntentBinding = latestAcceptedInputBinding?.takeIf {
                         (focusTargetValid && (it.inputIntent == VoiceTutorInputIntent.SELECT_SAVED_TOPIC ||
                             it.inputIntent == VoiceTutorInputIntent.CONTINUE_TREE)) || rootCreationIntentCurrent
+                    }
+                    rootStudyCreationAuthorization?.let { authorization ->
+                        scheduleServerRootStudyCreation(authorization)
                     }
                 }
             }
@@ -688,6 +956,36 @@ internal class VoiceTutorDuplexTurnController(
                 emitSpokenLessonEndLifecycle()
             }
         }
+    }
+
+    /**
+     * A durable assessed CREATE_ROOT_STUDY command is executable input, not a
+     * suggestion for the model. Insert the exact server-owned call into provider
+     * context now; no response can be created until both call and result ACKs.
+     */
+    private fun scheduleServerRootStudyCreation(
+        authorization: VoiceTutorRootStudyCreationAuthorization,
+    ) {
+        val coordinator = toolCoordinator
+        if (coordinator == null) {
+            terminate(VoiceTutorMcpProtocolException())
+            return
+        }
+        val scheduled = try {
+            coordinator.scheduleServerCall(
+                name = CREATE_ROOT_STUDY_TOOL,
+                arguments = linkedMapOf(
+                    "topic" to authorization.topic,
+                    "difficulty_level" to authorization.difficulty,
+                ),
+                nowNanos = nanoTime(),
+            )
+        } catch (error: VoiceTutorMcpProtocolException) {
+            terminate(error)
+            return
+        }
+        emit(scheduled.providerEvent)
+        ensureToolAcknowledgementTimer()
     }
 
     private fun validFocusTargetBinding(
@@ -769,7 +1067,7 @@ internal class VoiceTutorDuplexTurnController(
                 is VoiceTutorInputTurnCoordinator.Action.Ready -> {
                     // A meaningful checkpoint contributes context, not permission
                     // to speak over the learner. The normal response gate owns that.
-                    queuedCommittedTurn = true
+                    if (!action.checkpoint) queuedCommittedTurn = true
                 }
                 else -> {
                     if (action is VoiceTutorInputTurnCoordinator.Action.Publish) {
@@ -891,7 +1189,9 @@ internal class VoiceTutorDuplexTurnController(
     @Synchronized
     fun observeProviderEventWithPostRelay(raw: String): VoiceTutorProviderObservation {
         val disposition = observeProviderEventInternal(raw)
-        val pending = pendingPostRelayBoundary?.takeIf { !it.claimed }
+        val pending = pendingPostRelayBoundary?.takeIf {
+            !it.claimed && it.questionAssessmentToken == null && it.feedbackAssessmentToken == null
+        }
         val boundary = pending?.let {
             pendingPostRelayBoundary = it.copy(claimed = true)
             VoiceTutorPostRelayBoundary(it.token, it.tutorTranscriptEvents)
@@ -905,6 +1205,79 @@ internal class VoiceTutorDuplexTurnController(
             ?.takeIf { it.claimed && it.token == token } ?: return false
         resumeAfterPostRelayBoundary(pending)
         return true
+    }
+
+    /** Semantic failure/refusal/timeout is an ordinary false decision, never durable question authority. */
+    @Synchronized
+    fun completeSpokenQuestionAssessment(
+        token: Long,
+        result: Result<Boolean>,
+    ): VoiceTutorPostRelayBoundary? {
+        val pending = pendingPostRelayBoundary?.takeIf {
+            !it.claimed && it.questionAssessmentToken == token &&
+                it.proposedStudyQuestionEvidence != null
+        } ?: return null
+        val accepted = result.getOrDefault(false)
+        val transcriptEvents = if (accepted) {
+            pending.tutorTranscriptEvents.map(::stampStudyQuestionTranscriptEvent)
+        } else {
+            pending.tutorTranscriptEvents
+        }
+        pendingPostRelayBoundary = pending.copy(
+            tutorTranscriptEvents = transcriptEvents,
+            studyQuestionEvidence = pending.proposedStudyQuestionEvidence.takeIf { accepted },
+            proposedStudyQuestionEvidence = null,
+            questionAssessmentToken = null,
+            claimed = true,
+        )
+        return VoiceTutorPostRelayBoundary(pending.token, transcriptEvents)
+    }
+
+    /** Semantic failure/refusal/timeout is an ordinary false decision, never durable feedback authority. */
+    @Synchronized
+    fun completeSpokenFeedbackAssessment(
+        token: Long,
+        result: Result<Boolean>,
+    ): VoiceTutorPostRelayBoundary? {
+        val pending = pendingPostRelayBoundary?.takeIf {
+            !it.claimed && it.feedbackAssessmentToken == token &&
+                it.proposedFeedbackEvidence != null
+        } ?: return null
+        val accepted = result.getOrDefault(false)
+        val evidence = pending.proposedFeedbackEvidence.takeIf { accepted }
+        val transcriptEvents = if (evidence != null) {
+            pending.tutorTranscriptEvents.map { raw ->
+                stampStudyAnswerFeedbackTranscriptEvent(raw, evidence.identity.answerProviderItemId)
+            }
+        } else {
+            pending.tutorTranscriptEvents
+        }
+        pendingPostRelayBoundary = pending.copy(
+            tutorTranscriptEvents = transcriptEvents,
+            feedbackEvidence = evidence,
+            continuationAnchor = pending.proposedFeedbackContinuationAnchor.takeIf { accepted },
+            feedbackNavigationOffer = pending.proposedFeedbackNavigationOffer.takeIf { accepted },
+            proposedFeedbackEvidence = null,
+            proposedFeedbackContinuationAnchor = null,
+            proposedFeedbackNavigationOffer = null,
+            feedbackAssessmentToken = null,
+            claimed = true,
+        )
+        return VoiceTutorPostRelayBoundary(pending.token, transcriptEvents)
+    }
+
+    private fun stampStudyQuestionTranscriptEvent(raw: String): String {
+        val node = mapper.readTree(raw) as? com.fasterxml.jackson.databind.node.ObjectNode
+            ?: throw VoiceTutorProviderProtocolException()
+        node.put(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION, true)
+        return mapper.writeValueAsString(node)
+    }
+
+    private fun stampStudyAnswerFeedbackTranscriptEvent(raw: String, answerProviderItemId: String): String {
+        val node = mapper.readTree(raw) as? com.fasterxml.jackson.databind.node.ObjectNode
+            ?: throw VoiceTutorProviderProtocolException()
+        node.put(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID, answerProviderItemId)
+        return mapper.writeValueAsString(node)
     }
 
     private fun observeProviderEventInternal(raw: String): VoiceTutorProviderRelayDisposition {
@@ -993,7 +1366,12 @@ internal class VoiceTutorDuplexTurnController(
                 VoiceTutorProviderRelayDisposition.DROP
             }
             in VoiceTutorMcpTurnCoordinator.OUTPUT_ACK_EVENTS -> {
-                if (toolCoordinator?.acknowledge(node, nanoTime()) == true) {
+                val serverCall = toolCoordinator?.acknowledgeServerCall(node, nanoTime())
+                if (serverCall != null) {
+                    if (toolWork.tryEmitNext(serverCall).isFailure && !closed) {
+                        terminate(VoiceTutorMcpProtocolException())
+                    }
+                } else if (toolCoordinator?.acknowledge(node, nanoTime()) == true) {
                     if (!toolCoordinator.hasPending) {
                         toolAcknowledgementTimer?.dispose()
                         toolAcknowledgementTimer = null
@@ -1054,6 +1432,8 @@ internal class VoiceTutorDuplexTurnController(
                             precedingTutorSpeechStoppedOrder = commit.precedingTutorSpeechStoppedOrder,
                             precedingSpokenResponseGeneration = commit.precedingSpokenResponseGeneration,
                             precedingTutorProviderItemId = commit.precedingTutorProviderItemId,
+                            precedingTutorStudyQuestionEligible = commit.precedingTutorStudyQuestionEligible,
+                            precedingTutorContinuationEligible = commit.precedingTutorContinuationEligible,
                             precedingTutorFeedbackForStudyAnswer = commit.precedingTutorFeedbackForStudyAnswer,
                             precedingQuestionProviderItemId = commit.precedingQuestionProviderItemId,
                             precedingAnswerProviderItemId = commit.precedingAnswerProviderItemId,
@@ -1061,7 +1441,6 @@ internal class VoiceTutorDuplexTurnController(
                             precedingTutorNavigationOfferProviderItemId =
                                 commit.precedingTutorNavigationOfferProviderItemId,
                             targetOffer = commit.targetOffer,
-                            rootStudyCreationOffer = commit.rootStudyCreationOffer,
                         ),
                     )
                 }
@@ -1073,7 +1452,7 @@ internal class VoiceTutorDuplexTurnController(
                     withInputCoordinator {
                         observeCommitted(
                             node.path("item_id").asText(), commit.sequence, commit.checkpoint, nanoTime(),
-                            commit.targetOffer, commit.rootStudyCreationOffer,
+                            commit.targetOffer,
                         )
                     }
                 } else {
@@ -1182,9 +1561,14 @@ internal class VoiceTutorDuplexTurnController(
             toolCoordinator?.close()
             inputCoordinator?.close()
             pendingInputPublications.clear()
+            persistedStudyAnswerSequences.clear()
+            pendingStudyAnswerGroups.clear()
             pendingLessonEndPublications.clear()
             pendingSpokenLessonEnd = null
             pendingProviderResponseRetry = null
+            rootStudyCreationFollowupPending = false
+            rootStudyReadbackCalls.clear()
+            rootStudyReadbackFailed = false
             pendingPostRelayBoundary = null
             recentFailedResponseCreateEventIds.clear()
             recentFailedResponseIds.clear()
@@ -1192,7 +1576,7 @@ internal class VoiceTutorDuplexTurnController(
             activeTutorFinalTranscriptEvents.clear()
             activeTutorTranscriptItemIds.clear()
             latestFocusIntentBinding?.focusAuthorization?.invalidate()
-            latestFocusIntentBinding?.rootStudyConfirmationAuthorization?.invalidate()
+            latestFocusIntentBinding?.rootStudyCreationAuthorization?.invalidate()
             latestFocusIntentBinding = null
             clearTargetDiscovery()
             pendingInputCommits.clear()
@@ -1208,6 +1592,8 @@ internal class VoiceTutorDuplexTurnController(
                 terminalInputFailure.tryEmitValue(error)
             }
             inputWork.tryEmitComplete()
+            spokenQuestionAssessmentWork.tryEmitComplete()
+            spokenFeedbackAssessmentWork.tryEmitComplete()
             toolWork.tryEmitComplete()
             clientControls.tryEmitComplete()
             serverLifecycle.tryEmitComplete()
@@ -1227,6 +1613,7 @@ internal class VoiceTutorDuplexTurnController(
     private fun observeLegacySpeechStarted(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
         val itemId = providerItemId(node) ?: throw VoiceTutorProviderInputCorrelationException()
         if (activeClientSpeechSequence != null || itemId in legacyInputSequences) return false
+        pendingStudyQuestionPurpose = null
         if (lastClientSpeechSequence == Long.MAX_VALUE) throw VoiceTutorProviderInputCorrelationException()
         val sequence = lastClientSpeechSequence + 1
         lastClientSpeechSequence = sequence
@@ -1284,16 +1671,19 @@ internal class VoiceTutorDuplexTurnController(
             precedingTutorNavigationOfferProviderItemId =
                 binding.precedingTutorNavigationOfferProviderItemId,
             targetOffer = binding.targetOffer,
-            rootStudyCreationOffer = binding.rootStudyCreationOffer,
+            precedingTutorStudyQuestionEligible = binding.precedingTutorStudyQuestionEligible,
+            precedingTutorContinuationEligible = binding.precedingTutorContinuationEligible,
         )
     }
 
     private fun observeClientSpeechStarted(sequence: Long) {
         if (sequence <= lastClientSpeechSequence) return
+        persistedStudyAnswerSequences.keys.removeAll { it < sequence }
+        pendingStudyQuestionPurpose = null
         // Revocation happens at the first fresh speech edge, even while pause
         // suppression prevents this audio from becoming an accepted utterance.
         latestFocusIntentBinding?.focusAuthorization?.invalidate()
-        latestFocusIntentBinding?.rootStudyConfirmationAuthorization?.invalidate()
+        latestFocusIntentBinding?.rootStudyCreationAuthorization?.invalidate()
         latestFocusIntentBinding = null
         if (pauseCoordinator?.acceptsSpeechEdges != true) {
             // Keep a high-water mark even for suppressed edges. Replaying an
@@ -1324,8 +1714,14 @@ internal class VoiceTutorDuplexTurnController(
                 tutorOutputCompleted && lastSpokenResponseGeneration > 0 &&
                     lastSpokenTutorProviderItemGeneration == lastSpokenResponseGeneration
             }
-        val awaitsTutorFinalization = responseActive && providerOutputBufferStopped && !providerResponseDone
-        speechAwaitingTutorFinalizationGeneration = activeResponseGeneration.takeIf { awaitsTutorFinalization }
+        val pendingTutorBoundary = pendingPostRelayBoundary
+        val awaitsTutorFinalization = pendingTutorBoundary != null ||
+            (responseActive && providerOutputBufferStopped && !providerResponseDone)
+        speechAwaitingTutorFinalizationGeneration = when {
+            pendingTutorBoundary != null -> pendingTutorBoundary.completedResponseGeneration
+            awaitsTutorFinalization -> activeResponseGeneration
+            else -> null
+        }
         inputCheckpointSequence = null
         observeSpeechStarted(deferTutorEvidence = awaitsTutorFinalization)
     }
@@ -1344,6 +1740,8 @@ internal class VoiceTutorDuplexTurnController(
         val precedingTutorSpeechStoppedOrder = activeSpeechPrecedingTutorStopOrder
         val precedingSpokenResponseGeneration = activeSpeechPrecedingSpokenGeneration
         val precedingTutorProviderItemId = activeSpeechPrecedingTutorProviderItemId
+        val precedingTutorStudyQuestionEligible = activeSpeechPrecedingTutorStudyQuestionEligible
+        val precedingTutorContinuationEligible = activeSpeechPrecedingTutorContinuationEligible
         val precedingTutorFeedbackForStudyAnswer = activeSpeechPrecedingTutorFeedbackForStudyAnswer
         val precedingQuestionProviderItemId = activeSpeechPrecedingQuestionProviderItemId
         val precedingAnswerProviderItemId = activeSpeechPrecedingAnswerProviderItemId
@@ -1351,7 +1749,6 @@ internal class VoiceTutorDuplexTurnController(
         val precedingTutorNavigationOfferProviderItemId =
             activeSpeechPrecedingTutorNavigationOfferProviderItemId
         val targetOffer = activeSpeechTargetOffer
-        val rootStudyCreationOffer = activeSpeechRootStudyCreationOffer
         activeClientSpeechSequence = null
         if (speechAwaitingTutorFinalizationGeneration != null) {
             var waiting = PendingStopCommit(
@@ -1362,7 +1759,8 @@ internal class VoiceTutorDuplexTurnController(
                 precedingAnswerProviderItemId, precedingTutorFeedbackProviderItemId,
                 precedingTutorNavigationOfferProviderItemId,
                 targetOffer,
-                rootStudyCreationOffer,
+                precedingTutorStudyQuestionEligible = precedingTutorStudyQuestionEligible,
+                precedingTutorContinuationEligible = precedingTutorContinuationEligible,
             )
             delayedStopCommit?.let { beforeTutorStop ->
                 // response.done may arrive after the old spacing timer. Merge
@@ -1419,7 +1817,8 @@ internal class VoiceTutorDuplexTurnController(
                 precedingAnswerProviderItemId, precedingTutorFeedbackProviderItemId,
                 precedingTutorNavigationOfferProviderItemId,
                 targetOffer,
-                rootStudyCreationOffer,
+                precedingTutorStudyQuestionEligible = precedingTutorStudyQuestionEligible,
+                precedingTutorContinuationEligible = precedingTutorContinuationEligible,
             )
             delayedStopCommitTimer = Mono.delay(
                 Duration.ofNanos(MIN_INPUT_COMMIT_SPACING.toNanos() - sincePreviousCommit),
@@ -1440,7 +1839,8 @@ internal class VoiceTutorDuplexTurnController(
                 precedingTutorNavigationOfferProviderItemId =
                     precedingTutorNavigationOfferProviderItemId,
                 targetOffer = targetOffer,
-                rootStudyCreationOffer = rootStudyCreationOffer,
+                precedingTutorStudyQuestionEligible = precedingTutorStudyQuestionEligible,
+                precedingTutorContinuationEligible = precedingTutorContinuationEligible,
             )
         }
     }
@@ -1468,6 +1868,8 @@ internal class VoiceTutorDuplexTurnController(
             precedingTutorSpeechStoppedOrder = pending.precedingTutorSpeechStoppedOrder,
             precedingSpokenResponseGeneration = pending.precedingSpokenResponseGeneration,
             precedingTutorProviderItemId = pending.precedingTutorProviderItemId,
+            precedingTutorStudyQuestionEligible = pending.precedingTutorStudyQuestionEligible,
+            precedingTutorContinuationEligible = pending.precedingTutorContinuationEligible,
             precedingTutorFeedbackForStudyAnswer = pending.precedingTutorFeedbackForStudyAnswer,
             precedingQuestionProviderItemId = pending.precedingQuestionProviderItemId,
             precedingAnswerProviderItemId = pending.precedingAnswerProviderItemId,
@@ -1475,7 +1877,6 @@ internal class VoiceTutorDuplexTurnController(
             precedingTutorNavigationOfferProviderItemId =
                 pending.precedingTutorNavigationOfferProviderItemId,
             targetOffer = pending.targetOffer,
-            rootStudyCreationOffer = pending.rootStudyCreationOffer,
         )
     }
 
@@ -1488,6 +1889,8 @@ internal class VoiceTutorDuplexTurnController(
         precedingTutorSpeechStoppedOrder: Long = activeSpeechPrecedingTutorStopOrder,
         precedingSpokenResponseGeneration: Long = activeSpeechPrecedingSpokenGeneration,
         precedingTutorProviderItemId: String? = activeSpeechPrecedingTutorProviderItemId,
+        precedingTutorStudyQuestionEligible: Boolean = activeSpeechPrecedingTutorStudyQuestionEligible,
+        precedingTutorContinuationEligible: Boolean = activeSpeechPrecedingTutorContinuationEligible,
         precedingTutorFeedbackForStudyAnswer: Boolean = activeSpeechPrecedingTutorFeedbackForStudyAnswer,
         precedingQuestionProviderItemId: String? = activeSpeechPrecedingQuestionProviderItemId,
         precedingAnswerProviderItemId: String? = activeSpeechPrecedingAnswerProviderItemId,
@@ -1495,7 +1898,6 @@ internal class VoiceTutorDuplexTurnController(
         precedingTutorNavigationOfferProviderItemId: String? =
             activeSpeechPrecedingTutorNavigationOfferProviderItemId,
         targetOffer: VoiceTutorStudyTargetOffer? = activeSpeechTargetOffer,
-        rootStudyCreationOffer: VoiceTutorRootStudyCreationOffer? = activeSpeechRootStudyCreationOffer,
     ) {
         if (closed) return
         // Register before emitting: an immediate provider ACK must find the
@@ -1510,7 +1912,8 @@ internal class VoiceTutorDuplexTurnController(
             precedingAnswerProviderItemId, precedingTutorFeedbackProviderItemId,
             precedingTutorNavigationOfferProviderItemId,
             targetOffer,
-            rootStudyCreationOffer,
+            precedingTutorStudyQuestionEligible = precedingTutorStudyQuestionEligible,
+            precedingTutorContinuationEligible = precedingTutorContinuationEligible,
         ))
         lastInputCommitNanos = requestedAt
         scheduleInputCommitTimeout()
@@ -1526,7 +1929,7 @@ internal class VoiceTutorDuplexTurnController(
         // A newly observed utterance may retract or redirect the previous focus choice.
         // It cannot authorize a focus itself until its exact final item is assessed and persisted.
         latestFocusIntentBinding?.focusAuthorization?.invalidate()
-        latestFocusIntentBinding?.rootStudyConfirmationAuthorization?.invalidate()
+        latestFocusIntentBinding?.rootStudyCreationAuthorization?.invalidate()
         latestFocusIntentBinding = null
         if (!deferTutorEvidence) bindAndConsumeFinalizedTutorEvidence()
         if (!userSpeaking) {
@@ -1540,16 +1943,23 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     private fun bindAndConsumeFinalizedTutorEvidence() {
+        val lessonRevision = activeSpeechLessonRevision ?: currentLessonRevision
+        activeSpeechPrecedingTutorStudyQuestionEligible = lastSpokenStudyQuestion?.matches(
+            lessonRevision,
+            activeSpeechPrecedingSpokenGeneration,
+            activeSpeechPrecedingTutorStopOrder,
+            activeSpeechPrecedingTutorProviderItemId,
+        ) == true
+        activeSpeechPrecedingTutorContinuationEligible = lastSpokenContinuationAnchor?.matches(
+            lessonRevision,
+            activeSpeechPrecedingSpokenGeneration,
+            activeSpeechPrecedingTutorStopOrder,
+            activeSpeechPrecedingTutorProviderItemId,
+        ) == true
         activeSpeechTargetOffer = activeTargetOffer?.takeIf { offer ->
             offer.lessonRevision == currentLessonRevision &&
                 offer.tutorResponseGeneration == activeSpeechPrecedingSpokenGeneration &&
                 offer.tutorSpeechStoppedOrder == activeSpeechPrecedingTutorStopOrder
-        }
-        activeSpeechRootStudyCreationOffer = activeRootStudyCreationOffer?.takeIf { offer ->
-            offer.lessonRevision == currentLessonRevision &&
-                offer.tutorResponseGeneration == activeSpeechPrecedingSpokenGeneration &&
-                offer.tutorSpeechStoppedOrder == activeSpeechPrecedingTutorStopOrder &&
-                offer.tutorProviderItemId == activeSpeechPrecedingTutorProviderItemId
         }
         val exchange = activeTargetOfferExchangeEvidence?.takeIf { evidence ->
             activeSpeechTargetOffer?.offerId == evidence.offerId &&
@@ -1563,7 +1973,6 @@ internal class VoiceTutorDuplexTurnController(
         activeSpeechPrecedingTutorNavigationOfferProviderItemId = exchange?.navigationOfferProviderItemId
         activeTargetOffer = null
         activeTargetOfferExchangeEvidence = null
-        activeRootStudyCreationOffer = null
         candidateDiscoveryGraph = null
         activeResponseCandidateDiscovery = null
         toolDiscoveryFences.clear()
@@ -1576,13 +1985,14 @@ internal class VoiceTutorDuplexTurnController(
         activeSpeechPrecedingTutorStopOrder = 0
         activeSpeechPrecedingSpokenGeneration = 0
         activeSpeechPrecedingTutorProviderItemId = null
+        activeSpeechPrecedingTutorStudyQuestionEligible = false
+        activeSpeechPrecedingTutorContinuationEligible = false
         activeSpeechPrecedingTutorFeedbackForStudyAnswer = false
         activeSpeechPrecedingQuestionProviderItemId = null
         activeSpeechPrecedingAnswerProviderItemId = null
         activeSpeechPrecedingTutorFeedbackProviderItemId = null
         activeSpeechPrecedingTutorNavigationOfferProviderItemId = null
         activeSpeechTargetOffer = null
-        activeSpeechRootStudyCreationOffer = null
         cancelInputCheckpointTimer()
         inputCheckpointDue = false
         if (pendingSpeechCommitCount == 0) createNormalResponseIfReady()
@@ -1700,6 +2110,7 @@ internal class VoiceTutorDuplexTurnController(
             !openingResponseRequested || userSpeaking ||
             pendingSpeechCommitCount > 0 || pendingInputCommits.isNotEmpty() || delayedStopCommit != null || responseActive ||
             inputCoordinator?.hasPending == true || toolCoordinator?.hasPending == true ||
+            (rootStudyCreationFollowupPending && rootStudyReadbackCalls.isNotEmpty()) ||
             (!openingResponsePending && !queuedCommittedTurn && toolCoordinator?.continuationReady != true)
         ) return
         val opening = openingResponsePending
@@ -1716,9 +2127,32 @@ internal class VoiceTutorDuplexTurnController(
         // Opening speech uses the same response/playout gate as an ordinary turn.
         // Keep any early learner commit queued until its transport completion gate.
         val responseEventId = internalEventId(if (opening) "opening-response" else "turn-response")
-        val toolChoice = if (opening) "none" else toolCoordinator?.toolChoice ?: "none"
-        beginResponse(responseEventId, toolChoice)
-        emitResponseCreate(responseEventId, toolChoice)
+        val studyQuestionPurposeReady = !opening && pendingStudyQuestionPurpose?.let { purpose ->
+            confirmedStudyFocus?.revision == currentLessonRevision &&
+                purpose.lessonRevision == currentLessonRevision
+        } == true
+        val rootStudyFollowupReady = !opening && rootStudyCreationFollowupPending &&
+            rootStudyReadbackCalls.isEmpty()
+        val toolChoice = if (opening || rootStudyFollowupReady) {
+            "none"
+        } else if (studyQuestionPurposeReady) {
+            // A purpose-bound response may need the saved node's learning
+            // history before it can ask a well-grounded question. The purpose
+            // survives only strict tool-only rounds made entirely of the
+            // server allow-listed history/stat reads below.
+            "auto"
+        } else {
+            toolCoordinator?.toolChoice ?: "none"
+        }
+        val instructions = when {
+            rootStudyFollowupReady && !rootStudyReadbackFailed ->
+                ROOT_STUDY_CREATION_FOLLOWUP_INSTRUCTIONS
+            rootStudyFollowupReady -> ROOT_STUDY_CREATION_UNCONFIRMED_FOLLOWUP_INSTRUCTIONS
+            studyQuestionPurposeReady -> STUDY_QUESTION_RESPONSE_INSTRUCTIONS
+            else -> null
+        }
+        beginResponse(responseEventId, toolChoice, instructions)
+        emitResponseCreate(responseEventId, toolChoice, instructions)
     }
 
     /** A failed provider response owns one retry and always remains ahead of a new tutor turn. */
@@ -1747,7 +2181,7 @@ internal class VoiceTutorDuplexTurnController(
                 pending
             }
         }
-        emitResponseCreate(responseEventId, retry.toolChoice)
+        emitResponseCreate(responseEventId, retry.toolChoice, retry.instructionOverride)
         return true
     }
 
@@ -1810,21 +2244,44 @@ internal class VoiceTutorDuplexTurnController(
         }
     }
 
-    private fun beginResponse(createEventId: String, toolChoice: String) {
+    private fun beginResponse(
+        createEventId: String,
+        toolChoice: String,
+        instructionOverride: String?,
+    ) {
         val studyAnswer = latestAcceptedInputBinding?.takeIf {
             it.inputIntent == VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION
         }?.let { binding ->
             val question = binding.precedingTutorProviderItemId
                 ?.takeIf { it.isNotBlank() && it.length <= MAX_PROVIDER_ITEM_ID_CHARACTERS }
-            val answer = binding.providerItemId
+            val answer = binding.studyAnswerProviderItemId
                 ?.takeIf { it.isNotBlank() && it.length <= MAX_PROVIDER_ITEM_ID_CHARACTERS }
             if (question != null && answer != null) {
-                StudyAnswerIdentity(binding.lessonRevision, question, answer)
+                val questionTranscript = binding.studyQuestionTranscript
+                val answerTranscript = binding.inputTranscript
+                if (questionTranscript.isNullOrBlank() || answerTranscript.isNullOrBlank()) null else {
+                    StudyAnswerIdentity(
+                        binding.lessonRevision,
+                        question,
+                        answer,
+                        questionTranscript,
+                        answerTranscript,
+                    )
+                }
             } else {
                 null
             }
         }
         val responseStudyAnswer = studyAnswer?.takeUnless { it == lastSpokenStudyAnswer }
+        val respondsToLearnerQuestion = latestAcceptedInputBinding?.inputIntent ==
+            VoiceTutorInputIntent.ASK_STUDY_QUESTION
+        val studyQuestionPurpose = pendingStudyQuestionPurpose?.takeIf { purpose ->
+            val focus = confirmedStudyFocus
+            focus != null && focus.revision == currentLessonRevision &&
+                purpose.lessonRevision == focus.revision &&
+                instructionOverride == STUDY_QUESTION_RESPONSE_INSTRUCTIONS && toolChoice == "auto"
+        }
+        pendingStudyQuestionPurpose = null
         if (responseStudyAnswer != null) {
             // A new answer needs its own exact persisted feedback item. Tool-only
             // rounds leave it pending; an actual spoken response consumes it once.
@@ -1842,10 +2299,13 @@ internal class VoiceTutorDuplexTurnController(
                 },
                 respondsToStudyAnswer = responseStudyAnswer != null,
                 studyAnswer = responseStudyAnswer,
+                respondsToLearnerQuestion = respondsToLearnerQuestion,
+                studyQuestionPurpose = studyQuestionPurpose,
                 retryAttempt = 0,
                 replacesGeneration = activeResponseGeneration,
                 boundaryCheckpoint = boundary,
                 abandonedResponseId = null,
+                instructionOverride = instructionOverride,
             ),
         )
     }
@@ -1855,10 +2315,11 @@ internal class VoiceTutorDuplexTurnController(
         activeTutorTranscripts.clear()
         activeTutorFinalTranscriptEvents.clear()
         activeTutorTranscriptItemIds.clear()
+        activeTutorTranscriptOverflow = false
         activeTargetOffer = null
         activeTargetOfferExchangeEvidence = null
-        activeRootStudyCreationOffer = null
         activeResponseCandidateDiscovery = state.candidateDiscovery
+        activeResponseHadCandidateNavigation = state.candidateDiscovery != null
         playbackTimer?.dispose()
         playbackTimer = null
         activeResponseGeneration = if (activeResponseGeneration == Long.MAX_VALUE) 1 else activeResponseGeneration + 1
@@ -1866,6 +2327,8 @@ internal class VoiceTutorDuplexTurnController(
         activeResponseBoundaryCheckpoint = state.boundaryCheckpoint
         activeResponseStudyAnswer = state.studyAnswer
         activeResponseRespondsToStudyAnswer = state.respondsToStudyAnswer
+        activeResponseRespondsToLearnerQuestion = state.respondsToLearnerQuestion
+        activeResponseStudyQuestionPurpose = state.studyQuestionPurpose
         activeResponseTutorContext = ""
         activeResponseTutorContextForAssessment = ""
         responseActive = true
@@ -1873,6 +2336,7 @@ internal class VoiceTutorDuplexTurnController(
         activeResponseCreateEventId = createEventId
         activeResponseId = null
         activeResponseAllowsTools = state.toolChoice == "auto"
+        activeResponseInstructionOverride = state.instructionOverride
         activeResponseAudioBytes = 0
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false
@@ -1882,23 +2346,30 @@ internal class VoiceTutorDuplexTurnController(
         providerAudioObserved = false
         toolOnlyResponse = false
         activeResponseAcceptedToolCalls = false
+        activeResponseToolNames = emptySet()
         responseTimer?.dispose()
         val responseGeneration = activeResponseGeneration
         responseTimer = Mono.delay(responseTimeout)
             .subscribe { fireResponseTimeout(responseGeneration, createEventId) }
     }
 
-    private fun emitResponseCreate(responseEventId: String, toolChoice: String) {
+    private fun emitResponseCreate(
+        responseEventId: String,
+        toolChoice: String,
+        instructionOverride: String?,
+    ) {
+        val response = linkedMapOf<String, Any?>(
+            "tool_choice" to toolChoice,
+            "metadata" to linkedMapOf(
+                VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
+            ),
+        )
+        instructionOverride?.let { response["instructions"] = it }
         emit(
             linkedMapOf(
                 "event_id" to responseEventId,
                 "type" to "response.create",
-                "response" to linkedMapOf(
-                    "tool_choice" to toolChoice,
-                    "metadata" to linkedMapOf(
-                        VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
-                    ),
-                ),
+                "response" to response,
             ),
         )
     }
@@ -1979,9 +2450,19 @@ internal class VoiceTutorDuplexTurnController(
         rememberBoundedBinding(responseLessonRevisions, responseId, activeResponseLessonRevision)
         val toolCalls = toolCoordinator?.completedResponse(response) ?: emptyList()
         activeResponseAcceptedToolCalls = toolCalls.isNotEmpty()
+        activeResponseToolNames = toolCalls.mapTo(linkedSetOf()) { it.name }
         toolOnlyResponse = toolCalls.isNotEmpty() &&
             response.path("output").all { it.path("type").asText() == "function_call" } &&
             !providerOutputBufferStarted && !providerAudioObserved && activeTutorTranscripts.isEmpty()
+        val focusCalls = toolCalls.filter { it.name in STUDY_FOCUS_TOOLS }
+        if (toolOnlyResponse && focusCalls.size == 1 && toolCalls.all {
+                it.name in STUDY_FOCUS_TOOLS || it.name in SAFE_PURPOSE_PRESERVING_READ_TOOLS
+            }
+        ) {
+            eligibleFocusToolCallIds += focusCalls.single().callId
+        } else {
+            eligibleFocusToolCallIds.removeAll(toolCalls.mapTo(linkedSetOf()) { it.callId })
+        }
         if (toolOnlyResponse) {
             activeResponseCandidateDiscovery = null
         }
@@ -2020,6 +2501,12 @@ internal class VoiceTutorDuplexTurnController(
             it.isIntegralNumber && it.canConvertToInt() && it.intValue() >= 0
         }?.intValue() ?: return
         val key = "$itemId:$contentIndex"
+        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
+            key !in activeTutorFinalTranscriptEvents &&
+            activeTutorFinalTranscriptEvents.size >= MAX_TUTOR_CONTEXT_PARTS
+        ) {
+            activeTutorTranscriptOverflow = true
+        }
         if (
             transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
             (key in activeTutorFinalTranscriptEvents ||
@@ -2078,7 +2565,7 @@ internal class VoiceTutorDuplexTurnController(
      * Coalesce a provider item's bounded parts in index order and snapshot the
      * trusted lesson attribution before a later terminal can clear bindings.
      */
-    private fun completedTutorTranscriptEventsForPersistence(): List<String> {
+    private fun completedTutorTranscriptEventsForPersistence(isStudyQuestion: Boolean): List<String> {
         val byItem = linkedMapOf<String, MutableList<StagedTutorTranscript>>()
         orderedStagedTutorTranscriptParts().forEach { part ->
             byItem.getOrPut(part.itemId) { mutableListOf() } += part
@@ -2089,15 +2576,15 @@ internal class VoiceTutorDuplexTurnController(
             val transcript = ordered.joinToString("\n") { it.transcript }
                 .take(MAX_DEFERRED_TUTOR_TRANSCRIPT_CHARACTERS)
             if (transcript.isBlank()) return@mapNotNull null
-            mapper.writeValueAsString(
-                mapper.createObjectNode()
+            val event = mapper.createObjectNode()
                     .put("type", "response.output_audio_transcript.done")
                     .put("response_id", first.responseId)
                     .put("item_id", first.itemId)
                     .put("content_index", first.contentIndex)
                     .put("transcript", transcript)
-                    .put(VoiceTutorTranscriptMetadata.LESSON_REVISION, activeResponseLessonRevision),
-            )
+                    .put(VoiceTutorTranscriptMetadata.LESSON_REVISION, activeResponseLessonRevision)
+            if (isStudyQuestion) event.put(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION, true)
+            mapper.writeValueAsString(event)
         }
     }
 
@@ -2147,6 +2634,7 @@ internal class VoiceTutorDuplexTurnController(
         // even when no candidate was safely eligible or no transcript arrived.
         candidateDiscoveryGraph = null
         activeResponseCandidateDiscovery = null
+        activeResponseHadCandidateNavigation = false
         if (discovery == null) return
         val tutorAudioTranscript = completedActiveTutorTranscriptContext() ?: return
         if (nextTargetOfferId <= 0 || nextTargetOfferId == Long.MAX_VALUE ||
@@ -2165,41 +2653,6 @@ internal class VoiceTutorDuplexTurnController(
             candidateTraversals = discovery.candidateTraversals,
         )
     }
-
-    private fun promoteRootStudyCreationOfferIfReady(
-        completedResponseGeneration: Long,
-        completedTutorItemId: String?,
-        spokenResponseCompleted: Boolean,
-    ) {
-        if (!spokenResponseCompleted) return
-        // Exactly the first completed spoken response after a preview gets one chance to carry
-        // that proposal. An unrelated/interrupted/empty turn cannot leave reusable authority.
-        val preview = pendingRootStudyCreationPreview ?: return
-        pendingRootStudyCreationPreview = null
-        activeRootStudyCreationOffer = null
-        val tutorAudioTranscript = completedActiveTutorTranscriptContext() ?: return
-        val tutorItemId = completedTutorItemId?.takeIf {
-            it.isNotBlank() && it.length <= MAX_PROVIDER_ITEM_ID_CHARACTERS
-        } ?: return
-        if (!validRootStudyCreationPreview(preview) || preview.lessonRevision != activeResponseLessonRevision ||
-            preview.lessonRevision != currentLessonRevision ||
-            completedResponseGeneration <= preview.previewResponseGeneration ||
-            completedResponseGeneration != activeResponseGeneration ||
-            lastSpokenResponseGeneration != completedResponseGeneration ||
-            lastTutorSpeechStoppedOrder <= 0
-        ) return
-        activeRootStudyCreationOffer = VoiceTutorRootStudyCreationOffer(
-            topic = preview.topic,
-            difficulty = preview.difficulty,
-            lessonRevision = preview.lessonRevision,
-            previewResponseGeneration = preview.previewResponseGeneration,
-            tutorResponseGeneration = completedResponseGeneration,
-            tutorSpeechStoppedOrder = lastTutorSpeechStoppedOrder,
-            tutorProviderItemId = tutorItemId,
-            tutorAudioTranscript = tutorAudioTranscript,
-        )
-    }
-
 
     private fun validCandidateOfferPool(pool: CandidateOfferPool): Boolean =
         pool.lessonRevision >= 0 && pool.currentFocusStudyId?.let { it > 0 } != false &&
@@ -2368,11 +2821,14 @@ internal class VoiceTutorDuplexTurnController(
             candidateDiscovery = activeResponseCandidateDiscovery,
             respondsToStudyAnswer = activeResponseRespondsToStudyAnswer,
             studyAnswer = activeResponseStudyAnswer,
+            respondsToLearnerQuestion = activeResponseRespondsToLearnerQuestion,
+            studyQuestionPurpose = activeResponseStudyQuestionPurpose,
             retryAttempt = attempt,
             replacesGeneration = failedGeneration,
             boundaryCheckpoint = activeResponseBoundaryCheckpoint
                 ?: TutorBoundaryCheckpoint(lastTutorSpeechStoppedOrder, lastSpokenResponseGeneration),
             abandonedResponseId = responseId?.takeIf(::validProviderResponseId),
+            instructionOverride = activeResponseInstructionOverride,
         )
         rollbackFailedProviderResponse(failedGeneration, responseId)
         if (retryScheduled) {
@@ -2420,6 +2876,7 @@ internal class VoiceTutorDuplexTurnController(
         activeResponseCreateEventId = null
         activeResponseId = null
         activeResponseAllowsTools = false
+        activeResponseInstructionOverride = null
         activeResponseAudioBytes = 0
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false
@@ -2429,14 +2886,18 @@ internal class VoiceTutorDuplexTurnController(
         providerAudioObserved = false
         toolOnlyResponse = false
         activeResponseAcceptedToolCalls = false
+        activeResponseToolNames = emptySet()
         activeTutorTranscripts.clear()
         activeTutorFinalTranscriptEvents.clear()
         activeTutorTranscriptItemIds.clear()
+        activeTutorTranscriptOverflow = false
         activeTargetOffer = null
         activeTargetOfferExchangeEvidence = null
         activeResponseCandidateDiscovery = null
         activeResponseRespondsToStudyAnswer = false
         activeResponseStudyAnswer = null
+        activeResponseRespondsToLearnerQuestion = false
+        activeResponseStudyQuestionPurpose = null
         activeResponseTutorContext = ""
         activeResponseTutorContextForAssessment = ""
         activeResponseBoundaryCheckpoint = null
@@ -2454,13 +2915,14 @@ internal class VoiceTutorDuplexTurnController(
             precedingTutorSpeechStoppedOrder = 0,
             precedingSpokenResponseGeneration = 0,
             precedingTutorProviderItemId = null,
+            precedingTutorStudyQuestionEligible = false,
+            precedingTutorContinuationEligible = false,
             precedingTutorFeedbackForStudyAnswer = false,
             precedingQuestionProviderItemId = null,
             precedingAnswerProviderItemId = null,
             precedingTutorFeedbackProviderItemId = null,
             precedingTutorNavigationOfferProviderItemId = null,
             targetOffer = null,
-            rootStudyCreationOffer = null,
             mixedTutorBoundary = true,
         )
         val pending = delayedStopCommit?.let { before ->
@@ -2688,9 +3150,84 @@ internal class VoiceTutorDuplexTurnController(
         val successfulTutorTranscriptEvents = if (
             transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && spokenResponseCompleted
         ) {
-            completedTutorTranscriptEventsForPersistence()
+            completedTutorTranscriptEventsForPersistence(false)
         } else {
             emptyList()
+        }
+        // Semantic evidence must inspect the exact bounded string that will be
+        // persisted. A longer row fails closed rather than assessing a prefix.
+        val completedPersistedTutorTranscript = successfulTutorTranscriptEvents.singleOrNull()
+            ?.let { mapper.readTree(it).path("transcript") }
+            ?.takeIf { it.isTextual }
+            ?.textValue()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.takeIf { it.length <= MAX_TUTOR_QUESTION_ASSESSMENT_CHARACTERS }
+        val completedRootCreationFollowup = activeResponseInstructionOverride in setOf(
+            ROOT_STUDY_CREATION_FOLLOWUP_INSTRUCTIONS,
+            ROOT_STUDY_CREATION_UNCONFIRMED_FOLLOWUP_INSTRUCTIONS,
+        )
+        val completedRootCreationFollowupWithoutTools = completedRootCreationFollowup &&
+            !activeResponseAcceptedToolCalls && activeResponseToolNames.isEmpty()
+        val purpose = activeResponseStudyQuestionPurpose
+        val focus = confirmedStudyFocus
+        val proposedStudyQuestionEvidence = purpose?.takeIf {
+            spokenResponseCompleted && completedTutorItemId != null && completedPersistedTutorTranscript != null &&
+                !activeTutorTranscriptOverflow &&
+                focus != null && focus.revision == currentLessonRevision &&
+                it.lessonRevision == activeResponseLessonRevision &&
+                it.lessonRevision == focus.revision &&
+                !activeResponseRespondsToStudyAnswer && !activeResponseRespondsToLearnerQuestion &&
+                !activeResponseAcceptedToolCalls && !activeResponseHadCandidateNavigation &&
+                activeResponseToolNames.isEmpty()
+        }?.let {
+            SpokenTutorPurposeEvidence(
+                lessonRevision = it.lessonRevision,
+                responseGeneration = completedResponseGeneration,
+                tutorSpeechStoppedOrder = lastTutorSpeechStoppedOrder,
+                providerItemId = requireNotNull(completedTutorItemId),
+                transcript = requireNotNull(completedPersistedTutorTranscript),
+            )
+        }
+        val proposedFeedbackEvidence = activeResponseStudyAnswer?.takeIf { identity ->
+            activeResponseRespondsToStudyAnswer && spokenResponseCompleted &&
+                completedTutorItemId != null && completedPersistedTutorTranscript != null &&
+                !activeTutorTranscriptOverflow &&
+                focus != null && focus.revision == currentLessonRevision &&
+                identity.lessonRevision == activeResponseLessonRevision &&
+                identity.lessonRevision == focus.revision &&
+                !activeResponseRespondsToLearnerQuestion && activeResponseStudyQuestionPurpose == null &&
+                (!activeResponseAcceptedToolCalls || activeResponseToolNames.isNotEmpty()) &&
+                activeResponseToolNames.all { it in SAFE_PURPOSE_PRESERVING_READ_TOOLS }
+        }?.let { identity ->
+            StudyAnswerFeedbackEvidence(
+                identity = identity,
+                feedbackProviderItemId = requireNotNull(completedTutorItemId),
+                tutorContext = requireNotNull(completedPersistedTutorTranscript),
+            )
+        }
+        val proposedFeedbackContinuationAnchor = proposedFeedbackEvidence?.let {
+            SpokenTutorPurposeEvidence(
+                lessonRevision = activeResponseLessonRevision,
+                responseGeneration = completedResponseGeneration,
+                tutorSpeechStoppedOrder = lastTutorSpeechStoppedOrder,
+                providerItemId = requireNotNull(completedTutorItemId),
+            )
+        }
+        val completedContinuationAnchor = if (
+            spokenResponseCompleted && completedTutorItemId != null &&
+            focus != null && focus.revision == activeResponseLessonRevision &&
+            !activeResponseAcceptedToolCalls && activeResponseToolNames.isEmpty() &&
+            activeResponseRespondsToLearnerQuestion
+        ) {
+            SpokenTutorPurposeEvidence(
+                lessonRevision = activeResponseLessonRevision,
+                responseGeneration = completedResponseGeneration,
+                tutorSpeechStoppedOrder = lastTutorSpeechStoppedOrder,
+                providerItemId = completedTutorItemId,
+            )
+        } else {
+            null
         }
         val completedTutorContextForAssessment = if (
             transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && spokenResponseCompleted
@@ -2704,11 +3241,6 @@ internal class VoiceTutorDuplexTurnController(
             // transcript parts that back persistence and learner assessment.
             // In stopped-then-done ordering this is the first eligible promotion.
             promoteTargetOfferIfReady()
-            promoteRootStudyCreationOfferIfReady(
-                completedResponseGeneration,
-                completedTutorItemId,
-                spokenResponseCompleted,
-            )
             if (!spokenResponseCompleted) {
                 // A tool-only response has no playout or transcript persistence
                 // boundary. response.done is its exact successful completion.
@@ -2717,8 +3249,16 @@ internal class VoiceTutorDuplexTurnController(
                 }
             }
         }
+        val proposedFeedbackNavigationOffer = proposedFeedbackEvidence?.let {
+            activeTargetOffer?.takeIf { offer ->
+                completedTutorItemId != null &&
+                    offer.tutorResponseGeneration == completedResponseGeneration &&
+                    offer.lessonRevision == activeResponseLessonRevision
+            }?.let { offer ->
+                PendingFeedbackNavigationOffer(offer.offerId, requireNotNull(completedTutorItemId))
+            }
+        }
         activeTutorFinalTranscriptEvents.clear()
-        var feedbackThisResponse: StudyAnswerFeedbackEvidence? = null
         if (spokenResponseCompleted) {
             // Keep exact identity aligned with lastSpokenResponseGeneration. A
             // response without one final transcript item deliberately clears it.
@@ -2729,19 +3269,9 @@ internal class VoiceTutorDuplexTurnController(
         }
         if (activeResponseRespondsToStudyAnswer && spokenResponseCompleted) {
             activeResponseStudyAnswer?.let { identity ->
-                // Any spoken answer response consumes the answer-to-feedback slot.
-                // Only one exact final tutor item plus nonempty completed context
-                // creates feedback evidence; a later navigation offer cannot fill it in.
+                // Any spoken answer response consumes the answer-to-feedback slot. Semantic
+                // approval and durable linkage happen only at the post-playout boundary below.
                 lastSpokenStudyAnswer = identity
-                val feedbackItemId = completedTutorItemId
-                val tutorContext = activeResponseTutorContext.takeIf { it.isNotBlank() }
-                if (feedbackItemId != null && tutorContext != null) {
-                    StudyAnswerFeedbackEvidence(identity, feedbackItemId, tutorContext).also { evidence ->
-                        feedbackThisResponse = evidence
-                        completedStudyAnswerFeedback = evidence
-                        pendingNavigationFeedback = evidence
-                    }
-                }
             }
         }
         if (spokenResponseCompleted) {
@@ -2750,7 +3280,7 @@ internal class VoiceTutorDuplexTurnController(
                     it.lessonRevision == activeResponseLessonRevision
             }
             if (offer != null) {
-                val feedback = feedbackThisResponse ?: pendingNavigationFeedback?.takeIf {
+                val feedback = pendingNavigationFeedback?.takeIf {
                     it == completedStudyAnswerFeedback && it.identity == lastSpokenStudyAnswer &&
                         it.identity.lessonRevision == offer.lessonRevision
                 }
@@ -2775,17 +3305,34 @@ internal class VoiceTutorDuplexTurnController(
         activeResponseCreateEventId = null
         activeResponseId = null
         activeResponseAllowsTools = false
+        activeResponseInstructionOverride = null
         activeResponseAudioBytes = 0
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false
         playbackCompleted = false
         providerOutputBufferStopped = false
+        if (!spokenResponseCompleted) {
+            pendingStudyQuestionPurpose = purpose?.takeIf {
+                toolOnlyResponse && activeResponseToolNames.isNotEmpty() &&
+                    activeResponseToolNames.all { name -> name in SAFE_PURPOSE_PRESERVING_READ_TOOLS } &&
+                    it.lessonRevision == currentLessonRevision
+            }
+        }
         activeResponseAcceptedToolCalls = false
+        activeResponseToolNames = emptySet()
         activeResponseCandidateDiscovery = null
+        activeResponseHadCandidateNavigation = false
         activeResponseRespondsToStudyAnswer = false
         activeResponseStudyAnswer = null
+        activeResponseRespondsToLearnerQuestion = false
+        activeResponseStudyQuestionPurpose = null
         activeResponseTutorContext = ""
         activeResponseTutorContextForAssessment = ""
+        if (spokenResponseCompleted && completedRootCreationFollowupWithoutTools) {
+            rootStudyCreationFollowupPending = false
+            rootStudyReadbackCalls.clear()
+            rootStudyReadbackFailed = false
+        }
         if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && spokenResponseCompleted) {
             if (pendingPostRelayBoundary != null) {
                 terminate(VoiceTutorProviderProtocolException())
@@ -2800,7 +3347,42 @@ internal class VoiceTutorDuplexTurnController(
                 completedTutorItemId = completedTutorItemId,
                 tutorTranscriptEvents = successfulTutorTranscriptEvents,
                 tutorContextForAssessment = completedTutorContextForAssessment,
+                studyQuestionEvidence = null,
+                continuationAnchor = completedContinuationAnchor,
+                proposedStudyQuestionEvidence = proposedStudyQuestionEvidence,
+                questionAssessmentToken = token.takeIf { proposedStudyQuestionEvidence != null },
+                feedbackEvidence = null,
+                proposedFeedbackEvidence = proposedFeedbackEvidence,
+                proposedFeedbackContinuationAnchor = proposedFeedbackContinuationAnchor,
+                proposedFeedbackNavigationOffer = proposedFeedbackNavigationOffer,
+                feedbackAssessmentToken = token.takeIf { proposedFeedbackEvidence != null },
             )
+            if (proposedStudyQuestionEvidence != null && focus != null && completedPersistedTutorTranscript != null) {
+                val emitted = spokenQuestionAssessmentWork.tryEmitNext(
+                    VoiceTutorSpokenQuestionAssessmentAction(
+                        token = token,
+                        focusTopic = focus.topic,
+                        focusDifficulty = focus.difficulty,
+                        transcript = completedPersistedTutorTranscript,
+                    ),
+                )
+                if (emitted.isFailure) terminate(VoiceTutorProviderProtocolException())
+            }
+            if (proposedFeedbackEvidence != null && focus != null && completedPersistedTutorTranscript != null) {
+                val identity = proposedFeedbackEvidence.identity
+                val emitted = spokenFeedbackAssessmentWork.tryEmitNext(
+                    VoiceTutorSpokenFeedbackAssessmentAction(
+                        token = token,
+                        focusTopic = focus.topic,
+                        focusDifficulty = focus.difficulty,
+                        questionTranscript = identity.questionTranscript,
+                        answerTranscript = identity.answerTranscript,
+                        feedbackTranscript = completedPersistedTutorTranscript,
+                        allowsNavigationOffer = proposedFeedbackNavigationOffer != null,
+                    ),
+                )
+                if (emitted.isFailure) terminate(VoiceTutorProviderProtocolException())
+            }
             return
         }
         resumeCompletedResponse(completedResponseGeneration, completedTutorItemId)
@@ -2813,6 +3395,24 @@ internal class VoiceTutorDuplexTurnController(
             teacherResponseCompleted(pending.tutorContextForAssessment, nanoTime())
         }
         if (closed) return
+        lastSpokenStudyQuestion = pending.studyQuestionEvidence
+        lastSpokenContinuationAnchor = pending.continuationAnchor
+        pending.feedbackEvidence?.let { feedback ->
+            completedStudyAnswerFeedback = feedback
+            pendingNavigationFeedback = feedback
+            pending.feedbackNavigationOffer?.let { navigation ->
+                if (activeTargetOffer?.offerId == navigation.offerId) {
+                    activeTargetOfferExchangeEvidence = TargetOfferExchangeEvidence(
+                        navigation.offerId,
+                        feedback,
+                        navigation.providerItemId,
+                    )
+                }
+                // A combined response gets exactly this one opportunity to
+                // bind its semantically approved feedback to its own offer.
+                pendingNavigationFeedback = null
+            }
+        }
         finalizeSpeechAwaitingTutorResponse(
             pending.completedResponseGeneration,
             pending.completedTutorItemId,
@@ -2825,6 +3425,8 @@ internal class VoiceTutorDuplexTurnController(
         completedResponseGeneration: Long,
         completedTutorItemId: String?,
     ) {
+        lastSpokenStudyQuestion = null
+        lastSpokenContinuationAnchor = null
         finalizeSpeechAwaitingTutorResponse(completedResponseGeneration, completedTutorItemId)
         continueAfterCompletedResponse(completedResponseGeneration)
     }
@@ -2877,6 +3479,8 @@ internal class VoiceTutorDuplexTurnController(
                 precedingTutorSpeechStoppedOrder = activeSpeechPrecedingTutorStopOrder,
                 precedingSpokenResponseGeneration = activeSpeechPrecedingSpokenGeneration,
                 precedingTutorProviderItemId = activeSpeechPrecedingTutorProviderItemId,
+                precedingTutorStudyQuestionEligible = activeSpeechPrecedingTutorStudyQuestionEligible,
+                precedingTutorContinuationEligible = activeSpeechPrecedingTutorContinuationEligible,
                 precedingTutorFeedbackForStudyAnswer = activeSpeechPrecedingTutorFeedbackForStudyAnswer,
                 precedingQuestionProviderItemId = activeSpeechPrecedingQuestionProviderItemId,
                 precedingAnswerProviderItemId = activeSpeechPrecedingAnswerProviderItemId,
@@ -2884,7 +3488,6 @@ internal class VoiceTutorDuplexTurnController(
                 precedingTutorNavigationOfferProviderItemId =
                     activeSpeechPrecedingTutorNavigationOfferProviderItemId,
                 targetOffer = activeSpeechTargetOffer,
-                rootStudyCreationOffer = activeSpeechRootStudyCreationOffer,
             )
         }
         val earlierUncommittedSpeech = delayedStopCommit
@@ -2932,13 +3535,14 @@ internal class VoiceTutorDuplexTurnController(
             precedingTutorSpeechStoppedOrder = 0,
             precedingSpokenResponseGeneration = 0,
             precedingTutorProviderItemId = null,
+            precedingTutorStudyQuestionEligible = false,
+            precedingTutorContinuationEligible = false,
             precedingTutorFeedbackForStudyAnswer = false,
             precedingQuestionProviderItemId = null,
             precedingAnswerProviderItemId = null,
             precedingTutorFeedbackProviderItemId = null,
             precedingTutorNavigationOfferProviderItemId = null,
             targetOffer = null,
-            rootStudyCreationOffer = null,
             mixedTutorBoundary = true,
         )
     }
@@ -2953,6 +3557,8 @@ internal class VoiceTutorDuplexTurnController(
             precedingTutorSpeechStoppedOrder = pending.precedingTutorSpeechStoppedOrder,
             precedingSpokenResponseGeneration = pending.precedingSpokenResponseGeneration,
             precedingTutorProviderItemId = pending.precedingTutorProviderItemId,
+            precedingTutorStudyQuestionEligible = pending.precedingTutorStudyQuestionEligible,
+            precedingTutorContinuationEligible = pending.precedingTutorContinuationEligible,
             precedingTutorFeedbackForStudyAnswer = pending.precedingTutorFeedbackForStudyAnswer,
             precedingQuestionProviderItemId = pending.precedingQuestionProviderItemId,
             precedingAnswerProviderItemId = pending.precedingAnswerProviderItemId,
@@ -2960,7 +3566,6 @@ internal class VoiceTutorDuplexTurnController(
             precedingTutorNavigationOfferProviderItemId =
                 pending.precedingTutorNavigationOfferProviderItemId,
             targetOffer = pending.targetOffer,
-            rootStudyCreationOffer = pending.rootStudyCreationOffer,
         )
     }
 
@@ -2968,13 +3573,14 @@ internal class VoiceTutorDuplexTurnController(
         activeSpeechPrecedingTutorStopOrder = 0
         activeSpeechPrecedingSpokenGeneration = 0
         activeSpeechPrecedingTutorProviderItemId = null
+        activeSpeechPrecedingTutorStudyQuestionEligible = false
+        activeSpeechPrecedingTutorContinuationEligible = false
         activeSpeechPrecedingTutorFeedbackForStudyAnswer = false
         activeSpeechPrecedingQuestionProviderItemId = null
         activeSpeechPrecedingAnswerProviderItemId = null
         activeSpeechPrecedingTutorFeedbackProviderItemId = null
         activeSpeechPrecedingTutorNavigationOfferProviderItemId = null
         activeSpeechTargetOffer = null
-        activeSpeechRootStudyCreationOffer = null
     }
 
     private fun internalEventId(action: String): String =
@@ -3026,10 +3632,65 @@ internal class VoiceTutorDuplexTurnController(
         else -> VoiceTutorProviderRelayDisposition.DROP
     }
 
+    private fun discardStudyQuestionPurpose() {
+        pendingStudyQuestionPurpose = null
+    }
+
+    private data class ConfirmedStudyFocus(
+        val studyId: Long,
+        val revision: Long,
+        val topic: String,
+        val difficulty: Int,
+    )
+
+    private enum class StudyQuestionPurposeSource { FOCUS_TOOL, CONTINUE_STUDY }
+
+    private data class StudyQuestionPurpose(
+        val lessonRevision: Long,
+        val source: StudyQuestionPurposeSource,
+    )
+
+    private data class SpokenTutorPurposeEvidence(
+        val lessonRevision: Long,
+        val responseGeneration: Long,
+        val tutorSpeechStoppedOrder: Long,
+        val providerItemId: String,
+        val transcript: String = "",
+    ) {
+        fun matches(
+            revision: Long,
+            generation: Long,
+            stoppedOrder: Long,
+            itemId: String?,
+        ): Boolean = lessonRevision == revision && responseGeneration == generation &&
+            tutorSpeechStoppedOrder > 0 && tutorSpeechStoppedOrder == stoppedOrder &&
+            providerItemId == itemId
+    }
+
     private data class StudyAnswerIdentity(
         val lessonRevision: Long,
         val questionProviderItemId: String,
         val answerProviderItemId: String,
+        val questionTranscript: String,
+        val answerTranscript: String,
+    )
+
+    private data class PersistedStudyAnswerPart(
+        val providerItemId: String,
+        val transcript: String,
+    )
+
+    private data class PersistedStudyAnswerSequence(
+        val lessonRevision: Long,
+        val questionProviderItemId: String,
+        val answerParts: MutableList<PersistedStudyAnswerPart> = mutableListOf(),
+        var invalid: Boolean = false,
+    )
+
+    private data class PendingStudyAnswerGroup(
+        val lessonRevision: Long,
+        val questionProviderItemId: String,
+        val answerParts: List<PersistedStudyAnswerPart>,
     )
 
     private data class StudyAnswerFeedbackEvidence(
@@ -3051,10 +3712,13 @@ internal class VoiceTutorDuplexTurnController(
         val candidateDiscovery: CandidateOfferPool?,
         val respondsToStudyAnswer: Boolean,
         val studyAnswer: StudyAnswerIdentity?,
+        val respondsToLearnerQuestion: Boolean,
+        val studyQuestionPurpose: StudyQuestionPurpose?,
         val retryAttempt: Int,
         val replacesGeneration: Long,
         val boundaryCheckpoint: TutorBoundaryCheckpoint,
         val abandonedResponseId: String?,
+        val instructionOverride: String?,
     )
 
     private data class PendingPostRelayBoundary(
@@ -3063,6 +3727,16 @@ internal class VoiceTutorDuplexTurnController(
         val completedTutorItemId: String?,
         val tutorTranscriptEvents: List<String>,
         val tutorContextForAssessment: String,
+        val studyQuestionEvidence: SpokenTutorPurposeEvidence?,
+        val continuationAnchor: SpokenTutorPurposeEvidence?,
+        val proposedStudyQuestionEvidence: SpokenTutorPurposeEvidence? = null,
+        val questionAssessmentToken: Long? = null,
+        val feedbackEvidence: StudyAnswerFeedbackEvidence? = null,
+        val feedbackNavigationOffer: PendingFeedbackNavigationOffer? = null,
+        val proposedFeedbackEvidence: StudyAnswerFeedbackEvidence? = null,
+        val proposedFeedbackContinuationAnchor: SpokenTutorPurposeEvidence? = null,
+        val proposedFeedbackNavigationOffer: PendingFeedbackNavigationOffer? = null,
+        val feedbackAssessmentToken: Long? = null,
         val claimed: Boolean = false,
     )
 
@@ -3077,6 +3751,11 @@ internal class VoiceTutorDuplexTurnController(
         val offerId: Long,
         val feedback: StudyAnswerFeedbackEvidence,
         val navigationOfferProviderItemId: String,
+    )
+
+    private data class PendingFeedbackNavigationOffer(
+        val offerId: Long,
+        val providerItemId: String,
     )
 
     private data class PendingInputCommit(
@@ -3096,7 +3775,8 @@ internal class VoiceTutorDuplexTurnController(
         val precedingTutorFeedbackProviderItemId: String? = null,
         val precedingTutorNavigationOfferProviderItemId: String? = null,
         val targetOffer: VoiceTutorStudyTargetOffer? = null,
-        val rootStudyCreationOffer: VoiceTutorRootStudyCreationOffer? = null,
+        val precedingTutorStudyQuestionEligible: Boolean = false,
+        val precedingTutorContinuationEligible: Boolean = false,
     )
 
     private data class PendingStopCommit(
@@ -3116,8 +3796,9 @@ internal class VoiceTutorDuplexTurnController(
         val precedingTutorFeedbackProviderItemId: String?,
         val precedingTutorNavigationOfferProviderItemId: String?,
         val targetOffer: VoiceTutorStudyTargetOffer?,
-        val rootStudyCreationOffer: VoiceTutorRootStudyCreationOffer?,
         val mixedTutorBoundary: Boolean = false,
+        val precedingTutorStudyQuestionEligible: Boolean = false,
+        val precedingTutorContinuationEligible: Boolean = false,
     )
 
     private data class InputLessonBinding(
@@ -3132,13 +3813,17 @@ internal class VoiceTutorDuplexTurnController(
         val precedingTutorFeedbackProviderItemId: String? = null,
         val precedingTutorNavigationOfferProviderItemId: String? = null,
         val targetOffer: VoiceTutorStudyTargetOffer? = null,
-        val rootStudyCreationOffer: VoiceTutorRootStudyCreationOffer? = null,
         val providerItemId: String? = null,
         val inputIntent: VoiceTutorInputIntent = VoiceTutorInputIntent.NONE,
         val targetStudyId: Long? = null,
         val targetOfferId: Long? = null,
         val focusAuthorization: VoiceTutorFocusAuthorization? = null,
-        val rootStudyConfirmationAuthorization: VoiceTutorRootStudyConfirmationAuthorization? = null,
+        val rootStudyCreationAuthorization: VoiceTutorRootStudyCreationAuthorization? = null,
+        val studyQuestionTranscript: String? = null,
+        val inputTranscript: String? = null,
+        val studyAnswerProviderItemId: String? = null,
+        val precedingTutorStudyQuestionEligible: Boolean = false,
+        val precedingTutorContinuationEligible: Boolean = false,
     )
 
     private data class CandidateOfferPool(
@@ -3359,14 +4044,15 @@ internal class VoiceTutorDuplexTurnController(
     )
 
     private companion object {
-        const val ROOT_STUDY_TOOL_NAME = "create_root_study"
         const val MAX_BUFFERED_CONTROLS = 32
         const val MAX_PENDING_SPEECH_COMMITS = 32
         const val MAX_RECENT_COMMITTED_ITEMS = 64
         const val MAX_RECENT_FAILED_RESPONSES = 16
         const val MAX_PROVIDER_RESPONSE_RETRIES = 1
         const val MAX_PROVIDER_ITEM_ID_CHARACTERS = 191
+        const val MAX_PERSISTED_STUDY_ANSWER_SEQUENCES = 16
         const val MAX_TUTOR_CONTEXT_CHARACTERS = 4_000
+        const val MAX_TUTOR_QUESTION_ASSESSMENT_CHARACTERS = 4_000
         const val MAX_DEFERRED_TUTOR_TRANSCRIPT_CHARACTERS = 32_000
         const val MAX_TUTOR_CONTEXT_PARTS = 8
         const val MAX_TARGET_OFFER_CANDIDATES = 16
@@ -3376,6 +4062,30 @@ internal class VoiceTutorDuplexTurnController(
         const val MAX_DISCOVERY_RESULT_CANDIDATES = 60L
         const val MAX_DISCOVERY_PAGE_LIMIT = 500L
         const val MAX_DISCOVERY_PAGE_COUNT = 60
+        const val CREATE_ROOT_STUDY_TOOL = "create_root_study"
+        const val GET_STUDY_TOOL = "get_study"
+        val STUDY_FOCUS_TOOLS = setOf("select_voice_study", "advance_voice_study")
+        val SAFE_PURPOSE_PRESERVING_READ_TOOLS = setOf(
+            "list_records", "get_record", "list_study_learning_records", "get_voice_learning_record",
+            "get_topic_stats", "get_study_growth",
+        )
+        const val ROOT_STUDY_CREATION_FOLLOWUP_INSTRUCTIONS =
+            "The server has already executed the exact assessed create_root_study command and then completed an exact get_study readback for its persisted id. " +
+                "Never call any tool in this response, never call create_root_study again for that command, and never ask whether to create it. " +
+                "Using only the confirmed create and get_study results already in conversation context, briefly speak the exact saved root topic and level, then ask only whether the learner wants to start learning it. " +
+                "That question is new lesson-start consent, not creation confirmation; creation alone never selects a lesson. " +
+                "Do not begin teaching, ask a study question, summarize learning, or claim the lesson has started."
+        const val ROOT_STUDY_CREATION_UNCONFIRMED_FOLLOWUP_INSTRUCTIONS =
+            "The server-owned create_root_study command has already been attempted, but its create result or exact get_study readback was not confirmed. " +
+                "Never call any tool in this response, never retry create_root_study or get_study, and do not claim that the root was created, already existed, or was read back. " +
+                "Briefly tell the learner that the saved result could not be verified and that they should inspect their study tree or issue a fresh command later. " +
+                "Do not ask creation confirmation, start a lesson, ask a study question, or produce a learning summary."
+        const val STUDY_QUESTION_RESPONSE_INSTRUCTIONS =
+            "The server has authorized exactly one substantive study question for the current confirmed saved focus and level. " +
+                "If prior node learning history is needed, first emit a strict tool-only response using only list_records, get_record, list_study_learning_records, get_voice_learning_record, get_topic_stats, or get_study_growth; never mix audio with that tool response. " +
+                "After any such read result, ask the question in the next clean audio-only response. " +
+                "Ask that one knowledge, understanding, reasoning, recall, comparison, or application question now, then wait for the learner's answer. " +
+                "Do not greet, acknowledge, promise to begin, ask readiness or permission, discuss setup/settings/navigation, offer topics, give feedback, answer a learner question, call any other tool, or include a second question."
         val INPUT_DEADLINE_POLL_INTERVAL: Duration = Duration.ofMillis(100)
         val MIN_INPUT_COMMIT_SPACING: Duration = Duration.ofMillis(250)
         const val MAX_RESPONSE_AUDIO_BYTES = 172_800_000L
@@ -3400,6 +4110,23 @@ internal class VoiceTutorDuplexTurnController(
 internal data class VoiceTutorProviderObservation(
     val disposition: VoiceTutorProviderRelayDisposition,
     val postRelayBoundary: VoiceTutorPostRelayBoundary?,
+)
+
+internal data class VoiceTutorSpokenQuestionAssessmentAction(
+    val token: Long,
+    val focusTopic: String,
+    val focusDifficulty: Int,
+    val transcript: String,
+)
+
+internal data class VoiceTutorSpokenFeedbackAssessmentAction(
+    val token: Long,
+    val focusTopic: String,
+    val focusDifficulty: Int,
+    val questionTranscript: String,
+    val answerTranscript: String,
+    val feedbackTranscript: String,
+    val allowsNavigationOffer: Boolean,
 )
 
 internal data class VoiceTutorPostRelayBoundary(

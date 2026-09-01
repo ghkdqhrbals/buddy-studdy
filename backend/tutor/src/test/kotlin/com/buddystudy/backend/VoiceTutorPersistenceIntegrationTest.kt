@@ -43,6 +43,63 @@ class VoiceTutorPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var database: DatabaseClient
 
     @Test
+    fun `multipart answer promotion rolls back the final row and every prior link on a database failure`() =
+        runBlocking<Unit> {
+            val now = Instant.parse("2031-09-01T00:00:00Z")
+            val fixture = paidUser(now.minusSeconds(86_400))
+            val suffix = fixture.suffix.replace("-", "")
+            val questionItem = "atomic-question-$suffix"
+            val firstPart = "atomic-answer-1-$suffix"
+            val secondPart = "atomic-answer-2-$suffix"
+            val finalItem = "atomic-final-$suffix"
+            val checkName = "chk_voice_answer_${suffix.take(24)}"
+            val reserved = voiceTutor.reserve(
+                fixture.userId, fixture.studyId, "atomic-$suffix", "ko",
+                "gpt-realtime-test", "marin", 300, now,
+            ) as ReserveVoiceTutorSessionResult.Reserved
+            val session = voiceTutor.markActive(fixture.userId, reserved.value.session.id, now.plusSeconds(1))!!
+            assertThat(voiceTutor.appendTranscript(
+                fixture.userId, session.id, questionItem, VoiceTutorTranscriptRole.TUTOR,
+                "DI의 장점은 무엇인가요?", now.plusSeconds(2), 4_000, 20,
+                lessonRevision = 0, isStudyQuestion = true,
+            )).isTrue()
+            assertThat(voiceTutor.appendTranscript(
+                fixture.userId, session.id, firstPart, VoiceTutorTranscriptRole.USER,
+                "결합도를 낮추고", now.plusSeconds(3), 4_000, 20,
+            )).isTrue()
+            assertThat(voiceTutor.appendTranscript(
+                fixture.userId, session.id, secondPart, VoiceTutorTranscriptRole.USER,
+                "테스트를 쉽게 합니다.", now.plusSeconds(4), 4_000, 20,
+            )).isTrue()
+
+            database.sql(
+                "alter table voice_tutor_transcript_turns add constraint $checkName " +
+                    "check (provider_item_id <> '$secondPart' or study_question_turn_id is null)",
+            ).fetch().rowsUpdated().awaitSingle()
+            try {
+                val failure = runCatching {
+                    voiceTutor.appendTranscript(
+                        fixture.userId, session.id, finalItem, VoiceTutorTranscriptRole.USER,
+                        "음…", now.plusSeconds(5), 4_000, 20,
+                        lessonRevision = 0,
+                        studyQuestionProviderItemId = questionItem,
+                        studyAnswerProviderItemIds = listOf(firstPart, secondPart),
+                    )
+                }.exceptionOrNull()
+                assertThat(failure).isNotNull()
+            } finally {
+                database.sql(
+                    "alter table voice_tutor_transcript_turns drop check $checkName",
+                ).fetch().rowsUpdated().awaitSingle()
+            }
+
+            val turns = voiceTutor.transcript(fixture.userId, session.id, 4_000)
+            assertThat(turns.map { it.providerItemId }).doesNotContain(finalItem)
+            assertThat(turns.filter { it.providerItemId == firstPart || it.providerItemId == secondPart })
+                .allSatisfy { assertThat(it.studyQuestionTurnId).isNull() }
+        }
+
+    @Test
     fun `summary recovery claims failed transcribed sessions once and preserves completed results`() = runBlocking<Unit> {
         val endedAt = Instant.parse("2031-08-31T10:00:00Z")
         val session = failedSummarySession(endedAt, transcript = true)

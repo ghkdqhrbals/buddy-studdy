@@ -17,6 +17,12 @@ internal data class VoiceTutorMcpCall(
     override fun toString(): String = "VoiceTutorMcpCall(argumentsValid=${arguments != null})"
 }
 
+/** Correlates a server-owned call with the exact provider item that releases it. */
+internal data class VoiceTutorScheduledMcpCall(
+    val callId: String,
+    val providerEvent: Map<String, Any?>,
+)
+
 /**
  * All transitions run under VoiceTutorDuplexTurnController's lock. Only a
  * correlated, successfully completed response can enqueue work. Tool execution
@@ -80,6 +86,83 @@ internal class VoiceTutorMcpTurnCoordinator(
         return calls
     }
 
+    /**
+     * Registers a server-owned call whose arguments came from durable, assessed
+     * learner input rather than a model response. The synthetic function item
+     * must be acknowledged into provider conversation context before execution,
+     * and its output keeps the ordinary continuation gate closed until ACKed.
+     */
+    fun scheduleServerCall(
+        name: String,
+        arguments: Map<String, Any>,
+        nowNanos: Long,
+    ): VoiceTutorScheduledMcpCall {
+        if (closed || !TOOL_NAME.matches(name) || seenCallIds.size >= MAX_CALLS_PER_SESSION) {
+            throw VoiceTutorMcpProtocolException()
+        }
+        val argumentsJson = runCatching { mapper.writeValueAsString(arguments) }
+            .getOrElse { throw VoiceTutorMcpProtocolException() }
+        if (argumentsJson.toByteArray(Charsets.UTF_8).size > MAX_ARGUMENT_BYTES) {
+            throw VoiceTutorMcpProtocolException()
+        }
+        val frozenArguments = parseArguments(mapper.valueToTree(argumentsJson))
+            ?: throw VoiceTutorMcpProtocolException()
+        val callId = "bsvt_server_${UUID.randomUUID().toString().replace("-", "")}"
+        val callItemId = "vtmcp_c_${UUID.randomUUID().toString().replace("-", "").take(24)}"
+        val outputItemId = "vtmcp_${UUID.randomUUID().toString().replace("-", "").take(26)}"
+        val call = VoiceTutorMcpCall(callId, name, frozenArguments)
+        if (!seenCallIds.add(callId)) throw VoiceTutorMcpProtocolException()
+        // This is the first tool round for the newly persisted learner turn.
+        // Fold any already-ACKed prior result into the eventual continuation.
+        roundCount = 0
+        continuationReady = false
+        pending[callId] = Pending(
+            outputItemId = outputItemId,
+            toolName = name,
+            providerCallItemId = callItemId,
+            serverCall = call,
+            providerCallAcknowledgementDeadline = nowNanos + acknowledgementTimeout.toNanos(),
+        )
+        val event = linkedMapOf<String, Any?>(
+            "event_id" to "buddystudy-internal-server-tool-call-${UUID.randomUUID()}",
+            "type" to "conversation.item.create",
+            "item" to linkedMapOf(
+                "id" to callItemId,
+                "type" to "function_call",
+                "status" to "completed",
+                "call_id" to callId,
+                "name" to name,
+                "arguments" to argumentsJson,
+            ),
+        )
+        if (mapper.writeValueAsBytes(event).size > MAX_PROVIDER_EVENT_BYTES) {
+            pending.remove(callId)
+            seenCallIds.remove(callId)
+            throw VoiceTutorMcpProtocolException()
+        }
+        return VoiceTutorScheduledMcpCall(callId, event)
+    }
+
+    /** Duplicate or mutated provider ACKs never release server-owned work. */
+    fun acknowledgeServerCall(event: JsonNode, nowNanos: Long): VoiceTutorMcpCall? {
+        if (closed || event.path("type").asText() !in OUTPUT_ACK_EVENTS) return null
+        expire(nowNanos)
+        val item = event.path("item")
+        if (item.path("type").asText() != "function_call") return null
+        val callId = item.path("call_id").asText()
+        val pendingCall = pending[callId] ?: return null
+        val serverCall = pendingCall.serverCall ?: return null
+        if (pendingCall.serverCallReleased ||
+            item.path("id").asText() != pendingCall.providerCallItemId ||
+            item.path("name").asText() != serverCall.name ||
+            parseArguments(item.path("arguments")) != serverCall.arguments ||
+            (item.has("status") && item.path("status").asText() != "completed")
+        ) return null
+        pendingCall.serverCallReleased = true
+        pendingCall.providerCallAcknowledgementDeadline = null
+        return serverCall
+    }
+
     fun beginExecution(callId: String): Boolean {
         val call = pending[callId] ?: return false
         if (closed || call.started) return false
@@ -89,6 +172,10 @@ internal class VoiceTutorMcpTurnCoordinator(
 
     fun startedToolName(callId: String): String? = pending[callId]
         ?.takeIf { !closed && it.started }
+        ?.toolName
+
+    fun startedServerToolName(callId: String): String? = pending[callId]
+        ?.takeIf { !closed && it.started && it.serverCall != null }
         ?.toolName
 
     fun complete(callId: String, result: VoiceTutorMcpToolResult, nowNanos: Long): Map<String, Any?>? {
@@ -130,7 +217,11 @@ internal class VoiceTutorMcpTurnCoordinator(
     }
 
     fun expire(nowNanos: Long) {
-        if (!closed && pending.values.any { it.acknowledgementDeadline?.let { deadline -> nowNanos >= deadline } == true }) {
+        if (!closed && pending.values.any {
+                it.providerCallAcknowledgementDeadline?.let { deadline -> nowNanos >= deadline } == true ||
+                    it.acknowledgementDeadline?.let { deadline -> nowNanos >= deadline } == true
+            }
+        ) {
             throw VoiceTutorMcpOutputAcknowledgementException()
         }
     }
@@ -154,6 +245,10 @@ internal class VoiceTutorMcpTurnCoordinator(
     private data class Pending(
         val outputItemId: String,
         val toolName: String,
+        val providerCallItemId: String? = null,
+        val serverCall: VoiceTutorMcpCall? = null,
+        var serverCallReleased: Boolean = false,
+        var providerCallAcknowledgementDeadline: Long? = null,
         var started: Boolean = false,
         var acknowledgementDeadline: Long? = null,
     )

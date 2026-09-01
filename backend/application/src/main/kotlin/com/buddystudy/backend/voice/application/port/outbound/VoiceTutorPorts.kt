@@ -120,9 +120,29 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
         maxSessionCharacters: Int,
         maxSessionTurns: Int,
         lessonRevision: Long = 0,
+        /**
+         * Exact persisted tutor item classified by the final input assessor as the
+         * substantive study question answered by this USER turn. Persistence must
+         * verify the owner, lesson focus, role, revision and ordering before saving
+         * the durable link; arbitrary transcript text never establishes learning.
+         */
+        studyQuestionProviderItemId: String? = null,
+        /** Exact linked learner answer evaluated by this server-attested TUTOR feedback item. */
+        studyAnswerProviderItemId: String? = null,
+        /** Server semantic attestation that this final USER turn asks about the saved lesson focus. */
+        askedStudyQuestion: Boolean = false,
+        /** Server-owned proof attached only to a completed TUTOR study-question item. */
+        isStudyQuestion: Boolean = false,
+        /**
+         * Exact ordered provider identities for all durable USER parts semantically
+         * contributing to one completed answer. This is accepted only together
+         * with studyQuestionProviderItemId and is promoted atomically.
+         */
+        studyAnswerProviderItemIds: List<String> = emptyList(),
     ): Boolean
 
     suspend fun transcript(userId: Long, sessionId: String, maxCharacters: Int): List<VoiceTutorTranscriptTurn>
+    suspend fun hasVerifiedLearningExchange(userId: Long, sessionId: String): Boolean
     suspend fun result(userId: Long, sessionId: String): VoiceTutorResult?
 
     suspend fun finalize(

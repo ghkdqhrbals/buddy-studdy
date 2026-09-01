@@ -421,8 +421,20 @@ class VoiceTutorInputTurnCoordinatorTest {
             "checkpoint", "Redis는 메모리 데이터 저장소예요", "checkpoint-original", 1,
         ))
         assertThat(checkpoint.utterances.single().sameSpeechContext).isNull()
-        assertThat(coordinator.completeAssessment(checkpoint.token, meaningful(checkpoint), 2)).containsExactly(
-            Action.Publish("checkpoint", "checkpoint-original", sequence = 7, checkpoint = true),
+        val checkpointAssessment = VoiceTutorInputAssessmentResult(listOf(
+            VoiceTutorInputItemAssessment(
+                "checkpoint", VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION,
+                currentTranscriptAnswersStudyQuestion = true,
+            ),
+        ))
+        assertThat(coordinator.completeAssessment(checkpoint.token, Result.success(checkpointAssessment), 2))
+            .containsExactly(
+                Action.Publish(
+                    "checkpoint", "checkpoint-original", sequence = 7, checkpoint = true,
+                    intent = VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION,
+                    currentTranscriptAnswersStudyQuestion = true,
+                ),
         )
         coordinator.confirmPublished("checkpoint", 3)
 
@@ -437,6 +449,7 @@ class VoiceTutorInputTurnCoordinatorTest {
         val result = Result.success(VoiceTutorInputAssessmentResult(listOf(
             VoiceTutorInputItemAssessment(
                 "tail", VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION,
+                currentTranscriptAnswersStudyQuestion = false,
             ),
         )))
         assertThat(coordinator.completeAssessment(completed.token, result, 6)).containsExactly(

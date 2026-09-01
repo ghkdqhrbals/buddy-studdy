@@ -82,6 +82,11 @@ interface VoiceTutorRelayUseCase {
         transcript: String,
         occurredAt: Instant,
         lessonRevision: Long = 0,
+        studyQuestionProviderItemId: String? = null,
+        studyAnswerProviderItemId: String? = null,
+        askedStudyQuestion: Boolean = false,
+        isStudyQuestion: Boolean = false,
+        studyAnswerProviderItemIds: List<String> = emptyList(),
     ): Boolean
 
     suspend fun finish(

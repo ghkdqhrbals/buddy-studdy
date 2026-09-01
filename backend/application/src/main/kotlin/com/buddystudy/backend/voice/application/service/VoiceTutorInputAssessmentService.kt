@@ -5,6 +5,8 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentE
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentFailure
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
+import com.buddystudy.backend.voice.application.model.VoiceTutorSpokenFeedbackAssessmentRequest
+import com.buddystudy.backend.voice.application.model.VoiceTutorSpokenQuestionAssessmentRequest
 import com.buddystudy.backend.voice.application.model.correlatedTo
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorInputAssessmentPort
@@ -63,6 +65,57 @@ class VoiceTutorInputAssessmentService(
         } catch (error: CancellationException) {
             // Includes parent/session cancellation; never revive a closed call
             // or reinterpret cancellation as an assessment of its transcript.
+            throw error
+        } catch (error: VoiceTutorInputAssessmentException) {
+            throw error
+        } catch (_: Exception) {
+            throw failure(VoiceTutorInputAssessmentFailure.UNAVAILABLE)
+        } finally {
+            permits.release()
+        }
+    }
+
+    override suspend fun assessSpokenQuestion(request: VoiceTutorSpokenQuestionAssessmentRequest): Boolean {
+        currentCoroutineContext().ensureActive()
+        if (request.userId <= 0 || request.language.isBlank() || request.language.length > 35 ||
+            request.focusTopic.isBlank() || request.focusTopic.length > 255 ||
+            request.focusDifficulty !in 1..10 || request.transcript.isBlank() ||
+            request.transcript.length > limits.maxTranscriptCharacters
+        ) throw failure(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
+        if (!acquirePermit()) throw failure(VoiceTutorInputAssessmentFailure.BUSY)
+        try {
+            return withTimeoutOrNull(limits.timeoutMilliseconds) {
+                provider.assessSpokenQuestion(request)
+            } ?: throw failure(VoiceTutorInputAssessmentFailure.TIMEOUT)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: VoiceTutorInputAssessmentException) {
+            throw error
+        } catch (_: Exception) {
+            throw failure(VoiceTutorInputAssessmentFailure.UNAVAILABLE)
+        } finally {
+            permits.release()
+        }
+    }
+
+    override suspend fun assessSpokenFeedback(request: VoiceTutorSpokenFeedbackAssessmentRequest): Boolean {
+        currentCoroutineContext().ensureActive()
+        if (request.userId <= 0 || request.language.isBlank() || request.language.length > 35 ||
+            request.focusTopic.isBlank() || request.focusTopic.length > 255 ||
+            request.focusDifficulty !in 1..10 || request.questionTranscript.isBlank() ||
+            request.answerTranscript.isBlank() || request.feedbackTranscript.isBlank() ||
+            request.questionTranscript.length > limits.maxTranscriptCharacters ||
+            request.answerTranscript.length > limits.maxTranscriptCharacters ||
+            request.feedbackTranscript.length > limits.maxTranscriptCharacters ||
+            request.questionTranscript.length + request.answerTranscript.length +
+                request.feedbackTranscript.length > limits.maxBatchTranscriptCharacters
+        ) throw failure(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
+        if (!acquirePermit()) throw failure(VoiceTutorInputAssessmentFailure.BUSY)
+        try {
+            return withTimeoutOrNull(limits.timeoutMilliseconds) {
+                provider.assessSpokenFeedback(request)
+            } ?: throw failure(VoiceTutorInputAssessmentFailure.TIMEOUT)
+        } catch (error: CancellationException) {
             throw error
         } catch (error: VoiceTutorInputAssessmentException) {
             throw error

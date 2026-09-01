@@ -204,9 +204,20 @@ internal class VoiceTutorRealtimeEventPolicy(
     }
 
     private fun withoutInternalTranscriptMetadata(node: JsonNode, raw: String): String {
-        if (!node.has(VoiceTutorTranscriptMetadata.LESSON_REVISION)) return raw
+        if (!node.has(VoiceTutorTranscriptMetadata.LESSON_REVISION) &&
+            !node.has(VoiceTutorTranscriptMetadata.STUDY_QUESTION_PROVIDER_ITEM_ID) &&
+            !node.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID) &&
+            !node.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS) &&
+            !node.has(VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION) &&
+            !node.has(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION)
+        ) return raw
         val publicNode = node.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
         publicNode.remove(VoiceTutorTranscriptMetadata.LESSON_REVISION)
+        publicNode.remove(VoiceTutorTranscriptMetadata.STUDY_QUESTION_PROVIDER_ITEM_ID)
+        publicNode.remove(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID)
+        publicNode.remove(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS)
+        publicNode.remove(VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION)
+        publicNode.remove(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION)
         return mapper.writeValueAsString(publicNode)
     }
 

@@ -40,12 +40,10 @@ data class VoiceTutorDialogueBoundary(
     val latestAcceptedLearnerTargetCandidate: VoiceTutorStudyTargetCandidate? = null,
     /** Exact server-private topology proof paired with that confirmed candidate. */
     val latestAcceptedLearnerTargetTraversal: VoiceTutorStudyTargetTraversal? = null,
-    /** Exact root preview and spoken tutor boundary contextually affirmed by this learner turn. */
-    val latestAcceptedLearnerRootStudyCreationOffer: VoiceTutorRootStudyCreationOffer? = null,
     /** One-shot server-owned lease; a newer speech edge invalidates even an in-flight focus tool. */
     val focusAuthorization: VoiceTutorFocusAuthorization? = null,
-    /** One-shot root-confirmation lease; invalidated by any newer learner speech before write linearization. */
-    val rootStudyConfirmationAuthorization: VoiceTutorRootStudyConfirmationAuthorization? = null,
+    /** One-shot direct-root lease; invalidated by any newer learner speech before write linearization. */
+    val rootStudyCreationAuthorization: VoiceTutorRootStudyCreationAuthorization? = null,
 )
 
 class VoiceTutorFocusAuthorization {
@@ -63,7 +61,15 @@ class VoiceTutorFocusAuthorization {
     override fun toString(): String = "VoiceTutorFocusAuthorization(active=${active.get()})"
 }
 
-class VoiceTutorRootStudyConfirmationAuthorization {
+class VoiceTutorRootStudyCreationAuthorization(
+    val topic: String,
+    val difficulty: Int,
+) {
+    init {
+        require(topic.isNotBlank() && topic == topic.trim() && topic.length <= 255)
+        require(difficulty in 1..10)
+    }
+
     private val active = AtomicBoolean(true)
 
     fun invalidate() {
@@ -76,5 +82,5 @@ class VoiceTutorRootStudyConfirmationAuthorization {
     fun isActive(): Boolean = active.get()
 
     override fun toString(): String =
-        "VoiceTutorRootStudyConfirmationAuthorization(active=${active.get()})"
+        "VoiceTutorRootStudyCreationAuthorization(active=${active.get()}, topic=[redacted], difficulty=$difficulty)"
 }

@@ -7,8 +7,8 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentR
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
+import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
-import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationOffer
 import com.buddystudy.backend.voice.application.model.correlatedTo
 
 /**
@@ -41,6 +41,8 @@ internal class VoiceTutorInputTurnCoordinator(
             val intent: VoiceTutorInputIntent = VoiceTutorInputIntent.NONE,
             val targetStudyId: Long? = null,
             val targetOfferId: Long? = null,
+            val rootStudyCreationRequest: VoiceTutorRootStudyCreationRequest? = null,
+            val currentTranscriptAnswersStudyQuestion: Boolean = false,
         ) : Action {
             override fun toString(): String = "Publish(itemId=[redacted], eventCharacters=${rawEvent.length})"
         }
@@ -111,7 +113,6 @@ internal class VoiceTutorInputTurnCoordinator(
         checkpoint: Boolean,
         nowNanos: Long,
         targetOffer: VoiceTutorStudyTargetOffer? = null,
-        rootStudyCreationOffer: VoiceTutorRootStudyCreationOffer? = null,
     ): List<Action> {
         if (isClosed || itemId in pending || itemId in recentItemIds) return emptyList()
         if (!validItemId(itemId) || sequence <= 0) fail(VoiceTutorInputTurnCoordinatorFailure.INVALID_COMMITTED_ITEM)
@@ -120,7 +121,7 @@ internal class VoiceTutorInputTurnCoordinator(
         if (pending.size >= MAX_PENDING_ITEMS) fail(VoiceTutorInputTurnCoordinatorFailure.PENDING_CAPACITY_EXCEEDED)
         val item = PendingItem(
             itemId, sequence, checkpoint, Stage.WAITING_TRANSCRIPT, nowNanos,
-            targetOffer, rootStudyCreationOffer,
+            targetOffer,
         )
         pending[itemId] = item
         remember(itemId)
@@ -218,8 +219,16 @@ internal class VoiceTutorInputTurnCoordinator(
                             item.stage = Stage.WAITING_PUBLISH
                             item.stageStartedAt = nowNanos
                             actions += Action.Publish(
-                                item.itemId, requireNotNull(item.rawEvent), item.sequence, item.checkpoint,
-                                decision.intent, decision.targetStudyId, item.targetOffer?.offerId,
+                                itemId = item.itemId,
+                                rawEvent = requireNotNull(item.rawEvent),
+                                sequence = item.sequence,
+                                checkpoint = item.checkpoint,
+                                intent = decision.intent,
+                                targetStudyId = decision.targetStudyId,
+                                targetOfferId = item.targetOffer?.offerId,
+                                rootStudyCreationRequest = decision.rootStudyCreationRequest,
+                                currentTranscriptAnswersStudyQuestion =
+                                    decision.currentTranscriptAnswersStudyQuestion,
                             )
                         }
                         VoiceTutorInputDecision.NON_COMMUNICATIVE -> delete(item, nowNanos, actions)
@@ -338,9 +347,8 @@ internal class VoiceTutorInputTurnCoordinator(
             if (item.stage != Stage.WAITING_ASSESSMENT) break
             val text = requireNotNull(item.transcript)
             val offerCharacters = item.targetOffer?.tutorAudioTranscript?.length ?: 0
-            val rootOfferCharacters = item.rootStudyCreationOffer?.tutorAudioTranscript?.length ?: 0
             val remainingAfterTranscript =
-                limits.maxBatchTranscriptCharacters - characters - text.length - offerCharacters - rootOfferCharacters
+                limits.maxBatchTranscriptCharacters - characters - text.length - offerCharacters
             if (selected.size == limits.maxUtterances || remainingAfterTranscript < 0) break
             val sameSpeechContext = if (item.checkpoint) {
                 null
@@ -349,7 +357,7 @@ internal class VoiceTutorInputTurnCoordinator(
             }
             selected += item
             semanticContexts[item.itemId] = sameSpeechContext
-            characters += text.length + offerCharacters + rootOfferCharacters + (sameSpeechContext?.length ?: 0)
+            characters += text.length + offerCharacters + (sameSpeechContext?.length ?: 0)
         }
         if (selected.isEmpty()) return
         if (nextBatchToken <= 0 || nextBatchToken == Long.MAX_VALUE) {
@@ -362,7 +370,6 @@ internal class VoiceTutorInputTurnCoordinator(
                 requireNotNull(it.transcript),
                 checkpoint = it.checkpoint,
                 targetOffer = it.targetOffer,
-                rootStudyCreationOffer = it.rootStudyCreationOffer,
                 sameSpeechContext = semanticContexts[it.itemId],
             )
         }
@@ -484,7 +491,6 @@ internal class VoiceTutorInputTurnCoordinator(
         var stage: Stage,
         var stageStartedAt: Long,
         val targetOffer: VoiceTutorStudyTargetOffer? = null,
-        val rootStudyCreationOffer: VoiceTutorRootStudyCreationOffer? = null,
         var transcript: String? = null,
         var rawEvent: String? = null,
     )

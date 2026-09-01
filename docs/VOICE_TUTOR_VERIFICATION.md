@@ -1,9 +1,9 @@
 # Pro Voice Tutor verification
 
-Verification date: 2026-09-01. This is implementation verification, not a
+Verification date: 2026-09-02. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [provider-turn recovery and natural transcript drawer](#provider-turn-recovery-and-natural-transcript-drawer).
+Latest implementation: [learning evidence gate and direct root creation](#learning-evidence-gate-and-direct-root-creation).
 It extends the existing guided saved-tree descent, single-orb,
 Silero/contextual-input, MCP and source-backed summary contracts; it does not
 regrade past answers.
@@ -12,6 +12,99 @@ implementation.
 Source/fixture tests, iPhone tests and actual dev runtime observations are
 recorded separately; none implies a new human microphone-to-tutor conversation
 unless that specific check is explicitly recorded.
+
+## Learning evidence gate and direct root creation
+
+Current acceptance contract on 2026-09-02, branch `feature/2.0`:
+
+- A final, persisted learner command such as `Spring을 레벨 7 루트 주제로
+  만들어줘` authorizes the exact `(topic, effective level)` tuple once and calls
+  `create_root_study` immediately. There is no create-preview or `만들까요? ->
+  네` confirmation loop. Exact learner-source evidence must support the command,
+  complete topic and explicit level, or level omission; a generic yes, tutor-only
+  proposal, strict-subset topic, mismatched level, newer speech, replay or failed
+  persistence cannot authorize the write.
+- The create result cannot speak for itself. The server bridge schedules an exact
+  `get_study` read for its trusted returned ID and withholds the spoken
+  acknowledgment until both function outputs are acknowledged and that readback
+  proves the saved root. A failed or mismatched readback reports only that the
+  result could not be verified and never retries the mutation automatically.
+  Verified creation still does not begin a lesson: the tutor speaks the read-back
+  root as a separate start offer and waits for a new learner agreement before
+  `select_voice_study`. Root or child creation consumes no question quota and
+  creates no question record.
+- A successful focus selection or explicit continue decision grants one
+  server-owned question purpose. Only one clean, completed tutor-audio item whose
+  exact bounded persisted transcript is independently accepted as one substantive
+  study question receives `is_study_question=true`. Setup, creation, selection,
+  configuration, navigation, acknowledgment, multiple-question, tool/audio,
+  refusal, timeout, error and overlong responses fail closed even if their text
+  contains a question mark.
+- One continuous learner answer may span persisted checkpoints. Each part is
+  independently assessed from its own exact transcript; the final event carries
+  the complete ordered provider-ID set, and persistence atomically promotes only
+  those same-session, same-revision USER rows to the exact question. The current
+  final row need not be linked when it is only filler. Missing, duplicate,
+  reordered, foreign, previously attested, revision-mismatched or tutor-separated
+  parts reject the whole claimed set. Summary and canonical extraction must cite
+  every durable answer part in that same order, never a convenient prefix or
+  suffix.
+- Optional feedback is accepted only from one clean completed tutor-audio item
+  independently verified as evaluation of the exact question and full answer.
+  Its `study_answer_turn_id` must identify the final linked answer row in the same
+  lesson revision; a later linked answer, an intervening tutor item, a new study
+  question, navigation, tool use or unrelated response invalidates the feedback
+  provenance. Unsupported scores, strengths and improvements are omitted rather
+  than inferred or regraded.
+- Session settlement and recovery call the summary model only when a durable
+  `is_study_question` TUTOR row is joined to at least one exact linked USER answer
+  row. Before the model call, the server removes every setup/navigation/
+  configuration turn and applies the character budget only between complete
+  exchange groups. Topic discovery, root/topic creation, selection, level changes,
+  setup confirmations, filler and other management-only dialogue therefore finish
+  with an empty `COMPLETED` result, zero summary-model calls, zero canonical or
+  public `VOICE_TUTOR` records and zero translation projection. A supplemental
+  learner-led study question cannot bypass that base tutor-question/answer gate.
+
+Migration roles:
+
+| Migration | Durable role |
+| --- | --- |
+| V109 | Adds nullable positive `study_question_turn_id`, linking an accepted USER answer part to its exact TUTOR question row, plus the session/exchange lookup index. |
+| V110 | Adds USER-only `asked_study_question` for a substantive learner-led question; it is supplemental evidence and cannot independently make a session summary-eligible. |
+| V111 | Adds database invariants requiring question-linked answers to be USER rows and forbidding the same row from also carrying learner-question attestation. |
+| V112 | Adds TUTOR-only `is_study_question`, the durable proof that the exact completed tutor item consumed a server-owned substantive-question purpose. |
+| V113 | Adds nullable positive TUTOR-only `study_answer_turn_id`, linking exact feedback to the final learner-answer row and forbidding that feedback row from also being a study question. |
+
+The persistence layer supplies the owner/session/focus, role, sequence, lesson
+revision, multipart completeness, final-answer and intervening-turn checks that
+cannot be expressed by these column checks alone. V109–V113 are additive and do
+not delete, rewrite, regrade or republish older transcripts, summaries or records.
+Final verification evidence for this contract on 2026-09-02:
+
+- `:application:test`, `:infra:test` and `:tutor:bootJar` completed together:
+  **1,593 tests, zero failures, zero errors and two opt-in skips**. The focused
+  Spring-proxied MySQL rollback integration check for transcript provenance also
+  passed earlier in the same implementation run. This does not claim that the
+  complete `:tutor:test` Testcontainers suite was rerun.
+- The required unsigned generic-device `StudyMateiOS` Debug build completed with
+  `** BUILD SUCCEEDED **`. This verifies compilation and packaging, not a new
+  human microphone-to-tutor conversation.
+- The final backend artifact is **331,636,328 bytes**, SHA-256
+  `a64661ebaca8cdad51c2ba0f7c8c85c5340467311c7114881139aecd946aa315`.
+- With zero active or ending calls, only the existing
+  `backend-backend-1` container on localhost port 8080 was restarted. Its mounted
+  JAR hash matches the artifact, health returned `UP`, and the live Flyway
+  history reports successful V109, V110, V111, V112 and V113 rows. The live
+  `voice_tutor_transcript_turns` table exposes all four provenance columns:
+  `study_question_turn_id`, `study_answer_turn_id`, `asked_study_question` and
+  `is_study_question`.
+- MySQL, Redis, LibreTranslate and backup retained their exact container IDs and
+  start times during the API rollout. The short-lived copy helper removed itself;
+  no second backend stack or persistent infrastructure container was added.
+
+The numerical results in later dated sections are historical evidence for their
+respective earlier implementations.
 
 ## Provider-turn recovery and natural transcript drawer
 
@@ -108,26 +201,30 @@ audible microphone-to-tutor conversation.
   learner turn explicitly requests creation. A topic mention, saved-topic search,
   recommendation request, child-topic request, filler or tool text cannot
   authorize it.
-- [x] `create_root_study(confirm=false)` writes nothing. It resolves the exact
-  trimmed 1–255 character topic and the requested 1–10 level, using level 5 only
-  when the learner omitted one, then returns a bounded two-minute confirmation
-  token. The tutor speaks that exact topic and level without reading the token.
-- [x] `confirm=true` accepts only the unchanged preview fields and token after a
-  newer explicit affirmative learner turn. The server binds that turn to the
-  exact completed tutor-audio transcript, provider item, response generation and
-  playback-stop order, then atomically consumes a one-shot lease immediately
-  before the write. A correction such as “not A; create B” supersedes A and
-  requires a new B preview. Expired, consumed, changed, stale-call/account/device,
-  pre-preview, newer-speech and uncertain-write retries fail closed.
+- [x] A final persisted direct learner command calls `create_root_study` once
+  immediately; there is no `confirm=false` preview, “만들까요?” prompt or second
+  contextual-yes turn. The input assessor extracts the exact learner-spoken
+  trimmed 1–255 character topic and requested 1–10 level, applying level 5 only
+  when the learner omitted one.
+- [x] The server binds that topic/effective-level tuple to one call-local one-shot
+  lease and compares it with the tool arguments before consuming the lease at
+  the write boundary. A generic yes, tutor proposal, topic mention, checkpoint,
+  failed persistence, mismatched tuple, stale call/account/device, newer speech,
+  replay and uncertain-write retry all fail closed. Deletion retains its separate
+  preview plus confirmation-token contract.
 - [x] The common `create_root_study` use case is owner-scoped and create-only. An
   exact normalized owned root duplicate returns the existing row unchanged with
   `created=false`; it never adopts the requested level or overwrites scheduling
   settings. A normalized match on a child is a conflict. A new root uses product
   defaults, creates no question and consumes no question quota.
 - [x] Neither `created=true` nor `created=false` establishes lesson focus. The
-  tutor reads the returned ID with `get_study`, speaks the exact saved root as a
-  separate start offer, waits for another fresh learner agreement, and calls
-  `select_voice_study`. Teaching starts only after that focus result succeeds.
+  server bridge schedules `get_study` for the trusted returned ID, waits for both
+  output acknowledgements and proves the exact root before allowing the tutor to
+  acknowledge the saved result. Failed or mismatched readback cannot claim a
+  persisted outcome and never retries the create automatically. After verified
+  readback, the tutor speaks the exact saved root as a separate start offer,
+  waits for another fresh learner agreement, and calls `select_voice_study`.
+  Teaching starts only after that focus result succeeds.
 - [x] Only a verified new row is eligible for the live
   `buddystudy.voice.study.changed` refresh hint. While the controller remains
   valid, its sanitized wire payload carries the type, positive `studyId`,
@@ -1189,12 +1286,21 @@ The earlier test results remain historical evidence, not the current turn gate.
 
 ### Post-call summary inspection (read-only)
 
-- The reported summary is a server-side operation over stored final transcripts,
-  not another microphone session or a reanalysis of an audio recording. Ending
-  a call settles usage and queues its separate result as `PENDING`; the existing
-  five-second recovery scheduler claims work as `PROCESSING`. A separate GPT
-  request receives topic, difficulty, role-tagged text and summary instructions,
-  then persists summary/strengths/improvements/next steps as `COMPLETED`.
+- An eligible reported summary is a server-side operation over stored final
+  transcripts, not another microphone session or a reanalysis of an audio
+  recording. Eligibility requires a durable saved-focus TUTOR row with
+  `is_study_question=true` and its exact complete linked USER answer. A multipart
+  answer is one ordered all-or-none set; a character budget cannot expose only a
+  prefix. Ending always settles usage; eligible work is claimed as `PROCESSING`.
+  The separate GPT request receives only the verified complete exchanges with
+  topic, difficulty, role-tagged text and summary instructions, then persists
+  summary/strengths/improvements/next steps as `COMPLETED`. Exact feedback is
+  included only when its `study_answer_turn_id` targets the final linked answer in
+  the same revision with no later linked answer or intervening tutor item.
+- Topic discovery, root/topic creation, focus/consent and settings-only sessions
+  have no verified question/answer link. They synchronously receive a blank
+  `COMPLETED` technical result, invoke GPT zero times and append zero canonical
+  `VOICE_TUTOR` records, so the app does not keep displaying an analysis state.
 - The inspected 147-second dev call had a completed `gpt-5.4` result roughly
   8.03 seconds after call end (seven learner and ten tutor transcript items).
   No transcript, recording, credential, user identity or full session ID was
@@ -1205,8 +1311,10 @@ The earlier test results remain historical evidence, not the current turn gate.
   and a cached history detail is not refreshed. The backend had already
   completed the inspected result. This turn diagnosed that UI bug but did not
   change result polling/caching, stored summaries or quota data.
-- No-transcript calls receive a deterministic empty-conversation result without
-  GPT. Provider/parse failure becomes `FAILED`, not an automatic retry; an
+- Calls without a verified server-authorized study question and exact complete
+  answer receive a deterministic empty result without GPT, even when they contain
+  setup transcripts or a learner-led question. Provider/parse failure for an
+  eligible lesson becomes `FAILED`, not an automatic retry; an
   abandoned `PROCESSING` lease can be reclaimed after 300 seconds. No new MCP
   integration, worker container or infrastructure is needed for this flow.
 

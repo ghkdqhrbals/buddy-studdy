@@ -280,6 +280,10 @@ class VoiceStudyLearningRecordPersistenceAdapter(
             row.long("id"), row.string("session_id"), row.string("provider_item_id"),
             VoiceTutorTranscriptRole.valueOf(row.string("role")), row.string("transcript"),
             row.long("sequence_number"), row.instant("occurred_at"), row.long("lesson_revision"),
+            (row.get("study_question_turn_id") as? Number)?.toLong(),
+            (row.get("study_answer_turn_id") as? Number)?.toLong(),
+            row.get("asked_study_question", java.lang.Boolean::class.java) == true,
+            row.get("is_study_question", java.lang.Boolean::class.java) == true,
         )
     }.all().collectList().awaitSingle()
 

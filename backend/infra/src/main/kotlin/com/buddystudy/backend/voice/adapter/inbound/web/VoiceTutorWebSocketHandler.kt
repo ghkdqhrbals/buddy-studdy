@@ -371,6 +371,9 @@ class VoiceTutorWebSocketHandler(
                 VoiceTutorTranscriptRole.USER,
                 node.path("transcript").asText(),
                 VoiceTutorTranscriptMetadata.lessonRevision(node),
+                VoiceTutorTranscriptMetadata.studyQuestionProviderItemId(node),
+                askedStudyQuestion = VoiceTutorTranscriptMetadata.askedStudyQuestion(node),
+                studyAnswerProviderItemIds = VoiceTutorTranscriptMetadata.studyAnswerProviderItemIds(node),
             )
             "response.output_audio_transcript.done" -> appendTranscript(
                 principal,
@@ -379,6 +382,8 @@ class VoiceTutorWebSocketHandler(
                 VoiceTutorTranscriptRole.TUTOR,
                 node.path("transcript").asText(),
                 VoiceTutorTranscriptMetadata.lessonRevision(node),
+                studyAnswerProviderItemId = VoiceTutorTranscriptMetadata.studyAnswerProviderItemId(node),
+                isStudyQuestion = VoiceTutorTranscriptMetadata.isStudyQuestion(node),
             )
             else -> Mono.just(false)
         }
@@ -391,11 +396,29 @@ class VoiceTutorWebSocketHandler(
         role: VoiceTutorTranscriptRole,
         transcript: String,
         lessonRevision: Long,
+        studyQuestionProviderItemId: String? = null,
+        studyAnswerProviderItemId: String? = null,
+        askedStudyQuestion: Boolean = false,
+        isStudyQuestion: Boolean = false,
+        studyAnswerProviderItemIds: List<String> = emptyList(),
     ): Mono<Boolean> = if (transcript.isBlank()) {
         Mono.just(false)
     } else {
         mono {
-            relay.appendTranscript(principal, sessionId, providerItemId, role, transcript, Instant.now(), lessonRevision)
+            relay.appendTranscript(
+                principal = principal,
+                sessionId = sessionId,
+                providerItemId = providerItemId,
+                role = role,
+                transcript = transcript,
+                occurredAt = Instant.now(),
+                lessonRevision = lessonRevision,
+                studyQuestionProviderItemId = studyQuestionProviderItemId,
+                studyAnswerProviderItemId = studyAnswerProviderItemId,
+                askedStudyQuestion = askedStudyQuestion,
+                isStudyQuestion = isStudyQuestion,
+                studyAnswerProviderItemIds = studyAnswerProviderItemIds,
+            )
         }
     }
 

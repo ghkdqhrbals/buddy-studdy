@@ -29,6 +29,8 @@ class VoiceTutorSummaryPromptProviderTest {
         val data = JsonMapperProvider.mapper.readTree(messages[2].getValue("content"))
         assertThat(data.path("transcriptTurns").single().path("transcript").textValue()).isEqualTo(malicious)
         assertThat(data.path("transcriptTurns").single().path("id").longValue()).isEqualTo(9)
+        assertThat(data.path("transcriptTurns").single().path("studyQuestionTurnId").isNull).isTrue()
+        assertThat(data.path("transcriptTurns").single().path("askedStudyQuestion").booleanValue()).isFalse()
         assertThat(messages[2].getValue("content")).doesNotContain("<untrusted_session_data>")
     }
 
@@ -42,6 +44,7 @@ class VoiceTutorSummaryPromptProviderTest {
             "TUTOR_QUESTION", "LEARNER_QUESTION", "never grade a learner for asking a question",
             "greetings, readiness checks", "do not grade now", "never claim completeness",
             "depthSummary must state concretely", "48 exchanges in total",
+            "studyQuestionTurnId", "askedStudyQuestion=true", "immediately following uninterrupted run",
         )
         assertThat(messages.last().getValue("content")).doesNotContain("providerItemId", "userId")
     }
