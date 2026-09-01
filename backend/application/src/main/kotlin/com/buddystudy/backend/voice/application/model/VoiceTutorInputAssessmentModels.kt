@@ -6,6 +6,22 @@ data class VoiceTutorStudyTargetCandidate(
     val topic: String,
 )
 
+/** Bounded server-read targets that one learner turn may mutate; provider text cannot add an ID. */
+data class VoiceTutorStudyMutationContext(
+    val lessonRevision: Long,
+    val currentFocusStudyId: Long,
+    val candidates: List<VoiceTutorStudyTargetCandidate>,
+) {
+    fun isValid(maxCandidates: Int = 17): Boolean =
+        lessonRevision >= 0 && currentFocusStudyId > 0 && candidates.size in 1..maxCandidates &&
+            candidates.map { it.studyId }.distinct().size == candidates.size &&
+            candidates.singleOrNull { it.studyId == currentFocusStudyId } != null &&
+            candidates.all {
+                it.studyId > 0 && it.parentStudyId?.let { parent -> parent > 0 && parent != it.studyId } != false &&
+                    it.topic.isNotBlank() && it.topic == it.topic.trim() && it.topic.length <= 255
+            }
+}
+
 /** One server-verified edge that had exactly one live direct child when the offer was built. */
 data class VoiceTutorStudyTargetSingleChildEdge(
     val parentStudyId: Long,
@@ -74,6 +90,8 @@ data class VoiceTutorInputUtterance(
      * for [transcript]; this context must never be used to rewrite either provider item.
      */
     val sameSpeechContext: String? = null,
+    /** Frozen at this speech boundary from the current focus and verified call-local tree reads. */
+    val studyMutationContext: VoiceTutorStudyMutationContext? = null,
 ) {
     override fun toString(): String =
         "VoiceTutorInputUtterance(itemId=[redacted], transcriptCharacters=${transcript.length}, " +
@@ -125,8 +143,12 @@ enum class VoiceTutorInputDecision { MEANINGFUL, NON_COMMUNICATIVE }
 enum class VoiceTutorInputIntent {
     NONE,
     END_CURRENT_VOICE_LESSON,
-    /** The learner explicitly asks to create one new top-level saved study. */
+    /** The learner directly chooses to begin one new top-level saved study, including natural first-person intent. */
     CREATE_ROOT_STUDY,
+    /** The learner directly chooses one exact child under a server-verified saved node. */
+    CREATE_STUDY_TOPIC,
+    /** The learner directly chooses an exact name and/or level patch for a server-verified saved node. */
+    UPDATE_STUDY,
     /** The learner explicitly names a saved topic they want to enter or switch to. */
     SELECT_SAVED_TOPIC,
     /** The learner explicitly asks to continue deeper from the current saved-tree node. */
@@ -144,7 +166,7 @@ enum class VoiceTutorInputIntent {
 enum class VoiceTutorRootStudyEvidenceSource { TRANSCRIPT, SAME_SPEECH_CONTEXT }
 
 /**
- * Verbatim learner-owned evidence for one direct root command. These values are never normalized,
+ * Verbatim learner-owned evidence for one operative root-creation statement. These values are never normalized,
  * translated, or taken from tutor context. The semantic attestor separately proves that [topic]
  * spans the complete requested root name rather than a narrower substring.
  */
@@ -171,6 +193,9 @@ data class VoiceTutorRootStudyCreationEvidence(
     }
 
     fun isExactLearnerEvidence(utterance: VoiceTutorInputUtterance): Boolean {
+        // Checkpoint persistence is acknowledged independently. Until the request carries
+        // durable part IDs, only this exact final persisted USER item may authorize a write.
+        if (source != VoiceTutorRootStudyEvidenceSource.TRANSCRIPT) return false
         val learnerSource = when (source) {
             VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> utterance.transcript
             VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> utterance.sameSpeechContext ?: return false
@@ -191,6 +216,121 @@ data class VoiceTutorRootStudyCreationRequest(
             evidence.isValidFor(topic, difficulty)
 }
 
+data class VoiceTutorChildStudyCreationEvidence(
+    val source: VoiceTutorRootStudyEvidenceSource,
+    val command: String,
+    val parentTopic: String?,
+    val topic: String,
+    val difficulty: String?,
+    val difficultyOmitted: Boolean,
+    val parentImplicitCurrentFocus: Boolean,
+) {
+    fun isExactLearnerEvidence(utterance: VoiceTutorInputUtterance): Boolean {
+        if (source != VoiceTutorRootStudyEvidenceSource.TRANSCRIPT) return false
+        val learnerSource = when (source) {
+            VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> utterance.transcript
+            VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> utterance.sameSpeechContext ?: return false
+        }
+        val parentValid = if (parentImplicitCurrentFocus) {
+            parentTopic == null
+        } else {
+            parentTopic?.takeIf { it.isNotBlank() && it == it.trim() && it.length <= 255 }
+                ?.let(command::contains) == true
+        }
+        val difficultyValid = if (difficultyOmitted) {
+            difficulty == null
+        } else {
+            difficulty?.takeIf { it.isNotBlank() && it == it.trim() && it.length <= 2 }
+                ?.let(command::contains) == true
+        }
+        return command.isNotBlank() && command.length <= 4_000 && command.length > topic.length &&
+            parentTopic?.let { command.length > it.length } != false && learnerSource.contains(command) &&
+            topic.isNotBlank() && topic == topic.trim() && topic.length <= 255 && command.contains(topic) &&
+            parentValid && difficultyValid
+    }
+}
+
+data class VoiceTutorChildStudyCreationRequest(
+    val parentStudyId: Long,
+    val topic: String,
+    val difficulty: Int,
+    val evidence: VoiceTutorChildStudyCreationEvidence,
+) {
+    fun isValidFor(utterance: VoiceTutorInputUtterance): Boolean {
+        val context = utterance.studyMutationContext?.takeIf(VoiceTutorStudyMutationContext::isValid) ?: return false
+        val parent = context.candidates.singleOrNull { it.studyId == parentStudyId } ?: return false
+        if (topic.isBlank() || topic != topic.trim() || topic.length > 255 || difficulty !in 1..10 ||
+            evidence.topic != topic || !evidence.isExactLearnerEvidence(utterance)
+        ) return false
+        if (evidence.parentImplicitCurrentFocus) {
+            if (parentStudyId != context.currentFocusStudyId) return false
+        } else if (evidence.parentTopic != parent.topic) {
+            return false
+        }
+        return if (evidence.difficultyOmitted) {
+            evidence.difficulty == null && difficulty == 5
+        } else {
+            evidence.difficulty?.toIntOrNull() == difficulty
+        }
+    }
+}
+
+data class VoiceTutorStudyUpdateEvidence(
+    val source: VoiceTutorRootStudyEvidenceSource,
+    val command: String,
+    val targetTopic: String?,
+    val topic: String?,
+    val difficulty: String?,
+    val targetImplicitCurrentFocus: Boolean,
+) {
+    fun isExactLearnerEvidence(utterance: VoiceTutorInputUtterance): Boolean {
+        if (source != VoiceTutorRootStudyEvidenceSource.TRANSCRIPT) return false
+        val learnerSource = when (source) {
+            VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> utterance.transcript
+            VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> utterance.sameSpeechContext ?: return false
+        }
+        val targetValid = if (targetImplicitCurrentFocus) {
+            targetTopic == null
+        } else {
+            targetTopic?.takeIf { it.isNotBlank() && it == it.trim() && it.length <= 255 }
+                ?.let(command::contains) == true
+        }
+        return command.isNotBlank() && command.length <= 4_000 &&
+            listOfNotNull(targetTopic, topic, difficulty).all { command.length > it.length } &&
+            learnerSource.contains(command) && targetValid && topic?.let {
+                it.isNotBlank() && it == it.trim() && it.length <= 255 && command.contains(it)
+            } != false && difficulty?.let {
+                it.isNotBlank() && it == it.trim() && it.length <= 2 && command.contains(it)
+            } != false
+    }
+}
+
+data class VoiceTutorStudyUpdateRequest(
+    val studyId: Long,
+    val topic: String?,
+    val difficulty: Int?,
+    val evidence: VoiceTutorStudyUpdateEvidence,
+) {
+    fun isValidFor(utterance: VoiceTutorInputUtterance): Boolean {
+        val context = utterance.studyMutationContext?.takeIf(VoiceTutorStudyMutationContext::isValid) ?: return false
+        val target = context.candidates.singleOrNull { it.studyId == studyId } ?: return false
+        val difficultyEvidenceMatches = if (difficulty == null) {
+            evidence.difficulty == null
+        } else {
+            evidence.difficulty?.toIntOrNull() == difficulty
+        }
+        if (topic == null && difficulty == null || topic?.let { it.isBlank() || it != it.trim() || it.length > 255 } == true ||
+            difficulty?.let { it !in 1..10 } == true || evidence.topic != topic ||
+            !difficultyEvidenceMatches || !evidence.isExactLearnerEvidence(utterance)
+        ) return false
+        return if (evidence.targetImplicitCurrentFocus) {
+            studyId == context.currentFocusStudyId
+        } else {
+            evidence.targetTopic == target.topic
+        }
+    }
+}
+
 data class VoiceTutorInputItemAssessment(
     val itemId: String,
     val decision: VoiceTutorInputDecision,
@@ -198,7 +338,7 @@ data class VoiceTutorInputItemAssessment(
     val targetStudyId: Long? = null,
     /** Candidates semantically attested as actually proposed in tutorAudioTranscript. */
     val spokenCandidateStudyIds: List<Long> = emptyList(),
-    /** Present only for a direct CREATE_ROOT_STUDY command; never derived from tool arguments. */
+    /** Present only for an operative CREATE_ROOT_STUDY statement; never derived from tool arguments. */
     val rootStudyCreationRequest: VoiceTutorRootStudyCreationRequest? = null,
     /**
      * True only when this item's exact transcript itself contributes content to the
@@ -207,6 +347,10 @@ data class VoiceTutorInputItemAssessment(
      * false (for example, when the durable answer is in an earlier checkpoint).
      */
     val currentTranscriptAnswersStudyQuestion: Boolean = false,
+    /** Present only for an operative CREATE_STUDY_TOPIC statement. */
+    val childStudyCreationRequest: VoiceTutorChildStudyCreationRequest? = null,
+    /** Present only for an operative UPDATE_STUDY statement. */
+    val studyUpdateRequest: VoiceTutorStudyUpdateRequest? = null,
 ) {
     override fun toString(): String =
         "VoiceTutorInputItemAssessment(itemId=[redacted], decision=$decision, intent=$intent, currentTranscriptAnswersStudyQuestion=$currentTranscriptAnswersStudyQuestion, hasTarget=${targetStudyId != null}, spokenCandidateCount=${spokenCandidateStudyIds.size})"
@@ -241,9 +385,12 @@ fun VoiceTutorInputAssessmentResult.correlatedTo(
             val spokenValid = spoken.size <= 3 && spoken.distinct().size == spoken.size &&
                 spoken.all { spokenId -> offer?.candidates?.any { it.studyId == spokenId } == true }
             val rootRequest = decision.rootStudyCreationRequest
+            val childRequest = decision.childStudyCreationRequest
+            val updateRequest = decision.studyUpdateRequest
             if (decision.decision == VoiceTutorInputDecision.NON_COMMUNICATIVE) {
                 decision.intent != VoiceTutorInputIntent.NONE || decision.targetStudyId != null ||
-                    decision.currentTranscriptAnswersStudyQuestion || spoken.isNotEmpty() || rootRequest != null
+                    decision.currentTranscriptAnswersStudyQuestion || spoken.isNotEmpty() || rootRequest != null ||
+                    childRequest != null || updateRequest != null
             } else {
                 val targetIntent = decision.intent == VoiceTutorInputIntent.SELECT_SAVED_TOPIC ||
                     decision.intent == VoiceTutorInputIntent.CONTINUE_TREE
@@ -254,6 +401,8 @@ fun VoiceTutorInputAssessmentResult.correlatedTo(
                     !spokenValid -> true
                     utterance.checkpoint -> target != null || targetIntent || spoken.isNotEmpty() ||
                         decision.intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY ||
+                        decision.intent == VoiceTutorInputIntent.CREATE_STUDY_TOPIC ||
+                        decision.intent == VoiceTutorInputIntent.UPDATE_STUDY ||
                         decision.intent == VoiceTutorInputIntent.ASK_STUDY_QUESTION ||
                         decision.intent == VoiceTutorInputIntent.CONTINUE_STUDY
                     decision.intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY &&
@@ -263,6 +412,12 @@ fun VoiceTutorInputAssessmentResult.correlatedTo(
                             !request.evidence.isExactLearnerEvidence(utterance)
                         } != false -> true
                     decision.intent != VoiceTutorInputIntent.CREATE_ROOT_STUDY && rootRequest != null -> true
+                    decision.intent == VoiceTutorInputIntent.CREATE_STUDY_TOPIC &&
+                        childRequest?.isValidFor(utterance) != true -> true
+                    decision.intent != VoiceTutorInputIntent.CREATE_STUDY_TOPIC && childRequest != null -> true
+                    decision.intent == VoiceTutorInputIntent.UPDATE_STUDY &&
+                        updateRequest?.isValidFor(utterance) != true -> true
+                    decision.intent != VoiceTutorInputIntent.UPDATE_STUDY && updateRequest != null -> true
                     targetIntent && target == null -> true
                     targetIntent && (spoken.isEmpty() || target !in spoken) -> true
                     !targetIntent && target != null -> true

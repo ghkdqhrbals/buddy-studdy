@@ -17,6 +17,10 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTrave
 import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationEvidence
 import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyEvidenceSource
+import com.buddystudy.backend.voice.application.model.VoiceTutorChildStudyCreationEvidence
+import com.buddystudy.backend.voice.application.model.VoiceTutorChildStudyCreationRequest
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateEvidence
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscovery
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
@@ -174,7 +178,7 @@ class VoiceTutorMeaningfulInputRelayTest {
         }
 
     @Test
-    fun `persisted direct root command executes exact server call before readback and spoken start consent`() =
+    fun `natural new study intent executes one exact server root call before readback and spoken start consent`() =
         fixture().use { f ->
             val invocations = CopyOnWriteArrayList<Pair<String, Map<String, Any>>>()
             val relayEvents = CopyOnWriteArrayList<String>()
@@ -190,7 +194,7 @@ class VoiceTutorMeaningfulInputRelayTest {
                     invocations += toolName to arguments
                     return when (toolName) {
                         "create_root_study" -> VoiceTutorMcpToolResult(
-                            output = """{"created":true,"id":777,"parentStudyId":null,"topic":"Spring","difficultyLevel":7,"enabled":true,"activeForQuestions":true}""",
+                            output = """{"created":true,"id":777,"parentStudyId":null,"topic":"스프링","difficultyLevel":5,"enabled":true,"activeForQuestions":true}""",
                             isError = false,
                             studyTreeChanged = true,
                             createdStudyId = 777,
@@ -199,9 +203,9 @@ class VoiceTutorMeaningfulInputRelayTest {
                             rootStudyReadbackId = 777,
                         )
                         "get_study" -> VoiceTutorMcpToolResult(
-                            output = """{"id":777,"parentStudyId":null,"topic":"Spring","difficultyLevel":7,"enabled":true,"activeForQuestions":true}""",
+                            output = """{"id":777,"parentStudyId":null,"topic":"스프링","difficultyLevel":5,"enabled":true,"activeForQuestions":true}""",
                             isError = false,
-                            candidateDiscovery = exactRootReadback(777, "Spring"),
+                            candidateDiscovery = exactRootReadback(777, "스프링"),
                         )
                         else -> error("unexpected tool: $toolName")
                     }
@@ -217,11 +221,12 @@ class VoiceTutorMeaningfulInputRelayTest {
                 },
             ).subscribe({}, f.errors::add)
             try {
-                f.utterance(1, "create-spring", "Spring 레벨 7 루트 주제로 만들어줘")
+                val naturalRequest = "스프링으로 새롭게 공부하고 싶다고"
+                f.utterance(1, "create-spring", naturalRequest)
                 f.assess(
                     VoiceTutorInputDecision.MEANINGFUL,
                     VoiceTutorInputIntent.CREATE_ROOT_STUDY,
-                    rootRequest("Spring", 7, "Spring 레벨 7 루트 주제로 만들어줘"),
+                    rootRequest("스프링", 5, naturalRequest, omitted = true),
                 )
                 val publication = f.publications().single()
                 f.confirm(publication, persisted = true)
@@ -237,11 +242,11 @@ class VoiceTutorMeaningfulInputRelayTest {
                 assertThat(createCallItem.path("item").path("name").asText())
                     .isEqualTo("create_root_study")
                 assertThat(mapper.readTree(createCallItem.path("item").path("arguments").asText()))
-                    .isEqualTo(mapper.readTree("""{"topic":"Spring","difficulty_level":7}"""))
+                    .isEqualTo(mapper.readTree("""{"topic":"스프링","difficulty_level":5}"""))
 
                 // A forged ACK cannot change the tuple or release execution.
                 val forgedCallItem = createCallItem.path("item").deepCopy<ObjectNode>()
-                forgedCallItem.put("arguments", """{"topic":"Spring","difficulty_level":5}""")
+                forgedCallItem.put("arguments", """{"topic":"스프링","difficulty_level":7}""")
                 f.provider("conversation.item.created", "item" to forgedCallItem)
                 assertThat(invocations).isEmpty()
 
@@ -249,7 +254,7 @@ class VoiceTutorMeaningfulInputRelayTest {
                 f.acknowledgeConversationItem(createCallItem) // replay
                 assertThat(relayFinished.await(3, TimeUnit.SECONDS)).isTrue()
                 assertThat(invocations).containsExactly(
-                    "create_root_study" to mapOf("topic" to "Spring", "difficulty_level" to 7),
+                    "create_root_study" to mapOf("topic" to "스프링", "difficulty_level" to 5),
                 )
                 assertThat(relayEvents.map { mapper.readTree(it).path("type").asText() })
                     .containsExactly(VoiceTutorRealtimeContract.STUDY_TREE_CHANGED_EVENT)
@@ -268,7 +273,7 @@ class VoiceTutorMeaningfulInputRelayTest {
                 f.acknowledgeConversationItem(readbackCall)
                 val readOutput = f.awaitToolOutput(readbackCall.path("item").path("call_id").asText())
                 assertThat(invocations).containsExactly(
-                    "create_root_study" to mapOf("topic" to "Spring", "difficulty_level" to 7),
+                    "create_root_study" to mapOf("topic" to "스프링", "difficulty_level" to 5),
                     "get_study" to mapOf("study_id" to 777),
                 )
                 f.acknowledgeConversationItem(readOutput)
@@ -295,7 +300,7 @@ class VoiceTutorMeaningfulInputRelayTest {
                     "response_id" to "spoken-create-ack",
                     "item_id" to "spoken-create-ack-item",
                     "content_index" to 0,
-                    "transcript" to "Spring 레벨 7 루트를 저장했습니다. 이 주제로 학습을 시작할까요?",
+                    "transcript" to "스프링 레벨 5 루트를 저장했습니다. 이 주제로 학습을 시작할까요?",
                 )
                 assertThat(transcriptDisposition).isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_ONLY)
                 f.controller.observeProviderEvent(f.responseWithOutput(
@@ -307,7 +312,7 @@ class VoiceTutorMeaningfulInputRelayTest {
                         "role" to "assistant",
                         "content" to listOf(mapOf(
                             "type" to "output_audio",
-                            "transcript" to "Spring 레벨 7 루트를 저장했습니다. 이 주제로 학습을 시작할까요?",
+                            "transcript" to "스프링 레벨 5 루트를 저장했습니다. 이 주제로 학습을 시작할까요?",
                         )),
                     )),
                 ))
@@ -319,6 +324,149 @@ class VoiceTutorMeaningfulInputRelayTest {
                 worker.dispose()
             }
         }
+
+    @Test
+    fun `only the newest exact server child call receives its persisted one shot lease`() = fixture().use { f ->
+        f.establishVerifiedStudyQuestion(question = "Redis의 eviction 정책을 설명해 보세요.")
+        val command = "여기서 Streams를 새 하위 주제로 공부하고 싶어"
+
+        f.utterance(2, "child-a", command)
+        f.assess(
+            VoiceTutorInputDecision.MEANINGFUL,
+            VoiceTutorInputIntent.CREATE_STUDY_TOPIC,
+            childStudyCreationRequest = childRequest(101L, "Streams", command),
+        )
+        f.confirm(f.publications().last(), persisted = true)
+        val firstCall = f.awaitServerToolCall("create_study_topic")
+
+        f.utterance(3, "child-b", command)
+        f.assess(
+            VoiceTutorInputDecision.MEANINGFUL,
+            VoiceTutorInputIntent.CREATE_STUDY_TOPIC,
+            childStudyCreationRequest = childRequest(101L, "Streams", command),
+        )
+        f.confirm(f.publications().last(), persisted = true)
+        val calls = f.conversationItems().filter {
+            it.path("item").path("name").asText() == "create_study_topic"
+        }
+        assertThat(calls).hasSize(2)
+        val secondCall = calls.last()
+        assertThat(mapper.readTree(secondCall.path("item").path("arguments").asText())).isEqualTo(
+            mapper.readTree("""{"parent_study_id":101,"topic":"Streams","difficulty_level":5}"""),
+        )
+        val newestLease = f.controller.mutationDialogueBoundary().childStudyCreationAuthorization
+        assertThat(newestLease).isNotNull
+
+        f.acknowledgeConversationItem(firstCall)
+        val firstCallId = firstCall.path("item").path("call_id").asText()
+        assertThat(f.controller.beginToolExecution(firstCallId)).isTrue()
+        assertThat(f.controller.mutationDialogueBoundary(firstCallId).childStudyCreationAuthorization).isNull()
+
+        f.acknowledgeConversationItem(secondCall)
+        val secondCallId = secondCall.path("item").path("call_id").asText()
+        assertThat(f.controller.beginToolExecution(secondCallId)).isTrue()
+        assertThat(f.controller.mutationDialogueBoundary(secondCallId).childStudyCreationAuthorization)
+            .isSameAs(newestLease)
+        assertThat(f.errors).isEmpty()
+    }
+
+    @Test
+    fun `persisted natural update schedules only its exact patch and binds the lease to that call`() = fixture().use { f ->
+        f.establishVerifiedStudyQuestion(question = "Redis의 eviction 정책을 설명해 보세요.")
+        val command = "이 주제 레벨을 6으로 바꾸고 싶어"
+        f.utterance(2, "update-focus", command)
+        f.assess(
+            VoiceTutorInputDecision.MEANINGFUL,
+            VoiceTutorInputIntent.UPDATE_STUDY,
+            studyUpdateRequest = updateRequest(101L, command, difficulty = 6),
+        )
+        f.confirm(f.publications().last(), persisted = true)
+
+        val call = f.awaitServerToolCall("update_study")
+        assertThat(mapper.readTree(call.path("item").path("arguments").asText())).isEqualTo(
+            mapper.readTree("""{"study_id":101,"difficulty_level":6}"""),
+        )
+        f.acknowledgeConversationItem(call)
+        val callId = call.path("item").path("call_id").asText()
+        assertThat(f.controller.beginToolExecution(callId)).isTrue()
+        assertThat(f.controller.mutationDialogueBoundary(callId).studyUpdateAuthorization)
+            .isSameAs(f.controller.mutationDialogueBoundary().studyUpdateAuthorization)
+        assertThat(f.controller.beginToolExecution(callId)).isFalse()
+        assertThat(f.controller.completeToolExecution(
+            callId,
+            VoiceTutorMcpToolResult(
+                output = "{}",
+                isError = false,
+                studyTreeChanged = true,
+                changedStudyId = 101,
+                changeKind = VoiceTutorStudyChangeKind.UPDATED,
+                lessonRevision = 2,
+                lessonFocus = VoiceTutorLessonFocusSelection(
+                    VoiceTutorLessonFocus(101, 2),
+                    VoiceTutorStudySnapshot(101, null, "Redis", 6, 2),
+                ),
+            ),
+        )).isTrue()
+        f.utterance(3, "after-update", "이 주제 이름을 Redis 2로 바꾸고 싶어")
+        val refreshedMutationContext = f.assessments().last().utterances.single().studyMutationContext
+        assertThat(refreshedMutationContext?.lessonRevision).isEqualTo(2)
+        assertThat(refreshedMutationContext?.currentFocusStudyId).isEqualTo(101)
+        assertThat(refreshedMutationContext?.candidates?.single()?.topic).isEqualTo("Redis")
+        assertThat(f.errors).isEmpty()
+    }
+
+    @Test
+    fun `a committed update without a frozen new revision clears stale lesson focus`() = fixture().use { f ->
+        f.establishVerifiedStudyQuestion(question = "Redis의 eviction 정책을 설명해 보세요.")
+        val command = "이 주제 레벨을 6으로 바꾸고 싶어"
+        f.utterance(2, "update-without-context", command)
+        f.assess(
+            VoiceTutorInputDecision.MEANINGFUL,
+            VoiceTutorInputIntent.UPDATE_STUDY,
+            studyUpdateRequest = updateRequest(101L, command, difficulty = 6),
+        )
+        f.confirm(f.publications().last(), persisted = true)
+
+        val call = f.awaitServerToolCall("update_study")
+        f.acknowledgeConversationItem(call)
+        val callId = call.path("item").path("call_id").asText()
+        assertThat(f.controller.beginToolExecution(callId)).isTrue()
+        assertThat(f.controller.completeToolExecution(
+            callId,
+            VoiceTutorMcpToolResult(
+                output = "{}",
+                isError = false,
+                studyTreeChanged = true,
+                changedStudyId = 101,
+                changeKind = VoiceTutorStudyChangeKind.UPDATED,
+                lessonRevision = null,
+                lessonFocus = null,
+            ),
+        )).isTrue()
+
+        f.utterance(3, "after-unfrozen-update", "이어서 공부하자")
+        assertThat(f.assessments().last().utterances.single().studyMutationContext).isNull()
+        assertThat(f.errors).isEmpty()
+    }
+
+    @Test
+    fun `a newer overlapping speech edge prevents older root child and update turns from minting leases`() {
+        assertOverlappingNewerSpeechCannotMintMutation(
+            VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+            "Kotlin 레벨 6 루트로 만들어줘",
+            rootRequest = rootRequest("Kotlin", 6, "Kotlin 레벨 6 루트로 만들어줘"),
+        )
+        assertOverlappingNewerSpeechCannotMintMutation(
+            VoiceTutorInputIntent.CREATE_STUDY_TOPIC,
+            "여기서 Streams를 하위 주제로 공부하고 싶어",
+            childRequest = childRequest(101L, "Streams", "여기서 Streams를 하위 주제로 공부하고 싶어"),
+        )
+        assertOverlappingNewerSpeechCannotMintMutation(
+            VoiceTutorInputIntent.UPDATE_STUDY,
+            "이 주제 레벨을 6으로 바꾸고 싶어",
+            updateRequest = updateRequest(101L, "이 주제 레벨을 6으로 바꾸고 싶어", difficulty = 6),
+        )
+    }
 
     @Test
     fun `direct root server call queues behind an existing read and duplicate ACK never replays it`() =
@@ -459,14 +607,14 @@ class VoiceTutorMeaningfulInputRelayTest {
                     invocations += toolName to arguments
                     return when (toolName) {
                         "create_root_study" -> VoiceTutorMcpToolResult(
-                            output = """{"created":false,"id":779,"parentStudyId":null,"topic":"Spring","difficultyLevel":7,"enabled":true,"activeForQuestions":true}""",
+                            output = """{"created":false,"id":779,"parentStudyId":null,"topic":"Spring Framework","difficultyLevel":4,"enabled":true,"activeForQuestions":true}""",
                             isError = false,
                             rootStudyReadbackId = 779,
                         )
                         "get_study" -> VoiceTutorMcpToolResult(
-                            output = """{"id":779,"parentStudyId":null,"topic":"Spring","difficultyLevel":7,"enabled":true,"activeForQuestions":true}""",
+                            output = """{"id":779,"parentStudyId":null,"topic":"Spring Framework","difficultyLevel":4,"enabled":true,"activeForQuestions":true}""",
                             isError = false,
-                            candidateDiscovery = exactRootReadback(779, "Spring"),
+                            candidateDiscovery = exactRootReadback(779, "Spring Framework"),
                         )
                         else -> error("unexpected tool: $toolName")
                     }
@@ -476,11 +624,11 @@ class VoiceTutorMeaningfulInputRelayTest {
                 f.controller, controlContext(), tools, { _, _, _ -> },
             ).subscribe({}, f.errors::add)
             try {
-                f.utterance(1, "existing-spring", "Spring 레벨 7 루트로 만들어줘")
+                f.utterance(1, "existing-spring", "spring framework 레벨 7 루트로 만들어줘")
                 f.assess(
                     VoiceTutorInputDecision.MEANINGFUL,
                     VoiceTutorInputIntent.CREATE_ROOT_STUDY,
-                    rootRequest("Spring", 7, "Spring 레벨 7 루트로 만들어줘"),
+                    rootRequest("spring framework", 7, "spring framework 레벨 7 루트로 만들어줘"),
                 )
                 f.confirm(f.publications().single(), persisted = true)
 
@@ -501,7 +649,7 @@ class VoiceTutorMeaningfulInputRelayTest {
                 assertThat(response.path("response").path("instructions").asText())
                     .contains("exact get_study readback", "Never call any tool")
                 assertThat(invocations).containsExactly(
-                    "create_root_study" to mapOf("topic" to "Spring", "difficulty_level" to 7),
+                    "create_root_study" to mapOf("topic" to "spring framework", "difficulty_level" to 7),
                     "get_study" to mapOf("study_id" to 779),
                 )
 
@@ -599,6 +747,84 @@ class VoiceTutorMeaningfulInputRelayTest {
             assertThat(f.errors).isEmpty()
         } finally {
             worker.dispose()
+        }
+    }
+
+    @Test
+    fun `renamed or relevelled root readback cannot confirm a different persisted snapshot`() {
+        val mismatches = listOf(
+            "Kotlin renamed" to 6,
+            "Kotlin" to 7,
+        )
+        for ((readbackTopic, readbackDifficulty) in mismatches) {
+            fixture().use { f ->
+                val invocations = CopyOnWriteArrayList<String>()
+                val tools = object : VoiceTutorMcpToolPort {
+                    override fun definitions(): List<VoiceTutorMcpToolDefinition> = emptyList()
+
+                    override suspend fun execute(
+                        context: VoiceTutorWebRtcControlContext,
+                        toolName: String,
+                        arguments: Map<String, Any>,
+                    ): VoiceTutorMcpToolResult {
+                        invocations += toolName
+                        return when (toolName) {
+                            "create_root_study" -> VoiceTutorMcpToolResult(
+                                output = """{"created":true,"id":781,"parentStudyId":null,"topic":"Kotlin","difficultyLevel":6,"enabled":true,"activeForQuestions":true}""",
+                                isError = false,
+                                studyTreeChanged = true,
+                                createdStudyId = 781,
+                                changedStudyId = 781,
+                                changeKind = VoiceTutorStudyChangeKind.CREATED,
+                                rootStudyReadbackId = 781,
+                            )
+                            "get_study" -> VoiceTutorMcpToolResult(
+                                output = mapper.writeValueAsString(mapOf(
+                                    "id" to 781,
+                                    "parentStudyId" to null,
+                                    "topic" to readbackTopic,
+                                    "difficultyLevel" to readbackDifficulty,
+                                )),
+                                isError = false,
+                                candidateDiscovery = exactRootReadback(781, readbackTopic),
+                            )
+                            else -> error("unexpected tool: $toolName")
+                        }
+                    }
+                }
+                val worker = voiceTutorMcpToolRelay(
+                    f.controller, controlContext(), tools, { _, _, _ -> },
+                ).subscribe({}, f.errors::add)
+                try {
+                    val command = "Kotlin 레벨 6 루트로 만들어줘"
+                    f.utterance(1, "create-kotlin-mismatch", command)
+                    f.assess(
+                        VoiceTutorInputDecision.MEANINGFUL,
+                        VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+                        rootRequest("Kotlin", 6, command),
+                    )
+                    f.confirm(f.publications().single(), persisted = true)
+                    val createCall = f.awaitServerToolCall("create_root_study")
+                    f.acknowledgeConversationItem(createCall)
+                    val createOutput = f.awaitToolOutput(createCall.path("item").path("call_id").asText())
+                    val readbackCall = f.awaitServerToolCall("get_study")
+                    f.acknowledgeConversationItem(readbackCall)
+                    val readbackOutput = f.awaitToolOutput(readbackCall.path("item").path("call_id").asText())
+                    f.acknowledgeConversationItem(readbackOutput)
+                    f.acknowledgeConversationItem(createOutput)
+
+                    val response = f.awaitResponseCount(2).last()
+                    assertThat(response.path("response").path("tool_choice").asText()).isEqualTo("none")
+                    assertThat(response.path("response").path("instructions").asText())
+                        .contains("was not confirmed", "never retry")
+                        .doesNotContain("speak the exact saved root topic and level")
+                    assertThat(invocations).containsExactly("create_root_study", "get_study")
+                    assertThat(invocations.count { it == "create_root_study" }).isEqualTo(1)
+                    assertThat(f.errors).isEmpty()
+                } finally {
+                    worker.dispose()
+                }
+            }
         }
     }
 
@@ -1764,8 +1990,8 @@ class VoiceTutorMeaningfulInputRelayTest {
         f.utterance(1, "learner", "저는 준비됐어요")
         val batch = f.assessments().single()
         // The coordinator owns the same full lifetime as the use case:
-        // bounded admission (1.5 s) followed by provider work (5 s).
-        f.now.addAndGet(Duration.ofMillis(6_500).toNanos())
+        // bounded admission (1.5 s) followed by provider work (10 s).
+        f.now.addAndGet(Duration.ofMillis(11_500).toNanos())
         assertThat(f.controller.canAssessInput(batch.token)).isFalse()
         assertThat(f.deletions()).hasSize(1)
         f.now.addAndGet(Duration.ofSeconds(5).toNanos())
@@ -2010,6 +2236,44 @@ class VoiceTutorMeaningfulInputRelayTest {
     private fun fixture(finishOpening: Boolean = true, captureInputActions: Boolean = true, controlDemand: Long = Long.MAX_VALUE) =
         Fixture(finishOpening, captureInputActions, controlDemand)
 
+    private fun assertOverlappingNewerSpeechCannotMintMutation(
+        intent: VoiceTutorInputIntent,
+        command: String,
+        rootRequest: VoiceTutorRootStudyCreationRequest? = null,
+        childRequest: VoiceTutorChildStudyCreationRequest? = null,
+        updateRequest: VoiceTutorStudyUpdateRequest? = null,
+    ) = fixture().use { f ->
+        val sequence = if (intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY) 1L else {
+            f.establishVerifiedStudyQuestion(question = "Redis의 eviction 정책을 설명해 보세요.")
+            2L
+        }
+        f.start(sequence)
+        f.start(sequence + 1) // newer acoustic evidence arrives while the older buffer is active
+        f.stop(sequence)
+        val itemId = "overlapped-${intent.name.lowercase()}"
+        f.commit(itemId)
+        f.transcript(itemId, command)
+        f.assess(
+            VoiceTutorInputDecision.MEANINGFUL,
+            intent,
+            rootStudyCreationRequest = rootRequest,
+            childStudyCreationRequest = childRequest,
+            studyUpdateRequest = updateRequest,
+        )
+        f.confirm(f.publications().last(), persisted = true)
+
+        val boundary = f.controller.mutationDialogueBoundary()
+        assertThat(boundary.rootStudyCreationAuthorization).isNull()
+        assertThat(boundary.childStudyCreationAuthorization).isNull()
+        assertThat(boundary.studyUpdateAuthorization).isNull()
+        assertThat(f.conversationItems().filter {
+            it.path("item").path("type").asText() == "function_call" &&
+                it.path("item").path("name").asText() in
+                setOf("create_root_study", "create_study_topic", "update_study")
+        }).isEmpty()
+        assertThat(f.errors).isEmpty()
+    }
+
     private fun rootRequest(
         topic: String,
         difficulty: Int,
@@ -2024,6 +2288,46 @@ class VoiceTutorMeaningfulInputRelayTest {
             topic,
             difficulty.takeUnless { omitted }?.toString(),
             omitted,
+        ),
+    )
+
+    private fun childRequest(
+        parentStudyId: Long,
+        topic: String,
+        command: String,
+        difficulty: Int = 5,
+        omitted: Boolean = true,
+    ) = VoiceTutorChildStudyCreationRequest(
+        parentStudyId,
+        topic,
+        difficulty,
+        VoiceTutorChildStudyCreationEvidence(
+            source = VoiceTutorRootStudyEvidenceSource.TRANSCRIPT,
+            command = command,
+            parentTopic = null,
+            topic = topic,
+            difficulty = difficulty.takeUnless { omitted }?.toString(),
+            difficultyOmitted = omitted,
+            parentImplicitCurrentFocus = true,
+        ),
+    )
+
+    private fun updateRequest(
+        studyId: Long,
+        command: String,
+        topic: String? = null,
+        difficulty: Int? = null,
+    ) = VoiceTutorStudyUpdateRequest(
+        studyId,
+        topic,
+        difficulty,
+        VoiceTutorStudyUpdateEvidence(
+            source = VoiceTutorRootStudyEvidenceSource.TRANSCRIPT,
+            command = command,
+            targetTopic = null,
+            topic = topic,
+            difficulty = difficulty?.toString(),
+            targetImplicitCurrentFocus = true,
         ),
     )
 
@@ -2147,11 +2451,20 @@ class VoiceTutorMeaningfulInputRelayTest {
             decision: VoiceTutorInputDecision,
             intent: VoiceTutorInputIntent = VoiceTutorInputIntent.NONE,
             rootStudyCreationRequest: VoiceTutorRootStudyCreationRequest? = null,
+            childStudyCreationRequest: VoiceTutorChildStudyCreationRequest? = null,
+            studyUpdateRequest: VoiceTutorStudyUpdateRequest? = null,
         ) {
             val batch = assessments().last()
             controller.completeInputAssessment(
                 batch.token,
-                result(batch, decision, intent, rootStudyCreationRequest),
+                result(
+                    batch,
+                    decision,
+                    intent,
+                    rootStudyCreationRequest,
+                    childStudyCreationRequest,
+                    studyUpdateRequest,
+                ),
             )
         }
         fun result(
@@ -2159,6 +2472,8 @@ class VoiceTutorMeaningfulInputRelayTest {
             decision: VoiceTutorInputDecision,
             intent: VoiceTutorInputIntent = VoiceTutorInputIntent.NONE,
             rootStudyCreationRequest: VoiceTutorRootStudyCreationRequest? = null,
+            childStudyCreationRequest: VoiceTutorChildStudyCreationRequest? = null,
+            studyUpdateRequest: VoiceTutorStudyUpdateRequest? = null,
         ) = Result.success(
             VoiceTutorInputAssessmentResult(batch.utterances.map {
                 val target = if (intent == VoiceTutorInputIntent.SELECT_SAVED_TOPIC ||
@@ -2170,6 +2485,8 @@ class VoiceTutorMeaningfulInputRelayTest {
                     rootStudyCreationRequest = rootStudyCreationRequest,
                     currentTranscriptAnswersStudyQuestion =
                         intent == VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION,
+                    childStudyCreationRequest = childStudyCreationRequest,
+                    studyUpdateRequest = studyUpdateRequest,
                 )
             }),
         )
@@ -2531,7 +2848,7 @@ class VoiceTutorMeaningfulInputRelayTest {
             )).isTrue()
             acknowledgeLatestToolOutput()
         }
-        private fun acknowledgeLatestToolOutput() {
+        fun acknowledgeLatestToolOutput() {
             val outputItem = controls.map(mapper::readTree)
                 .last { it.path("type").asText() == "conversation.item.create" }
                 .path("item").deepCopy<ObjectNode>()

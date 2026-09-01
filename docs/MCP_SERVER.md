@@ -116,14 +116,20 @@ rollout gate.
   Active call/device authorization is rechecked across suspended reads before
   returning private history. This additional call-tree restriction applies to
   these two tools; general MCP reads remain owner-scoped.
-- Root creation requires one final, meaningful, durably persisted direct learner
-  command. That command itself is approval: semantic assessment extracts the
-  exact learner-spoken topic and requested 1–10 level, or default 5 only when the
-  level was omitted, and binds that tuple to a call-local one-shot write lease.
+- Root creation requires one final, meaningful, durably persisted, semantically
+  clear learner choice to begin one named topic as a new saved study. Natural
+  first-person wording is sufficient without imperative grammar or literal
+  create/save/root words. That statement itself is approval: structured semantic
+  assessment plus an independent semantic attestation extracts the exact
+  learner-spoken topic and requested 1–10 level, or default 5 only when the level
+  was omitted, and binds that tuple to a call-local one-shot write lease. Neither
+  semantic decision uses regex, keyword lists, utterance length, punctuation or
+  sentence completeness.
   The tutor calls `create_root_study` immediately and must not add a preview,
-  “만들까요?” prompt or contextual-yes round. Generic agreement, a tutor
-  proposal, checkpoint, mismatched tool arguments, failed persistence and newer
-  speech cannot grant or reuse the lease. The owner-scoped common write is
+  “만들까요?” prompt, restatement or contextual-yes round. Generic agreement,
+  ordinary interest, a recommendation request, a tutor proposal, checkpoint,
+  mismatched tool arguments, failed persistence and newer speech cannot grant or
+  reuse the lease. The owner-scoped common write is
   create-only: a normalized exact root duplicate is returned unchanged, while a
   matching child conflicts. It never generates a question or consumes question
   quota, and its result never selects or starts a lesson. After that result, the
@@ -133,11 +139,17 @@ rollout gate.
   saved outcome and never retries the create automatically. The tutor then speaks
   the exact read-back root as a separate start offer, receives fresh consent and
   calls `select_voice_study`.
-- Child creation requires an explicit learner request and an unambiguous parent
-  inside the call's selected study subtree. Schema validation, active identity,
-  parent scope and the existing use-case permissions are all enforced before
-  the write. Question requests, answer submission, profile writes and
-  call/recording control are not voice tools.
+- Child creation requires a semantically clear current first-person choice of one
+  exact child and an unambiguous parent inside the call's selected study subtree.
+  It runs once in that turn without requiring imperative grammar, restatement or
+  duplicate confirmation; the same rule applies to an unambiguous learner-chosen
+  name or level update. Mere mentions, examples, recommendations, quotations,
+  third-party wishes and ambiguous targets or outcomes are not write permission.
+  Destructive deletion retains its separate preview plus fresh-confirmation
+  boundary. Schema validation, active identity, parent scope and the existing
+  use-case permissions are all enforced before a write. Question requests,
+  answer submission, profile writes and call/recording control are not voice
+  tools.
 - Function calls are correlated to a completed response and executed serially
   off the provider receive loop. IDs are registered before execution, output
   acknowledgement gates the spoken continuation, and timeouts never blindly
@@ -360,11 +372,15 @@ create_root_study(topic, difficulty_level=5)
 ```
 
 The external HTTP MCP tool performs that create-only operation directly. During
-a live voice call, one final persisted explicit learner command invokes it
-immediately; the bridge does not add a preview or ask for contextual agreement.
-Semantic input assessment binds the exact learner-spoken topic and effective
-level to a one-shot server lease, rejects different tool arguments and consumes
-the lease immediately before the write. Generic “yes”, tutor suggestions,
+a live voice call, one final persisted, semantically clear learner choice to
+begin one named topic as a new saved study invokes it immediately; natural
+first-person wording needs neither imperative grammar, literal create/save/root
+words, restatement nor contextual agreement. Structured semantic assessment and
+an independent semantic attestation bind the exact learner-spoken topic and
+effective level to a one-shot server lease, reject different tool arguments and
+consume the lease immediately before the write. They do not classify intent with
+regex, keyword lists, utterance length, punctuation or sentence completeness.
+Generic “yes”, ordinary interest, recommendation requests, tutor suggestions,
 checkpoints and newer speech cannot authorize creation. Either `created=true`
 or `created=false` remains only a saved-study result. The voice bridge takes the
 trusted positive readback ID from that result, schedules an exact server-owned

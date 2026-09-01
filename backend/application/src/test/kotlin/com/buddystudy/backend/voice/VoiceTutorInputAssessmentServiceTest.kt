@@ -66,6 +66,38 @@ class VoiceTutorInputAssessmentServiceTest {
     }
 
     @Test
+    fun `semantic mutation remains meaningful configuration and cannot be forged into a study answer`() =
+        runBlocking<Unit> {
+            val request = request().copy(utterances = listOf(
+                VoiceTutorInputUtterance(
+                    "mutation-item",
+                    "Spring 주제 이름을 Spring Boot로 바꾸고 레벨을 7로 수정해줘.",
+                ),
+            ))
+            val mutation = VoiceTutorInputItemAssessment(
+                itemId = "mutation-item",
+                decision = VoiceTutorInputDecision.MEANINGFUL,
+                intent = VoiceTutorInputIntent.NONE,
+                currentTranscriptAnswersStudyQuestion = false,
+            )
+
+            val accepted = service { VoiceTutorInputAssessmentResult(listOf(mutation)) }.assess(request)
+
+            assertThat(accepted.decisions).containsExactly(mutation)
+
+            val forged = runCatching {
+                service {
+                    VoiceTutorInputAssessmentResult(listOf(
+                        mutation.copy(currentTranscriptAnswersStudyQuestion = true),
+                    ))
+                }.assess(request)
+            }.exceptionOrNull()
+            assertThat(forged).isInstanceOf(VoiceTutorInputAssessmentException::class.java)
+            assertThat((forged as VoiceTutorInputAssessmentException).reason)
+                .isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_RESULT)
+        }
+
+    @Test
     fun `reordered complete provider decisions correlate to the original item order`() = runBlocking<Unit> {
         val request = request().copy(utterances = listOf(
             VoiceTutorInputUtterance("first", "네"), VoiceTutorInputUtterance("second", "계속해 주세요"),

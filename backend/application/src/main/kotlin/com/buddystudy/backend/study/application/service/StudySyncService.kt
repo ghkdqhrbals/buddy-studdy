@@ -6,6 +6,7 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
+import com.buddystudy.backend.study.application.model.StudyTopicCreationResponse
 import com.buddystudy.backend.study.application.model.toRecordResponse
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
@@ -190,14 +191,31 @@ class StudySyncService(
         principal: Principal,
         parentStudyId: Long,
         command: CreateStudyTopicCommand,
-    ): StudyRoomResponse {
+    ): StudyRoomResponse = createStudyTopicOutcome(principal, parentStudyId, command).study
+
+    @Transactional
+    @RequirePermission(Permissions.STUDY_CREATE)
+    override suspend fun createStudyTopicWithOutcome(
+        principal: Principal,
+        parentStudyId: Long,
+        command: CreateStudyTopicCommand,
+    ): StudyTopicCreationResponse =
+        createStudyTopicOutcome(principal, parentStudyId, command).let { outcome ->
+            outcome.study.toStudyTopicCreationResponse(outcome.created)
+        }
+
+    private suspend fun createStudyTopicOutcome(
+        principal: Principal,
+        parentStudyId: Long,
+        command: CreateStudyTopicCommand,
+    ): SavedStudyOutcome {
         lockStudyOwner(principal.userId)
         val parentStudy = studies.findByIdAndUserId(parentStudyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Parent study not found.")
         val allStudies = studies.findAllByUserId(principal.userId)
         val rootStudy = StudyTreeSelector.rootFor(parentStudy, allStudies)
 
-        return saveStudy(
+        return saveStudyOutcome(
             principal = principal,
             command = CreateStudyCommand(
                 topic = command.topic,
@@ -263,7 +281,23 @@ class StudySyncService(
         sortOrder: Int,
         activeForQuestions: Boolean,
         scheduleEnabled: Boolean,
-    ): StudyRoomResponse {
+    ): StudyRoomResponse = saveStudyOutcome(
+        principal,
+        command,
+        parentStudy,
+        sortOrder,
+        activeForQuestions,
+        scheduleEnabled,
+    ).study
+
+    private suspend fun saveStudyOutcome(
+        principal: Principal,
+        command: CreateStudyCommand,
+        parentStudy: StudyEntity?,
+        sortOrder: Int,
+        activeForQuestions: Boolean,
+        scheduleEnabled: Boolean,
+    ): SavedStudyOutcome {
         val topic = command.topic.trim()
         if (topic.isEmpty()) {
             throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR, "Study topic is required.")
@@ -277,7 +311,7 @@ class StudySyncService(
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A study topic with the same name already exists.")
         }
         if (duplicate != null && parentStudy != null && duplicateBelongsToRequestedParent) {
-            return duplicate.toStudyRoomResponse()
+            return SavedStudyOutcome(duplicate.toStudyRoomResponse(), created = false)
         }
         val study = duplicate ?: StudyEntity(
                 deviceId = principal.deviceId,
@@ -328,7 +362,7 @@ class StudySyncService(
             saved.reschedule(now)
             saved = studies.save(saved)
         }
-        return saved.toStudyRoomResponse()
+        return SavedStudyOutcome(saved.toStudyRoomResponse(), created = isNewStudy)
     }
 
     @Transactional
@@ -429,6 +463,16 @@ private fun StudyRoomResponse.toRootStudyCreationResponse(created: Boolean) = Ro
     activeForQuestions = activeForQuestions,
 )
 
+private fun StudyRoomResponse.toStudyTopicCreationResponse(created: Boolean) = StudyTopicCreationResponse(
+    created = created,
+    id = id,
+    parentStudyId = requireNotNull(parentStudyId),
+    topic = topic,
+    difficultyLevel = difficultyLevel,
+    enabled = enabled,
+    activeForQuestions = activeForQuestions,
+)
+
 private fun StudyEntity.toRootStudyCreationResponse(created: Boolean) = RootStudyCreationResponse(
     created = created,
     id = id,
@@ -494,3 +538,8 @@ private data class ChildStudyPageable(
     override fun withPage(pageNumber: Int): Pageable = copy(exactOffset = pageNumber.toLong() * limit)
     override fun hasPrevious(): Boolean = exactOffset > 0
 }
+
+private data class SavedStudyOutcome(
+    val study: StudyRoomResponse,
+    val created: Boolean,
+)

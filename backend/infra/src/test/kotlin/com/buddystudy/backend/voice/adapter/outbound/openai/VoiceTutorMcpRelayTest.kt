@@ -14,6 +14,7 @@ import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import kotlinx.coroutines.CompletableDeferred
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -371,6 +372,26 @@ class VoiceTutorMcpRelayTest {
         assertThat(coordinator.toolChoice).isEqualTo("auto")
         assertThatThrownBy { coordinator.completedResponse(mapper.valueToTree(mapOf("output" to listOf(call("call-0"))))) }
             .isInstanceOf(VoiceTutorMcpProtocolException::class.java)
+        coordinator.close()
+    }
+
+    @Test
+    fun `function output acknowledgement must echo the exact frozen output`() {
+        val coordinator = VoiceTutorMcpTurnCoordinator()
+        coordinator.completedResponse(mapper.valueToTree(mapOf("output" to listOf(call("exact-output")))))
+        assertThat(coordinator.beginExecution("exact-output")).isTrue()
+        val output = coordinator.complete("exact-output", success(), 0)!!
+        val acknowledgement = mapper.valueToTree<JsonNode>(mapOf(
+            "type" to "conversation.item.created",
+            "item" to output.getValue("item"),
+        ))
+        val forged = acknowledgement.deepCopy<JsonNode>()
+        (forged.path("item") as ObjectNode).put("output", "{}")
+
+        assertThat(coordinator.acknowledge(forged, 1)).isFalse()
+        assertThat(coordinator.hasPending).isTrue()
+        assertThat(coordinator.acknowledge(acknowledgement, 2)).isTrue()
+        assertThat(coordinator.continuationReady).isTrue()
         coordinator.close()
     }
 

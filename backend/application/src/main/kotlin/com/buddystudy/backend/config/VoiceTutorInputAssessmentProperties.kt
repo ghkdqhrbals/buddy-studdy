@@ -7,7 +7,11 @@ import org.springframework.stereotype.Component
 @Component
 @ConfigurationProperties(prefix = "buddystudy.voice-tutor.input-assessment")
 data class VoiceTutorInputAssessmentProperties(
-    var timeoutMilliseconds: Long = 5_000,
+    // A positive saved-study mutation performs a primary semantic decision and
+    // one independent semantic attestation in sequence. The deadline is a cap,
+    // not an artificial delay; ordinary non-mutation turns still return after
+    // the first provider response.
+    var timeoutMilliseconds: Long = 10_000,
     var maxConcurrentAssessments: Int = 4,
     var admissionTimeoutMilliseconds: Long = 1_500,
     var maxQueuedAssessments: Int = 16,

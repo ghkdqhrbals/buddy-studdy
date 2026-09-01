@@ -241,6 +241,37 @@ class OpenAIVoiceTutorSummaryAdapterTest {
     }
 
     @Test
+    fun `mutation-only transcript returns an empty result without invoking GPT`() = runBlocking<Unit> {
+        val invoked = AtomicBoolean()
+        val provider = adapter(exchange = ExchangeFunction {
+            invoked.set(true)
+            Mono.just(response(envelope(lessonResult())))
+        })
+        val mutationOnly = listOf(
+            VoiceTutorTranscriptTurn(
+                1, session().id, "mutation-command", VoiceTutorTranscriptRole.USER,
+                "Spring 주제 이름을 Spring Boot로 바꾸고 레벨을 7로 수정해줘.",
+                1, now, lessonRevision = 1,
+            ),
+            VoiceTutorTranscriptTurn(
+                2, session().id, "mutation-acknowledgement", VoiceTutorTranscriptRole.TUTOR,
+                "Spring Boot, 레벨 7로 수정했습니다.",
+                2, now.plusSeconds(1), lessonRevision = 2,
+            ),
+        )
+
+        val generated = provider.summarize(session(), mutationOnly)
+
+        assertThat(invoked.get()).isFalse()
+        assertThat(generated.summaryMarkdown).isEmpty()
+        assertThat(generated.strengths).isEmpty()
+        assertThat(generated.improvements).isEmpty()
+        assertThat(generated.nextSteps).isEmpty()
+        assertThat(generated.explorations).isEmpty()
+        assertThat(generated.model).isEqualTo("system")
+    }
+
+    @Test
     fun `a provider summary citing only filtered setup turns becomes a deterministic empty learning result`() = runBlocking<Unit> {
         val raw = mapper.readTree(lessonResult()) as com.fasterxml.jackson.databind.node.ObjectNode
         raw.put("summaryMarkdown", "루트 주제를 만든 설정 대화입니다.")
@@ -593,7 +624,7 @@ class OpenAIVoiceTutorSummaryAdapterTest {
     )
 
     private fun mixedLessonAndSetupTurns() = lessonTurns() + listOf(
-        VoiceTutorTranscriptTurn(4, session().id, "configure-root", VoiceTutorTranscriptRole.USER, "새 루트 주제를 만들어줘.", 4, now.plusSeconds(3)),
+        VoiceTutorTranscriptTurn(4, session().id, "configure-root", VoiceTutorTranscriptRole.USER, "스프링으로 새롭게 공부하고 싶다.", 4, now.plusSeconds(3)),
         VoiceTutorTranscriptTurn(5, session().id, "confirm-root", VoiceTutorTranscriptRole.TUTOR, "루트를 만들까요?", 5, now.plusSeconds(4)),
         VoiceTutorTranscriptTurn(6, session().id, "confirm-root-answer", VoiceTutorTranscriptRole.USER, "네", 6, now.plusSeconds(5)),
         VoiceTutorTranscriptTurn(

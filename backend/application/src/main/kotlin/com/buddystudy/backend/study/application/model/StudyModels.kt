@@ -98,6 +98,17 @@ data class RootStudyCreationResponse(
     val activeForQuestions: Boolean,
 )
 
+/** Owner-lock-protected outcome for idempotent child creation. */
+data class StudyTopicCreationResponse(
+    val created: Boolean,
+    val id: Long,
+    val parentStudyId: Long,
+    val topic: String,
+    val difficultyLevel: Int,
+    val enabled: Boolean,
+    val activeForQuestions: Boolean,
+)
+
 data class StudyTopicSuggestionsResponse(
     val parentStudyId: Long,
     val suggestions: List<String>,

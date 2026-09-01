@@ -12,6 +12,8 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorizati
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
 import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorChildStudyCreationAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateAuthorization
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateReadKind
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMcpToolPort
@@ -498,9 +500,14 @@ class McpVoiceTutorToolAdapterTest {
     fun `metadata persistence failure cannot misreport an already committed child creation`(): Unit = runBlocking {
         val contextStore = ContextStore().apply { fail = true }
         val fixture = Fixture(studyContexts = contextStore).apply {
-            handler = { _, _ -> success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Cache")) }
+            handler = { _, _ -> success(mapOf(
+                "created" to true, "id" to 102L, "parentStudyId" to 101L, "topic" to "Cache", "difficultyLevel" to 5,
+            )) }
         }
-        val result = fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Cache"))
+        val result = fixture.adapter.execute(
+            childContext(101L, "Cache"), "create_study_topic",
+            mapOf("parent_study_id" to 101L, "topic" to "Cache"),
+        )
         assertThat(result.isError).isFalse()
         assertThat(result.studyTreeChanged).isTrue()
         assertThat(result.createdStudyId).isEqualTo(102)
@@ -516,9 +523,14 @@ class McpVoiceTutorToolAdapterTest {
     fun `ancestry read failure preserves a completed creation and its captured level without inventing a root`(): Unit = runBlocking {
         val contextStore = ContextStore().apply { failList = true }
         val fixture = Fixture(studyContexts = contextStore).apply {
-            handler = { _, _ -> success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Cache")) }
+            handler = { _, _ -> success(mapOf(
+                "created" to true, "id" to 102L, "parentStudyId" to 101L, "topic" to "Cache", "difficultyLevel" to 5,
+            )) }
         }
-        val result = fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Cache"))
+        val result = fixture.adapter.execute(
+            childContext(101L, "Cache"), "create_study_topic",
+            mapOf("parent_study_id" to 101L, "topic" to "Cache"),
+        )
         assertThat(result.isError).isFalse()
         assertThat(result.createdStudyId).isEqualTo(102)
         assertThat(result.studyTreeChanged).isTrue()
@@ -564,11 +576,15 @@ class McpVoiceTutorToolAdapterTest {
     fun `lesson metadata obeys the output bound without losing a committed creation`(): Unit = runBlocking {
         for (name in listOf("get_study", "create_study_topic")) {
             val fixture = Fixture(studyContexts = ContextStore()).apply {
-                handler = { _, _ -> success(mapOf("id" to 102L, "topic" to "Cache", "customPrompt" to "x".repeat(16_300))) }
+                handler = { _, _ -> success(mapOf(
+                    "created" to true, "id" to 102L, "parentStudyId" to 101L, "topic" to "Cache",
+                    "difficultyLevel" to 5, "customPrompt" to "x".repeat(16_300),
+                )) }
             }
             val args = if (name == "get_study") mapOf("study_id" to 102L)
                 else mapOf("parent_study_id" to 101L, "topic" to "Cache")
-            val result = fixture.adapter.execute(context(), name, args)
+            val callContext = if (name == "create_study_topic") childContext(101L, "Cache") else context()
+            val result = fixture.adapter.execute(callContext, name, args)
             assertThat(result.output.toByteArray(Charsets.UTF_8).size).isLessThanOrEqualTo(16 * 1_024)
             if (name == "get_study") assertCode(result, "RESULT_TOO_LARGE") else {
                 assertThat(result.isError).isFalse()
@@ -609,8 +625,18 @@ class McpVoiceTutorToolAdapterTest {
         )
         assertThat(rootCreation.path("properties").has("interval_minutes")).isFalse()
         assertThat(definitions.single { it.name == "create_root_study" }.description)
-            .contains("call this once immediately", "Do not ask for confirmation", "never selects a lesson or creates a question")
-        assertThat(definitions.single { it.name == "create_study_topic" }.description).contains("descendants")
+            .contains(
+                "call this once immediately", "Natural first-person new-study intent is sufficient",
+                "imperative grammar", "Do not restate", "never selects a lesson or creates a question",
+            )
+        assertThat(definitions.single { it.name == "create_study_topic" }.description).contains(
+            "descendants", "current first-person intent", "imperative grammar", "duplicate confirmation",
+            "Mere mentions", "ambiguous targets",
+        )
+        assertThat(definitions.single { it.name == "update_study" }.description).contains(
+            "current first-person intent", "Imperative grammar", "duplicate confirmation",
+            "Unspecified fields", "ambiguous targets or outcomes",
+        )
         val deletion = mapper.valueToTree<JsonNode>(definitions.single { it.name == "delete_study" }.parameters)
         assertThat(deletion.path("properties").has("confirmation_token")).isTrue()
         assertThat(deletion.path("properties").has("expected_study_ids")).isFalse()
@@ -929,12 +955,16 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(read.isError).isFalse()
         assertThat(json(read).path("voiceLessonContextReady").asBoolean()).isFalse()
         assertThat(store.remembered).isEmpty()
-        for ((name, args) in listOf(
-            "create_study_topic" to mapOf("parent_study_id" to 101L, "topic" to "Cache"),
-            "update_study" to mapOf("study_id" to 101L, "difficulty_level" to 2),
-            "delete_study" to mapOf("study_id" to 101L, "confirm" to false),
-            "list_study_learning_records" to mapOf("study_id" to 101L),
-        )) assertCode(fixture.adapter.execute(context, name, args), "STUDY_SCOPE_DENIED")
+        for ((name, args, code) in listOf(
+            Triple(
+                "create_study_topic",
+                mapOf("parent_study_id" to 101L, "topic" to "Cache"),
+                "CHILD_CREATION_REQUEST_REQUIRED",
+            ),
+            Triple("update_study", mapOf("study_id" to 101L, "difficulty_level" to 2), "STUDY_UPDATE_REQUEST_REQUIRED"),
+            Triple("delete_study", mapOf("study_id" to 101L, "confirm" to false), "STUDY_SCOPE_DENIED"),
+            Triple("list_study_learning_records", mapOf("study_id" to 101L), "STUDY_SCOPE_DENIED"),
+        )) assertCode(fixture.adapter.execute(context, name, args), code)
         assertThat(fixture.calls.map { it.name }).containsExactly("list_studies", "get_study")
         assertThat(fixture.focusSelections).isEmpty()
     }
@@ -1338,11 +1368,19 @@ class McpVoiceTutorToolAdapterTest {
         ).isError).isFalse()
         assertThat(fixture.persistedSession?.acceptedStudyId).isEqualTo(101)
         val original = fixture.handler
-        fixture.handler = { name, args -> if (name == "create_study_topic") success(mapOf("id" to 202L, "parentStudyId" to 201L))
+        fixture.handler = { name, args -> if (name == "create_study_topic") success(mapOf(
+            "created" to true, "id" to 202L, "parentStudyId" to 201L, "topic" to "Child", "difficultyLevel" to 5,
+        ))
             else original(name, args) }
-        assertThat(fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 201L, "topic" to "Child")).isError).isFalse()
+        assertThat(fixture.adapter.execute(
+            childContext(201L, "Child"), "create_study_topic",
+            mapOf("parent_study_id" to 201L, "topic" to "Child"),
+        ).isError).isFalse()
         assertThat(fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 101L)).isError).isFalse()
-        assertCode(fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Wrong tree")), "STUDY_SCOPE_DENIED")
+        assertCode(fixture.adapter.execute(
+            childContext(101L, "Wrong tree"), "create_study_topic",
+            mapOf("parent_study_id" to 101L, "topic" to "Wrong tree"),
+        ), "STUDY_SCOPE_DENIED")
     }
 
     @Test
@@ -1646,20 +1684,60 @@ class McpVoiceTutorToolAdapterTest {
     @Test
     fun `creates a child of the current study through the original handler preserving short titles`(): Unit = runBlocking {
         val fixture = Fixture()
-        fixture.handler = { _, _ -> success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "2")) }
+        fixture.handler = { _, _ -> success(mapOf(
+            "created" to true, "id" to 102L, "parentStudyId" to 101L, "topic" to "2", "difficultyLevel" to 7,
+        )) }
 
         val result = fixture.adapter.execute(
-            context(), "create_study_topic",
-            mapOf("parent_study_id" to 101L, "topic" to "2", "difficulty_level" to 7, "active_for_questions" to false),
+            childContext(101L, "2", 7), "create_study_topic",
+            mapOf("parent_study_id" to 101L, "topic" to "2", "difficulty_level" to 7),
         )
 
         assertThat(result.isError).isFalse()
         assertThat(result.studyTreeChanged).isTrue()
         assertThat(result.createdStudyId).isEqualTo(102L)
         assertThat(fixture.calls.map { it.name }).containsExactly("create_study_topic")
-        assertThat(fixture.calls.single().arguments).containsEntry("topic", "2").containsEntry("active_for_questions", false)
+        assertThat(fixture.calls.single().arguments)
+            .isEqualTo(mapOf("parent_study_id" to 101L, "topic" to "2", "difficulty_level" to 7))
         assertThat(fixture.calls.single().principal).isSameAs(principal)
         assertThat(fixture.authorizationCalls).isEqualTo(2)
+    }
+
+    @Test
+    fun `an idempotent existing child is available without announcing a new tree change or replaying`() = runBlocking {
+        val contexts = ContextStore()
+        val fixture = Fixture(studyContexts = contexts).apply {
+            handler = { _, _ -> success(mapOf(
+                "created" to false,
+                "id" to 102L,
+                "parentStudyId" to 101L,
+                "topic" to "Redis Streams",
+                "difficultyLevel" to 5,
+            )) }
+        }
+        val context = childContext(101L, "redis streams", difficulty = 7)
+        val arguments = mapOf<String, Any>(
+            "parent_study_id" to 101L,
+            "topic" to "redis streams",
+            "difficulty_level" to 7,
+        )
+
+        val result = fixture.adapter.execute(context, "create_study_topic", arguments)
+
+        assertThat(result.isError).isFalse()
+        assertThat(json(result).path("created").asBoolean()).isFalse()
+        assertThat(json(result).path("difficultyLevel").asInt()).isEqualTo(5)
+        assertThat(json(result).path("notice").asText()).contains("already available", "level 5 was preserved")
+        assertThat(result.studyTreeChanged).isFalse()
+        assertThat(result.createdStudyId).isNull()
+        assertThat(result.changedStudyId).isNull()
+        assertThat(result.changeKind).isNull()
+        assertThat(contexts.remembered).containsExactly(listOf(102L))
+        assertCode(
+            fixture.adapter.execute(context, "create_study_topic", arguments),
+            "CHILD_CREATION_REQUEST_REQUIRED",
+        )
+        assertThat(fixture.calls.map { it.name }).containsExactly("create_study_topic")
     }
 
     @Test
@@ -1672,12 +1750,17 @@ class McpVoiceTutorToolAdapterTest {
                     201L -> success(mapOf("id" to 201L, "parentStudyId" to 101L))
                     else -> error("Unexpected ancestor")
                 }
-                "create_study_topic" -> success(mapOf("id" to 401L, "parentStudyId" to 301L, "topic" to "Streams"))
+                "create_study_topic" -> success(mapOf(
+                    "created" to true, "id" to 401L, "parentStudyId" to 301L, "topic" to "Streams", "difficultyLevel" to 5,
+                ))
                 else -> error("Unexpected tool")
             }
         }
 
-        val result = fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 301L, "topic" to "Streams"))
+        val result = fixture.adapter.execute(
+            childContext(301L, "Streams"), "create_study_topic",
+            mapOf("parent_study_id" to 301L, "topic" to "Streams"),
+        )
 
         assertThat(result.isError).isFalse()
         assertThat(result.studyTreeChanged).isTrue()
@@ -1698,7 +1781,10 @@ class McpVoiceTutorToolAdapterTest {
         )
         for (response in invalidAncestors) {
             val fixture = Fixture().apply { handler = { _, _ -> response } }
-            val result = fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 201L, "topic" to "Streams"))
+            val result = fixture.adapter.execute(
+                childContext(201L, "Streams"), "create_study_topic",
+                mapOf("parent_study_id" to 201L, "topic" to "Streams"),
+            )
             assertCode(result, "STUDY_SCOPE_DENIED")
             assertThat(result.studyTreeChanged).isFalse()
             assertThat(fixture.calls.map { it.name }).containsExactly("get_study")
@@ -1708,7 +1794,11 @@ class McpVoiceTutorToolAdapterTest {
     @Test
     fun `a call with no study cannot create topics`(): Unit = runBlocking {
         val fixture = Fixture().apply { persistedSession = session().copy(studyId = null, acceptedStudyId = null) }
-        val result = fixture.adapter.execute(context().copy(session = fixture.persistedSession!!), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Streams"))
+        val result = fixture.adapter.execute(
+            childContext(101L, "Streams").copy(session = fixture.persistedSession!!),
+            "create_study_topic",
+            mapOf("parent_study_id" to 101L, "topic" to "Streams"),
+        )
         assertCode(result, "STUDY_SCOPE_DENIED")
         assertThat(fixture.calls).isEmpty()
     }
@@ -1721,7 +1811,10 @@ class McpVoiceTutorToolAdapterTest {
                 success(mapOf("id" to id, "parentStudyId" to if (id == 201L) 301L else 201L))
             }
         }
-        assertCode(cyclic.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 201L, "topic" to "Streams")), "STUDY_SCOPE_DENIED")
+        assertCode(cyclic.adapter.execute(
+            childContext(201L, "Streams"), "create_study_topic",
+            mapOf("parent_study_id" to 201L, "topic" to "Streams"),
+        ), "STUDY_SCOPE_DENIED")
         assertThat(cyclic.calls).hasSize(2)
 
         val deep = Fixture().apply {
@@ -1730,7 +1823,10 @@ class McpVoiceTutorToolAdapterTest {
                 success(mapOf("id" to id, "parentStudyId" to id + 1))
             }
         }
-        assertCode(deep.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 201L, "topic" to "Streams")), "STUDY_SCOPE_DENIED")
+        assertCode(deep.adapter.execute(
+            childContext(201L, "Streams"), "create_study_topic",
+            mapOf("parent_study_id" to 201L, "topic" to "Streams"),
+        ), "STUDY_SCOPE_DENIED")
         assertThat(deep.calls).hasSize(32)
         assertThat(deep.calls.map { it.name }).containsOnly("get_study")
     }
@@ -1744,7 +1840,10 @@ class McpVoiceTutorToolAdapterTest {
                 else fixture.persistedSession = session().copy(status = VoiceTutorSessionStatus.ENDING)
                 success(mapOf("id" to 201L, "parentStudyId" to 101L))
             }
-            assertCode(fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 201L, "topic" to "Streams")), "CALL_NOT_AUTHORIZED")
+            assertCode(fixture.adapter.execute(
+                childContext(201L, "Streams"), "create_study_topic",
+                mapOf("parent_study_id" to 201L, "topic" to "Streams"),
+            ), "CALL_NOT_AUTHORIZED")
             assertThat(fixture.calls.map { it.name }).containsExactly("get_study")
         }
     }
@@ -1753,7 +1852,10 @@ class McpVoiceTutorToolAdapterTest {
     fun `MCP permission and conflict failures remain errors and cannot announce a tree change`(): Unit = runBlocking {
         for (code in listOf("PERMISSION_DENIED", "VALIDATION_ERROR")) {
             val fixture = Fixture().apply { handler = { _, _ -> failure(code) } }
-            val result = fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Streams"))
+            val result = fixture.adapter.execute(
+                childContext(101L, "Streams"), "create_study_topic",
+                mapOf("parent_study_id" to 101L, "topic" to "Streams"),
+            )
             assertCode(result, code)
             assertThat(result.studyTreeChanged).isFalse()
             assertThat(result.createdStudyId).isNull()
@@ -1763,15 +1865,23 @@ class McpVoiceTutorToolAdapterTest {
     @Test
     fun `only positive integral bounded IDs from a successful creation become refresh targets`(): Unit = runBlocking {
         for (invalidId in listOf(-1, 0, 1.5, "102", 1e40)) {
-            val fixture = Fixture().apply { handler = { _, _ -> success(mapOf("id" to invalidId, "parentStudyId" to 101L)) } }
-            val result = fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Streams"))
-            assertThat(result.isError).isFalse()
+            val fixture = Fixture().apply { handler = { _, _ -> success(mapOf(
+                "created" to true, "id" to invalidId, "parentStudyId" to 101L, "topic" to "Streams", "difficultyLevel" to 5,
+            )) } }
+            val result = fixture.adapter.execute(
+                childContext(101L, "Streams"), "create_study_topic",
+                mapOf("parent_study_id" to 101L, "topic" to "Streams"),
+            )
+            assertCode(result, "CHILD_CREATION_RESULT_UNCONFIRMED")
             assertThat(result.createdStudyId).isNull()
         }
         val failureWithId = Fixture().apply {
             handler = { _, _ -> McpSchema.CallToolResult.builder().structuredContent(mapOf("id" to 102L)).isError(true).build() }
         }
-        assertThat(failureWithId.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Streams")).createdStudyId).isNull()
+        assertThat(failureWithId.adapter.execute(
+            childContext(101L, "Streams"), "create_study_topic",
+            mapOf("parent_study_id" to 101L, "topic" to "Streams"),
+        ).createdStudyId).isNull()
     }
 
     @Test
@@ -1799,12 +1909,15 @@ class McpVoiceTutorToolAdapterTest {
     fun `oversized successful creation retains success and only bounded tree metadata`(): Unit = runBlocking {
         val fixture = Fixture().apply {
             handler = { _, _ -> success(mapOf(
-                "id" to 102L, "parentStudyId" to 101L, "topic" to "Streams",
+                "created" to true, "id" to 102L, "parentStudyId" to 101L, "topic" to "Streams",
                 "sortOrder" to 2, "difficultyLevel" to 5,
                 "customPrompt" to "비공개".repeat(20_000),
             )) }
         }
-        val result = fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "Streams"))
+        val result = fixture.adapter.execute(
+            childContext(101L, "Streams"), "create_study_topic",
+            mapOf("parent_study_id" to 101L, "topic" to "Streams"),
+        )
         assertThat(result.isError).isFalse()
         assertThat(result.studyTreeChanged).isTrue()
         assertThat(result.createdStudyId).isEqualTo(102L)
@@ -1835,25 +1948,96 @@ class McpVoiceTutorToolAdapterTest {
     fun `explicit update keeps node identity and captures a new question level after the saved write`(): Unit = runBlocking {
         val contexts = ContextStore()
         val fixture = mutationFixture(contexts)
-        val result = fixture.adapter.execute(context(), "update_study", mapOf("study_id" to 102L, "difficulty_level" to 6))
+        val result = fixture.adapter.execute(
+            updateContext(102L, difficulty = 6), "update_study",
+            mapOf("study_id" to 102L, "difficulty_level" to 6),
+        )
         assertThat(result.isError).isFalse()
         assertThat(result.changeKind).isEqualTo(VoiceTutorStudyChangeKind.UPDATED)
         assertThat(result.createdStudyId).isNull()
         assertThat(result.changedStudyId).isEqualTo(102)
         assertThat(result.lessonRevision).isEqualTo(1)
+        assertThat(result.lessonFocus?.studyId).isEqualTo(101)
+        assertThat(result.lessonFocus?.revision).isEqualTo(1)
+        assertThat(result.lessonFocus?.topic).isEqualTo("Selected root")
+        assertThat(result.lessonFocus?.difficulty).isEqualTo(5)
         assertThat(contexts.remembered).containsExactly(listOf(102L))
         assertThat(contexts.revised).containsExactly(102)
         assertThat(json(result).path("voiceLessonChangeApplies").asText()).isEqualTo("NEXT_QUESTION")
         assertThat(json(result).path("voiceLessonTopics")[0].path("difficulty").asInt()).isEqualTo(6)
         assertThat(fixture.calls.single { it.name == "update_study" }.arguments)
-            .isEqualTo(mapOf("study_id" to 102L, "difficulty_level" to 6))
+            .isEqualTo(mapOf<String, Any>("study_id" to 102L, "difficulty_level" to 6))
     }
+
+    @Test
+    fun `persisted child and update leases execute exact patches once and reject replay or field smuggling`(): Unit =
+        runBlocking {
+            val childFixture = Fixture(studyContexts = ContextStore()).apply {
+                handler = { _, _ -> success(mapOf(
+                    "created" to true, "id" to 102L, "parentStudyId" to 101L, "topic" to "Streams", "difficultyLevel" to 5,
+                )) }
+            }
+            val childContext = childContext(101L, "Streams")
+            val childArguments = mapOf<String, Any>("parent_study_id" to 101L, "topic" to "Streams")
+
+            assertCode(
+                childFixture.adapter.execute(
+                    childContext,
+                    "create_study_topic",
+                    childArguments + ("difficulty_level" to 7),
+                ),
+                "CHILD_CREATION_REQUEST_MISMATCH",
+            )
+            assertThat(childFixture.calls).isEmpty()
+            assertThat(childFixture.adapter.execute(childContext, "create_study_topic", childArguments).isError).isFalse()
+            assertCode(
+                childFixture.adapter.execute(childContext, "create_study_topic", childArguments),
+                "CHILD_CREATION_REQUEST_REQUIRED",
+            )
+            assertThat(childFixture.calls.count { it.name == "create_study_topic" }).isEqualTo(1)
+
+            val updateFixture = mutationFixture(ContextStore())
+            val updateContext = updateContext(102L, topic = "Renamed cache", difficulty = 6)
+            val updateArguments = mapOf<String, Any>(
+                "study_id" to 102L,
+                "topic" to "Renamed cache",
+                "difficulty_level" to 6,
+            )
+
+            assertCode(
+                updateFixture.adapter.execute(
+                    updateContext,
+                    "update_study",
+                    mapOf("study_id" to 102L, "difficulty_level" to 6),
+                ),
+                "STUDY_UPDATE_REQUEST_MISMATCH",
+            )
+            assertThat(updateFixture.adapter.execute(updateContext, "update_study", updateArguments).isError).isFalse()
+            assertCode(
+                updateFixture.adapter.execute(updateContext, "update_study", updateArguments),
+                "STUDY_UPDATE_REQUEST_REQUIRED",
+            )
+            assertCode(
+                mutationFixture(ContextStore()).adapter.execute(
+                    updateContext(102L, difficulty = 6),
+                    "update_study",
+                    mapOf("study_id" to 102L, "topic" to "   ", "difficulty_level" to 6),
+                ),
+                "INVALID_ARGUMENTS",
+            )
+            assertThat(updateFixture.calls.count { it.name == "update_study" }).isEqualTo(1)
+            assertThat(updateFixture.calls.single { it.name == "update_study" }.arguments)
+                .isEqualTo(updateArguments)
+        }
 
     @Test
     fun `metadata capture failure keeps a confirmed update distinct from an unprepared lesson`(): Unit = runBlocking {
         val contexts = ContextStore().apply { failRevision = true }
         val fixture = mutationFixture(contexts)
-        val result = fixture.adapter.execute(context(), "update_study", mapOf("study_id" to 102L, "topic" to "Renamed cache"))
+        val result = fixture.adapter.execute(
+            updateContext(102L, topic = "Renamed cache"), "update_study",
+            mapOf("study_id" to 102L, "topic" to "Renamed cache"),
+        )
         assertThat(result.isError).isFalse()
         assertThat(result.studyTreeChanged).isTrue()
         assertThat(result.changeKind).isEqualTo(VoiceTutorStudyChangeKind.UPDATED)
@@ -1866,9 +2050,16 @@ class McpVoiceTutorToolAdapterTest {
 
     @Test
     fun `unprepared and revision capped calls cannot change settings`(): Unit = runBlocking {
-        for (contexts in listOf(UnavailableVoiceTutorStudyContextPort, ContextStore().apply { revision = 32 })) {
+        for ((contexts, revision) in listOf(
+            UnavailableVoiceTutorStudyContextPort to 0L,
+            ContextStore().apply { revision = 32 } to 32L,
+        )) {
             val fixture = mutationFixture(contexts)
-            assertCode(fixture.adapter.execute(context(), "update_study", mapOf("study_id" to 102L, "difficulty_level" to 6)), "LESSON_CONTEXT_UNAVAILABLE")
+            fixture.acceptedLessonRevision = revision
+            assertCode(fixture.adapter.execute(
+                updateContext(102L, difficulty = 6, lessonRevision = revision), "update_study",
+                mapOf("study_id" to 102L, "difficulty_level" to 6),
+            ), "LESSON_CONTEXT_UNAVAILABLE")
             assertThat(fixture.calls.none { it.name == "update_study" }).isTrue()
         }
     }
@@ -1876,11 +2067,13 @@ class McpVoiceTutorToolAdapterTest {
     @Test
     fun `mutations cannot escape the verified owned call tree`(): Unit = runBlocking {
         val fixture = mutationFixture()
-        for (name in listOf("update_study", "delete_study")) {
-            val arguments = if (name == "update_study") mapOf("study_id" to 900L, "difficulty_level" to 6)
-                else mapOf("study_id" to 900L, "confirm" to false)
-            assertCode(fixture.adapter.execute(context(), name, arguments), "STUDY_SCOPE_DENIED")
-        }
+        assertCode(fixture.adapter.execute(
+            updateContext(900L, difficulty = 6), "update_study",
+            mapOf("study_id" to 900L, "difficulty_level" to 6),
+        ), "STUDY_SCOPE_DENIED")
+        assertCode(fixture.adapter.execute(
+            context(), "delete_study", mapOf("study_id" to 900L, "confirm" to false),
+        ), "STUDY_SCOPE_DENIED")
         assertThat(fixture.calls.none { it.name in listOf("update_study", "delete_study") }).isTrue()
     }
 
@@ -1958,7 +2151,10 @@ class McpVoiceTutorToolAdapterTest {
         val fixture = mutationFixture().apply { persistedSession = session().copy(studyId = null, acceptedStudyId = 101L) }
         val read = fixture.adapter.execute(context(), "list_studies", emptyMap())
         assertThat(read.isError).isFalse()
-        assertCode(fixture.adapter.execute(context(), "create_study_topic", mapOf("parent_study_id" to 101L, "topic" to "New")), "STUDY_SCOPE_DENIED")
+        assertCode(fixture.adapter.execute(
+            childContext(101L, "New"), "create_study_topic",
+            mapOf("parent_study_id" to 101L, "topic" to "New"),
+        ), "STUDY_SCOPE_DENIED")
         assertThat(fixture.calls.none { it.name == "create_study_topic" }).isTrue()
     }
 
@@ -2305,6 +2501,40 @@ class McpVoiceTutorToolAdapterTest {
                 },
             ),
         )
+
+        fun childContext(
+            parentStudyId: Long,
+            topic: String,
+            difficulty: Int = 5,
+            lessonRevision: Long = 0,
+        ): VoiceTutorWebRtcControlContext {
+            val base = context(
+                inputIntent = VoiceTutorInputIntent.CREATE_STUDY_TOPIC,
+                lessonRevision = lessonRevision,
+            )
+            return base.copy(dialogueBoundary = requireNotNull(base.dialogueBoundary).copy(
+                childStudyCreationAuthorization = VoiceTutorChildStudyCreationAuthorization(
+                    parentStudyId,
+                    topic,
+                    difficulty,
+                ),
+            ))
+        }
+
+        fun updateContext(
+            studyId: Long,
+            topic: String? = null,
+            difficulty: Int? = null,
+            lessonRevision: Long = 0,
+        ): VoiceTutorWebRtcControlContext {
+            val base = context(
+                inputIntent = VoiceTutorInputIntent.UPDATE_STUDY,
+                lessonRevision = lessonRevision,
+            )
+            return base.copy(dialogueBoundary = requireNotNull(base.dialogueBoundary).copy(
+                studyUpdateAuthorization = VoiceTutorStudyUpdateAuthorization(studyId, topic, difficulty),
+            ))
+        }
 
         fun session() = VoiceTutorSession(
             id = "00000000-0000-0000-0000-000000000007", userId = principal.userId, studyId = 101L,

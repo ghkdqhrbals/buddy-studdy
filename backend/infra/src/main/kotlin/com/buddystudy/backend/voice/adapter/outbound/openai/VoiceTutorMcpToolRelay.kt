@@ -27,7 +27,11 @@ internal fun voiceTutorMcpToolRelay(
         } else {
             try {
                 withTimeout(executionTimeoutMillis) {
-                    tools.execute(context.copy(dialogueBoundary = controller.mutationDialogueBoundary()), call.name, call.arguments)
+                    tools.execute(
+                        context.copy(dialogueBoundary = controller.mutationDialogueBoundary(call.callId)),
+                        call.name,
+                        call.arguments,
+                    )
                 }
             } catch (_: TimeoutCancellationException) {
                 // A timed-out write may have committed. Never automatically

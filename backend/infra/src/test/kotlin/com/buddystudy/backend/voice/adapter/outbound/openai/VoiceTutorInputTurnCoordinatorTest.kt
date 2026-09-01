@@ -244,23 +244,23 @@ class VoiceTutorInputTurnCoordinatorTest {
     fun `assessment expires exactly at deadline and late successful callback cannot publish`() {
         val coordinator = VoiceTutorInputTurnCoordinator()
         val assessment = registered(coordinator, "item-one", "응")
-        assertThat(coordinator.expire(ms(6_499))).isEmpty()
-        assertThat(coordinator.expire(ms(6_500))).containsExactly(
+        assertThat(coordinator.expire(ms(11_499))).isEmpty()
+        assertThat(coordinator.expire(ms(11_500))).containsExactly(
             Action.Retry(RetryReason.ASSESSMENT_TIMEOUT), Action.Delete("item-one"),
         )
-        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(6_501))).isEmpty()
-        assertThat(coordinator.expire(ms(6_501))).isEmpty()
-        assertThat(coordinator.confirmDeleted("item-one", ms(6_502))).isEmpty()
+        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(11_501))).isEmpty()
+        assertThat(coordinator.expire(ms(11_501))).isEmpty()
+        assertThat(coordinator.confirmDeleted("item-one", ms(11_502))).isEmpty()
     }
 
     @Test
     fun `callback at expired assessment deadline cannot bypass missing timer tick`() {
         val coordinator = VoiceTutorInputTurnCoordinator()
         val assessment = registered(coordinator, "item-one", "응")
-        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(6_500))).containsExactly(
+        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(11_500))).containsExactly(
             Action.Retry(RetryReason.ASSESSMENT_TIMEOUT), Action.Delete("item-one"),
         )
-        assertThat(coordinator.expire(ms(6_500))).isEmpty()
+        assertThat(coordinator.expire(ms(11_500))).isEmpty()
         assertThat(coordinator.hasPending).isTrue()
     }
 
@@ -293,10 +293,10 @@ class VoiceTutorInputTurnCoordinatorTest {
     fun `success before deadline cancels batch expiry and starts a separate publication lease`() {
         val coordinator = VoiceTutorInputTurnCoordinator()
         val assessment = registered(coordinator, "item-one", "응")
-        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(6_499)))
+        assertThat(coordinator.completeAssessment(assessment.token, meaningful(assessment), ms(11_499)))
             .containsExactly(Action.Publish("item-one", raw("item-one", "응"), sequence = 1))
-        assertThat(coordinator.expire(ms(6_500))).isEmpty()
-        assertThat(coordinator.confirmPublished("item-one", ms(6_501))).containsExactly(Action.Ready(1, false))
+        assertThat(coordinator.expire(ms(11_500))).isEmpty()
+        assertThat(coordinator.confirmPublished("item-one", ms(11_501))).containsExactly(Action.Ready(1, false))
         assertThat(coordinator.expire(ms(20_000))).isEmpty()
     }
 
@@ -367,10 +367,10 @@ class VoiceTutorInputTurnCoordinatorTest {
         val coordinator = VoiceTutorInputTurnCoordinator()
         val first = registered(coordinator, "item-one", "2")
         coordinator.teacherResponseStarted()
-        assertThat(coordinator.expire(ms(6_500))).isEmpty()
-        val second = assess(coordinator.teacherResponseCompleted("다음 항목을 선택해 주세요.", ms(6_501)))
+        assertThat(coordinator.expire(ms(11_500))).isEmpty()
+        val second = assess(coordinator.teacherResponseCompleted("다음 항목을 선택해 주세요.", ms(11_501)))
         assertThat(second.token).isGreaterThan(first.token)
-        assertThat(coordinator.completeAssessment(first.token, meaningful(first), ms(6_502))).isEmpty()
+        assertThat(coordinator.completeAssessment(first.token, meaningful(first), ms(11_502))).isEmpty()
     }
 
     @Test

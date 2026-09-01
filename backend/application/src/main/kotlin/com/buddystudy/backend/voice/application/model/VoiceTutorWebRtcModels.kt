@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.application.model
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.backend.auth.Principal
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 data class VoiceTutorWebRtcControlContext(
     val session: VoiceTutorSession,
@@ -44,6 +45,10 @@ data class VoiceTutorDialogueBoundary(
     val focusAuthorization: VoiceTutorFocusAuthorization? = null,
     /** One-shot direct-root lease; invalidated by any newer learner speech before write linearization. */
     val rootStudyCreationAuthorization: VoiceTutorRootStudyCreationAuthorization? = null,
+    /** One-shot exact child-create lease minted only after the assessed USER item is persisted. */
+    val childStudyCreationAuthorization: VoiceTutorChildStudyCreationAuthorization? = null,
+    /** One-shot exact saved-node patch lease minted only after the assessed USER item is persisted. */
+    val studyUpdateAuthorization: VoiceTutorStudyUpdateAuthorization? = null,
 )
 
 class VoiceTutorFocusAuthorization {
@@ -71,6 +76,12 @@ class VoiceTutorRootStudyCreationAuthorization(
     }
 
     private val active = AtomicBoolean(true)
+    private val serverCallId = AtomicReference<String?>(null)
+
+    fun bindToServerCall(callId: String): Boolean =
+        callId.isNotBlank() && callId.length <= 128 && serverCallId.compareAndSet(null, callId)
+
+    fun isBoundToServerCall(callId: String): Boolean = serverCallId.get() == callId
 
     fun invalidate() {
         active.set(false)
@@ -83,4 +94,71 @@ class VoiceTutorRootStudyCreationAuthorization(
 
     override fun toString(): String =
         "VoiceTutorRootStudyCreationAuthorization(active=${active.get()}, topic=[redacted], difficulty=$difficulty)"
+}
+
+class VoiceTutorChildStudyCreationAuthorization(
+    val parentStudyId: Long,
+    val topic: String,
+    val difficulty: Int,
+) {
+    init {
+        require(parentStudyId > 0)
+        require(topic.isNotBlank() && topic == topic.trim() && topic.length <= 255)
+        require(difficulty in 1..10)
+    }
+
+    private val active = AtomicBoolean(true)
+    private val serverCallId = AtomicReference<String?>(null)
+
+    fun bindToServerCall(callId: String): Boolean =
+        callId.isNotBlank() && callId.length <= 128 && serverCallId.compareAndSet(null, callId)
+
+    fun isBoundToServerCall(callId: String): Boolean = serverCallId.get() == callId
+
+    fun invalidate() {
+        active.set(false)
+    }
+
+    /** Linearization point immediately before the exact child create begins. */
+    fun consume(): Boolean = active.compareAndSet(true, false)
+
+    fun isActive(): Boolean = active.get()
+
+    override fun toString(): String =
+        "VoiceTutorChildStudyCreationAuthorization(active=${active.get()}, parentStudyId=$parentStudyId, " +
+            "topic=[redacted], difficulty=$difficulty)"
+}
+
+class VoiceTutorStudyUpdateAuthorization(
+    val studyId: Long,
+    val topic: String?,
+    val difficulty: Int?,
+) {
+    init {
+        require(studyId > 0)
+        require(topic != null || difficulty != null)
+        require(topic?.let { it.isNotBlank() && it == it.trim() && it.length <= 255 } != false)
+        require(difficulty?.let { it in 1..10 } != false)
+    }
+
+    private val active = AtomicBoolean(true)
+    private val serverCallId = AtomicReference<String?>(null)
+
+    fun bindToServerCall(callId: String): Boolean =
+        callId.isNotBlank() && callId.length <= 128 && serverCallId.compareAndSet(null, callId)
+
+    fun isBoundToServerCall(callId: String): Boolean = serverCallId.get() == callId
+
+    fun invalidate() {
+        active.set(false)
+    }
+
+    /** Linearization point immediately before the exact name/level patch begins. */
+    fun consume(): Boolean = active.compareAndSet(true, false)
+
+    fun isActive(): Boolean = active.get()
+
+    override fun toString(): String =
+        "VoiceTutorStudyUpdateAuthorization(active=${active.get()}, studyId=$studyId, " +
+            "hasTopic=${topic != null}, difficulty=$difficulty)"
 }

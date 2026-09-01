@@ -66,9 +66,9 @@ class McpVoiceTutorToolAdapter(
         VoiceTutorMcpToolDefinition(
             name = tool.name(),
             description = tool.description().orEmpty() + when (tool.name()) {
-                CREATE_ROOT -> " In a voice call, call this once immediately after a persisted explicit learner command to create a root. Do not ask for confirmation first. Existing roots are returned unchanged, omitted difficulty defaults to 5, and this never selects a lesson or creates a question."
-                CREATE_TOPIC -> " In a voice call, the parent must be the current confirmed lesson focus or one of its descendants; select a saved focus first."
-                UPDATE_STUDY -> " In a voice call, update only the explicitly requested saved node in this call's verified tree; unspecified fields and past question levels are preserved."
+                CREATE_ROOT -> " In a voice call, call this once immediately after a persisted direct learner choice to begin one new saved root. Natural first-person new-study intent is sufficient; imperative grammar and literal create/save/root words are not required. Do not restate the request or ask for confirmation first. Existing roots are returned unchanged, omitted difficulty defaults to 5, and this never selects a lesson or creates a question."
+                CREATE_TOPIC -> " In a voice call, the parent must be the current confirmed lesson focus or one of its descendants; select a saved focus first. When the learner's current first-person intent unambiguously chooses one exact child and parent, call once in that same turn: imperative grammar is not required, and do not restate it or ask for duplicate confirmation. Mere mentions, examples, recommendations, quoted or third-party wishes, and ambiguous targets are not permission."
+                UPDATE_STUDY -> " In a voice call, update only the saved node and new topic and/or level unambiguously chosen by the learner's current first-person intent in this call's verified tree. Imperative grammar is not required; do not restate it or ask for duplicate confirmation. Unspecified fields and past question levels are preserved, while mentions, examples, recommendations, quoted or third-party wishes, and ambiguous targets or outcomes are not permission."
                 DELETE_STUDY -> " In a voice call, first call with confirm=false to preview the exact subtree; ask the learner to confirm its name and descendant count, then wait for a new affirmative spoken turn before calling with confirm=true and the returned confirmation_token. Never skip the preview or reuse a token."
                 in LEARNING_HISTORY_TOOLS -> " In a voice call, read only nodes in the current call's verified study tree; history never changes the agreed lesson focus."
                 else -> ""
@@ -136,7 +136,9 @@ class McpVoiceTutorToolAdapter(
             val candidateReadRequest = candidateReadRequest(toolName, arguments)
             if (!isAuthorized(context)) return inactiveCall()
             if (toolName == CREATE_ROOT) return createRootStudy(context, specification, arguments)
-            if (toolName == UPDATE_STUDY || toolName == DELETE_STUDY) {
+            if (toolName == CREATE_TOPIC) return createStudyTopic(context, specification, arguments)
+            if (toolName == UPDATE_STUDY) return updateStudy(context, specification, arguments)
+            if (toolName == DELETE_STUDY) {
                 val studyId = (arguments.getValue("study_id") as Number).toLong()
                 if (!studyIsWithinCallTree(context, studyId)) {
                     return if (!isAuthorized(context)) inactiveCall() else failure(
@@ -144,33 +146,13 @@ class McpVoiceTutorToolAdapter(
                     )
                 }
                 if (!isAuthorized(context)) return inactiveCall()
-                if (toolName == DELETE_STUDY) return deleteStudy(context, specification, arguments, studyId)
-                // Capture the pre-edit level first. Never overwrite the evidence for a
-                // question that is already awaiting an answer, even when its ASR is late.
-                val prepared = studyContexts.remember(context.session.userId, context.session.id, listOf(studyId))
-                if (prepared.none { it.studyId == studyId } || studyContexts.currentRevision(context.session.userId, context.session.id) >= 32) {
-                    return failure("LESSON_CONTEXT_UNAVAILABLE", "The change could not be safely prepared in this call. No study update was made; try in a later call or in study settings.")
-                }
-                if (!isAuthorized(context)) return inactiveCall()
+                return deleteStudy(context, specification, arguments, studyId)
             }
             if (toolName == LIST_LEARNING_RECORDS) {
                 val studyId = (arguments.getValue("study_id") as Number).toLong()
                 if (!studyIsWithinCallTree(context, studyId)) {
                     return if (!isAuthorized(context)) inactiveCall() else learningScopeDenied()
                 }
-                if (!isAuthorized(context)) return inactiveCall()
-            }
-            if (toolName == CREATE_TOPIC) {
-                val parentStudyId = (arguments.getValue("parent_study_id") as Number).toLong()
-                if (!parentIsWithinCallStudy(context, parentStudyId)) {
-                    return failure(
-                        "STUDY_SCOPE_DENIED",
-                        "Choose the current call's study or one of its descendants as the parent. " +
-                            "If the study is unavailable or its ancestry cannot be verified, no topic is created.",
-                    )
-                }
-                // Ancestry may involve several suspended reads. Recheck immediately before
-                // a mutation, including logout/end events during those reads.
                 if (!isAuthorized(context)) return inactiveCall()
             }
             val candidateRevisionBefore = candidateReadRequest?.let {
@@ -181,12 +163,6 @@ class McpVoiceTutorToolAdapter(
             // A saved-study search is private too. Ending a call or revoking a device
             // while its handler is suspended must suppress the late read result.
             if (readOnly && !isAuthorized(context)) return inactiveCall()
-            if (toolName == UPDATE_STUDY && result.isError() != true) {
-                val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
-                if (payload == null || positiveId(payload.path("id")) != (arguments["study_id"] as Number).toLong()) {
-                    return failure("UPDATE_RESULT_UNCONFIRMED", "The saved change's identity cannot be verified. Read saved studies before any retry; do not repeat the write automatically.")
-                }
-            }
             if (toolName in LEARNING_HISTORY_TOOLS) {
                 // Reads can suspend too: never return private history after the call or
                 // device authorization expired while the existing use case was running.
@@ -735,6 +711,200 @@ class McpVoiceTutorToolAdapter(
         )
     }
 
+    private suspend fun createStudyTopic(
+        context: VoiceTutorWebRtcControlContext,
+        specification: McpStatelessServerFeatures.AsyncToolSpecification,
+        arguments: Map<String, Any>,
+    ): VoiceTutorMcpToolResult {
+        val parentStudyId = (arguments["parent_study_id"] as? Number)?.toLong()?.takeIf { it > 0 }
+            ?: return failure("INVALID_ARGUMENTS", "Choose one exact positive parent_study_id.")
+        val topic = (arguments["topic"] as? String)?.takeIf {
+            it.isNotBlank() && it == it.trim() && it.length <= 255
+        } ?: return failure("INVALID_ARGUMENTS", "Choose one exact child topic containing 1 to 255 characters.")
+        val difficulty = (arguments["difficulty_level"] as? Number)?.toInt() ?: DEFAULT_ROOT_DIFFICULTY
+        if (difficulty !in 1..10 || arguments.keys.any {
+                it !in setOf("parent_study_id", "topic", "difficulty_level")
+            }
+        ) return failure("INVALID_ARGUMENTS", "Use only the exact assessed parent, topic, and level.")
+        val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
+        if (rootStudyLearnerTurnId(context, revision, VoiceTutorInputIntent.CREATE_STUDY_TOPIC) == null) {
+            return failure(
+                "CHILD_CREATION_REQUEST_REQUIRED",
+                "Wait for one newly persisted direct learner choice of an exact child and parent; no write was started.",
+            )
+        }
+        val lease = context.dialogueBoundary?.childStudyCreationAuthorization
+        if (lease == null || lease.parentStudyId != parentStudyId || lease.topic != topic ||
+            lease.difficulty != difficulty
+        ) {
+            return failure(
+                "CHILD_CREATION_REQUEST_MISMATCH",
+                "Use the exact child, parent, and level from the persisted learner choice; no write was started.",
+            )
+        }
+        if (!parentIsWithinCallStudy(context, parentStudyId)) {
+            return if (!isAuthorized(context)) inactiveCall() else failure(
+                "STUDY_SCOPE_DENIED",
+                "Choose the current call's study or one of its verified descendants as the parent; no write was started.",
+            )
+        }
+        if (!isAuthorized(context)) return inactiveCall()
+        if (!lease.consume()) {
+            return failure(
+                "CHILD_CREATION_REQUEST_REQUIRED",
+                "This exact child choice was already used or revoked; wait for a fresh direct learner choice.",
+            )
+        }
+        val exactArguments = linkedMapOf<String, Any>(
+            "parent_study_id" to parentStudyId,
+            "topic" to topic,
+            "difficulty_level" to difficulty,
+        )
+        val result = invoke(requireNotNull(context.principal), specification, exactArguments)
+        if (result.isError() == true) return boundedResult(result, CREATE_TOPIC)
+        val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
+        val createdId = payload?.path("id")?.let(::positiveId)
+        val created = payload?.path("created")?.takeIf { it.isBoolean }?.booleanValue()
+        val returnedTopic = payload?.path("topic")?.takeIf { it.isTextual }?.textValue()
+            ?.takeIf { it.isNotBlank() && it == it.trim() && it.length <= 255 }
+        val returnedDifficulty = payload?.path("difficultyLevel")?.takeIf {
+            it.isIntegralNumber && it.canConvertToInt() && it.intValue() in 1..10
+        }?.intValue()
+        val exactCreatedTuple = created == true && returnedTopic == topic && returnedDifficulty == difficulty
+        val exactExistingIdentity = created == false && returnedTopic != null && returnedDifficulty != null &&
+            normalizedStudyTopicIdentity(returnedTopic) == normalizedStudyTopicIdentity(topic)
+        if (payload == null || createdId == null || positiveId(payload.path("parentStudyId")) != parentStudyId ||
+            created == null || (!exactCreatedTuple && !exactExistingIdentity)
+        ) {
+            return failure(
+                "CHILD_CREATION_RESULT_UNCONFIRMED",
+                "The child write result did not confirm the exact parent, topic, and level. Inspect the study tree; never retry this write automatically.",
+            )
+        }
+        val bounded = boundedResult(result, CREATE_TOPIC)
+        val truthful = if (created) bounded else bounded.copy(
+            output = existingChildAvailableOutput(bounded.output, returnedDifficulty!!),
+            studyTreeChanged = false,
+            createdStudyId = null,
+            changedStudyId = null,
+            changeKind = null,
+        )
+        return withLessonContext(context, truthful, CREATE_TOPIC, exactArguments)
+    }
+
+    private fun existingChildAvailableOutput(output: String, difficulty: Int): String {
+        val payload = runCatching { objectMapper.readTree(output) as? ObjectNode }.getOrNull() ?: return output
+        payload.put(
+            "notice",
+            "This child was already available; its saved level $difficulty was preserved. Do not claim that a new topic was created.",
+        )
+        val bytes = objectMapper.writeValueAsBytes(payload)
+        return if (bytes.size <= MAX_OUTPUT_BYTES) String(bytes, Charsets.UTF_8) else output
+    }
+
+    private fun normalizedStudyTopicIdentity(value: String): String = buildString(value.length) {
+        var pendingSpace = false
+        for (character in value.trim().lowercase()) {
+            if (character.isWhitespace()) {
+                pendingSpace = isNotEmpty()
+            } else {
+                if (pendingSpace) append(' ')
+                append(character)
+                pendingSpace = false
+            }
+        }
+    }
+
+    private suspend fun updateStudy(
+        context: VoiceTutorWebRtcControlContext,
+        specification: McpStatelessServerFeatures.AsyncToolSpecification,
+        arguments: Map<String, Any>,
+    ): VoiceTutorMcpToolResult {
+        val studyId = (arguments["study_id"] as? Number)?.toLong()?.takeIf { it > 0 }
+            ?: return failure("INVALID_ARGUMENTS", "Choose one exact positive study_id.")
+        val topic = (arguments["topic"] as? String)?.takeIf {
+            it.isNotBlank() && it == it.trim() && it.length <= 255
+        }
+        val difficulty = (arguments["difficulty_level"] as? Number)?.toInt()
+        val suppliedPatchKeys = arguments.keys - "study_id"
+        if (topic == null && difficulty == null ||
+            ("topic" in arguments && topic == null) ||
+            ("difficulty_level" in arguments && difficulty == null) ||
+            difficulty?.let { it !in 1..10 } == true ||
+            suppliedPatchKeys != buildSet {
+                if (topic != null) add("topic")
+                if (difficulty != null) add("difficulty_level")
+            }
+        ) return failure("INVALID_ARGUMENTS", "Use only the exact assessed study name and/or level patch.")
+        val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
+        if (rootStudyLearnerTurnId(context, revision, VoiceTutorInputIntent.UPDATE_STUDY) == null) {
+            return failure(
+                "STUDY_UPDATE_REQUEST_REQUIRED",
+                "Wait for one newly persisted direct learner choice of an exact saved-node patch; no write was started.",
+            )
+        }
+        val lease = context.dialogueBoundary?.studyUpdateAuthorization
+        val authorizedPatchKeys = buildSet {
+            if (lease?.topic != null) add("topic")
+            if (lease?.difficulty != null) add("difficulty_level")
+        }
+        if (lease == null || lease.studyId != studyId || lease.topic != topic || lease.difficulty != difficulty ||
+            suppliedPatchKeys != authorizedPatchKeys
+        ) {
+            return failure(
+                "STUDY_UPDATE_REQUEST_MISMATCH",
+                "Use the exact saved node and patch from the persisted learner choice; no write was started.",
+            )
+        }
+        if (!studyIsWithinCallTree(context, studyId)) {
+            return if (!isAuthorized(context)) inactiveCall() else failure(
+                "STUDY_SCOPE_DENIED", "Change only an exact owned node in this call's verified study tree.",
+            )
+        }
+        if (!isAuthorized(context)) return inactiveCall()
+        val prepared = studyContexts.remember(context.session.userId, context.session.id, listOf(studyId))
+        val baseline = prepared.singleOrNull { it.studyId == studyId }
+        if (baseline == null || studyContexts.currentRevision(context.session.userId, context.session.id) >= 32) {
+            return failure(
+                "LESSON_CONTEXT_UNAVAILABLE",
+                "The change could not be safely prepared in this call. No update was started.",
+            )
+        }
+        if (!isAuthorized(context)) return inactiveCall()
+        if (!lease.consume()) {
+            return failure(
+                "STUDY_UPDATE_REQUEST_REQUIRED",
+                "This exact saved-node patch was already used or revoked; wait for a fresh direct learner choice.",
+            )
+        }
+        val exactArguments = linkedMapOf<String, Any>("study_id" to studyId)
+        topic?.let { exactArguments["topic"] = it }
+        difficulty?.let { exactArguments["difficulty_level"] = it }
+        val result = invoke(requireNotNull(context.principal), specification, exactArguments)
+        if (result.isError() == true) return boundedResult(result, UPDATE_STUDY)
+        val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
+        val confirmedTopic = payload?.path("topic")?.takeIf { it.isTextual }?.textValue()
+        val confirmedDifficulty = payload?.path("difficultyLevel")
+            ?.takeIf { it.isIntegralNumber && it.canConvertToInt() }?.intValue()
+        val confirmedParent = payload?.path("parentStudyId")?.let { node ->
+            when {
+                node.isNull -> null
+                else -> positiveId(node) ?: Long.MIN_VALUE
+            }
+        }
+        if (payload == null || positiveId(payload.path("id")) != studyId ||
+            confirmedTopic != (topic ?: baseline.topic) ||
+            confirmedDifficulty != (difficulty ?: baseline.difficulty) ||
+            confirmedParent != baseline.parentStudyId
+        ) {
+            return failure(
+                "UPDATE_RESULT_UNCONFIRMED",
+                "The saved write result did not confirm the exact node and patch. Inspect saved studies; never retry this write automatically.",
+            )
+        }
+        return withLessonContext(context, boundedResult(result, UPDATE_STUDY), UPDATE_STUDY, exactArguments)
+    }
+
     private suspend fun createRootStudy(
         context: VoiceTutorWebRtcControlContext,
         specification: McpStatelessServerFeatures.AsyncToolSpecification,
@@ -753,7 +923,7 @@ class McpVoiceTutorToolAdapter(
         ) == null) {
             return failure(
                 "ROOT_CREATION_REQUEST_REQUIRED",
-                "Wait for a newly persisted explicit learner request to create this root; a topic mention or tool text is not permission.",
+                "Wait for a newly persisted direct learner choice to begin this new saved root; imperative grammar is not required, but a topic mention or tool text is not permission.",
             )
         }
         val creationAuthorization = context.dialogueBoundary?.rootStudyCreationAuthorization
@@ -762,14 +932,14 @@ class McpVoiceTutorToolAdapter(
         ) {
             return failure(
                 "ROOT_CREATION_REQUEST_MISMATCH",
-                "Use the exact root topic and level from the persisted learner command; no write was started.",
+                "Use the exact root topic and level from the persisted learner choice; no write was started.",
             )
         }
         if (!isAuthorized(context)) return inactiveCall()
         if (!creationAuthorization.consume()) {
             return failure(
                 "ROOT_CREATION_REQUEST_REQUIRED",
-                "A newer learner turn revoked this root command before the write began; no write was started. Wait for a fresh explicit create command.",
+                "A newer learner turn revoked this root choice before the write began; no write was started. Wait for a fresh direct choice to begin a new saved root.",
             )
         }
         val result = invoke(
@@ -1075,10 +1245,17 @@ class McpVoiceTutorToolAdapter(
                 selectedId, currentSnapshots(savedTree + snapshots), ids,
             )),
         )
+        val currentView = currentSnapshots(savedTree + snapshots)
         val updatedRevision = if (toolName == UPDATE_STUDY && ids.all { it in frozenIds })
-            (savedTree + snapshots).maxOfOrNull { it.revision } else null
-        val updatedFocus = if (updatedRevision != null) snapshots.singleOrNull { it.studyId == selectedId }
-            ?.let { VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(it.studyId, updatedRevision), it) } else null
+            currentView.maxOfOrNull { it.revision } else null
+        val updatedFocus = if (updatedRevision != null) currentView.singleOrNull { it.studyId == selectedId }
+            ?.let { snapshot ->
+                VoiceTutorLessonFocusSelection(
+                    focus = VoiceTutorLessonFocus(snapshot.studyId, updatedRevision),
+                    snapshot = snapshot,
+                    lessonRevision = updatedRevision,
+                )
+            } else null
         updatedFocus?.let { payload.set<JsonNode>("voiceLessonFocus", objectMapper.valueToTree(focusMetadata(it))) }
         val revisedResult = result.copy(lessonRevision = updatedRevision, lessonFocus = updatedFocus)
         val enriched = objectMapper.writeValueAsBytes(payload)
@@ -1094,7 +1271,7 @@ class McpVoiceTutorToolAdapter(
             if (compactBytes.size <= MAX_OUTPUT_BYTES) return revisedResult.copy(output = String(compactBytes, Charsets.UTF_8))
             // Even an unusually large metadata capture must not imply that a
             // successful creation failed or that mutable live levels are frozen.
-            return result.copy(output = objectMapper.writeValueAsString(mapOf(
+            return revisedResult.copy(output = objectMapper.writeValueAsString(mapOf(
                 "id" to result.changedStudyId,
                 "voiceLessonTopics" to emptyList<Any>(),
                 "voiceLessonContextReady" to false,

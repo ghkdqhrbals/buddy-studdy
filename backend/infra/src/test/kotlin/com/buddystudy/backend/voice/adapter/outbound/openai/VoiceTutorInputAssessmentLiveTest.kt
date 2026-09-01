@@ -6,12 +6,14 @@ import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvi
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentException
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.service.VoiceTutorInputAssessmentService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
@@ -26,8 +28,50 @@ import java.util.concurrent.TimeUnit
 class VoiceTutorInputAssessmentLiveTest {
     @Test
     @Timeout(value = 30, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SAME_THREAD)
-    fun `production GPT assesses a frozen bounded Korean held out set`() = runBlocking<Unit> {
+    fun `production GPT authorizes one natural new study choice without phrase matching`() = runBlocking<Unit> {
         withTimeout(30_000) {
+            val key = System.getenv("OPENAI_API_KEY_USER")?.takeIf { it.isNotBlank() }
+                ?: throw AssertionError("Opt-in live assessment requires OPENAI_API_KEY_USER.")
+            val properties = BuddyStudyProperties().apply { openai.userContentApiKey = key }
+            val useCase: VoiceTutorInputAssessmentUseCase = VoiceTutorInputAssessmentService(
+                OpenAIVoiceTutorInputAssessmentAdapter(UserContentOpenAIKeyProvider(properties), properties),
+                VoiceTutorInputAssessmentProperties(),
+            )
+            // Match production turn shape: the phone normally submits one final
+            // learner item, and only that positive item needs the independent
+            // creation attestation inside the per-assessment deadline.
+            val created = useCase.assess(VoiceTutorInputAssessmentRequest(
+                userId = SYNTHETIC_USER_ID,
+                language = "ko",
+                teacherContext = "저장된 주제를 찾지 못했습니다. 만들려면 명확한 생성 명령을 다시 말해 주세요.",
+                utterances = listOf(VoiceTutorInputUtterance(
+                    "natural_create", "아니 스프링으로 새롭게 공부하고 싶다고.",
+                )),
+            )).decisions.single()
+            val nonWrites = useCase.assess(VoiceTutorInputAssessmentRequest(
+                userId = SYNTHETIC_USER_ID,
+                language = "ko",
+                teacherContext = "저장된 주제를 찾지 못했습니다. 만들려면 명확한 생성 명령을 다시 말해 주세요.",
+                utterances = listOf(
+                    VoiceTutorInputUtterance("mere_interest", "스프링 공부에 관심 있어."),
+                    VoiceTutorInputUtterance("recommendation", "새롭게 공부할 주제 좀 추천해 줘."),
+                    VoiceTutorInputUtterance("third_party", "친구가 스프링으로 새롭게 공부하고 싶다고 했어."),
+                    VoiceTutorInputUtterance("generic_yes", "네."),
+                ),
+            )).decisions
+
+            assertThat(created.intent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+            assertThat(created.rootStudyCreationRequest?.topic).isEqualTo("스프링")
+            assertThat(created.rootStudyCreationRequest?.difficulty).isEqualTo(5)
+            assertThat(nonWrites)
+                .allMatch { it.intent != VoiceTutorInputIntent.CREATE_ROOT_STUDY }
+        }
+    }
+
+    @Test
+    @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SAME_THREAD)
+    fun `production GPT assesses a frozen bounded Korean held out set`() = runBlocking<Unit> {
+        withTimeout(60_000) {
             // Read the one explicitly supplied credential only after the opt-in
             // condition. Missing configuration is a failure, not a skipped/pass run.
             val key = System.getenv("OPENAI_API_KEY_USER")?.takeIf { it.isNotBlank() }
@@ -37,7 +81,7 @@ class VoiceTutorInputAssessmentLiveTest {
             check(properties.voiceTutor.summaryModel == "gpt-5.4") {
                 "This frozen evaluation requires the existing gpt-5.4 summary model."
             }
-            check(limits.timeoutMilliseconds == 5_000L && limits.maxConcurrentAssessments == 4) {
+            check(limits.timeoutMilliseconds == 10_000L && limits.maxConcurrentAssessments == 4) {
                 "This evaluation requires unchanged production assessment deadline and admission defaults."
             }
             val useCase: VoiceTutorInputAssessmentUseCase = VoiceTutorInputAssessmentService(

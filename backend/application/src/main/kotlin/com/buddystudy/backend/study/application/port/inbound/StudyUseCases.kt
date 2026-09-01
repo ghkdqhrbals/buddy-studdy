@@ -6,6 +6,7 @@ import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
+import com.buddystudy.backend.study.application.model.StudyTopicCreationResponse
 import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsResponse
 import com.buddystudy.backend.study.application.model.QuestionGenerationAcceptedResponse
 import com.buddystudy.backend.study.application.model.QuestionGenerationProcessResponse
@@ -100,6 +101,11 @@ interface StudySyncUseCase {
         parentStudyId: Long,
         command: CreateStudyTopicCommand,
     ): StudyRoomResponse
+    suspend fun createStudyTopicWithOutcome(
+        principal: Principal,
+        parentStudyId: Long,
+        command: CreateStudyTopicCommand,
+    ): StudyTopicCreationResponse
     suspend fun updateStudy(principal: Principal, studyId: Long, command: UpdateStudyCommand): StudyRoomResponse =
         throw UnsupportedOperationException("Metadata-only study updates are not supported.")
     suspend fun deleteStudy(principal: Principal, studyId: Long, expectedStudyIds: List<Long>? = null)

@@ -3,7 +3,7 @@
 Verification date: 2026-09-02. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [learning evidence gate and direct root creation](#learning-evidence-gate-and-direct-root-creation).
+Latest implementation: [natural one-turn study-tree mutations](#natural-one-turn-study-tree-mutations).
 It extends the existing guided saved-tree descent, single-orb,
 Silero/contextual-input, MCP and source-backed summary contracts; it does not
 regrade past answers.
@@ -13,14 +13,82 @@ Source/fixture tests, iPhone tests and actual dev runtime observations are
 recorded separately; none implies a new human microphone-to-tutor conversation
 unless that specific check is explicitly recorded.
 
+## Natural one-turn study-tree mutations
+
+Current acceptance contract on 2026-09-02, branch `feature/2.0`:
+
+- Creation and update intent is decided from meaning through a strict structured
+  GPT assessment followed, only for a proposed write, by an independent semantic
+  attestation. No regex, keyword/phrase list, utterance length, punctuation or
+  sentence-completeness rule may grant or deny a write. The learner's exact final,
+  persisted transcript remains the only speech evidence.
+- Natural first-person wording is sufficient. For example, `아니 스프링으로
+  새롭게 공부하고 싶다고.` authorizes one root named exactly `스프링` at the
+  server default level 5 without another “만들까요?” or “네” turn. Mere interest,
+  a recommendation request, quoted or third-party desire, a bare topic and a
+  generic confirmation do not authorize creation.
+- A clear request for a child under the currently confirmed focus or a clear
+  rename/level change of that focus follows the same one-turn semantic path.
+  Target IDs, lesson revision and focus are frozen by the server, never supplied
+  as authority by the model. Another node must first become the confirmed focus.
+  Destructive deletion remains the deliberate exception: it still requires an
+  exact preview and a fresh spoken confirmation.
+- The server schedules an authorized root/child/update tool call itself with one
+  exact call ID and canonical arguments. A call/account/device/revision-bound
+  one-shot lease is consumed at the write boundary; arbitrary model-authored
+  mutation calls, mismatched output acknowledgements, newer speech, timeout,
+  replay and automatic retry cannot spend or revive it. Root creation additionally
+  requires an exact server-scheduled readback before the tutor may claim success.
+- Normalized duplicate roots and children return the existing stored node with
+  `created=false`; their original casing, level and settings are preserved and no
+  false tree-change event is emitted. A successful update adopts the returned
+  revision/focus; failure to refresh that context clears the old focus rather than
+  asking a stale-level question.
+- Root/child creation, rename, level change and all other management-only speech
+  remain outside the tutor-question/learner-answer evidence gate. Ending such a
+  call creates no learning summary, canonical/public record or translation-stream
+  projection. Those outputs begin only after a durable substantive tutor question
+  and its linked learner answer exist.
+- The assessment provider ceiling is 10 seconds. It adds no fixed wait: ordinary
+  non-write turns return after the first response, while a positive mutation may
+  use a second sequential independent attestation. Admission remains separately
+  bounded to four active assessments and sixteen waiters for at most 1.5 seconds,
+  with no provider retry or regex fallback.
+
+Verification evidence:
+
+- The opt-in production GPT test passed the exact natural Korean root request and
+  rejected four non-writing controls: mere interest, a recommendation request,
+  third-party reported desire and generic `네`. The test made no app session,
+  database write, quota reservation or recording. Its three HTTP decisions
+  (primary plus root attestation, then one batched non-write assessment) completed
+  in 9.064 seconds total using the existing dev user-content secret in memory.
+- Clean full `:application:test` and `:infra:test` runs passed **1,492 tests**:
+  application 566/566 and infrastructure 923 passed plus three opt-in skips, with
+  zero failures or errors. `:tutor:bootJar` also passed. Separate focused mutation,
+  lease/replay, exact-ACK, duplicate/readback and stale-focus tests passed, and two
+  independent code audits found no unresolved P1/P2 issue.
+- The final backend artifact is **331,722,575 bytes**, SHA-256
+  `3d546748384c30da9dbb952399d95f8b3e9cf50e2c2f7f1b466a5735a9fe4627`.
+  No database migration or iOS source change is part of this correction, so an
+  iOS build is not used as substitute verification for this backend-only path.
+- With zero `ACTIVE`/`ENDING` voice sessions, the artifact was atomically copied
+  into the existing app volume and only `backend-backend-1` on localhost port
+  8080 was restarted. Its mounted hash matches the artifact and health returned
+  `UP`. MySQL, Redis, LibreTranslate and backup retained their exact container IDs
+  and start times. The fixed immediate-previous JAR was rotated in place; the
+  short-lived copy helper removed itself and no duplicate backend or infrastructure
+  container was created.
+
 ## Learning evidence gate and direct root creation
 
 Current acceptance contract on 2026-09-02, branch `feature/2.0`:
 
-- A final, persisted learner command such as `Spring을 레벨 7 루트 주제로
-  만들어줘` authorizes the exact `(topic, effective level)` tuple once and calls
-  `create_root_study` immediately. There is no create-preview or `만들까요? ->
-  네` confirmation loop. Exact learner-source evidence must support the command,
+- A final, persisted, semantically clear learner choice such as `Spring을 레벨 7
+  루트 주제로 만들어줘` or `스프링으로 새롭게 공부하고 싶다고` authorizes
+  the exact `(topic, effective level)` tuple once and calls `create_root_study`
+  immediately. There is no create-preview, imperative-grammar requirement or
+  `만들까요? -> 네` confirmation loop. Exact learner-source evidence must support the choice,
   complete topic and explicit level, or level omission; a generic yes, tutor-only
   proposal, strict-subset topic, mismatched level, newer speech, replay or failed
   persistence cannot authorize the write.
@@ -198,11 +266,12 @@ This verifies implementation, installation and process launch, not a new human
 audible microphone-to-tutor conversation.
 
 - [x] A root write is considered only after one final, persisted, meaningful
-  learner turn explicitly requests creation. A topic mention, saved-topic search,
+  learner turn semantically and presently chooses creation. A topic mention, saved-topic search,
   recommendation request, child-topic request, filler or tool text cannot
   authorize it.
-- [x] A final persisted direct learner command calls `create_root_study` once
-  immediately; there is no `confirm=false` preview, “만들까요?” prompt or second
+- [x] A final persisted direct learner choice calls `create_root_study` once
+  immediately; imperative grammar and literal create/save/root words are not
+  required, and there is no `confirm=false` preview, “만들까요?” prompt or second
   contextual-yes turn. The input assessor extracts the exact learner-spoken
   trimmed 1–255 character topic and requested 1–10 level, applying level 5 only
   when the learner omitted one.
@@ -1161,7 +1230,10 @@ The earlier test results remain historical evidence, not the current turn gate.
   meaningful ideas are explicitly valid; uncertainty preserves meaningful input.
 - The application service implements its inbound use case and depends on an
   outbound provider port. Process-wide admission is bounded to four requests,
-  with a five-second total deadline, no waiting queue and no implicit retries.
+  with at most sixteen callers waiting for 1.5 seconds and a ten-second total
+  provider deadline. There are no implicit retries. The deadline is a ceiling,
+  not an added delay: ordinary turns use one response, while a positive saved-
+  study mutation may use a second sequential independent semantic attestation.
   Configurable batch/text bounds are documented in [the backend README](../backend/README.md).
   The authenticated context supplies user identity; callers cannot select a
   different key/account through a provider call ID. Chat Completions uses
@@ -1198,7 +1270,8 @@ The earlier test results remain historical evidence, not the current turn gate.
   filler deletion acknowledgement, checkpoint/tail coalescing, stale worker
   callbacks and terminal failure under outbound backpressure.
 - A separate, explicitly enabled real-GPT test used the production use case,
-  adapter, default model, schema and five-second deadline. Four sequential
+  adapter, default model and schema. At the time of that historical run, the
+  production deadline was five seconds. Four sequential
   requests classified 24 frozen synthetic cases: all 15 meaningful and all nine
   non-communicative cases matched their expected labels. Batch durations were
   4,555 ms, 1,650 ms, 1,662 ms and 1,709 ms (9,583 ms total). No retries or

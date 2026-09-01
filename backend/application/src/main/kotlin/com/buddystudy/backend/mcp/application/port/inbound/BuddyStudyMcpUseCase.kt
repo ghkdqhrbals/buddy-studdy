@@ -16,6 +16,7 @@ import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
+import com.buddystudy.backend.study.application.model.StudyTopicCreationResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
@@ -58,7 +59,7 @@ interface BuddyStudyMcpUseCase {
         principal: Principal,
         parentStudyId: Long,
         command: CreateStudyTopicCommand,
-    ): StudyRoomResponse
+    ): StudyTopicCreationResponse
 
     suspend fun deleteStudy(
         principal: Principal,

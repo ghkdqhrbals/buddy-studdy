@@ -197,6 +197,7 @@ internal class VoiceTutorMcpTurnCoordinator(
             ),
         )
         if (mapper.writeValueAsBytes(event).size > MAX_PROVIDER_EVENT_BYTES) throw VoiceTutorMcpProtocolException()
+        call.expectedOutput = output
         call.acknowledgementDeadline = nowNanos + acknowledgementTimeout.toNanos()
         return event
     }
@@ -209,7 +210,9 @@ internal class VoiceTutorMcpTurnCoordinator(
         if (item.path("type").asText() != "function_call_output") return false
         val callId = item.path("call_id").asText()
         val call = pending[callId] ?: return false
-        if (call.acknowledgementDeadline == null || item.path("id").asText() != call.outputItemId) return false
+        if (call.acknowledgementDeadline == null || item.path("id").asText() != call.outputItemId ||
+            !item.path("output").isTextual || item.path("output").textValue() != call.expectedOutput
+        ) return false
         if (item.has("status") && item.path("status").asText() != "completed") return false
         pending.remove(callId)
         if (pending.isEmpty()) continuationReady = true
@@ -250,6 +253,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         var serverCallReleased: Boolean = false,
         var providerCallAcknowledgementDeadline: Long? = null,
         var started: Boolean = false,
+        var expectedOutput: String? = null,
         var acknowledgementDeadline: Long? = null,
     )
 

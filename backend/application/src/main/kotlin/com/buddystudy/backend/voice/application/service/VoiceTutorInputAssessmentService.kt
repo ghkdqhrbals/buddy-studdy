@@ -200,6 +200,12 @@ class VoiceTutorInputAssessmentService(
                 ) throw failure(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
                 characters += offer.tutorAudioTranscript.length
             }
+            utterance.studyMutationContext?.let { context ->
+                if (!context.isValid()) {
+                    throw failure(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
+                }
+                characters += context.candidates.sumOf { it.topic.length }
+            }
             characters += utterance.transcript.length
             characters += utterance.sameSpeechContext?.length ?: 0
         }

@@ -50,10 +50,15 @@ Accept: application/json, text/event-stream
 It exposes private profile/resume/interests, owned studies, asynchronous question and grading operations, records, feedback, scores, topic statistics, and the read-only Voice Tutor quota/history/result surface. It never accepts a `userId` argument. `create_root_study(topic, difficulty_level=5)` is an owner-scoped, create-only study operation: a normalized matching root is returned unchanged with `created=false`, a matching child conflicts, and a new root uses product defaults without generating a question or consuming question quota. It never selects a voice lesson. Production is disabled unless `MCP_SERVER_ENABLED=true`; connection, tool, privacy, and rollout details are documented in [MCP_SERVER.md](../docs/MCP_SERVER.md).
 
 The server-owned Voice Tutor sideband reuses that operation immediately after a
-final persisted explicit learner command. Semantic input assessment binds the
-exact learner-spoken topic and effective level to a one-shot write lease; a
-generic contextual agreement or mismatched tool arguments cannot create a root,
-and there is no voice preview/confirmation round. A created or existing result is then read with
+final persisted, semantically clear learner choice to begin one named topic as a
+new saved study. Natural first-person wording is sufficient without imperative
+grammar, literal create/save/root words, restatement, or a second confirmation.
+Structured semantic assessment and an independent semantic attestation bind the
+exact learner-spoken topic and effective level to a one-shot write lease; this
+authorization is not decided by regex, keyword lists, length, punctuation or
+sentence completeness. A generic contextual agreement, mere interest,
+recommendation request or mismatched tool arguments cannot create a root, and
+there is no voice preview/confirmation round. A created or existing result is then read with
 `get_study(returned id)` and spoken as a separate lesson offer; only another
 fresh learner agreement followed by `select_voice_study` may establish focus and
 start teaching. A real creation is eligible for the live

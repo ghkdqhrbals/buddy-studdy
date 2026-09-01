@@ -258,7 +258,7 @@ class VoiceTutorServiceTest {
             .contains("distinguish this learner-led exploration from a graded answer")
             .contains("never claim an unanswered question was assessed")
             .contains("do not squeeze a long explanation plus several new questions")
-            .contains("Do not create root studies except from an explicit direct learner command through create_root_study")
+            .contains("Do not create root studies except from a direct operative learner choice to begin one new saved root through create_root_study")
             .contains("submit answers to the standard question workflow")
             .contains("does not prohibit spoken lesson questions or spoken feedback and scores")
             .contains("clearly agree or explicitly ask to start before teaching")
@@ -278,7 +278,9 @@ class VoiceTutorServiceTest {
             .contains("Going deeper means following the learner's actual saved study tree through verified direct-child focus changes")
             .contains("tree depth, a good score or fluent speech never authorizes raising the level")
             .contains("childrenMayBeIncomplete=true")
-            .contains("Only when the learner explicitly asks to add a child topic")
+            .contains("current first-person intent directly and unambiguously chooses one exact child topic")
+            .contains("Imperative grammar and literal add/create words are not required")
+            .contains("do not restate the choice or ask for duplicate confirmation")
             .doesNotContain(
                 "do not automatically traverse its descendants",
                 "Deepen the same topic with why, how",
@@ -297,12 +299,15 @@ class VoiceTutorServiceTest {
     }
 
     @Test
-    fun `voice mutations require explicit scope and fresh delete consent while new levels keep pending questions intact`() = runBlocking<Unit> {
+    fun `voice mutations accept unambiguous natural intent while delete keeps fresh consent`() = runBlocking<Unit> {
         val persistence = FakePersistence(now)
         val instructions = service(persistence).connect(principal, persistence.session.id).instructions
         assertThat(instructions)
-            .contains("use update_study with the exact owned study_id")
-            .contains("only the requested topic and/or difficulty_level (1-10)")
+            .contains("use update_study once in that same turn with the exact owned study_id")
+            .contains("only the chosen topic and/or difficulty_level (1-10)")
+            .contains("Imperative grammar and literal rename/change/update words are not required")
+            .contains("do not restate the choice or ask for duplicate confirmation")
+            .contains("A mere mention, example, recommendation, quoted or third-party wish is not permission")
             .contains("changes the level for the next NEW question")
             .contains("pending or completed question keeps its original title, level")
             .contains("NOT_PREPARED or voiceLessonContextReady=false")
@@ -318,17 +323,19 @@ class VoiceTutorServiceTest {
     }
 
     @Test
-    fun `voice root creation writes on the direct command and keeps separate lesson consent`() =
+    fun `voice root creation writes on a direct natural new study choice and keeps separate lesson consent`() =
         runBlocking<Unit> {
             val persistence = FakePersistence(now)
             val instructions = service(persistence).connect(principal, persistence.session.id).instructions
 
             assertThat(instructions)
-                .contains("direct request to create one new root")
+                .contains("direct choice to begin one new root")
+                .contains("Natural first-person wording")
+                .contains("without literal create/save/root words")
                 .contains("call create_root_study once immediately")
                 .contains("Include difficulty_level only when the learner explicitly requested")
                 .contains("server applies exactly the default level 5")
-                .contains("direct command is already final permission")
+                .contains("direct request is already final permission")
                 .contains("never preview it, ask '만들까요?'/'shall I create it?' or any equivalent confirmation question")
                 .contains("A generic yes")
                 .contains("never authorizes creation")
@@ -603,6 +610,45 @@ class VoiceTutorServiceTest {
         assertThat(summaries.calls).isEqualTo(1)
         assertThat(persistence.completedResult?.summaryMarkdown).isEqualTo("학습 요약")
         assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+    }
+
+    @Test
+    fun `recovery completes mutation-only conversation without invoking the summary provider`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now).apply {
+            session = session.copy(
+                status = VoiceTutorSessionStatus.COMPLETED,
+                resultStatus = VoiceTutorResultStatus.PENDING,
+                connectedAt = now.minusSeconds(30),
+                endedAt = now,
+                finalizedAt = now,
+                chargedSeconds = 30,
+            )
+            awaiting = listOf(session)
+            turns = listOf(
+                VoiceTutorTranscriptTurn(
+                    1, session.id, "mutation-command", VoiceTutorTranscriptRole.USER,
+                    "Spring 주제 이름을 Spring Boot로 바꾸고 레벨을 7로 수정해줘.",
+                    1, now.minusSeconds(2), lessonRevision = 1,
+                ),
+                VoiceTutorTranscriptTurn(
+                    2, session.id, "mutation-acknowledgement", VoiceTutorTranscriptRole.TUTOR,
+                    "Spring Boot, 레벨 7로 수정했습니다.",
+                    2, now.minusSeconds(1), lessonRevision = 2,
+                ),
+            )
+            verifiedLearningExchange = false
+        }
+        val summaries = FakeSummary()
+        val service = service(persistence, summaries = summaries)
+
+        service.recoverPendingResults(10)
+        service.recoverPendingResults(10)
+
+        assertThat(summaries.calls).isZero()
+        assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+        assertThat(persistence.completedResult?.summaryMarkdown).isEmpty()
+        assertThat(persistence.completedResult?.explorations).isEmpty()
+        assertThat(persistence.completedResult?.model).isEqualTo("system")
     }
 
     @Test

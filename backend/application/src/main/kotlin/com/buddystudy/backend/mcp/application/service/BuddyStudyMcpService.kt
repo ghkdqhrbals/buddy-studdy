@@ -111,7 +111,11 @@ class BuddyStudyMcpService(
         principal: Principal,
         parentStudyId: Long,
         command: CreateStudyTopicCommand,
-    ) = studies.createStudyTopic(registered(principal), positiveId(parentStudyId, "parent_study_id"), command)
+    ) = studies.createStudyTopicWithOutcome(
+        registered(principal),
+        positiveId(parentStudyId, "parent_study_id"),
+        command,
+    )
 
     @RequirePermission(Permissions.STUDY_DELETE)
     override suspend fun deleteStudy(

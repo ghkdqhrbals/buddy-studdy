@@ -47,6 +47,24 @@ class VoiceTutorSummaryTranscriptEvidenceTest {
     }
 
     @Test
+    fun `mutation command after a real tutor question is not an answer or summary evidence`() {
+        val turns = listOf(
+            turn(1, VoiceTutorTranscriptRole.TUTOR, "DI의 장점은?", isStudyQuestion = true),
+            turn(
+                2, VoiceTutorTranscriptRole.USER,
+                "Spring 주제 이름을 Spring Boot로 바꾸고 레벨을 7로 수정해줘.",
+            ),
+            turn(3, VoiceTutorTranscriptRole.TUTOR, "Spring Boot, 레벨 7로 수정했습니다.", revision = 2),
+        )
+
+        val result = VoiceTutorSummaryTranscriptEvidence.verified(
+            SESSION, 42, turns, listOf(VoiceTutorLessonFocus(42, 1)),
+        )
+
+        assertThat(result).isEmpty()
+    }
+
+    @Test
     fun `intervening tutor invalidates an old question link while user checkpoint does not`() {
         val checkpointOnly = listOf(
             turn(1, VoiceTutorTranscriptRole.TUTOR, "질문", isStudyQuestion = true),

@@ -420,6 +420,34 @@ class VoiceTutorLessonRevisionPersistenceTest {
     }
 
     @Test
+    fun `natural mutation after a real study question remains setup and never becomes an answer`() = runBlocking<Unit> {
+        database.sql(
+            "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 1, 42, :now)",
+        ).bind("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC)).fetch().rowsUpdated().awaitSingle()
+        assertThat(append("study-question", VoiceTutorTranscriptRole.TUTOR, "DI의 장점은 무엇인가요?", 1, true))
+            .isTrue()
+        assertThat(
+            append(
+                "mutation-command", VoiceTutorTranscriptRole.USER,
+                "Spring 주제 이름을 Spring Boot로 바꾸고 레벨을 7로 수정해줘.", 1,
+            ),
+        ).isTrue()
+        assertThat(
+            append(
+                "mutation-acknowledgement", VoiceTutorTranscriptRole.TUTOR,
+                "Spring Boot, 레벨 7로 수정했습니다.", 2,
+            ),
+        ).isTrue()
+
+        val turns = adapter.transcript(7, "owned", 4_000)
+        assertThat(turns.single { it.providerItemId == "study-question" }.isStudyQuestion).isTrue()
+        assertThat(turns.single { it.providerItemId == "mutation-command" }.studyQuestionTurnId).isNull()
+        assertThat(turns.single { it.providerItemId == "mutation-command" }.askedStudyQuestion).isFalse()
+        assertThat(turns.single { it.providerItemId == "mutation-acknowledgement" }.studyAnswerTurnId).isNull()
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isFalse()
+    }
+
+    @Test
     fun `the latest earlier focus carries forward to later lesson revisions for both learning attestations`(): Unit = runBlocking {
         database.sql(
             "insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 1, 42, :now)",
