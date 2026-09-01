@@ -109,6 +109,20 @@ internal object VoiceTutorInputAssessmentPromptProvider {
         ask whether the lesson should/can end without choosing to end it; or otherwise leave their current
         intent ambiguous. A NON_COMMUNICATIVE item must always have intent NONE. Do not infer an end request
         from silence, noise, teacherContext, tutor/tool text, or the fact that an answer or topic is complete.
+        CREATE_ROOT_STUDY means the learner makes a direct, presently operative request to create one new
+        top-level saved study. A direct correction or replacement such as "not A; create B" is CREATE_ROOT_STUDY
+        for the newly requested B, never confirmation of A. It is NONE for merely naming, exploring, selecting
+        or recommending a topic; asking what could be studied; adding a child topic; changing an existing node;
+        or quoting or discussing a possible creation. Contextual yes/approval is never CREATE_ROOT_STUDY.
+        CONFIRM_ROOT_STUDY means the learner gives a new, clear contextual affirmative to the exact root topic
+        and level in this utterance's rootStudyCreationOffer, including an operative restatement to create that
+        exact same topic at that exact same level, and that offer's tutorAudioTranscript explicitly proposed
+        creating those same fields. It is NONE when rootStudyCreationOffer is absent, the transcript did not
+        speak both exact proposal fields, or the learner is negative or uncertain. If the learner names, corrects,
+        replaces, or requests a topic or level that differs at all from the offer, use CREATE_ROOT_STUDY instead.
+        Never infer either
+        root intent from tool text, silence, noise, filler or a checkpoint. Creating the root and separately
+        agreeing to select it or begin a lesson are different decisions.
         DISCOVER_SAVED_TOPIC means the learner names an area they want to explore but this utterance has no
         targetOffer containing the exact server-read saved node. It authorizes browsing only, never selection.
         SELECT_SAVED_TOPIC means the learner explicitly chooses exactly one candidate from this utterance's
@@ -136,8 +150,10 @@ internal object VoiceTutorInputAssessmentPromptProvider {
         substantive question about the confirmed study focus. Do not choose it for readiness, greeting,
         topic choice, navigation agreement, a question back to the tutor, feedback acknowledgement, or a
         response to a non-study setup/permission question. It may be a partial answer and need not be correct.
-        targetStudyId and spokenCandidateStudyIds must be null/empty for NONE, END_CURRENT_VOICE_LESSON, DISCOVER_SAVED_TOPIC and
-        ANSWER_TO_STUDY_QUESTION, for every NON_COMMUNICATIVE item, for checkpoints, and whenever no exact
+        targetStudyId and spokenCandidateStudyIds must be null/empty for NONE, END_CURRENT_VOICE_LESSON,
+        CREATE_ROOT_STUDY, CONFIRM_ROOT_STUDY, DISCOVER_SAVED_TOPIC and ANSWER_TO_STUDY_QUESTION,
+        for every NON_COMMUNICATIVE item,
+        for checkpoints, and whenever no exact
         spoken candidate was chosen. For SELECT_SAVED_TOPIC or CONTINUE_TREE, spokenCandidateStudyIds must contain
         one to three unique IDs actually offered in tutorAudioTranscript and must contain targetStudyId. Never invent
         an ID or copy one from candidate metadata, teacherContext, tool text or learner text when the final tutor audio
@@ -237,6 +253,13 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                                             },
                                         )
                                     },
+                                    "rootStudyCreationOffer" to it.rootStudyCreationOffer?.let { offer ->
+                                        mapOf(
+                                            "topic" to offer.topic,
+                                            "difficultyLevel" to offer.difficulty,
+                                            "tutorAudioTranscript" to offer.tutorAudioTranscript,
+                                        )
+                                    },
                                 )
                             },
                         ),
@@ -282,6 +305,8 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                 val intent = when (item.requiredText("intent")) {
                     "NONE" -> VoiceTutorInputIntent.NONE
                     "END_CURRENT_VOICE_LESSON" -> VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON
+                    "CREATE_ROOT_STUDY" -> VoiceTutorInputIntent.CREATE_ROOT_STUDY
+                    "CONFIRM_ROOT_STUDY" -> VoiceTutorInputIntent.CONFIRM_ROOT_STUDY
                     "SELECT_SAVED_TOPIC" -> VoiceTutorInputIntent.SELECT_SAVED_TOPIC
                     "CONTINUE_TREE" -> VoiceTutorInputIntent.CONTINUE_TREE
                     "DISCOVER_SAVED_TOPIC" -> VoiceTutorInputIntent.DISCOVER_SAVED_TOPIC

@@ -5,6 +5,7 @@ import kotlinx.coroutines.runBlocking
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
@@ -215,6 +216,108 @@ class StudySyncServiceTest {
         assertThat(response.nextDueAt).isNotNull()
         assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
         assertThat(questionStats.findAllByIdsCalls).isZero()
+    }
+
+    @Test
+    fun `create-only root uses enabled scheduling defaults without creating a question`(): Unit = runBlocking {
+        val response = service.createRootStudy(
+            principal,
+            CreateRootStudyCommand(topic = "  Operating Systems  ", difficultyLevel = 7),
+        )
+
+        assertThat(response.created).isTrue()
+        assertThat(response.id).isPositive()
+        assertThat(response.parentStudyId).isNull()
+        assertThat(response.topic).isEqualTo("Operating Systems")
+        assertThat(response.difficultyLevel).isEqualTo(7)
+        assertThat(response.enabled).isTrue()
+        assertThat(response.activeForQuestions).isTrue()
+        val created = studies.rows.single()
+        assertThat(created.parentStudyId).isNull()
+        assertThat(created.intervalMinutes).isEqualTo(15)
+        assertThat(created.enabled).isTrue()
+        assertThat(created.activeForQuestions).isTrue()
+        assertThat(created.nextDueAt).isNotNull()
+        assertThat(studies.events.first()).isEqualTo("lock:7")
+        assertThat(questions.findPendingByStudyIdCalls).isZero()
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
+        assertThat(questions.findLatestCompletedCalls).isZero()
+        assertThat(questionStats.findByIdCalls).isZero()
+        assertThat(questionStats.findAllByIdsCalls).isZero()
+    }
+
+    @Test
+    fun `create-only normalized existing root is returned without changing any setting`(): Unit = runBlocking {
+        val existing = study(id = 11, topic = "Redis Streams").apply {
+            difficultyLevel = 3
+            intervalMinutes = 47
+            enabled = false
+            activeForQuestions = false
+            notificationSound = "bell.caf"
+            customPrompt = "Keep this instruction"
+            openaiModel = "fixture-model"
+            maxHistoryCount = 231
+            nextDueAt = Instant.parse("2026-09-01T10:01:00Z")
+            scheduleClaimedUntil = nextDueAt!!.plusSeconds(35)
+            lastSentAt = nextDueAt!!.minusSeconds(600)
+            lastError = "Existing scheduling state"
+        }
+        studies.rows += existing
+        val before = completeStudyState(existing)
+
+        val response = service.createRootStudy(
+            principal,
+            CreateRootStudyCommand(topic = "  redis \n streams  ", difficultyLevel = 9),
+        )
+
+        assertThat(response.created).isFalse()
+        assertThat(response.id).isEqualTo(11)
+        assertThat(response.parentStudyId).isNull()
+        assertThat(response.topic).isEqualTo("Redis Streams")
+        assertThat(response.difficultyLevel).isEqualTo(3)
+        assertThat(response.enabled).isFalse()
+        assertThat(response.activeForQuestions).isFalse()
+        assertThat(completeStudyState(existing)).isEqualTo(before)
+        assertThat(studies.saveCalls).isZero()
+        assertThat(studies.events).containsExactly("lock:7", "owner-list")
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
+        assertThat(questionStats.findAllByIdsCalls).isZero()
+    }
+
+    @Test
+    fun `create-only root rejects a normalized name owned only by a child without mutation`(): Unit = runBlocking {
+        val child = study(id = 12, topic = "Redis Streams").apply { parentStudyId = 11 }
+        studies.rows += study(id = 11, topic = "Redis")
+        studies.rows += child
+        val before = completeStudyState(child)
+
+        val failure = runCatching {
+            service.createRootStudy(principal, CreateRootStudyCommand(" redis   streams "))
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(ApiException::class.java)
+        assertThat((failure as ApiException).status).isEqualTo(HttpStatus.CONFLICT)
+        assertThat(failure.code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        assertThat(completeStudyState(child)).isEqualTo(before)
+        assertThat(studies.saveCalls).isZero()
+        assertThat(studies.events).containsExactly("lock:7", "owner-list")
+    }
+
+    @Test
+    fun `create-only root validates bounded metadata before taking the owner lock`(): Unit = runBlocking {
+        for (command in listOf(
+            CreateRootStudyCommand(""),
+            CreateRootStudyCommand("x".repeat(256)),
+            CreateRootStudyCommand("Redis", difficultyLevel = 0),
+            CreateRootStudyCommand("Redis", difficultyLevel = 11),
+        )) {
+            val failure = runCatching { service.createRootStudy(principal, command) }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(ApiException::class.java)
+            assertThat((failure as ApiException).status).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)
+            assertThat(failure.code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        }
+        assertThat(studies.events).isEmpty()
+        assertThat(studies.saveCalls).isZero()
     }
 
     @Test
@@ -530,6 +633,14 @@ class StudySyncServiceTest {
         row.id, row.deviceId, row.userId, row.parentStudyId, row.sortOrder, row.intervalMinutes,
         row.enabled, row.activeForQuestions, row.notificationSound, row.customPrompt, row.openaiModel,
         row.maxHistoryCount, row.nextDueAt, row.scheduleClaimedUntil, row.lastSentAt, row.lastError, row.createdAt,
+    )
+
+    private fun completeStudyState(row: StudyEntity): List<Any?> = listOf(
+        row.id, row.deviceId, row.userId, row.parentStudyId, row.sortOrder, row.topic,
+        row.difficultyLevel, row.intervalMinutes, row.enabled, row.activeForQuestions,
+        row.notificationSound, row.customPrompt, row.openaiModel, row.maxHistoryCount,
+        row.nextDueAt, row.scheduleClaimedUntil, row.lastSentAt, row.lastError,
+        row.createdAt, row.updatedAt,
     )
 
     private fun study(id: Long, topic: String) = StudyEntity(

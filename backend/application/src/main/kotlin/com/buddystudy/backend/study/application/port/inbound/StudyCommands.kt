@@ -11,6 +11,12 @@ data class CreateStudyCommand(
     val maxHistoryCount: Int = 100,
 )
 
+/** Create-only root metadata. Scheduling uses the product defaults and is not model-controlled. */
+data class CreateRootStudyCommand(
+    val topic: String,
+    val difficultyLevel: Int = 5,
+)
+
 data class CreateStudyTopicCommand(
     val topic: String,
     val sortOrder: Int = 0,

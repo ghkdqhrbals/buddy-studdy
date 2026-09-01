@@ -47,7 +47,19 @@ Content-Type: application/json
 Accept: application/json, text/event-stream
 ```
 
-It exposes private profile/resume/interests, owned studies, asynchronous question and grading operations, records, feedback, scores, topic statistics, and the read-only Voice Tutor quota/history/result surface. It never accepts a `userId` argument. Production is disabled unless `MCP_SERVER_ENABLED=true`; connection, tool, privacy, and rollout details are documented in [MCP_SERVER.md](../docs/MCP_SERVER.md).
+It exposes private profile/resume/interests, owned studies, asynchronous question and grading operations, records, feedback, scores, topic statistics, and the read-only Voice Tutor quota/history/result surface. It never accepts a `userId` argument. `create_root_study(topic, difficulty_level=5)` is an owner-scoped, create-only study operation: a normalized matching root is returned unchanged with `created=false`, a matching child conflicts, and a new root uses product defaults without generating a question or consuming question quota. It never selects a voice lesson. Production is disabled unless `MCP_SERVER_ENABLED=true`; connection, tool, privacy, and rollout details are documented in [MCP_SERVER.md](../docs/MCP_SERVER.md).
+
+The server-owned Voice Tutor sideband reuses that operation only after a
+non-writing preview of the exact topic and level and a fresh explicit spoken
+confirmation. A created or existing result is then read with
+`get_study(returned id)` and spoken as a separate lesson offer; only another
+fresh learner agreement followed by `select_voice_study` may establish focus and
+start teaching. A real creation is eligible for the live
+`buddystudy.voice.study.changed` hint. When the call is still valid and that
+sanitized event type, positive study ID, server-owned change kind and bounded
+deleted-ID list are delivered, iOS fetches the exact node through its existing
+study-sync path; tool output and study settings never enter that event. Normal
+sync remains authoritative and `created=false` requests no false change hint.
 
 ## Endpoints
 

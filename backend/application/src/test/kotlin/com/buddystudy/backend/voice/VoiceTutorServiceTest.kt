@@ -258,7 +258,7 @@ class VoiceTutorServiceTest {
             .contains("distinguish this learner-led exploration from a graded answer")
             .contains("never claim an unanswered question was assessed")
             .contains("do not squeeze a long explanation plus several new questions")
-            .contains("Do not create root studies, delete anything except the explicitly confirmed study subtree")
+            .contains("Do not create root studies except through the explicit confirmed create_root_study flow")
             .contains("submit answers to the standard question workflow")
             .contains("does not prohibit spoken lesson questions or spoken feedback and scores")
             .contains("clearly agree or explicitly ask to start before teaching")
@@ -316,6 +316,34 @@ class VoiceTutorServiceTest {
             .contains("Never take the floor while the learner is still speaking")
             .contains("intermediate transcription checkpoints are not a completed user turn")
     }
+
+    @Test
+    fun `voice root creation is a create only preview with fresh confirmation and separate lesson consent`() =
+        runBlocking<Unit> {
+            val persistence = FakePersistence(now)
+            val instructions = service(persistence).connect(principal, persistence.session.id).instructions
+
+            assertThat(instructions)
+                .contains("direct request to create one new root")
+                .contains("call create_root_study with confirm=false")
+                .contains("This preview writes nothing")
+                .contains("speak the exact topic and level")
+                .contains("wait for one NEW explicit affirmative learner reply")
+                .contains("confirm=true with the unchanged topic, level and exact confirmation_token")
+                .contains("operative restatement of that exact same topic and level may confirm it")
+                .contains("If the learner changes either field, including 'not A; create B'")
+                .contains("never consume A's token")
+                .contains("call confirm=false for the newly requested B")
+                .contains("Never read the token aloud")
+                .contains("saved in My Studies but is not yet the lesson focus")
+                .contains("does not by itself start learning")
+                .contains("After created=true, call get_study with the returned id")
+                .contains("ask once whether to start learning it")
+                .contains("wait for a NEW agreement and use select_voice_study")
+                .contains("If created=false, the existing root was preserved unchanged")
+                .contains("Only after select_voice_study returns voiceLessonFocus")
+                .contains("study-tree changes are separate from generating a question and consume no question quota")
+        }
 
     @Test
     fun `failed lesson metadata preparation finalizes the unconnected session without exposing private errors`() = runBlocking<Unit> {
@@ -707,7 +735,7 @@ class VoiceTutorServiceTest {
             .contains("scope=node, limit=3 and view=original")
             .contains("not learning questions, answers, feedback or score evidence")
             .contains("Never retroactively attribute them to a node selected later")
-            .contains("explain the limitation briefly and never pretend to have selected or advanced a topic")
+            .contains("explain the limitation briefly and never pretend to have created, selected or advanced a topic")
             .doesNotContain("with the selectedStudyId", "equal to selectedStudyId")
     }
 

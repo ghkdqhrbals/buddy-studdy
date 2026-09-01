@@ -8,8 +8,10 @@ import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
 import com.buddystudy.backend.mcp.application.model.McpDeletionResponse
+import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
+import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
@@ -64,6 +66,26 @@ class BuddyStudyMcpAdapterTest {
                 .describedAs("openWorldHint for ${contract.name}")
                 .isEqualTo(contract.openWorld)
         }
+    }
+
+    @Test
+    fun `external catalog exposes only the create-only contract for new root creation`() {
+        val tools = adapter().tools().map { it.tool() }
+        val names = tools.map { it.name() }
+
+        assertThat(names).contains("create_root_study")
+        assertThat(names).doesNotContain("create_study")
+        assertThat(names.filter { it.contains("root") && it.contains("create") })
+            .containsExactly("create_root_study")
+
+        val rootCreation = tools.single { it.name() == "create_root_study" }
+        assertThat(rootCreation.title()).isEqualTo("Create a new root study")
+        assertThat(rootCreation.description())
+            .contains("without replacing any existing study settings")
+        val properties = rootCreation.inputSchema()["properties"] as Map<*, *>
+        assertThat(properties.keys).containsExactlyInAnyOrder("topic", "difficulty_level")
+        assertThat(properties.keys)
+            .doesNotContain("interval_minutes", "enabled", "notification_sound", "custom_prompt")
     }
 
     @Test
@@ -266,6 +288,86 @@ class BuddyStudyMcpAdapterTest {
     }
 
     @Test
+    fun `create-only root handler applies only its difficulty default and returns bounded metadata`(): Unit {
+        val forwarded = mutableListOf<List<Any?>>()
+        val adapter = adapter(proxyUseCase { method, arguments ->
+            assertThat(method).isEqualTo("createRootStudy")
+            forwarded += arguments.dropLast(1)
+            val command = arguments[1] as CreateRootStudyCommand
+            RootStudyCreationResponse(
+                created = true,
+                id = 42L,
+                parentStudyId = null,
+                topic = command.topic,
+                difficultyLevel = command.difficultyLevel,
+                enabled = true,
+                activeForQuestions = true,
+            )
+        })
+
+        val defaulted = call(
+            adapter,
+            "create_root_study",
+            mapOf("topic" to "Operating Systems"),
+            authenticatedContext,
+        )
+        val explicit = call(
+            adapter,
+            "create_root_study",
+            mapOf("topic" to "Distributed Systems", "difficulty_level" to 8),
+            authenticatedContext,
+        )
+
+        assertThat(defaulted.isError()).isFalse()
+        assertThat(explicit.isError()).isFalse()
+        assertThat(forwarded).containsExactly(
+            listOf(principal, CreateRootStudyCommand("Operating Systems", 5)),
+            listOf(principal, CreateRootStudyCommand("Distributed Systems", 8)),
+        )
+        val payload = explicit.structuredContent() as Map<*, *>
+        assertThat(payload.keys).containsExactlyInAnyOrder(
+            "created",
+            "id",
+            "parentStudyId",
+            "topic",
+            "difficultyLevel",
+            "enabled",
+            "activeForQuestions",
+        )
+        assertThat(payload["parentStudyId"]).isNull()
+        assertThat(payload["difficultyLevel"]).isEqualTo(8)
+    }
+
+    @Test
+    fun `create-only root schema rejects model-controlled settings and invalid metadata`(): Unit {
+        val schema = adapter().tools().single { it.tool().name() == "create_root_study" }.tool().inputSchema()
+        val validator = McpJsonSchemaValidatorProvider.create()
+        val valid = listOf(
+            mapOf("topic" to "응"),
+            mapOf("topic" to "x".repeat(255), "difficulty_level" to 1),
+            mapOf("topic" to "Redis", "difficulty_level" to 10),
+        )
+        val invalid = listOf(
+            emptyMap(),
+            mapOf("topic" to null),
+            mapOf("topic" to ""),
+            mapOf("topic" to "x".repeat(256)),
+            mapOf("topic" to "Redis", "difficulty_level" to null),
+            mapOf("topic" to "Redis", "difficulty_level" to 3.5),
+            mapOf("topic" to "Redis", "difficulty_level" to 0),
+            mapOf("topic" to "Redis", "difficulty_level" to 11),
+            mapOf("topic" to "Redis", "enabled" to false),
+            mapOf("topic" to "Redis", "parent_study_id" to 42L),
+            mapOf("topic" to "Redis", "custom_prompt" to "Replace it"),
+        )
+
+        valid.forEach { assertThat(validator.validate(schema, it).valid()).isTrue() }
+        invalid.forEach { assertThat(validator.validate(schema, it).valid()).isFalse() }
+        assertThat(errorDetails(call(adapter(), "create_root_study", mapOf("topic" to "Redis"), McpTransportContext.EMPTY)))
+            .containsEntry("code", "PERMISSION_DENIED")
+    }
+
+    @Test
     fun `SDK metadata schema rejects absent null unknown fractional and out of range patches`(): Unit {
         val schema = adapter().tools().single { it.tool().name() == "update_study" }.tool().inputSchema()
         val validator = McpJsonSchemaValidatorProvider.create()
@@ -461,20 +563,15 @@ class BuddyStudyMcpAdapterTest {
             idempotent = true,
         ),
         ToolContract(
-            name = "create_study",
+            name = "create_root_study",
             schema = objectSchema(
                 properties = linkedMapOf(
                     "topic" to stringProperty("Root study topic.", minLength = 1, maxLength = 255),
                     "difficulty_level" to integerProperty("Difficulty from 1 to 10.", 1, 10, 5),
-                    "interval_minutes" to integerProperty("Schedule interval from 1 to 1440 minutes.", 1, 1_440, 15),
-                    "enabled" to booleanProperty("Whether scheduled question delivery is enabled.", true),
-                    "notification_sound" to stringProperty("Optional APNs sound name.", maxLength = 100),
-                    "custom_prompt" to stringProperty("Optional custom question-generation guidance.", maxLength = 4_000),
                 ),
                 required = listOf("topic"),
             ),
             readOnly = false,
-            destructive = true,
             idempotent = true,
         ),
         ToolContract(

@@ -4,11 +4,13 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.model.StudyPageResponse
+import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.toRecordResponse
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
@@ -136,6 +138,50 @@ class StudySyncService(
             activeForQuestions = true,
             scheduleEnabled = command.enabled,
         )
+    }
+
+    @Transactional
+    @RequirePermission(Permissions.STUDY_CREATE)
+    override suspend fun createRootStudy(
+        principal: Principal,
+        command: CreateRootStudyCommand,
+    ): RootStudyCreationResponse {
+        val topic = command.topic.trim()
+        if (topic.isEmpty() || topic.length > 255 || command.difficultyLevel !in 1..10) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Root study topic must contain 1 to 255 characters and difficulty must be between 1 and 10.",
+            )
+        }
+        lockStudyOwner(principal.userId)
+        val topicKey = topic.normalizedStudyTopicKey()
+        val duplicates = studies.findAllByUserId(principal.userId)
+            .filter { it.topic.normalizedStudyTopicKey() == topicKey }
+        duplicates.firstOrNull { it.parentStudyId == null }?.let { existingRoot ->
+            return existingRoot.toRootStudyCreationResponse(created = false)
+        }
+        if (duplicates.isNotEmpty()) {
+            throw ApiException(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.VALIDATION_ERROR,
+                "A study topic with the same name already exists.",
+            )
+        }
+        val created = saveStudy(
+            principal = principal,
+            command = CreateStudyCommand(
+                topic = topic,
+                difficultyLevel = command.difficultyLevel,
+                intervalMinutes = 15,
+                enabled = true,
+            ),
+            parentStudy = null,
+            sortOrder = 0,
+            activeForQuestions = true,
+            scheduleEnabled = true,
+        )
+        return created.toRootStudyCreationResponse(created = true)
     }
 
     @Transactional
@@ -372,6 +418,26 @@ internal suspend fun StudyEntity.toStudyRoomResponse(
         updatedAt = updatedAt,
     )
 }
+
+private fun StudyRoomResponse.toRootStudyCreationResponse(created: Boolean) = RootStudyCreationResponse(
+    created = created,
+    id = id,
+    parentStudyId = null,
+    topic = topic,
+    difficultyLevel = difficultyLevel,
+    enabled = enabled,
+    activeForQuestions = activeForQuestions,
+)
+
+private fun StudyEntity.toRootStudyCreationResponse(created: Boolean) = RootStudyCreationResponse(
+    created = created,
+    id = id,
+    parentStudyId = null,
+    topic = topic,
+    difficultyLevel = difficultyLevel,
+    enabled = enabled,
+    activeForQuestions = activeForQuestions,
+)
 
 private suspend fun StudyEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(
     openaiApiKeyCipher = null,

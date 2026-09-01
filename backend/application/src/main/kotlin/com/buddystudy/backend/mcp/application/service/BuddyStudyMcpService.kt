@@ -17,6 +17,7 @@ import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCas
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.BrowseStudyLearningRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.GetAnswerGradingProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerationProcessUseCase
@@ -100,6 +101,10 @@ class BuddyStudyMcpService(
     @RequirePermission(Permissions.STUDY_CREATE)
     override suspend fun createStudy(principal: Principal, command: CreateStudyCommand) =
         studies.createStudy(registered(principal), command)
+
+    @RequirePermission(Permissions.STUDY_CREATE)
+    override suspend fun createRootStudy(principal: Principal, command: CreateRootStudyCommand) =
+        studies.createRootStudy(registered(principal), command)
 
     @RequirePermission(Permissions.STUDY_CREATE)
     override suspend fun createStudyTopic(

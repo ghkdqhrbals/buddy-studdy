@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice.application.port.outbound
 
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
+import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationPreview
 
 data class VoiceTutorMcpToolDefinition(
     val name: String,
@@ -24,6 +25,8 @@ data class VoiceTutorMcpToolResult(
     val lessonFocusCleared: Boolean = false,
     /** Trusted call-local metadata; never serialized into provider function output. */
     val candidateDiscovery: VoiceTutorCandidateDiscovery? = null,
+    /** Trusted create-only preview metadata; provider JSON cannot mint a confirmation offer. */
+    val rootStudyCreationPreview: VoiceTutorRootStudyCreationPreview? = null,
 )
 
 enum class VoiceTutorCandidateReadKind { LIST_STUDIES, GET_STUDY }

@@ -13,6 +13,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
+import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationOffer
 import com.buddystudy.backend.voice.application.service.VoiceTutorInputAssessmentService
 import com.fasterxml.jackson.databind.JsonNode
 import kotlinx.coroutines.CoroutineStart
@@ -98,7 +99,8 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             .containsExactly("MEANINGFUL", "NON_COMMUNICATIVE")
         assertThat(item.path("properties").path("intent").path("enum").map { it.asText() })
             .containsExactly(
-                "NONE", "END_CURRENT_VOICE_LESSON", "SELECT_SAVED_TOPIC", "CONTINUE_TREE",
+                "NONE", "END_CURRENT_VOICE_LESSON", "CREATE_ROOT_STUDY", "CONFIRM_ROOT_STUDY",
+                "SELECT_SAVED_TOPIC", "CONTINUE_TREE",
                 "DISCOVER_SAVED_TOPIC", "ANSWER_TO_STUDY_QUESTION",
             )
         assertThat(item.path("properties").path("targetStudyId").path("type").asText()).isEqualTo("null")
@@ -159,7 +161,9 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             "direct", "presently operative", "current voice lesson/call", "quote", "hypothetically", "negatively",
             "topic, section, answer, task or example", "tutor/tool text", "SELECT_SAVED_TOPIC", "CONTINUE_TREE",
             "new unanswered study question", "contextual yes", "brief feedback", "before that navigation offer",
-            "ANSWER_TO_STUDY_QUESTION", "substantive question")
+            "ANSWER_TO_STUDY_QUESTION", "substantive question", "CREATE_ROOT_STUDY",
+            "top-level saved study", "CONFIRM_ROOT_STUDY", "not A; create B", "exact same topic",
+            "differs at all from the offer", "separately", "begin a lesson")
         assertThat(instruction).doesNotContain(original, context)
         assertThat(data.path("utterances")[0].path("transcript").asText()).isEqualTo(original)
         assertThat(data.path("teacherContext").asText()).isEqualTo(context)
@@ -231,6 +235,86 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             envelope(decisionsWithIntent("item_1", "NON_COMMUNICATIVE", "END_CURRENT_VOICE_LESSON")),
             VoiceTutorInputAssessmentFailure.INVALID_RESULT,
         )
+    }
+
+    @Test
+    fun `root creation intent is targetless meaningful and never accepted from checkpoints`() {
+        val parsed = VoiceTutorInputAssessmentPromptProvider.parseResponse(
+            request().copy(utterances = listOf(VoiceTutorInputUtterance("item_1", "운영체제를 새 루트로 만들어 줘"))),
+            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CREATE_ROOT_STUDY")),
+        )
+
+        assertThat(parsed.decisions.single().intent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+        assertThat(parsed.decisions.single().targetStudyId).isNull()
+        assertThat(parsed.decisions.single().spokenCandidateStudyIds).isEmpty()
+        assertReason(
+            request(),
+            envelope(decisionsWithIntent("item_1", "NON_COMMUNICATIVE", "CREATE_ROOT_STUDY")),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+        assertReason(
+            request().copy(utterances = listOf(VoiceTutorInputUtterance(
+                "item_1", "운영체제를 새 루트로 만들어 줘", checkpoint = true,
+            ))),
+            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CREATE_ROOT_STUDY")),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+        assertReason(
+            offeredRequest(101, null, null),
+            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CREATE_ROOT_STUDY", 101)),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+    }
+
+    @Test
+    fun `root confirmation is distinct and requires the exact server owned spoken offer`() {
+        val offered = rootOfferedRequest("운영체제를 레벨 6으로 만들어 줘")
+        val parsed = VoiceTutorInputAssessmentPromptProvider.parseResponse(
+            offered,
+            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CONFIRM_ROOT_STUDY")),
+        )
+        assertThat(parsed.decisions.single().intent).isEqualTo(VoiceTutorInputIntent.CONFIRM_ROOT_STUDY)
+
+        val body = mapper.valueToTree<JsonNode>(
+            VoiceTutorInputAssessmentPromptProvider.requestBody(offered, "gpt-5.4"),
+        )
+        val rootOffer = mapper.readTree(body.path("messages")[1].path("content").asText())
+            .path("utterances")[0].path("rootStudyCreationOffer")
+        assertThat(rootOffer.path("topic").asText()).isEqualTo("운영체제")
+        assertThat(rootOffer.path("difficultyLevel").asInt()).isEqualTo(6)
+        assertThat(rootOffer.path("tutorAudioTranscript").asText())
+            .isEqualTo("운영체제를 레벨 6 루트 주제로 만들까요?")
+        assertThat(rootOffer.fieldNames().asSequence().toSet())
+            .containsExactlyInAnyOrder("topic", "difficultyLevel", "tutorAudioTranscript")
+
+        assertReason(
+            request(),
+            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CONFIRM_ROOT_STUDY")),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+        assertReason(
+            offered.copy(utterances = listOf(offered.utterances.single().copy(checkpoint = true))),
+            envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CONFIRM_ROOT_STUDY")),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+        assertReason(
+            offered,
+            envelope(decisionsWithIntent("item_1", "NON_COMMUNICATIVE", "CONFIRM_ROOT_STUDY")),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+    }
+
+    @Test
+    fun `exact offered tuple can confirm while a changed tuple remains a direct create request`() {
+        val exact = rootOfferedRequest("운영체제를 레벨 6으로 만들어 줘")
+        val replacement = rootOfferedRequest("운영체제 말고 Redis를 레벨 8로 만들어 줘")
+
+        assertThat(VoiceTutorInputAssessmentPromptProvider.parseResponse(
+            exact, envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CONFIRM_ROOT_STUDY")),
+        ).decisions.single().intent).isEqualTo(VoiceTutorInputIntent.CONFIRM_ROOT_STUDY)
+        assertThat(VoiceTutorInputAssessmentPromptProvider.parseResponse(
+            replacement, envelope(decisionsWithIntent("item_1", "MEANINGFUL", "CREATE_ROOT_STUDY")),
+        ).decisions.single().intent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
     }
 
     @Test
@@ -523,6 +607,24 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 candidates = candidates,
                 tutorAudioTranscript = tutorAudioTranscript,
                 candidateTraversals = candidates.associate { it.studyId to VoiceTutorStudyTargetTraversal() },
+            ),
+        )),
+    )
+
+    private fun rootOfferedRequest(learnerTranscript: String) = request().copy(
+        teacherContext = "운영체제를 레벨 6 루트 주제로 만들까요?",
+        utterances = listOf(VoiceTutorInputUtterance(
+            itemId = "item_1",
+            transcript = learnerTranscript,
+            rootStudyCreationOffer = VoiceTutorRootStudyCreationOffer(
+                topic = "운영체제",
+                difficulty = 6,
+                lessonRevision = 0,
+                previewResponseGeneration = 2,
+                tutorResponseGeneration = 3,
+                tutorSpeechStoppedOrder = 6,
+                tutorProviderItemId = "root-preview-3",
+                tutorAudioTranscript = "운영체제를 레벨 6 루트 주제로 만들까요?",
             ),
         )),
     )

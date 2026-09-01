@@ -4,7 +4,7 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.backend.learningcontext.application.model.LearningContextPatchCommand
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
-import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -141,33 +141,24 @@ class BuddyStudyMcpAdapter(
                 )
             },
             tool(
-                name = "create_study",
-                title = "Create a root study",
-                description = "Create or update a root study. This never creates a question and never consumes question quota.",
+                name = "create_root_study",
+                title = "Create a new root study",
+                description = "Create a root study without replacing any existing study settings. A normalized matching root is returned unchanged with created=false; a matching child topic is a conflict. The new root uses the normal enabled 15-minute schedule, creates no question, and consumes no question quota.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "topic" to stringProperty("Root study topic.", minLength = 1, maxLength = 255),
                         "difficulty_level" to integerProperty("Difficulty from 1 to 10.", 1, 10, 5),
-                        "interval_minutes" to integerProperty("Schedule interval from 1 to 1440 minutes.", 1, 1440, 15),
-                        "enabled" to booleanProperty("Whether scheduled question delivery is enabled.", true),
-                        "notification_sound" to stringProperty("Optional APNs sound name.", maxLength = 100),
-                        "custom_prompt" to stringProperty("Optional custom question-generation guidance.", maxLength = 4_000),
                     ),
                     required = listOf("topic"),
                 ),
                 readOnly = false,
-                destructive = true,
                 idempotent = true,
             ) { principal, args ->
-                buddyStudy.createStudy(
+                buddyStudy.createRootStudy(
                     principal,
-                    CreateStudyCommand(
+                    CreateRootStudyCommand(
                         topic = args.string("topic"),
                         difficultyLevel = args.int("difficulty_level", 5),
-                        intervalMinutes = args.int("interval_minutes", 15),
-                        enabled = args.boolean("enabled", true),
-                        notificationSound = args.optionalString("notification_sound"),
-                        customPrompt = args.string("custom_prompt", ""),
                     ),
                 )
             },

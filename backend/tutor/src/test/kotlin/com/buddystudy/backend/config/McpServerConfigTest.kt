@@ -183,10 +183,17 @@ class McpServerConfigTest {
         val catalog = BuddyStudyMcpAdapter(useCase, JsonMapperProvider.mapper)
         val fixture = fixture(catalog)
         try {
-            fixture.client.post().uri(BuddyStudyMcpPort.ENDPOINT).mcpHeaders()
+            val responseBody = fixture.client.post().uri(BuddyStudyMcpPort.ENDPOINT).mcpHeaders()
                 .bodyValue("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
                 .exchange().expectStatus().isOk
-                .expectBody().jsonPath("$.result.tools.length()").isEqualTo(catalog.tools().size)
+                .expectBody(String::class.java).returnResult().responseBody
+                ?: error("MCP tools/list returned no body")
+            val names = JsonMapperProvider.mapper.readTree(responseBody)
+                .path("result").path("tools").map { it.path("name").asText() }
+
+            assertThat(names).hasSize(catalog.tools().size)
+            assertThat(names).contains("create_root_study")
+            assertThat(names).doesNotContain("create_study")
         } finally {
             fixture.server.close()
         }

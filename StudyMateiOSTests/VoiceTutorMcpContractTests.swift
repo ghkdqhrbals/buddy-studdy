@@ -101,6 +101,72 @@ final class VoiceTutorMcpContractTests: XCTestCase {
         XCTAssertEqual(original.studyCategories[0].difficulty.level, 3)
     }
 
+    func testNewRootMetadataAppendsAVisibleCategoryWithoutChangingTheActiveSelection() {
+        let original = makeSettings()
+        var root = makeStudy()
+        root.id = 99
+        root.topic = "새 음성 루트"
+        root.difficultyLevel = 8
+        root.customPrompt = "새 루트 전용 안내"
+        root.openAIModel = "gpt-5.4"
+        root.createdAt = Date(timeIntervalSince1970: 123)
+
+        let result = VoiceTutorStudySettingsMetadata.applying(root, to: original)
+
+        XCTAssertEqual(result.studyCategories.map(\.id), ["42", "45", "99"])
+        XCTAssertEqual(result.studyCategories.last, StudyCategory(
+            id: "99",
+            title: "새 음성 루트",
+            difficulty: Difficulty(level: 8),
+            customPrompt: "새 루트 전용 안내",
+            openAIModel: "gpt-5.4",
+            createdAt: Date(timeIntervalSince1970: 123)
+        ))
+        XCTAssertEqual(result.selectedStudyCategoryID, original.selectedStudyCategoryID)
+        XCTAssertEqual(result.topic, original.topic)
+        XCTAssertEqual(result.difficulty, original.difficulty)
+        XCTAssertEqual(result.customPrompt, original.customPrompt)
+        XCTAssertEqual(result.openAIModel, original.openAIModel)
+        XCTAssertEqual(result.intervalMinutes, original.intervalMinutes)
+        XCTAssertEqual(original.studyCategories.map(\.id), ["42", "45"])
+
+        var rooms = StudyRoomStateStore()
+        rooms.replace(with: [root])
+        XCTAssertEqual(
+            StudyRoomDisplayPolicy.rootCategories(from: result.studyCategories, rooms: rooms.rooms).map(\.id),
+            ["99"]
+        )
+    }
+
+    func testNewChildMetadataNeverBecomesARootCategoryOrChangesDraftSettings() {
+        let original = makeSettings()
+        var child = makeStudy()
+        child.id = 99
+        child.parentStudyId = 42
+        child.topic = "새 음성 하위 주제"
+        child.difficultyLevel = 8
+
+        XCTAssertEqual(VoiceTutorStudySettingsMetadata.applying(child, to: original), original)
+    }
+
+    func testMissingSelectedRootCategoryCanBeImportedWithoutReplacingItsDraftTopicOrLevel() {
+        var original = makeSettings()
+        original.selectedStudyCategoryID = "99"
+        original.topic = "작성 중인 기존 주제"
+        original.difficulty = .level9
+        var root = makeStudy()
+        root.id = 99
+        root.topic = "서버의 새 음성 루트"
+        root.difficultyLevel = 2
+
+        let result = VoiceTutorStudySettingsMetadata.applying(root, to: original)
+
+        XCTAssertEqual(result.studyCategories.map(\.id), ["42", "45", "99"])
+        XCTAssertEqual(result.selectedStudyCategoryID, "99")
+        XCTAssertEqual(result.topic, "작성 중인 기존 주제")
+        XCTAssertEqual(result.difficulty, .level9)
+    }
+
     func testServerDeletionDoesNotSwitchActiveDraftSettingsOrDeleteOtherTopics() {
         let original = makeSettings()
         let result = VoiceTutorStudySettingsMetadata.removing(studyIDs: [42, 43], from: original)

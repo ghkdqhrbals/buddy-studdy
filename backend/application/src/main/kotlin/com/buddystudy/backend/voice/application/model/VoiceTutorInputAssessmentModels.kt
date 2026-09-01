@@ -62,12 +62,38 @@ data class VoiceTutorStudyTargetOffer(
     val candidateTraversals: Map<Long, VoiceTutorStudyTargetTraversal> = emptyMap(),
 )
 
+/** Exact create-only preview returned by the server-side voice MCP bridge. */
+data class VoiceTutorRootStudyCreationPreview(
+    val topic: String,
+    val difficulty: Int,
+    val lessonRevision: Long,
+    /** Function-call response generation that prepared the one-shot confirmation ticket. */
+    val previewResponseGeneration: Long,
+)
+
+/**
+ * One server-owned root-creation offer, bound to the exact completed tutor audio immediately
+ * before a learner turn. Provider text and tool arguments cannot create or alter these fields.
+ */
+data class VoiceTutorRootStudyCreationOffer(
+    val topic: String,
+    val difficulty: Int,
+    val lessonRevision: Long,
+    val previewResponseGeneration: Long,
+    val tutorResponseGeneration: Long,
+    val tutorSpeechStoppedOrder: Long,
+    val tutorProviderItemId: String,
+    /** Final provider audio transcript for this exact completed response. */
+    val tutorAudioTranscript: String,
+)
+
 /** Original ASR text. Assessment never normalizes, rewrites or persists this text. */
 data class VoiceTutorInputUtterance(
     val itemId: String,
     val transcript: String,
     val checkpoint: Boolean = false,
     val targetOffer: VoiceTutorStudyTargetOffer? = null,
+    val rootStudyCreationOffer: VoiceTutorRootStudyCreationOffer? = null,
     /**
      * Assessment-only, bounded original ASR from earlier checkpoints in this same continuous
      * speech sequence, followed by [transcript]. Persistence still receives the exact raw event
@@ -96,6 +122,10 @@ enum class VoiceTutorInputDecision { MEANINGFUL, NON_COMMUNICATIVE }
 enum class VoiceTutorInputIntent {
     NONE,
     END_CURRENT_VOICE_LESSON,
+    /** The learner explicitly asks to create one new top-level saved study. */
+    CREATE_ROOT_STUDY,
+    /** The learner contextually affirms the exact immediately preceding root-creation offer. */
+    CONFIRM_ROOT_STUDY,
     /** The learner explicitly names a saved topic they want to enter or switch to. */
     SELECT_SAVED_TOPIC,
     /** The learner explicitly asks to continue deeper from the current saved-tree node. */
@@ -154,7 +184,11 @@ fun VoiceTutorInputAssessmentResult.correlatedTo(
                 val target = decision.targetStudyId
                 when {
                     !spokenValid -> true
-                    utterance.checkpoint -> target != null || targetIntent || spoken.isNotEmpty()
+                    utterance.checkpoint -> target != null || targetIntent || spoken.isNotEmpty() ||
+                        decision.intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY ||
+                        decision.intent == VoiceTutorInputIntent.CONFIRM_ROOT_STUDY
+                    decision.intent == VoiceTutorInputIntent.CONFIRM_ROOT_STUDY &&
+                        utterance.rootStudyCreationOffer == null -> true
                     targetIntent && target == null -> true
                     targetIntent && (spoken.isEmpty() || target !in spoken) -> true
                     !targetIntent && target != null -> true

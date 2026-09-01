@@ -80,6 +80,63 @@ Verification completed so far:
   not a new human audible microphone-to-tutor end-to-end conversation; that last
   behavior still requires an intentional call by the tester.
 
+## Voice root-study creation acceptance checklist
+
+Implementation verified on 2026-09-01 on branch `feature/2.0`:
+
+- Focused root/voice consent tests: **200 passed, zero failures**.
+- Application and infra suites: **1,435 tests, zero failures/errors, two skipped**.
+  The isolated HTTP MCP catalog suite passed **8/8**, and `:tutor:bootJar`
+  succeeded. The built JAR is 331,467,317 bytes with SHA-256
+  `fff71e10fba95dbdba786513b7d84feb24920d65123b4897d11c2e36df39cbdb`.
+- Relevant iOS contract tests passed **48/48**. The required unsigned generic
+  `StudyMateiOS` build and a signed physical-iPhone build succeeded; the app was
+  installed and launched as `io.github.ghkdqhrbals.StudyMate`.
+- With zero active voice sessions, only the existing `backend-backend-1` JAR was
+  atomically replaced on localhost port 8080. Health returned `UP`, the deployed
+  hash matched the built artifact, and MySQL, Redis, LibreTranslate and backup
+  retained their container IDs and start times.
+- A separate all-of-`tutor:test` integration attempt ran 241 tests and exposed
+  eight existing shared-Testcontainers state failures in billing, migration,
+  study API/statistics, OpenAI settings and quota persistence tests. None was in
+  the root/MCP code or its focused suites; the isolated MCP server test passed.
+
+This verifies implementation, installation and process launch, not a new human
+audible microphone-to-tutor conversation.
+
+- [x] A root write is considered only after one final, persisted, meaningful
+  learner turn explicitly requests creation. A topic mention, saved-topic search,
+  recommendation request, child-topic request, filler or tool text cannot
+  authorize it.
+- [x] `create_root_study(confirm=false)` writes nothing. It resolves the exact
+  trimmed 1–255 character topic and the requested 1–10 level, using level 5 only
+  when the learner omitted one, then returns a bounded two-minute confirmation
+  token. The tutor speaks that exact topic and level without reading the token.
+- [x] `confirm=true` accepts only the unchanged preview fields and token after a
+  newer explicit affirmative learner turn. The server binds that turn to the
+  exact completed tutor-audio transcript, provider item, response generation and
+  playback-stop order, then atomically consumes a one-shot lease immediately
+  before the write. A correction such as “not A; create B” supersedes A and
+  requires a new B preview. Expired, consumed, changed, stale-call/account/device,
+  pre-preview, newer-speech and uncertain-write retries fail closed.
+- [x] The common `create_root_study` use case is owner-scoped and create-only. An
+  exact normalized owned root duplicate returns the existing row unchanged with
+  `created=false`; it never adopts the requested level or overwrites scheduling
+  settings. A normalized match on a child is a conflict. A new root uses product
+  defaults, creates no question and consumes no question quota.
+- [x] Neither `created=true` nor `created=false` establishes lesson focus. The
+  tutor reads the returned ID with `get_study`, speaks the exact saved root as a
+  separate start offer, waits for another fresh learner agreement, and calls
+  `select_voice_study`. Teaching starts only after that focus result succeeds.
+- [x] Only a verified new row is eligible for the live
+  `buddystudy.voice.study.changed` refresh hint. While the controller remains
+  valid, its sanitized wire payload carries the type, positive `studyId`,
+  server-owned change kind and a bounded deleted-ID list, never tool output or
+  study settings. iOS uses a delivered creation hint to fetch that exact node
+  through its existing study store. An unchanged duplicate requests no false
+  hint, ordinary study sync remains authoritative, and no answer draft, question
+  record or lesson state is replaced.
+
 ## Guided saved-tree descent
 
 Implementation verified on 2026-09-01, branch `feature/2.0`, commit

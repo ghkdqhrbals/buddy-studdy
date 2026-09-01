@@ -84,6 +84,20 @@ data class StudyRoomResponse(
     val updatedAt: Instant,
 )
 
+/**
+ * Bounded result for create-only root-study operations. Existing root settings are deliberately
+ * omitted so an AI caller cannot mistake a replay for permission to replace them.
+ */
+data class RootStudyCreationResponse(
+    val created: Boolean,
+    val id: Long,
+    val parentStudyId: Long?,
+    val topic: String,
+    val difficultyLevel: Int,
+    val enabled: Boolean,
+    val activeForQuestions: Boolean,
+)
+
 data class StudyTopicSuggestionsResponse(
     val parentStudyId: Long,
     val suggestions: List<String>,

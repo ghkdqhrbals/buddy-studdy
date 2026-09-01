@@ -10,12 +10,14 @@ import com.buddystudy.backend.mcp.application.service.BuddyStudyMcpService
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyGrowthUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCase
+import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.BrowseStudyLearningRecordsUseCase
+import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.GetAnswerGradingProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerationProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
@@ -212,6 +214,36 @@ class BuddyStudyMcpServiceTest {
     }
 
     @Test
+    fun `create-only root delegates bounded metadata without invoking question or record paths`(): Unit = runBlocking {
+        val command = CreateRootStudyCommand(topic = "Operating Systems", difficultyLevel = 7)
+        val response = RootStudyCreationResponse(
+            created = true,
+            id = 42L,
+            parentStudyId = null,
+            topic = "Operating Systems",
+            difficultyLevel = 7,
+            enabled = true,
+            activeForQuestions = true,
+        )
+        Mockito.`when`(studies.createRootStudy(principal, command)).thenReturn(response)
+
+        val result = service.createRootStudy(principal, command)
+
+        assertThat(result).isSameAs(response)
+        Mockito.verify(studies).createRootStudy(principal, command)
+        Mockito.verifyNoMoreInteractions(studies)
+        Mockito.verifyNoInteractions(
+            questionRequests,
+            questionProcesses,
+            gradingProcesses,
+            answers,
+            records,
+            learningRecords,
+            voiceTutor,
+        )
+    }
+
+    @Test
     fun `metadata patch rejects anonymous and invalid targets and preserves owned not found failures`(): Unit = runBlocking {
         val command = UpdateStudyCommand(difficultyLevel = 4)
         val anonymous = runCatching { service.updateStudy(principal.copy(anonymous = true), 42L, command) }.exceptionOrNull() as ApiException
@@ -270,6 +302,7 @@ class BuddyStudyMcpServiceTest {
         }
         assertThat(operations.getValue("deleteStudy")).containsExactly(Permissions.STUDY_DELETE)
         assertThat(operations.getValue("updateStudy")).containsExactly(Permissions.STUDY_UPDATE)
+        assertThat(operations.getValue("createRootStudy")).containsExactly(Permissions.STUDY_CREATE)
         assertThat(operations.getValue("submitAnswer")).containsExactly(Permissions.RECORD_UPDATE)
         assertThat(operations.getValue("getMyContext")).containsExactly(Permissions.PROFILE_READ)
         assertThat(operations.getValue("listStudyLearningRecords"))
@@ -309,6 +342,7 @@ class BuddyStudyMcpServiceTest {
             "getStudy",
             "updateStudy",
             "createStudy",
+            "createRootStudy",
             "createStudyTopic",
             "deleteStudy",
             "listPendingQuestions",

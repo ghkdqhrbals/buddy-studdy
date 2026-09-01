@@ -333,6 +333,39 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
         fixture.assertDraftsUnchanged()
     }
 
+    func testExactVoiceCreatedRootRefreshAddsTheRootWithoutSwitchingOrReplacingDrafts() async throws {
+        let fixture = try VoiceDiscoveryAppFixture()
+        defer { fixture.close() }
+
+        await fixture.appState.refreshVoiceTutorCreatedStudy(studyID: 99, validity: { true })
+
+        XCTAssertEqual(fixture.requests.map { $0.url?.path }, ["/api/v1/studies/99"])
+        XCTAssertEqual(
+            URLComponents(url: try XCTUnwrap(fixture.requests.first?.url), resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "tl" })?.value,
+            "ko"
+        )
+        XCTAssertEqual(fixture.appState.backendStudyRooms.map(\.id), [99])
+        XCTAssertEqual(fixture.appState.settings.studyCategories.map(\.id), ["42", "99"])
+        XCTAssertEqual(fixture.store.loadSettings().studyCategories.map(\.id), ["42", "99"])
+        XCTAssertEqual(fixture.appState.rootStudyCategoriesForDisplay.map(\.id), ["99"])
+        fixture.assertDraftsUnchanged()
+    }
+
+    func testExactVoiceCreatedChildRefreshNeverAddsARootOrReplacesDrafts() async throws {
+        let fixture = try VoiceDiscoveryAppFixture()
+        defer { fixture.close() }
+
+        await fixture.appState.refreshVoiceTutorCreatedStudy(studyID: 100, validity: { true })
+
+        XCTAssertEqual(fixture.requests.map { $0.url?.path }, ["/api/v1/studies/100"])
+        XCTAssertEqual(fixture.appState.backendStudyRooms.map(\.id), [100])
+        XCTAssertEqual(fixture.appState.settings.studyCategories.map(\.id), ["42"])
+        XCTAssertEqual(fixture.store.loadSettings().studyCategories.map(\.id), ["42"])
+        XCTAssertTrue(fixture.appState.rootStudyCategoriesForDisplay.isEmpty)
+        fixture.assertDraftsUnchanged()
+    }
+
     private let focusEventType = "buddystudy.voice.study.focused"
 
     private func focus(id: Int = 42, parent: Int? = nil, topic: String = "합성 주제",
@@ -467,6 +500,10 @@ private final class VoiceDiscoveryAppFixture {
         switch (request.httpMethod, request.url?.path) {
         case ("GET", "/api/v1/studies"):
             body = Self.serverStudyTreeResponse
+        case ("GET", "/api/v1/studies/99"):
+            body = Self.voiceCreatedRootResponse
+        case ("GET", "/api/v1/studies/100"):
+            body = Self.voiceCreatedChildResponse
         case ("POST", "/api/v1/auth/token"):
             body = """
             {"accessToken":"\(registration.accessToken!)","accessTokenExpiresAt":"2100-01-01T00:00:00Z"}
@@ -555,6 +592,44 @@ private final class VoiceDiscoveryAppFixture {
       "limit": 500,
       "offset": 0,
       "serverTime": "2026-09-01T00:00:00Z"
+    }
+    """#
+
+    private static let voiceCreatedRootResponse = #"""
+    {
+      "id": 99,
+      "topic": "새 음성 루트",
+      "parentStudyId": null,
+      "sortOrder": 0,
+      "difficultyLevel": 8,
+      "intervalMinutes": 30,
+      "enabled": true,
+      "activeForQuestions": true,
+      "notificationSound": "default",
+      "customPrompt": "새 루트 전용 안내",
+      "openaiModel": "gpt-5.4",
+      "maxHistoryCount": 100,
+      "createdAt": "2026-09-01T00:00:00Z",
+      "updatedAt": "2026-09-01T00:00:00Z"
+    }
+    """#
+
+    private static let voiceCreatedChildResponse = #"""
+    {
+      "id": 100,
+      "topic": "새 음성 하위 주제",
+      "parentStudyId": 42,
+      "sortOrder": 1,
+      "difficultyLevel": 7,
+      "intervalMinutes": 27,
+      "enabled": true,
+      "activeForQuestions": true,
+      "notificationSound": "default",
+      "customPrompt": "",
+      "openaiModel": "gpt-5.4",
+      "maxHistoryCount": 100,
+      "createdAt": "2026-09-01T00:00:00Z",
+      "updatedAt": "2026-09-01T00:00:00Z"
     }
     """#
 }

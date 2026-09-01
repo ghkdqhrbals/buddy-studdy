@@ -11,12 +11,14 @@ import com.buddystudy.backend.study.application.model.AnswerGradingProcessRespon
 import com.buddystudy.backend.study.application.model.QuestionGenerationAcceptedResponse
 import com.buddystudy.backend.study.application.model.QuestionGenerationProcessResponse
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
+import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
@@ -51,6 +53,7 @@ interface BuddyStudyMcpUseCase {
     suspend fun getStudy(principal: Principal, studyId: Long, language: String): StudyRoomResponse
     suspend fun updateStudy(principal: Principal, studyId: Long, command: UpdateStudyCommand): StudyRoomResponse
     suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
+    suspend fun createRootStudy(principal: Principal, command: CreateRootStudyCommand): RootStudyCreationResponse
     suspend fun createStudyTopic(
         principal: Principal,
         parentStudyId: Long,

@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.application.port.inbound
 
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
+import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
@@ -90,6 +91,10 @@ interface StudySyncUseCase {
     ): StudyPageResponse = throw UnsupportedOperationException("Owned child study pages are not supported.")
     suspend fun study(principal: Principal, studyId: Long, language: String): StudyRoomResponse
     suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
+    suspend fun createRootStudy(
+        principal: Principal,
+        command: CreateRootStudyCommand,
+    ): RootStudyCreationResponse
     suspend fun createStudyTopic(
         principal: Principal,
         parentStudyId: Long,

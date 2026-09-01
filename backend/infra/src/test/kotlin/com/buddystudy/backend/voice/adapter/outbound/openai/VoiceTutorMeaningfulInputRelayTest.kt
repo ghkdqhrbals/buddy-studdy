@@ -13,6 +13,7 @@ import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAsse
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetSingleChildEdge
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
+import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationPreview
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscovery
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateReadKind
@@ -123,6 +124,97 @@ class VoiceTutorMeaningfulInputRelayTest {
             assertThat(boundary.latestAcceptedLearnerIntent).isEqualTo(VoiceTutorInputIntent.NONE)
         }
     }
+
+    @Test
+    fun `persisted root creation intent reaches mutation boundary without inventing a study target`() =
+        fixture().use { f ->
+            f.utterance(1, "create-root", "운영체제를 새 루트로 만들어 줘")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+            val publication = f.publications().single()
+
+            assertThat(f.controller.mutationDialogueBoundary().latestAcceptedLearnerIntent)
+                .isEqualTo(VoiceTutorInputIntent.NONE)
+            f.confirm(publication, persisted = true)
+
+            val boundary = f.controller.mutationDialogueBoundary()
+            assertThat(boundary.latestAcceptedLearnerProviderItemId).isEqualTo("create-root")
+            assertThat(boundary.latestAcceptedLearnerIntent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+            assertThat(boundary.latestAcceptedLearnerTargetStudyId).isNull()
+            assertThat(boundary.latestAcceptedLearnerTargetOfferId).isNull()
+            assertThat(boundary.latestAcceptedLearnerTargetCandidate).isNull()
+            assertThat(boundary.focusAuthorization).isNull()
+
+            f.start(2)
+            val revoked = f.controller.mutationDialogueBoundary()
+            assertThat(revoked.latestAcceptedLearnerProviderItemId).isNull()
+            assertThat(revoked.latestAcceptedLearnerIntent).isEqualTo(VoiceTutorInputIntent.NONE)
+        }
+
+    @Test
+    fun `root preview becomes confirmation authority only after its exact completed spoken offer`() =
+        fixture().use { f ->
+            f.utterance(1, "root-request", "운영체제를 레벨 6 루트로 만들어 줘")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+            f.confirm(f.publications().last(), persisted = true)
+
+            f.finishCurrentResponseWithRootPreview(
+                topic = "운영체제",
+                difficulty = 6,
+                spokenTranscript = "운영체제를 레벨 6 루트 주제로 만들까요?",
+                spokenProviderItemId = "root-preview-message",
+            )
+            f.utterance(2, "root-confirmation", "네, 운영체제를 레벨 6으로 만들어 줘")
+            val assessment = f.assessments().last()
+            val offer = requireNotNull(assessment.utterances.single().rootStudyCreationOffer)
+            assertThat(offer.topic).isEqualTo("운영체제")
+            assertThat(offer.difficulty).isEqualTo(6)
+            assertThat(offer.previewResponseGeneration).isEqualTo(2)
+            assertThat(offer.tutorResponseGeneration).isEqualTo(3)
+            assertThat(offer.tutorProviderItemId).isEqualTo("root-preview-message")
+            assertThat(offer.tutorAudioTranscript)
+                .isEqualTo("운영체제를 레벨 6 루트 주제로 만들까요?")
+
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.CONFIRM_ROOT_STUDY)
+            f.confirm(f.publications().last(), persisted = true)
+            val boundary = f.controller.mutationDialogueBoundary()
+            assertThat(boundary.latestAcceptedLearnerIntent)
+                .isEqualTo(VoiceTutorInputIntent.CONFIRM_ROOT_STUDY)
+            assertThat(boundary.precedingTutorProviderItemId).isEqualTo("root-preview-message")
+            assertThat(boundary.latestAcceptedLearnerRootStudyCreationOffer).isEqualTo(offer)
+            assertThat(boundary.rootStudyConfirmationAuthorization?.isActive()).isTrue()
+
+            f.start(3)
+            assertThat(boundary.rootStudyConfirmationAuthorization?.isActive()).isFalse()
+            assertThat(f.controller.mutationDialogueBoundary().latestAcceptedLearnerIntent)
+                .isEqualTo(VoiceTutorInputIntent.NONE)
+        }
+
+    @Test
+    fun `unrelated spoken response is assessable evidence but cannot mint confirmed root authority`() =
+        fixture().use { f ->
+            f.utterance(1, "root-request", "운영체제를 레벨 6 루트로 만들어 줘")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+            f.confirm(f.publications().last(), persisted = true)
+
+            f.finishCurrentResponseWithRootPreview(
+                topic = "운영체제",
+                difficulty = 6,
+                spokenTranscript = "잠시만 기다려 주세요.",
+                spokenProviderItemId = "unrelated-message",
+            )
+            f.utterance(2, "generic-yes", "네")
+
+            val assessmentOffer = f.assessments().last().utterances.single().rootStudyCreationOffer
+            assertThat(assessmentOffer?.topic).isEqualTo("운영체제")
+            assertThat(assessmentOffer?.difficulty).isEqualTo(6)
+            assertThat(assessmentOffer?.tutorAudioTranscript).isEqualTo("잠시만 기다려 주세요.")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            f.confirm(f.publications().last(), persisted = true)
+            val boundary = f.controller.mutationDialogueBoundary()
+            assertThat(boundary.latestAcceptedLearnerIntent).isEqualTo(VoiceTutorInputIntent.NONE)
+            assertThat(boundary.latestAcceptedLearnerRootStudyCreationOffer).isNull()
+            assertThat(boundary.rootStudyConfirmationAuthorization).isNull()
+        }
 
     @Test
     fun `a newer speech generation prevents a late persistence ack from resurrecting focus authority`() =
@@ -1826,6 +1918,48 @@ class VoiceTutorMeaningfulInputRelayTest {
                 ),
             )).isTrue()
             acknowledgeLatestToolOutput()
+        }
+        fun finishCurrentResponseWithRootPreview(
+            topic: String,
+            difficulty: Int,
+            spokenTranscript: String,
+            spokenProviderItemId: String,
+        ) {
+            syntheticToolSequence += 1
+            val suffix = syntheticToolSequence
+            val toolResponseToken = responses().last().path("event_id").asText()
+            val toolResponseId = "root-preview-tool-$suffix"
+            val callId = "root-preview-call-$suffix"
+            val previewGeneration = controller.mutationDialogueBoundary().responseGeneration
+            controller.observeProviderEvent(response("response.created", toolResponseId, toolResponseToken))
+            controller.observeProviderEvent(responseWithOutput(
+                "response.done",
+                toolResponseId,
+                toolResponseToken,
+                listOf(mapOf(
+                    "type" to "function_call",
+                    "status" to "completed",
+                    "call_id" to callId,
+                    "name" to "create_root_study",
+                    "arguments" to "{\"topic\":\"$topic\",\"difficulty_level\":$difficulty,\"confirm\":false}",
+                )),
+            ))
+            assertThat(controller.beginToolExecution(callId)).isTrue()
+            assertThat(controller.completeToolExecution(
+                callId,
+                VoiceTutorMcpToolResult(
+                    output = "{\"created\":false,\"requiresConfirmation\":true}",
+                    isError = false,
+                    rootStudyCreationPreview = VoiceTutorRootStudyCreationPreview(
+                        topic = topic,
+                        difficulty = difficulty,
+                        lessonRevision = 0,
+                        previewResponseGeneration = previewGeneration,
+                    ),
+                ),
+            )).isTrue()
+            acknowledgeLatestToolOutput()
+            finishCurrentSpokenOffer(spokenTranscript, spokenProviderItemId)
         }
         private fun acknowledgeLatestToolOutput() {
             val outputItem = controls.map(mapper::readTree)

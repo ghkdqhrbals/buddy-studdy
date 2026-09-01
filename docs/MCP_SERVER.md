@@ -90,14 +90,17 @@ arguments or tool results.
 
 An enabled MCP HTTP endpoint does not itself teach the voice model its tools.
 For an authenticated WebRTC call, the backend registers the existing
-`list_studies`, `get_study`, `create_study_topic`, `list_records`, `get_record`,
+`list_studies`, `get_study`, `create_root_study`, `create_study_topic`,
+`update_study`, `delete_study`, `list_records`, `get_record`,
 `list_study_learning_records`, `get_voice_learning_record`, `get_topic_stats`,
-and `get_study_growth` definitions as nine Realtime function tools.
-The server's local `McpVoiceTutorToolAdapter` executes those same MCP handlers
-with the captured, revalidated principal and returns a bounded
-`function_call_output`; the model receives neither an app bearer nor a new MCP
-access token. This local bridge does not enable the external HTTP endpoint or
-change its production rollout gate.
+and `get_study_growth` definitions as twelve Realtime function tools, plus the
+voice-only `select_voice_study` and `advance_voice_study` focus functions.
+The server's local `McpVoiceTutorToolAdapter` reuses the existing MCP handlers
+for the twelve shared tools, owns the two voice-only focus functions, and returns
+a bounded `function_call_output` with the captured, revalidated principal; the
+model receives neither an app bearer nor a new MCP access token. This local
+bridge does not enable the external HTTP endpoint or change its production
+rollout gate.
 
 - `list_studies` optionally accepts `parent_study_id` to page only the direct
   children of an owned parent. Missing/foreign parents are indistinguishable
@@ -113,11 +116,21 @@ change its production rollout gate.
   Active call/device authorization is rechecked across suspended reads before
   returning private history. This additional call-tree restriction applies to
   these two tools; general MCP reads remain owner-scoped.
+- Root creation requires a persisted direct learner request, then a non-writing
+  preview of the exact trimmed topic and requested 1–10 level (default 5 only
+  when omitted). The tutor must speak that preview and receive a newer explicit
+  affirmative turn before the short-lived call/account/device-bound token can
+  be consumed. The owner-scoped common write is create-only: a normalized exact
+  root duplicate is returned unchanged, while a matching child conflicts. It
+  never generates a question or consumes question quota, and its result never
+  selects or starts a lesson. The tutor must call `get_study` with the returned
+  ID, speak that exact saved root as a separate start offer, receive fresh consent
+  and then call `select_voice_study`.
 - Child creation requires an explicit learner request and an unambiguous parent
   inside the call's selected study subtree. Schema validation, active identity,
   parent scope and the existing use-case permissions are all enforced before
-  the write. Root creation, deletion, question requests, answer submission,
-  profile writes and call/recording control are not voice tools.
+  the write. Question requests, answer submission, profile writes and
+  call/recording control are not voice tools.
 - Function calls are correlated to a completed response and executed serially
   off the provider receive loop. IDs are registered before execution, output
   acknowledgement gates the spoken continuation, and timeouts never blindly
@@ -169,7 +182,8 @@ receive. Never put it in prompts, logs, repository files, or browser code.
 | `update_my_learning_context` | Write | `profile:update` | Omitted fields are preserved; empty values clear |
 | `list_studies` | Read | `study:read` | Bounded `limit`/`offset` page |
 | `get_study` | Read | `study:read` | Owned node plus pending/latest question |
-| `create_study` | Write | `study:create` | Root only; consumes no question quota |
+| `update_study` | Write | `study:update` | Owner-scoped topic/level patch; omitted metadata stays unchanged |
+| `create_root_study` | Write | `study:create` | Owner-scoped create-only root; default level 5; normalized existing root is returned unchanged; no question quota |
 | `create_study_topic` | Write | `study:create` | Descendant only; consumes no question quota |
 | `delete_study` | Destructive | `study:delete` | Requires `confirm=true`; deletes descendants |
 | `list_pending_questions` | Read | `record:read` | Bounded active-question page |
@@ -191,6 +205,12 @@ Tool errors use MCP `isError=true` with structured `code`, HTTP-style `status`,
 and a safe message. Business and validation failures are exposed without stack
 traces. Unexpected exceptions produce a generic internal error and logs contain
 only the operation name and exception type, never tool arguments.
+
+The legacy application/REST root settings upsert remains available to the iOS
+sync flow, but it is intentionally not published as an MCP tool. External AI
+clients have exactly one root-creation contract, `create_root_study`, so a new
+root request cannot accidentally select an upsert that overwrites scheduling or
+prompt settings.
 
 ### Learning-history arguments and results
 
@@ -315,6 +335,29 @@ read or mutate an answer draft. The session/quota read use case may settle a
 stale/expired session and lazily advance an overdue quota period before returning
 the authoritative snapshot. That housekeeping is owner-scoped and does not let
 MCP explicitly end, extend, or stream a live session.
+
+Create-only root study:
+
+```text
+create_root_study(topic, difficulty_level=5)
+  -> authenticate the registered owner and take the owner mutation lock
+  -> return the normalized matching owned root unchanged with created=false
+     OR create one root with product defaults and created=true
+  -> never create a question, consume question quota, or replace existing settings
+```
+
+The external HTTP MCP tool performs that create-only operation directly. During
+a live voice call, the server-side bridge adds a separate `confirm=false`
+preview and fresh-spoken-confirmation gate before invoking it. Either
+`created=true` or `created=false` remains only a saved-study result; lesson focus
+still requires `get_study(returned id)`, a spoken start offer, a new learner
+agreement and `select_voice_study`. Only a real new row is eligible for the
+existing live `buddystudy.voice.study.changed` hint. Its sanitized wire payload
+contains only the event type, positive study ID, server-owned change kind and a
+bounded deleted-ID list (empty for creation); it never forwards tool output,
+topic text, levels, prompts or credentials. If the call is still valid and the
+hint is delivered, iOS fetches that exact node. Normal study sync remains
+authoritative, and `created=false` requests no false refresh hint.
 
 Study deletion:
 

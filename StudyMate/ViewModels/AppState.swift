@@ -149,17 +149,38 @@ struct VoiceTutorStudyMetadataFence {
 enum VoiceTutorStudySettingsMetadata {
     static func applying(_ study: BackendStudyRoom, to settings: StudySettings) -> StudySettings {
         var result = settings
-        result.studyCategories = settings.studyCategories.map { category in
-            guard category.id == String(study.id) else { return category }
-            var updated = category
+        let categoryID = String(study.id)
+        if let categoryIndex = settings.studyCategories.firstIndex(where: { $0.id == categoryID }) {
+            var updated = settings.studyCategories[categoryIndex]
             updated.title = study.topic
             updated.difficulty = Difficulty(level: study.difficultyLevel)
-            return updated
+            result.studyCategories[categoryIndex] = updated
+
+            if settings.selectedStudyCategoryID == categoryID {
+                result.topic = study.topic
+                result.difficulty = Difficulty(level: study.difficultyLevel)
+            }
+            return result
         }
-        if settings.selectedStudyCategoryID == String(study.id) {
-            result.topic = study.topic
-            result.difficulty = Difficulty(level: study.difficultyLevel)
-        }
+
+        // A confirmed voice-side creation is refreshed from the exact owned
+        // node before it reaches local settings. Import only a newly observed
+        // root into the root-category index; children remain tree nodes. Do not
+        // select the new root or replace the active question's topic/level.
+        let topic = study.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard study.id > 0, study.parentStudyId == nil,
+              !topic.isEmpty, topic.utf16.count <= 255,
+              (1...10).contains(study.difficultyLevel) else { return result }
+        result.studyCategories.append(
+            StudyCategory(
+                id: categoryID,
+                title: topic,
+                difficulty: Difficulty(level: study.difficultyLevel),
+                customPrompt: study.customPrompt,
+                openAIModel: study.openAIModel,
+                createdAt: study.createdAt
+            )
+        )
         return result
     }
 
