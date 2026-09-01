@@ -95,10 +95,10 @@ class VoiceTutorControlWebSocketHandlerTest {
     }
 
     @Test
-    fun `provider cleared event stays failed when terminal send wins before receive throws`() {
+    fun `fatal provider error stays failed when terminal send wins before receive throws`() {
         withControlLogs { logs ->
             val result = runControlScenario(
-                providerEventBeforeCompletion = """{"type":"output_audio_buffer.cleared","response_id":"private-provider-response"}""",
+                providerEventBeforeCompletion = """{"type":"error","error":{"type":"authentication_error","code":"invalid_api_key","message":"private-provider-response"}}""",
                 provider = { _, _ -> },
             )
 
@@ -222,10 +222,10 @@ class VoiceTutorControlWebSocketHandlerTest {
     }
 
     @Test
-    fun `a client end triggered by a provider error notification cannot overwrite that earlier error`() {
+    fun `a client end triggered by a fatal provider error notification cannot overwrite that earlier error`() {
         withControlLogs { logs ->
             val result = runControlScenario(
-                providerEventBeforeCompletion = """{"type":"output_audio_buffer.cleared","response_id":"private-error-response"}""",
+                providerEventBeforeCompletion = """{"type":"error","error":{"type":"authentication_error","code":"invalid_api_key","message":"private-error-response"}}""",
                 clientEndsOnProviderError = true,
                 provider = { _, _ -> },
             )

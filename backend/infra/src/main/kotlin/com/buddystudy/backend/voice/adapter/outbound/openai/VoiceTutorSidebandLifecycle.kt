@@ -29,6 +29,7 @@ internal data class VoiceTutorSidebandTermination(
     val elapsedMs: Long,
     val providerEventCounts: Map<String, Long>,
     val clientEventCounts: Map<String, Long>,
+    val providerTurnFailureCounts: Map<String, Long>,
     val errorType: String?,
 )
 
@@ -45,6 +46,8 @@ internal class VoiceTutorSidebandDiagnostics(
     private var localTerminal: VoiceTutorRelayTermination? = null
     private val providerEventCounts = linkedMapOf<String, Long>()
     private val clientEventCounts = linkedMapOf<String, Long>()
+    private val providerTurnFailureCounts = linkedMapOf<String, Long>()
+    private var providerTurnFailureLogCount = 0
 
     @Synchronized
     fun observeProviderEvent(raw: String) {
@@ -54,6 +57,39 @@ internal class VoiceTutorSidebandDiagnostics(
     @Synchronized
     fun observeClientEvent(raw: String) {
         countEvent(raw, CLIENT_EVENT_TYPES, clientEventCounts)
+    }
+
+    @Synchronized
+    fun observeProviderTurnFailure(diagnostic: VoiceTutorProviderTurnFailureDiagnostic) {
+        val key = listOf(
+            diagnostic.kind.diagnosticValue,
+            diagnostic.providerErrorType,
+            diagnostic.providerErrorCode,
+            diagnostic.eventCorrelation.diagnosticValue,
+            diagnostic.action.diagnosticValue,
+        ).joinToString(":")
+        val boundedKey = if (key in providerTurnFailureCounts || providerTurnFailureCounts.size < MAX_FAILURE_KEYS) {
+            key
+        } else {
+            "other"
+        }
+        val count = providerTurnFailureCounts[boundedKey] ?: 0
+        if (count < Long.MAX_VALUE) providerTurnFailureCounts[boundedKey] = count + 1
+        if (providerTurnFailureLogCount < MAX_FAILURE_LOGS) {
+            providerTurnFailureLogCount += 1
+            sidebandLogger.info(
+                "voice_tutor_provider_turn_failure callRef={} kind={} providerType={} providerCode={} " +
+                    "eventCorrelation={} causedEventRef={} attempt={} action={}",
+                callRef,
+                diagnostic.kind.diagnosticValue,
+                diagnostic.providerErrorType,
+                diagnostic.providerErrorCode,
+                diagnostic.eventCorrelation.diagnosticValue,
+                diagnostic.causedEventRef,
+                diagnostic.attempt,
+                diagnostic.action.diagnosticValue,
+            )
+        }
     }
 
     @Synchronized
@@ -81,6 +117,7 @@ internal class VoiceTutorSidebandDiagnostics(
         elapsedMs = ((nanoTime() - startedAt) / 1_000_000).coerceAtLeast(0),
         providerEventCounts = providerEventCounts.toMap(),
         clientEventCounts = clientEventCounts.toMap(),
+        providerTurnFailureCounts = providerTurnFailureCounts.toMap(),
         errorType = error?.javaClass?.simpleName,
     )
 
@@ -98,6 +135,8 @@ internal class VoiceTutorSidebandDiagnostics(
     }
 
     private companion object {
+        const val MAX_FAILURE_KEYS = 16
+        const val MAX_FAILURE_LOGS = 32
         val PROVIDER_EVENT_TYPES = setOf(
             "session.created", "session.updated",
             "response.created", "response.done",
@@ -200,7 +239,8 @@ private val sidebandLogger = LoggerFactory.getLogger(
 
 private fun logSidebandTermination(termination: VoiceTutorSidebandTermination) {
     val format = "voice_tutor_sideband_terminated callRef={} branch={} signal={} closeCode={} expectedTerminal={} " +
-        "cancelActiveResponse={} elapsedMs={} providerEventCounts={} clientEventCounts={} errorType={}"
+        "cancelActiveResponse={} elapsedMs={} providerEventCounts={} clientEventCounts={} " +
+        "providerTurnFailureCounts={} errorType={}"
     val fields = arrayOf(
         termination.callRef,
         termination.branch,
@@ -211,6 +251,7 @@ private fun logSidebandTermination(termination: VoiceTutorSidebandTermination) {
         termination.elapsedMs,
         JsonMapperProvider.mapper.writeValueAsString(termination.providerEventCounts),
         JsonMapperProvider.mapper.writeValueAsString(termination.clientEventCounts),
+        JsonMapperProvider.mapper.writeValueAsString(termination.providerTurnFailureCounts),
         termination.errorType ?: "none",
     )
     if (termination.signal == VoiceTutorSidebandSignal.ERROR ||

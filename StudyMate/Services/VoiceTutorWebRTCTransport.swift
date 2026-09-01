@@ -658,6 +658,13 @@ struct VoiceTutorLocalPlayoutTailState: Equatable {
         return token
     }
 
+    @discardableResult
+    mutating func abandonResponse(_ responseID: String) -> Bool {
+        guard !responseID.isEmpty, activeResponseID == responseID else { return false }
+        invalidate()
+        return true
+    }
+
     /// Returns nil when the exact generation is drained, superseded, or its
     /// bounded fallback has elapsed. A positive value is safe to sleep/poll.
     func remainingWait(
@@ -918,6 +925,16 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         )
         diagnosticLock.unlock()
         return token
+    }
+
+    /// Invalidates only response-attribution state. The continuous WebRTC
+    /// output track remains connected and is never muted, cleared, or stopped.
+    @discardableResult
+    func abandonLocalPlayoutResponse(responseID: String) -> Bool {
+        diagnosticLock.lock()
+        let abandoned = localPlayoutTailState.abandonResponse(responseID)
+        diagnosticLock.unlock()
+        return abandoned
     }
 
     /// Keeps native playout alive for an exact, already server-completed response.

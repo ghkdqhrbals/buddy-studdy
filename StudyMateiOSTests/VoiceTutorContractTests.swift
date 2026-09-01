@@ -579,6 +579,24 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertNotEqual(event, .serviceError(code: nil, message: "", retryable: true))
     }
 
+    func testProviderTurnAbandonmentCarriesOnlyTheExactBoundedResponseID() throws {
+        let abandoned = try VoiceTutorRealtimeEventParser.parse(
+            text: #"{"type":"buddystudy.voice.input.retry","abandonedResponseId":"resp_1-a"}"#
+        )
+        XCTAssertEqual(abandoned, .providerTurnAbandoned(responseID: "resp_1-a"))
+
+        let malformed = try VoiceTutorRealtimeEventParser.parse(
+            text: #"{"type":"buddystudy.voice.input.retry","abandonedResponseId":"response id with spaces"}"#
+        )
+        XCTAssertEqual(malformed, .inputRetry, "Malformed metadata must not clear any active tutor response")
+
+        let oversizedID = String(repeating: "r", count: 192)
+        let oversized = try VoiceTutorRealtimeEventParser.parse(
+            text: #"{"type":"buddystudy.voice.input.retry","abandonedResponseId":"\#(oversizedID)"}"#
+        )
+        XCTAssertEqual(oversized, .inputRetry)
+    }
+
     func testInputRetryKeepsCompactCallLiveAndDoesNotOverrideTutorSpeechOrMute() {
         let strings = AppStrings(language: .korean)
         var call = VoiceTutorCallPresentation(
@@ -642,6 +660,23 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(state.assistantResponseActive)
     }
 
+    func testProviderTurnAbandonmentClearsOnlyTheExactResponseAndPreservesLearnerSpeech() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.responseStarted(responseID: "response-current", isTutorIntervention: true)
+        state.userSpeechStarted()
+
+        XCTAssertFalse(state.abandonResponse(responseID: "response-stale"))
+        XCTAssertTrue(state.assistantResponseActive)
+        XCTAssertTrue(state.tutorInterventionActive)
+        XCTAssertTrue(state.isUserSpeaking)
+
+        XCTAssertTrue(state.abandonResponse(responseID: "response-current"))
+        XCTAssertFalse(state.assistantResponseActive)
+        XCTAssertNil(state.activeResponseID)
+        XCTAssertFalse(state.tutorInterventionActive)
+        XCTAssertTrue(state.isUserSpeaking, "Abandoning a failed tutor turn must not discard live learner speech")
+    }
+
     func testAssistantEventsMustMatchTheServerOwnedResponseGeneration() {
         var state = VoiceTutorDuplexPlaybackState()
         XCTAssertTrue(state.responseStarted(responseID: "response-new", isTutorIntervention: false))
@@ -690,6 +725,25 @@ final class VoiceTutorContractTests: XCTestCase {
             XCTAssertNil(state.markResponseDone("response-1"))
             XCTAssertNil(state.markOutputBufferStopped("response-1"))
         }
+    }
+
+    func testProviderTurnAbandonmentInvalidatesOnlyExactWebRTCAttributionState() {
+        var response = VoiceTutorWebRTCResponseState()
+        response.responseStarted("response-current")
+        response.markOutputBufferStarted("response-current")
+        XCTAssertFalse(response.abandonResponse("response-stale"))
+        XCTAssertTrue(response.mayIndicateSpeaking)
+        XCTAssertTrue(response.abandonResponse("response-current"))
+        XCTAssertNil(response.responseID)
+        XCTAssertFalse(response.mayIndicateSpeaking)
+
+        var playout = VoiceTutorLocalPlayoutTailState()
+        playout.responseStarted("response-current")
+        XCTAssertFalse(playout.abandonResponse("response-stale"))
+        XCTAssertEqual(playout.activeResponseID, "response-current")
+        XCTAssertTrue(playout.abandonResponse("response-current"))
+        XCTAssertNil(playout.activeResponseID)
+        XCTAssertNil(playout.sealedToken)
     }
 
     func testSpokenEndLocalPlayoutTailIsBoundToTheExactCompletedResponseGeneration() throws {
@@ -1356,6 +1410,38 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
+    func testCompactVoiceCallDistinguishesProviderFailureFromNetworkDisconnection() {
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            let provider = VoiceTutorCallPresentation(phase: .failed, failureCause: .provider)
+            XCTAssertFalse(provider.showsConnectionFailure(strings, errorMessage: strings.serviceTemporarilyUnavailable))
+            XCTAssertEqual(provider.statusText(strings), strings.voiceTutorProviderCallFailed)
+            XCTAssertEqual(
+                provider.supplementaryError(strings, errorMessage: strings.serviceTemporarilyUnavailable),
+                strings.serviceTemporarilyUnavailable
+            )
+
+            let connection = VoiceTutorCallPresentation(phase: .failed, failureCause: .connection)
+            XCTAssertTrue(connection.showsConnectionFailure(strings, errorMessage: strings.voiceTutorConnectionFailed))
+            XCTAssertEqual(connection.statusText(strings), strings.voiceTutorCallFailed)
+            XCTAssertNil(connection.supplementaryError(strings, errorMessage: strings.voiceTutorConnectionFailed))
+
+            for cause in [
+                VoiceTutorFailureCause.microphone, .audio, .localControl, .service, .unknown
+            ] {
+                let stopped = VoiceTutorCallPresentation(phase: .failed, failureCause: cause)
+                XCTAssertFalse(stopped.showsConnectionFailure(strings, errorMessage: nil))
+                XCTAssertEqual(stopped.statusText(strings), strings.voiceTutorCallEnded)
+            }
+        }
+    }
+
+    func testProviderFailureLabelIsLocalized() {
+        XCTAssertEqual(AppStrings(language: .korean).voiceTutorProviderCallFailed, "AI 응답 중단됨")
+        XCTAssertEqual(AppStrings(language: .english).voiceTutorProviderCallFailed, "AI response stopped")
+        XCTAssertEqual(AppStrings(language: .japanese).voiceTutorProviderCallFailed, "AIの応答が中断されました")
+    }
+
     func testCompactVoiceCallSummaryStatesDistinguishPendingFailedReadyAndAbsentContent() throws {
         typealias State = VoiceTutorCallPresentation.SummaryState
         let content: [String: Any] = ["status": "COMPLETED", "summaryMarkdown": "합성 요약"]
@@ -1523,135 +1609,117 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(state.shouldAutoScrollForContentChange)
     }
 
-    func testSingleOrbTranscriptGestureRequiresAnIntentionalVerticalSwipe() {
-        typealias Gesture = VoiceTutorCallTranscriptGesture
+    func testTranscriptSheetUsesConventionalDirectionsAndIntentionalTravel() {
+        typealias Interaction = VoiceTutorTranscriptSheetInteraction
         XCTAssertEqual(
-            Gesture.action(translation: CGSize(width: 0, height: 44), isExpanded: false),
-            .reveal
+            Interaction.action(
+                translation: CGSize(width: 0, height: -44),
+                predictedEndTranslation: CGSize(width: 0, height: -44),
+                isPresented: false
+            ),
+            .present,
+            "The compact handle should follow the conventional upward reveal gesture"
         )
         XCTAssertEqual(
-            Gesture.action(translation: CGSize(width: 0, height: -44), isExpanded: true),
-            .collapse
+            Interaction.action(
+                translation: CGSize(width: 0, height: 44),
+                predictedEndTranslation: CGSize(width: 0, height: 44),
+                isPresented: true
+            ),
+            .dismiss,
+            "The sheet header should dismiss downward"
         )
-        XCTAssertNil(Gesture.action(translation: CGSize(width: 0, height: -80), isExpanded: false))
-        XCTAssertNil(Gesture.action(translation: CGSize(width: 0, height: 80), isExpanded: true))
-        XCTAssertNil(Gesture.action(translation: CGSize(width: 0, height: 43), isExpanded: false))
-        XCTAssertNil(Gesture.action(translation: CGSize(width: 80, height: 60), isExpanded: false))
-        XCTAssertNil(Gesture.action(translation: CGSize(width: 40, height: 44), isExpanded: false))
         XCTAssertEqual(
-            Gesture.action(translation: CGSize(width: 20, height: 80), isExpanded: false),
-            .reveal
+            Interaction.action(
+                translation: CGSize(width: 0, height: -20),
+                predictedEndTranslation: CGSize(width: 0, height: -90),
+                isPresented: false
+            ),
+            .present,
+            "A deliberate short flick may settle open using its projected endpoint"
         )
+        XCTAssertNil(Interaction.action(
+            translation: CGSize(width: 0, height: 80),
+            predictedEndTranslation: CGSize(width: 0, height: 100),
+            isPresented: false
+        ))
+        XCTAssertNil(Interaction.action(
+            translation: CGSize(width: 0, height: -80),
+            predictedEndTranslation: CGSize(width: 0, height: -100),
+            isPresented: true
+        ))
+        XCTAssertNil(Interaction.action(
+            translation: CGSize(width: 0, height: -43),
+            predictedEndTranslation: CGSize(width: 0, height: -60),
+            isPresented: false
+        ))
+        XCTAssertNil(Interaction.action(
+            translation: CGSize(width: 80, height: -60),
+            predictedEndTranslation: CGSize(width: 100, height: -70),
+            isPresented: false
+        ))
+        XCTAssertNil(Interaction.action(
+            translation: CGSize(width: 0, height: -20),
+            predictedEndTranslation: CGSize(width: 0, height: 90),
+            isPresented: false
+        ), "A reversed projected direction must not complete the opposite transition")
     }
 
-    func testExpandedTranscriptGestureCollapsesFromChromeButPreservesTranscriptScrolling() {
-        typealias Gesture = VoiceTutorCallTranscriptGesture
-        let transcriptFrame = CGRect(x: 20, y: 210, width: 362, height: 360)
-        let upwardSwipe = CGSize(width: 2, height: -72)
+    func testTranscriptSheetInteractiveOffsetsMoveOnlyInUsefulDirections() {
+        typealias Interaction = VoiceTutorTranscriptSheetInteraction
+        XCTAssertEqual(Interaction.presentedOffset(translationHeight: 52), 52)
+        XCTAssertEqual(Interaction.presentedOffset(translationHeight: -52), 0)
+        XCTAssertEqual(Interaction.presentedOffset(translationHeight: .infinity), 0)
 
-        XCTAssertEqual(
-            Gesture.expandedSurfaceAction(
-                translation: upwardSwipe,
-                startLocation: CGPoint(x: 201, y: 120),
-                transcriptFrame: transcriptFrame,
-                transcriptWasAtLatestAtStart: false,
-                expandedScrollWasAtLatestAtStart: true
-            ),
-            .collapse,
-            "An intentional upward swipe on the expanded call chrome should restore the orb"
-        )
-        XCTAssertEqual(
-            Gesture.expandedSurfaceAction(
-                translation: upwardSwipe,
-                startLocation: CGPoint(x: 201, y: 650),
-                transcriptFrame: transcriptFrame,
-                transcriptWasAtLatestAtStart: false,
-                expandedScrollWasAtLatestAtStart: true
-            ),
-            .collapse,
-            "Controls and empty call chrome below the transcript should support the same collapse gesture"
-        )
-        XCTAssertNil(
-            Gesture.expandedSurfaceAction(
-                translation: upwardSwipe,
-                startLocation: CGPoint(x: 201, y: 390),
-                transcriptFrame: transcriptFrame,
-                transcriptWasAtLatestAtStart: false,
-                expandedScrollWasAtLatestAtStart: true
-            ),
-            "A normal upward transcript scroll must remain owned by the nested transcript ScrollView"
-        )
-        XCTAssertEqual(
-            Gesture.expandedSurfaceAction(
-                translation: upwardSwipe,
-                startLocation: CGPoint(x: 201, y: 390),
-                transcriptFrame: transcriptFrame,
-                transcriptWasAtLatestAtStart: true,
-                expandedScrollWasAtLatestAtStart: true
-            ),
-            .collapse,
-            "Once already at the latest transcript edge, an intentional upward overscroll should restore the orb"
-        )
-        XCTAssertNil(
-            Gesture.expandedSurfaceAction(
-                translation: CGSize(width: 0, height: -43),
-                startLocation: CGPoint(x: 201, y: 120),
-                transcriptFrame: transcriptFrame,
-                transcriptWasAtLatestAtStart: true,
-                expandedScrollWasAtLatestAtStart: true
-            )
-        )
-        XCTAssertNil(
-            Gesture.expandedSurfaceAction(
-                translation: upwardSwipe,
-                startLocation: CGPoint(x: 201, y: 120),
-                transcriptFrame: .null,
-                transcriptWasAtLatestAtStart: true,
-                expandedScrollWasAtLatestAtStart: true
-            ),
-            "Gesture routing must fail closed until the transcript has a measured frame"
-        )
-        XCTAssertNil(
-            Gesture.expandedSurfaceAction(
-                translation: upwardSwipe,
-                startLocation: CGPoint(x: 201, y: 120),
-                transcriptFrame: transcriptFrame,
-                transcriptWasAtLatestAtStart: true,
-                expandedScrollWasAtLatestAtStart: false
-            ),
-            "Large Dynamic Type must scroll the outer call to its controls before overscroll collapses it"
-        )
+        XCTAssertEqual(Interaction.launcherOffset(translationHeight: -40), -7.2, accuracy: 0.001)
+        XCTAssertEqual(Interaction.launcherOffset(translationHeight: -200), -14)
+        XCTAssertEqual(Interaction.launcherOffset(translationHeight: 40), 0)
+        XCTAssertEqual(Interaction.launcherOffset(translationHeight: .nan), 0)
     }
 
-    func testExpandedTranscriptLatestEdgeDetectionIsBoundedAndFailsClosed() {
-        typealias Gesture = VoiceTutorCallTranscriptGesture
-        XCTAssertTrue(Gesture.transcriptIsAtLatest(
+    func testTranscriptRevealLabelsDescribeActionsInsteadOfSwipeInstructions() {
+        let expected = [
+            (AppLanguage.korean, "대화 내용 열기", "대화 내용 닫기"),
+            (AppLanguage.english, "Open conversation", "Close conversation"),
+            (AppLanguage.japanese, "会話を開く", "会話を閉じる")
+        ]
+        for (language, reveal, collapse) in expected {
+            let strings = AppStrings(language: language)
+            XCTAssertEqual(strings.voiceTutorCallRevealConversation, reveal)
+            XCTAssertEqual(strings.voiceTutorCallCollapseConversation, collapse)
+            XCTAssertFalse(strings.voiceTutorCallRevealConversation.lowercased().contains("swipe"))
+        }
+    }
+
+    func testTranscriptLatestEdgeDetectionIsBoundedAndFailsClosed() {
+        typealias Interaction = VoiceTutorTranscriptSheetInteraction
+        XCTAssertTrue(Interaction.transcriptIsAtLatest(
             contentFrame: CGRect(x: 0, y: -250, width: 360, height: 610),
             viewportHeight: 360
         ))
-        XCTAssertTrue(Gesture.transcriptIsAtLatest(
+        XCTAssertTrue(Interaction.transcriptIsAtLatest(
             contentFrame: CGRect(x: 0, y: 0, width: 360, height: 180),
             viewportHeight: 360
         ), "Short transcripts are already at their latest edge")
-        XCTAssertTrue(Gesture.transcriptIsAtLatest(
+        XCTAssertTrue(Interaction.transcriptIsAtLatest(
             contentFrame: CGRect(x: 0, y: -242, width: 360, height: 610),
             viewportHeight: 360
         ), "Small bounce/layout differences stay inside the fixed edge tolerance")
-        XCTAssertFalse(Gesture.transcriptIsAtLatest(
+        XCTAssertFalse(Interaction.transcriptIsAtLatest(
             contentFrame: CGRect(x: 0, y: -200, width: 360, height: 610),
             viewportHeight: 360
         ), "A learner who has scrolled up must retain normal transcript scrolling")
-        XCTAssertFalse(Gesture.transcriptIsAtLatest(
+        XCTAssertFalse(Interaction.transcriptIsAtLatest(
             contentFrame: .null,
             viewportHeight: 360
         ))
-        XCTAssertFalse(Gesture.transcriptIsAtLatest(
+        XCTAssertFalse(Interaction.transcriptIsAtLatest(
             contentFrame: CGRect(x: 0, y: 0, width: 360, height: 180),
             viewportHeight: 0
         ))
     }
 
-    func testCollapsedLiveCallKeepsTopicTranscriptAndControlsBehindInteraction() throws {
+    func testCallKeepsOrbAndControlsStableWhileTranscriptStaysInItsOwnSheet() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -1661,15 +1729,188 @@ final class VoiceTutorContractTests: XCTestCase {
         }
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
         let compactStart = try XCTUnwrap(source.range(of: "private func compactCall(in geometry:"))
-        let expandedStart = try XCTUnwrap(source.range(of: "private func expandedCall(in geometry:"))
-        let compact = String(source[compactStart.lowerBound..<expandedStart.lowerBound])
+        let sheetStart = try XCTUnwrap(source.range(of: "private func transcriptSheet(in geometry:"))
+        let orbStart = try XCTUnwrap(source.range(of: "private func callOrb(diameter:"))
+        let compact = String(source[compactStart.lowerBound..<sheetStart.lowerBound])
+        let sheet = String(source[sheetStart.lowerBound..<orbStart.lowerBound])
 
         XCTAssertTrue(compact.contains("callOrb(diameter:"))
-        XCTAssertFalse(compact.contains("Text(topic)"))
+        XCTAssertTrue(compact.contains("Text(topic)"))
+        XCTAssertTrue(compact.contains("callTime"))
         XCTAssertFalse(compact.contains("Text(discoveryPrompt)"))
-        XCTAssertFalse(compact.contains("transcriptAffordance"))
-        XCTAssertFalse(compact.contains("expandedTime"))
-        XCTAssertFalse(compact.contains("expandedControls"))
+        XCTAssertFalse(compact.contains("transcriptPanel"))
+
+        XCTAssertTrue(sheet.contains("transcriptPanel"))
+        XCTAssertTrue(sheet.contains("transcriptSheetHeader"))
+        XCTAssertFalse(sheet.contains("callOrb"))
+        XCTAssertFalse(sheet.contains("summaryRow"))
+        XCTAssertFalse(sheet.contains("VoiceTutorResultSections"))
+        XCTAssertFalse(sheet.contains("stableCallControls"))
+        XCTAssertTrue(source.contains("interactionDock"))
+        XCTAssertTrue(source.contains("stableCallControls"))
+        XCTAssertTrue(source.contains(".gesture(transcriptSheetGesture(isPresented: true))"))
+        XCTAssertTrue(source.contains(".gesture(transcriptSheetGesture(isPresented: false))"))
+        XCTAssertTrue(source.contains("settleTranscriptGesture(action)"))
+        XCTAssertFalse(source.contains("@GestureState private var transcriptSheetDragTranslation"))
+        XCTAssertTrue(source.contains(".frame(width: 44, height: 44)"))
+        let clearanceStart = try XCTUnwrap(source.range(of: "private var transcriptSheetBottomClearance"))
+        let clearanceEnd = try XCTUnwrap(source.range(of: "private var compactCallBottomClearance", range: clearanceStart.upperBound..<source.endIndex))
+        let clearance = String(source[clearanceStart.lowerBound..<clearanceEnd.lowerBound])
+        XCTAssertTrue(clearance.contains("dynamicTypeSize.isAccessibilitySize ? 150 : 66"))
+        XCTAssertFalse(clearance.contains("presentation.primaryAction"))
+        XCTAssertFalse(source.contains("expandedTranscriptDragGesture"))
+    }
+
+    func testProviderResponseRecoveryDiscardsOnlyPartialTutorStateWithoutStoppingTheCall() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift"),
+            encoding: .utf8
+        )
+        let retryStart = try XCTUnwrap(source.range(of: "case .responseStarted(let responseID"))
+        let retryEnd = try XCTUnwrap(source.range(of: "case .responseFinished", range: retryStart.upperBound..<source.endIndex))
+        let retry = String(source[retryStart.lowerBound..<retryEnd.lowerBound])
+        XCTAssertTrue(retry.contains("duplexPlaybackState.assistantResponseActive"))
+        XCTAssertTrue(retry.contains("assistantTranscriptState.discard()"))
+
+        let transcriptDoneStart = try XCTUnwrap(source.range(of: "case .assistantTranscriptDone"))
+        let transcriptDoneEnd = try XCTUnwrap(source.range(of: "case .userTranscript", range: transcriptDoneStart.upperBound..<source.endIndex))
+        let transcriptDone = String(source[transcriptDoneStart.lowerBound..<transcriptDoneEnd.lowerBound])
+        XCTAssertTrue(transcriptDone.contains("assistantTranscriptState.stageCompletedTranscript"))
+        XCTAssertFalse(transcriptDone.contains("commitAssistantTranscript"))
+
+        let responseFinishedStart = try XCTUnwrap(source.range(of: "case .responseFinished(let responseID)"))
+        let responseFinishedEnd = try XCTUnwrap(source.range(of: "case .outputAudioBufferStarted", range: responseFinishedStart.upperBound..<source.endIndex))
+        let responseFinished = String(source[responseFinishedStart.lowerBound..<responseFinishedEnd.lowerBound])
+        XCTAssertTrue(responseFinished.contains("if usesWebRTC"))
+        XCTAssertTrue(responseFinished.contains("finishWebRTCResponseIfReady"))
+        XCTAssertTrue(responseFinished.contains("else if let responseID"))
+        XCTAssertTrue(responseFinished.contains("commitAssistantTranscript()"))
+
+        let webRTCFinishStart = try XCTUnwrap(source.range(of: "private func finishWebRTCResponseIfReady"))
+        let webRTCFinishEnd = try XCTUnwrap(source.range(of: "private func abandonProviderTurn", range: webRTCFinishStart.upperBound..<source.endIndex))
+        let webRTCFinish = String(source[webRTCFinishStart.lowerBound..<webRTCFinishEnd.lowerBound])
+        XCTAssertTrue(webRTCFinish.contains("duplexPlaybackState.responseFinished"))
+        XCTAssertTrue(webRTCFinish.contains("commitAssistantTranscript()"))
+
+        let clearStart = try XCTUnwrap(source.range(of: "case .outputAudioBufferCleared(let responseID)"))
+        let clearEnd = try XCTUnwrap(source.range(of: "case .ignored", range: clearStart.upperBound..<source.endIndex))
+        let clear = String(source[clearStart.lowerBound..<clearEnd.lowerBound])
+        XCTAssertTrue(clear.contains("abandonProviderTurn(responseID: responseID)"))
+        XCTAssertFalse(clear.contains("await stop"))
+
+        let abandonStart = try XCTUnwrap(source.range(of: "private func abandonProviderTurn(responseID:"))
+        let abandonEnd = try XCTUnwrap(source.range(of: "private func finishFromServer", range: abandonStart.upperBound..<source.endIndex))
+        let abandon = String(source[abandonStart.lowerBound..<abandonEnd.lowerBound])
+        XCTAssertTrue(abandon.contains("duplexPlaybackState.abandonResponse"))
+        XCTAssertTrue(abandon.contains("webRTCResponseState.abandonResponse"))
+        XCTAssertTrue(abandon.contains("abandonLocalPlayoutResponse"))
+        XCTAssertTrue(abandon.contains("phase = .listening"))
+        XCTAssertFalse(abandon.contains("await stop"))
+    }
+
+    func testFailedTutorTranscriptIsDiscardedBeforeReplacementResponseCommits() {
+        var transcript = VoiceTutorAssistantTranscriptState()
+
+        transcript.append(delta: "실패한 일부")
+        transcript.stageCompletedTranscript("실패한 일부 문장")
+        XCTAssertEqual(transcript.draft, "실패한 일부 문장")
+
+        // A failed response never calls commit. The retry boundary discards its
+        // provisional transcript before any replacement deltas arrive.
+        transcript.discard()
+        transcript.append(delta: "정상 대체")
+        transcript.stageCompletedTranscript("정상 대체 문장")
+
+        XCTAssertEqual(transcript.commit(), "정상 대체 문장")
+        XCTAssertEqual(transcript.draft, "")
+        XCTAssertNil(transcript.commit())
+    }
+
+    func testAuthoritativeEmptyTutorTranscriptClearsEarlierPartialDeltas() {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        transcript.append(delta: "확정되지 않은 일부")
+        transcript.stageCompletedTranscript("  \n ")
+
+        XCTAssertEqual(transcript.draft, "")
+        XCTAssertNil(transcript.commit())
+    }
+
+    func testServerVerifiedSpokenEndCommitsLastTutorTranscriptWhenLifecycleWinsRace() throws {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        transcript.stageCompletedTranscript("정상적으로 끝난 마지막 문장")
+
+        let exactResponseID = try XCTUnwrap(
+            VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
+                reason: "USER_ENDED",
+                usesWebRTC: true,
+                pending: nil,
+                activeResponseID: "response-final"
+            )
+        )
+        XCTAssertEqual(exactResponseID, "response-final")
+        XCTAssertEqual(transcript.commit(), "정상적으로 끝난 마지막 문장")
+
+        var failedTranscript = VoiceTutorAssistantTranscriptState()
+        failedTranscript.stageCompletedTranscript("실패한 중간 문장")
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
+            reason: "PROVIDER_ERROR",
+            usesWebRTC: true,
+            pending: nil,
+            activeResponseID: "response-failed"
+        ))
+        failedTranscript.discard()
+        XCTAssertNil(failedTranscript.commit())
+    }
+
+    func testTutorTranscriptCommitsOnlyAfterBothExactWebRTCCompletionBoundaries() throws {
+        for responseDoneFirst in [true, false] {
+            var transcript = VoiceTutorAssistantTranscriptState()
+            var response = VoiceTutorWebRTCResponseState()
+            var duplex = VoiceTutorDuplexPlaybackState()
+            response.responseStarted("response-complete")
+            XCTAssertTrue(duplex.responseStarted(
+                responseID: "response-complete",
+                isTutorIntervention: false
+            ))
+            transcript.stageCompletedTranscript("완료된 선생님 문장")
+
+            let firstReadyID = responseDoneFirst
+                ? response.markResponseDone("response-complete")
+                : response.markOutputBufferStopped("response-complete")
+            XCTAssertNil(firstReadyID)
+            XCTAssertEqual(transcript.draft, "완료된 선생님 문장")
+
+            let readyID = try XCTUnwrap(responseDoneFirst
+                ? response.markOutputBufferStopped("response-complete")
+                : response.markResponseDone("response-complete"))
+            XCTAssertTrue(duplex.responseFinished(responseID: readyID))
+            XCTAssertEqual(transcript.commit(), "완료된 선생님 문장")
+            XCTAssertNil(transcript.commit(), "The same response cannot publish twice")
+        }
+    }
+
+    func testResponseDoneThenProviderClearDiscardsTutorTranscriptBeforeRetry() {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        var response = VoiceTutorWebRTCResponseState()
+        var duplex = VoiceTutorDuplexPlaybackState()
+        response.responseStarted("response-failed")
+        XCTAssertTrue(duplex.responseStarted(
+            responseID: "response-failed",
+            isTutorIntervention: false
+        ))
+        transcript.stageCompletedTranscript("전송되지 않아야 할 문장")
+
+        XCTAssertNil(response.markResponseDone("response-failed"))
+        XCTAssertTrue(duplex.abandonResponse(responseID: "response-failed"))
+        XCTAssertTrue(response.abandonResponse("response-failed"))
+        transcript.discard()
+
+        XCTAssertNil(transcript.commit())
+        XCTAssertFalse(duplex.assistantResponseActive)
+        XCTAssertNil(response.responseID)
     }
 
     @MainActor
@@ -1691,7 +1932,10 @@ final class VoiceTutorContractTests: XCTestCase {
                 name: "04-paused-static", phase: .listening,
                 pauseState: pausedState
             ),
-            .init(name: "05-failed-with-saved-summary", phase: .failed, detail: completed),
+            .init(
+                name: "05-provider-failed-with-saved-summary", phase: .failed,
+                failureCause: .provider, detail: completed
+            ),
             .init(name: "06-ended-summary-pending", phase: .ended, detail: pending),
             .init(name: "07-expanded-conversation", phase: .speaking, showsTranscript: true),
             .init(
@@ -3200,6 +3444,7 @@ final class VoiceTutorContractTests: XCTestCase {
                 topic: fixture.topic,
                 presentation: VoiceTutorCallPresentation(
                     phase: fixture.phase,
+                    failureCause: fixture.failureCause,
                     isRecording: fixture.isRecording,
                     pauseState: fixture.pauseState,
                     sessionSecondsRemaining: fixture.seconds,
@@ -3210,7 +3455,11 @@ final class VoiceTutorContractTests: XCTestCase {
                 ),
                 strings: strings,
                 captions: fixture.showsTranscript ? captions : [],
-                errorMessage: fixture.phase == .failed ? strings.voiceTutorConnectionFailed : nil,
+                errorMessage: fixture.phase == .failed
+                    ? (fixture.failureCause == .provider
+                        ? strings.serviceTemporarilyUnavailable
+                        : strings.voiceTutorConnectionFailed)
+                    : nil,
                 showsTranscript: .constant(fixture.showsTranscript),
                 showsSummary: .constant(false),
                 onMute: { XCTFail("A visual fixture must never change the microphone") },
@@ -3440,6 +3689,7 @@ private struct VoiceTutorCompactCallSnapshot {
     var seconds: Int? = 1_852
     var isRecording = false
     var pauseState = VoiceTutorCallPauseState()
+    var failureCause: VoiceTutorFailureCause? = nil
     var detail: BackendVoiceTutorSessionDetail?
     var showsTranscript = false
     var language: AppLanguage = .korean

@@ -11,6 +11,7 @@ internal object VoiceTutorRealtimeContract {
     const val SPEECH_STARTED_EVENT = "buddystudy.voice.input.speech.started"
     const val SPEECH_STOPPED_EVENT = "buddystudy.voice.input.speech.stopped"
     const val INPUT_RETRY_EVENT = "buddystudy.voice.input.retry"
+    const val ABANDONED_RESPONSE_ID_FIELD = "abandonedResponseId"
     // Server-only lifecycle request. It is never accepted from or forwarded to the client/provider.
     const val SPOKEN_LESSON_END_EVENT = "buddystudy-internal-voice-session-end"
     const val STUDY_TREE_CHANGED_EVENT = "buddystudy.voice.study.changed"

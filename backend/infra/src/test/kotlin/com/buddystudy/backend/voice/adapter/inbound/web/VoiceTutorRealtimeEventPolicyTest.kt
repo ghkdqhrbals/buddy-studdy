@@ -47,6 +47,37 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
+    fun `turn abandon retry exposes only its bounded exact response id`() {
+        val raw = mapper.writeValueAsString(mapOf(
+            "type" to VoiceTutorRealtimeContract.INPUT_RETRY_EVENT,
+            VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD to "response_123",
+            "message" to "private provider message",
+            "error" to mapOf("raw" to "private provider payload"),
+        ))
+        val decision = policy.providerDecision(
+            raw,
+            "voice-1",
+            Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
+        )
+
+        assertThat(decision.terminate).isFalse()
+        assertThat(mapper.readTree(decision.payload).fieldNames().asSequence().toSet())
+            .containsExactlyInAnyOrder("type", VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD)
+        assertThat(mapper.readTree(decision.payload).path(VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD).asText())
+            .isEqualTo("response_123")
+        assertThat(decision.payload).doesNotContain("private", "message", "error", "raw")
+
+        val invalid = policy.providerDecision(
+            raw.replace("response_123", "../../response"),
+            "voice-1",
+            Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
+        )
+        assertThat(mapper.readTree(invalid.payload).fieldNames().asSequence().toList()).containsExactly("type")
+    }
+
+    @Test
     fun `local speech boundaries are validated but never forwarded to the provider`() {
         listOf(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT)
             .forEach { type ->
@@ -154,30 +185,41 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
-    fun `only drain and relay terminal cancel races are nonfatal provider errors`() {
+    fun `recoverable provider errors stay live while fatal and malformed errors terminate`() {
         listOf(
             "buddystudy-internal-drain-1",
             "buddystudy-internal-relay-terminal-1",
+            "buddystudy-internal-duplex-turn-response-1",
+            "client-event-1",
         ).forEach { eventId ->
-            val expectedRace = policy.providerDecision(
-                """{"type":"error","error":{"event_id":"$eventId"}}""",
+            val recoverable = policy.providerDecision(
+                """{"type":"error","error":{"type":"server_error","code":"server_error","event_id":"$eventId","message":"private"}}""",
                 "session-1",
                 Instant.EPOCH,
             )
-            assertThat(expectedRace.terminate).isFalse()
-            assertThat(expectedRace.payload).isNull()
+            assertThat(recoverable.terminate).isFalse()
+            assertThat(recoverable.payload).isNull()
         }
 
-        listOf("client-event-1", "buddystudy-internal-duplex-turn-response-1").forEach { eventId ->
-            val providerFailure = policy.providerDecision(
-                """{"type":"error","error":{"event_id":"$eventId"}}""",
-                "session-1",
-                Instant.EPOCH,
-            )
-            assertThat(providerFailure.terminate).isTrue()
-            assertThat(mapper.readTree(providerFailure.payload).path("code").asText())
-                .isEqualTo("VOICE_TUTOR_PROVIDER_ERROR")
-        }
+        val fatal = policy.providerDecision(
+            """{"type":"error","error":{"type":"authentication_error","code":"invalid_api_key","message":"private"}}""",
+            "session-1",
+            Instant.EPOCH,
+        )
+        assertThat(fatal.terminate).isTrue()
+        assertThat(mapper.readTree(fatal.payload).path("code").asText())
+            .isEqualTo("VOICE_TUTOR_PROVIDER_ERROR")
+        assertThat(fatal.payload).doesNotContain("private")
+
+        val malformed = policy.providerDecision(
+            """{"type":"error","error":{"event_id":"missing-error-type","message":"private"}}""",
+            "session-1",
+            Instant.EPOCH,
+        )
+        assertThat(malformed.terminate).isTrue()
+        assertThat(mapper.readTree(malformed.payload).path("code").asText())
+            .isEqualTo("VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+        assertThat(malformed.payload).doesNotContain("private")
     }
 
     @Test
@@ -277,27 +319,25 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
-    fun `webrtc cleared and non-completed responses terminate`() {
+    fun `webrtc cleared and non-completed responses stay turn local`() {
         val cleared = policy.providerDecision(
             """{"type":"output_audio_buffer.cleared","response_id":"response-1"}""",
             "session-1",
             Instant.EPOCH,
             VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
         )
-        assertThat(cleared.terminate).isTrue()
-        assertThat(mapper.readTree(cleared.payload).path("code").asText())
-            .isEqualTo("VOICE_TUTOR_PROVIDER_PLAYOUT_CLEARED")
+        assertThat(cleared.terminate).isFalse()
+        assertThat(cleared.payload).isNull()
 
-        listOf("cancelled", "incomplete").forEach { status ->
+        listOf("cancelled", "incomplete", "failed").forEach { status ->
             val decision = policy.providerDecision(
                 """{"type":"response.done","response":{"id":"response-1","status":"$status"}}""",
                 "session-1",
                 Instant.EPOCH,
                 VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
             )
-            assertThat(decision.terminate).isTrue()
-            assertThat(mapper.readTree(decision.payload).path("code").asText())
-                .isEqualTo("VOICE_TUTOR_PROVIDER_INCOMPLETE_RESPONSE")
+            assertThat(decision.terminate).isFalse()
+            assertThat(decision.payload).isNull()
         }
     }
 

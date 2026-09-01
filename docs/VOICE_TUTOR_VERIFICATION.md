@@ -3,14 +3,82 @@
 Verification date: 2026-09-01. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [guided saved-tree descent](#guided-saved-tree-descent).
-It extends the existing topic-discovery, single-orb, Silero/contextual-input,
-MCP and source-backed summary contracts; it does not regrade past answers.
+Latest implementation: [provider-turn recovery and natural transcript drawer](#provider-turn-recovery-and-natural-transcript-drawer).
+It extends the existing guided saved-tree descent, single-orb,
+Silero/contextual-input, MCP and source-backed summary contracts; it does not
+regrade past answers.
 Earlier checks below are historical and do not all describe the current
 implementation.
 Source/fixture tests, iPhone tests and actual dev runtime observations are
 recorded separately; none implies a new human microphone-to-tutor conversation
 unless that specific check is explicitly recorded.
+
+## Provider-turn recovery and natural transcript drawer
+
+Implementation verified to date on 2026-09-01, branch `feature/2.0`.
+
+- The captured mid-sentence disconnect was not initiated by Routingflare. Its
+  control WebSocket completed the 101 upgrade and remained available until the
+  backend treated a provider response failure as terminal; the client stop and
+  control-socket close followed that backend provider-turn decision. The fix
+  therefore scopes recoverable OpenAI Realtime failures to the affected response
+  instead of ending the lesson.
+- A clean failed response receives at most one internal retry. If that exact turn
+  fails again, the server abandons only its response ID, asks the learner to repeat
+  the input, and keeps the call, RTP media and control channel alive. Stale or
+  mismatched failures cannot abandon a newer response. Unknown session-, input-
+  or tool-level failures remain terminal rather than being guessed recoverable.
+- An accepted MCP tool call permanently makes its response non-retryable. This
+  prevents study-tree mutations, level changes and other acknowledged side effects
+  from being executed twice, including when a late provider clear or failure
+  arrives.
+- A WebRTC tutor transcript becomes durable only after the same response has both
+  `response.done` and `output_audio_buffer.stopped`, its sanitized transcript has
+  been persisted successfully, and that post-relay work has been acknowledged.
+  Learner-boundary settlement, the next tutor response and spoken lesson-end
+  lifecycle all wait behind that exact acknowledgement. A failed or cleared
+  attempt cannot publish its partial caption or make the learner turn appear
+  answered.
+- iOS applies an exact abandoned-response instruction only to that response's
+  staged caption and playout attribution. It does not stop the whole voice session.
+  Tutor captions are likewise committed only after the exact completed-and-stopped
+  boundary, in either provider event order.
+- The call keeps one fixed status orb for microphone, listening, speaking, paused
+  and failure state. Conversation history now opens as an independent bottom
+  transcript drawer with stable mute/end controls, conventional learner-right and
+  tutor-left bubbles, direct open/close affordances and scroll gestures that do not
+  unexpectedly collapse the call UI.
+
+Verification completed so far:
+
+- Selected `StudyMateiOS` contract tests: **129 discovered, 128 passed, one
+  opt-in hardware test skipped, zero failures**. The cases include failed-partial
+  replacement, authoritative empty finals, both WebRTC completion-boundary orders,
+  done-then-clear discard and the server-attested `USER_ENDED` race. Result bundle:
+  `build/VoiceTutorRecoveryFinal5.xcresult`.
+- The exact required unsigned generic `StudyMateiOS` Debug build passed. A normal
+  signed physical-device Debug build also passed; deep signature validation,
+  bundle identifier and absence of XCTest injection artifacts were checked. The
+  regular and accessibility transcript-drawer renders were inspected for control
+  stability and clipping.
+- A broad backend recovery run completed **453 tests: 451 passed, two opt-in
+  live tests skipped, zero failures and zero errors**. It covered response-local
+  retry/abandonment, MCP no-retry, failed-transcript replacement, both provider-
+  boundary orders, and the final raw-provider-event -> durable transcript ->
+  exact acknowledgement fence, including persistence failure and cancellation.
+  Kotlin test compilation, Spring AOT processing and `:tutor:bootJar` passed. The
+  JAR is 331,429,757 bytes with SHA-256
+  `bac93447c112b6fea2a5d10ff5b2194288f09d270cc7646d47b2f464e2a9bf39`.
+- With zero active voice sessions, only the existing `backend-backend-1` API JAR
+  was atomically refreshed on localhost port 8080. Health returned `UP`, the
+  OpenAPI document exposed 11 voice-tutor paths, and the deployed JAR hash matched
+  the built artifact. MySQL, Redis, LibreTranslate and backup retained their exact
+  container IDs and start times; no persistent container or duplicate stack was
+  added.
+- The signed Debug app was installed on the paired physical iPhone and launched as
+  `io.github.ghkdqhrbals.StudyMate`. This proves installation and process launch,
+  not a new human audible microphone-to-tutor end-to-end conversation; that last
+  behavior still requires an intentional call by the tester.
 
 ## Guided saved-tree descent
 

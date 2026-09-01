@@ -319,6 +319,44 @@ class VoiceTutorSidebandLifecycleTest {
     }
 
     @Test
+    fun `provider turn failure diagnostics keep bounded subtype code and hashed correlation only`() {
+        val logger = LoggerFactory.getLogger(
+            "com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorSidebandLifecycle",
+        ) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            val rawEventId = "buddystudy-internal-duplex-turn-response-private"
+            val diagnostics = VoiceTutorSidebandDiagnostics(CALL_ID)
+            diagnostics.observeProviderTurnFailure(
+                VoiceTutorProviderTurnFailureDiagnostic(
+                    kind = VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR,
+                    providerErrorType = "server_error",
+                    providerErrorCode = "rate_limit_exceeded",
+                    eventCorrelation = VoiceTutorProviderEventCorrelation.ACTIVE_RESPONSE,
+                    causedEventRef = providerEventReference(rawEventId),
+                    attempt = 1,
+                    action = VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED,
+                ),
+            )
+
+            val snapshot = diagnostics.snapshot(VoiceTutorSidebandBranch.RECEIVE, VoiceTutorSidebandSignal.COMPLETE)
+            assertThat(snapshot.providerTurnFailureCounts).isEqualTo(
+                mapOf("provider-error:server_error:rate_limit_exceeded:active-response:retry" to 1L),
+            )
+            assertThat(snapshot.toString()).doesNotContain(rawEventId, PRIVATE_PAYLOAD, CALL_ID)
+            assertThat(appender.list).hasSize(1)
+            assertThat(appender.list.single().formattedMessage)
+                .contains(providerEventReference(rawEventId), "server_error", "rate_limit_exceeded", "attempt=1")
+                .doesNotContain(rawEventId, PRIVATE_PAYLOAD, CALL_ID)
+            assertThat(appender.list.single().throwableProxy).isNull()
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
+    }
+
+    @Test
     fun `default diagnostics logger excludes raw call payload close reason and exception`() {
         val logger = LoggerFactory.getLogger(
             "com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorSidebandLifecycle",

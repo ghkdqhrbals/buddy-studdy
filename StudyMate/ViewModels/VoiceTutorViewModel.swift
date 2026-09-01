@@ -42,10 +42,20 @@ enum VoiceTutorSessionPhase: Equatable {
     }
 }
 
+enum VoiceTutorFailureCause: Equatable {
+    case connection
+    case provider
+    case microphone
+    case audio
+    case localControl
+    case service
+    case unknown
+}
+
 private enum VoiceTutorStopSource: String {
     case startupFailure, user, backgroundOrDismissal, audioInterruption, mediaFailure
     case identityInvalidated, controlReceiveFailure, providerError, pcmPlaybackFailure
-    case outputBufferCleared, localSpeechDeliveryFailure, pauseControlFailure
+    case localSpeechDeliveryFailure, pauseControlFailure
 }
 
 enum VoiceTutorDiagnosticError {
@@ -142,6 +152,37 @@ enum VoiceTutorLiveTextBounds {
     }
 }
 
+/// Keeps a tutor sentence provisional until the provider confirms that the
+/// whole response completed. Transcript `done` only means that transcription
+/// for that output item finished; the enclosing response can still fail and be
+/// retried, so publishing it to chat at that point would preserve a failed
+/// partial answer beside its replacement.
+struct VoiceTutorAssistantTranscriptState: Equatable {
+    private(set) var draft = ""
+
+    mutating func append(delta: String) {
+        draft = VoiceTutorLiveTextBounds.appending(delta: delta, to: draft)
+    }
+
+    mutating func stageCompletedTranscript(_ transcript: String?) {
+        guard let transcript else { return }
+        let normalized = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A non-nil final transcript is authoritative even when it is empty.
+        // Keeping earlier deltas here would publish stale partial speech.
+        draft = VoiceTutorLiveTextBounds.boundedCaption(normalized)
+    }
+
+    mutating func commit() -> String? {
+        let normalized = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = ""
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    mutating func discard() {
+        draft = ""
+    }
+}
+
 struct VoiceTutorDuplexPlaybackState: Equatable {
     private(set) var isUserSpeaking = false
     private(set) var assistantResponseActive = false
@@ -194,6 +235,15 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
         return true
     }
 
+    @discardableResult
+    mutating func abandonResponse(responseID: String?) -> Bool {
+        guard matchesActiveResponse(responseID: responseID) else { return false }
+        assistantResponseActive = false
+        activeResponseID = nil
+        tutorInterventionActive = false
+        return true
+    }
+
     mutating func reset() {
         self = VoiceTutorDuplexPlaybackState()
     }
@@ -236,6 +286,13 @@ struct VoiceTutorWebRTCResponseState: Equatable {
         guard matches(responseID) else { return nil }
         outputBufferStopped = true
         return finishIfReady()
+    }
+
+    @discardableResult
+    mutating func abandonResponse(_ responseID: String?) -> Bool {
+        guard matches(responseID) else { return false }
+        reset()
+        return true
     }
 
     private mutating func finishIfReady() -> String? {
@@ -291,12 +348,13 @@ enum VoiceTutorServerEndPlayoutPolicy {
 final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var phase: VoiceTutorSessionPhase = .idle
     @Published private(set) var captions: [VoiceTutorCaption] = []
-    @Published private(set) var assistantTranscriptDraft = ""
+    @Published private var assistantTranscriptState = VoiceTutorAssistantTranscriptState()
     @Published private(set) var sessionQuota = VoiceTutorSessionQuotaState()
     @Published private(set) var sessionSecondsRemaining: Int?
     @Published private(set) var detail: BackendVoiceTutorSessionDetail?
     @Published private(set) var summaryRefreshState: VoiceTutorSummaryRefreshState = .idle
     @Published private(set) var errorMessage: String?
+    @Published private(set) var failureCause: VoiceTutorFailureCause?
     @Published private(set) var isMuted = false
     @Published private(set) var pauseState = VoiceTutorCallPauseState()
     @Published private(set) var isRecording = false
@@ -305,6 +363,7 @@ final class VoiceTutorViewModel: ObservableObject {
     var quotaRemainingSeconds: Int { sessionQuota.remainingSeconds }
     var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
     var quotaReservedSeconds: Int { sessionQuota.reservedSeconds }
+    var assistantTranscriptDraft: String { assistantTranscriptState.draft }
 
     @Published private(set) var studyFocus = VoiceTutorStudyFocusState()
 
@@ -365,9 +424,10 @@ final class VoiceTutorViewModel: ObservableObject {
         pauseState = VoiceTutorCallPauseState()
         inputNeedsRepeat = false
         errorMessage = nil
+        failureCause = nil
         detail = nil
         captions = []
-        assistantTranscriptDraft = ""
+        assistantTranscriptState.discard()
         duplexPlaybackState.reset()
         webRTCResponseState.reset()
         pendingSpokenEndPlayoutTail = nil
@@ -383,6 +443,7 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         guard hasMicrophonePermission else {
             errorMessage = appState.strings.voiceTutorMicrophoneDenied
+            failureCause = .microphone
             phase = .failed
             return
         }
@@ -555,6 +616,7 @@ final class VoiceTutorViewModel: ObservableObject {
             guard connectionAttemptFence.isCurrent(attemptID), !isFinalizing,
                   phase.isLive else { return }
             errorMessage = localizedMessage(for: error)
+            failureCause = .unknown
             logDiagnostic("event=startup_failed \(VoiceTutorDiagnosticError.fields(for: error))", isWarning: true)
             await stop(shouldNotifyServerOverSocket: false, outcome: .failed, source: .startupFailure)
         }
@@ -618,6 +680,7 @@ final class VoiceTutorViewModel: ObservableObject {
     private func failPause() async {
         guard phase.isLive, !isFinalizing else { return }
         errorMessage = appState.strings.voiceTutorPauseFailed
+        failureCause = .localControl
         await stop(shouldNotifyServerOverSocket: true, outcome: .failed, source: .pauseControlFailure)
     }
 
@@ -649,12 +712,14 @@ final class VoiceTutorViewModel: ObservableObject {
             return
         }
         errorMessage = appState.strings.voiceTutorAudioInterrupted
+        failureCause = .audio
         await stop(shouldNotifyServerOverSocket: true, outcome: .failed, source: .audioInterruption)
     }
 
     private func handleWebRTCConnectionFailure() async {
         guard phase.isLive, !isFinalizing else { return }
         errorMessage = appState.strings.voiceTutorConnectionFailed
+        failureCause = .connection
         await stop(shouldNotifyServerOverSocket: false, outcome: .failed, source: .mediaFailure)
     }
 
@@ -741,7 +806,7 @@ final class VoiceTutorViewModel: ObservableObject {
         summaryContextValidity = nil
         summaryRefreshState = .idle
         captions = []
-        assistantTranscriptDraft = ""
+        assistantTranscriptState.discard()
         audioEngine.stop()
         webRTCTransport?.close()
         stopAudioSendPump()
@@ -817,6 +882,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 self.errorMessage = self.pauseState.holdsMicrophone
                     ? self.appState.strings.voiceTutorPauseFailed
                     : self.appState.strings.voiceTutorConnectionFailed
+                self.failureCause = self.pauseState.holdsMicrophone ? .localControl : .connection
                 await self.stop(
                     shouldNotifyServerOverSocket: false,
                     outcome: .failed,
@@ -976,6 +1042,7 @@ final class VoiceTutorViewModel: ObservableObject {
             errorMessage = pauseState.holdsMicrophone
                 ? appState.strings.voiceTutorPauseFailed
                 : appState.strings.voiceTutorConnectionFailed
+            failureCause = pauseState.holdsMicrophone ? .localControl : .connection
             await stop(shouldNotifyServerOverSocket: false, outcome: .failed, source: .controlReceiveFailure)
         }
     }
@@ -1076,6 +1143,8 @@ final class VoiceTutorViewModel: ObservableObject {
             // This is not a disconnected call. Keep native capture/output alive
             // and show a small retry hint after the tutor finishes speaking.
             inputNeedsRepeat = true
+        case .providerTurnAbandoned(let responseID):
+            abandonProviderTurn(responseID: responseID)
         case .studyFocused(let focus):
             guard phase.isLive, !isFinalizing else { break }
             studyFocus.apply(focus, attemptID: attemptID)
@@ -1107,14 +1176,18 @@ final class VoiceTutorViewModel: ObservableObject {
             switch code?.uppercased() {
             case "VOICE_TUTOR_PRO_REQUIRED":
                 errorMessage = appState.strings.voiceTutorProRequiredMessage
+                failureCause = .service
             case "VOICE_TUTOR_QUOTA_EXCEEDED":
                 errorMessage = appState.strings.voiceTutorQuotaReached
+                failureCause = .service
             case "VOICE_TUTOR_PROVIDER_UNAVAILABLE":
                 errorMessage = appState.strings.serviceTemporarilyUnavailable
+                failureCause = .provider
             default:
                 errorMessage = pauseState.holdsMicrophone
                     ? appState.strings.voiceTutorPauseFailed
-                    : appState.strings.voiceTutorConnectionFailed
+                    : appState.strings.serviceTemporarilyUnavailable
+                failureCause = pauseState.holdsMicrophone ? .localControl : .provider
             }
             await stop(shouldNotifyServerOverSocket: false, outcome: .failed, source: .providerError)
         case .audioDelta(let delta):
@@ -1132,7 +1205,8 @@ final class VoiceTutorViewModel: ObservableObject {
             do {
                 try audioEngine.playPCM24(delta)
             } catch {
-                errorMessage = appState.strings.voiceTutorConnectionFailed
+                errorMessage = appState.strings.voiceTutorAudioInterrupted
+                failureCause = .audio
                 await stop(shouldNotifyServerOverSocket: false, outcome: .failed, source: .pcmPlaybackFailure)
                 break
             }
@@ -1141,15 +1215,14 @@ final class VoiceTutorViewModel: ObservableObject {
             guard duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
                 break
             }
-            assistantTranscriptDraft = VoiceTutorLiveTextBounds.appending(
-                delta: delta,
-                to: assistantTranscriptDraft
-            )
+            assistantTranscriptState.append(delta: delta)
         case .assistantTranscriptDone(let responseID, let transcript):
             guard duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
                 break
             }
-            commitAssistantTranscript(transcript)
+            // Keep this full transcript provisional. Only a completed
+            // response.done is allowed to publish it as a tutor chat message.
+            assistantTranscriptState.stageCompletedTranscript(transcript)
         case .userTranscript(let transcript):
             inputNeedsRepeat = false
             appendCaption(speaker: .learner, text: transcript)
@@ -1163,6 +1236,12 @@ final class VoiceTutorViewModel: ObservableObject {
             duplexPlaybackState.userSpeechStopped()
         case .responseStarted(let responseID, let isTutorIntervention):
             if !duplexPlaybackState.matchesActiveResponse(responseID: responseID) {
+                if duplexPlaybackState.assistantResponseActive {
+                    // A provider retry replaces, rather than extends, the
+                    // failed partial sentence. Never merge its draft into the
+                    // replacement response or persist it as completed teaching.
+                    assistantTranscriptState.discard()
+                }
                 pendingSpokenEndPlayoutTail = nil
                 duplexPlaybackState.responseStarted(
                     responseID: responseID,
@@ -1177,11 +1256,11 @@ final class VoiceTutorViewModel: ObservableObject {
             guard duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
                 break
             }
-            commitAssistantTranscript(nil)
             if usesWebRTC {
                 logDiagnostic("event=response_done")
                 finishWebRTCResponseIfReady(webRTCResponseState.markResponseDone(responseID))
             } else if let responseID {
+                commitAssistantTranscript()
                 audioEngine.finishResponseAudio(responseID: responseID)
             }
         case .outputAudioBufferStarted(let responseID):
@@ -1197,13 +1276,12 @@ final class VoiceTutorViewModel: ObservableObject {
             guard usesWebRTC else { break }
             logDiagnostic("event=provider_output_stopped")
             finishWebRTCResponseIfReady(webRTCResponseState.markOutputBufferStopped(responseID))
-        case .outputAudioBufferCleared:
+        case .outputAudioBufferCleared(let responseID):
             guard usesWebRTC else { break }
-            // A normal learner overlap must never clear tutor audio. Treat an
-            // observed clear as a protocol violation instead of acknowledging
-            // a sentence that was not played to completion.
-            errorMessage = appState.strings.voiceTutorConnectionFailed
-            await stop(shouldNotifyServerOverSocket: false, outcome: .failed, source: .outputBufferCleared)
+            // The server normally consumes this response-local anomaly and
+            // retries it. If an older server or boundary race forwards it,
+            // abandon only that exact turn; the call and RTP track stay alive.
+            abandonProviderTurn(responseID: responseID)
         case .ignored:
             break
         }
@@ -1233,6 +1311,10 @@ final class VoiceTutorViewModel: ObservableObject {
     private func finishWebRTCResponseIfReady(_ responseID: String?) {
         guard let responseID, phase.maySealServerResponse(isFinalizing: isFinalizing),
               duplexPlaybackState.responseFinished(responseID: responseID) else { return }
+        // A completed response.done is not enough: the provider can still clear
+        // its output buffer. Publish tutor chat only after both exact WebRTC
+        // completion boundaries have arrived in either order.
+        commitAssistantTranscript()
         pendingSpokenEndPlayoutTail = webRTCTransport?.sealLocalPlayoutResponse(
             responseID: responseID
         )
@@ -1243,6 +1325,23 @@ final class VoiceTutorViewModel: ObservableObject {
         if phase.isLive { phase = .listening }
     }
 
+    private func abandonProviderTurn(responseID: String?) {
+        guard phase.isLive,
+              let responseID,
+              duplexPlaybackState.abandonResponse(responseID: responseID) else { return }
+        assistantTranscriptState.discard()
+        pendingSpokenEndPlayoutTail = nil
+        if usesWebRTC {
+            _ = webRTCResponseState.abandonResponse(responseID)
+            _ = webRTCTransport?.abandonLocalPlayoutResponse(responseID: responseID)
+        }
+        inputNeedsRepeat = true
+        errorMessage = nil
+        failureCause = nil
+        phase = .listening
+        logDiagnostic("event=provider_turn_abandoned")
+    }
+
     private func finishFromServer(_ ended: VoiceTutorRealtimeEnded) async {
         guard !isFinalizing else {
             return
@@ -1250,6 +1349,9 @@ final class VoiceTutorViewModel: ObservableObject {
         let outcome = VoiceTutorSessionPhase.completed(outcome: .ended, serverState: nil, serverReason: ended.reason)
         if outcome == .failed, pauseState.holdsMicrophone, errorMessage == nil {
             errorMessage = appState.strings.voiceTutorPauseFailed
+            failureCause = .localControl
+        } else if outcome == .failed, failureCause == nil {
+            failureCause = ended.reason?.uppercased() == "PROVIDER_ERROR" ? .provider : .connection
         }
         logDiagnostic("event=server_ended")
         isFinalizing = true
@@ -1268,13 +1370,22 @@ final class VoiceTutorViewModel: ObservableObject {
                 usesWebRTC: usesWebRTC,
                 pending: pendingSpokenEndPlayoutTail
             )
-            if token == nil,
-               let responseID = VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
+            let serverVerifiedFallbackResponseID = token == nil
+                ? VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
                    reason: ended.reason,
                    usesWebRTC: usesWebRTC,
                    pending: pendingSpokenEndPlayoutTail,
                    activeResponseID: webRTCResponseState.responseID
-               ) {
+                )
+                : nil
+            if let responseID = serverVerifiedFallbackResponseID {
+                // USER_ENDED is emitted only after the backend observed both
+                // completion boundaries for this exact response. The lifecycle
+                // can beat the final raw response.done over the control socket,
+                // so seal its provisional transcript here before teardown.
+                if duplexPlaybackState.matchesActiveResponse(responseID: responseID) {
+                    commitAssistantTranscript()
+                }
                 token = webRTCTransport?.sealLocalPlayoutResponse(responseID: responseID)
             }
             pendingSpokenEndPlayoutTail = token
@@ -1362,7 +1473,7 @@ final class VoiceTutorViewModel: ObservableObject {
             summaryContextValidity = nil
             summaryRefreshState = .idle
             captions = []
-            assistantTranscriptDraft = ""
+            assistantTranscriptState.discard()
         }
         duplexPlaybackState.reset()
         webRTCResponseState.reset()
@@ -1373,7 +1484,10 @@ final class VoiceTutorViewModel: ObservableObject {
         clearSessionCountdown()
         phase = .completed(outcome: outcome, serverState: detail?.state)
         if phase == .failed, errorMessage == nil {
-            errorMessage = appState.strings.voiceTutorConnectionFailed
+            failureCause = failureCause ?? .unknown
+            errorMessage = failureCause == .provider
+                ? appState.strings.serviceTemporarilyUnavailable
+                : appState.strings.voiceTutorConnectionFailed
         }
         activeConnection = nil
     }
@@ -1434,10 +1548,8 @@ final class VoiceTutorViewModel: ObservableObject {
         return outcome.detail
     }
 
-    private func commitAssistantTranscript(_ completedTranscript: String?) {
-        let text = (completedTranscript ?? assistantTranscriptDraft)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        assistantTranscriptDraft = ""
+    private func commitAssistantTranscript() {
+        guard let text = assistantTranscriptState.commit() else { return }
         appendCaption(speaker: .tutor, text: text)
     }
 

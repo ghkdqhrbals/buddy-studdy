@@ -20,6 +20,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolR
 import com.fasterxml.jackson.databind.node.ObjectNode
 import kotlinx.coroutines.CompletableDeferred
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.reactivestreams.Subscription
 import reactor.core.Disposable
@@ -472,6 +473,67 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
+    fun `stopped then done target offer uses content index order instead of transcript arrival order`() =
+        fixture().use { f ->
+            f.utterance(1, "browse-ordered-offer", "Redis 주제를 찾아줘")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.DISCOVER_SAVED_TOPIC)
+            f.confirm(f.publications().last(), persisted = true)
+
+            val root = VoiceTutorStudyTargetCandidate(101, null, "Redis")
+            f.finishCurrentResponseWithCandidateRead(
+                VoiceTutorCandidateDiscovery(
+                    VoiceTutorCandidateReadKind.LIST_STUDIES, 0, null, listOf(root),
+                    VoiceTutorCandidateDiscoveryScope.CompleteQueryPage("Redis", 0, 3, 1),
+                ),
+            )
+            f.finishCurrentResponseWithCandidateRead(
+                VoiceTutorCandidateDiscovery(
+                    VoiceTutorCandidateReadKind.LIST_STUDIES, 0, null, emptyList(),
+                    VoiceTutorCandidateDiscoveryScope.CompleteDirectChildrenPage(101, 0, 3, 0),
+                ),
+            )
+
+            val token = f.responses().last().path("event_id").asText()
+            val responseId = "reversed-parts-offer"
+            f.controller.observeProviderEvent(f.response("response.created", responseId, token))
+            f.provider("output_audio_buffer.started", "response_id" to responseId)
+            f.provider("response.output_audio.delta", "response_id" to responseId, "delta" to "AA==")
+            f.provider(
+                "response.output_audio_transcript.done",
+                "response_id" to responseId,
+                "item_id" to "ordered-offer-item",
+                "content_index" to 1,
+                "transcript" to "part one",
+            )
+            f.provider(
+                "response.output_audio_transcript.done",
+                "response_id" to responseId,
+                "item_id" to "ordered-offer-item",
+                "content_index" to 0,
+                "transcript" to "part zero",
+            )
+            f.provider("output_audio_buffer.stopped", "response_id" to responseId)
+            f.controller.observeProviderEvent(
+                f.responseWithOutput(
+                    "response.done",
+                    responseId,
+                    token,
+                    listOf(mapOf(
+                        "type" to "message",
+                        "role" to "assistant",
+                        "content" to listOf(mapOf("transcript" to "fallback must not win")),
+                    )),
+                ),
+            )
+
+            f.utterance(2, "select-ordered-offer", "응, 그 주제로 가자")
+            val assessment = f.assessments().last()
+            assertThat(assessment.teacherContext).isEqualTo("part zero\npart one")
+            assertThat(assessment.utterances.single().targetOffer?.tutorAudioTranscript)
+                .isEqualTo("part zero\npart one")
+        }
+
+    @Test
     fun `root plus five descendant discovery can use all seven dependent tool rounds and offer the leaf`() =
         fixture().use { f ->
             f.utterance(1, "browse-deep-chain", "저장된 시스템 주제를 찾아줘")
@@ -816,21 +878,22 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
-    fun `spoken lesson end waits for the active tutor sentence to drain completely`() =
+    fun `spoken lesson end assessment and lifecycle wait for the active tutor sentence boundary`() =
         fixture(finishOpening = false).use { f ->
             f.utterance(1, "persisted-end", "학습 끝낼게")
             f.openingDone()
-            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
-            val publication = f.publications().single()
-            f.controller.confirmInputPublished(publication.itemId, persisted = true)
-
+            assertThat(f.assessments()).isEmpty()
             assertThat(f.serverLifecycleTypes()).isEmpty()
             assertThat(f.responses()).hasSize(1)
             f.start(1) // Duplicate/stale speech generation cannot retract a valid END.
             f.provider("output_audio_buffer.stopped", "response_id" to "wrong-response")
+            assertThat(f.assessments()).isEmpty()
             assertThat(f.serverLifecycleTypes()).isEmpty()
 
             f.openingStopped()
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
+            val publication = f.publications().single()
+            f.controller.confirmInputPublished(publication.itemId, persisted = true)
             assertThat(f.serverLifecycleTypes()).containsExactly(VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT)
             assertThat(f.responses()).hasSize(1)
             f.assertNoAudioDisruption()
@@ -877,16 +940,19 @@ class VoiceTutorMeaningfulInputRelayTest {
         fixture(finishOpening = false).use { f ->
             f.utterance(1, "old-end", "학습 끝낼게")
             f.openingDone()
+            assertThat(f.assessments()).isEmpty()
+            f.openingStopped()
             f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
-            f.controller.confirmInputPublished("old-end", persisted = true)
+            val oldPublication = f.publications().single()
+            f.start(2)
+            f.controller.confirmInputPublished(oldPublication.itemId, persisted = true)
             assertThat(f.serverLifecycleTypes()).isEmpty()
 
-            // The END is already persisted, but the active tutor sentence has
-            // not drained. A newer learner generation must still retract it.
-            f.utterance(2, "continue", "아니, 계속할게")
+            f.stop(2)
+            f.commit("continue")
+            f.transcript("continue", "아니, 계속할게")
             f.assess(VoiceTutorInputDecision.MEANINGFUL)
             f.controller.confirmInputPublished("continue", persisted = true)
-            f.openingStopped()
 
             assertThat(f.serverLifecycleTypes()).isEmpty()
             assertThat(f.responses()).hasSize(2)
@@ -897,12 +963,17 @@ class VoiceTutorMeaningfulInputRelayTest {
         fixture(finishOpening = false).use { f ->
             f.utterance(1, "old-end", "학습 끝낼게")
             f.openingDone()
+            assertThat(f.assessments()).isEmpty()
+            f.openingStopped()
             f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON)
-            f.controller.confirmInputPublished("old-end", persisted = true)
-            f.utterance(2, "noise", "어… 음…")
+            val oldPublication = f.publications().single()
+            f.start(2)
+            f.controller.confirmInputPublished(oldPublication.itemId, persisted = true)
+            f.stop(2)
+            f.commit("noise")
+            f.transcript("noise", "어… 음…")
             f.assess(VoiceTutorInputDecision.NON_COMMUNICATIVE)
             f.deleted("noise")
-            f.openingStopped()
 
             assertThat(f.serverLifecycleTypes()).isEmpty()
             assertThat(f.responses()).hasSize(2)
@@ -917,6 +988,8 @@ class VoiceTutorMeaningfulInputRelayTest {
             f.utterance(1, "old-end", "학습 끝낼게")
             f.utterance(2, "continue", "아니, 계속할게")
             f.openingDone()
+            assertThat(f.assessments()).isEmpty()
+            f.openingStopped()
             val batch = f.assessments().single()
             f.controller.completeInputAssessment(
                 batch.token,
@@ -931,7 +1004,6 @@ class VoiceTutorMeaningfulInputRelayTest {
             assertThat(f.publications().map { it.itemId }).containsExactly("old-end", "continue")
             f.controller.confirmInputPublished("continue", persisted = true)
             f.controller.confirmInputPublished("old-end", persisted = true)
-            f.openingStopped()
 
             assertThat(f.serverLifecycleTypes()).isEmpty()
             assertThat(f.responses()).hasSize(2)
@@ -986,14 +1058,68 @@ class VoiceTutorMeaningfulInputRelayTest {
         f.utterance(1, "learner", "어 준비됐지")
         assertThat(f.assessments()).isEmpty()
         f.openingDone()
+        assertThat(f.assessments()).isEmpty()
+        f.openingStopped()
         assertThat(f.assessments().single().teacherContext).isEqualTo("학습을 시작할 준비가 됐나요?")
         f.assess(VoiceTutorInputDecision.MEANINGFUL)
         f.publishAll()
-        assertThat(f.responses()).hasSize(1)
-        f.openingStopped()
         assertThat(f.responses()).hasSize(2)
         f.assertNoAudioDisruption()
     }
+
+    @Test
+    fun `provider failure during learner overlap abandons old retry and keeps failed tutor context unassessed`() =
+        fixture(finishOpening = false).use { f ->
+            val clientEvents = CopyOnWriteArrayList<String>()
+            val client = f.controller.clientEvents().subscribe(clientEvents::add, f.errors::add)
+            try {
+                f.utterance(1, "before-failure", "첫 문장")
+                f.openingDone()
+                assertThat(f.assessments()).isEmpty()
+                assertThat(f.publications()).isEmpty()
+
+                f.start(2)
+                assertThat(f.provider("output_audio_buffer.cleared", "response_id" to "opening"))
+                    .isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+                assertThat(f.responses()).hasSize(1)
+                assertThat(f.responses().map { it.path("event_id").asText() })
+                    .noneMatch { it.contains("turn-retry") }
+                assertThat(clientEvents).isEmpty()
+                assertThat(f.publications()).isEmpty()
+
+                f.stop(2)
+                f.commit("after-failure")
+                f.transcript("after-failure", "새 문장")
+
+                val restoredAssessment = f.assessments().first()
+                assertThat(restoredAssessment.utterances.map { it.itemId }).containsExactly("before-failure")
+                f.controller.completeInputAssessment(
+                    restoredAssessment.token,
+                    f.result(restoredAssessment, VoiceTutorInputDecision.MEANINGFUL),
+                )
+                val restoredPublication = f.publications().single()
+                f.confirm(restoredPublication, persisted = true)
+
+                val freshAssessment = f.assessments().last()
+                assertThat(freshAssessment.token).isNotEqualTo(restoredAssessment.token)
+                assertThat(freshAssessment.utterances.map { it.itemId }).containsExactly("after-failure")
+                f.controller.completeInputAssessment(
+                    freshAssessment.token,
+                    f.result(freshAssessment, VoiceTutorInputDecision.MEANINGFUL),
+                )
+                f.confirm(f.publications().last(), persisted = true)
+
+                assertThat(f.responses()).hasSize(2)
+                assertThat(f.responses().last().path("event_id").asText())
+                    .startsWith("buddystudy-internal-duplex-turn-response-")
+                    .doesNotContain("turn-retry")
+                assertThat(f.errors).isEmpty()
+                assertThat(f.controller.acceptsInputEvents()).isTrue()
+                f.assertNoAudioDisruption()
+            } finally {
+                client.dispose()
+            }
+        }
 
     @Test
     fun `provider stop before done still needs contextual assessment and persistence`() = fixture(finishOpening = false).use { f ->
@@ -1096,7 +1222,8 @@ class VoiceTutorMeaningfulInputRelayTest {
         f.stop(1)
         val commitId = f.inputCommits().single().path("event_id").asText()
         val unknown = f.emptyCommit("not-owned")
-        assertThat(f.controller.observeProviderEvent(unknown)).isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST)
+        assertThatThrownBy { f.controller.observeProviderEvent(unknown) }
+            .isInstanceOf(VoiceTutorProviderProtocolException::class.java)
         assertThat(f.controller.observeProviderEvent(f.emptyCommit(commitId))).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
         assertThat(f.actions.filterIsInstance<VoiceTutorInputTurnCoordinator.Action.Retry>()).hasSize(1)
         assertThat(f.responses()).hasSize(1)
@@ -1275,9 +1402,13 @@ class VoiceTutorMeaningfulInputRelayTest {
             try {
                 f.utterance(1, "learner", "응")
                 f.openingDone()
-                assertThat(classifierEntered.await(2, TimeUnit.SECONDS)).isTrue()
-                // This provider boundary must be processed while GPT is waiting.
+                assertThat(classifierEntered.await(100, TimeUnit.MILLISECONDS)).isFalse()
                 f.openingStopped()
+                assertThat(classifierEntered.await(2, TimeUnit.SECONDS)).isTrue()
+                // A later provider frame must still be processed while the
+                // classifier is waiting outside the ordered receive path.
+                assertThat(f.provider("output_audio_buffer.stopped", "response_id" to "stale-response"))
+                    .isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
                 assertThat(f.responses()).hasSize(1)
                 assertThat(capturedRequest.get().userId).isEqualTo(42)
                 assertThat(capturedRequest.get().language).isEqualTo("ko")
@@ -1666,7 +1797,7 @@ class VoiceTutorMeaningfulInputRelayTest {
             now.addAndGet(Duration.ofMillis(250).toNanos())
             controller.flushDelayedStopCommit(firstSequence)
         }
-        private fun finishCurrentResponseWithCandidateRead(discovery: VoiceTutorCandidateDiscovery) {
+        fun finishCurrentResponseWithCandidateRead(discovery: VoiceTutorCandidateDiscovery) {
             syntheticToolSequence += 1
             val suffix = syntheticToolSequence
             val toolResponseToken = responses().last().path("event_id").asText()

@@ -2,6 +2,14 @@
 import Foundation
 
 extension AppStrings {
+    var voiceTutorProviderCallFailed: String {
+        voiceTutorPauseText(
+            "AI 응답 중단됨",
+            "AI response stopped",
+            "AIの応答が中断されました"
+        )
+    }
+
     var voiceTutorTakeBreak: String { voiceTutorPauseText("잠깐 쉬기", "Take a break", "少し休む") }
     var voiceTutorResumeLesson: String { voiceTutorPauseText("계속하기", "Continue", "続ける") }
     var voiceTutorPausing: String {
@@ -39,16 +47,16 @@ extension AppStrings {
     }
     var voiceTutorCallRevealConversation: String {
         voiceTutorPauseText(
-            "아래로 쓸어 대화 보기",
-            "Swipe down for conversation",
-            "下にスワイプして会話を表示"
+            "대화 내용 열기",
+            "Open conversation",
+            "会話を開く"
         )
     }
     var voiceTutorCallCollapseConversation: String {
         voiceTutorPauseText(
-            "위로 쓸어 통화로 돌아가기",
-            "Swipe up to return to the call",
-            "上にスワイプして通話に戻る"
+            "대화 내용 닫기",
+            "Close conversation",
+            "会話を閉じる"
         )
     }
 

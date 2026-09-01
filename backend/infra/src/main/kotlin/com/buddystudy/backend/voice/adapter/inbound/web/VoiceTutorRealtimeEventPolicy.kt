@@ -3,6 +3,8 @@ package com.buddystudy.backend.voice.adapter.inbound.web
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata
+import com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorProviderErrorDisposition
+import com.buddystudy.backend.voice.adapter.outbound.openai.classifyRealtimeProviderError
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.time.Instant
@@ -50,11 +52,16 @@ internal class VoiceTutorRealtimeEventPolicy(
     ): ProviderEventDecision {
         val node = runCatching { mapper.readTree(raw) }.getOrNull()
             ?: return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+        if (!node.isObject || node.path("type").asText().isBlank()) {
+            return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
+        }
         return when (val type = node.path("type").asText()) {
-            "error" -> if (isExpectedInternalControlError(node)) {
-                ProviderEventDecision(payload = null)
-            } else {
-                providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_ERROR")
+            "error" -> when (classifyRealtimeProviderError(node)) {
+                VoiceTutorProviderErrorDisposition.RECOVERABLE -> ProviderEventDecision(payload = null)
+                VoiceTutorProviderErrorDisposition.SESSION_FATAL ->
+                    providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_ERROR")
+                VoiceTutorProviderErrorDisposition.PROTOCOL_INVALID ->
+                    providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
             "response.output_audio.delta" -> if (validProviderAudioDelta(node)) {
                 ProviderEventDecision(
@@ -103,8 +110,13 @@ internal class VoiceTutorRealtimeEventPolicy(
             ) {
                 // A safe server-owned hint, not a provider failure or call end.
                 // Never forward provider bodies/classifier text to the UI.
+                val payload = linkedMapOf<String, Any>("type" to VoiceTutorRealtimeContract.INPUT_RETRY_EVENT)
+                node.path(VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD)
+                    .takeIf(::validProviderResponseId)
+                    ?.asText()
+                    ?.let { payload[VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD] = it }
                 ProviderEventDecision(
-                    mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.INPUT_RETRY_EVENT)),
+                    mapper.writeValueAsString(payload),
                 )
             } else {
                 ProviderEventDecision(payload = null)
@@ -171,7 +183,9 @@ internal class VoiceTutorRealtimeEventPolicy(
                 transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
                 validProviderResponseId(node.path("response_id"))
             ) {
-                providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PLAYOUT_CLEARED")
+                // The turn controller owns one bounded regeneration. This is
+                // never a whole-call failure on its own.
+                ProviderEventDecision(payload = null)
             } else if (transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND) {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             } else {
@@ -211,15 +225,17 @@ internal class VoiceTutorRealtimeEventPolicy(
         if (type == "response.done" && status !in RESPONSE_DONE_STATUSES) {
             return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
         }
-        if (type == "response.done" && status == "failed") {
-            return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_ERROR")
-        }
         if (
             type == "response.done" &&
             transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
             status != "completed"
         ) {
-            return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_INCOMPLETE_RESPONSE")
+            // Cancelled/incomplete/failed are response-local. The sideband
+            // turn controller retries once, then asks for fresh learner input.
+            return ProviderEventDecision(payload = null)
+        }
+        if (type == "response.done" && status == "failed") {
+            return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_ERROR")
         }
         return ProviderEventDecision(
             mapper.writeValueAsString(
@@ -267,12 +283,6 @@ internal class VoiceTutorRealtimeEventPolicy(
         if (!responseId.isTextual || !PROVIDER_ID_PATTERN.matches(responseId.asText())) {
             throw VoiceTutorClientProtocolException("Voice Tutor playback response id is invalid.")
         }
-    }
-
-    private fun isExpectedInternalControlError(node: JsonNode): Boolean {
-        val eventId = node.path("error").path("event_id").asText()
-        return eventId.startsWith("${INTERNAL_CONTROL_EVENT_PREFIX}drain-") ||
-            eventId.startsWith("${INTERNAL_CONTROL_EVENT_PREFIX}relay-terminal-")
     }
 
     private fun validProviderAudioDelta(node: JsonNode): Boolean {

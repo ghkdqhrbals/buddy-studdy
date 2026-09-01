@@ -2,8 +2,12 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcPort
@@ -13,6 +17,8 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestFactory
+import org.junit.jupiter.api.DynamicTest.dynamicTest
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
@@ -20,7 +26,13 @@ import org.springframework.web.reactive.function.client.ClientResponse
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import reactor.core.publisher.Sinks
+import reactor.core.scheduler.Schedulers
+import reactor.test.StepVerifier
+import reactor.core.Disposable
 import java.time.Duration
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class OpenAIVoiceTutorWebRtcAdapterTest {
     private val mapper = JsonMapperProvider.mapper
@@ -211,6 +223,486 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         relay.dispose()
     }
 
+    @TestFactory
+    fun `production relay persists the completed tutor boundary before releasing the next response`() =
+        listOf("done-then-stopped", "stopped-then-done").map { ordering ->
+            dynamicTest(ordering) {
+                val fixture = postRelayFixture("persisted tutor sentence")
+                val calls = CopyOnWriteArrayList<RelayCall>()
+                val errors = CopyOnWriteArrayList<Throwable>()
+                val transcriptStarted = CountDownLatch(1)
+                val releaseTranscript = CountDownLatch(1)
+                val relayFinished = CountDownLatch(1)
+                try {
+                    val finalRaw = fixture.finalBoundaryEvent(ordering)
+                    val finalType = mapper.readTree(finalRaw).path("type").asText()
+                    val relay = relayVoiceTutorProviderEvent(fixture.controller, finalRaw) { raw, persist, forward ->
+                        val type = mapper.readTree(raw).path("type").asText()
+                        calls += RelayCall(type, persist, forward)
+                        if (type == "response.output_audio_transcript.done") {
+                            transcriptStarted.countDown()
+                            check(releaseTranscript.await(5, TimeUnit.SECONDS))
+                        }
+                        true
+                    }.subscribeOn(Schedulers.boundedElastic())
+                        .doFinally { relayFinished.countDown() }
+                        .subscribe({}, errors::add)
+
+                    assertThat(transcriptStarted.await(2, TimeUnit.SECONDS)).isTrue()
+                    assertThat(calls.map { it.type }).containsExactly(
+                        finalType,
+                        "response.output_audio_transcript.done",
+                    )
+                    assertThat(calls.last()).isEqualTo(
+                        RelayCall("response.output_audio_transcript.done", persist = true, forward = false),
+                    )
+                    assertThat(fixture.responseCreates()).hasSize(1)
+                    assertThat(fixture.lifecycle).isEmpty()
+
+                    releaseTranscript.countDown()
+                    assertThat(relayFinished.await(2, TimeUnit.SECONDS)).isTrue()
+                    assertThat(errors).isEmpty()
+                    assertThat(fixture.responseCreates()).hasSize(2)
+                    assertThat(fixture.lifecycle).isEmpty()
+                    relay.dispose()
+                } finally {
+                    releaseTranscript.countDown()
+                    fixture.close()
+                }
+            }
+        }
+
+    @Test
+    fun `transcript free spoken success remains fenced until its raw proof relay completes`() {
+        val fixture = postRelayFixture(transcript = null)
+        val proofStarted = CountDownLatch(1)
+        val releaseProof = CountDownLatch(1)
+        val relayFinished = CountDownLatch(1)
+        val calls = CopyOnWriteArrayList<RelayCall>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        try {
+            val finalRaw = fixture.finalBoundaryEvent("done-then-stopped")
+            val relay = relayVoiceTutorProviderEvent(fixture.controller, finalRaw) { raw, persist, forward ->
+                calls += RelayCall(mapper.readTree(raw).path("type").asText(), persist, forward)
+                proofStarted.countDown()
+                check(releaseProof.await(5, TimeUnit.SECONDS))
+                true
+            }.subscribeOn(Schedulers.boundedElastic())
+                .doFinally { relayFinished.countDown() }
+                .subscribe({}, errors::add)
+
+            assertThat(proofStarted.await(2, TimeUnit.SECONDS)).isTrue()
+            assertThat(fixture.responseCreates()).hasSize(1)
+            releaseProof.countDown()
+            assertThat(relayFinished.await(2, TimeUnit.SECONDS)).isTrue()
+            assertThat(errors).isEmpty()
+            assertThat(calls.map { it.type }).containsExactly("output_audio_buffer.stopped")
+            assertThat(fixture.responseCreates()).hasSize(2)
+            relay.dispose()
+        } finally {
+            releaseProof.countDown()
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun `same tutor item content parts persist as one ordered row before boundary ack`() {
+        val fixture = postRelayFixture(transcript = null)
+        try {
+            fixture.controller.observeProviderEvent(
+                tutorTranscriptEvent("part one", contentIndex = 1),
+            )
+            fixture.controller.observeProviderEvent(
+                tutorTranscriptEvent("part zero", contentIndex = 0),
+            )
+            val finalRaw = fixture.finalBoundaryEvent("done-then-stopped")
+            val persisted = CopyOnWriteArrayList<String>()
+
+            StepVerifier.create(
+                relayVoiceTutorProviderEvent(fixture.controller, finalRaw) { raw, persist, _ ->
+                    if (persist && mapper.readTree(raw).path("type").asText() ==
+                        "response.output_audio_transcript.done"
+                    ) {
+                        persisted += raw
+                    }
+                    true
+                },
+            ).verifyComplete()
+
+            assertThat(persisted).hasSize(1)
+            val transcript = mapper.readTree(persisted.single())
+            assertThat(transcript.path("item_id").asText()).isEqualTo(TUTOR_ITEM_ID)
+            assertThat(transcript.path("content_index").asInt()).isZero()
+            assertThat(transcript.path("transcript").asText()).isEqualTo("part zero\npart one")
+            assertThat(fixture.responseCreates()).hasSize(2)
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun `reversed tutor content parts release the same ordered assessment context as persistence`() {
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            inputCoordinator = VoiceTutorInputTurnCoordinator(),
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val actions = CopyOnWriteArrayList<VoiceTutorInputTurnCoordinator.Action>()
+        val subscriptions = listOf(
+            controller.providerEvents().subscribe(controls::add),
+            controller.inputActions().subscribe(actions::add),
+        )
+        try {
+            controller.startOpeningResponse()
+            val opening = controls.single()
+            controller.observeProviderEvent(providerResponseEvent("response.created", opening))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started"))
+            controller.observeClientEvent(
+                """{"type":"buddystudy.voice.input.speech.started","sequence":1}""",
+            )
+            controller.observeClientEvent(
+                """{"type":"buddystudy.voice.input.speech.stopped","sequence":1}""",
+            )
+            controller.observeProviderEvent(
+                """{"type":"input_audio_buffer.committed","item_id":"learner-parts"}""",
+            )
+            controller.observeProviderEvent(
+                """{"type":"conversation.item.input_audio_transcription.completed","item_id":"learner-parts","transcript":"설명해 주세요"}""",
+            )
+            controller.observeProviderEvent(tutorTranscriptEvent("part one", contentIndex = 1))
+            controller.observeProviderEvent(tutorTranscriptEvent("part zero", contentIndex = 0))
+            controller.observeProviderEvent(providerResponseEvent("response.done", opening))
+
+            val observed = controller.observeProviderEventWithPostRelay(
+                outputBufferEvent("output_audio_buffer.stopped"),
+            )
+            val boundary = observed.postRelayBoundary!!
+            assertThat(actions).isEmpty()
+            assertThat(mapper.readTree(boundary.tutorTranscriptEvents.single()).path("transcript").asText())
+                .isEqualTo("part zero\npart one")
+
+            assertThat(controller.acknowledgePostRelayBoundary(boundary.token)).isTrue()
+            assertThat(actions.filterIsInstance<VoiceTutorInputTurnCoordinator.Action.Assess>()
+                .single().teacherContext).isEqualTo("part zero\npart one")
+        } finally {
+            controller.close()
+            subscriptions.forEach(Disposable::dispose)
+        }
+    }
+
+    @Test
+    fun `failed tutor persistence never acknowledges or releases the next response`() {
+        listOf<(String) -> Boolean>(
+            { false },
+            { throw IllegalStateException("database unavailable") },
+        ).forEachIndexed { index, persistence ->
+            val fixture = postRelayFixture("must remain staged")
+            try {
+                val finalRaw = fixture.finalBoundaryEvent("done-then-stopped")
+                val failure = runCatching {
+                    relayVoiceTutorProviderEvent(fixture.controller, finalRaw) { raw, _, _ ->
+                        if (mapper.readTree(raw).path("type").asText() ==
+                            "response.output_audio_transcript.done"
+                        ) {
+                            persistence(raw)
+                        } else {
+                            true
+                        }
+                    }.block(Duration.ofSeconds(2))
+                }.exceptionOrNull()
+
+                if (index == 0) {
+                    assertThat(failure).isInstanceOf(VoiceTutorTutorTranscriptPersistenceException::class.java)
+                } else {
+                    assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+                        .hasMessage("database unavailable")
+                }
+                assertThat(fixture.responseCreates()).hasSize(1)
+                assertThat(fixture.lifecycle).isEmpty()
+                assertThat(fixture.controller.acceptsInputEvents()).isTrue()
+            } finally {
+                fixture.close()
+            }
+        }
+    }
+
+    @Test
+    fun `cancelled tutor persistence never acknowledges the completed boundary`() {
+        val fixture = postRelayFixture("cancelled persistence")
+        val persistenceStarted = CountDownLatch(1)
+        val releasePersistence = CountDownLatch(1)
+        val persistenceExited = CountDownLatch(1)
+        try {
+            val finalRaw = fixture.finalBoundaryEvent("done-then-stopped")
+            val relay = relayVoiceTutorProviderEvent(fixture.controller, finalRaw) { raw, _, _ ->
+                if (mapper.readTree(raw).path("type").asText() == "response.output_audio_transcript.done") {
+                    persistenceStarted.countDown()
+                    try {
+                        releasePersistence.await(5, TimeUnit.SECONDS)
+                    } finally {
+                        persistenceExited.countDown()
+                    }
+                }
+                true
+            }.subscribeOn(Schedulers.boundedElastic()).subscribe()
+
+            assertThat(persistenceStarted.await(2, TimeUnit.SECONDS)).isTrue()
+            relay.dispose()
+            releasePersistence.countDown()
+            assertThat(persistenceExited.await(2, TimeUnit.SECONDS)).isTrue()
+            assertThat(fixture.responseCreates()).hasSize(1)
+            assertThat(fixture.lifecycle).isEmpty()
+        } finally {
+            releasePersistence.countDown()
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun `atomic completed batch survives controller close after provider observation`() {
+        val fixture = postRelayFixture("owned before close")
+        val calls = CopyOnWriteArrayList<String>()
+        try {
+            val finalRaw = fixture.finalBoundaryEvent("done-then-stopped")
+            val relay = relayVoiceTutorProviderEvent(fixture.controller, finalRaw) { raw, _, _ ->
+                calls += mapper.readTree(raw).path("type").asText()
+                true
+            }
+            fixture.controller.close()
+
+            relay.block(Duration.ofSeconds(2))
+
+            assertThat(calls).containsExactly(
+                "output_audio_buffer.stopped",
+                "response.output_audio_transcript.done",
+            )
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun `spoken lesson end assessment waits for persisted tutor boundary acknowledgement`() {
+        val assessments = CopyOnWriteArrayList<VoiceTutorInputAssessmentRequest>()
+        val persisted = CopyOnWriteArrayList<String>()
+        val lifecycle = CopyOnWriteArrayList<String>()
+        val controls = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val tutorPersistenceStarted = CountDownLatch(1)
+        val releaseTutorPersistence = CountDownLatch(1)
+        val lessonEnded = CountDownLatch(1)
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            inputCoordinator = VoiceTutorInputTurnCoordinator(),
+        )
+        val assessment = object : VoiceTutorInputAssessmentUseCase {
+            override suspend fun assess(request: VoiceTutorInputAssessmentRequest): VoiceTutorInputAssessmentResult {
+                assessments += request
+                return VoiceTutorInputAssessmentResult(
+                    request.utterances.map { utterance ->
+                        VoiceTutorInputItemAssessment(
+                            itemId = utterance.itemId,
+                            decision = VoiceTutorInputDecision.MEANINGFUL,
+                            intent = VoiceTutorInputIntent.END_CURRENT_VOICE_LESSON,
+                        )
+                    },
+                )
+            }
+        }
+        val onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean = { raw, persist, _ ->
+            val type = mapper.readTree(raw).path("type").asText()
+            if (type == "response.output_audio_transcript.done") {
+                tutorPersistenceStarted.countDown()
+                check(releaseTutorPersistence.await(5, TimeUnit.SECONDS))
+            }
+            if (persist) persisted += raw
+            true
+        }
+        val subscriptions = listOf(
+            controller.providerEvents().subscribe(controls::add, errors::add),
+            controller.serverLifecycleEvents().subscribe({ raw ->
+                lifecycle += raw
+                lessonEnded.countDown()
+            }, errors::add),
+            voiceTutorInputAssessmentRelay(
+                controller = controller,
+                userId = 42,
+                language = "ko",
+                assessment = assessment,
+                onProviderEvent = onProviderEvent,
+            ).subscribe({}, errors::add),
+        )
+        try {
+            controller.startOpeningResponse()
+            val opening = controls.single { mapper.readTree(it).path("type").asText() == "response.create" }
+            controller.observeProviderEvent(providerResponseEvent("response.created", opening))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started"))
+            controller.observeProviderEvent(tutorTranscriptEvent("끝내기 전 마지막 선생님 문장"))
+            controller.observeClientEvent(
+                """{"type":"buddystudy.voice.input.speech.started","sequence":1}""",
+            )
+            controller.observeClientEvent(
+                """{"type":"buddystudy.voice.input.speech.stopped","sequence":1}""",
+            )
+            controller.observeProviderEvent(
+                """{"type":"input_audio_buffer.committed","item_id":"learner-end"}""",
+            )
+            controller.observeProviderEvent(
+                """{"type":"conversation.item.input_audio_transcription.completed","item_id":"learner-end","transcript":"학습 종료할게"}""",
+            )
+            controller.observeProviderEvent(providerResponseEvent("response.done", opening))
+            assertThat(assessments).isEmpty()
+            assertThat(lifecycle).isEmpty()
+
+            val relayFinished = CountDownLatch(1)
+            val relay = relayVoiceTutorProviderEvent(
+                controller,
+                outputBufferEvent("output_audio_buffer.stopped"),
+                onProviderEvent,
+            ).subscribeOn(Schedulers.boundedElastic())
+                .doFinally { relayFinished.countDown() }
+                .subscribe({}, errors::add)
+            assertThat(tutorPersistenceStarted.await(2, TimeUnit.SECONDS)).isTrue()
+            assertThat(assessments).isEmpty()
+            assertThat(lifecycle).isEmpty()
+
+            releaseTutorPersistence.countDown()
+            assertThat(relayFinished.await(2, TimeUnit.SECONDS)).isTrue()
+            assertThat(lessonEnded.await(2, TimeUnit.SECONDS)).isTrue()
+            assertThat(errors).isEmpty()
+            assertThat(assessments).hasSize(1)
+            assertThat(assessments.single().teacherContext).isEqualTo("끝내기 전 마지막 선생님 문장")
+            assertThat(persisted.map { mapper.readTree(it).path("type").asText() }).containsExactly(
+                "response.output_audio_transcript.done",
+                "conversation.item.input_audio_transcription.completed",
+            )
+            assertThat(lifecycle.map { mapper.readTree(it).path("type").asText() }).containsExactly(
+                VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT,
+            )
+            assertThat(controller.acceptsInputEvents()).isFalse()
+            relay.dispose()
+        } finally {
+            releaseTutorPersistence.countDown()
+            controller.close()
+            subscriptions.forEach(Disposable::dispose)
+        }
+    }
+
+    @Test
+    fun `due continuous speech checkpoint fires immediately after persisted boundary ack`() {
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add, errors::add)
+        val proofStarted = CountDownLatch(1)
+        val releaseProof = CountDownLatch(1)
+        val relayFinished = CountDownLatch(1)
+        try {
+            controller.startOpeningResponse()
+            val opening = controls.single()
+            controller.observeProviderEvent(providerResponseEvent("response.created", opening))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started"))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped"))
+            controller.observeClientEvent(
+                """{"type":"buddystudy.voice.input.speech.started","sequence":1}""",
+            )
+            controller.fireContinuousSpeechDeadline()
+            assertThat(controls.map { mapper.readTree(it).path("type").asText() })
+                .containsExactly("response.create")
+
+            val relay = relayVoiceTutorProviderEvent(
+                controller,
+                providerResponseEvent("response.done", opening),
+            ) { _, _, _ ->
+                proofStarted.countDown()
+                check(releaseProof.await(5, TimeUnit.SECONDS))
+                true
+            }.subscribeOn(Schedulers.boundedElastic())
+                .doFinally { relayFinished.countDown() }
+                .subscribe({}, errors::add)
+            assertThat(proofStarted.await(2, TimeUnit.SECONDS)).isTrue()
+            assertThat(controls.map { mapper.readTree(it).path("type").asText() })
+                .containsExactly("response.create")
+
+            releaseProof.countDown()
+            assertThat(relayFinished.await(2, TimeUnit.SECONDS)).isTrue()
+            assertThat(errors).isEmpty()
+            assertThat(controls.map { mapper.readTree(it).path("type").asText() })
+                .containsExactly("response.create", "input_audio_buffer.commit")
+            relay.dispose()
+        } finally {
+            releaseProof.countDown()
+            controller.close()
+            output.dispose()
+        }
+    }
+
+    @Test
+    fun `blank tutor final yields an empty batch and response output supplies assessment context`() {
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            inputCoordinator = VoiceTutorInputTurnCoordinator(),
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val actions = CopyOnWriteArrayList<VoiceTutorInputTurnCoordinator.Action>()
+        val subscriptions = listOf(
+            controller.providerEvents().subscribe(controls::add),
+            controller.inputActions().subscribe(actions::add),
+        )
+        try {
+            controller.startOpeningResponse()
+            val opening = controls.single()
+            controller.observeProviderEvent(providerResponseEvent("response.created", opening))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started"))
+            controller.observeClientEvent(
+                """{"type":"buddystudy.voice.input.speech.started","sequence":1}""",
+            )
+            controller.observeClientEvent(
+                """{"type":"buddystudy.voice.input.speech.stopped","sequence":1}""",
+            )
+            controller.observeProviderEvent(
+                """{"type":"input_audio_buffer.committed","item_id":"learner-fallback"}""",
+            )
+            controller.observeProviderEvent(
+                """{"type":"conversation.item.input_audio_transcription.completed","item_id":"learner-fallback","transcript":"준비됐어요"}""",
+            )
+            controller.observeProviderEvent(tutorTranscriptEvent("   "))
+            controller.observeProviderEvent(
+                providerResponseEvent(
+                    "response.done",
+                    opening,
+                    tutorFallback = "response done fallback context",
+                ),
+            )
+            assertThat(actions).isEmpty()
+
+            val observed = controller.observeProviderEventWithPostRelay(
+                outputBufferEvent("output_audio_buffer.stopped"),
+            )
+            val boundary = observed.postRelayBoundary
+            assertThat(boundary).isNotNull
+            assertThat(boundary!!.tutorTranscriptEvents).isEmpty()
+            assertThat(actions).isEmpty()
+
+            assertThat(controller.acknowledgePostRelayBoundary(boundary.token)).isTrue()
+            val assessment = actions.filterIsInstance<VoiceTutorInputTurnCoordinator.Action.Assess>().single()
+            assertThat(assessment.teacherContext).isEqualTo("response done fallback context")
+        } finally {
+            controller.close()
+            subscriptions.forEach(Disposable::dispose)
+        }
+    }
+
     @Test
     fun `sideband verifies provider configuration before readiness and opening without losing an early learner turn`() {
         val subscriptions = mutableListOf<String>()
@@ -311,6 +803,116 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         }
     }
 
+    private fun postRelayFixture(transcript: String?): PostRelayFixture {
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val lifecycle = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val subscriptions = listOf(
+            controller.providerEvents().subscribe(controls::add, errors::add),
+            controller.serverLifecycleEvents().subscribe(lifecycle::add, errors::add),
+        )
+        controller.startOpeningResponse()
+        val opening = controls.single { mapper.readTree(it).path("type").asText() == "response.create" }
+        controller.observeProviderEvent(providerResponseEvent("response.created", opening))
+        controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started"))
+        transcript?.let { controller.observeProviderEvent(tutorTranscriptEvent(it)) }
+        controller.observeClientEvent(
+            """{"type":"buddystudy.voice.input.speech.started","sequence":1}""",
+        )
+        controller.observeClientEvent(
+            """{"type":"buddystudy.voice.input.speech.stopped","sequence":1}""",
+        )
+        controller.observeProviderEvent(
+            """{"type":"input_audio_buffer.committed","item_id":"queued-learner"}""",
+        )
+        assertThat(errors).isEmpty()
+        return PostRelayFixture(controller, controls, lifecycle, subscriptions, opening)
+    }
+
+    private inner class PostRelayFixture(
+        val controller: VoiceTutorDuplexTurnController,
+        val controls: CopyOnWriteArrayList<String>,
+        val lifecycle: CopyOnWriteArrayList<String>,
+        private val subscriptions: List<Disposable>,
+        private val openingControl: String,
+    ) {
+        fun responseCreates(): List<String> = controls.filter {
+            mapper.readTree(it).path("type").asText() == "response.create"
+        }
+
+        fun finalBoundaryEvent(ordering: String): String = when (ordering) {
+            "done-then-stopped" -> {
+                controller.observeProviderEvent(providerResponseEvent("response.done", openingControl))
+                outputBufferEvent("output_audio_buffer.stopped")
+            }
+            "stopped-then-done" -> {
+                controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped"))
+                providerResponseEvent("response.done", openingControl)
+            }
+            else -> error("Unsupported boundary ordering: $ordering")
+        }
+
+        fun close() {
+            controller.close()
+            subscriptions.forEach(Disposable::dispose)
+        }
+    }
+
+    private fun providerResponseEvent(
+        type: String,
+        responseControl: String,
+        tutorFallback: String? = null,
+    ): String {
+        val token = mapper.readTree(responseControl).path("response").path("metadata")
+            .path("buddystudy_response_token").asText()
+        val response = linkedMapOf<String, Any>(
+            "id" to RESPONSE_ID,
+            "status" to if (type == "response.created") "in_progress" else "completed",
+            "metadata" to mapOf("buddystudy_response_token" to token),
+        )
+        tutorFallback?.let { transcript ->
+            response["output"] = listOf(
+                mapOf(
+                    "role" to "assistant",
+                    "content" to listOf(mapOf("transcript" to transcript)),
+                ),
+            )
+        }
+        return mapper.writeValueAsString(
+            mapOf(
+                "type" to type,
+                "response" to response,
+            ),
+        )
+    }
+
+    private fun outputBufferEvent(type: String): String =
+        """{"type":"$type","response_id":"$RESPONSE_ID"}"""
+
+    private fun tutorTranscriptEvent(
+        transcript: String,
+        contentIndex: Int = 0,
+    ): String = mapper.writeValueAsString(
+        mapOf(
+            "type" to "response.output_audio_transcript.done",
+            "response_id" to RESPONSE_ID,
+            "item_id" to TUTOR_ITEM_ID,
+            "content_index" to contentIndex,
+            "transcript" to transcript,
+        ),
+    )
+
+    private data class RelayCall(
+        val type: String,
+        val persist: Boolean,
+        val forward: Boolean,
+    )
+
     private fun validSdp(includeDataChannel: Boolean = false): String = buildString {
         append("v=0\r\n")
         append("o=- 1 1 IN IP4 127.0.0.1\r\n")
@@ -330,6 +932,8 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
     }
 
     private companion object {
+        const val RESPONSE_ID = "response-post-relay"
+        const val TUTOR_ITEM_ID = "tutor-post-relay"
         val FINGERPRINT = "sha-256 " + (0 until 32).joinToString(":") { "AA" }
     }
 }

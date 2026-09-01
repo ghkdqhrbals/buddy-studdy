@@ -187,9 +187,28 @@ class VoiceTutorMcpRelayTest {
         f.event("response.function_call_arguments.done", "call_id" to "write-1", "name" to "create_study_topic", "arguments" to "{}")
         f.controller.observeProviderEvent(f.done(listOf(call("write-1")), token = "old-token"))
         assertThat(f.calls).isEmpty()
-        assertThatThrownBy { f.controller.observeProviderEvent(f.done(listOf(call("write-1")), status = "cancelled")) }
-            .isInstanceOf(VoiceTutorProviderIncompleteResponseException::class.java)
+        assertThat(f.controller.observeProviderEvent(f.done(listOf(call("write-1")), status = "cancelled")))
+            .isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
         assertThat(f.calls).isEmpty()
+        assertThat(f.responses()).hasSize(2)
+    }
+
+    @Test
+    fun `late clear after an acknowledged tool never replays the accepted call`() = Fixture().use { f ->
+        f.event("output_audio_buffer.started", "response_id" to "response-1")
+        f.controller.observeProviderEvent(f.done(listOf(spokenItem(), call("write-1", "create_study_topic"))))
+        assertThat(f.calls.map { it.callId }).containsExactly("write-1")
+        f.completeAll()
+        f.ack(f.outputs().single())
+        assertThat(f.responses()).hasSize(1)
+
+        assertThat(f.event("output_audio_buffer.cleared", "response_id" to "response-1"))
+            .isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+
+        assertThat(f.calls.map { it.callId }).containsExactly("write-1")
+        assertThat(f.responses()).hasSize(2)
+        assertThat(f.clientControls).isEmpty()
+        f.noMediaDisruption()
     }
 
     @Test
@@ -370,6 +389,7 @@ class VoiceTutorMcpRelayTest {
         val now = AtomicLong(0)
         val errors = CopyOnWriteArrayList<Throwable>()
         val controls = CopyOnWriteArrayList<String>()
+        val clientControls = CopyOnWriteArrayList<String>()
         val calls = CopyOnWriteArrayList<VoiceTutorMcpCall>()
         val outputArrived = CountDownLatch(1)
         val controller = VoiceTutorDuplexTurnController(
@@ -381,6 +401,7 @@ class VoiceTutorMcpRelayTest {
             if (mapper.readTree(raw).path("type").asText() == "conversation.item.create") outputArrived.countDown()
         }, errors::add)
         private val workSubscription = if (captureCalls) controller.toolActions().subscribe(calls::add, errors::add) else null
+        private val clientSubscription = controller.clientEvents().subscribe(clientControls::add, errors::add)
         private val token: String
         init {
             controller.startOpeningResponse()
@@ -418,7 +439,12 @@ class VoiceTutorMcpRelayTest {
             assertThat(controls.map { mapper.readTree(it).path("type").asText() })
                 .doesNotContain("response.cancel", "output_audio_buffer.clear", "input_audio_buffer.clear", "conversation.item.truncate")
         }
-        override fun close() { controller.close(); workSubscription?.dispose(); controlSubscription.dispose() }
+        override fun close() {
+            controller.close()
+            clientSubscription.dispose()
+            workSubscription?.dispose()
+            controlSubscription.dispose()
+        }
     }
 
     private companion object {

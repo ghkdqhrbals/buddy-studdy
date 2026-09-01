@@ -564,7 +564,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
             .assertNext(activeControl::set)
             .then {
                 controller.observeProviderEvent(
-                    """{"type":"error","error":{"event_id":"buddystudy-internal-duplex-stale"}}""",
+                    """{"type":"error","error":{"type":"invalid_request_error","code":"response_cancel_not_active","event_id":"buddystudy-internal-drain-stale"}}""",
                 )
                 learnerTurn(controller)
             }
@@ -1453,33 +1453,382 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
     }
 
     @Test
-    fun `webrtc cleared or non-completed response is terminal`() {
+    fun `webrtc cleared or non-completed response retries once then abandons only the turn`() {
         listOf("cancelled", "incomplete", "failed").forEach { status ->
             val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
-            val control = providerEvents(controller).next().doOnSubscribe { queueOrdinaryResponse(controller) }.block()!!
-            controller.observeProviderEvent(responseEvent("response.created", "response-$status", control))
+            val controls = CopyOnWriteArrayList<String>()
+            val errors = CopyOnWriteArrayList<Throwable>()
+            val clientEvents = CopyOnWriteArrayList<String>()
+            val output = providerEvents(controller).subscribe(controls::add, errors::add)
+            val client = controller.clientEvents().subscribe(clientEvents::add, errors::add)
+            try {
+                queueOrdinaryResponse(controller)
+                val firstControl = controls.single()
+                controller.observeProviderEvent(responseEvent("response.created", "response-$status-1", firstControl))
+                assertThat(controller.observeProviderEvent(
+                    responseEvent("response.done", "response-$status-1", firstControl, status = status),
+                )).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
 
-            assertThatThrownBy {
-                controller.observeProviderEvent(
-                    responseEvent("response.done", "response-$status", control, status = status),
+                assertThat(controls).hasSize(2)
+                val retryControl = controls.last()
+                assertThat(mapper.readTree(retryControl).path("event_id").asText())
+                    .startsWith("buddystudy-internal-duplex-turn-retry-")
+                controller.observeProviderEvent(responseEvent("response.created", "response-$status-2", retryControl))
+                assertThat(controller.observeProviderEvent(
+                    responseEvent("response.done", "response-$status-2", retryControl, status = status),
+                )).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+
+                assertThat(errors).isEmpty()
+                assertThat(controller.acceptsInputEvents()).isTrue()
+                assertThat(clientEvents).hasSize(1)
+                val abandoned = mapper.readTree(clientEvents.single())
+                assertThat(abandoned.path("type").asText()).isEqualTo(VoiceTutorRealtimeContract.INPUT_RETRY_EVENT)
+                assertThat(abandoned.path(VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD).asText())
+                    .isEqualTo("response-$status-2")
+                assertThat(abandoned.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+                    "type", VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD,
                 )
-            }.isInstanceOf(VoiceTutorProviderIncompleteResponseException::class.java)
-            controller.close()
+            } finally {
+                controller.close()
+                client.dispose()
+                output.dispose()
+            }
         }
 
         val clearedController = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
-        val clearedControl = providerEvents(clearedController).next()
-            .doOnSubscribe { queueOrdinaryResponse(clearedController) }
-            .block()!!
-        clearedController.observeProviderEvent(
-            responseEvent("response.created", "response-cleared", clearedControl),
-        )
-        assertThatThrownBy {
+        val clearedControls = CopyOnWriteArrayList<String>()
+        val clearedClientEvents = CopyOnWriteArrayList<String>()
+        val clearedOutput = providerEvents(clearedController).subscribe(clearedControls::add)
+        val clearedClient = clearedController.clientEvents().subscribe(clearedClientEvents::add)
+        try {
+            queueOrdinaryResponse(clearedController)
+            val firstControl = clearedControls.single()
             clearedController.observeProviderEvent(
-                outputBufferEvent("output_audio_buffer.cleared", "response-cleared"),
+                responseEvent("response.created", "response-cleared-1", firstControl),
             )
-        }.isInstanceOf(VoiceTutorProviderOutputBufferClearedException::class.java)
-        clearedController.close()
+            assertThat(clearedController.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.cleared", "response-cleared-1"),
+            )).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+            val retryControl = clearedControls.last()
+            clearedController.observeProviderEvent(
+                responseEvent("response.created", "response-cleared-2", retryControl),
+            )
+            assertThat(clearedController.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.cleared", "response-cleared-1"),
+            )).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+            listOf("../../response", "response-unknown").forEach { responseId ->
+                assertThatThrownBy {
+                    clearedController.observeProviderEvent(
+                        outputBufferEvent("output_audio_buffer.cleared", responseId),
+                    )
+                }.isInstanceOf(VoiceTutorProviderProtocolException::class.java)
+            }
+            assertThat(clearedController.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.cleared", "response-cleared-2"),
+            )).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+            assertThat(clearedControls).hasSize(2)
+            assertThat(mapper.readTree(clearedClientEvents.single())
+                .path(VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD).asText())
+                .isEqualTo("response-cleared-2")
+            assertThat(clearedController.acceptsInputEvents()).isTrue()
+        } finally {
+            clearedController.close()
+            clearedClient.dispose()
+            clearedOutput.dispose()
+        }
+    }
+
+    @Test
+    fun `webrtc persists only the replacement tutor transcript after completed playout`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val controls = CopyOnWriteArrayList<String>()
+        val persisted = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val output = providerEvents(controller).subscribe(controls::add, errors::add)
+        try {
+            queueOrdinaryResponse(controller)
+            val failedControl = controls.single()
+            controller.observeProviderEvent(responseEvent("response.created", "response-transcript-failed", failedControl))
+            controller.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.started", "response-transcript-failed"),
+            )
+            val failedTranscript = mapper.writeValueAsString(linkedMapOf(
+                "type" to "response.output_audio_transcript.done",
+                "response_id" to "response-transcript-failed",
+                "item_id" to "tutor-item-failed",
+                "content_index" to 0,
+                "transcript" to "failed sentence",
+                "private_message" to "must-not-persist",
+                VoiceTutorTranscriptMetadata.LESSON_REVISION to 999,
+            ))
+            assertThat(controller.observeProviderEvent(failedTranscript))
+                .isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_ONLY)
+            controller.observeProviderEvent(
+                responseEvent("response.done", "response-transcript-failed", failedControl),
+            )
+            assertThat(persisted).isEmpty()
+
+            controller.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.cleared", "response-transcript-failed"),
+            )
+            assertThat(persisted).isEmpty()
+            val retryControl = controls.last()
+            assertThat(mapper.readTree(retryControl).path("event_id").asText())
+                .startsWith("buddystudy-internal-duplex-turn-retry-")
+
+            controller.observeProviderEvent(
+                responseEvent("response.created", "response-transcript-replacement", retryControl),
+            )
+            controller.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.started", "response-transcript-replacement"),
+            )
+            val replacementTranscript = mapper.writeValueAsString(linkedMapOf(
+                "type" to "response.output_audio_transcript.done",
+                "response_id" to "response-transcript-replacement",
+                "item_id" to "tutor-item-replacement",
+                "content_index" to 0,
+                "transcript" to "replacement sentence",
+                "private_message" to "must-not-persist",
+                VoiceTutorTranscriptMetadata.LESSON_REVISION to 999,
+            ))
+            assertThat(controller.observeProviderEvent(replacementTranscript))
+                .isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_ONLY)
+            controller.observeProviderEvent(
+                responseEvent("response.done", "response-transcript-replacement", retryControl),
+            )
+            assertThat(persisted).isEmpty()
+
+            val successfulBoundary = controller.observeProviderEventWithPostRelay(
+                outputBufferEvent("output_audio_buffer.stopped", "response-transcript-replacement"),
+            )
+            val boundary = successfulBoundary.postRelayBoundary
+            assertThat(boundary).isNotNull
+            persisted.addAll(boundary!!.tutorTranscriptEvents)
+            assertThat(persisted).hasSize(1)
+            val persistedTranscript = mapper.readTree(persisted.single())
+            assertThat(persistedTranscript.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+                "type", "response_id", "item_id", "content_index", "transcript",
+                VoiceTutorTranscriptMetadata.LESSON_REVISION,
+            )
+            assertThat(persistedTranscript.path("response_id").asText())
+                .isEqualTo("response-transcript-replacement")
+            assertThat(persistedTranscript.path("item_id").asText()).isEqualTo("tutor-item-replacement")
+            assertThat(persistedTranscript.path("content_index").asInt()).isZero()
+            assertThat(persistedTranscript.path("transcript").asText()).isEqualTo("replacement sentence")
+            assertThat(persistedTranscript.toString()).doesNotContain(
+                "failed sentence", "private_message", "must-not-persist",
+            )
+            assertThat(persistedTranscript.path(VoiceTutorTranscriptMetadata.LESSON_REVISION).asLong()).isZero()
+            assertThat(controller.acknowledgePostRelayBoundary(boundary.token)).isTrue()
+
+            assertThat(controller.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.stopped", "response-transcript-replacement"),
+            )).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+            assertThat(persisted).hasSize(1)
+            assertThat(errors).isEmpty()
+        } finally {
+            controller.close()
+            output.dispose()
+        }
+    }
+
+    @Test
+    fun `webrtc persists a tutor transcript once when output stops before response done`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val control = providerEvents(controller).next().doOnSubscribe { queueOrdinaryResponse(controller) }.block()!!
+        try {
+            controller.observeProviderEvent(responseEvent("response.created", "response-stopped-first", control))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started", "response-stopped-first"))
+            assertThat(controller.observeProviderEvent(mapper.writeValueAsString(linkedMapOf(
+                "type" to "response.output_audio_transcript.done",
+                "response_id" to "response-stopped-first",
+                "item_id" to "tutor-stopped-first",
+                "content_index" to 0,
+                "transcript" to "stopped before done",
+            )))).isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_ONLY)
+
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "response-stopped-first"))
+            val completed = controller.observeProviderEventWithPostRelay(
+                responseEvent("response.done", "response-stopped-first", control),
+            )
+            val boundary = completed.postRelayBoundary
+            assertThat(boundary).isNotNull
+            val persisted = boundary!!.tutorTranscriptEvents
+            assertThat(persisted).hasSize(1)
+            assertThat(mapper.readTree(persisted.single()).path("transcript").asText())
+                .isEqualTo("stopped before done")
+            assertThat(controller.acknowledgePostRelayBoundary(boundary.token)).isTrue()
+
+            assertThat(controller.observeProviderEvent(responseEvent("response.done", "response-stopped-first", control)))
+                .isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `webrtc retry rejects a provider response id reused from the failed attempt`() {
+        val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val controls = CopyOnWriteArrayList<String>()
+        val output = providerEvents(controller).subscribe(controls::add)
+        try {
+            queueOrdinaryResponse(controller)
+            val firstControl = controls.single()
+            controller.observeProviderEvent(responseEvent("response.created", "response-reused", firstControl))
+            controller.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.cleared", "response-reused"),
+            )
+            val retryControl = controls.last()
+
+            assertThatThrownBy {
+                controller.observeProviderEvent(responseEvent("response.created", "response-reused", retryControl))
+            }.isInstanceOf(VoiceTutorProviderProtocolException::class.java)
+        } finally {
+            controller.close()
+            output.dispose()
+        }
+    }
+
+    @Test
+    fun `learner speech in flight abandons the old provider retry before a new input commit`() {
+        val diagnostics = CopyOnWriteArrayList<VoiceTutorProviderTurnFailureDiagnostic>()
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            onProviderTurnFailure = diagnostics::add,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val clientEvents = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val output = providerEvents(controller).subscribe(controls::add, errors::add)
+        val client = controller.clientEvents().subscribe(clientEvents::add, errors::add)
+        try {
+            queueOrdinaryResponse(controller)
+            val failedControl = controls.single()
+            controller.observeProviderEvent(responseEvent("response.created", "response-before-learner", failedControl))
+            controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 2))
+
+            assertThat(controller.observeProviderEvent(
+                outputBufferEvent("output_audio_buffer.cleared", "response-before-learner"),
+            )).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+            assertThat(controls).hasSize(1)
+            assertThat(diagnostics.map { it.action })
+                .containsExactly(VoiceTutorProviderTurnFailureAction.TURN_ABANDONED)
+            assertThat(clientEvents).isEmpty()
+
+            controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 2))
+            assertThat(controls).hasSize(1)
+            controller.observeProviderEvent(committedEvent("learner-after-failure"))
+
+            assertThat(controls).hasSize(2)
+            val newTurn = mapper.readTree(controls.last())
+            assertThat(newTurn.path("event_id").asText())
+                .startsWith("buddystudy-internal-duplex-turn-response-")
+                .doesNotContain("turn-retry")
+            assertThat(errors).isEmpty()
+            assertThat(controller.acceptsInputEvents()).isTrue()
+        } finally {
+            controller.close()
+            client.dispose()
+            output.dispose()
+        }
+    }
+
+    @Test
+    fun `matching raw provider error retries once without leaking its payload then abandons exact response`() {
+        val diagnostics = CopyOnWriteArrayList<VoiceTutorProviderTurnFailureDiagnostic>()
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            onProviderTurnFailure = diagnostics::add,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val clientEvents = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val output = providerEvents(controller).subscribe(controls::add, errors::add)
+        val client = controller.clientEvents().subscribe(clientEvents::add, errors::add)
+        try {
+            queueOrdinaryResponse(controller)
+            val firstControl = controls.single()
+            controller.observeProviderEvent(responseEvent("response.created", "response-error-1", firstControl))
+            val firstEventId = mapper.readTree(firstControl).path("event_id").asText()
+            controller.observeProviderEvent(providerErrorEvent(firstEventId, "private provider message"))
+
+            val retryControl = controls.last()
+            controller.observeProviderEvent(responseEvent("response.created", "response-error-2", retryControl))
+            val retryEventId = mapper.readTree(retryControl).path("event_id").asText()
+            controller.observeProviderEvent(providerErrorEvent(retryEventId, "private provider message"))
+
+            assertThat(errors).isEmpty()
+            assertThat(diagnostics.map { it.action }).containsExactly(
+                VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED,
+                VoiceTutorProviderTurnFailureAction.TURN_ABANDONED,
+            )
+            assertThat(diagnostics.map { it.attempt }).containsExactly(1, 2)
+            assertThat(diagnostics.map { it.causedEventRef }).allMatch { it.matches(Regex("[0-9a-f]{16}")) }
+            assertThat(diagnostics.toString()).doesNotContain(
+                firstEventId,
+                retryEventId,
+                "private provider message",
+            )
+            val abandoned = mapper.readTree(clientEvents.single())
+            assertThat(abandoned.path(VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD).asText())
+                .isEqualTo("response-error-2")
+            assertThat(abandoned.toString()).doesNotContain("private provider message", "message", "code")
+            assertThat(controller.acceptsInputEvents()).isTrue()
+        } finally {
+            controller.close()
+            client.dispose()
+            output.dispose()
+        }
+    }
+
+    @Test
+    fun `uncorrelated provider errors never replay an active response`() {
+        val safeController = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val safeControls = CopyOnWriteArrayList<String>()
+        val safeClientEvents = CopyOnWriteArrayList<String>()
+        val safeOutput = providerEvents(safeController).subscribe(safeControls::add)
+        val safeClient = safeController.clientEvents().subscribe(safeClientEvents::add)
+        try {
+            queueOrdinaryResponse(safeController)
+            val control = safeControls.single()
+            safeController.observeProviderEvent(responseEvent("response.created", "response-safe-abandon", control))
+            val disposition = safeController.observeProviderEvent(
+                """{"type":"error","error":{"type":"server_error","code":"service_unavailable","message":"private"}}""",
+            )
+
+            assertThat(disposition).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+            assertThat(safeControls).hasSize(1)
+            assertThat(mapper.readTree(safeClientEvents.single())
+                .path(VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD).asText())
+                .isEqualTo("response-safe-abandon")
+            assertThat(safeController.acceptsInputEvents()).isTrue()
+        } finally {
+            safeController.close()
+            safeClient.dispose()
+            safeOutput.dispose()
+        }
+
+        val ambiguousController = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
+        val ambiguousControls = CopyOnWriteArrayList<String>()
+        val ambiguousOutput = providerEvents(ambiguousController).subscribe(ambiguousControls::add)
+        try {
+            queueOrdinaryResponse(ambiguousController)
+            val control = ambiguousControls.single()
+            ambiguousController.observeProviderEvent(responseEvent("response.created", "response-ambiguous", control))
+
+            listOf(
+                """{"type":"error","error":{"type":"server_error","code":"service_unavailable","event_id":"unknown-input-event","message":"private"}}""",
+                """{"type":"error","error":{"type":"server_error","code":"service_unavailable","event_id":"buddystudy-internal-duplex-input-commit-unknown","message":"private"}}""",
+                """{"type":"error","error":{"type":"invalid_request_error","code":"invalid_value","event_id":"unknown-input-event","message":"private"}}""",
+            ).forEach { raw ->
+                assertThatThrownBy { ambiguousController.observeProviderEvent(raw) }
+                    .isInstanceOf(VoiceTutorProviderProtocolException::class.java)
+            }
+            assertThat(ambiguousControls).hasSize(1)
+        } finally {
+            ambiguousController.close()
+            ambiguousOutput.dispose()
+        }
     }
 
     @Test
@@ -1567,6 +1916,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         nanoTime: () -> Long = System::nanoTime,
         transport: VoiceTutorRealtimeTransport = VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY,
         readyForLearnerTurns: Boolean = true,
+        onProviderTurnFailure: (VoiceTutorProviderTurnFailureDiagnostic) -> Unit = {},
     ): VoiceTutorDuplexTurnController {
         val controller = VoiceTutorDuplexTurnController(
             mapper = mapper,
@@ -1574,6 +1924,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
             responseTimeout = Duration.ofSeconds(60),
             nanoTime = nanoTime,
             transport = transport,
+            onProviderTurnFailure = onProviderTurnFailure,
         )
         controllerTransports[controller] = transport
         if (!readyForLearnerTurns) return controller
@@ -1701,6 +2052,18 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
 
     private fun outputBufferEvent(type: String, id: String): String =
         """{"type":"$type","response_id":"$id"}"""
+
+    private fun providerErrorEvent(eventId: String, message: String): String = mapper.writeValueAsString(
+        mapOf(
+            "type" to "error",
+            "error" to mapOf(
+                "type" to "server_error",
+                "code" to "server_error",
+                "event_id" to eventId,
+                "message" to message,
+            ),
+        ),
+    )
 
     private fun applyWebRtcGateSignal(
         controller: VoiceTutorDuplexTurnController,

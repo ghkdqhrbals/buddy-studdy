@@ -92,6 +92,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case userSpeechStarted
     case userSpeechStopped
     case inputRetry
+    case providerTurnAbandoned(responseID: String)
     case studyFocused(VoiceTutorStudyFocus?)
     case studyTreeChanged(studyID: Int)
     case studyTreeUpdated(studyID: Int)
@@ -175,6 +176,9 @@ enum VoiceTutorRealtimeEventParser {
         case "buddystudy.voice.heartbeat.ack":
             return .heartbeatAcknowledged
         case "buddystudy.voice.input.retry":
+            if let responseID = providerResponseID("abandonedResponseId", in: object) {
+                return .providerTurnAbandoned(responseID: responseID)
+            }
             return .inputRetry
         case "buddystudy.voice.study.focused":
             // Only an explicit null clears the current topic. Missing or malformed
@@ -293,6 +297,18 @@ enum VoiceTutorRealtimeEventParser {
 
     private static func string(_ key: String, in object: [String: Any]) -> String? {
         object[key] as? String
+    }
+
+    private static func providerResponseID(_ key: String, in object: [String: Any]) -> String? {
+        guard let value = string(key, in: object), !value.isEmpty, value.utf8.count <= 191 else {
+            return nil
+        }
+        let allowedPunctuation = CharacterSet(charactersIn: "_-")
+        let allowed = CharacterSet.alphanumerics.union(allowedPunctuation)
+        guard value.unicodeScalars.allSatisfy({ $0.isASCII && allowed.contains($0) }) else {
+            return nil
+        }
+        return value
     }
 
     private static func integer(_ key: String, in object: [String: Any]) -> Int? {

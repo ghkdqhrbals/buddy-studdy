@@ -237,6 +237,7 @@ internal class VoiceTutorDuplexTurnController(
     private val inputCoordinator: VoiceTutorInputTurnCoordinator? = null,
     toolsEnabled: Boolean = false,
     initialLessonRevision: Long = 0,
+    private val onProviderTurnFailure: (VoiceTutorProviderTurnFailureDiagnostic) -> Unit = {},
 ) {
     init {
         require(initialLessonRevision >= 0) { "Voice Tutor lesson revision was invalid." }
@@ -277,6 +278,7 @@ internal class VoiceTutorDuplexTurnController(
     private var activeResponseRespondsToStudyAnswer = false
     private var activeResponseStudyAnswer: StudyAnswerIdentity? = null
     private var activeResponseTutorContext = ""
+    private var activeResponseTutorContextForAssessment = ""
     private val controls = Sinks.many().unicast()
         .onBackpressureBuffer(Queues.get<String>(MAX_BUFFERED_CONTROLS).get())
     private val inputWork = Sinks.many().unicast()
@@ -312,6 +314,7 @@ internal class VoiceTutorDuplexTurnController(
     private var speechAwaitingTutorFinalizationGeneration: Long? = null
     private var stopAwaitingTutorFinalization: PendingStopCommit? = null
     private val activeTutorTranscripts = linkedMapOf<String, String>()
+    private val activeTutorFinalTranscriptEvents = linkedMapOf<String, StagedTutorTranscript>()
     private val activeTutorTranscriptItemIds = linkedSetOf<String>()
     private var inputCheckpointTimer: Disposable? = null
     private var inputCheckpointTimerGeneration = 0L
@@ -329,6 +332,14 @@ internal class VoiceTutorDuplexTurnController(
     private var providerOutputBufferStarted = false
     private var providerAudioObserved = false
     private var toolOnlyResponse = false
+    private var activeResponseAcceptedToolCalls = false
+    private var activeResponseRetryAttempt = 0
+    private var activeResponseBoundaryCheckpoint: TutorBoundaryCheckpoint? = null
+    private var pendingProviderResponseRetry: PendingProviderResponseRetry? = null
+    private var pendingPostRelayBoundary: PendingPostRelayBoundary? = null
+    private var nextPostRelayBoundaryToken = 1L
+    private val recentFailedResponseCreateEventIds = LinkedHashSet<String>()
+    private val recentFailedResponseIds = LinkedHashSet<String>()
     private var playbackTimer: Disposable? = null
     private var responseTimer: Disposable? = null
     private var openingResponseRequested = false
@@ -613,7 +624,7 @@ internal class VoiceTutorDuplexTurnController(
             // the newest learner generation. Never create another response. If
             // the tutor is already speaking, however, keep the call alive until
             // that exact response reaches response.done + output buffer stopped.
-            if (!responseActive) {
+            if (!responseActive && pendingPostRelayBoundary == null) {
                 emitSpokenLessonEndLifecycle()
             }
         }
@@ -648,7 +659,8 @@ internal class VoiceTutorDuplexTurnController(
     private fun emitSpokenLessonEndLifecycle() {
         val pending = pendingSpokenLessonEnd ?: return
         if (
-            closed || spokenLessonEndLifecycleEmitted || pending.speechSequence != lastClientSpeechSequence ||
+            closed || pendingPostRelayBoundary != null || spokenLessonEndLifecycleEmitted ||
+            pending.speechSequence != lastClientSpeechSequence ||
             activeClientSpeechSequence != null
         ) return
         spokenLessonEndRequested = true
@@ -804,10 +816,50 @@ internal class VoiceTutorDuplexTurnController(
         }
     }
 
+    /** Direct/unit callers acknowledge successful media boundaries immediately. */
     @Synchronized
     fun observeProviderEvent(raw: String): VoiceTutorProviderRelayDisposition {
+        val observation = observeProviderEventWithPostRelay(raw)
+        observation.postRelayBoundary?.let { acknowledgePostRelayBoundary(it.token) }
+        return observation.disposition
+    }
+
+    /**
+     * Production sideband ownership is atomic: no client terminal can clear the
+     * completed transcript batch between provider observation and batch take.
+     */
+    @Synchronized
+    fun observeProviderEventWithPostRelay(raw: String): VoiceTutorProviderObservation {
+        val disposition = observeProviderEventInternal(raw)
+        val pending = pendingPostRelayBoundary?.takeIf { !it.claimed }
+        val boundary = pending?.let {
+            pendingPostRelayBoundary = it.copy(claimed = true)
+            VoiceTutorPostRelayBoundary(it.token, it.tutorTranscriptEvents)
+        }
+        return VoiceTutorProviderObservation(disposition, boundary)
+    }
+
+    @Synchronized
+    fun acknowledgePostRelayBoundary(token: Long): Boolean {
+        val pending = pendingPostRelayBoundary
+            ?.takeIf { it.claimed && it.token == token } ?: return false
+        resumeAfterPostRelayBoundary(pending)
+        return true
+    }
+
+    private fun observeProviderEventInternal(raw: String): VoiceTutorProviderRelayDisposition {
         val node = runCatching { mapper.readTree(raw) }.getOrNull()
-            ?: return VoiceTutorProviderRelayDisposition.DROP
+            ?: if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+                throw VoiceTutorProviderProtocolException()
+            } else {
+                return VoiceTutorProviderRelayDisposition.DROP
+            }
+        if (!node.isObject || node.path("type").asText().isBlank()) {
+            if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+                throw VoiceTutorProviderProtocolException()
+            }
+            return VoiceTutorProviderRelayDisposition.DROP
+        }
         if (closed) {
             return terminalDisposition(node)
         }
@@ -845,7 +897,14 @@ internal class VoiceTutorDuplexTurnController(
                 if (matches && node.path("type").asText() == "response.output_audio_transcript.done") {
                     rememberTutorTranscript(node)
                 }
-                accepted(matches)
+                accepted(
+                    matches,
+                    if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+                        VoiceTutorProviderRelayDisposition.FORWARD_ONLY
+                    } else {
+                        VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
+                    },
+                )
             }
             in USER_TRANSCRIPT_EVENTS -> {
                 if (inputCoordinator == null) return VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
@@ -981,11 +1040,11 @@ internal class VoiceTutorDuplexTurnController(
                 VoiceTutorProviderRelayDisposition.DROP
             }
             "response.created" -> accepted(observeResponseCreated(node))
-            "response.done" -> accepted(observeResponseDone(node))
+            "response.done" -> observeResponseDone(node)
             "error" -> if (observeEmptyInputCommit(node)) {
                 VoiceTutorProviderRelayDisposition.DROP
             } else {
-                VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
+                observeProviderError(node)
             }
             else -> VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
         }
@@ -996,7 +1055,8 @@ internal class VoiceTutorDuplexTurnController(
     internal fun fireContinuousSpeechDeadline() {
         cancelInputCheckpointTimer()
         if (
-            closed || pauseCoordinator?.blocksResponses == true || !openingResponseRequested || openingResponsePending ||
+            closed || pendingPostRelayBoundary != null ||
+            pauseCoordinator?.blocksResponses == true || !openingResponseRequested || openingResponsePending ||
             !userSpeaking || transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND
         ) return
         val sequence = activeClientSpeechSequence ?: return
@@ -1063,7 +1123,12 @@ internal class VoiceTutorDuplexTurnController(
             pendingInputPublications.clear()
             pendingLessonEndPublications.clear()
             pendingSpokenLessonEnd = null
+            pendingProviderResponseRetry = null
+            pendingPostRelayBoundary = null
+            recentFailedResponseCreateEventIds.clear()
+            recentFailedResponseIds.clear()
             activeTutorTranscripts.clear()
+            activeTutorFinalTranscriptEvents.clear()
             activeTutorTranscriptItemIds.clear()
             latestFocusIntentBinding?.focusAuthorization?.invalidate()
             latestFocusIntentBinding = null
@@ -1522,7 +1587,8 @@ internal class VoiceTutorDuplexTurnController(
 
     private fun scheduleInputCheckpoint(delay: Duration = continuousSpeechLimit) {
         if (closed || pauseCoordinator?.blocksResponses == true || !openingResponseRequested ||
-            openingResponsePending || !userSpeaking || transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND
+            openingResponsePending || pendingPostRelayBoundary != null ||
+            !userSpeaking || transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND
         ) return
         val sequence = activeClientSpeechSequence ?: return
         cancelInputCheckpointTimer()
@@ -1546,8 +1612,10 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     private fun createNormalResponseIfReady() {
+        if (createProviderResponseRetryIfReady()) return
         if (
-            closed || pendingSpokenLessonEnd != null || spokenLessonEndRequested ||
+            closed || pendingPostRelayBoundary != null ||
+            pendingSpokenLessonEnd != null || spokenLessonEndRequested ||
             pauseCoordinator?.blocksResponses == true ||
             !openingResponseRequested || userSpeaking ||
             pendingSpeechCommitCount > 0 || pendingInputCommits.isNotEmpty() || delayedStopCommit != null || responseActive ||
@@ -1568,19 +1636,39 @@ internal class VoiceTutorDuplexTurnController(
         // Opening speech uses the same response/playout gate as an ordinary turn.
         // Keep any early learner commit queued until its transport completion gate.
         val responseEventId = internalEventId(if (opening) "opening-response" else "turn-response")
-        beginResponse(responseEventId, allowTools = !opening && toolCoordinator?.toolChoice == "auto")
-        emit(
-            linkedMapOf(
-                "event_id" to responseEventId,
-                "type" to "response.create",
-                "response" to linkedMapOf(
-                    "tool_choice" to if (opening) "none" else toolCoordinator?.toolChoice ?: "none",
-                    "metadata" to linkedMapOf(
-                        VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
-                    ),
-                ),
-            ),
-        )
+        val toolChoice = if (opening) "none" else toolCoordinator?.toolChoice ?: "none"
+        beginResponse(responseEventId, toolChoice)
+        emitResponseCreate(responseEventId, toolChoice)
+    }
+
+    /** A failed provider response owns one retry and always remains ahead of a new tutor turn. */
+    private fun createProviderResponseRetryIfReady(): Boolean {
+        val retry = pendingProviderResponseRetry ?: return false
+        if (closed || spokenLessonEndRequested) {
+            pendingProviderResponseRetry = null
+            return true
+        }
+        if (
+            pauseCoordinator?.blocksResponses == true || userSpeaking || responseActive ||
+            pendingSpeechCommitCount > 0 || pendingInputCommits.isNotEmpty() || delayedStopCommit != null ||
+            toolCoordinator?.hasPending == true
+        ) return true
+        pendingProviderResponseRetry = null
+        if (retry.lessonRevision != currentLessonRevision) {
+            abandonProviderResponseTurn(abandonedResponseId = retry.abandonedResponseId)
+            return true
+        }
+        val responseEventId = internalEventId("turn-retry")
+        activateResponse(responseEventId, retry)
+        pendingSpokenLessonEnd = pendingSpokenLessonEnd?.let { pending ->
+            if (pending.waitResponseGeneration == retry.replacesGeneration) {
+                pending.copy(waitResponseGeneration = activeResponseGeneration)
+            } else {
+                pending
+            }
+        }
+        emitResponseCreate(responseEventId, retry.toolChoice)
+        return true
     }
 
     @Synchronized
@@ -1590,7 +1678,8 @@ internal class VoiceTutorDuplexTurnController(
         try {
             applyPauseActions(
                 pause.advance(
-                    boundaryReady = !responseActive && !userSpeaking && activeClientSpeechSequence == null &&
+                    boundaryReady = !responseActive && pendingPostRelayBoundary == null &&
+                        !userSpeaking && activeClientSpeechSequence == null &&
                         pendingSpeechCommitCount == 0 && pendingInputCommits.isEmpty() && delayedStopCommit == null,
                     now = nanoTime(),
                 ),
@@ -1641,22 +1730,7 @@ internal class VoiceTutorDuplexTurnController(
         }
     }
 
-    private fun beginResponse(createEventId: String, allowTools: Boolean = false) {
-        inputCoordinator?.teacherResponseStarted()
-        activeTutorTranscripts.clear()
-        activeTutorTranscriptItemIds.clear()
-        activeTargetOffer = null
-        activeTargetOfferExchangeEvidence = null
-        activeResponseCandidateDiscovery = candidateDiscoveryGraph?.offerPool()?.takeIf {
-            it.lessonRevision == currentLessonRevision
-        }
-        playbackTimer?.dispose()
-        playbackTimer = null
-        activeResponseGeneration = if (activeResponseGeneration == Long.MAX_VALUE) {
-            1
-        } else {
-            activeResponseGeneration + 1
-        }
+    private fun beginResponse(createEventId: String, toolChoice: String) {
         val studyAnswer = latestAcceptedInputBinding?.takeIf {
             it.inputIntent == VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION
         }?.let { binding ->
@@ -1670,20 +1744,54 @@ internal class VoiceTutorDuplexTurnController(
                 null
             }
         }
-        activeResponseStudyAnswer = studyAnswer?.takeUnless { it == lastSpokenStudyAnswer }
-        activeResponseRespondsToStudyAnswer = activeResponseStudyAnswer != null
-        if (activeResponseRespondsToStudyAnswer) {
+        val responseStudyAnswer = studyAnswer?.takeUnless { it == lastSpokenStudyAnswer }
+        if (responseStudyAnswer != null) {
             // A new answer needs its own exact persisted feedback item. Tool-only
             // rounds leave it pending; an actual spoken response consumes it once.
             completedStudyAnswerFeedback = null
             pendingNavigationFeedback = null
         }
+        val boundary = TutorBoundaryCheckpoint(lastTutorSpeechStoppedOrder, lastSpokenResponseGeneration)
+        activateResponse(
+            createEventId,
+            PendingProviderResponseRetry(
+                toolChoice = toolChoice,
+                lessonRevision = currentLessonRevision,
+                candidateDiscovery = candidateDiscoveryGraph?.offerPool()?.takeIf {
+                    it.lessonRevision == currentLessonRevision
+                },
+                respondsToStudyAnswer = responseStudyAnswer != null,
+                studyAnswer = responseStudyAnswer,
+                retryAttempt = 0,
+                replacesGeneration = activeResponseGeneration,
+                boundaryCheckpoint = boundary,
+                abandonedResponseId = null,
+            ),
+        )
+    }
+
+    private fun activateResponse(createEventId: String, state: PendingProviderResponseRetry) {
+        inputCoordinator?.teacherResponseStarted()
+        activeTutorTranscripts.clear()
+        activeTutorFinalTranscriptEvents.clear()
+        activeTutorTranscriptItemIds.clear()
+        activeTargetOffer = null
+        activeTargetOfferExchangeEvidence = null
+        activeResponseCandidateDiscovery = state.candidateDiscovery
+        playbackTimer?.dispose()
+        playbackTimer = null
+        activeResponseGeneration = if (activeResponseGeneration == Long.MAX_VALUE) 1 else activeResponseGeneration + 1
+        activeResponseRetryAttempt = state.retryAttempt
+        activeResponseBoundaryCheckpoint = state.boundaryCheckpoint
+        activeResponseStudyAnswer = state.studyAnswer
+        activeResponseRespondsToStudyAnswer = state.respondsToStudyAnswer
         activeResponseTutorContext = ""
+        activeResponseTutorContextForAssessment = ""
         responseActive = true
-        activeResponseLessonRevision = currentLessonRevision
+        activeResponseLessonRevision = state.lessonRevision
         activeResponseCreateEventId = createEventId
         activeResponseId = null
-        activeResponseAllowsTools = allowTools
+        activeResponseAllowsTools = state.toolChoice == "auto"
         activeResponseAudioBytes = 0
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false
@@ -1692,16 +1800,44 @@ internal class VoiceTutorDuplexTurnController(
         providerOutputBufferStarted = false
         providerAudioObserved = false
         toolOnlyResponse = false
+        activeResponseAcceptedToolCalls = false
         responseTimer?.dispose()
         val responseGeneration = activeResponseGeneration
         responseTimer = Mono.delay(responseTimeout)
             .subscribe { fireResponseTimeout(responseGeneration, createEventId) }
     }
 
+    private fun emitResponseCreate(responseEventId: String, toolChoice: String) {
+        emit(
+            linkedMapOf(
+                "event_id" to responseEventId,
+                "type" to "response.create",
+                "response" to linkedMapOf(
+                    "tool_choice" to toolChoice,
+                    "metadata" to linkedMapOf(
+                        VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
+                    ),
+                ),
+            ),
+        )
+    }
+
     private fun observeResponseCreated(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
         if (!responseActive) return false
         if (!matchesActiveResponseToken(node.path("response"))) return false
         val responseId = node.path("response").path("id").asText()
+        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && !validProviderResponseId(responseId)) {
+            throw VoiceTutorProviderProtocolException()
+        }
+        if (
+            transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
+            responseId in recentFailedResponseIds
+        ) {
+            // A provider response id is the only correlation key on late clear
+            // and playout events. Reusing one across attempts makes those
+            // boundaries ambiguous, so fail closed instead of guessing.
+            throw VoiceTutorProviderProtocolException()
+        }
         if (!matchesActiveResponse(responseId)) return false
         if (activeResponseId == null) {
             activeResponseId = responseId
@@ -1728,20 +1864,29 @@ internal class VoiceTutorDuplexTurnController(
         return true
     }
 
-    private fun observeResponseDone(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
-        if (!responseActive || providerResponseDone) return false
+    private fun observeResponseDone(
+        node: com.fasterxml.jackson.databind.JsonNode,
+    ): VoiceTutorProviderRelayDisposition {
+        if (!responseActive || providerResponseDone) return VoiceTutorProviderRelayDisposition.DROP
         val response = node.path("response")
         // A stale provider result cannot fail or complete a different response.
-        if (!matchesActiveResponseToken(response)) return false
+        if (!matchesActiveResponseToken(response)) return VoiceTutorProviderRelayDisposition.DROP
         val responseId = response.path("id").asText()
-        if (!matchesActiveResponse(responseId)) return false
-        if (
-            transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
-            response.path("status").asText() != "completed"
-        ) {
-            throw VoiceTutorProviderIncompleteResponseException()
+        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && !validProviderResponseId(responseId)) {
+            throw VoiceTutorProviderProtocolException()
         }
-        if (response.path("status").asText() !in COMPLETING_RESPONSE_STATUSES) return true
+        if (!matchesActiveResponse(responseId)) return VoiceTutorProviderRelayDisposition.DROP
+        val status = response.path("status").asText()
+        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && status != "completed") {
+            val kind = when (status) {
+                "cancelled" -> VoiceTutorProviderTurnFailureKind.RESPONSE_CANCELLED
+                "incomplete" -> VoiceTutorProviderTurnFailureKind.RESPONSE_INCOMPLETE
+                "failed" -> VoiceTutorProviderTurnFailureKind.RESPONSE_FAILED
+                else -> throw VoiceTutorProviderProtocolException()
+            }
+            return recoverProviderResponseTurn(kind, responseId = responseId)
+        }
+        if (status !in COMPLETING_RESPONSE_STATUSES) return VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
         if (activeResponseId == null) {
             activeResponseId = responseId
         }
@@ -1752,6 +1897,7 @@ internal class VoiceTutorDuplexTurnController(
         }
         rememberBoundedBinding(responseLessonRevisions, responseId, activeResponseLessonRevision)
         val toolCalls = toolCoordinator?.completedResponse(response) ?: emptyList()
+        activeResponseAcceptedToolCalls = toolCalls.isNotEmpty()
         toolOnlyResponse = toolCalls.isNotEmpty() &&
             response.path("output").all { it.path("type").asText() == "function_call" } &&
             !providerOutputBufferStarted && !providerAudioObserved && activeTutorTranscripts.isEmpty()
@@ -1764,33 +1910,57 @@ internal class VoiceTutorDuplexTurnController(
         for (call in toolCalls) {
             if (toolWork.tryEmitNext(call).isFailure && !closed) {
                 terminate(VoiceTutorMcpProtocolException())
-                return true
+                return VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
             }
         }
         activeResponseTutorContext = completedTutorContext(response)
-        withInputCoordinator {
-            teacherResponseCompleted(tutorContextForAssessment(activeResponseTutorContext), nanoTime())
+        // Stage semantic context at response.done, before a following output
+        // stop can promote/consume navigation evidence. It remains private
+        // until the successful post-relay persistence ACK.
+        activeResponseTutorContextForAssessment = tutorContextForAssessment(activeResponseTutorContext)
+        if (transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+            withInputCoordinator {
+                teacherResponseCompleted(activeResponseTutorContextForAssessment, nanoTime())
+            }
+            promoteTargetOfferIfReady()
         }
-        promoteTargetOfferIfReady()
         advancePlaybackGate()
-        return true
+        return VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
     }
 
     private fun rememberTutorTranscript(node: com.fasterxml.jackson.databind.JsonNode) {
-        if (inputCoordinator == null || activeTutorTranscripts.size >= MAX_TUTOR_CONTEXT_PARTS) return
         val text = node.path("transcript").takeIf { it.isTextual }?.textValue() ?: return
+        // A blank final is valid provider output, but it is not a transcript
+        // row. The spoken done+stopped boundary still owns an empty batch.
+        if (text.isBlank()) return
         val itemId = node.path("item_id").asText()
             .takeIf { it.isNotBlank() && it.length <= MAX_PROVIDER_ITEM_ID_CHARACTERS } ?: return
-        val key = itemId +
-            ":" + node.path("content_index").asInt(0)
+        val contentIndex = node.path("content_index").takeIf {
+            it.isIntegralNumber && it.canConvertToInt() && it.intValue() >= 0
+        }?.intValue() ?: return
+        val key = "$itemId:$contentIndex"
+        if (
+            transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
+            (key in activeTutorFinalTranscriptEvents ||
+                activeTutorFinalTranscriptEvents.size < MAX_TUTOR_CONTEXT_PARTS)
+        ) {
+            val responseId = activeResponseId ?: return
+            activeTutorFinalTranscriptEvents[key] = StagedTutorTranscript(
+                responseId = responseId,
+                itemId = itemId,
+                contentIndex = contentIndex,
+                transcript = text.take(MAX_DEFERRED_TUTOR_TRANSCRIPT_CHARACTERS),
+            )
+        }
+        if (inputCoordinator == null ||
+            (key !in activeTutorTranscripts && activeTutorTranscripts.size >= MAX_TUTOR_CONTEXT_PARTS)
+        ) return
         activeTutorTranscripts[key] = text.take(MAX_TUTOR_CONTEXT_CHARACTERS)
         activeTutorTranscriptItemIds += itemId
     }
 
     private fun completedTutorContext(response: com.fasterxml.jackson.databind.JsonNode): String {
-        if (activeTutorTranscripts.isNotEmpty()) {
-            return activeTutorTranscripts.values.joinToString("\n").take(MAX_TUTOR_CONTEXT_CHARACTERS)
-        }
+        completedActiveTutorTranscriptContext()?.let { return it }
         // response.done is also authoritative if final transcript events were
         // unavailable. Read assistant text only; never invent learner context.
         return response.path("output").asSequence()
@@ -1800,6 +1970,54 @@ internal class VoiceTutorDuplexTurnController(
             .take(MAX_TUTOR_CONTEXT_PARTS)
             .joinToString("\n")
             .take(MAX_TUTOR_CONTEXT_CHARACTERS)
+    }
+
+    private fun completedActiveTutorTranscriptContext(): String? {
+        val transcript = if (
+            transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
+            activeTutorFinalTranscriptEvents.isNotEmpty()
+        ) {
+            orderedStagedTutorTranscriptParts().joinToString("\n") { it.transcript }
+        } else {
+            activeTutorTranscripts.values.joinToString("\n")
+        }
+        return transcript.take(MAX_TUTOR_CONTEXT_CHARACTERS).takeIf { it.isNotBlank() }
+    }
+
+    private fun orderedStagedTutorTranscriptParts(): List<StagedTutorTranscript> {
+        val byItem = linkedMapOf<String, MutableList<StagedTutorTranscript>>()
+        activeTutorFinalTranscriptEvents.values.forEach { part ->
+            byItem.getOrPut(part.itemId) { mutableListOf() } += part
+        }
+        return byItem.values.flatMap { parts -> parts.sortedBy { it.contentIndex } }
+    }
+
+    /**
+     * Persistence is idempotent per provider item, not per audio content part.
+     * Coalesce a provider item's bounded parts in index order and snapshot the
+     * trusted lesson attribution before a later terminal can clear bindings.
+     */
+    private fun completedTutorTranscriptEventsForPersistence(): List<String> {
+        val byItem = linkedMapOf<String, MutableList<StagedTutorTranscript>>()
+        orderedStagedTutorTranscriptParts().forEach { part ->
+            byItem.getOrPut(part.itemId) { mutableListOf() } += part
+        }
+        return byItem.values.mapNotNull { parts ->
+            val ordered = parts.sortedBy { it.contentIndex }
+            val first = ordered.firstOrNull() ?: return@mapNotNull null
+            val transcript = ordered.joinToString("\n") { it.transcript }
+                .take(MAX_DEFERRED_TUTOR_TRANSCRIPT_CHARACTERS)
+            if (transcript.isBlank()) return@mapNotNull null
+            mapper.writeValueAsString(
+                mapper.createObjectNode()
+                    .put("type", "response.output_audio_transcript.done")
+                    .put("response_id", first.responseId)
+                    .put("item_id", first.itemId)
+                    .put("content_index", first.contentIndex)
+                    .put("transcript", transcript)
+                    .put(VoiceTutorTranscriptMetadata.LESSON_REVISION, activeResponseLessonRevision),
+            )
+        }
     }
 
     private fun tutorContextForAssessment(latestTutorContext: String): String {
@@ -1849,11 +2067,7 @@ internal class VoiceTutorDuplexTurnController(
         candidateDiscoveryGraph = null
         activeResponseCandidateDiscovery = null
         if (discovery == null) return
-        val tutorAudioTranscript = activeTutorTranscripts.values.joinToString("\n")
-            .take(MAX_TUTOR_CONTEXT_CHARACTERS)
-            .takeIf { it.isNotBlank() } ?: run {
-            return
-        }
+        val tutorAudioTranscript = completedActiveTutorTranscriptContext() ?: return
         if (nextTargetOfferId <= 0 || nextTargetOfferId == Long.MAX_VALUE ||
             lastTutorSpeechStoppedOrder <= 0 || lastSpokenResponseGeneration != activeResponseGeneration
         ) {
@@ -1889,14 +2103,324 @@ internal class VoiceTutorDuplexTurnController(
         if (transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
             return VoiceTutorProviderRelayDisposition.DROP
         }
-        // A cleared WebRTC buffer means a tutor sentence was cut short. It is never
-        // a valid turn completion, including when a stale or forged response id is used.
-        node.path("response_id").asText()
-        throw VoiceTutorProviderOutputBufferClearedException()
+        val responseId = node.path("response_id").asText()
+        if (!validProviderResponseId(responseId)) throw VoiceTutorProviderProtocolException()
+        // A late clear for the discarded attempt cannot consume the retry or
+        // invalidate a newer, complete sentence.
+        if (!matchesKnownActiveResponse(responseId)) {
+            if (responseId in recentFailedResponseIds) return VoiceTutorProviderRelayDisposition.DROP
+            throw VoiceTutorProviderProtocolException()
+        }
+        return recoverProviderResponseTurn(
+            VoiceTutorProviderTurnFailureKind.OUTPUT_BUFFER_CLEARED,
+            responseId = responseId,
+        )
+    }
+
+    private fun observeProviderError(
+        node: com.fasterxml.jackson.databind.JsonNode,
+    ): VoiceTutorProviderRelayDisposition {
+        val disposition = classifyRealtimeProviderError(node)
+        val causedEventId = safeProviderCausedEventId(node)
+        val correlation = providerErrorCorrelation(causedEventId)
+        if (disposition == VoiceTutorProviderErrorDisposition.PROTOCOL_INVALID) {
+            throw VoiceTutorProviderProtocolException()
+        }
+        if (disposition == VoiceTutorProviderErrorDisposition.SESSION_FATAL) {
+            onProviderTurnFailure(
+                providerFailureDiagnostic(
+                    VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR,
+                    node,
+                    correlation,
+                    (activeResponseRetryAttempt + 1).coerceAtLeast(1),
+                    VoiceTutorProviderTurnFailureAction.SESSION_FATAL,
+                ),
+            )
+            return VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
+        }
+        if (correlation == VoiceTutorProviderEventCorrelation.ACTIVE_RESPONSE) {
+            return recoverProviderResponseTurn(
+                VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR,
+                providerErrorNode = node,
+                eventCorrelation = correlation,
+            )
+        }
+        if (correlation == VoiceTutorProviderEventCorrelation.STALE_RESPONSE ||
+            (correlation == VoiceTutorProviderEventCorrelation.INTERNAL_CONTROL &&
+                isSafeRealtimeInternalControlError(node))
+        ) {
+            onProviderTurnFailure(
+                providerFailureDiagnostic(
+                    VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR,
+                    node,
+                    correlation,
+                    0,
+                    VoiceTutorProviderTurnFailureAction.IGNORED,
+                ),
+            )
+            return VoiceTutorProviderRelayDisposition.DROP
+        }
+        if (correlation == VoiceTutorProviderEventCorrelation.MISSING &&
+            isSafeUncorrelatedRealtimeProviderError(node)
+        ) {
+            if (responseActive) {
+                return abandonUncorrelatedProviderResponse(node, correlation)
+            }
+            onProviderTurnFailure(
+                providerFailureDiagnostic(
+                    VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR,
+                    node,
+                    correlation,
+                    0,
+                    VoiceTutorProviderTurnFailureAction.IGNORED,
+                ),
+            )
+            return VoiceTutorProviderRelayDisposition.DROP
+        }
+        // An error for an unknown/input/session/tool event cannot be safely
+        // attached to a response generation. Treat the state ambiguity as a
+        // protocol failure instead of replaying a possibly mutating turn.
+        throw VoiceTutorProviderProtocolException()
+    }
+
+    private fun abandonUncorrelatedProviderResponse(
+        node: com.fasterxml.jackson.databind.JsonNode,
+        correlation: VoiceTutorProviderEventCorrelation,
+    ): VoiceTutorProviderRelayDisposition {
+        val failedGeneration = activeResponseGeneration
+        val acceptedToolCalls = activeResponseAcceptedToolCalls
+        val learnerInputInFlight = learnerInputFenceActive()
+        val abandonedResponseId = activeResponseId
+        onProviderTurnFailure(
+            providerFailureDiagnostic(
+                VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR,
+                node,
+                correlation,
+                (activeResponseRetryAttempt + 1).coerceAtLeast(1),
+                VoiceTutorProviderTurnFailureAction.TURN_ABANDONED,
+            ),
+        )
+        rollbackFailedProviderResponse(failedGeneration, abandonedResponseId)
+        abandonProviderResponseTurn(
+            promptForFreshInput = !acceptedToolCalls && !learnerInputInFlight,
+            abandonedResponseId = abandonedResponseId,
+        )
+        if (learnerInputInFlight) createNormalResponseIfReady()
+        return VoiceTutorProviderRelayDisposition.DROP
+    }
+
+    private fun recoverProviderResponseTurn(
+        kind: VoiceTutorProviderTurnFailureKind,
+        responseId: String? = activeResponseId,
+        providerErrorNode: com.fasterxml.jackson.databind.JsonNode? = null,
+        eventCorrelation: VoiceTutorProviderEventCorrelation = VoiceTutorProviderEventCorrelation.ACTIVE_RESPONSE,
+    ): VoiceTutorProviderRelayDisposition {
+        if (!responseActive) return VoiceTutorProviderRelayDisposition.DROP
+        val attempt = activeResponseRetryAttempt + 1
+        val acceptedToolCalls = activeResponseAcceptedToolCalls
+        val learnerInputInFlight = learnerInputFenceActive()
+        val retryActivationBlocked = learnerInputInFlight ||
+            pauseCoordinator?.blocksResponses == true ||
+            pendingSpokenLessonEnd != null || spokenLessonEndRequested ||
+            toolCoordinator?.hasPending == true ||
+            activeResponseLessonRevision != currentLessonRevision
+        // Once a tool call has been accepted its side effect belongs to this
+        // exact response generation. Re-generating it could execute the same
+        // mutation twice, so that turn is abandoned instead of retried. A
+        // provider retry is also allowed only when it can be activated in this
+        // same synchronized turn: otherwise a newer learner item could enter
+        // provider context first and inherit the failed turn's attribution.
+        val retryScheduled = attempt <= MAX_PROVIDER_RESPONSE_RETRIES &&
+            !acceptedToolCalls && !retryActivationBlocked
+        onProviderTurnFailure(
+            providerFailureDiagnostic(
+                kind,
+                providerErrorNode,
+                eventCorrelation,
+                attempt,
+                if (retryScheduled) {
+                    VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED
+                } else {
+                    VoiceTutorProviderTurnFailureAction.TURN_ABANDONED
+                },
+            ),
+        )
+        val failedGeneration = activeResponseGeneration
+        val retry = PendingProviderResponseRetry(
+            toolChoice = if (activeResponseAllowsTools) "auto" else "none",
+            lessonRevision = activeResponseLessonRevision,
+            candidateDiscovery = activeResponseCandidateDiscovery,
+            respondsToStudyAnswer = activeResponseRespondsToStudyAnswer,
+            studyAnswer = activeResponseStudyAnswer,
+            retryAttempt = attempt,
+            replacesGeneration = failedGeneration,
+            boundaryCheckpoint = activeResponseBoundaryCheckpoint
+                ?: TutorBoundaryCheckpoint(lastTutorSpeechStoppedOrder, lastSpokenResponseGeneration),
+            abandonedResponseId = responseId?.takeIf(::validProviderResponseId),
+        )
+        rollbackFailedProviderResponse(failedGeneration, responseId)
+        if (retryScheduled) {
+            pendingProviderResponseRetry = retry
+            createNormalResponseIfReady()
+        } else {
+            pendingProviderResponseRetry = null
+            abandonProviderResponseTurn(
+                promptForFreshInput = !acceptedToolCalls && !learnerInputInFlight,
+                abandonedResponseId = responseId,
+            )
+            if (learnerInputInFlight) createNormalResponseIfReady()
+        }
+        return VoiceTutorProviderRelayDisposition.DROP
+    }
+
+    private fun learnerInputFenceActive(): Boolean =
+        userSpeaking || activeClientSpeechSequence != null ||
+            pendingSpeechCommitCount > 0 || pendingInputCommits.isNotEmpty() ||
+            delayedStopCommit != null || stopAwaitingTutorFinalization != null ||
+            speechAwaitingTutorFinalizationGeneration != null ||
+            queuedCommittedTurn || inputCoordinator?.hasPending == true
+
+    private fun rollbackFailedProviderResponse(failedGeneration: Long, responseId: String?) {
+        // Revoke the failed response's staged teacher generation before
+        // restoring or retrying. No learner assessment may inherit context
+        // from a response that never crossed the exact playout boundary.
+        inputCoordinator?.teacherResponseStarted()
+        activeResponseCreateEventId?.let {
+            rememberBoundedId(recentFailedResponseCreateEventIds, it, MAX_RECENT_FAILED_RESPONSES)
+        }
+        responseId?.takeIf(::validProviderResponseId)?.let {
+            rememberBoundedId(recentFailedResponseIds, it, MAX_RECENT_FAILED_RESPONSES)
+        }
+        activeResponseBoundaryCheckpoint?.let { boundary ->
+            lastTutorSpeechStoppedOrder = boundary.tutorSpeechStoppedOrder
+            lastSpokenResponseGeneration = boundary.spokenResponseGeneration
+        }
+        releaseSpeechAwaitingFailedTutorResponse(failedGeneration)
+        playbackTimer?.dispose()
+        playbackTimer = null
+        responseTimer?.dispose()
+        responseTimer = null
+        responseActive = false
+        activeResponseCreateEventId = null
+        activeResponseId = null
+        activeResponseAllowsTools = false
+        activeResponseAudioBytes = 0
+        earliestResponsePlaybackEndNanos = null
+        providerResponseDone = false
+        playbackCompleted = false
+        providerOutputBufferStopped = false
+        providerOutputBufferStarted = false
+        providerAudioObserved = false
+        toolOnlyResponse = false
+        activeResponseAcceptedToolCalls = false
+        activeTutorTranscripts.clear()
+        activeTutorFinalTranscriptEvents.clear()
+        activeTutorTranscriptItemIds.clear()
+        activeTargetOffer = null
+        activeTargetOfferExchangeEvidence = null
+        activeResponseCandidateDiscovery = null
+        activeResponseRespondsToStudyAnswer = false
+        activeResponseStudyAnswer = null
+        activeResponseTutorContext = ""
+        activeResponseTutorContextForAssessment = ""
+        activeResponseBoundaryCheckpoint = null
+        activeResponseRetryAttempt = 0
+    }
+
+    private fun releaseSpeechAwaitingFailedTutorResponse(failedGeneration: Long) {
+        if (speechAwaitingTutorFinalizationGeneration != failedGeneration) return
+        speechAwaitingTutorFinalizationGeneration = null
+        val stopped = stopAwaitingTutorFinalization
+        stopAwaitingTutorFinalization = null
+        clearActiveSpeechTutorBoundary()
+        if (stopped == null) return
+        val unbound = stopped.copy(
+            precedingTutorSpeechStoppedOrder = 0,
+            precedingSpokenResponseGeneration = 0,
+            precedingTutorProviderItemId = null,
+            precedingTutorFeedbackForStudyAnswer = false,
+            precedingQuestionProviderItemId = null,
+            precedingAnswerProviderItemId = null,
+            precedingTutorFeedbackProviderItemId = null,
+            precedingTutorNavigationOfferProviderItemId = null,
+            targetOffer = null,
+            mixedTutorBoundary = true,
+        )
+        val pending = delayedStopCommit?.let { before ->
+            delayedStopCommitTimer?.dispose()
+            delayedStopCommitTimer = null
+            delayedStopCommit = null
+            mergeMixedTutorBoundaryStopCommits(before, unbound)
+        } ?: unbound
+        if (activeClientSpeechSequence != null) {
+            delayedStopCommit = pending
+        } else {
+            requestPendingStopCommit(pending)
+        }
+    }
+
+    private fun abandonProviderResponseTurn(
+        promptForFreshInput: Boolean = true,
+        abandonedResponseId: String? = null,
+    ) {
+        // Restore the last complete tutor context so pending/new speech can be
+        // assessed without treating the partial provider response as teaching.
+        withInputCoordinator { teacherResponseCompleted("", nanoTime()) }
+        if (pendingSpokenLessonEnd != null) {
+            emitSpokenLessonEndLifecycle()
+        } else if (promptForFreshInput) {
+            val payload = linkedMapOf<String, Any>("type" to VoiceTutorRealtimeContract.INPUT_RETRY_EVENT)
+            abandonedResponseId?.takeIf(::validProviderResponseId)?.let {
+                payload[VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD] = it
+            }
+            val result = clientControls.tryEmitNext(
+                mapper.writeValueAsString(payload),
+            )
+            if (result.isFailure && !closed) {
+                terminate(IllegalStateException("Voice Tutor client control buffer overflowed."))
+            }
+        }
+        // A completed MCP output already has exact-once provider context. It
+        // may continue with a fresh spoken response, but never by replaying the
+        // response generation that accepted the tool call.
+        if (toolCoordinator?.continuationReady == true) createNormalResponseIfReady()
+    }
+
+    private fun providerErrorCorrelation(causedEventId: String?): VoiceTutorProviderEventCorrelation = when {
+        causedEventId == null -> VoiceTutorProviderEventCorrelation.MISSING
+        causedEventId == activeResponseCreateEventId -> VoiceTutorProviderEventCorrelation.ACTIVE_RESPONSE
+        causedEventId in recentFailedResponseCreateEventIds -> VoiceTutorProviderEventCorrelation.STALE_RESPONSE
+        causedEventId.startsWith("buddystudy-internal-") -> VoiceTutorProviderEventCorrelation.INTERNAL_CONTROL
+        else -> VoiceTutorProviderEventCorrelation.EXTERNAL_EVENT
+    }
+
+    private fun providerFailureDiagnostic(
+        kind: VoiceTutorProviderTurnFailureKind,
+        providerErrorNode: com.fasterxml.jackson.databind.JsonNode?,
+        correlation: VoiceTutorProviderEventCorrelation,
+        attempt: Int,
+        action: VoiceTutorProviderTurnFailureAction,
+    ) = VoiceTutorProviderTurnFailureDiagnostic(
+        kind = kind,
+        providerErrorType = providerErrorNode?.let(::safeProviderErrorType) ?: "none",
+        providerErrorCode = providerErrorNode?.let(::safeProviderErrorCode) ?: "none",
+        eventCorrelation = correlation,
+        causedEventRef = providerEventReference(providerErrorNode?.let(::safeProviderCausedEventId)),
+        attempt = attempt,
+        action = action,
+    )
+
+    private fun rememberBoundedId(values: LinkedHashSet<String>, value: String, maximum: Int) {
+        values.remove(value)
+        values.add(value)
+        while (values.size > maximum) values.remove(values.first())
     }
 
     private fun matchesActiveResponse(responseId: String): Boolean =
         responseActive && responseId.isNotBlank() && (activeResponseId == null || responseId == activeResponseId)
+
+    private fun validProviderResponseId(responseId: String): Boolean =
+        PROVIDER_RESPONSE_ID.matches(responseId)
 
     private fun matchesKnownActiveResponse(responseId: String): Boolean =
         responseActive && activeResponseId != null && responseId == activeResponseId
@@ -2044,6 +2568,34 @@ internal class VoiceTutorDuplexTurnController(
             ?.takeIf { it.isNotBlank() && it.length <= MAX_PROVIDER_ITEM_ID_CHARACTERS }
         val spokenResponseCompleted = providerOutputBufferStopped &&
             (providerOutputBufferStarted || providerAudioObserved)
+        val successfulTutorTranscriptEvents = if (
+            transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && spokenResponseCompleted
+        ) {
+            completedTutorTranscriptEventsForPersistence()
+        } else {
+            emptyList()
+        }
+        val completedTutorContextForAssessment = if (
+            transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && spokenResponseCompleted
+        ) {
+            activeResponseTutorContextForAssessment
+        } else {
+            ""
+        }
+        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+            // Promotion must observe the same structured, content-index ordered
+            // transcript parts that back persistence and learner assessment.
+            // In stopped-then-done ordering this is the first eligible promotion.
+            promoteTargetOfferIfReady()
+            if (!spokenResponseCompleted) {
+                // A tool-only response has no playout or transcript persistence
+                // boundary. response.done is its exact successful completion.
+                withInputCoordinator {
+                    teacherResponseCompleted(activeResponseTutorContextForAssessment, nanoTime())
+                }
+            }
+        }
+        activeTutorFinalTranscriptEvents.clear()
         var feedbackThisResponse: StudyAnswerFeedbackEvidence? = null
         if (spokenResponseCompleted) {
             // Keep exact identity aligned with lastSpokenResponseGeneration. A
@@ -2093,7 +2645,6 @@ internal class VoiceTutorDuplexTurnController(
                 pendingNavigationFeedback = null
             }
         }
-        finalizeSpeechAwaitingTutorResponse(completedResponseGeneration, completedTutorItemId)
         playbackTimer?.dispose()
         playbackTimer = null
         responseTimer?.dispose()
@@ -2107,10 +2658,56 @@ internal class VoiceTutorDuplexTurnController(
         providerResponseDone = false
         playbackCompleted = false
         providerOutputBufferStopped = false
+        activeResponseAcceptedToolCalls = false
         activeResponseCandidateDiscovery = null
         activeResponseRespondsToStudyAnswer = false
         activeResponseStudyAnswer = null
         activeResponseTutorContext = ""
+        activeResponseTutorContextForAssessment = ""
+        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && spokenResponseCompleted) {
+            if (pendingPostRelayBoundary != null) {
+                terminate(VoiceTutorProviderProtocolException())
+                return
+            }
+            cancelInputCheckpointTimer()
+            val token = nextPostRelayBoundaryToken
+            nextPostRelayBoundaryToken = if (token == Long.MAX_VALUE) 1 else token + 1
+            pendingPostRelayBoundary = PendingPostRelayBoundary(
+                token = token,
+                completedResponseGeneration = completedResponseGeneration,
+                completedTutorItemId = completedTutorItemId,
+                tutorTranscriptEvents = successfulTutorTranscriptEvents,
+                tutorContextForAssessment = completedTutorContextForAssessment,
+            )
+            return
+        }
+        resumeCompletedResponse(completedResponseGeneration, completedTutorItemId)
+    }
+
+    private fun resumeAfterPostRelayBoundary(pending: PendingPostRelayBoundary) {
+        // Tutor persistence has succeeded. Release semantic learner work only
+        // now, while the fence still prevents a nested next response/lifecycle.
+        withInputCoordinator {
+            teacherResponseCompleted(pending.tutorContextForAssessment, nanoTime())
+        }
+        if (closed) return
+        finalizeSpeechAwaitingTutorResponse(
+            pending.completedResponseGeneration,
+            pending.completedTutorItemId,
+        )
+        pendingPostRelayBoundary = null
+        continueAfterCompletedResponse(pending.completedResponseGeneration)
+    }
+
+    private fun resumeCompletedResponse(
+        completedResponseGeneration: Long,
+        completedTutorItemId: String?,
+    ) {
+        finalizeSpeechAwaitingTutorResponse(completedResponseGeneration, completedTutorItemId)
+        continueAfterCompletedResponse(completedResponseGeneration)
+    }
+
+    private fun continueAfterCompletedResponse(completedResponseGeneration: Long) {
         if (closed) return
         pendingSpokenLessonEnd?.let { pending ->
             if (
@@ -2292,7 +2889,10 @@ internal class VoiceTutorDuplexTurnController(
         } else {
             VoiceTutorProviderRelayDisposition.DROP
         }
-        in TUTOR_TRANSCRIPT_EVENTS -> if (matchesKnownActiveResponse(node.path("response_id").asText())) {
+        in TUTOR_TRANSCRIPT_EVENTS -> if (
+            transport != VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
+            matchesKnownActiveResponse(node.path("response_id").asText())
+        ) {
             VoiceTutorProviderRelayDisposition.PERSIST_ONLY
         } else {
             VoiceTutorProviderRelayDisposition.DROP
@@ -2310,6 +2910,41 @@ internal class VoiceTutorDuplexTurnController(
         val identity: StudyAnswerIdentity,
         val feedbackProviderItemId: String,
         val tutorContext: String,
+    )
+
+    /** The last fully spoken tutor boundary before one provider attempt began. */
+    private data class TutorBoundaryCheckpoint(
+        val tutorSpeechStoppedOrder: Long,
+        val spokenResponseGeneration: Long,
+    )
+
+    /** Logical response state retained across one provider-local regeneration. */
+    private data class PendingProviderResponseRetry(
+        val toolChoice: String,
+        val lessonRevision: Long,
+        val candidateDiscovery: CandidateOfferPool?,
+        val respondsToStudyAnswer: Boolean,
+        val studyAnswer: StudyAnswerIdentity?,
+        val retryAttempt: Int,
+        val replacesGeneration: Long,
+        val boundaryCheckpoint: TutorBoundaryCheckpoint,
+        val abandonedResponseId: String?,
+    )
+
+    private data class PendingPostRelayBoundary(
+        val token: Long,
+        val completedResponseGeneration: Long,
+        val completedTutorItemId: String?,
+        val tutorTranscriptEvents: List<String>,
+        val tutorContextForAssessment: String,
+        val claimed: Boolean = false,
+    )
+
+    private data class StagedTutorTranscript(
+        val responseId: String,
+        val itemId: String,
+        val contentIndex: Int,
+        val transcript: String,
     )
 
     private data class TargetOfferExchangeEvidence(
@@ -2597,8 +3232,11 @@ internal class VoiceTutorDuplexTurnController(
         const val MAX_BUFFERED_CONTROLS = 32
         const val MAX_PENDING_SPEECH_COMMITS = 32
         const val MAX_RECENT_COMMITTED_ITEMS = 64
+        const val MAX_RECENT_FAILED_RESPONSES = 16
+        const val MAX_PROVIDER_RESPONSE_RETRIES = 1
         const val MAX_PROVIDER_ITEM_ID_CHARACTERS = 191
         const val MAX_TUTOR_CONTEXT_CHARACTERS = 4_000
+        const val MAX_DEFERRED_TUTOR_TRANSCRIPT_CHARACTERS = 32_000
         const val MAX_TUTOR_CONTEXT_PARTS = 8
         const val MAX_TARGET_OFFER_CANDIDATES = 16
         const val MAX_DISCOVERY_GRAPH_NODES = 64
@@ -2624,8 +3262,19 @@ internal class VoiceTutorDuplexTurnController(
             "conversation.item.input_audio_transcription.completed",
         )
         val COMPLETING_RESPONSE_STATUSES = setOf("completed", "cancelled", "incomplete")
+        val PROVIDER_RESPONSE_ID = Regex("[A-Za-z0-9_-]{1,191}")
     }
 }
+
+internal data class VoiceTutorProviderObservation(
+    val disposition: VoiceTutorProviderRelayDisposition,
+    val postRelayBoundary: VoiceTutorPostRelayBoundary?,
+)
+
+internal data class VoiceTutorPostRelayBoundary(
+    val token: Long,
+    val tutorTranscriptEvents: List<String>,
+)
 
 internal data class VoiceTutorProviderRelayDisposition(
     val persist: Boolean,
@@ -2659,12 +3308,8 @@ internal class VoiceTutorPendingInputCommitOverflowException : RuntimeException(
     "Voice Tutor pending input commit limit exceeded.",
 )
 
-internal class VoiceTutorProviderOutputBufferClearedException : RuntimeException(
-    "Voice Tutor provider cleared an active output buffer.",
-)
-
-internal class VoiceTutorProviderIncompleteResponseException : RuntimeException(
-    "Voice Tutor provider returned an incomplete realtime response.",
+internal class VoiceTutorProviderProtocolException : RuntimeException(
+    "Voice Tutor provider event violated the realtime protocol.",
 )
 
 internal class VoiceTutorProviderDrainState(

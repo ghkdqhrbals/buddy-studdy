@@ -20,7 +20,8 @@ class VoiceTutorLessonRevisionRelayTest {
     fun `reattached lesson revision stamps opening speech and overrides a provider supplied revision`(): Unit =
         Fixture(initialRevision = 5, finishOpening = false).use { f ->
             val raw = f.tutorTranscript("opening", "지금 주제에서 이어서 이야기해 볼게요.", forgedRevision = 99)
-            assertThat(f.controller.observeProviderEvent(raw).persist).isTrue()
+            assertThat(f.controller.observeProviderEvent(raw))
+                .isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_ONLY)
 
             val stamped = mapper.readTree(f.controller.providerEventForRelay(raw))
 
@@ -39,7 +40,8 @@ class VoiceTutorLessonRevisionRelayTest {
             f.ackAll()
 
             val lateTeacher = f.tutorTranscript(oldResponse.id, "기존 난도의 질문을 마저 설명할게요.", forgedRevision = 91)
-            assertThat(f.controller.observeProviderEvent(lateTeacher).persist).isTrue()
+            assertThat(f.controller.observeProviderEvent(lateTeacher))
+                .isEqualTo(VoiceTutorProviderRelayDisposition.FORWARD_ONLY)
             assertThat(f.revision(lateTeacher)).isZero()
 
             f.advance(Duration.ofSeconds(12))
@@ -48,15 +50,20 @@ class VoiceTutorLessonRevisionRelayTest {
             // earlier speech start, never this later completion/current epoch.
             f.transcript("old-checkpoint", "그 질문에 대해 아직 설명하는 중이에요.", forgedRevision = 91)
             f.commit("old-checkpoint")
-            f.assess()
-            assertThat(f.publish("old-checkpoint")).isZero()
+            // A completed provider response is not yet a successful spoken
+            // boundary. Assessment must wait for the exact output stop and its
+            // post-relay acknowledgement.
             assertThat(f.responses()).hasSize(2) // Opening and the old tutor response.
 
             f.advance(Duration.ofSeconds(1))
             f.stop(2)
-            assertThat(f.accept("old-tail", "제 답변은 여기까지예요.")).isZero()
+            f.commit("old-tail")
+            f.transcript("old-tail", "제 답변은 여기까지예요.")
             assertThat(f.responses()).hasSize(2)
             f.stopped(oldResponse.id)
+            f.assess()
+            assertThat(f.publish("old-checkpoint")).isZero()
+            assertThat(f.publish("old-tail")).isZero()
 
             val next = f.created("new-question")
             assertThat(f.revision(f.tutorTranscript(next.id, "변경된 난도로 질문할게요."))).isEqualTo(1)
@@ -404,7 +411,8 @@ class VoiceTutorLessonRevisionRelayTest {
         ))
         fun tutorTranscript(id: String, text: String, forgedRevision: Long = 99) = mapper.writeValueAsString(mapOf(
             "type" to "response.output_audio_transcript.done", "response_id" to id, "item_id" to "message-$id",
-            "transcript" to text, VoiceTutorTranscriptMetadata.LESSON_REVISION to forgedRevision,
+            "content_index" to 0, "transcript" to text,
+            VoiceTutorTranscriptMetadata.LESSON_REVISION to forgedRevision,
         ))
         fun revision(raw: String) = VoiceTutorTranscriptMetadata.lessonRevision(mapper.readTree(controller.providerEventForRelay(raw)))
         private fun provider(type: String, vararg fields: Pair<String, Any>) {

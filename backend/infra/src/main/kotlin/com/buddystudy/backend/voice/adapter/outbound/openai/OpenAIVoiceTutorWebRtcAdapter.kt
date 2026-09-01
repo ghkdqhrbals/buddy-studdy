@@ -163,6 +163,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 inputCoordinator = VoiceTutorInputTurnCoordinator(limits = inputAssessmentProperties),
                 toolsEnabled = mcpTools.definitions().isNotEmpty(),
                 initialLessonRevision = context.initialLessonRevision,
+                onProviderTurnFailure = diagnostics::observeProviderTurnFailure,
             )
             val terminal = terminalEvents.asFlux()
                 .next()
@@ -199,28 +200,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 .concatMap { raw ->
                     diagnostics.observeProviderEvent(raw)
                     if (sessionHandshake.observeProviderEvent(raw)) return@concatMap Mono.empty<Void>()
-                    val observed = runCatching { turnController.observeProviderEvent(raw) }
-                    val observationFailure = observed.exceptionOrNull()
-                    if (
-                        observationFailure is VoiceTutorProviderOutputBufferClearedException ||
-                        observationFailure is VoiceTutorProviderIncompleteResponseException
-                    ) {
-                        return@concatMap mono {
-                            onProviderEvent(raw, false, true)
-                        }.then(Mono.error<Void>(observationFailure))
-                    }
-                    if (observationFailure != null) {
-                        return@concatMap Mono.error<Void>(observationFailure)
-                    }
-                    val disposition = observed.getOrThrow()
-                    if (!disposition.persist && !disposition.forwardToClient) return@concatMap Mono.empty<Void>()
-                    mono {
-                        onProviderEvent(
-                            turnController.providerEventForRelay(raw),
-                            disposition.persist,
-                            disposition.forwardToClient,
-                        )
-                    }.then()
+                    relayVoiceTutorProviderEvent(turnController, raw, onProviderEvent)
                 }
                 .then()
             // Assessment/persistence is a separate subscriber: never await a
@@ -246,7 +226,12 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 mono { onProviderEvent(raw, false, false) }.then()
             }.then()
             val receive = Mono.firstWithSignal(
-                providerReceive, turnController.inputFailure(), inputWork, toolWork, clientControls, serverLifecycle,
+                providerReceive,
+                turnController.inputFailure(),
+                inputWork,
+                toolWork,
+                clientControls,
+                serverLifecycle,
             )
             val ready = sessionHandshake.awaitConfirmation().then(
                 mono {
@@ -318,6 +303,57 @@ class OpenAIVoiceTutorWebRtcAdapter(
     }
 }
 
+/**
+ * Ordered production boundary for a single sideband event. Observation and
+ * completed-transcript batch ownership are atomic inside the controller; the
+ * exact proof is relayed before staged tutor rows, and only successful storage
+ * may acknowledge the boundary and release later turn/lifecycle work.
+ */
+internal fun relayVoiceTutorProviderEvent(
+    controller: VoiceTutorDuplexTurnController,
+    raw: String,
+    onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
+): Mono<Void> {
+    // Take ownership eagerly while the provider concatMap is handling this
+    // exact frame. A concurrent local terminal may close the controller after
+    // this point, but it cannot erase the immutable transcript batch below.
+    val observation = runCatching { controller.observeProviderEventWithPostRelay(raw) }
+        .getOrElse { return Mono.error(it) }
+    val disposition = observation.disposition
+    val currentProviderEventWork = if (disposition.persist || disposition.forwardToClient) {
+        mono {
+            onProviderEvent(
+                controller.providerEventForRelay(raw),
+                disposition.persist,
+                disposition.forwardToClient,
+            )
+        }.then()
+    } else {
+        Mono.empty()
+    }
+    val boundary = observation.postRelayBoundary ?: return currentProviderEventWork
+    val finalTranscriptWork = Flux.fromIterable(boundary.tutorTranscriptEvents)
+        .concatMap { transcript ->
+            mono {
+                val persisted = onProviderEvent(
+                    transcript,
+                    true,
+                    false,
+                )
+                if (!persisted) throw VoiceTutorTutorTranscriptPersistenceException()
+            }.then()
+        }
+        .then()
+    return currentProviderEventWork.then(finalTranscriptWork).then(
+        Mono.fromRunnable {
+            val acknowledged = controller.acknowledgePostRelayBoundary(boundary.token)
+            if (!acknowledged && controller.acceptsInputEvents()) {
+                throw VoiceTutorProviderProtocolException()
+            }
+        },
+    )
+}
+
 internal fun validateWebRtcSdp(sdp: String): String {
     if (sdp.isBlank() || sdp.toByteArray(StandardCharsets.UTF_8).size > MAX_SDP_BYTES || '\u0000' in sdp) {
         throw VoiceTutorWebRtcSdpException()
@@ -371,6 +407,9 @@ internal fun HttpStatusCode.isAlreadyEndedCall(): Boolean = value() in setOf(404
 internal class VoiceTutorWebRtcSdpException : IllegalArgumentException("Invalid WebRTC SDP.")
 internal class VoiceTutorWebRtcCallIdException : IllegalArgumentException("Invalid OpenAI WebRTC call id.")
 internal class VoiceTutorWebRtcProviderException(message: String) : RuntimeException(message)
+internal class VoiceTutorTutorTranscriptPersistenceException : RuntimeException(
+    "Voice Tutor tutor transcript persistence failed.",
+)
 
 private const val MAX_SDP_BYTES = 65_536
 private const val MAX_SDP_LINES = 512
