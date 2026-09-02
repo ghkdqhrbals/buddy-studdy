@@ -1,9 +1,9 @@
 # Pro Voice Tutor verification
 
-Verification date: 2026-09-02. This is implementation verification, not a
+Verification date: 2026-09-03. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [natural one-turn study-tree mutations](#natural-one-turn-study-tree-mutations).
+Latest implementation: [provider-safe server-owned tool call identifiers](#provider-safe-server-owned-tool-call-identifiers).
 It extends the existing guided saved-tree descent, single-orb,
 Silero/contextual-input, MCP and source-backed summary contracts; it does not
 regrade past answers.
@@ -12,6 +12,41 @@ implementation.
 Source/fixture tests, iPhone tests and actual dev runtime observations are
 recorded separately; none implies a new human microphone-to-tutor conversation
 unless that specific check is explicitly recorded.
+
+## Provider-safe server-owned tool call identifiers
+
+Incident and correction on 2026-09-03, branch `feature/2.0`:
+
+- Two physical-iPhone calls ended after the final learner utterance with server
+  reason `PROVIDER_RELAY_ERROR`. The iPhone retained live capture/render evidence
+  and recorded no ICE failure before its control socket was closed. The backend
+  was stable and Routingflare completed its WebSocket upgrade; the backend-to-
+  OpenAI sideband closed first.
+- The final Korean request was durably stored but no root, readback, focus or MCP
+  execution followed. A live Realtime protocol probe reproduced the exact
+  synthetic `conversation.item.create(function_call)` shape and returned
+  `invalid_request_error`, code `string_above_max_length`, parameter
+  `item.call_id`. A 33-character call ID was rejected while a 32-character ID,
+  the corresponding function-call acknowledgement and its function-call-output
+  acknowledgement all succeeded.
+- Server-owned MCP calls previously used a 44-character `call_id`. They now use
+  the `bsvt_s_` prefix plus an unpadded URL-safe Base64 encoding of all 128 UUID
+  bits, producing 29 characters. An explicit 32-character provider ceiling and
+  the existing provider-ID character contract are checked before any event is
+  emitted. This changes no semantic input rule and introduces no regex, keyword
+  or phrase-based learner-intent decision.
+- The focused MCP relay test covers the provider length ceiling and the complete
+  server-owned call ACK, exact tool execution, output ACK and continuation gate.
+  The full infrastructure suite passed 932 tests with zero failures/errors and
+  three opt-in skips. Normal AOT processing and `:tutor:bootJar` passed. The JAR
+  SHA-256 is `225444021aaaa262552fe7b65ddef86a498600b726867e7737aa9ceb10c7b5cd`.
+- With zero READY/ACTIVE/ENDING voice sessions and zero PROCESSING results, only
+  the existing 8080 `backend-backend-1` application JAR was refreshed and that
+  container restarted. It retained the `dev` profile and the existing
+  `buddystudy/dev` AWS secret import. MySQL, Redis, LibreTranslate and backup
+  containers were not recreated or restarted. Local and public dev health both
+  returned `UP`; the prior verified JAR is retained as
+  `/app/buddystudy-backend.previous-e3518801.jar`.
 
 ## Natural one-turn study-tree mutations
 

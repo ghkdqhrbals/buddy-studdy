@@ -5,7 +5,9 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolR
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import java.nio.ByteBuffer
 import java.time.Duration
+import java.util.Base64
 import java.util.UUID
 
 /** A server-owned, bounded function call; never include arguments in diagnostics. */
@@ -107,7 +109,10 @@ internal class VoiceTutorMcpTurnCoordinator(
         }
         val frozenArguments = parseArguments(mapper.valueToTree(argumentsJson))
             ?: throw VoiceTutorMcpProtocolException()
-        val callId = "bsvt_server_${UUID.randomUUID().toString().replace("-", "")}"
+        val callId = newServerCallId()
+        if (callId.length > MAX_PROVIDER_CALL_ID_LENGTH || !PROVIDER_ID.matches(callId)) {
+            throw VoiceTutorMcpProtocolException()
+        }
         val callItemId = "vtmcp_c_${UUID.randomUUID().toString().replace("-", "").take(24)}"
         val outputItemId = "vtmcp_${UUID.randomUUID().toString().replace("-", "").take(26)}"
         val call = VoiceTutorMcpCall(callId, name, frozenArguments)
@@ -245,6 +250,16 @@ internal class VoiceTutorMcpTurnCoordinator(
         }.getOrNull()
     }
 
+    /** Full UUID entropy encoded inside Realtime's 32-character call_id ceiling. */
+    private fun newServerCallId(): String {
+        val uuid = UUID.randomUUID()
+        val bytes = ByteBuffer.allocate(16)
+            .putLong(uuid.mostSignificantBits)
+            .putLong(uuid.leastSignificantBits)
+            .array()
+        return "bsvt_s_${Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)}"
+    }
+
     private data class Pending(
         val outputItemId: String,
         val toolName: String,
@@ -267,6 +282,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         const val MAX_ARGUMENT_BYTES = 16 * 1024
         const val MAX_OUTPUT_BYTES = 16 * 1024
         const val MAX_PROVIDER_EVENT_BYTES = 65_536
+        const val MAX_PROVIDER_CALL_ID_LENGTH = 32
         val OUTPUT_ACK_EVENTS = setOf("conversation.item.created", "conversation.item.added", "conversation.item.done")
         private val PROVIDER_ID = Regex("[A-Za-z0-9_-]{1,256}")
         private val TOOL_NAME = Regex("[A-Za-z0-9_-]{1,64}")

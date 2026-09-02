@@ -396,6 +396,41 @@ class VoiceTutorMcpRelayTest {
     }
 
     @Test
+    fun `server-owned call id fits provider limit and completes only after both acknowledgements`() {
+        val coordinator = VoiceTutorMcpTurnCoordinator()
+        val scheduled = coordinator.scheduleServerCall(
+            name = "create_root_study",
+            arguments = mapOf("topic" to "Spring", "difficulty_level" to 7),
+            nowNanos = 0,
+        )
+        val callItem = mapper.valueToTree<JsonNode>(scheduled.providerEvent).path("item")
+
+        assertThat(scheduled.callId.length)
+            .isLessThanOrEqualTo(VoiceTutorMcpTurnCoordinator.MAX_PROVIDER_CALL_ID_LENGTH)
+        assertThat(callItem.path("call_id").asText()).isEqualTo(scheduled.callId)
+
+        val released = coordinator.acknowledgeServerCall(mapper.valueToTree(mapOf(
+            "type" to "conversation.item.created",
+            "item" to callItem,
+        )), 1)
+        assertThat(released).isEqualTo(VoiceTutorMcpCall(
+            scheduled.callId,
+            "create_root_study",
+            mapOf("topic" to "Spring", "difficulty_level" to 7),
+        ))
+        assertThat(coordinator.beginExecution(scheduled.callId)).isTrue()
+
+        val output = coordinator.complete(scheduled.callId, success(), 2)!!
+        assertThat((output.getValue("item") as Map<*, *>)["call_id"]).isEqualTo(scheduled.callId)
+        assertThat(coordinator.acknowledge(mapper.valueToTree(mapOf(
+            "type" to "conversation.item.created",
+            "item" to output.getValue("item"),
+        )), 3)).isTrue()
+        assertThat(coordinator.continuationReady).isTrue()
+        coordinator.close()
+    }
+
+    @Test
     fun `too many duplicate and malformed calls fail before any work is queued`() {
         for (items in listOf(List(9) { call("call-$it") }, listOf(call("same"), call("same")), listOf(call("bad id")))) {
             Fixture().use { f ->
