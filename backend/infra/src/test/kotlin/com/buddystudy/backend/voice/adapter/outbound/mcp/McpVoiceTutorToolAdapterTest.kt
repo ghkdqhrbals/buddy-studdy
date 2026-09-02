@@ -626,15 +626,15 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(rootCreation.path("properties").has("interval_minutes")).isFalse()
         assertThat(definitions.single { it.name == "create_root_study" }.description)
             .contains(
-                "call this once immediately", "Natural first-person new-study intent is sufficient",
-                "imperative grammar", "Do not restate", "never selects a lesson or creates a question",
+                "server-owned", "never originate", "natural first-person new-study intent",
+                "bounded earlier persisted learner speech", "never selects a lesson or creates a question",
             )
         assertThat(definitions.single { it.name == "create_study_topic" }.description).contains(
-            "descendants", "current first-person intent", "imperative grammar", "duplicate confirmation",
+            "server-owned", "never originate", "current first-person choice", "verified descendant",
             "Mere mentions", "ambiguous targets",
         )
         assertThat(definitions.single { it.name == "update_study" }.description).contains(
-            "current first-person intent", "Imperative grammar", "duplicate confirmation",
+            "server-owned", "never originate", "current first-person choice",
             "Unspecified fields", "ambiguous targets or outcomes",
         )
         val deletion = mapper.valueToTree<JsonNode>(definitions.single { it.name == "delete_study" }.parameters)

@@ -9,6 +9,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
+import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearnerUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetSingleChildEdge
@@ -148,6 +149,22 @@ class VoiceTutorInputAssessmentServiceTest {
             ))),
             base.copy(utterances = listOf(VoiceTutorInputUtterance(
                 "item", "네", sameSpeechContext = "가".repeat(4_001) + "네",
+            ))),
+            base.copy(utterances = listOf(VoiceTutorInputUtterance(
+                "item", "네", priorPersistedLearnerUtterances = listOf(
+                    VoiceTutorPersistedLearnerUtterance("item", "스프링"),
+                ),
+            ))),
+            base.copy(utterances = listOf(VoiceTutorInputUtterance(
+                "item", "네", priorPersistedLearnerUtterances = List(4) {
+                    VoiceTutorPersistedLearnerUtterance("prior-$it", "스프링")
+                },
+            ))),
+            base.copy(utterances = listOf(VoiceTutorInputUtterance(
+                "item", "네", priorPersistedLearnerUtterances = listOf(
+                    VoiceTutorPersistedLearnerUtterance("prior", "스프링"),
+                    VoiceTutorPersistedLearnerUtterance("prior", "레벨 세븐"),
+                ),
             ))),
             base.copy(utterances = listOf(base.utterances[0], base.utterances[0])),
         )

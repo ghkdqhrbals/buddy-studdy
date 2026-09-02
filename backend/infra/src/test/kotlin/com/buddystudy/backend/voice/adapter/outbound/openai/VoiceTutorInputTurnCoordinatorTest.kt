@@ -412,6 +412,53 @@ class VoiceTutorInputTurnCoordinatorTest {
     }
 
     @Test
+    fun `next learner action receives only earlier durably persisted learner evidence`() {
+        val coordinator = VoiceTutorInputTurnCoordinator()
+        val topic = registered(coordinator, "topic-item", "스프링 레벨 세븐")
+        coordinator.completeAssessment(topic.token, meaningful(topic), 1)
+        coordinator.confirmPublished("topic-item", 2, persisted = true)
+
+        coordinator.observeCommitted("action-item", 2, false, 3)
+        val action = assess(coordinator.observeTranscript("action-item", "만들어 줄래?", "action-raw", 4))
+
+        assertThat(action.utterances.single().priorPersistedLearnerUtterances.map { it.itemId })
+            .containsExactly("topic-item")
+        assertThat(action.utterances.single().persistedLearnerSource())
+            .isEqualTo("스프링 레벨 세븐\n만들어 줄래?")
+    }
+
+    @Test
+    fun `co-batched learner items cannot become persisted evidence for one another`() {
+        val coordinator = VoiceTutorInputTurnCoordinator()
+
+        val batch = preparedBatch(coordinator, listOf("스프링 레벨 세븐", "만들어 줄래?"))
+
+        assertThat(batch.utterances.map { it.transcript })
+            .containsExactly("스프링 레벨 세븐", "만들어 줄래?")
+        assertThat(batch.utterances)
+            .allMatch { it.priorPersistedLearnerUtterances.isEmpty() }
+    }
+
+    @Test
+    fun `failed learner persistence never becomes later mutation evidence and successful mutation can consume context`() {
+        val coordinator = VoiceTutorInputTurnCoordinator()
+        val failed = registered(coordinator, "failed-item", "Redis 레벨 세븐")
+        coordinator.completeAssessment(failed.token, meaningful(failed), 1)
+        coordinator.confirmPublished("failed-item", 2, persisted = false)
+
+        coordinator.observeCommitted("first-action", 2, false, 3)
+        val firstAction = assess(coordinator.observeTranscript("first-action", "만들어 줘", "first-raw", 4))
+        assertThat(firstAction.utterances.single().priorPersistedLearnerUtterances).isEmpty()
+        coordinator.completeAssessment(firstAction.token, meaningful(firstAction), 5)
+        coordinator.confirmPublished("first-action", 6, persisted = true)
+        coordinator.clearPersistedLearnerContext()
+
+        coordinator.observeCommitted("next-action", 3, false, 7)
+        val nextAction = assess(coordinator.observeTranscript("next-action", "새로 시작할래", "next-raw", 8))
+        assertThat(nextAction.utterances.single().priorPersistedLearnerUtterances).isEmpty()
+    }
+
+    @Test
     fun `final tail assessment receives bounded same speech checkpoint context without rewriting either item`() {
         val coordinator = VoiceTutorInputTurnCoordinator(
             VoiceTutorInputAssessmentProperties(maxTranscriptCharacters = 32, maxBatchTranscriptCharacters = 64),

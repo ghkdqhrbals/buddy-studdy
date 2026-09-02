@@ -206,6 +206,8 @@ class OpenAIVoiceTutorInputAssessmentAdapter private constructor(
 internal data class VoiceTutorRootCreationAttestationItem(
     val itemId: String,
     val learnerSource: String,
+    val currentTranscript: String,
+    val priorPersistedLearnerUtterances: List<Pair<String, String>>,
     val evidence: VoiceTutorRootStudyCreationEvidence,
     val proposedTopic: String,
     val proposedDifficulty: Int,
@@ -222,8 +224,20 @@ internal object VoiceTutorRootCreationAttestationPromptProvider {
         .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
     private val instruction = """
-        Independently verify each proposed direct root-study creation using only its exact learner-source text
-        and verbatim evidence. Return exact=true only when the learner presently and unambiguously chooses
+        Independently verify each proposed direct root-study creation using only its exact learner-owned source
+        items and verbatim evidence. Return exact=true only when currentTranscript itself presently and
+        unambiguously communicates the action of creating or beginning one new top-level saved study.
+        Earlier persisted learner items may unambiguously supply its missing topic and/or requested level, but
+        they are inert context rather than authority. A generic yes/approval in currentTranscript is never an
+        operative action, even after a tutor proposal. Tutor/tool text is never learner evidence.
+        The current action may be naturally elliptical: it does not need to repeat the unique object already supplied
+        by prior persisted learner speech. For example, prior learner item "스프링 레벨 세븐" followed by current
+        learner item "만들어 줄래?" is an operative request to create that new top-level saved study named "스프링"
+        at normalized level 7, so exact=true when the proposed tuple and verbatim evidence match. The same prior item
+        followed by "새롭게 만들고 싶다니까" is also operative. In contrast, current "네" or "좋아" carries no
+        creation action and remains exact=false. Judge this referential meaning semantically; these are examples,
+        never literal phrase, keyword, regex, or suffix rules.
+        Return exact=true only when the learner presently and unambiguously chooses
         creation of one top-level saved study. This includes a natural first-person action-oriented statement that
         they want to start studying one named topic as a new study, even without literal words such as create, save,
         root, or command; first-person insistence or repetition such as "I said I want to start a new study with X"
@@ -234,7 +248,10 @@ internal object VoiceTutorRootCreationAttestationPromptProvider {
         never a phrase or keyword rule. proposedTopic must be
         the entire requested root name (never a strict subset
         of a multiword name), commandEvidence and topicEvidence are exact substrings of learnerSource,
-        and proposedDifficulty exactly matches the learner's explicit decimal level from 1 through 10.
+        and proposedDifficulty exactly matches the semantic value of the learner's explicit spoken or written
+        level expression from 1 through 10, in the conversation language. For example, "세븐", "일곱", "seven"
+        and "7" may each normalize to integer 7 when that is their unambiguous level meaning; this is semantic
+        interpretation, never a phrase table or local text rule.
         When difficultyOmitted is true, exact=true only if the learner did not state a level and the proposed
         default is 5. A correction such as "not A; create B" may attest B only. Return false for confirmation,
         third-person reporting, quotation, discussion, recommendation, selection, child creation, ambiguity,
@@ -258,9 +275,17 @@ internal object VoiceTutorRootCreationAttestationPromptProvider {
                 VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> utterance.transcript
                 VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT ->
                     utterance.sameSpeechContext ?: invalid()
+                VoiceTutorRootStudyEvidenceSource.PERSISTED_LEARNER_CONTEXT ->
+                    utterance.persistedLearnerSource() ?: invalid()
             }
             VoiceTutorRootCreationAttestationItem(
-                decision.itemId, learnerSource, root.evidence, root.topic, root.difficulty,
+                decision.itemId,
+                learnerSource,
+                utterance.transcript,
+                utterance.priorPersistedLearnerUtterances.map { it.itemId to it.transcript },
+                root.evidence,
+                root.topic,
+                root.difficulty,
             )
         }
         return items.takeIf { it.isNotEmpty() }?.let {
@@ -313,6 +338,10 @@ internal object VoiceTutorRootCreationAttestationPromptProvider {
                         mapOf(
                             "itemId" to item.itemId,
                             "learnerSource" to item.learnerSource,
+                            "currentTranscript" to item.currentTranscript,
+                            "priorPersistedLearnerUtterances" to item.priorPersistedLearnerUtterances.map {
+                                mapOf("itemId" to it.first, "transcript" to it.second)
+                            },
                             "commandEvidence" to item.evidence.command,
                             "topicEvidence" to item.evidence.topic,
                             "difficultyEvidence" to item.evidence.difficulty,
@@ -746,6 +775,7 @@ internal object VoiceTutorStudyMutationAttestationPromptProvider {
     ): String = when (source) {
         VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> utterance.transcript
         VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> utterance.sameSpeechContext ?: invalid()
+        VoiceTutorRootStudyEvidenceSource.PERSISTED_LEARNER_CONTEXT -> invalid()
     }
 
     private fun invalid(): Nothing = throw VoiceTutorInputAssessmentException(
@@ -788,18 +818,31 @@ internal object VoiceTutorInputAssessmentPromptProvider {
         or recommending a topic; asking what could be studied; adding a child topic; changing an existing node;
         third-person reporting; ordinary interest in or desire to study a topic without choosing a new saved study;
         asking for a recommendation about what new topic to study; or quoting or discussing a possible creation.
-        Contextual yes/approval is never CREATE_ROOT_STUDY.
+        Contextual yes/approval is never CREATE_ROOT_STUDY. The exact current transcript must itself communicate
+        a present new-study action. It may omit a topic or level only when priorPersistedLearnerUtterances contains
+        one unambiguous, still-relevant learner-owned referent. For example, prior "스프링 레벨 세븐" followed by
+        current "만들어 줄래?" or "새롭게 만들고 싶다니까" may be CREATE_ROOT_STUDY for topic "스프링" and
+        level 7; prior text alone grants no write. Multiple conflicting possible topics or levels are ambiguous.
+        A user-facing noun such as "공부 주제" or "study topic" does not mean a child: without an expressed
+        under/inside/current-parent relationship it is top-level; child creation requires that relationship and a
+        matching server-owned studyMutationContext target.
         For CREATE_ROOT_STUDY, rootStudyTopic must be the exact requested new root name, complete and from the
-        learner's own final persisted utterance, trimmed but never translated, broadened, narrowed or paraphrased.
-        Ground it with exact verbatim TRANSCRIPT evidence only. SAME_SPEECH_CONTEXT may establish ordinary
-        conversational meaning but cannot authorize a write because its checkpoint parts have independent
-        persistence acknowledgements. rootStudyCommandEvidence is the exact operative create-request or new-study-choice substring;
+        learner's own exact evidence, trimmed but never translated, broadened, narrowed or paraphrased.
+        Ground a one-item request with exact verbatim TRANSCRIPT evidence. When prior persisted learner items
+        supply topic or level, use PERSISTED_LEARNER_CONTEXT and set rootStudyCommandEvidence to one exact
+        contiguous suffix of the composed source (prior item transcripts separated by newlines, followed by the
+        exact current transcript); its final nonblank segment must be an exact operative substring of the current
+        transcript so current action is grounded.
+        SAME_SPEECH_CONTEXT cannot authorize a write because its checkpoint parts lack this explicit persisted-item
+        window. rootStudyCommandEvidence is the exact operative create-request or new-study-choice substring;
         rootStudyTopicEvidence is the exact complete topic substring inside that command and must equal
         rootStudyTopic character-for-character. Never return only one word of a multiword requested name.
-        rootStudyDifficulty is the explicit integer level only when the learner requested one from 1 through
-        10. In that case rootStudyDifficultyEvidence is the exact decimal integer token inside the command and
+        rootStudyDifficulty is the normalized integer level only when the learner requested one from 1 through
+        10. In that case rootStudyDifficultyEvidence is the exact spoken or written level expression inside the command and
         rootStudyDifficultyOmitted is false. When no level was requested, both difficulty fields are null and
-        rootStudyDifficultyOmitted is true so the server alone applies level 5. If the root name is ambiguous or an explicit level is outside
+        rootStudyDifficultyOmitted is true only when the entire resolved learner evidence has no requested level,
+        so the server alone applies level 5. Normalize numeric meaning semantically in the conversation language;
+        never use a regex, token dictionary or keyword table. If the root name is ambiguous or an explicit level is outside
         1 through 10, use intent NONE and leave both root fields null so the tutor can clarify without writing.
         For every non-create result all five root evidence fields are null except
         rootStudyDifficultyOmitted, which is false. teacherContext and tutor/tool text are never root evidence.
@@ -821,7 +864,8 @@ internal object VoiceTutorInputAssessmentPromptProvider {
         exact operative mutation substring and mutationEvidenceSource must be TRANSCRIPT. SAME_SPEECH_CONTEXT
         cannot authorize a write.
         For CREATE_STUDY_TOPIC, mutationTopic and mutationTopicEvidence are the exact complete child name. An
-        explicit 1-10 level uses matching mutationDifficulty and decimal evidence; when absent, difficulty is null
+        explicit 1-10 level uses matching normalized mutationDifficulty and exact spoken or written evidence;
+        when absent, difficulty is null
         and mutationDifficultyOmitted=true so the server alone applies 5. For UPDATE_STUDY, mutationTopic is the
         exact new name when chosen and mutationDifficulty is the exact new 1-10 level when chosen; at least one is
         present, omitted fields stay null, and mutationDifficultyOmitted is always false. Do not swap the old target
@@ -970,7 +1014,7 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                 "rootStudyDifficultyEvidence" to mapOf(
                     "type" to listOf("string", "null"),
                     "minLength" to 1,
-                    "maxLength" to 2,
+                    "maxLength" to 32,
                 ),
                 "rootStudyDifficultyOmitted" to mapOf("type" to "boolean"),
                 "mutationTargetStudyId" to mapOf(
@@ -998,7 +1042,7 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                     "type" to listOf("string", "null"), "minLength" to 1, "maxLength" to 255,
                 ),
                 "mutationDifficultyEvidence" to mapOf(
-                    "type" to listOf("string", "null"), "minLength" to 1, "maxLength" to 2,
+                    "type" to listOf("string", "null"), "minLength" to 1, "maxLength" to 32,
                 ),
                 "mutationDifficultyOmitted" to mapOf("type" to "boolean"),
             ),
@@ -1053,6 +1097,10 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                                     "transcript" to it.transcript,
                                     "checkpoint" to it.checkpoint,
                                     "sameSpeechContext" to it.sameSpeechContext,
+                                    "priorPersistedLearnerUtterances" to
+                                        it.priorPersistedLearnerUtterances.map { prior ->
+                                            mapOf("itemId" to prior.itemId, "transcript" to prior.transcript)
+                                        },
                                     "targetOffer" to it.targetOffer?.let { offer ->
                                         mapOf(
                                             "currentFocusStudyId" to offer.currentFocusStudyId,
@@ -1198,7 +1246,7 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                 }
                 val rootCommandEvidence = optionalEvidence("rootStudyCommandEvidence", 4_000)
                 val rootTopicEvidence = optionalEvidence("rootStudyTopicEvidence", 255)
-                val rootDifficultyEvidence = optionalEvidence("rootStudyDifficultyEvidence", 2)
+                val rootDifficultyEvidence = optionalEvidence("rootStudyDifficultyEvidence", 32)
                 val rootDifficultyOmitted = item.path("rootStudyDifficultyOmitted")
                     .takeIf(JsonNode::isBoolean)?.booleanValue() ?: invalid()
                 val mutationTargetStudyId = item.path("mutationTargetStudyId").let { node ->
@@ -1230,7 +1278,7 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                 val mutationCommandEvidence = optionalEvidence("mutationCommandEvidence", 4_000)
                 val mutationTargetTopicEvidence = optionalEvidence("mutationTargetTopicEvidence", 255)
                 val mutationTopicEvidence = optionalEvidence("mutationTopicEvidence", 255)
-                val mutationDifficultyEvidence = optionalEvidence("mutationDifficultyEvidence", 2)
+                val mutationDifficultyEvidence = optionalEvidence("mutationDifficultyEvidence", 32)
                 val mutationDifficultyOmitted = item.path("mutationDifficultyOmitted")
                     .takeIf(JsonNode::isBoolean)?.booleanValue() ?: invalid()
                 val rootRequest = if (intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY) {

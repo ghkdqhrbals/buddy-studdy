@@ -7,6 +7,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentR
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
+import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearnerUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorChildStudyCreationRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContext
@@ -78,6 +79,7 @@ internal class VoiceTutorInputTurnCoordinator(
     private val recentItemIds = linkedSetOf<String>()
     private val earlyTranscripts = linkedMapOf<String, EarlyTranscript>()
     private val checkpointContextBySequence = linkedMapOf<Long, String>()
+    private val persistedLearnerContext = linkedMapOf<String, VoiceTutorPersistedLearnerUtterance>()
     private var batch: AssessmentBatch? = null
     private var nextBatchToken = 1L
     private var contextGeneration = 0L
@@ -248,11 +250,14 @@ internal class VoiceTutorInputTurnCoordinator(
         return actions
     }
 
-    fun confirmPublished(itemId: String, nowNanos: Long): List<Action> {
+    fun confirmPublished(itemId: String, nowNanos: Long, persisted: Boolean = true): List<Action> {
         if (isClosed || pending[itemId]?.stage != Stage.WAITING_PUBLISH) return emptyList()
         val actions = mutableListOf<Action>()
         expireStages(nowNanos, actions)
         val item = pending.remove(itemId) ?: return actions
+        if (persisted) {
+            rememberPersistedLearnerContext(item.itemId, requireNotNull(item.transcript))
+        }
         if (item.checkpoint) {
             rememberCheckpointContext(item.sequence, requireNotNull(item.transcript))
         } else {
@@ -281,6 +286,11 @@ internal class VoiceTutorInputTurnCoordinator(
         }
     }
 
+    /** Consume old referential slots after one attested study mutation owns them. */
+    fun clearPersistedLearnerContext() {
+        if (!isClosed) persistedLearnerContext.clear()
+    }
+
     fun expire(nowNanos: Long): List<Action> {
         if (isClosed) return emptyList()
         val actions = mutableListOf<Action>()
@@ -294,6 +304,7 @@ internal class VoiceTutorInputTurnCoordinator(
         pending.clear()
         earlyTranscripts.clear()
         checkpointContextBySequence.clear()
+        persistedLearnerContext.clear()
         recentItemIds.clear()
         batch = null
         teacherContext = ""
@@ -348,6 +359,7 @@ internal class VoiceTutorInputTurnCoordinator(
         if (isClosed || !teacherContextReady || batch != null) return
         val selected = mutableListOf<PendingItem>()
         val semanticContexts = linkedMapOf<String, String?>()
+        val persistedContexts = linkedMapOf<String, List<VoiceTutorPersistedLearnerUtterance>>()
         var characters = 0
         // Preserve acknowledged turn order, including ASR arriving out of order.
         // An older unpersisted/deleting item cannot be overtaken by a new batch.
@@ -356,8 +368,13 @@ internal class VoiceTutorInputTurnCoordinator(
             val text = requireNotNull(item.transcript)
             val offerCharacters = item.targetOffer?.tutorAudioTranscript?.length ?: 0
             val mutationCharacters = item.studyMutationContext?.candidates.orEmpty().sumOf { it.topic.length }
+            val persistedContext = boundedPersistedLearnerContext(
+                limits.maxBatchTranscriptCharacters - characters - text.length - offerCharacters - mutationCharacters,
+            )
+            val persistedContextCharacters = persistedContext.sumOf { it.transcript.length }
             val remainingAfterTranscript =
-                limits.maxBatchTranscriptCharacters - characters - text.length - offerCharacters - mutationCharacters
+                limits.maxBatchTranscriptCharacters - characters - text.length - offerCharacters - mutationCharacters -
+                    persistedContextCharacters
             if (selected.size == limits.maxUtterances || remainingAfterTranscript < 0) break
             val sameSpeechContext = if (item.checkpoint) {
                 null
@@ -366,7 +383,13 @@ internal class VoiceTutorInputTurnCoordinator(
             }
             selected += item
             semanticContexts[item.itemId] = sameSpeechContext
-            characters += text.length + offerCharacters + mutationCharacters + (sameSpeechContext?.length ?: 0)
+            persistedContexts[item.itemId] = persistedContext
+            characters += text.length + offerCharacters + mutationCharacters + persistedContextCharacters +
+                (sameSpeechContext?.length ?: 0)
+            // Every item in this batch receives the same frozen snapshot made
+            // only of earlier persistence acknowledgements. Co-batched USER
+            // items can still correct one another's conversational intent, but
+            // none can become persisted mutation evidence for another.
         }
         if (selected.isEmpty()) return
         if (nextBatchToken <= 0 || nextBatchToken == Long.MAX_VALUE) {
@@ -380,6 +403,7 @@ internal class VoiceTutorInputTurnCoordinator(
                 checkpoint = it.checkpoint,
                 targetOffer = it.targetOffer,
                 sameSpeechContext = semanticContexts[it.itemId],
+                priorPersistedLearnerUtterances = persistedContexts.getValue(it.itemId),
                 studyMutationContext = it.studyMutationContext,
             )
         }
@@ -473,6 +497,28 @@ internal class VoiceTutorInputTurnCoordinator(
         }
     }
 
+    private fun rememberPersistedLearnerContext(itemId: String, transcript: String) {
+        persistedLearnerContext.remove(itemId)
+        persistedLearnerContext[itemId] = VoiceTutorPersistedLearnerUtterance(itemId, transcript)
+        while (persistedLearnerContext.size > MAX_PERSISTED_LEARNER_CONTEXT_ITEMS ||
+            persistedLearnerContext.values.sumOf { it.transcript.length } > limits.maxTranscriptCharacters
+        ) {
+            persistedLearnerContext.remove(persistedLearnerContext.keys.first())
+        }
+    }
+
+    private fun boundedPersistedLearnerContext(maxCharacters: Int): List<VoiceTutorPersistedLearnerUtterance> {
+        if (maxCharacters <= 0) return emptyList()
+        var characters = 0
+        val selected = ArrayDeque<VoiceTutorPersistedLearnerUtterance>()
+        for (item in persistedLearnerContext.values.toList().asReversed()) {
+            if (characters + item.transcript.length > maxCharacters) break
+            selected.addFirst(item)
+            characters += item.transcript.length
+        }
+        return selected.toList()
+    }
+
     private fun completedSpeechContext(sequence: Long, transcript: String, maxCharacters: Int): String? {
         val checkpoint = checkpointContextBySequence[sequence]?.takeIf { it.isNotBlank() } ?: return null
         if (maxCharacters <= transcript.length + 1) return null
@@ -525,6 +571,7 @@ internal class VoiceTutorInputTurnCoordinator(
         const val MAX_EARLY_TRANSCRIPTS = 16
         const val MAX_RECENT_ITEMS = 64
         const val MAX_CHECKPOINT_CONTEXTS = 16
+        const val MAX_PERSISTED_LEARNER_CONTEXT_ITEMS = 3
         const val MAX_ITEM_ID_CHARACTERS = 256
         const val MAX_RAW_EVENT_CHARACTERS = 64_000
         const val NANOS_PER_MILLISECOND = 1_000_000L

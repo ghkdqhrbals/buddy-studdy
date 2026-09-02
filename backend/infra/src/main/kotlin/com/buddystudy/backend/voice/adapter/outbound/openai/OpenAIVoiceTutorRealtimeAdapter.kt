@@ -941,7 +941,7 @@ internal class VoiceTutorDuplexTurnController(
             )
         }
         withInputCoordinator {
-            confirmPublished(itemId, nanoTime()).also { actions ->
+            confirmPublished(itemId, nanoTime(), persisted).also { actions ->
                 val ready = actions.filterIsInstance<VoiceTutorInputTurnCoordinator.Action.Ready>().singleOrNull()
                 if (ready != null) {
                     if (ready.checkpoint) {
@@ -999,6 +999,11 @@ internal class VoiceTutorDuplexTurnController(
                     val studyUpdateAuthorization = publication.studyUpdateRequest
                         ?.takeIf { persisted && !ready.checkpoint && studyUpdateIntentCurrent }
                         ?.let { VoiceTutorStudyUpdateAuthorization(it.studyId, it.topic, it.difficulty) }
+                    if (rootStudyCreationAuthorization != null || childStudyCreationAuthorization != null ||
+                        studyUpdateAuthorization != null
+                    ) {
+                        clearPersistedLearnerContext()
+                    }
                     val exactAnswerTranscript = studyAnswerGroup
                         ?.takeIf {
                             persisted && publication.intent ==

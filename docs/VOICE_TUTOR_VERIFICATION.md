@@ -20,13 +20,29 @@ Current acceptance contract on 2026-09-02, branch `feature/2.0`:
 - Creation and update intent is decided from meaning through a strict structured
   GPT assessment followed, only for a proposed write, by an independent semantic
   attestation. No regex, keyword/phrase list, utterance length, punctuation or
-  sentence-completeness rule may grant or deny a write. The learner's exact final,
-  persisted transcript remains the only speech evidence.
+  sentence-completeness rule may grant or deny a write. The exact current,
+  persisted learner transcript must itself communicate the operative mutation
+  action. For root creation only, at most three earlier learner USER items may
+  supply an unambiguous omitted topic and/or level, and only after each item has
+  completed its own durable persistence acknowledgement; tutor/tool text,
+  same-speech checkpoint context and unacknowledged input are never evidence.
 - Natural first-person wording is sufficient. For example, `아니 스프링으로
   새롭게 공부하고 싶다고.` authorizes one root named exactly `스프링` at the
-  server default level 5 without another “만들까요?” or “네” turn. Mere interest,
-  a recommendation request, quoted or third-party desire, a bare topic and a
-  generic confirmation do not authorize creation.
+  server default level 5 without another “만들까요?” or “네” turn. A split request
+  such as prior `스프링 레벨 세븐` followed by current `새롭게 만들고
+  싶다니까` can authorize exact topic `스프링`, level 7. GPT semantically
+  normalizes unambiguous spoken or written 1–10 expressions in the conversation
+  language; local code does not use a regex, keyword list or numeric phrase
+  table. Mere interest, a recommendation request, quoted or third-party desire,
+  a bare topic and generic confirmation remain non-authorizing.
+- Every item in an assessment receives one frozen referential snapshot containing
+  only USER turns whose semantic approval and transcript write reached the exact
+  persistence ACK before that batch. Pending, failed and co-batched items cannot
+  contribute context to one another. Original ordered multi-item batching remains
+  intact so GPT can interpret rapid corrective speech together. Once a root,
+  child or update authorization consumes the bounded referential window, that
+  prior-learner context is cleared before subsequent input and cannot authorize a
+  later command or retry.
 - A clear request for a child under the currently confirmed focus or a clear
   rename/level change of that focus follows the same one-turn semantic path.
   Target IDs, lesson revision and focus are frozen by the server, never supplied
@@ -57,28 +73,34 @@ Current acceptance contract on 2026-09-02, branch `feature/2.0`:
 
 Verification evidence:
 
-- The opt-in production GPT test passed the exact natural Korean root request and
-  rejected four non-writing controls: mere interest, a recommendation request,
-  third-party reported desire and generic `네`. The test made no app session,
-  database write, quota reservation or recording. Its three HTTP decisions
-  (primary plus root attestation, then one batched non-write assessment) completed
-  in 9.064 seconds total using the existing dev user-content secret in memory.
-- Clean full `:application:test` and `:infra:test` runs passed **1,492 tests**:
-  application 566/566 and infrastructure 923 passed plus three opt-in skips, with
+- The opt-in production GPT test passed the reported split Korean request: prior
+  `스프링 레벨 세븐` plus current `만들어 줄래?` produced exact root `스프링`,
+  normalized level 7 through both the primary decision and independent
+  attestation. The same live run rejected mere interest, a recommendation
+  request, third-party reported desire and generic `네` even when that `네` had
+  the persisted Spring/7 context. It made no app session, database write, quota
+  reservation or recording and obtained the existing dev user-content secret in
+  memory without logging it.
+- Clean full `:application:test` and `:infra:test` runs passed **1,494 tests**:
+  application 566/566 and infrastructure 928 passed plus three opt-in skips, with
   zero failures or errors. `:tutor:bootJar` also passed. Separate focused mutation,
-  lease/replay, exact-ACK, duplicate/readback and stale-focus tests passed, and two
-  independent code audits found no unresolved P1/P2 issue.
-- The final backend artifact is **331,722,575 bytes**, SHA-256
-  `3d546748384c30da9dbb952399d95f8b3e9cf50e2c2f7f1b466a5735a9fe4627`.
+  lease/replay, exact-ACK, split-context, co-batch exclusion, failed-persistence,
+  duplicate/readback and stale-focus tests passed.
+- The final backend artifact is **331,730,771 bytes**, SHA-256
+  `e3518801319e300e3e11ce7325b3a29ac0d301cd6e23e3ac5179cebea9eb8fee`.
   No database migration or iOS source change is part of this correction, so an
   iOS build is not used as substitute verification for this backend-only path.
 - With zero `ACTIVE`/`ENDING` voice sessions, the artifact was atomically copied
   into the existing app volume and only `backend-backend-1` on localhost port
-  8080 was restarted. Its mounted hash matches the artifact and health returned
-  `UP`. MySQL, Redis, LibreTranslate and backup retained their exact container IDs
-  and start times. The fixed immediate-previous JAR was rotated in place; the
-  short-lived copy helper removed itself and no duplicate backend or infrastructure
-  container was created.
+  8080 was restarted. Its mounted hash matches the artifact; local and public
+  `https://lowfidev.cloud` health both returned HTTP 200/`UP`. MySQL, Redis,
+  LibreTranslate and backup retained their exact container IDs and start times.
+  The immediate previous JAR with SHA-256
+  `3d546748384c30da9dbb952399d95f8b3e9cf50e2c2f7f1b466a5735a9fe4627`
+  was rotated in place; the short-lived copy helper removed itself and no
+  duplicate backend or infrastructure container was created. The already
+  installed normal app was then terminated and relaunched on the paired iPhone
+  16 Pro; no iOS binary or source change was needed for this backend-only fix.
 
 ## Learning evidence gate and direct root creation
 
@@ -87,11 +109,22 @@ Current acceptance contract on 2026-09-02, branch `feature/2.0`:
 - A final, persisted, semantically clear learner choice such as `Spring을 레벨 7
   루트 주제로 만들어줘` or `스프링으로 새롭게 공부하고 싶다고` authorizes
   the exact `(topic, effective level)` tuple once and calls `create_root_study`
-  immediately. There is no create-preview, imperative-grammar requirement or
-  `만들까요? -> 네` confirmation loop. Exact learner-source evidence must support the choice,
-  complete topic and explicit level, or level omission; a generic yes, tutor-only
-  proposal, strict-subset topic, mismatched level, newer speech, replay or failed
-  persistence cannot authorize the write.
+  immediately. The current persisted transcript must carry the operative
+  new-study action; up to three earlier durably persisted learner turns may
+  contribute only an unambiguous omitted topic and/or level. Every item receives
+  the same kind of frozen pre-batch snapshot, so each prior turn must finish its
+  own persistence ACK before the batch starts; pending, failed and co-batched
+  items cannot become one another's context. Ordered multi-item correction
+  semantics remain available. There is no create-preview,
+  imperative-grammar requirement or `만들까요? -> 네` confirmation loop. Exact
+  learner-source evidence must support the complete topic and explicit level, or
+  genuine level omission. Spoken numeric expressions are normalized to 1–10 by
+  the two GPT semantic decisions, never by a regex, keyword list or numeric
+  phrase table. A generic yes remains non-authorizing even after a tutor proposal;
+  a strict-subset topic, mismatched level, conflicting prior referents, newer
+  speech, replay or failed persistence also cannot authorize the write. An
+  accepted root/child/update authorization clears the prior-learner context so
+  the same referents cannot spill into a later mutation or retry.
 - The create result cannot speak for itself. The server bridge schedules an exact
   `get_study` read for its trusted returned ID and withholds the spoken
   acknowledgment until both function outputs are acknowledged and that readback

@@ -280,7 +280,7 @@ class VoiceTutorServiceTest {
             .contains("childrenMayBeIncomplete=true")
             .contains("current first-person intent directly and unambiguously chooses one exact child topic")
             .contains("Imperative grammar and literal add/create words are not required")
-            .contains("do not restate the choice or ask for duplicate confirmation")
+            .contains("never originate that mutation tool yourself, restate the choice or ask for duplicate confirmation")
             .doesNotContain(
                 "do not automatically traverse its descendants",
                 "Deepen the same topic with why, how",
@@ -303,10 +303,10 @@ class VoiceTutorServiceTest {
         val persistence = FakePersistence(now)
         val instructions = service(persistence).connect(principal, persistence.session.id).instructions
         assertThat(instructions)
-            .contains("use update_study once in that same turn with the exact owned study_id")
+            .contains("inserts update_study once with the exact owned study_id")
             .contains("only the chosen topic and/or difficulty_level (1-10)")
             .contains("Imperative grammar and literal rename/change/update words are not required")
-            .contains("do not restate the choice or ask for duplicate confirmation")
+            .contains("never originate update_study yourself, restate the choice or ask for duplicate confirmation")
             .contains("A mere mention, example, recommendation, quoted or third-party wish is not permission")
             .contains("changes the level for the next NEW question")
             .contains("pending or completed question keeps its original title, level")
@@ -332,11 +332,13 @@ class VoiceTutorServiceTest {
                 .contains("direct choice to begin one new root")
                 .contains("Natural first-person wording")
                 .contains("without literal create/save/root words")
-                .contains("call create_root_study once immediately")
-                .contains("Include difficulty_level only when the learner explicitly requested")
-                .contains("server applies exactly the default level 5")
+                .contains("server independently resolves")
+                .contains("spoken or written 1-10 level")
+                .contains("earlier durably persisted learner speech")
+                .contains("Never originate create_root_study yourself")
                 .contains("direct request is already final permission")
                 .contains("never preview it, ask '만들까요?'/'shall I create it?' or any equivalent confirmation question")
+                .contains("demand a clearer/more explicit/magic phrase")
                 .contains("A generic yes")
                 .contains("never authorizes creation")
                 .contains("one-shot write to the exact topic and effective level")

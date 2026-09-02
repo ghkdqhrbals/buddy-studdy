@@ -78,6 +78,21 @@ data class VoiceTutorStudyTargetOffer(
     val candidateTraversals: Map<Long, VoiceTutorStudyTargetTraversal> = emptyMap(),
 )
 
+/**
+ * Exact learner text whose durable USER-row write already completed in this call.
+ * It may supply bounded referential context, but it never grants mutation authority
+ * by itself; the newest [VoiceTutorInputUtterance.transcript] must still carry the
+ * presently operative action.
+ */
+data class VoiceTutorPersistedLearnerUtterance(
+    val itemId: String,
+    val transcript: String,
+) {
+    fun isValid(maxTranscriptCharacters: Int = 4_000): Boolean =
+        itemId.isNotBlank() && itemId.length <= 256 && itemId.none(Char::isISOControl) &&
+            transcript.isNotBlank() && transcript.length <= maxTranscriptCharacters
+}
+
 /** Original ASR text. Assessment never normalizes, rewrites or persists this text. */
 data class VoiceTutorInputUtterance(
     val itemId: String,
@@ -90,12 +105,22 @@ data class VoiceTutorInputUtterance(
      * for [transcript]; this context must never be used to rewrite either provider item.
      */
     val sameSpeechContext: String? = null,
+    /**
+     * Bounded, call-local USER items retained only after their persistence ACK.
+     * Tutor/tool text, failed writes and unacknowledged items never enter this list.
+     */
+    val priorPersistedLearnerUtterances: List<VoiceTutorPersistedLearnerUtterance> = emptyList(),
     /** Frozen at this speech boundary from the current focus and verified call-local tree reads. */
     val studyMutationContext: VoiceTutorStudyMutationContext? = null,
 ) {
+    fun persistedLearnerSource(): String? = priorPersistedLearnerUtterances
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString(separator = "\n", postfix = "\n$transcript") { it.transcript }
+
     override fun toString(): String =
         "VoiceTutorInputUtterance(itemId=[redacted], transcriptCharacters=${transcript.length}, " +
-            "sameSpeechContextCharacters=${sameSpeechContext?.length ?: 0})"
+            "sameSpeechContextCharacters=${sameSpeechContext?.length ?: 0}, " +
+            "priorPersistedLearnerUtteranceCount=${priorPersistedLearnerUtterances.size})"
 }
 
 /** The caller owns authentication and the session/turn-generation fence. */
@@ -163,7 +188,12 @@ enum class VoiceTutorInputIntent {
     CONTINUE_STUDY,
 }
 
-enum class VoiceTutorRootStudyEvidenceSource { TRANSCRIPT, SAME_SPEECH_CONTEXT }
+enum class VoiceTutorRootStudyEvidenceSource {
+    TRANSCRIPT,
+    SAME_SPEECH_CONTEXT,
+    /** Prior durably persisted learner items followed by the exact current transcript. */
+    PERSISTED_LEARNER_CONTEXT,
+}
 
 /**
  * Verbatim learner-owned evidence for one operative root-creation statement. These values are never normalized,
@@ -186,21 +216,33 @@ data class VoiceTutorRootStudyCreationEvidence(
             this.difficulty == null && difficulty == 5
         } else {
             val exactDifficulty = this.difficulty
-                ?.takeIf { it.isNotBlank() && it == it.trim() && it.length <= 2 }
+                ?.takeIf { it.isNotBlank() && it == it.trim() && it.length <= 32 }
                 ?: return false
-            command.contains(exactDifficulty) && exactDifficulty.toIntOrNull() == difficulty && difficulty in 1..10
+            // The two independent semantic assessments normalize spoken/written
+            // number expressions (for example "세븐" or "seven") to 1..10.
+            // Local code verifies only exact learner provenance and the bounded
+            // normalized value; it deliberately has no regex or language table.
+            command.contains(exactDifficulty) && difficulty in 1..10
         }
     }
 
     fun isExactLearnerEvidence(utterance: VoiceTutorInputUtterance): Boolean {
-        // Checkpoint persistence is acknowledged independently. Until the request carries
-        // durable part IDs, only this exact final persisted USER item may authorize a write.
-        if (source != VoiceTutorRootStudyEvidenceSource.TRANSCRIPT) return false
         val learnerSource = when (source) {
             VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> utterance.transcript
-            VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> utterance.sameSpeechContext ?: return false
+            // Checkpoint context still cannot authorize a write because it lacks
+            // the explicit durable USER-item provenance carried by the list below.
+            VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> return false
+            VoiceTutorRootStudyEvidenceSource.PERSISTED_LEARNER_CONTEXT ->
+                utterance.persistedLearnerSource() ?: return false
         }
-        return learnerSource.contains(command) && command.contains(topic) &&
+        val currentActionGrounded = when (source) {
+            VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> true
+            VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> false
+            VoiceTutorRootStudyEvidenceSource.PERSISTED_LEARNER_CONTEXT ->
+                command.substringAfterLast('\n').takeIf { it.isNotBlank() }
+                    ?.let(utterance.transcript::contains) == true
+        }
+        return currentActionGrounded && learnerSource.contains(command) && command.contains(topic) &&
             (difficultyOmitted || difficulty?.let(command::contains) == true)
     }
 }
@@ -230,6 +272,8 @@ data class VoiceTutorChildStudyCreationEvidence(
         val learnerSource = when (source) {
             VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> utterance.transcript
             VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> utterance.sameSpeechContext ?: return false
+            VoiceTutorRootStudyEvidenceSource.PERSISTED_LEARNER_CONTEXT ->
+                utterance.persistedLearnerSource() ?: return false
         }
         val parentValid = if (parentImplicitCurrentFocus) {
             parentTopic == null
@@ -240,7 +284,7 @@ data class VoiceTutorChildStudyCreationEvidence(
         val difficultyValid = if (difficultyOmitted) {
             difficulty == null
         } else {
-            difficulty?.takeIf { it.isNotBlank() && it == it.trim() && it.length <= 2 }
+            difficulty?.takeIf { it.isNotBlank() && it == it.trim() && it.length <= 32 }
                 ?.let(command::contains) == true
         }
         return command.isNotBlank() && command.length <= 4_000 && command.length > topic.length &&
@@ -270,7 +314,7 @@ data class VoiceTutorChildStudyCreationRequest(
         return if (evidence.difficultyOmitted) {
             evidence.difficulty == null && difficulty == 5
         } else {
-            evidence.difficulty?.toIntOrNull() == difficulty
+            evidence.difficulty != null && difficulty in 1..10
         }
     }
 }
@@ -288,6 +332,8 @@ data class VoiceTutorStudyUpdateEvidence(
         val learnerSource = when (source) {
             VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> utterance.transcript
             VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> utterance.sameSpeechContext ?: return false
+            VoiceTutorRootStudyEvidenceSource.PERSISTED_LEARNER_CONTEXT ->
+                utterance.persistedLearnerSource() ?: return false
         }
         val targetValid = if (targetImplicitCurrentFocus) {
             targetTopic == null
@@ -300,7 +346,7 @@ data class VoiceTutorStudyUpdateEvidence(
             learnerSource.contains(command) && targetValid && topic?.let {
                 it.isNotBlank() && it == it.trim() && it.length <= 255 && command.contains(it)
             } != false && difficulty?.let {
-                it.isNotBlank() && it == it.trim() && it.length <= 2 && command.contains(it)
+                it.isNotBlank() && it == it.trim() && it.length <= 32 && command.contains(it)
             } != false
     }
 }
@@ -317,7 +363,7 @@ data class VoiceTutorStudyUpdateRequest(
         val difficultyEvidenceMatches = if (difficulty == null) {
             evidence.difficulty == null
         } else {
-            evidence.difficulty?.toIntOrNull() == difficulty
+            evidence.difficulty != null && difficulty in 1..10
         }
         if (topic == null && difficulty == null || topic?.let { it.isBlank() || it != it.trim() || it.length > 255 } == true ||
             difficulty?.let { it !in 1..10 } == true || evidence.topic != topic ||

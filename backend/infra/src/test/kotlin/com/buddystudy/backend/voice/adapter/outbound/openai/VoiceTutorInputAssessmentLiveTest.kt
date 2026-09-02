@@ -8,15 +8,20 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentR
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
+import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearnerUtterance
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.service.VoiceTutorInputAssessmentService
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
+import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
+import org.springframework.web.reactive.function.client.WebClient
 import java.util.concurrent.TimeUnit
 
 /**
@@ -37,17 +42,45 @@ class VoiceTutorInputAssessmentLiveTest {
                 OpenAIVoiceTutorInputAssessmentAdapter(UserContentOpenAIKeyProvider(properties), properties),
                 VoiceTutorInputAssessmentProperties(),
             )
-            // Match production turn shape: the phone normally submits one final
-            // learner item, and only that positive item needs the independent
-            // creation attestation inside the per-assessment deadline.
-            val created = useCase.assess(VoiceTutorInputAssessmentRequest(
+            val persistedDetails = VoiceTutorPersistedLearnerUtterance(
+                "persisted_details", "스프링 레벨 세븐",
+            )
+            // Match the reported production turn shape: topic and spoken level
+            // were persisted first, then the learner made one natural current
+            // creation request without repeating those business values.
+            val createRequest = VoiceTutorInputAssessmentRequest(
                 userId = SYNTHETIC_USER_ID,
                 language = "ko",
                 teacherContext = "저장된 주제를 찾지 못했습니다. 만들려면 명확한 생성 명령을 다시 말해 주세요.",
                 utterances = listOf(VoiceTutorInputUtterance(
-                    "natural_create", "아니 스프링으로 새롭게 공부하고 싶다고.",
+                    itemId = "natural_create",
+                    transcript = "만들어 줄래?",
+                    priorPersistedLearnerUtterances = listOf(persistedDetails),
                 )),
-            )).decisions.single()
+            )
+            // Keep the live assertion stage-specific: a false negative in the
+            // primary semantic decision is different from an independent
+            // attestation rejection and must not be hidden as a final NONE.
+            val client = WebClient.builder().baseUrl("https://api.openai.com").build()
+            val model = properties.voiceTutor.summaryModel
+            val primaryBody = VoiceTutorInputAssessmentPromptProvider.requestBody(createRequest, model) +
+                ("safety_identifier" to VoiceTutorSafetyIdentifier.create(SYNTHETIC_USER_ID, key))
+            val primary = VoiceTutorInputAssessmentPromptProvider.parseResponse(
+                createRequest, completion(client, key, primaryBody),
+            )
+            val primaryCreated = primary.decisions.single()
+            println("voice_input_assessment stage=split_primary intent=${primaryCreated.intent.name}")
+            assertThat(primaryCreated.intent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+            val attestation = VoiceTutorRootCreationAttestationPromptProvider.request(createRequest, primary)
+            assertThat(attestation).isNotNull
+            val attestationBody = VoiceTutorRootCreationAttestationPromptProvider.requestBody(attestation!!, model) +
+                ("safety_identifier" to VoiceTutorSafetyIdentifier.create(SYNTHETIC_USER_ID, key))
+            val approved = VoiceTutorRootCreationAttestationPromptProvider.parseResponse(
+                attestation, completion(client, key, attestationBody),
+            )
+            println("voice_input_assessment stage=split_attestation exact=${"natural_create" in approved}")
+            assertThat(approved).containsExactly("natural_create")
+            val created = useCase.assess(createRequest).decisions.single()
             val nonWrites = useCase.assess(VoiceTutorInputAssessmentRequest(
                 userId = SYNTHETIC_USER_ID,
                 language = "ko",
@@ -56,13 +89,16 @@ class VoiceTutorInputAssessmentLiveTest {
                     VoiceTutorInputUtterance("mere_interest", "스프링 공부에 관심 있어."),
                     VoiceTutorInputUtterance("recommendation", "새롭게 공부할 주제 좀 추천해 줘."),
                     VoiceTutorInputUtterance("third_party", "친구가 스프링으로 새롭게 공부하고 싶다고 했어."),
-                    VoiceTutorInputUtterance("generic_yes", "네."),
+                    VoiceTutorInputUtterance(
+                        itemId = "generic_yes",
+                        transcript = "네.",
+                        priorPersistedLearnerUtterances = listOf(persistedDetails),
+                    ),
                 ),
             )).decisions
 
-            assertThat(created.intent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
             assertThat(created.rootStudyCreationRequest?.topic).isEqualTo("스프링")
-            assertThat(created.rootStudyCreationRequest?.difficulty).isEqualTo(5)
+            assertThat(created.rootStudyCreationRequest?.difficulty).isEqualTo(7)
             assertThat(nonWrites)
                 .allMatch { it.intent != VoiceTutorInputIntent.CREATE_ROOT_STUDY }
         }
@@ -204,6 +240,16 @@ class VoiceTutorInputAssessmentLiveTest {
 
     private fun elapsedMilliseconds(started: Long): Long =
         TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+
+    private suspend fun completion(client: WebClient, key: String, body: Map<String, Any>): String =
+        client.post()
+            .uri("/v1/chat/completions")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer $key")
+            .contentType(MediaType.APPLICATION_JSON)
+            .bodyValue(body)
+            .retrieve()
+            .bodyToMono(String::class.java)
+            .awaitSingle()
 
     private data class SyntheticBatch(val id: String, val teacherContext: String, val cases: List<SyntheticCase>) {
         override fun toString(): String = "SyntheticBatch(id=$id, caseCount=${cases.size})"

@@ -10,6 +10,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentR
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
+import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearnerUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
@@ -239,7 +240,9 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         }).containsExactly(null, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
         assertThat(item.path("properties").path("rootStudyEvidenceSource").path("enum").map {
             it.takeUnless(JsonNode::isNull)?.asText()
-        }).containsExactly(null, "TRANSCRIPT", "SAME_SPEECH_CONTEXT")
+        }).containsExactly(null, "TRANSCRIPT", "SAME_SPEECH_CONTEXT", "PERSISTED_LEARNER_CONTEXT")
+        assertThat(item.path("properties").path("rootStudyDifficultyEvidence").path("maxLength").asInt())
+            .isEqualTo(32)
         assertThat(item.path("properties").path("rootStudyDifficultyOmitted").path("type").asText())
             .isEqualTo("boolean")
         assertThat(item.path("properties").path("targetStudyId").path("type").asText()).isEqualTo("null")
@@ -619,6 +622,67 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         }
 
     @Test
+    fun `persisted learner topic and spoken level combine with the current natural create action`() =
+        runBlocking<Unit> {
+            val prior = VoiceTutorPersistedLearnerUtterance("prior-topic", "스프링 레벨 세븐")
+            val current = "만들어 줄래?"
+            val learnerSource = "${prior.transcript}\n$current"
+            val request = request().copy(utterances = listOf(
+                VoiceTutorInputUtterance(
+                    itemId = "item_1",
+                    transcript = current,
+                    priorPersistedLearnerUtterances = listOf(prior),
+                ),
+            ))
+            val calls = AtomicInteger()
+            var primaryBody: JsonNode? = null
+            var attestationBody: JsonNode? = null
+            val adapter = adapter(properties(), ExchangeFunction { httpRequest ->
+                val output = MockClientHttpRequest(httpRequest.method(), httpRequest.url())
+                httpRequest.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                    output.bodyAsString.map { rawBody ->
+                        if (calls.incrementAndGet() == 1) {
+                            primaryBody = mapper.readTree(rawBody)
+                            response(envelope(decisionsWithIntent(
+                                "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                                rootStudyTopic = "스프링",
+                                rootStudyDifficulty = 7,
+                                rootStudyEvidenceSource = "PERSISTED_LEARNER_CONTEXT",
+                                rootStudyCommandEvidence = learnerSource,
+                                rootStudyTopicEvidence = "스프링",
+                                rootStudyDifficultyEvidence = "세븐",
+                            )))
+                        } else {
+                            attestationBody = mapper.readTree(rawBody)
+                            response(envelope("""{"attestations":[{"itemId":"item_1","exact":true}]}"""))
+                        }
+                    }
+                })
+            })
+
+            val result = adapter.assess(request)
+
+            val creation = result.decisions.single().rootStudyCreationRequest
+            assertThat(creation?.topic).isEqualTo("스프링")
+            assertThat(creation?.difficulty).isEqualTo(7)
+            assertThat(creation?.evidence?.difficulty).isEqualTo("세븐")
+            val primaryEvidence = mapper.readTree(primaryBody!!.path("messages")[1].path("content").asText())
+            assertThat(primaryEvidence.path("utterances")[0].path("priorPersistedLearnerUtterances")[0]
+                .path("itemId").asText()).isEqualTo("prior-topic")
+            val attestationEvidence = mapper.readTree(
+                attestationBody!!.path("messages")[1].path("content").asText(),
+            ).path("items")[0]
+            assertThat(attestationEvidence.path("currentTranscript").asText()).isEqualTo(current)
+            assertThat(attestationEvidence.path("priorPersistedLearnerUtterances")[0]
+                .path("transcript").asText()).isEqualTo(prior.transcript)
+            assertThat(attestationBody!!.path("messages")[0].path("content").asText()).contains(
+                "currentTranscript itself", "generic yes/approval", "spoken or written", "never a phrase table",
+                "naturally elliptical", "스프링 레벨 세븐", "만들어 줄래?", "current \"네\" or \"좋아\"",
+                "never literal phrase, keyword, regex, or suffix rules",
+            )
+        }
+
+    @Test
     fun `natural child choice attests exact current parent and default level once`() = runBlocking<Unit> {
         val source = "여기서 트랜잭션 전파를 새 하위 주제로 공부하고 싶어"
         val calls = AtomicInteger()
@@ -703,7 +767,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         }
 
     @Test
-    fun `root tuple requires exact command topic and level evidence from learner source`() {
+    fun `root tuple requires exact command and topic evidence while level semantics are independently attested`() {
         val multiword = request().copy(
             teacherContext = "Spring 레벨 6 루트를 만들까요?",
             utterances = listOf(VoiceTutorInputUtterance(
@@ -723,7 +787,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             )),
             VoiceTutorInputAssessmentFailure.INVALID_RESULT,
         )
-        assertReason(
+        val provisionallyParsed = VoiceTutorInputAssessmentPromptProvider.parseResponse(
             multiword,
             envelope(decisionsWithIntent(
                 "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
@@ -734,8 +798,9 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 rootStudyTopicEvidence = "Spring Boot",
                 rootStudyDifficultyEvidence = "7",
             )),
-            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
         )
+        assertThat(provisionallyParsed.decisions.single().rootStudyCreationRequest?.difficulty).isEqualTo(6)
+        assertThat(provisionallyParsed.decisions.single().rootStudyCreationRequest?.evidence?.difficulty).isEqualTo("7")
         assertReason(
             multiword.copy(utterances = listOf(VoiceTutorInputUtterance("item_1", "네"))),
             envelope(decisionsWithIntent(
@@ -750,6 +815,64 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             VoiceTutorInputAssessmentFailure.INVALID_RESULT,
         )
     }
+
+    @Test
+    fun `independent semantic attestation rejects level mismatch and generic approval with persisted details`() =
+        runBlocking<Unit> {
+            val cases = listOf(
+                Triple(
+                    request().copy(utterances = listOf(VoiceTutorInputUtterance(
+                        "item_1", "Spring Boot를 레벨 7 루트로 만들어 줘",
+                    ))),
+                    "Spring Boot를 레벨 7 루트로 만들어 줘",
+                    "TRANSCRIPT",
+                ),
+                Triple(
+                    request().copy(utterances = listOf(VoiceTutorInputUtterance(
+                        itemId = "item_1",
+                        transcript = "네",
+                        priorPersistedLearnerUtterances = listOf(
+                            VoiceTutorPersistedLearnerUtterance("prior-topic", "스프링 레벨 세븐"),
+                        ),
+                    ))),
+                    "스프링 레벨 세븐\n네",
+                    "PERSISTED_LEARNER_CONTEXT",
+                ),
+            )
+
+            for ((assessmentRequest, learnerSource, evidenceSource) in cases) {
+                val calls = AtomicInteger()
+                val adapter = adapter(properties(), ExchangeFunction { httpRequest ->
+                    val output = MockClientHttpRequest(httpRequest.method(), httpRequest.url())
+                    httpRequest.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                        output.bodyAsString.map {
+                            if (calls.incrementAndGet() == 1) {
+                                response(envelope(decisionsWithIntent(
+                                    "item_1", "MEANINGFUL", "CREATE_ROOT_STUDY",
+                                    rootStudyTopic = if (evidenceSource == "TRANSCRIPT") "Spring Boot" else "스프링",
+                                    rootStudyDifficulty = if (evidenceSource == "TRANSCRIPT") 6 else 7,
+                                    rootStudyEvidenceSource = evidenceSource,
+                                    rootStudyCommandEvidence = learnerSource,
+                                    rootStudyTopicEvidence = if (evidenceSource == "TRANSCRIPT") "Spring Boot" else "스프링",
+                                    rootStudyDifficultyEvidence = if (evidenceSource == "TRANSCRIPT") "7" else "세븐",
+                                )))
+                            } else {
+                                response(envelope(
+                                    """{"attestations":[{"itemId":"item_1","exact":false}]}""",
+                                ))
+                            }
+                        }
+                    })
+                })
+
+                val result = adapter.assess(assessmentRequest).decisions.single()
+
+                assertThat(calls).hasValue(2)
+                assertThat(result.decision).isEqualTo(VoiceTutorInputDecision.MEANINGFUL)
+                assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.NONE)
+                assertThat(result.rootStudyCreationRequest).isNull()
+            }
+        }
 
     @Test
     fun `unpersisted checkpoint context cannot authorize child creation or update`() {
