@@ -1923,6 +1923,69 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertLessThan(reset.lowerBound, start.lowerBound)
     }
 
+    func testVoiceCallInitialAttemptResetsDisclosureBeforeStarting() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = root.appendingPathComponent("StudyMate/Views/VoiceTutorView.swift")
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw XCTSkip("Source-contract check requires the local repository.")
+        }
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let sessionStart = try XCTUnwrap(source.range(of: "struct VoiceTutorSessionView: View"))
+        let sessionEnd = try XCTUnwrap(
+            source.range(of: "struct VoiceTutorCallAdaptiveLayout", range: sessionStart.upperBound..<source.endIndex)
+        )
+        let sessionSource = String(source[sessionStart.lowerBound..<sessionEnd.lowerBound])
+        let taskStart = try XCTUnwrap(sessionSource.range(of: ".task {"))
+        let reset = try XCTUnwrap(
+            sessionSource.range(
+                of: "disclosureState.resetForNewAttempt()",
+                range: taskStart.upperBound..<sessionSource.endIndex
+            )
+        )
+        let start = try XCTUnwrap(
+            sessionSource.range(
+                of: "await viewModel.start()",
+                range: taskStart.upperBound..<sessionSource.endIndex
+            )
+        )
+        XCTAssertLessThan(reset.lowerBound, start.lowerBound)
+    }
+
+    func testVoiceCallOrbSwipeRoutingPreservesTapAndHorizontalMovement() {
+        typealias Routing = VoiceTutorOrbGestureRouting
+
+        XCTAssertEqual(
+            Routing.transcriptAction(for: CGSize(width: 4, height: -80), showsTranscript: false),
+            .reveal
+        )
+        XCTAssertEqual(
+            Routing.transcriptAction(for: CGSize(width: 3, height: 72), showsTranscript: true),
+            .hide
+        )
+        XCTAssertNil(
+            Routing.transcriptAction(for: .zero, showsTranscript: false),
+            "A tap must remain available to pause or resume the call"
+        )
+        XCTAssertNil(
+            Routing.transcriptAction(for: CGSize(width: 2, height: -20), showsTranscript: false),
+            "Small finger movement during a tap must not reveal the transcript"
+        )
+        XCTAssertNil(
+            Routing.transcriptAction(for: CGSize(width: 90, height: -50), showsTranscript: false),
+            "Horizontal movement must not be interpreted as transcript navigation"
+        )
+        XCTAssertNil(
+            Routing.transcriptAction(for: CGSize(width: 0, height: 80), showsTranscript: false),
+            "Only an upward swipe reveals a hidden transcript"
+        )
+        XCTAssertNil(
+            Routing.transcriptAction(for: CGSize(width: 0, height: -80), showsTranscript: true),
+            "Only a downward swipe hides a visible transcript"
+        )
+    }
+
     func testTranscriptFollowingIgnoresContentGrowthButPausesDuringUserInteraction() {
         var state = VoiceTutorTranscriptFollowState()
         let bottom = CGRect(x: 0, y: -250, width: 360, height: 610)
@@ -1938,6 +2001,44 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(state.shouldAutoScrollForContentChange, "New deltas must not fight an active scroll")
         XCTAssertTrue(state.endUserInteraction())
         XCTAssertTrue(state.shouldAutoScrollForContentChange)
+    }
+
+    func testTranscriptContentAutoFollowWaitsForLayoutAndRechecksLearnerIntent() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = root.appendingPathComponent("StudyMate/Views/VoiceTutorView.swift")
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw XCTSkip("Source-contract check requires the local repository.")
+        }
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let methodStart = try XCTUnwrap(source.range(of: "private func scheduleTranscriptAutoScroll(using proxy:"))
+        let methodEnd = try XCTUnwrap(
+            source.range(
+                of: "private func scheduleTranscriptScrollSettlement(using proxy:",
+                range: methodStart.upperBound..<source.endIndex
+            )
+        )
+        let method = String(source[methodStart.lowerBound..<methodEnd.lowerBound])
+
+        XCTAssertTrue(method.contains("await Task.yield()"), "The latest anchor must exist before scrolling")
+        XCTAssertGreaterThanOrEqual(
+            method.components(separatedBy: "transcriptFollowState.shouldAutoScrollForContentChange").count - 1,
+            2,
+            "Auto-follow eligibility must be checked both before scheduling and after layout"
+        )
+        XCTAssertTrue(method.contains("showsTranscript"))
+        XCTAssertTrue(method.contains("guard !Task.isCancelled"))
+        XCTAssertTrue(source.contains(".onChange(of: showsTranscript) { _, isShowingTranscript in"))
+        XCTAssertTrue(source.contains("if !isShowingTranscript {"))
+
+        var state = VoiceTutorTranscriptFollowState()
+        XCTAssertTrue(state.shouldAutoScrollForContentChange)
+        state.beginUserInteraction()
+        XCTAssertFalse(
+            state.shouldAutoScrollForContentChange,
+            "A user who starts reading history while a scroll is queued must win the re-check"
+        )
     }
 
     func testTranscriptFollowingCannotSettleWhileTheFingerIsStillDown() {
@@ -2002,6 +2103,17 @@ final class VoiceTutorContractTests: XCTestCase {
             XCTAssertEqual(strings.voiceTutorCallLatestConversation, latest)
             XCTAssertFalse(strings.voiceTutorCallRevealConversation.lowercased().contains("swipe"))
         }
+
+        let gestureHints = [
+            (AppLanguage.korean, "위로 쓸어 전체 대화를 봅니다.", "아래로 쓸어 통화 화면으로 돌아갑니다."),
+            (AppLanguage.english, "Swipe up to view the full conversation.", "Swipe down to return to the call."),
+            (AppLanguage.japanese, "上にスワイプすると会話全体を表示します。", "下にスワイプすると通話画面に戻ります。")
+        ]
+        for (language, reveal, hide) in gestureHints {
+            let strings = AppStrings(language: language)
+            XCTAssertEqual(strings.voiceTutorOrbRevealConversationHint, reveal)
+            XCTAssertEqual(strings.voiceTutorOrbHideConversationHint, hide)
+        }
     }
 
     func testTranscriptLatestEdgeDetectionIsBoundedAndFailsClosed() {
@@ -2050,9 +2162,8 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(compact.contains("callOrb(diameter:"))
         XCTAssertTrue(compact.contains("Text(topic)"))
         XCTAssertTrue(compact.contains("callTime"))
-        XCTAssertTrue(compact.contains("transcriptPanel"))
-        XCTAssertTrue(compact.contains("voiceCall.liveTranscript"))
-        XCTAssertTrue(compact.contains("compactHeaderMaximumHeight"))
+        XCTAssertFalse(compact.contains("transcriptPanel"))
+        XCTAssertFalse(compact.contains("voiceCall.liveTranscript"))
         XCTAssertFalse(compact.contains("integratedConversationPreview"))
 
         XCTAssertTrue(transcript.contains("transcriptPanel"))
@@ -2066,13 +2177,13 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(source.contains("interactionDock"))
         XCTAssertTrue(source.contains("stableCallControls"))
         XCTAssertTrue(source.contains("Button(action: onPause)"))
-        XCTAssertTrue(source.contains("voiceCall.openTranscript"))
+        XCTAssertTrue(source.contains("VoiceTutorOrbGestureRouting.transcriptAction"))
+        XCTAssertTrue(source.contains(".highPriorityGesture(orbTranscriptGesture)"))
+        XCTAssertFalse(source.contains("voiceCall.openTranscript"))
         XCTAssertTrue(source.contains("voiceCall.collapseTranscript"))
-        XCTAssertEqual(
-            source.components(separatedBy: "setTranscriptExpanded(true)").count - 1,
-            1,
-            "The compact screen should expose one clear full-screen transcript entry point"
-        )
+        XCTAssertTrue(source.contains(".move(edge: .bottom).combined(with: .opacity)"))
+        XCTAssertTrue(source.contains(".easeInOut(duration: 0.24)"))
+        XCTAssertTrue(source.contains("reduceMotion"))
         XCTAssertFalse(source.contains("voiceCall.mute"))
         XCTAssertFalse(source.contains("onMute"))
         XCTAssertFalse(source.contains("transcriptSheet"))
@@ -2080,6 +2191,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(source.contains("LazyVStack(alignment: .leading"))
         XCTAssertTrue(source.contains(".onChange(of: captions.last?.id)"))
         XCTAssertTrue(source.contains(".onChange(of: assistantTranscriptDraft)"))
+        XCTAssertTrue(source.contains("scheduleTranscriptAutoScroll(using: proxy)"))
         XCTAssertTrue(source.contains(".simultaneousGesture(transcriptFollowGesture"))
 
         let presentationStart = try XCTUnwrap(source.range(of: "struct VoiceTutorCallPresentation"))

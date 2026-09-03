@@ -701,6 +701,13 @@ internal object VoiceTutorStudyMutationAttestationPromptProvider {
         snapshot candidate with that exact name and the exact proposed target ID. For every other context with
         currentFocusStudyId null, the completed tutorAudioTranscript must explicitly offer the candidate. A
         candidate appearing only in ordinary metadata or learner text without the initial-snapshot rule is not enough.
+        A singleton candidate which the immediately preceding tutor audio explicitly named does not need to be
+        selected as the lesson focus before it can be updated. A natural pronoun may bind that one spoken saved
+        node directly: for example, after the tutor says that the sole saved candidate is "스프링", the learner's
+        Korean request "그걸 레벨 칠로 바꿔줘" is an exact present UPDATE_STUDY request for that offered node at
+        normalized level 7. Do not reject it merely because the learner used a pronoun, polite question form, a
+        spoken number word, or did not first select the node. This is semantic coreference and number
+        normalization, never a phrase, keyword, dictionary, or regex rule.
         Command, target, outcome-name, and level evidence are verbatim substrings of learnerSource and must express
         their stated roles. Reject a strict-subset or broadened name, swapped old/new names, invented or mismatched
         levels, ambiguous targets/outcomes, generic yes/approval, status questions such as asking whether a change
@@ -1028,6 +1035,13 @@ internal object VoiceTutorInputAssessmentPromptProvider {
         targeting or persisted context with this source. Otherwise, when currentFocusStudyId is null,
         UPDATE_STUDY is allowed only if targetOffer contains the same exact candidate and tutorAudioTranscript
         explicitly offered it. A candidate present only in ordinary metadata cannot be updated.
+        The exact singleton spoken candidate does not have to be selected as the current lesson focus before an
+        update. Natural anaphora is sufficient when it resolves unambiguously: after the tutor says that the sole
+        saved candidate is "스프링", Korean "그걸 레벨 칠로 바꿔줘" is UPDATE_STUDY for that candidate with
+        mutationTargetImplicitSpokenOffer=true, mutationDifficulty=7, and exact difficulty evidence "칠". Do not
+        require the learner to repeat the saved name, select it first, use imperative grammar, use Arabic digits,
+        or confirm the request in another turn. This example describes semantic meaning, not text matching;
+        never implement or infer it with a regex, keyword list, suffix rule, or numeral dictionary.
         For CREATE_STUDY_TOPIC, mutationTopic and mutationTopicEvidence are the exact complete child name. An
         explicit 1-10 level uses matching normalized mutationDifficulty and exact spoken or written evidence;
         when absent, difficulty is null

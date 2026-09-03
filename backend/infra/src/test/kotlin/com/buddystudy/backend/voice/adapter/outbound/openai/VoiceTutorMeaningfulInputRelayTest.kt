@@ -796,6 +796,54 @@ class VoiceTutorMeaningfulInputRelayTest {
         }
 
     @Test
+    fun `one natural referential word level update schedules one server owned mutation`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-level-target", 84, null, null)
+
+            val command = "그걸 레벨 칠로 바꿔줘."
+            f.utterance(2, "natural-level-update", command)
+            val assessment = f.assessments().last().utterances.single()
+            assertThat(assessment.targetOffer?.candidates).containsExactly(
+                VoiceTutorStudyTargetCandidate(84, null, "Redis"),
+            )
+
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 84,
+                    command = command,
+                    difficulty = 7,
+                    difficultyEvidence = "칠",
+                    targetImplicitCurrentFocus = false,
+                    targetImplicitSpokenOffer = true,
+                ),
+            )
+            val publication = f.publications().last()
+            assertThat(f.conversationItems().none {
+                it.path("item").path("name").asText() == "update_study"
+            }).isTrue()
+
+            f.confirm(publication, persisted = true)
+
+            val updateCall = f.awaitServerToolCall("update_study")
+            assertThat(mapper.readTree(updateCall.path("item").path("arguments").asText())).isEqualTo(
+                mapper.readTree("""{"study_id":84,"difficulty_level":7}"""),
+            )
+            assertThat(f.conversationItems().count {
+                it.path("item").path("name").asText() == "update_study"
+            }).isEqualTo(1)
+            val updateId = f.startServerToolCall(updateCall)
+            val authorization = f.controller.mutationDialogueBoundary(updateId).studyUpdateAuthorization
+            assertThat(authorization?.scope)
+                .isEqualTo(VoiceTutorStudyUpdateAuthorizationScope.OFFERED_CANDIDATE)
+            assertThat(authorization?.consume()).isTrue()
+            assertThat(authorization?.consume()).isFalse()
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
     fun `vad split boundary word preserves one spoken candidate for the adjacent update`() =
         fixture().use { f ->
             f.offerCandidate(1, "browse-redis", 101, null, null)
@@ -4640,6 +4688,7 @@ class VoiceTutorMeaningfulInputRelayTest {
         command: String,
         topic: String? = null,
         difficulty: Int? = null,
+        difficultyEvidence: String? = difficulty?.toString(),
         targetTopic: String? = null,
         targetImplicitCurrentFocus: Boolean = true,
         targetImplicitSpokenOffer: Boolean = false,
@@ -4653,7 +4702,7 @@ class VoiceTutorMeaningfulInputRelayTest {
             command = command,
             targetTopic = targetTopic,
             topic = topic,
-            difficulty = difficulty?.toString(),
+            difficulty = difficultyEvidence,
             targetImplicitCurrentFocus = targetImplicitCurrentFocus,
             targetImplicitSpokenOffer = targetImplicitSpokenOffer,
         ),

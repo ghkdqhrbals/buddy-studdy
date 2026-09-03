@@ -66,6 +66,20 @@ extension AppStrings {
             "最近の会話"
         )
     }
+    var voiceTutorOrbRevealConversationHint: String {
+        voiceTutorPauseText(
+            "위로 쓸어 전체 대화를 봅니다.",
+            "Swipe up to view the full conversation.",
+            "上にスワイプすると会話全体を表示します。"
+        )
+    }
+    var voiceTutorOrbHideConversationHint: String {
+        voiceTutorPauseText(
+            "아래로 쓸어 통화 화면으로 돌아갑니다.",
+            "Swipe down to return to the call.",
+            "下にスワイプすると通話画面に戻ります。"
+        )
+    }
 
     private func voiceTutorPauseText(_ korean: String, _ english: String, _ japanese: String) -> String {
         switch language {

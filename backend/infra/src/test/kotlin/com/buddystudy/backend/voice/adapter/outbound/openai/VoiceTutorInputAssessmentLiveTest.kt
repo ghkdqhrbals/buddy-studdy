@@ -9,6 +9,10 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearnerUtterance
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.service.VoiceTutorInputAssessmentService
 import kotlinx.coroutines.CancellationException
@@ -31,6 +35,72 @@ import java.util.concurrent.TimeUnit
  */
 @EnabledIfEnvironmentVariable(named = "BUDDYSTUDY_LIVE_INPUT_ASSESSMENT", matches = "1")
 class VoiceTutorInputAssessmentLiveTest {
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SAME_THREAD)
+    fun `production GPT authorizes one natural referential level update after a spoken offer`() = runBlocking<Unit> {
+        withTimeout(30_000) {
+            val key = System.getenv("OPENAI_API_KEY_USER")?.takeIf { it.isNotBlank() }
+                ?: throw AssertionError("Opt-in live assessment requires OPENAI_API_KEY_USER.")
+            val properties = BuddyStudyProperties().apply { openai.userContentApiKey = key }
+            val target = VoiceTutorStudyTargetCandidate(84, null, "스프링", difficulty = null)
+            val offer = VoiceTutorStudyTargetOffer(
+                offerId = 10,
+                lessonRevision = 0,
+                tutorResponseGeneration = 12,
+                tutorSpeechStoppedOrder = 12,
+                currentFocusStudyId = null,
+                candidates = listOf(target),
+                tutorAudioTranscript =
+                    "저장된 후보는 스프링 하나뿐이라, 이 주제를 공부할지 말씀해 주시면 그때 선택해서 시작할 수 있어요.",
+                candidateTraversals = mapOf(target.studyId to VoiceTutorStudyTargetTraversal()),
+            )
+            val assessmentRequest = VoiceTutorInputAssessmentRequest(
+                userId = SYNTHETIC_USER_ID,
+                language = "ko",
+                teacherContext = offer.tutorAudioTranscript,
+                utterances = listOf(VoiceTutorInputUtterance(
+                    itemId = "natural_level_update",
+                    transcript = "그걸 레벨 칠로 바꿔줘.",
+                    targetOffer = offer,
+                    studyMutationContext = VoiceTutorStudyMutationContext(0, null, listOf(target)),
+                )),
+            )
+            val client = WebClient.builder().baseUrl("https://api.openai.com").build()
+            val primaryBody = VoiceTutorInputAssessmentPromptProvider.requestBody(
+                assessmentRequest,
+                properties.voiceTutor.summaryModel,
+            ) + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(SYNTHETIC_USER_ID, key))
+            val primary = VoiceTutorInputAssessmentPromptProvider.parseResponse(
+                assessmentRequest,
+                completion(client, key, primaryBody),
+            )
+            val primaryDecision = primary.decisions.single()
+            println(
+                "voice_input_assessment stage=reported_level_update_primary " +
+                    "intent=${primaryDecision.intent.name} difficulty=${primaryDecision.studyUpdateRequest?.difficulty} " +
+                    "implicitOffer=${primaryDecision.studyUpdateRequest?.evidence?.targetImplicitSpokenOffer} " +
+                    "difficultyEvidence=${primaryDecision.studyUpdateRequest?.evidence?.difficulty}",
+            )
+            assertThat(primaryDecision.intent).isEqualTo(VoiceTutorInputIntent.UPDATE_STUDY)
+            val attestation = VoiceTutorStudyMutationAttestationPromptProvider.request(assessmentRequest, primary)
+            assertThat(attestation).isNotNull
+            val attestationBody = VoiceTutorStudyMutationAttestationPromptProvider.requestBody(
+                attestation!!,
+                properties.voiceTutor.summaryModel,
+            ) + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(SYNTHETIC_USER_ID, key))
+            val attested = VoiceTutorStudyMutationAttestationPromptProvider.parseResponse(
+                attestation,
+                completion(client, key, attestationBody),
+            ).getValue("natural_level_update")
+            println("voice_input_assessment stage=reported_level_update_attestation exact=${attested.exact}")
+            assertThat(attested.exact).isTrue()
+
+            assertThat(primaryDecision.studyUpdateRequest?.studyId).isEqualTo(target.studyId)
+            assertThat(primaryDecision.studyUpdateRequest?.difficulty).isEqualTo(7)
+            assertThat(primaryDecision.studyUpdateRequest?.evidence?.targetImplicitSpokenOffer).isTrue()
+        }
+    }
+
     @Test
     @Timeout(value = 30, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SAME_THREAD)
     fun `production GPT authorizes one natural new study choice without phrase matching`() = runBlocking<Unit> {

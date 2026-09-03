@@ -878,8 +878,8 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
     @Test
     fun `natural anaphora can change the level of the one exact candidate just spoken by tutor`() =
         runBlocking<Unit> {
-            val source = "아 그거 난이도 7로 바꿔줄래?"
-            val target = VoiceTutorStudyTargetCandidate(84, null, "스프링", difficulty = 5)
+            val source = "그걸 레벨 칠로 바꿔줘."
+            val target = VoiceTutorStudyTargetCandidate(84, null, "스프링", difficulty = null)
             val offer = VoiceTutorStudyTargetOffer(
                 offerId = 10,
                 lessonRevision = 0,
@@ -887,24 +887,25 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 tutorSpeechStoppedOrder = 12,
                 currentFocusStudyId = null,
                 candidates = listOf(target),
-                tutorAudioTranscript = "저장된 루트 주제는 스프링이고, 난이도는 5입니다.",
+                tutorAudioTranscript =
+                    "저장된 후보는 스프링 하나뿐이라, 이 주제를 공부할지 말씀해 주시면 그때 선택해서 시작할 수 있어요.",
                 candidateTraversals = mapOf(target.studyId to VoiceTutorStudyTargetTraversal()),
             )
             val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
                 itemId = "item_1",
                 transcript = source,
-                priorPersistedLearnerUtterances = listOf(
-                    VoiceTutorPersistedLearnerUtterance("prior-boundary", "지금"),
-                ),
                 targetOffer = offer,
                 studyMutationContext = VoiceTutorStudyMutationContext(0, null, listOf(target)),
             )))
             val calls = AtomicInteger()
+            var primaryBody: JsonNode? = null
+            var attestationBody: JsonNode? = null
             val adapter = adapter(properties(), ExchangeFunction { request ->
                 val output = MockClientHttpRequest(request.method(), request.url())
                 request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
-                    output.bodyAsString.map {
+                    output.bodyAsString.map { rawBody ->
                         if (calls.incrementAndGet() == 1) {
+                            primaryBody = mapper.readTree(rawBody)
                             response(envelope(decisionsWithIntent(
                                 id = "item_1",
                                 decision = "MEANINGFUL",
@@ -914,9 +915,10 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                                 mutationDifficulty = 7,
                                 mutationEvidenceSource = "TRANSCRIPT",
                                 mutationCommandEvidence = source,
-                                mutationDifficultyEvidence = "7",
+                                mutationDifficultyEvidence = "칠",
                             )))
                         } else {
+                            attestationBody = mapper.readTree(rawBody)
                             response(envelope(mutationAttestation(true, false)))
                         }
                     }
@@ -932,6 +934,19 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             assertThat(result.studyUpdateRequest?.evidence?.targetImplicitSpokenOffer).isTrue()
             assertThat(result.studyUpdateRequest?.evidence?.source)
                 .isEqualTo(VoiceTutorRootStudyEvidenceSource.TRANSCRIPT)
+            assertThat(primaryBody!!.path("messages")[0].path("content").asText()).contains(
+                "saved candidate is \"스프링\"",
+                "그걸 레벨 칠로 바꿔줘",
+                "does not have to be selected",
+                "never implement or infer it with a regex",
+            )
+            assertThat(attestationBody!!.path("messages")[0].path("content").asText()).contains(
+                "saved candidate is \"스프링\"",
+                "그걸 레벨 칠로 바꿔줘",
+                "does not need to be",
+                "selected as the lesson focus",
+                "never a phrase, keyword, dictionary, or regex rule",
+            )
         }
 
     @Test
