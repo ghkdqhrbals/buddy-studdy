@@ -3,15 +3,93 @@
 Verification date: 2026-09-03. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [direct opening and update-and-start](#direct-opening-and-update-and-start).
-It extends the existing one-turn root creation, guided saved-tree descent,
-single-orb, Silero/contextual-input, MCP and source-backed summary contracts; it
-does not regrade past answers.
+Latest acceptance: [compact call controls and retained target evidence](#compact-call-controls-and-retained-target-evidence).
+It extends the direct-opening and update-and-start implementation with the
+current in-call presentation and multi-utterance mutation contract; it does not
+regrade past answers.
 Earlier checks below are historical and do not all describe the current
-implementation.
+implementation. In particular, historical mute and transcript-drawer checks are
+superseded by the latest acceptance section.
 Source/fixture tests, iPhone tests and actual dev runtime observations are
 recorded separately; none implies a new human microphone-to-tutor conversation
 unless that specific check is explicitly recorded.
+
+## Compact call controls and retained target evidence
+
+Current acceptance and final verification on 2026-09-03, branch
+`feature/2.0`:
+
+- The active call exposes no user-facing mute action. The central tutor orb is
+  the only break/continue control: its first tap sends `pause-v1`, and the UI
+  becomes paused only after the matching server `pause.state` acknowledgement.
+  A second tap requests resume and live listening returns only after the matching
+  acknowledgement and input-clear fence. Pending, failed and stale
+  acknowledgements cannot be displayed as a completed transition.
+- “대화 내용” switches the same call destination into a full-screen transcript
+  mode; it is not a popup, drawer or sheet. The full-screen mode keeps the
+  authoritative remaining time, end-call access and a direct return to the orb,
+  uses learner-right/tutor-left dialogue, and isolates transcript scrolling from
+  pause/resume and dismissal gestures.
+- The opening response is one short topic-discovery question in the configured
+  session language, with no greeting, self-reference, tutor/teacher/AI name or
+  role description. The same restriction applies to the bounded provider-local
+  retry.
+- A semantically clear natural request to create a topic or change its name or
+  1–10 level executes the authorized tool once without asking the learner to
+  repeat the request or confirm it again. Structured semantic assessment and an
+  independent semantic attestation must agree; regex, keywords, punctuation,
+  duration and word count cannot grant write authority.
+- When the tutor has spoken exactly one server-read target, that target evidence
+  remains available across consecutive durably persisted learner utterances
+  after the same tutor boundary until the next tutor response begins. This lets
+  a learner finish the intended name, level or action and use references such as
+  “그 이름” or “이 주제” without repeating the old title. The continuation is
+  evidence, not permission: ambiguity, a different target, newer tutor speech,
+  stale revision or spent authority clears it. Failed persistence grants no
+  mutation authority, while the same unspent spoken referent may remain until
+  that tutor boundary changes. Dual semantic attestation can mint only one
+  owner/call/revision/target-bound lease, and the
+  mutation still requires a fresh owned read plus compare-and-set validation.
+- A session without at least one durable server-authorized substantive tutor
+  question linked to the learner's exact complete answer skips the summary model,
+  completes with an empty technical result and creates no canonical or public
+  learning record. Topic creation, renaming, level changes, discovery and other
+  setup dialogue never qualify by transcript length alone.
+- Verification must cover absence of mute controls, ACK-gated pause/resume,
+  same-destination full-screen transcript navigation, first/retry language and
+  self-introduction constraints, consecutive learner-turn target completion,
+  one-shot/ownership/CAS rejection paths, and a setup-only settlement that never
+  invokes summary generation.
+- The final application/domain/infrastructure run discovered **1,605 tests**:
+  zero failures, zero errors and three intentional opt-in infrastructure skips.
+  Focused relay coverage includes a provider-VAD split such as `지금` followed
+  by `아 그거 난이도 7로 바꿔줄래?`, update-then-start continuations,
+  question/answer/feedback navigation continuations, next-tutor-boundary
+  retirement and old-offer retirement after a different root is created.
+- The final iOS simulator run executed **143 selected tests**: **142 passed**,
+  zero failed, and one intentional physical native-capture opt-in test skipped.
+  It covers the integrated compact/full-screen layouts, all accessibility text
+  categories, absence of a user mute control, ACK-gated pause/resume, stale ACK
+  fencing, and the rule that a pause never cancels or truncates tutor output.
+- The required unsigned generic `StudyMateiOS` build and the normal signed build
+  for the paired iPhone both passed. The signed app contained no XCTest plug-ins,
+  passed deep/strict signature verification, and was installed and launched on
+  the iPhone. This does not claim an automated live microphone/provider call.
+- The final AOT boot JAR is 331,836,833 bytes with SHA-256
+  `822a4d4c8ab6765c3475ef3f4704b75344da1512a77e38f1d18b0c17606ba9fc`.
+  Before replacement there were zero active/ending voice sessions and zero
+  processing results. The existing `backend-backend-1` container retained its
+  ID and was restarted on localhost 8080; local and public dev health returned
+  HTTP 200 with `UP`. The running JAR hash matches the verified artifact and the
+  prior JAR is retained at `/app/buddystudy-backend.previous.jar`.
+- Docker Desktop initially left the existing MySQL runtime shim stale while its
+  named data volume remained intact. The unusable `backend-db-1` container was
+  removed and recreated under the same Compose service/name, network alias,
+  environment and `backend_buddystudy-mysql-data` volume. It returned healthy
+  and the existing voice-session/result aggregates remained present. Redis,
+  LibreTranslate and backup container IDs were retained. No second backend,
+  database, Redis or persistent staging stack was created; the one-shot JAR copy
+  helper removed itself after updating the existing read-only application volume.
 
 ## Direct opening and update-and-start
 

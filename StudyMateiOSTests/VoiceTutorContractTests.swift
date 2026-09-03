@@ -597,7 +597,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(oversized, .inputRetry)
     }
 
-    func testInputRetryKeepsCompactCallLiveAndDoesNotOverrideTutorSpeechOrMute() {
+    func testInputRetryKeepsCompactCallLiveAndDoesNotOverrideTutorSpeech() {
         let strings = AppStrings(language: .korean)
         var call = VoiceTutorCallPresentation(
             phase: .listening,
@@ -607,14 +607,10 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(call.statusText(strings), strings.voiceTutorInputRepeat)
         XCTAssertEqual(call.primaryAction, .end)
         XCTAssertEqual(call.remainingTime, .call(120))
-        XCTAssertTrue(call.canMute)
         XCTAssertFalse(call.showsConnectionFailure(strings, errorMessage: nil))
         call.phase = .speaking
         XCTAssertEqual(call.statusText(strings), strings.voiceTutorCallSpeaking)
         call.phase = .listening
-        call.isMuted = true
-        XCTAssertEqual(call.statusText(strings), strings.voiceTutorCallMuted)
-        call.isMuted = false
         call.inputNeedsRepeat = false
         XCTAssertEqual(call.statusText(strings), strings.voiceTutorCallListening)
         XCTAssertEqual(AppStrings(language: .english).voiceTutorInputRepeat, "Please say that again")
@@ -1304,31 +1300,23 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
-    func testCompactVoiceCallActionsMuteAndStatusFollowTheConnectionPhase() {
+    func testCompactVoiceCallActionsAndStatusFollowTheConnectionPhase() {
         for language in [AppLanguage.korean, .english, .japanese] {
             let strings = AppStrings(language: language)
-            let cases: [(VoiceTutorSessionPhase, Bool, VoiceTutorCallPresentation.PrimaryAction, String)] = [
-                (.idle, false, .wait, strings.voiceTutorCallConnecting),
-                (.requestingPermission, false, .end, strings.voiceTutorCallConnecting),
-                (.connecting, false, .end, strings.voiceTutorCallConnecting),
-                (.listening, true, .end, strings.voiceTutorCallListening),
-                (.speaking, true, .end, strings.voiceTutorCallSpeaking),
-                (.ending, false, .wait, strings.voiceTutorCallEnding),
-                (.ended, false, .dismiss, strings.voiceTutorCallEnded),
-                (.failed, false, .retry, strings.voiceTutorCallFailed)
+            let cases: [(VoiceTutorSessionPhase, VoiceTutorCallPresentation.PrimaryAction, String)] = [
+                (.idle, .wait, strings.voiceTutorCallConnecting),
+                (.requestingPermission, .end, strings.voiceTutorCallConnecting),
+                (.connecting, .end, strings.voiceTutorCallConnecting),
+                (.listening, .end, strings.voiceTutorCallListening),
+                (.speaking, .end, strings.voiceTutorCallSpeaking),
+                (.ending, .wait, strings.voiceTutorCallEnding),
+                (.ended, .dismiss, strings.voiceTutorCallEnded),
+                (.failed, .retry, strings.voiceTutorCallFailed)
             ]
-            for (phase, canMute, action, text) in cases {
-                var presentation = VoiceTutorCallPresentation(phase: phase)
-                XCTAssertEqual(presentation.canMute, canMute, "\(language): \(phase)")
+            for (phase, action, text) in cases {
+                let presentation = VoiceTutorCallPresentation(phase: phase)
                 XCTAssertEqual(presentation.primaryAction, action, "\(language): \(phase)")
                 XCTAssertEqual(presentation.statusText(strings), text, "\(language): \(phase)")
-                presentation.isMuted = true
-                XCTAssertEqual(presentation.canMute, canMute)
-                XCTAssertEqual(presentation.primaryAction, action)
-                XCTAssertEqual(
-                    presentation.statusText(strings),
-                    phase == .listening ? strings.voiceTutorCallMuted : text
-                )
             }
         }
     }
@@ -1349,7 +1337,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(screen.presentation.statusText(strings), strings.voiceTutorCallListening)
         XCTAssertNotEqual(screen.presentation.statusText(strings), strings.voiceTutorCallSpeaking)
 
-        let speaking = VoiceTutorCallPresentation(phase: .speaking, isMuted: true)
+        let speaking = VoiceTutorCallPresentation(phase: .speaking)
         XCTAssertEqual(speaking.statusText(strings), strings.voiceTutorCallSpeaking)
     }
 
@@ -1365,7 +1353,6 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertNotEqual(presentation.statusText(strings), strings.voiceTutorCallEnded)
         XCTAssertEqual(presentation.primaryAction, .retry)
         XCTAssertEqual(presentation.summaryState, .ready)
-        XCTAssertFalse(presentation.canMute)
     }
 
     func testCompactVoiceCallShowsDisconnectionWhileFailureSettlementIsStillPending() {
@@ -1376,7 +1363,6 @@ final class VoiceTutorContractTests: XCTestCase {
             XCTAssertTrue(presentation.showsConnectionFailure(strings, errorMessage: failure))
             XCTAssertEqual(presentation.statusText(strings, errorMessage: failure), strings.voiceTutorCallFailed)
             XCTAssertNil(presentation.supplementaryError(strings, errorMessage: failure))
-            XCTAssertFalse(presentation.canMute)
             XCTAssertEqual(presentation.primaryAction, .wait, "Retry must wait for the original call to settle")
             XCTAssertFalse(presentation.showsConnectionFailure(strings, errorMessage: nil))
             XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorCallEnding)
@@ -1609,90 +1595,23 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(state.shouldAutoScrollForContentChange)
     }
 
-    func testTranscriptSheetUsesConventionalDirectionsAndIntentionalTravel() {
-        typealias Interaction = VoiceTutorTranscriptSheetInteraction
-        XCTAssertEqual(
-            Interaction.action(
-                translation: CGSize(width: 0, height: -44),
-                predictedEndTranslation: CGSize(width: 0, height: -44),
-                isPresented: false
-            ),
-            .present,
-            "The compact handle should follow the conventional upward reveal gesture"
-        )
-        XCTAssertEqual(
-            Interaction.action(
-                translation: CGSize(width: 0, height: 44),
-                predictedEndTranslation: CGSize(width: 0, height: 44),
-                isPresented: true
-            ),
-            .dismiss,
-            "The sheet header should dismiss downward"
-        )
-        XCTAssertEqual(
-            Interaction.action(
-                translation: CGSize(width: 0, height: -20),
-                predictedEndTranslation: CGSize(width: 0, height: -90),
-                isPresented: false
-            ),
-            .present,
-            "A deliberate short flick may settle open using its projected endpoint"
-        )
-        XCTAssertNil(Interaction.action(
-            translation: CGSize(width: 0, height: 80),
-            predictedEndTranslation: CGSize(width: 0, height: 100),
-            isPresented: false
-        ))
-        XCTAssertNil(Interaction.action(
-            translation: CGSize(width: 0, height: -80),
-            predictedEndTranslation: CGSize(width: 0, height: -100),
-            isPresented: true
-        ))
-        XCTAssertNil(Interaction.action(
-            translation: CGSize(width: 0, height: -43),
-            predictedEndTranslation: CGSize(width: 0, height: -60),
-            isPresented: false
-        ))
-        XCTAssertNil(Interaction.action(
-            translation: CGSize(width: 80, height: -60),
-            predictedEndTranslation: CGSize(width: 100, height: -70),
-            isPresented: false
-        ))
-        XCTAssertNil(Interaction.action(
-            translation: CGSize(width: 0, height: -20),
-            predictedEndTranslation: CGSize(width: 0, height: 90),
-            isPresented: false
-        ), "A reversed projected direction must not complete the opposite transition")
-    }
-
-    func testTranscriptSheetInteractiveOffsetsMoveOnlyInUsefulDirections() {
-        typealias Interaction = VoiceTutorTranscriptSheetInteraction
-        XCTAssertEqual(Interaction.presentedOffset(translationHeight: 52), 52)
-        XCTAssertEqual(Interaction.presentedOffset(translationHeight: -52), 0)
-        XCTAssertEqual(Interaction.presentedOffset(translationHeight: .infinity), 0)
-
-        XCTAssertEqual(Interaction.launcherOffset(translationHeight: -40), -7.2, accuracy: 0.001)
-        XCTAssertEqual(Interaction.launcherOffset(translationHeight: -200), -14)
-        XCTAssertEqual(Interaction.launcherOffset(translationHeight: 40), 0)
-        XCTAssertEqual(Interaction.launcherOffset(translationHeight: .nan), 0)
-    }
-
-    func testTranscriptRevealLabelsDescribeActionsInsteadOfSwipeInstructions() {
+    func testTranscriptNavigationLabelsDescribeFullScreenActions() {
         let expected = [
-            (AppLanguage.korean, "대화 내용 열기", "대화 내용 닫기"),
-            (AppLanguage.english, "Open conversation", "Close conversation"),
-            (AppLanguage.japanese, "会話を開く", "会話を閉じる")
+            (AppLanguage.korean, "전체 대화 보기", "통화로 돌아가기", "최근 대화"),
+            (AppLanguage.english, "View full conversation", "Return to call", "Latest conversation"),
+            (AppLanguage.japanese, "会話を全画面で見る", "通話に戻る", "最近の会話")
         ]
-        for (language, reveal, collapse) in expected {
+        for (language, reveal, collapse, latest) in expected {
             let strings = AppStrings(language: language)
             XCTAssertEqual(strings.voiceTutorCallRevealConversation, reveal)
             XCTAssertEqual(strings.voiceTutorCallCollapseConversation, collapse)
+            XCTAssertEqual(strings.voiceTutorCallLatestConversation, latest)
             XCTAssertFalse(strings.voiceTutorCallRevealConversation.lowercased().contains("swipe"))
         }
     }
 
     func testTranscriptLatestEdgeDetectionIsBoundedAndFailsClosed() {
-        typealias Interaction = VoiceTutorTranscriptSheetInteraction
+        typealias Interaction = VoiceTutorTranscriptInteraction
         XCTAssertTrue(Interaction.transcriptIsAtLatest(
             contentFrame: CGRect(x: 0, y: -250, width: 360, height: 610),
             viewportHeight: 360
@@ -1719,7 +1638,7 @@ final class VoiceTutorContractTests: XCTestCase {
         ))
     }
 
-    func testCallKeepsOrbAndControlsStableWhileTranscriptStaysInItsOwnSheet() throws {
+    func testCallUsesAnIntegratedFullScreenTranscriptAndNoUserMuteControl() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -1729,36 +1648,78 @@ final class VoiceTutorContractTests: XCTestCase {
         }
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
         let compactStart = try XCTUnwrap(source.range(of: "private func compactCall(in geometry:"))
-        let sheetStart = try XCTUnwrap(source.range(of: "private func transcriptSheet(in geometry:"))
+        let transcriptStart = try XCTUnwrap(source.range(of: "private var fullScreenTranscript:"))
         let orbStart = try XCTUnwrap(source.range(of: "private func callOrb(diameter:"))
-        let compact = String(source[compactStart.lowerBound..<sheetStart.lowerBound])
-        let sheet = String(source[sheetStart.lowerBound..<orbStart.lowerBound])
+        let compact = String(source[compactStart.lowerBound..<transcriptStart.lowerBound])
+        let transcript = String(source[transcriptStart.lowerBound..<orbStart.lowerBound])
 
         XCTAssertTrue(compact.contains("callOrb(diameter:"))
         XCTAssertTrue(compact.contains("Text(topic)"))
         XCTAssertTrue(compact.contains("callTime"))
-        XCTAssertFalse(compact.contains("Text(discoveryPrompt)"))
+        XCTAssertTrue(compact.contains("integratedConversationPreview"))
         XCTAssertFalse(compact.contains("transcriptPanel"))
 
-        XCTAssertTrue(sheet.contains("transcriptPanel"))
-        XCTAssertTrue(sheet.contains("transcriptSheetHeader"))
-        XCTAssertFalse(sheet.contains("callOrb"))
-        XCTAssertFalse(sheet.contains("summaryRow"))
-        XCTAssertFalse(sheet.contains("VoiceTutorResultSections"))
-        XCTAssertFalse(sheet.contains("stableCallControls"))
+        XCTAssertTrue(transcript.contains("transcriptPanel"))
+        XCTAssertTrue(transcript.contains("transcriptHeader"))
+        XCTAssertTrue(transcript.contains("maxHeight: .infinity"))
+        XCTAssertTrue(transcript.contains("voiceCall.fullTranscript"))
+        XCTAssertTrue(transcript.contains("Color(uiColor: .systemBackground)"))
+        XCTAssertFalse(transcript.contains("UnevenRoundedRectangle"))
+        XCTAssertFalse(transcript.contains("shadow("))
+        XCTAssertTrue(transcript.contains("callOrb(diameter: usesAccessibilityChrome ? 56 : 48)"))
         XCTAssertTrue(source.contains("interactionDock"))
         XCTAssertTrue(source.contains("stableCallControls"))
-        XCTAssertTrue(source.contains(".gesture(transcriptSheetGesture(isPresented: true))"))
-        XCTAssertTrue(source.contains(".gesture(transcriptSheetGesture(isPresented: false))"))
-        XCTAssertTrue(source.contains("settleTranscriptGesture(action)"))
-        XCTAssertFalse(source.contains("@GestureState private var transcriptSheetDragTranslation"))
-        XCTAssertTrue(source.contains(".frame(width: 44, height: 44)"))
-        let clearanceStart = try XCTUnwrap(source.range(of: "private var transcriptSheetBottomClearance"))
-        let clearanceEnd = try XCTUnwrap(source.range(of: "private var compactCallBottomClearance", range: clearanceStart.upperBound..<source.endIndex))
-        let clearance = String(source[clearanceStart.lowerBound..<clearanceEnd.lowerBound])
-        XCTAssertTrue(clearance.contains("dynamicTypeSize.isAccessibilitySize ? 150 : 66"))
-        XCTAssertFalse(clearance.contains("presentation.primaryAction"))
-        XCTAssertFalse(source.contains("expandedTranscriptDragGesture"))
+        XCTAssertTrue(source.contains("Button(action: onPause)"))
+        XCTAssertTrue(source.contains("voiceCall.openTranscript"))
+        XCTAssertTrue(source.contains("voiceCall.collapseTranscript"))
+        XCTAssertEqual(
+            source.components(separatedBy: "setTranscriptExpanded(true)").count - 1,
+            1,
+            "The compact screen should expose one clear full-screen transcript entry point"
+        )
+        XCTAssertFalse(source.contains("voiceCall.mute"))
+        XCTAssertFalse(source.contains("onMute"))
+        XCTAssertFalse(source.contains("transcriptSheet"))
+        XCTAssertFalse(source.contains("transcriptSheetGesture"))
+
+        let presentationStart = try XCTUnwrap(source.range(of: "struct VoiceTutorCallPresentation"))
+        let presentationEnd = try XCTUnwrap(
+            source.range(of: "struct VoiceTutorTranscriptInteraction", range: presentationStart.upperBound..<source.endIndex)
+        )
+        let presentationSource = String(source[presentationStart.lowerBound..<presentationEnd.lowerBound])
+        XCTAssertFalse(presentationSource.contains("isMuted"))
+        XCTAssertFalse(presentationSource.contains("canMute"))
+        XCTAssertFalse(presentationSource.contains("voiceTutorCallMuted"))
+
+        let callScreenStart = try XCTUnwrap(source.range(of: "struct VoiceTutorCallScreen"))
+        let callScreenEnd = try XCTUnwrap(
+            source.range(of: "private struct VoiceTutorCaptionBubble", range: callScreenStart.upperBound..<source.endIndex)
+        )
+        let callScreenSource = String(source[callScreenStart.lowerBound..<callScreenEnd.lowerBound])
+        XCTAssertFalse(
+            callScreenSource.contains(".dynamicTypeSize("),
+            "The call screen must respect AX2-AX5 instead of forcing a smaller text category"
+        )
+        XCTAssertTrue(callScreenSource.contains(".accessibilityLabel(title)"))
+    }
+
+    func testCallChromeStacksAtEveryAccessibilityTextCategory() {
+        let accessibilitySizes: [DynamicTypeSize] = [
+            .accessibility1, .accessibility2, .accessibility3, .accessibility4, .accessibility5
+        ]
+        for size in accessibilitySizes {
+            XCTAssertTrue(
+                VoiceTutorCallAdaptiveLayout.usesAccessibilityChrome(for: size),
+                "Essential call controls must use the reachable vertical layout at \(size)"
+            )
+        }
+
+        let standardSizes: [DynamicTypeSize] = [
+            .xSmall, .small, .medium, .large, .xLarge, .xxLarge, .xxxLarge
+        ]
+        for size in standardSizes {
+            XCTAssertFalse(VoiceTutorCallAdaptiveLayout.usesAccessibilityChrome(for: size))
+        }
     }
 
     func testProviderResponseRecoveryDiscardsOnlyPartialTutorStateWithoutStoppingTheCall() throws {
@@ -1926,7 +1887,10 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(pausedState.acknowledge(sequence: pause.sequence, paused: true))
         let fixtures: [VoiceTutorCompactCallSnapshot] = [
             .init(name: "01-connecting", phase: .connecting, seconds: nil),
-            .init(name: "02-listening", phase: .listening, seconds: 3_596),
+            .init(
+                name: "02-listening-with-preview", phase: .listening,
+                seconds: 3_596, showsPreview: true
+            ),
             .init(name: "03-speaking-recording", phase: .speaking, isRecording: true),
             .init(
                 name: "04-paused-static", phase: .listening,
@@ -3454,7 +3418,7 @@ final class VoiceTutorContractTests: XCTestCase {
                     detail: fixture.detail
                 ),
                 strings: strings,
-                captions: fixture.showsTranscript ? captions : [],
+                captions: fixture.showsTranscript || fixture.showsPreview ? captions : [],
                 errorMessage: fixture.phase == .failed
                     ? (fixture.failureCause == .provider
                         ? strings.serviceTemporarilyUnavailable
@@ -3462,7 +3426,6 @@ final class VoiceTutorContractTests: XCTestCase {
                     : nil,
                 showsTranscript: .constant(fixture.showsTranscript),
                 showsSummary: .constant(false),
-                onMute: { XCTFail("A visual fixture must never change the microphone") },
                 onEnd: { XCTFail("A visual fixture must never end a real call") },
                 onRetry: { XCTFail("A visual fixture must never start a real call") },
                 onDismiss: { XCTFail("A visual fixture must never dismiss the real call screen") }
@@ -3692,6 +3655,7 @@ private struct VoiceTutorCompactCallSnapshot {
     var failureCause: VoiceTutorFailureCause? = nil
     var detail: BackendVoiceTutorSessionDetail?
     var showsTranscript = false
+    var showsPreview = false
     var language: AppLanguage = .korean
     var topic = "Redis"
     var size = CGSize(width: 402, height: 874)

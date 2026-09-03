@@ -10,18 +10,18 @@ extension AppStrings {
         )
     }
 
-    var voiceTutorTakeBreak: String { voiceTutorPauseText("잠깐 쉬기", "Take a break", "少し休む") }
+    var voiceTutorTakeBreak: String { voiceTutorPauseText("일시정지", "Pause", "一時停止") }
     var voiceTutorResumeLesson: String { voiceTutorPauseText("계속하기", "Continue", "続ける") }
     var voiceTutorPausing: String {
-        voiceTutorPauseText("말을 마치면 쉬어요", "Finishing this sentence", "話し終えたら休憩")
+        voiceTutorPauseText("문장을 마친 뒤 일시정지", "Pausing after this sentence", "この文の後に一時停止")
     }
-    var voiceTutorPaused: String { voiceTutorPauseText("잠깐 쉬는 중", "On a break", "休憩中") }
+    var voiceTutorPaused: String { voiceTutorPauseText("일시정지됨", "Paused", "一時停止中") }
     var voiceTutorResuming: String { voiceTutorPauseText("계속할 준비 중", "Getting ready to continue", "再開の準備中") }
     var voiceTutorPauseUsesTime: String {
         voiceTutorPauseText(
-            "연결 중에는 통화 시간이 계속 사용돼요.",
-            "Call time continues while connected.",
-            "接続中は通話時間を消費します。"
+            "일시정지 중에도 통화 시간은 사용돼요.",
+            "Call time continues while paused.",
+            "一時停止中も通話時間を消費します。"
         )
     }
     var voiceTutorPauseFailed: String {
@@ -47,16 +47,23 @@ extension AppStrings {
     }
     var voiceTutorCallRevealConversation: String {
         voiceTutorPauseText(
-            "대화 내용 열기",
-            "Open conversation",
-            "会話を開く"
+            "전체 대화 보기",
+            "View full conversation",
+            "会話を全画面で見る"
         )
     }
     var voiceTutorCallCollapseConversation: String {
         voiceTutorPauseText(
-            "대화 내용 닫기",
-            "Close conversation",
-            "会話を閉じる"
+            "통화로 돌아가기",
+            "Return to call",
+            "通話に戻る"
+        )
+    }
+    var voiceTutorCallLatestConversation: String {
+        voiceTutorPauseText(
+            "최근 대화",
+            "Latest conversation",
+            "最近の会話"
         )
     }
 

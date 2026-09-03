@@ -12,6 +12,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessm
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearnerUtterance
+import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyEvidenceSource
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContextSource
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
@@ -776,6 +777,65 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.UPDATE_STUDY)
             assertThat(result.studyUpdateRequest?.evidence?.targetImplicitSpokenOffer).isTrue()
             assertThat(result.studyUpdateRequest?.evidence?.targetTopic).isNull()
+        }
+
+    @Test
+    fun `natural anaphora can change the level of the one exact candidate just spoken by tutor`() =
+        runBlocking<Unit> {
+            val source = "아 그거 난이도 7로 바꿔줄래?"
+            val target = VoiceTutorStudyTargetCandidate(84, null, "스프링", difficulty = 5)
+            val offer = VoiceTutorStudyTargetOffer(
+                offerId = 10,
+                lessonRevision = 0,
+                tutorResponseGeneration = 12,
+                tutorSpeechStoppedOrder = 12,
+                currentFocusStudyId = null,
+                candidates = listOf(target),
+                tutorAudioTranscript = "저장된 루트 주제는 스프링이고, 난이도는 5입니다.",
+                candidateTraversals = mapOf(target.studyId to VoiceTutorStudyTargetTraversal()),
+            )
+            val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+                itemId = "item_1",
+                transcript = source,
+                priorPersistedLearnerUtterances = listOf(
+                    VoiceTutorPersistedLearnerUtterance("prior-boundary", "지금"),
+                ),
+                targetOffer = offer,
+                studyMutationContext = VoiceTutorStudyMutationContext(0, null, listOf(target)),
+            )))
+            val calls = AtomicInteger()
+            val adapter = adapter(properties(), ExchangeFunction { request ->
+                val output = MockClientHttpRequest(request.method(), request.url())
+                request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                    output.bodyAsString.map {
+                        if (calls.incrementAndGet() == 1) {
+                            response(envelope(decisionsWithIntent(
+                                id = "item_1",
+                                decision = "MEANINGFUL",
+                                intent = "UPDATE_STUDY",
+                                mutationTargetStudyId = target.studyId,
+                                mutationTargetImplicitSpokenOffer = true,
+                                mutationDifficulty = 7,
+                                mutationEvidenceSource = "TRANSCRIPT",
+                                mutationCommandEvidence = source,
+                                mutationDifficultyEvidence = "7",
+                            )))
+                        } else {
+                            response(envelope(mutationAttestation(true, false)))
+                        }
+                    }
+                })
+            })
+
+            val result = adapter.assess(assessmentRequest).decisions.single()
+
+            assertThat(calls).hasValue(2)
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.UPDATE_STUDY)
+            assertThat(result.studyUpdateRequest?.studyId).isEqualTo(84)
+            assertThat(result.studyUpdateRequest?.difficulty).isEqualTo(7)
+            assertThat(result.studyUpdateRequest?.evidence?.targetImplicitSpokenOffer).isTrue()
+            assertThat(result.studyUpdateRequest?.evidence?.source)
+                .isEqualTo(VoiceTutorRootStudyEvidenceSource.TRANSCRIPT)
         }
 
     @Test

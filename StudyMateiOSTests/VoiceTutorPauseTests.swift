@@ -4,6 +4,20 @@ import XCTest
 
 /// No microphone, provider, database, or live session is opened by these tests.
 final class VoiceTutorPauseTests: XCTestCase {
+    func testPauseCopyUsesDirectCallControlsInEveryLanguage() {
+        let expected = [
+            (AppLanguage.korean, "일시정지", "계속하기", "일시정지됨"),
+            (AppLanguage.english, "Pause", "Continue", "Paused"),
+            (AppLanguage.japanese, "一時停止", "続ける", "一時停止中")
+        ]
+        for (language, pause, resume, paused) in expected {
+            let strings = AppStrings(language: language)
+            XCTAssertEqual(strings.voiceTutorTakeBreak, pause)
+            XCTAssertEqual(strings.voiceTutorResumeLesson, resume)
+            XCTAssertEqual(strings.voiceTutorPaused, paused)
+        }
+    }
+
     func testPauseIsUnavailableWithoutTheExplicitServerCapability() throws {
         var state = VoiceTutorCallPauseState()
         XCTAssertNil(state.requestPause())
@@ -176,8 +190,6 @@ final class VoiceTutorPauseTests: XCTestCase {
         XCTAssertEqual(presentation.primaryAction, .end)
         XCTAssertTrue(presentation.showsPauseControl)
         XCTAssertTrue(presentation.canChangePause)
-        XCTAssertFalse(presentation.canMute)
-        XCTAssertTrue(presentation.microphoneIsMuted)
         presentation.sessionSecondsRemaining = 3_009
         XCTAssertEqual(presentation.remainingTime, .call(3_009), "Pause never freezes or grants call time")
         for language in [AppLanguage.korean, .english, .japanese] {
@@ -228,9 +240,6 @@ final class VoiceTutorPauseTests: XCTestCase {
         XCTAssertFalse(presentation.needsVisibleStatus(strings, errorMessage: nil))
 
         presentation.phase = .listening
-        presentation.isMuted = true
-        XCTAssertTrue(presentation.needsVisibleStatus(strings, errorMessage: nil))
-        presentation.isMuted = false
         presentation.inputNeedsRepeat = true
         XCTAssertTrue(presentation.needsVisibleStatus(strings, errorMessage: nil))
         presentation.inputNeedsRepeat = false

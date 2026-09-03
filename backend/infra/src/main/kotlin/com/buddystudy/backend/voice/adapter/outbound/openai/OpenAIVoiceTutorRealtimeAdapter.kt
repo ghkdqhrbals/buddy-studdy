@@ -29,6 +29,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolR
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
+import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.reactor.asFlux
@@ -70,7 +71,9 @@ class OpenAIVoiceTutorRealtimeAdapter(
         },
     )
 
-    internal fun createLegacyTurnController(): VoiceTutorDuplexTurnController = VoiceTutorDuplexTurnController(
+    internal fun createLegacyTurnController(
+        language: String = QuestionLanguage.KOREAN,
+    ): VoiceTutorDuplexTurnController = VoiceTutorDuplexTurnController(
         mapper = mapper,
         continuousSpeechLimit = Duration.ofSeconds(
             properties.voiceTutor.continuousSpeechInterventionSeconds.coerceIn(5, 30),
@@ -80,6 +83,7 @@ class OpenAIVoiceTutorRealtimeAdapter(
         ),
         transport = VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY,
         inputCoordinator = VoiceTutorInputTurnCoordinator(limits = inputAssessmentProperties),
+        sessionLanguage = language,
     )
 
     internal fun legacyInputAssessmentRelay(
@@ -118,7 +122,7 @@ class OpenAIVoiceTutorRealtimeAdapter(
         }
         client.execute(providerUri, headers) { providerSession ->
             val drainState = VoiceTutorProviderDrainState(mapper)
-            val turnController = createLegacyTurnController()
+            val turnController = createLegacyTurnController(request.language)
             val clientEventFlux = clientEvents.asFlux()
                 .handle<String> { raw, sink ->
                     if (!turnController.observeClientEvent(raw)) {
@@ -247,6 +251,7 @@ internal class VoiceTutorDuplexTurnController(
     toolsEnabled: Boolean = false,
     initialLessonRevision: Long = 0,
     initialStudyMutationSnapshot: com.buddystudy.backend.voice.application.model.VoiceTutorInitialStudyMutationSnapshot? = null,
+    sessionLanguage: String = QuestionLanguage.KOREAN,
     private val onProviderTurnFailure: (VoiceTutorProviderTurnFailureDiagnostic) -> Unit = {},
 ) {
     init {
@@ -257,6 +262,7 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     private var currentLessonRevision = initialLessonRevision
+    private val openingResponseInstructions = openingResponseInstructions(sessionLanguage)
     /** Consumed when the first final learner item receives a meaningful dual-semantic verdict. */
     private var initialStudyMutationSnapshot = initialStudyMutationSnapshot
     /** The sole meaningful item allowed to retain an already-frozen initial snapshot copy. */
@@ -291,10 +297,8 @@ internal class VoiceTutorDuplexTurnController(
      * A successful update-only write gets one spoken, revised-name offer. It is
      * deliberately separate from discovery: the old name/revision can never be
      * reused and a later semantic turn can only select, never replay the write.
-     */
+    */
     private var pendingStudyUpdateSelectionOffer: CandidateOfferPool? = null
-    /** Noise may not consume the update follow-up; its next meaningful item does. */
-    private var reusableStudyUpdateTargetOfferId: Long? = null
     private var activeTargetOfferExchangeEvidence: TargetOfferExchangeEvidence? = null
     private var activeSpeechTargetOffer: VoiceTutorStudyTargetOffer? = null
     private val toolDiscoveryFences = linkedMapOf<String, ToolDiscoveryFence>()
@@ -1493,7 +1497,6 @@ internal class VoiceTutorDuplexTurnController(
         activeTargetOfferExchangeEvidence = null
         activeSpeechTargetOffer = null
         pendingStudyUpdateSelectionOffer = null
-        reusableStudyUpdateTargetOfferId = null
         toolDiscoveryFences.clear()
     }
 
@@ -1746,6 +1749,17 @@ internal class VoiceTutorDuplexTurnController(
                             VoiceTutorInputIntent.UPDATE_STUDY,
                         )
                     val retiresPreviousMutationOwner = persisted && focusPublicationCurrent && binding != null
+                    if (persisted && (
+                            focusTargetValid || rootCreationIntentCurrent || childCreationIntentCurrent ||
+                                studyUpdateIntentCurrent
+                        )
+                    ) {
+                        // A spoken offer is a conversational referent, not an
+                        // acoustic one-shot. Consecutive VAD items may share it
+                        // until one exact persisted action consumes it. The
+                        // action authorization remains separately one-shot.
+                        retireCompletedTargetOffer()
+                    }
                     if (retiresPreviousMutationOwner) {
                         currentRootStudyPipelineOwner = null
                         currentStudyUpdatePipelineOwner = null
@@ -2234,13 +2248,6 @@ internal class VoiceTutorDuplexTurnController(
                     val outboundAction = if (action is VoiceTutorInputTurnCoordinator.Action.Publish) {
                         val publication = claimInitialStudyMutationSnapshot(coordinator, action)
                         pendingInputPublications[publication.itemId] = publication
-                        if (!publication.checkpoint && publication.targetOfferId == reusableStudyUpdateTargetOfferId) {
-                            // The first semantically meaningful reply owns this
-                            // revised-name offer, regardless of whether storage
-                            // subsequently succeeds. Never let a later item reuse it.
-                            reusableStudyUpdateTargetOfferId = null
-                            activeTargetOffer = null
-                        }
                         // A long-speech checkpoint is incomplete by definition:
                         // later words can negate, quote or make it hypothetical.
                         if (
@@ -3218,10 +3225,11 @@ internal class VoiceTutorDuplexTurnController(
         activeSpeechPrecedingAnswerProviderItemId = exchange?.feedback?.identity?.answerProviderItemId
         activeSpeechPrecedingTutorFeedbackProviderItemId = exchange?.feedback?.feedbackProviderItemId
         activeSpeechPrecedingTutorNavigationOfferProviderItemId = exchange?.navigationOfferProviderItemId
-        if (activeSpeechTargetOffer?.offerId != reusableStudyUpdateTargetOfferId) {
-            activeTargetOffer = null
-        }
-        activeTargetOfferExchangeEvidence = null
+        // Keep the completed offer for adjacent VAD fragments. Filler, noise,
+        // or a boundary-only word cannot consume a semantic referent.
+        // A candidate and its verified feedback/navigation exchange share one
+        // tutor boundary. Keep both across adjacent VAD fragments; only an
+        // exact persisted target action or the next tutor response retires them.
         candidateDiscoveryGraph = null
         activeResponseCandidateDiscovery = null
         toolDiscoveryFences.clear()
@@ -3405,7 +3413,7 @@ internal class VoiceTutorDuplexTurnController(
             toolCoordinator?.toolChoice ?: "none"
         }
         val instructions = when {
-            opening -> OPENING_RESPONSE_INSTRUCTIONS
+            opening -> openingResponseInstructions
             rootStudyFollowupReady && rootStudyCommittedFocusSuperseded ->
                 ROOT_STUDY_COMMITTED_FOCUS_SUPERSEDED_FOLLOWUP_INSTRUCTIONS
             rootStudyFollowupReady && !rootStudyReadbackFailed && !rootStudyAutoFocusFailed ->
@@ -3593,7 +3601,6 @@ internal class VoiceTutorDuplexTurnController(
         activeTutorTranscriptItemIds.clear()
         activeTutorTranscriptOverflow = false
         activeTargetOffer = null
-        reusableStudyUpdateTargetOfferId = null
         activeTargetOfferExchangeEvidence = null
         activeResponseCandidateDiscovery = state.candidateDiscovery
         activeResponseHadCandidateNavigation = state.candidateDiscovery != null
@@ -3929,9 +3936,6 @@ internal class VoiceTutorDuplexTurnController(
             tutorAudioTranscript = tutorAudioTranscript,
             candidateTraversals = discovery.candidateTraversals,
         )
-        if (discovery.purpose == CandidateOfferPurpose.UPDATED_STUDY_SELECTION) {
-            reusableStudyUpdateTargetOfferId = activeTargetOffer?.offerId
-        }
     }
 
     private fun validCandidateOfferPool(pool: CandidateOfferPool): Boolean =
@@ -3945,6 +3949,11 @@ internal class VoiceTutorDuplexTurnController(
                     pool.candidateTraversals[candidate.studyId]
                         ?.isValidFor(candidate, MAX_DISCOVERY_TREE_DEPTH) == true
             }
+
+    private fun retireCompletedTargetOffer() {
+        activeTargetOffer = null
+        activeTargetOfferExchangeEvidence = null
+    }
 
     private fun observeOutputBufferCleared(
         node: com.fasterxml.jackson.databind.JsonNode,
@@ -4282,7 +4291,6 @@ internal class VoiceTutorDuplexTurnController(
         activeTutorTranscriptItemIds.clear()
         activeTutorTranscriptOverflow = false
         activeTargetOffer = null
-        reusableStudyUpdateTargetOfferId = null
         activeTargetOfferExchangeEvidence = null
         activeResponseCandidateDiscovery = null
         activeResponseRespondsToStudyAnswer = false
@@ -5557,10 +5565,16 @@ internal class VoiceTutorDuplexTurnController(
             GET_STUDY_TOOL,
             SELECT_VOICE_STUDY_TOOL,
         )
-        const val OPENING_RESPONSE_INSTRUCTIONS =
-            "Ask only one short direct question about which topic the learner wants to discuss. " +
-                "Do not greet the learner, use a lead-in, introduce or name yourself, describe your role, say that you are an AI/tutor/teacher, mention readiness, or call any tool. " +
-                "Use the configured session language; only when it is Korean, say exactly: 어떤 주제로 이야기해 볼까요?; otherwise ask the same direct question in that configured language."
+        fun openingResponseInstructions(language: String): String {
+            val exactOpening = when (QuestionLanguage.normalize(language)) {
+                QuestionLanguage.ENGLISH -> "What topic would you like to talk about?"
+                QuestionLanguage.JAPANESE -> "どんなテーマについて話しましょうか？"
+                else -> "어떤 주제로 이야기해 볼까요?"
+            }
+            return "Say exactly this one sentence and nothing else: $exactOpening " +
+                "Do not translate it. Do not greet the learner, use a lead-in, introduce or name yourself, " +
+                "describe your role, say that you are an AI/tutor/teacher, mention readiness, or call any tool."
+        }
         val STUDY_FOCUS_TOOLS = setOf(SELECT_VOICE_STUDY_TOOL, "advance_voice_study")
         val SAFE_PURPOSE_PRESERVING_READ_TOOLS = setOf(
             "list_records", "get_record", "list_study_learning_records", "get_voice_learning_record",

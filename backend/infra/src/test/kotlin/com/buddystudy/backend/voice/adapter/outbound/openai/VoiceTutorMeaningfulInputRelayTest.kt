@@ -683,6 +683,152 @@ class VoiceTutorMeaningfulInputRelayTest {
         }
 
     @Test
+    fun `vad split boundary word preserves one spoken candidate for the adjacent update`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-redis", 101, null, null)
+
+            // The provider can split "지금, 아 그거 ..." into two final
+            // items. The first item may finish semantic assessment while the
+            // adjacent continuation is already being transcribed, without an
+            // intervening tutor audio response.
+            f.utterance(2, "split-boundary", "지금")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            val boundaryPublication = f.publications().last()
+
+            val command = "아 그거 난이도 7로 바꿔줄래?"
+            f.utterance(3, "split-update", command)
+            f.confirm(boundaryPublication, persisted = true)
+
+            val updateAssessment = f.assessments().last().utterances.single()
+            val offered = requireNotNull(updateAssessment.targetOffer)
+            assertThat(offered.candidates).containsExactly(
+                VoiceTutorStudyTargetCandidate(101, null, "Redis"),
+            )
+            assertThat(updateAssessment.studyMutationContext?.candidates)
+                .containsExactlyElementsOf(offered.candidates)
+
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 101,
+                    command = command,
+                    difficulty = 7,
+                    targetImplicitCurrentFocus = false,
+                    targetImplicitSpokenOffer = true,
+                ),
+            )
+            f.confirm(f.publications().last(), persisted = true)
+
+            val updateCall = f.awaitServerToolCall("update_study")
+            assertThat(mapper.readTree(updateCall.path("item").path("arguments").asText())).isEqualTo(
+                mapper.readTree("""{"study_id":101,"difficulty_level":7}"""),
+            )
+            val updateId = f.startServerToolCall(updateCall)
+            val authorization = f.controller.mutationDialogueBoundary(updateId).studyUpdateAuthorization
+            assertThat(authorization?.scope)
+                .isEqualTo(VoiceTutorStudyUpdateAuthorizationScope.OFFERED_CANDIDATE)
+            assertThat(authorization?.consume()).isTrue()
+            assertThat(authorization?.consume()).isFalse()
+
+            val secondCommand = "아 그거 난이도 8로 바꿔줄래?"
+            f.utterance(4, "same-offer-second-update", secondCommand)
+            val secondAssessment = f.assessments().last().utterances.single()
+            assertThat(secondAssessment.targetOffer).isNull()
+            assertThat(secondAssessment.studyMutationContext).isNull()
+            val publicationCount = f.publications().size
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 101,
+                    command = secondCommand,
+                    difficulty = 8,
+                    targetImplicitCurrentFocus = false,
+                    targetImplicitSpokenOffer = true,
+                ),
+            )
+            assertThat(f.publications()).hasSize(publicationCount)
+            assertThat(f.deletions().last().path("item_id").asText())
+                .isEqualTo("same-offer-second-update")
+            f.deleted("same-offer-second-update")
+            assertThat(f.conversationItems().count {
+                it.path("item").path("name").asText() == "update_study"
+            }).isEqualTo(1)
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `persisted root creation retires an older spoken candidate before tool acknowledgement`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-redis", 101, null, null)
+
+            val rootCommand = "Spring을 새로운 루트 주제로 만들고 싶어."
+            f.utterance(2, "create-spring-root", rootCommand)
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+                rootStudyCreationRequest = rootRequest("Spring", 5, rootCommand, omitted = true),
+            )
+            f.confirm(f.publications().last(), persisted = true)
+
+            // The create tool has not acknowledged and no newer tutor response
+            // has begun. Even in that window, the prior Redis proposal is a
+            // different target and cannot ground a pronoun after the Spring write.
+            f.utterance(3, "start-new-root", "그 주제로 시작하자")
+            val assessment = f.assessments().last().utterances.single()
+            assertThat(assessment.targetOffer).isNull()
+            assertThat(assessment.studyMutationContext).isNull()
+
+            val publicationCount = f.publications().size
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.SELECT_SAVED_TOPIC)
+            assertThat(f.publications()).hasSize(publicationCount)
+            assertThat(f.deletions().last().path("item_id").asText()).isEqualTo("start-new-root")
+            f.deleted("start-new-root")
+            assertThat(f.controller.mutationDialogueBoundary().focusAuthorization).isNull()
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `an intervening tutor response retires the prior spoken candidate`() = fixture().use { f ->
+        f.offerCandidate(1, "browse-before-response", 101, null, null)
+
+        f.utterance(2, "boundary-before-response", "지금")
+        f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+        f.confirm(f.publications().last(), persisted = true)
+        f.finishCurrentSpokenOffer("원하는 변경을 말씀해 주세요.")
+
+        val command = "아 그거 난이도 7로 바꿔줄래?"
+        f.utterance(3, "update-after-response", command)
+        val assessment = f.assessments().last().utterances.single()
+        assertThat(assessment.targetOffer).isNull()
+        assertThat(assessment.studyMutationContext).isNull()
+
+        val publicationCount = f.publications().size
+        f.assess(
+            VoiceTutorInputDecision.MEANINGFUL,
+            VoiceTutorInputIntent.UPDATE_STUDY,
+            studyUpdateRequest = updateRequest(
+                studyId = 101,
+                command = command,
+                difficulty = 7,
+                targetImplicitCurrentFocus = false,
+                targetImplicitSpokenOffer = true,
+            ),
+        )
+        assertThat(f.publications()).hasSize(publicationCount)
+        assertThat(f.deletions().last().path("item_id").asText()).isEqualTo("update-after-response")
+        f.deleted("update-after-response")
+        assertThat(f.conversationItems().none {
+            it.path("item").path("name").asText() == "update_study"
+        }).isTrue()
+        assertThat(f.errors).isEmpty()
+        f.assertNoAudioDisruption()
+    }
+
+    @Test
     fun `fresh owner snapshot survives noncommunicative noise and executes one exact first turn rename`() {
         val initialSnapshot = VoiceTutorInitialStudyMutationSnapshot(
             listOf(
@@ -1040,7 +1186,16 @@ class VoiceTutorMeaningfulInputRelayTest {
                 f.assess(VoiceTutorInputDecision.NON_COMMUNICATIVE)
                 f.deleted("split-update-noise")
 
-                f.utterance(4, "split-update-start", "시작하자")
+                // A provider-side split can classify a short boundary word as
+                // communicative without resolving the offered target. Persisting
+                // it must not spend the revised-name referent while the adjacent
+                // learner fragment is already in flight.
+                f.utterance(4, "split-update-boundary", "지금")
+                f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+                val boundaryPublication = f.publications().last()
+
+                f.utterance(5, "split-update-start", "시작하자")
+                f.confirm(boundaryPublication, persisted = true)
                 val startAssessment = f.assessments().last()
                 assertThat(startAssessment.utterances.single().targetOffer?.candidates)
                     .containsExactly(VoiceTutorStudyTargetCandidate(101, null, "Redis 기초", 7))
@@ -2912,7 +3067,12 @@ class VoiceTutorMeaningfulInputRelayTest {
             assertThat(f.feedbackAssessments.last().allowsNavigationOffer).isTrue()
             f.approveLatestFeedback()
 
-            f.utterance(3, "continue-item", "그 하위 주제로 더 들어가자")
+            f.utterance(3, "continue-boundary", "지금")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            val boundaryPublication = f.publications().last()
+
+            f.utterance(4, "continue-item", "그 하위 주제로 더 들어가자")
+            f.confirm(boundaryPublication, persisted = true)
             assertThat(f.assessments().last().teacherContext)
                 .isEqualTo("핵심을 잘 설명했어요. 다음으로 Redis cache를 공부해 볼까요?")
             f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.CONTINUE_TREE)
@@ -4327,6 +4487,7 @@ class VoiceTutorMeaningfulInputRelayTest {
         difficulty: Int? = null,
         targetTopic: String? = null,
         targetImplicitCurrentFocus: Boolean = true,
+        targetImplicitSpokenOffer: Boolean = false,
         startLessonAfterUpdate: Boolean = false,
     ) = VoiceTutorStudyUpdateRequest(
         studyId,
@@ -4339,6 +4500,7 @@ class VoiceTutorMeaningfulInputRelayTest {
             topic = topic,
             difficulty = difficulty?.toString(),
             targetImplicitCurrentFocus = targetImplicitCurrentFocus,
+            targetImplicitSpokenOffer = targetImplicitSpokenOffer,
         ),
         startLessonAfterUpdate = startLessonAfterUpdate,
     )

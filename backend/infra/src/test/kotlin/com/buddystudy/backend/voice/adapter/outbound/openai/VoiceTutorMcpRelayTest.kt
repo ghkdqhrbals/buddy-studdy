@@ -135,10 +135,10 @@ class VoiceTutorMcpRelayTest {
             val create = mapper.readTree(controls.single())
             assertThat(create.path("response").path("tool_choice").asText()).isEqualTo("none")
             assertThat(create.path("response").path("instructions").asText())
-                .contains("Ask only one short direct question")
+                .contains("Say exactly this one sentence and nothing else")
                 .contains("Do not greet the learner")
                 .contains("Do not", "introduce or name yourself", "AI/tutor/teacher")
-                .contains("Use the configured session language")
+                .contains("Do not translate it")
                 .contains("어떤 주제로 이야기해 볼까요?")
             val token = create.path("event_id").asText()
             controller.observeProviderEvent(response("response.created", emptyList(), token, "in_progress"))
@@ -147,6 +147,38 @@ class VoiceTutorMcpRelayTest {
             }.isInstanceOf(VoiceTutorMcpProtocolException::class.java)
             assertThat(calls).isEmpty()
         } finally { controller.close(); work.dispose(); output.dispose() }
+    }
+
+    @Test
+    fun `opening response pins one exact sentence to the authenticated session language`() {
+        val openings = linkedMapOf(
+            "ko" to "어떤 주제로 이야기해 볼까요?",
+            "en" to "What topic would you like to talk about?",
+            "ja" to "どんなテーマについて話しましょうか？",
+        )
+
+        openings.forEach { (language, expected) ->
+            val controller = VoiceTutorDuplexTurnController(
+                continuousSpeechLimit = Duration.ofSeconds(30),
+                responseTimeout = Duration.ofSeconds(60),
+                transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+                toolsEnabled = true,
+                sessionLanguage = language,
+            )
+            val controls = mutableListOf<String>()
+            val output = controller.providerEvents().subscribe(controls::add)
+            try {
+                controller.startOpeningResponse()
+                val response = mapper.readTree(controls.single()).path("response")
+                assertThat(response.path("tool_choice").asText()).isEqualTo("none")
+                assertThat(response.path("instructions").asText())
+                    .contains("Say exactly this one sentence and nothing else: $expected")
+                    .contains("Do not translate it", "Do not greet the learner", "introduce or name yourself")
+            } finally {
+                controller.close()
+                output.dispose()
+            }
+        }
     }
 
     @Test
