@@ -3,7 +3,7 @@
 Verification date: 2026-09-03. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [provider-safe server-owned tool call identifiers](#provider-safe-server-owned-tool-call-identifiers).
+Latest implementation: [one-turn root creation and immediate lesson start](#one-turn-root-creation-and-immediate-lesson-start).
 It extends the existing guided saved-tree descent, single-orb,
 Silero/contextual-input, MCP and source-backed summary contracts; it does not
 regrade past answers.
@@ -12,6 +12,68 @@ implementation.
 Source/fixture tests, iPhone tests and actual dev runtime observations are
 recorded separately; none implies a new human microphone-to-tutor conversation
 unless that specific check is explicitly recorded.
+
+## One-turn root creation and immediate lesson start
+
+Current acceptance contract and verification on 2026-09-03, branch
+`feature/2.0`:
+
+- One natural final learner turn such as “스프링 관련해서 백엔드를 배워보고
+  싶거든. 그러니까 스프링 레벨 7 정도로 새롭게 주제 생성해서
+  학습해보자.” can both create the exact root and authorize starting that new
+  lesson. The structured GPT assessment and its independent semantic attestation
+  must both approve the exact creation and independently set
+  `startLessonAfterCreate` from that same current persisted turn. Local code does
+  not decide this with a regex, keyword or phrase list, punctuation, duration or
+  word-count rule. Earlier persisted learner turns may still provide only an
+  unambiguous omitted topic or level; they cannot supply immediate-start consent.
+- The accepted compound flow is server-owned end to end:
+  `create_root_study` returns `AUTO_FOCUS_PENDING`, the sideband performs an exact
+  `get_study` readback, and then performs the one authorized
+  `select_voice_study`. Only a successful
+  `CREATED_ROOT_IMMEDIATE_START` focus result establishes the frozen saved level
+  and opens the first substantive tutor question. The tutor must not ask
+  “만들까요?”, request a restatement, or add another readiness/permission turn.
+  A create-only utterance still returns `REQUIRES_SELECTION`, speaks the verified
+  saved root and waits for one fresh learner agreement before ordinary selection.
+  A failed readback or focus cannot retry the write or reuse the old utterance.
+- Root, child, update and focus authority now use one atomic state transition per
+  exact call ID. A tool call freezes its dialogue boundary at dispatch. Noise or
+  a semantically non-communicative checkpoint cannot spend that authority; a
+  newly persisted meaningful learner turn invalidates the older permit, while a
+  tool execution that won the boundary race consumes it exactly once. Read-only
+  and otherwise unauthorized tools are not held behind the semantic write gate,
+  so study lookup cannot deadlock the assessment that would release it. Response
+  speech still waits for transcript persistence and tool-output acknowledgement.
+- A provider rejection of a synthetic server-owned function-call item before its
+  acknowledgement now tombstones that exact call, returns a bounded safe
+  no-tools follow-up and does not replay the write or terminate the WebRTC call.
+  This is deliberately scoped to the server call-envelope rejection; an unknown
+  output-item protocol failure is still terminal. The diagnostic action is
+  `SERVER_CALL_REJECTED`.
+- Management-only turns still do not become learning. A summary/canonical/public
+  record is eligible only after one durable, server-authorized substantive tutor
+  question is linked to the learner's exact complete answer. Creating or selecting
+  a root alone therefore finishes with an empty technical result and no summary
+  model call.
+- Clean non-incremental `:application:test` and `:infra:test` runs discovered
+  **1,527 tests**: application 566/566 and infrastructure 958 passed plus three
+  opt-in skips, with zero failures or errors. A non-incremental AOT
+  `:tutor:bootJar` also passed. The artifact is **331,771,322 bytes**, SHA-256
+  `b9c79b39023adeeb1beb8e24e87304dfaedc00e8561196e42dabfc03d5d1bffc`.
+- Immediately before deployment there were zero READY/ACTIVE/ENDING voice
+  sessions and zero PROCESSING voice results. The final JAR was atomically copied
+  into the existing dev app volume and only `backend-backend-1` on localhost port
+  8080 was restarted. Its mounted hash matches the artifact; the `dev` profile
+  loaded the existing `buddystudy/dev` AWS Secrets Manager import, and both local
+  and public `https://lowfidev.cloud` health returned `UP`. MySQL, Redis,
+  LibreTranslate and backup retained container IDs `5e20e9bde995`,
+  `a7010be91c0e`, `2381e8844d11` and `fa108012a17a`; no duplicate backend or
+  infrastructure container was created. The replaced JAR is retained as
+  `/app/buddystudy-backend.previous-2d7c9e6d.jar`.
+- This correction changes backend behavior only. It requires no iOS rebuild or
+  reinstall, but the document does not claim a new physical microphone-to-tutor
+  pass until the learner retries the compound sentence on the existing app.
 
 ## Provider-safe server-owned tool call identifiers
 
@@ -165,10 +227,14 @@ Current acceptance contract on 2026-09-02, branch `feature/2.0`:
   acknowledgment until both function outputs are acknowledged and that readback
   proves the saved root. A failed or mismatched readback reports only that the
   result could not be verified and never retries the mutation automatically.
-  Verified creation still does not begin a lesson: the tutor speaks the read-back
-  root as a separate start offer and waits for a new learner agreement before
-  `select_voice_study`. Root or child creation consumes no question quota and
-  creates no question record.
+  Verified creation alone does not begin a lesson: a create-only result makes the
+  tutor speak the read-back root as a separate start offer and wait for a new
+  learner agreement before `select_voice_study`. The later compound exception
+  requires both semantic decisions to attest immediate start from the same
+  persisted creation turn; only the server-owned exact readback plus
+  `CREATED_ROOT_IMMEDIATE_START` selection may then begin the first question
+  without another confirmation. Root or child creation consumes no question
+  quota and creates no question record.
 - A successful focus selection or explicit continue decision grants one
   server-owned question purpose. Only one clean, completed tutor-audio item whose
   exact bounded persisted transcript is independently accepted as one substantive
@@ -354,14 +420,17 @@ audible microphone-to-tutor conversation.
   `created=false`; it never adopts the requested level or overwrites scheduling
   settings. A normalized match on a child is a conflict. A new root uses product
   defaults, creates no question and consumes no question quota.
-- [x] Neither `created=true` nor `created=false` establishes lesson focus. The
+- [x] Neither `created=true` nor `created=false` by itself establishes lesson focus. The
   server bridge schedules `get_study` for the trusted returned ID, waits for both
   output acknowledgements and proves the exact root before allowing the tutor to
   acknowledge the saved result. Failed or mismatched readback cannot claim a
-  persisted outcome and never retries the create automatically. After verified
-  readback, the tutor speaks the exact saved root as a separate start offer,
-  waits for another fresh learner agreement, and calls `select_voice_study`.
-  Teaching starts only after that focus result succeeds.
+  persisted outcome and never retries the create automatically. A create-only
+  result follows verified readback by speaking the exact saved root as a separate
+  start offer, waiting for another fresh learner agreement, and calling
+  `select_voice_study`. The later server-attested compound exception reports
+  `AUTO_FOCUS_PENDING` and performs exact readback plus
+  `CREATED_ROOT_IMMEDIATE_START` selection without another agreement. Teaching
+  starts only after the applicable focus result succeeds.
 - [x] Only a verified new row is eligible for the live
   `buddystudy.voice.study.changed` refresh hint. While the controller remains
   valid, its sanitized wire payload carries the type, positive `studyId`,

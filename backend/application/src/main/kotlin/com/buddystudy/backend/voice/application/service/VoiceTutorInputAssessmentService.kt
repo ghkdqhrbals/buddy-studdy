@@ -201,7 +201,8 @@ class VoiceTutorInputAssessmentService(
                     candidates.map { it.studyId }.distinct().size != candidates.size ||
                     candidates.any { candidate ->
                         candidate.studyId <= 0 || candidate.parentStudyId?.let { it <= 0 } == true ||
-                            candidate.topic.isBlank() || candidate.topic.length > MAX_TARGET_TOPIC_CHARACTERS
+                            candidate.topic.isBlank() || candidate.topic.length > MAX_TARGET_TOPIC_CHARACTERS ||
+                            candidate.difficulty?.let { it !in 1..10 } == true
                     } ||
                     offer.candidateTraversals.keys != candidates.mapTo(linkedSetOf()) { it.studyId } ||
                     candidates.any { candidate ->

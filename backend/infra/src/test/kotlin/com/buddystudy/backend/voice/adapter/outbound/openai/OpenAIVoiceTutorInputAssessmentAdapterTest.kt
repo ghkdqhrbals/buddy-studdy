@@ -8,6 +8,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentE
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentFailure
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
+import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearnerUtterance
@@ -217,7 +218,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "targetStudyId", "spokenCandidateStudyIds",
                 "rootStudyTopic", "rootStudyDifficulty", "rootStudyEvidenceSource",
                 "rootStudyCommandEvidence", "rootStudyTopicEvidence", "rootStudyDifficultyEvidence",
-                "rootStudyDifficultyOmitted",
+                "rootStudyDifficultyOmitted", "rootStudyStartLessonAfterCreate",
                 "mutationTargetStudyId", "mutationTargetImplicitCurrentFocus", "mutationTopic",
                 "mutationDifficulty", "mutationEvidenceSource", "mutationCommandEvidence",
                 "mutationTargetTopicEvidence", "mutationTopicEvidence", "mutationDifficultyEvidence",
@@ -244,6 +245,8 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         assertThat(item.path("properties").path("rootStudyDifficultyEvidence").path("maxLength").asInt())
             .isEqualTo(32)
         assertThat(item.path("properties").path("rootStudyDifficultyOmitted").path("type").asText())
+            .isEqualTo("boolean")
+        assertThat(item.path("properties").path("rootStudyStartLessonAfterCreate").path("type").asText())
             .isEqualTo("boolean")
         assertThat(item.path("properties").path("targetStudyId").path("type").asText()).isEqualTo("null")
         assertThat(item.path("properties").path("spokenCandidateStudyIds").path("maxItems").intValue()).isZero()
@@ -308,7 +311,8 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             "CONTINUE_STUDY", "next substantive", "generic acknowledgement",
             "top-level saved study", "not A; create B", "exact requested new root name",
             "Contextual yes/approval is never CREATE_ROOT_STUDY", "server alone applies level 5",
-            "separately", "begin a lesson")
+            "rootStudyStartLessonAfterCreate=true", "compound utterance", "without another confirmation",
+            "never by phrase, keyword, regex")
         assertThat(instruction).doesNotContain(original, context)
         assertThat(data.path("utterances")[0].path("transcript").asText()).isEqualTo(original)
         assertThat(data.path("teacherContext").asText()).isEqualTo(context)
@@ -521,7 +525,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                             )))
                         } else {
                             attestationBody = mapper.readTree(rawBody)
-                            response(envelope("""{"attestations":[{"itemId":"item_1","exact":true}]}"""))
+                            response(envelope(rootAttestation(exactCreation = true)))
                         }
                     }
                 })
@@ -556,6 +560,47 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             )
             assertThat(attestationEvidence.path("items")[0].path("learnerSource").asText()).isEqualTo(source)
             assertThat(attestationBody.toString()).doesNotContain(direct.teacherContext)
+        }
+
+    @Test
+    fun `compound root creation starts the lesson only when both semantic assessments agree`() =
+        runBlocking<Unit> {
+            val result = assessCompoundRootCreation(
+                primaryStartLessonAfterCreate = true,
+                secondaryStartLessonAfterCreate = true,
+            )
+
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+            assertThat(result.rootStudyCreationRequest?.topic).isEqualTo("스프링")
+            assertThat(result.rootStudyCreationRequest?.difficulty).isEqualTo(7)
+            assertThat(result.rootStudyCreationRequest?.startLessonAfterCreate).isTrue()
+        }
+
+    @Test
+    fun `secondary semantic assessment cannot upgrade a primary create only decision into lesson start`() =
+        runBlocking<Unit> {
+            val result = assessCompoundRootCreation(
+                primaryStartLessonAfterCreate = false,
+                secondaryStartLessonAfterCreate = true,
+            )
+
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+            assertThat(result.rootStudyCreationRequest).isNotNull
+            assertThat(result.rootStudyCreationRequest?.startLessonAfterCreate).isFalse()
+        }
+
+    @Test
+    fun `secondary lesson start rejection keeps the independently verified root creation`() =
+        runBlocking<Unit> {
+            val result = assessCompoundRootCreation(
+                primaryStartLessonAfterCreate = true,
+                secondaryStartLessonAfterCreate = false,
+            )
+
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.CREATE_ROOT_STUDY)
+            assertThat(result.rootStudyCreationRequest?.topic).isEqualTo("스프링")
+            assertThat(result.rootStudyCreationRequest?.difficulty).isEqualTo(7)
+            assertThat(result.rootStudyCreationRequest?.startLessonAfterCreate).isFalse()
         }
 
     @Test
@@ -654,7 +699,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                             )))
                         } else {
                             attestationBody = mapper.readTree(rawBody)
-                            response(envelope("""{"attestations":[{"itemId":"item_1","exact":true}]}"""))
+                            response(envelope(rootAttestation(exactCreation = true)))
                         }
                     }
                 })
@@ -750,7 +795,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                                 )))
                             } else {
                                 response(envelope(
-                                    """{"attestations":[{"itemId":"item_1","exact":false}]}""",
+                                    rootAttestation(exactCreation = false),
                                 ))
                             }
                         }
@@ -858,7 +903,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                                 )))
                             } else {
                                 response(envelope(
-                                    """{"attestations":[{"itemId":"item_1","exact":false}]}""",
+                                    rootAttestation(exactCreation = false),
                                 ))
                             }
                         }
@@ -946,7 +991,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                         )))
                     } else {
                         attestationBody = mapper.readTree(rawBody)
-                        response(envelope("""{"attestations":[{"itemId":"item_1","exact":false}]}"""))
+                        response(envelope(rootAttestation(exactCreation = false)))
                     }
                 }
             })
@@ -989,20 +1034,50 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             VoiceTutorRootCreationAttestationPromptProvider.requestBody(attestation, "gpt-5.4"),
         )
         assertThat(body.path("messages")[0].path("content").asText())
-            .contains("entire requested root name", "strict subset", "difficultyOmitted", "untrusted evidence")
-        assertThat(body.path("response_format").path("json_schema").path("schema")
-            .path("additionalProperties").booleanValue()).isFalse()
+            .contains(
+                "entire requested root name", "strict subset", "difficultyOmitted", "untrusted evidence",
+                "Independently set startLessonAfterCreate=true", "same current learner turn",
+                "never use phrases, word lists, regexes",
+            )
+        val schema = body.path("response_format").path("json_schema").path("schema")
+        val row = schema.path("properties").path("attestations").path("items")
+        assertThat(schema.path("additionalProperties").booleanValue()).isFalse()
+        assertThat(row.path("additionalProperties").booleanValue()).isFalse()
+        assertThat(row.path("required").map(JsonNode::asText)).containsExactly(
+            "itemId", "exactCreation", "startLessonAfterCreate",
+        )
+        assertThat(row.path("properties").path("exactCreation").path("type").asText()).isEqualTo("boolean")
+        assertThat(row.path("properties").path("startLessonAfterCreate").path("type").asText())
+            .isEqualTo("boolean")
         assertThat(VoiceTutorRootCreationAttestationPromptProvider.parseResponse(
             attestation,
-            envelope("""{"attestations":[{"itemId":"item_1","exact":true}]}"""),
-        )).containsExactly("item_1")
+            envelope(rootAttestation(exactCreation = true, startLessonAfterCreate = true)),
+        )).containsEntry(
+            "item_1",
+            VoiceTutorRootCreationAttestationDecision(
+                exactCreation = true,
+                startLessonAfterCreate = true,
+            ),
+        )
         assertThat(VoiceTutorRootCreationAttestationPromptProvider.parseResponse(
             attestation,
-            envelope("""{"attestations":[{"itemId":"item_1","exact":false}]}"""),
-        )).isEmpty()
+            envelope(rootAttestation(exactCreation = false)),
+        )).containsEntry(
+            "item_1",
+            VoiceTutorRootCreationAttestationDecision(
+                exactCreation = false,
+                startLessonAfterCreate = false,
+            ),
+        )
         assertReasonForRootAttestation(
             attestation,
-            envelope("""{"attestations":[{"itemId":"other","exact":true}]}"""),
+            envelope(
+                """{"attestations":[{"itemId":"other","exactCreation":true,"startLessonAfterCreate":false}]}""",
+            ),
+        )
+        assertReasonForRootAttestation(
+            attestation,
+            envelope(rootAttestation(exactCreation = false, startLessonAfterCreate = true)),
         )
     }
 
@@ -1402,6 +1477,47 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
     private fun adapter(properties: BuddyStudyProperties, exchange: ExchangeFunction) =
         OpenAIVoiceTutorInputAssessmentAdapter(UserContentOpenAIKeyProvider(properties), properties, exchange)
 
+    private suspend fun assessCompoundRootCreation(
+        primaryStartLessonAfterCreate: Boolean,
+        secondaryStartLessonAfterCreate: Boolean,
+    ): VoiceTutorInputItemAssessment {
+        val source = "어 스프링 관련해서 백엔드를 배워보고 싶거든. " +
+            "그러니까 스프링 레벨 7 정도로 새롭게 주제 생성해서 학습해보자."
+        val calls = AtomicInteger()
+        val adapter = adapter(properties(), ExchangeFunction { request ->
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map {
+                    if (calls.incrementAndGet() == 1) {
+                        response(envelope(decisionsWithIntent(
+                            id = "item_1",
+                            decision = "MEANINGFUL",
+                            intent = "CREATE_ROOT_STUDY",
+                            rootStudyTopic = "스프링",
+                            rootStudyDifficulty = 7,
+                            rootStudyEvidenceSource = "TRANSCRIPT",
+                            rootStudyCommandEvidence = source,
+                            rootStudyTopicEvidence = "스프링",
+                            rootStudyDifficultyEvidence = "7",
+                            rootStudyStartLessonAfterCreate = primaryStartLessonAfterCreate,
+                        )))
+                    } else {
+                        response(envelope(rootAttestation(
+                            exactCreation = true,
+                            startLessonAfterCreate = secondaryStartLessonAfterCreate,
+                        )))
+                    }
+                }
+            })
+        })
+
+        val result = adapter.assess(request().copy(utterances = listOf(
+            VoiceTutorInputUtterance("item_1", source),
+        ))).decisions.single()
+        assertThat(calls).hasValue(2)
+        return result
+    }
+
     private fun response(body: String, status: HttpStatus = HttpStatus.OK): ClientResponse =
         ClientResponse.create(status).header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE).body(body).build()
 
@@ -1421,6 +1537,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "rootStudyTopicEvidence" to null,
                 "rootStudyDifficultyEvidence" to null,
                 "rootStudyDifficultyOmitted" to false,
+                "rootStudyStartLessonAfterCreate" to false,
                 "mutationTargetStudyId" to null,
                 "mutationTargetImplicitCurrentFocus" to false,
                 "mutationTopic" to null,
@@ -1448,6 +1565,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         rootStudyTopicEvidence: String? = null,
         rootStudyDifficultyEvidence: String? = null,
         rootStudyDifficultyOmitted: Boolean = false,
+        rootStudyStartLessonAfterCreate: Boolean = false,
         currentTranscriptAnswersStudyQuestion: Boolean = false,
         mutationTargetStudyId: Long? = null,
         mutationTargetImplicitCurrentFocus: Boolean = false,
@@ -1475,6 +1593,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "rootStudyTopicEvidence" to rootStudyTopicEvidence,
                 "rootStudyDifficultyEvidence" to rootStudyDifficultyEvidence,
                 "rootStudyDifficultyOmitted" to rootStudyDifficultyOmitted,
+                "rootStudyStartLessonAfterCreate" to rootStudyStartLessonAfterCreate,
                 "mutationTargetStudyId" to mutationTargetStudyId,
                 "mutationTargetImplicitCurrentFocus" to mutationTargetImplicitCurrentFocus,
                 "mutationTopic" to mutationTopic,
@@ -1487,6 +1606,17 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "mutationDifficultyOmitted" to mutationDifficultyOmitted,
             )),
         ))
+
+    private fun rootAttestation(
+        exactCreation: Boolean,
+        startLessonAfterCreate: Boolean = false,
+    ): String = mapper.writeValueAsString(mapOf(
+        "attestations" to listOf(mapOf(
+            "itemId" to "item_1",
+            "exactCreation" to exactCreation,
+            "startLessonAfterCreate" to startLessonAfterCreate,
+        )),
+    ))
 
     private fun envelope(content: String, finishReason: String = "stop"): String = mapper.writeValueAsString(mapOf(
         "choices" to listOf(mapOf(

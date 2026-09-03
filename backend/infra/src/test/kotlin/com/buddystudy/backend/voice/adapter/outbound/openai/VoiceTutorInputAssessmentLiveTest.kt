@@ -75,11 +75,14 @@ class VoiceTutorInputAssessmentLiveTest {
             assertThat(attestation).isNotNull
             val attestationBody = VoiceTutorRootCreationAttestationPromptProvider.requestBody(attestation!!, model) +
                 ("safety_identifier" to VoiceTutorSafetyIdentifier.create(SYNTHETIC_USER_ID, key))
-            val approved = VoiceTutorRootCreationAttestationPromptProvider.parseResponse(
+            val rootAttestations = VoiceTutorRootCreationAttestationPromptProvider.parseResponse(
                 attestation, completion(client, key, attestationBody),
             )
-            println("voice_input_assessment stage=split_attestation exact=${"natural_create" in approved}")
-            assertThat(approved).containsExactly("natural_create")
+            println(
+                "voice_input_assessment stage=split_attestation " +
+                    "exact=${rootAttestations["natural_create"]?.exactCreation}",
+            )
+            assertThat(rootAttestations["natural_create"]?.exactCreation).isTrue()
             val created = useCase.assess(createRequest).decisions.single()
             val nonWrites = useCase.assess(VoiceTutorInputAssessmentRequest(
                 userId = SYNTHETIC_USER_ID,

@@ -30,6 +30,7 @@ internal enum class VoiceTutorProviderEventCorrelation(val diagnosticValue: Stri
 internal enum class VoiceTutorProviderTurnFailureAction(val diagnosticValue: String) {
     RETRY_SCHEDULED("retry"),
     TURN_ABANDONED("turn-abandoned"),
+    SERVER_CALL_REJECTED("server-call-rejected"),
     IGNORED("ignored"),
     SESSION_FATAL("session-fatal"),
 }
@@ -43,6 +44,17 @@ internal data class VoiceTutorProviderTurnFailureDiagnostic(
     val causedEventRef: String,
     val attempt: Int,
     val action: VoiceTutorProviderTurnFailureAction,
+)
+
+/**
+ * Sanitized proof that the provider rejected one conversation item-create envelope. Raw provider
+ * messages and item contents are deliberately absent; the event id still requires exact
+ * correlation against coordinator-owned state before the rejection is actionable.
+ */
+internal data class VoiceTutorProviderItemCreateRejection(
+    val eventId: String,
+    val errorCode: String,
+    val parameter: String,
 )
 
 internal fun classifyRealtimeProviderError(node: JsonNode): VoiceTutorProviderErrorDisposition {
@@ -79,6 +91,24 @@ internal fun isSafeRealtimeInternalControlError(node: JsonNode): Boolean {
 }
 
 /**
+ * Accept only structured validation failures tied to fields owned by the synthetic function-call
+ * envelope. Exact event ownership is intentionally not inferred here; the MCP coordinator must
+ * still match [VoiceTutorProviderItemCreateRejection.eventId] byte-for-byte before dropping work.
+ */
+internal fun safeRealtimeItemCreateRejection(node: JsonNode): VoiceTutorProviderItemCreateRejection? {
+    if (classifyRealtimeProviderError(node) != VoiceTutorProviderErrorDisposition.RECOVERABLE) return null
+    val error = node.path("error")
+    if (safeProviderErrorType(node) != "invalid_request_error") return null
+    val code = safeProviderErrorCode(node).takeIf { it in SAFE_ITEM_CREATE_REJECTION_CODES } ?: return null
+    val parameter = error.get("param")
+        ?.takeIf { it.isTextual && it.textValue() in SAFE_ITEM_CREATE_REJECTION_PARAMETERS }
+        ?.textValue()
+        ?: return null
+    val eventId = safeProviderCausedEventId(node) ?: return null
+    return VoiceTutorProviderItemCreateRejection(eventId, code, parameter)
+}
+
+/**
  * Provider-capacity failures can be emitted without an event id while the
  * Realtime session remains usable. They are safe to abandon, never to replay.
  */
@@ -110,6 +140,24 @@ private fun safeProviderToken(node: JsonNode?): String = node
 
 private val PROVIDER_TOKEN = Regex("[A-Za-z0-9_.-]{1,64}")
 private val PROVIDER_EVENT_ID = Regex("[A-Za-z0-9_.:-]{1,191}")
+
+private val SAFE_ITEM_CREATE_REJECTION_CODES = setOf(
+    "invalid_type",
+    "invalid_value",
+    "missing_required_parameter",
+    "string_above_max_length",
+    "string_below_min_length",
+    "unknown_parameter",
+)
+private val SAFE_ITEM_CREATE_REJECTION_PARAMETERS = setOf(
+    "item",
+    "item.arguments",
+    "item.call_id",
+    "item.id",
+    "item.name",
+    "item.status",
+    "item.type",
+)
 
 // Only errors that make the Realtime session itself unusable belong here.
 // Response/request failures and provider server errors remain turn-local.

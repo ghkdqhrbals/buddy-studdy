@@ -5,6 +5,7 @@ import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpPort
 import com.buddystudy.backend.mcp.adapter.inbound.McpJsonSchemaValidatorProvider
 import com.buddystudy.backend.voice.application.model.VoiceTutorLessonTreeContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
+import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorizationPurpose
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscovery
@@ -66,7 +67,7 @@ class McpVoiceTutorToolAdapter(
         VoiceTutorMcpToolDefinition(
             name = tool.name(),
             description = tool.description().orEmpty() + when (tool.name()) {
-                CREATE_ROOT -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact call only after independently attesting a persisted direct learner choice, including natural first-person new-study intent and an unambiguous topic or level carried from bounded earlier persisted learner speech. Existing roots are returned unchanged, omitted difficulty defaults to 5, and this never selects a lesson or creates a question."
+                CREATE_ROOT -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact call only after independently attesting a persisted direct learner choice, including natural first-person new-study intent and an unambiguous topic or level carried from bounded earlier persisted learner speech. Existing roots are returned unchanged and omitted difficulty defaults to 5. This tool never itself selects a lesson or creates a question. When the same persisted turn was also independently attested to start that new lesson immediately, its result reports AUTO_FOCUS_PENDING and the server performs the exact readback and selection; do not ask the learner to confirm again, and teach only after CREATED_ROOT_IMMEDIATE_START is returned."
                 CREATE_TOPIC -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact call only after independently attesting the current first-person choice of one exact child under the current confirmed focus or one verified descendant. Mere mentions, examples, recommendations, quoted or third-party wishes, and ambiguous targets are not permission."
                 UPDATE_STUDY -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact update only after independently attesting the learner's current first-person choice of an exact saved node and new topic and/or level. Unspecified fields and past question levels are preserved, while mentions, examples, recommendations, quoted or third-party wishes, and ambiguous targets or outcomes are not permission."
                 DELETE_STUDY -> " In a voice call, first call with confirm=false to preview the exact subtree; ask the learner to confirm its name and descendant count, then wait for a new affirmative spoken turn before calling with confirm=true and the returned confirmation_token. Never skip the preview or reuse a token."
@@ -420,12 +421,15 @@ class McpVoiceTutorToolAdapter(
         guidedAdvance: Boolean,
         expectedParentStudyId: Long?,
     ): VoiceTutorMcpToolResult? {
-        val requiredIntent = if (guidedAdvance) {
-            VoiceTutorInputIntent.CONTINUE_TREE
-        } else {
-            VoiceTutorInputIntent.SELECT_SAVED_TOPIC
-        }
         val dialogue = context.dialogueBoundary
+        val createdRootImmediateStart = !guidedAdvance &&
+            dialogue?.focusAuthorization?.purpose ==
+            VoiceTutorFocusAuthorizationPurpose.CREATED_ROOT_IMMEDIATE_START
+        val requiredIntent = when {
+            guidedAdvance -> VoiceTutorInputIntent.CONTINUE_TREE
+            createdRootImmediateStart -> VoiceTutorInputIntent.CREATE_ROOT_STUDY
+            else -> VoiceTutorInputIntent.SELECT_SAVED_TOPIC
+        }
         val providerItemId = dialogue?.latestAcceptedLearnerProviderItemId
         if (dialogue == null || providerItemId.isNullOrBlank() || providerItemId.length > 191 ||
             dialogue.latestAcceptedLearnerIntent != requiredIntent ||
@@ -441,6 +445,28 @@ class McpVoiceTutorToolAdapter(
             )
         }
         val attestedTarget = dialogue.latestAcceptedLearnerTargetStudyId
+        if (createdRootImmediateStart) {
+            if (attestedTarget != id) {
+                return failure(
+                    "LEARNER_TARGET_MISMATCH",
+                    "The server-read root is not the exact study authorized for this immediate lesson start.",
+                )
+            }
+            val candidate = dialogue.latestAcceptedLearnerTargetCandidate?.takeIf {
+                it.studyId == id && it.parentStudyId == null &&
+                    it.topic.isNotBlank() && it.topic == it.topic.trim() && it.topic.length <= 255 &&
+                    it.difficulty?.let { difficulty -> difficulty in 1..10 } == true
+            } ?: return failure(
+                "LEARNER_TARGET_MISMATCH",
+                "The exact server-read root metadata is missing or stale; do not start teaching.",
+            )
+            dialogue.latestAcceptedLearnerTargetTraversal?.takeIf { it.isValidFor(candidate) }
+                ?: return failure(
+                    "LEARNER_TARGET_MISMATCH",
+                    "The exact server-read root path is missing or stale; do not start teaching.",
+                )
+            return null
+        }
         if (attestedTarget == null || dialogue.latestAcceptedLearnerTargetOfferId?.let { it > 0 } != true) {
             return failure(
                 if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
@@ -484,6 +510,9 @@ class McpVoiceTutorToolAdapter(
         if (!isAuthorized(context)) return inactiveCall()
         focusRequestFailure(context, id, guidedAdvance, expectedParentStudyId)?.let { return it }
         val dialogue = requireNotNull(context.dialogueBoundary)
+        val createdRootImmediateStart = !guidedAdvance &&
+            dialogue.focusAuthorization?.purpose ==
+            VoiceTutorFocusAuthorizationPurpose.CREATED_ROOT_IMMEDIATE_START
         val providerItemId = requireNotNull(dialogue.latestAcceptedLearnerProviderItemId)
         val attestedCandidate = requireNotNull(dialogue.latestAcceptedLearnerTargetCandidate)
         val attestedTraversal = requireNotNull(dialogue.latestAcceptedLearnerTargetTraversal)
@@ -568,6 +597,14 @@ class McpVoiceTutorToolAdapter(
             selection.snapshot.topic.isBlank() || selection.snapshot.topic.length > 255 ||
             selection.snapshot.difficulty !in 1..10 || selection.snapshot.parentStudyId?.let { it > 0 } == false
         ) return failure("LESSON_FOCUS_UNCONFIRMED", "The saved focus result could not be verified; do not begin teaching or repeat a selection automatically.")
+        if (createdRootImmediateStart && (
+                selection.snapshot.parentStudyId != null || selection.snapshot.topic != attestedCandidate.topic ||
+                    selection.snapshot.difficulty != attestedCandidate.difficulty
+            )
+        ) return failure(
+            "LESSON_FOCUS_UNCONFIRMED",
+            "The created root changed before its exact level could be focused; no lesson was started.",
+        )
         // Selection already committed. Optional tree enrichment must not turn it into an
         // uncertain failed selection or cause a duplicate focus epoch on retry. In particular,
         // logout/revocation after the atomic commit must not hide the new realtime lesson epoch.
@@ -588,11 +625,18 @@ class McpVoiceTutorToolAdapter(
                 "selected" to true, "voiceLessonContextReady" to true,
                 "voiceLessonFocus" to focus, "voiceLessonTopics" to listOf(focus),
                 "voiceLessonTree" to VoiceTutorLessonTreeContext.metadata(id, saved, listOf(id)),
-                "voiceLessonFocusChange" to if (guidedAdvance) "GUIDED_DIRECT_CHILD" else "EXPLICIT_SELECTION",
-                "notice" to if (guidedAdvance) {
-                    "The next direct child focus is confirmed. Review only its node history, then ask one question at its frozen level; do not skip another edge or append a second question."
-                } else {
-                    "The saved lesson focus is confirmed. Use its frozen level for the next new question, review only its node history first, and wait for clear learner agreement before teaching; prior questions and navigation turns keep their original context."
+                "voiceLessonFocusChange" to when {
+                    guidedAdvance -> "GUIDED_DIRECT_CHILD"
+                    createdRootImmediateStart -> "CREATED_ROOT_IMMEDIATE_START"
+                    else -> "EXPLICIT_SELECTION"
+                },
+                "notice" to when {
+                    guidedAdvance ->
+                        "The next direct child focus is confirmed. Review only its node history, then ask one question at its frozen level; do not skip another edge or append a second question."
+                    createdRootImmediateStart ->
+                        "The newly created root and the learner's immediate lesson start are both confirmed. Use its frozen level and ask the first substantive question now without requesting readiness or permission again."
+                    else ->
+                        "The saved lesson focus is confirmed. Use its frozen level for the next new question, review only its node history first, and wait for clear learner agreement before teaching; prior questions and navigation turns keep their original context."
                 },
             )),
             isError = false, lessonRevision = selection.revision, lessonFocus = selection,
@@ -975,6 +1019,7 @@ class McpVoiceTutorToolAdapter(
             "ROOT_CREATION_RESULT_UNCONFIRMED",
             "The root write result could not be verified. Read saved studies before any retry; do not repeat this write automatically.",
         )
+        val compoundStartPending = creationAuthorization.startLessonAfterCreate
         val cleanResult = VoiceTutorMcpToolResult(
             output = objectMapper.writeValueAsString(linkedMapOf(
                 "created" to created,
@@ -984,10 +1029,21 @@ class McpVoiceTutorToolAdapter(
                 "difficultyLevel" to returnedDifficulty,
                 "enabled" to enabled,
                 "activeForQuestions" to activeForQuestions,
-                "notice" to if (created) {
-                    "The root was created but is not the lesson focus. Read it with get_study, speak that exact saved root, and wait for a NEW agreement to start before select_voice_study."
+                "voiceLessonContextReady" to false,
+                "voiceLessonChangeApplies" to if (compoundStartPending) {
+                    "AUTO_FOCUS_PENDING"
                 } else {
-                    "An exact root already existed and was returned unchanged. Read it with get_study, speak that saved root, and wait for a NEW agreement before select_voice_study."
+                    "REQUIRES_SELECTION"
+                },
+                "notice" to when {
+                    compoundStartPending && created ->
+                        "The root was created and the same persisted learner turn independently authorized starting it now. This result is not yet a lesson focus: do not ask for agreement again, do not originate or retry a pipeline tool, and wait for the server-owned exact readback and CREATED_ROOT_IMMEDIATE_START selection before asking the first question."
+                    compoundStartPending ->
+                        "The exact root already existed unchanged and the same persisted learner turn independently authorized starting it now. This result is not yet a lesson focus: do not ask for agreement again, do not originate or retry a pipeline tool, and wait for the server-owned exact readback and CREATED_ROOT_IMMEDIATE_START selection before asking the first question."
+                    created ->
+                        "The root was created but is not the lesson focus. Read it with get_study, speak that exact saved root, and wait for a NEW agreement to start before select_voice_study."
+                    else ->
+                        "An exact root already existed and was returned unchanged. Read it with get_study, speak that saved root, and wait for a NEW agreement before select_voice_study."
                 },
             )),
             isError = false,
@@ -1217,10 +1273,19 @@ class McpVoiceTutorToolAdapter(
             toolName != CREATE_ROOT && nodes.size <= 32 && ids.all { it in frozenIds },
         )
         if (toolName == CREATE_ROOT) {
-            payload.put("voiceLessonChangeApplies", "REQUIRES_SELECTION")
+            val compoundStartPending = context.dialogueBoundary
+                ?.rootStudyCreationAuthorization?.startLessonAfterCreate == true
+            payload.put(
+                "voiceLessonChangeApplies",
+                if (compoundStartPending) "AUTO_FOCUS_PENDING" else "REQUIRES_SELECTION",
+            )
             payload.put(
                 "notice",
-                "The root was saved but is not a lesson focus. Read this exact root, speak it, and wait for a new learner agreement before select_voice_study; creation itself never starts teaching.",
+                if (compoundStartPending) {
+                    "The root was saved and the same persisted learner turn independently authorized starting it now. This result is not yet a lesson focus: do not ask for agreement again, do not originate or retry a pipeline tool, and wait for the server-owned exact readback and CREATED_ROOT_IMMEDIATE_START selection before asking the first question."
+                } else {
+                    "The root was saved but is not a lesson focus. Read this exact root, speak it, and wait for a new learner agreement before select_voice_study; creation itself never starts teaching."
+                },
             )
         }
         if (toolName == UPDATE_STUDY) {

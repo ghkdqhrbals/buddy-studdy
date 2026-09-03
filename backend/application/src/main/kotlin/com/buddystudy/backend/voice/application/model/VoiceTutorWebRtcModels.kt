@@ -2,7 +2,6 @@ package com.buddystudy.backend.voice.application.model
 
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.backend.auth.Principal
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 data class VoiceTutorWebRtcControlContext(
@@ -51,49 +50,154 @@ data class VoiceTutorDialogueBoundary(
     val studyUpdateAuthorization: VoiceTutorStudyUpdateAuthorization? = null,
 )
 
-class VoiceTutorFocusAuthorization {
-    private val active = AtomicBoolean(true)
+enum class VoiceTutorFocusAuthorizationPurpose {
+    SPOKEN_SAVED_TOPIC_CHOICE,
+    CREATED_ROOT_IMMEDIATE_START,
+}
+
+private sealed interface VoiceTutorOneShotAuthorizationState {
+    data object UnboundActive : VoiceTutorOneShotAuthorizationState
+    data class Bound(val callId: String) : VoiceTutorOneShotAuthorizationState
+    data class ServerExecutionClaimed(val callId: String) : VoiceTutorOneShotAuthorizationState
+    data object Consumed : VoiceTutorOneShotAuthorizationState
+    data object Invalidated : VoiceTutorOneShotAuthorizationState
+}
+
+/**
+ * A server-bound write has two linearization points: the controller first claims
+ * the exact call under its dialogue lock, then the adapter consumes that permit
+ * immediately before the write. A later learner turn may invalidate only an
+ * unclaimed lease; it cannot revoke a write whose controller claim already won.
+ */
+private class VoiceTutorOneShotAuthorization(
+    private val allowUnboundExecution: Boolean,
+) {
+    private val state = AtomicReference<VoiceTutorOneShotAuthorizationState>(
+        VoiceTutorOneShotAuthorizationState.UnboundActive,
+    )
+
+    fun bindToServerCall(callId: String): Boolean {
+        if (callId.isBlank() || callId.length > 128) return false
+        return state.compareAndSet(
+            VoiceTutorOneShotAuthorizationState.UnboundActive,
+            VoiceTutorOneShotAuthorizationState.Bound(callId),
+        )
+    }
+
+    fun isBoundToServerCall(callId: String): Boolean = when (val current = state.get()) {
+        is VoiceTutorOneShotAuthorizationState.Bound -> current.callId == callId
+        is VoiceTutorOneShotAuthorizationState.ServerExecutionClaimed -> current.callId == callId
+        else -> false
+    }
+
+    fun claimExecution(callId: String): Boolean {
+        if (callId.isBlank() || callId.length > 128) return false
+        val current = state.get()
+        if (current is VoiceTutorOneShotAuthorizationState.Bound && current.callId != callId) return false
+        if (current !is VoiceTutorOneShotAuthorizationState.Bound &&
+            (current != VoiceTutorOneShotAuthorizationState.UnboundActive || !allowUnboundExecution)
+        ) return false
+        return state.compareAndSet(current, VoiceTutorOneShotAuthorizationState.ServerExecutionClaimed(callId))
+    }
 
     fun invalidate() {
-        active.set(false)
+        while (true) {
+            val current = state.get()
+            when (current) {
+                VoiceTutorOneShotAuthorizationState.UnboundActive,
+                is VoiceTutorOneShotAuthorizationState.Bound,
+                -> if (state.compareAndSet(current, VoiceTutorOneShotAuthorizationState.Invalidated)) return
+                is VoiceTutorOneShotAuthorizationState.ServerExecutionClaimed,
+                VoiceTutorOneShotAuthorizationState.Consumed,
+                VoiceTutorOneShotAuthorizationState.Invalidated,
+                -> return
+            }
+        }
+    }
+
+    fun consume(): Boolean = when (val current = state.get()) {
+        VoiceTutorOneShotAuthorizationState.UnboundActive -> allowUnboundExecution && state.compareAndSet(
+            current,
+            VoiceTutorOneShotAuthorizationState.Consumed,
+        )
+        is VoiceTutorOneShotAuthorizationState.ServerExecutionClaimed -> state.compareAndSet(
+            current,
+            VoiceTutorOneShotAuthorizationState.Consumed,
+        )
+        else -> false
+    }
+
+    fun isActive(): Boolean = when (state.get()) {
+        VoiceTutorOneShotAuthorizationState.UnboundActive,
+        is VoiceTutorOneShotAuthorizationState.Bound,
+        is VoiceTutorOneShotAuthorizationState.ServerExecutionClaimed,
+        -> true
+        VoiceTutorOneShotAuthorizationState.Consumed,
+        VoiceTutorOneShotAuthorizationState.Invalidated,
+        -> false
+    }
+}
+
+class VoiceTutorFocusAuthorization(
+    val purpose: VoiceTutorFocusAuthorizationPurpose =
+        VoiceTutorFocusAuthorizationPurpose.SPOKEN_SAVED_TOPIC_CHOICE,
+) {
+    private val oneShot = VoiceTutorOneShotAuthorization(
+        allowUnboundExecution = purpose == VoiceTutorFocusAuthorizationPurpose.SPOKEN_SAVED_TOPIC_CHOICE,
+    )
+
+    fun bindToServerCall(callId: String): Boolean =
+        purpose == VoiceTutorFocusAuthorizationPurpose.CREATED_ROOT_IMMEDIATE_START &&
+            oneShot.bindToServerCall(callId)
+
+    fun isBoundToServerCall(callId: String): Boolean = oneShot.isBoundToServerCall(callId)
+
+    fun claimExecution(callId: String): Boolean = oneShot.claimExecution(callId)
+
+    fun invalidate() {
+        oneShot.invalidate()
     }
 
     /** Linearization point immediately before the persistent focus write. */
-    fun consume(): Boolean = active.compareAndSet(true, false)
+    fun consume(): Boolean = oneShot.consume()
 
-    fun isActive(): Boolean = active.get()
+    fun isActive(): Boolean = oneShot.isActive()
 
-    override fun toString(): String = "VoiceTutorFocusAuthorization(active=${active.get()})"
+    override fun toString(): String =
+        "VoiceTutorFocusAuthorization(active=${oneShot.isActive()}, purpose=$purpose)"
 }
 
 class VoiceTutorRootStudyCreationAuthorization(
     val topic: String,
     val difficulty: Int,
+    /** Server-attested compound intent; never derived from provider tool arguments or local text rules. */
+    val startLessonAfterCreate: Boolean = false,
 ) {
     init {
         require(topic.isNotBlank() && topic == topic.trim() && topic.length <= 255)
         require(difficulty in 1..10)
     }
 
-    private val active = AtomicBoolean(true)
-    private val serverCallId = AtomicReference<String?>(null)
+    private val oneShot = VoiceTutorOneShotAuthorization(allowUnboundExecution = false)
 
-    fun bindToServerCall(callId: String): Boolean =
-        callId.isNotBlank() && callId.length <= 128 && serverCallId.compareAndSet(null, callId)
+    fun bindToServerCall(callId: String): Boolean = oneShot.bindToServerCall(callId)
 
-    fun isBoundToServerCall(callId: String): Boolean = serverCallId.get() == callId
+    fun isBoundToServerCall(callId: String): Boolean = oneShot.isBoundToServerCall(callId)
+
+    fun claimExecution(callId: String): Boolean = oneShot.claimExecution(callId)
 
     fun invalidate() {
-        active.set(false)
+        oneShot.invalidate()
     }
 
     /** Linearization point immediately before the create-only root write begins. */
-    fun consume(): Boolean = active.compareAndSet(true, false)
+    fun consume(): Boolean = oneShot.consume()
 
-    fun isActive(): Boolean = active.get()
+    fun isActive(): Boolean = oneShot.isActive()
 
     override fun toString(): String =
-        "VoiceTutorRootStudyCreationAuthorization(active=${active.get()}, topic=[redacted], difficulty=$difficulty)"
+        "VoiceTutorRootStudyCreationAuthorization(active=${oneShot.isActive()}, topic=[redacted], " +
+            "difficulty=$difficulty, startLessonAfterCreate=$startLessonAfterCreate)"
 }
 
 class VoiceTutorChildStudyCreationAuthorization(
@@ -107,25 +211,25 @@ class VoiceTutorChildStudyCreationAuthorization(
         require(difficulty in 1..10)
     }
 
-    private val active = AtomicBoolean(true)
-    private val serverCallId = AtomicReference<String?>(null)
+    private val oneShot = VoiceTutorOneShotAuthorization(allowUnboundExecution = false)
 
-    fun bindToServerCall(callId: String): Boolean =
-        callId.isNotBlank() && callId.length <= 128 && serverCallId.compareAndSet(null, callId)
+    fun bindToServerCall(callId: String): Boolean = oneShot.bindToServerCall(callId)
 
-    fun isBoundToServerCall(callId: String): Boolean = serverCallId.get() == callId
+    fun isBoundToServerCall(callId: String): Boolean = oneShot.isBoundToServerCall(callId)
+
+    fun claimExecution(callId: String): Boolean = oneShot.claimExecution(callId)
 
     fun invalidate() {
-        active.set(false)
+        oneShot.invalidate()
     }
 
     /** Linearization point immediately before the exact child create begins. */
-    fun consume(): Boolean = active.compareAndSet(true, false)
+    fun consume(): Boolean = oneShot.consume()
 
-    fun isActive(): Boolean = active.get()
+    fun isActive(): Boolean = oneShot.isActive()
 
     override fun toString(): String =
-        "VoiceTutorChildStudyCreationAuthorization(active=${active.get()}, parentStudyId=$parentStudyId, " +
+        "VoiceTutorChildStudyCreationAuthorization(active=${oneShot.isActive()}, parentStudyId=$parentStudyId, " +
             "topic=[redacted], difficulty=$difficulty)"
 }
 
@@ -141,24 +245,24 @@ class VoiceTutorStudyUpdateAuthorization(
         require(difficulty?.let { it in 1..10 } != false)
     }
 
-    private val active = AtomicBoolean(true)
-    private val serverCallId = AtomicReference<String?>(null)
+    private val oneShot = VoiceTutorOneShotAuthorization(allowUnboundExecution = false)
 
-    fun bindToServerCall(callId: String): Boolean =
-        callId.isNotBlank() && callId.length <= 128 && serverCallId.compareAndSet(null, callId)
+    fun bindToServerCall(callId: String): Boolean = oneShot.bindToServerCall(callId)
 
-    fun isBoundToServerCall(callId: String): Boolean = serverCallId.get() == callId
+    fun isBoundToServerCall(callId: String): Boolean = oneShot.isBoundToServerCall(callId)
+
+    fun claimExecution(callId: String): Boolean = oneShot.claimExecution(callId)
 
     fun invalidate() {
-        active.set(false)
+        oneShot.invalidate()
     }
 
     /** Linearization point immediately before the exact name/level patch begins. */
-    fun consume(): Boolean = active.compareAndSet(true, false)
+    fun consume(): Boolean = oneShot.consume()
 
-    fun isActive(): Boolean = active.get()
+    fun isActive(): Boolean = oneShot.isActive()
 
     override fun toString(): String =
-        "VoiceTutorStudyUpdateAuthorization(active=${active.get()}, studyId=$studyId, " +
+        "VoiceTutorStudyUpdateAuthorization(active=${oneShot.isActive()}, studyId=$studyId, " +
             "hasTopic=${topic != null}, difficulty=$difficulty)"
 }

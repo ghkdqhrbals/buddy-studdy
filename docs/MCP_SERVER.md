@@ -122,7 +122,10 @@ rollout gate.
   create/save/root words. That statement itself is approval: structured semantic
   assessment plus an independent semantic attestation extracts the exact
   learner-spoken topic and requested 1–10 level, or default 5 only when the level
-  was omitted, and binds that tuple to a call-local one-shot write lease. Neither
+  was omitted, and binds that tuple to a call-local one-shot write lease. Each
+  decision also independently sets `startLessonAfterCreate` only when that same
+  current persisted turn unambiguously requests immediate learning; both must
+  agree before the server grants that distinct one-shot focus purpose. Neither
   semantic decision uses regex, keyword lists, utterance length, punctuation or
   sentence completeness.
   The tutor calls `create_root_study` immediately and must not add a preview,
@@ -132,13 +135,19 @@ rollout gate.
   reuse the lease. The owner-scoped common write is
   create-only: a normalized exact root duplicate is returned unchanged, while a
   matching child conflicts. It never generates a question or consumes question
-  quota, and its result never selects or starts a lesson. After that result, the
+  quota, and its result alone never selects or starts a lesson. After that result, the
   server bridge schedules `get_study` for the trusted returned ID and blocks the
   spoken acknowledgment until both function outputs are acknowledged and the
   exact root readback succeeds. Failed or mismatched readback cannot claim a
-  saved outcome and never retries the create automatically. The tutor then speaks
-  the exact read-back root as a separate start offer, receives fresh consent and
-  calls `select_voice_study`.
+  saved outcome and never retries the create automatically. A create-only result
+  reports `REQUIRES_SELECTION`; the tutor then speaks the exact read-back root as
+  a separate start offer, receives fresh consent and calls
+  `select_voice_study`. A compound create-and-start result instead reports
+  `AUTO_FOCUS_PENDING`: the model remains silent while the server performs the
+  exact readback and one bound selection. Only a successful
+  `CREATED_ROOT_IMMEDIATE_START` result permits the first substantive question
+  without another confirmation. Failure cannot reuse the old learner turn or
+  replay the mutation.
 - Child creation requires a semantically clear current first-person choice of one
   exact child and an unambiguous parent inside the call's selected study subtree.
   It runs once in that turn without requiring imperative grammar, restatement or

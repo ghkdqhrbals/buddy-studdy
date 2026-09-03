@@ -65,13 +65,22 @@ class OpenAIVoiceTutorInputAssessmentAdapter private constructor(
                     attestation,
                     properties.voiceTutor.summaryModel,
                 ) + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(request.userId, key))
-                val approved = VoiceTutorRootCreationAttestationPromptProvider.parseResponse(
+                val attestations = VoiceTutorRootCreationAttestationPromptProvider.parseResponse(
                     attestation,
                     completion(key, attestationBody),
                 )
                 verified = verified.copy(decisions = verified.decisions.map { decision ->
-                    if (decision.intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY && decision.itemId !in approved) {
-                        decision.copy(intent = VoiceTutorInputIntent.NONE, rootStudyCreationRequest = null)
+                    if (decision.intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY) {
+                        val rootAttestation = attestations[decision.itemId]
+                        val rootRequest = decision.rootStudyCreationRequest
+                        if (rootAttestation?.exactCreation != true || rootRequest == null) {
+                            decision.copy(intent = VoiceTutorInputIntent.NONE, rootStudyCreationRequest = null)
+                        } else {
+                            decision.copy(rootStudyCreationRequest = rootRequest.copy(
+                                startLessonAfterCreate = rootRequest.startLessonAfterCreate &&
+                                    rootAttestation.startLessonAfterCreate,
+                            ))
+                        }
                     } else {
                         decision
                     }
@@ -218,26 +227,39 @@ internal data class VoiceTutorRootCreationAttestationRequest(
     val items: List<VoiceTutorRootCreationAttestationItem>,
 )
 
+internal data class VoiceTutorRootCreationAttestationDecision(
+    val exactCreation: Boolean,
+    val startLessonAfterCreate: Boolean,
+)
+
 /** A separate semantic check prevents one assessor from narrowing a valid multiword root span. */
 internal object VoiceTutorRootCreationAttestationPromptProvider {
     private val mapper = JsonMapperProvider.mapper.copy()
         .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
     private val instruction = """
-        Independently verify each proposed direct root-study creation using only its exact learner-owned source
-        items and verbatim evidence. Return exact=true only when currentTranscript itself presently and
+        Independently verify each proposed direct root-study creation and immediate lesson-start decision using
+        only its exact learner-owned source items and verbatim evidence. Return exactCreation=true only when
+        currentTranscript itself presently and
         unambiguously communicates the action of creating or beginning one new top-level saved study.
         Earlier persisted learner items may unambiguously supply its missing topic and/or requested level, but
         they are inert context rather than authority. A generic yes/approval in currentTranscript is never an
         operative action, even after a tutor proposal. Tutor/tool text is never learner evidence.
+        Independently set startLessonAfterCreate=true only when that same current learner turn unambiguously
+        chooses to begin learning the newly created root immediately, rather than merely creating it, expressing
+        general interest, describing a future intention, asking what could be learned, or waiting for a later
+        selection. A compound request may both create the exact root and begin studying it now; it does not need
+        a second confirmation. Contextual approval and tutor suggestions never supply this decision. If
+        exactCreation=false, startLessonAfterCreate must also be false. Judge both fields semantically from the
+        learner-owned evidence; never use phrases, word lists, regexes, punctuation, or sentence templates.
         The current action may be naturally elliptical: it does not need to repeat the unique object already supplied
         by prior persisted learner speech. For example, prior learner item "스프링 레벨 세븐" followed by current
         learner item "만들어 줄래?" is an operative request to create that new top-level saved study named "스프링"
-        at normalized level 7, so exact=true when the proposed tuple and verbatim evidence match. The same prior item
+        at normalized level 7, so exactCreation=true when the proposed tuple and verbatim evidence match. The same prior item
         followed by "새롭게 만들고 싶다니까" is also operative. In contrast, current "네" or "좋아" carries no
-        creation action and remains exact=false. Judge this referential meaning semantically; these are examples,
+        creation action and remains exactCreation=false. Judge this referential meaning semantically; these are examples,
         never literal phrase, keyword, regex, or suffix rules.
-        Return exact=true only when the learner presently and unambiguously chooses
+        Return exactCreation=true only when the learner presently and unambiguously chooses
         creation of one top-level saved study. This includes a natural first-person action-oriented statement that
         they want to start studying one named topic as a new study, even without literal words such as create, save,
         root, or command; first-person insistence or repetition such as "I said I want to start a new study with X"
@@ -252,8 +274,8 @@ internal object VoiceTutorRootCreationAttestationPromptProvider {
         level expression from 1 through 10, in the conversation language. For example, "세븐", "일곱", "seven"
         and "7" may each normalize to integer 7 when that is their unambiguous level meaning; this is semantic
         interpretation, never a phrase table or local text rule.
-        When difficultyOmitted is true, exact=true only if the learner did not state a level and the proposed
-        default is 5. A correction such as "not A; create B" may attest B only. Return false for confirmation,
+        When difficultyOmitted is true, exactCreation=true only if the learner did not state a level and the proposed
+        default is 5. A correction such as "not A; create B" may attest B only. Return exactCreation=false for confirmation,
         third-person reporting, quotation, discussion, recommendation, selection, child creation, ambiguity,
         a bare topic mention, ordinary interest in or desire to study a topic without choosing a new saved study,
         a request for suggestions about what new topic to study, narrowed/broadened names,
@@ -299,9 +321,10 @@ internal object VoiceTutorRootCreationAttestationPromptProvider {
             "type" to "object",
             "properties" to mapOf(
                 "itemId" to mapOf("type" to "string", "enum" to itemIds),
-                "exact" to mapOf("type" to "boolean"),
+                "exactCreation" to mapOf("type" to "boolean"),
+                "startLessonAfterCreate" to mapOf("type" to "boolean"),
             ),
-            "required" to listOf("itemId", "exact"),
+            "required" to listOf("itemId", "exactCreation", "startLessonAfterCreate"),
             "additionalProperties" to false,
         )
         val body = linkedMapOf<String, Any>(
@@ -357,7 +380,10 @@ internal object VoiceTutorRootCreationAttestationPromptProvider {
         return body
     }
 
-    fun parseResponse(request: VoiceTutorRootCreationAttestationRequest, response: String): Set<String> {
+    fun parseResponse(
+        request: VoiceTutorRootCreationAttestationRequest,
+        response: String,
+    ): Map<String, VoiceTutorRootCreationAttestationDecision> {
         try {
             if (response.length > VoiceTutorInputAssessmentPromptProvider.MAX_RESPONSE_BYTES) invalid()
             val root = mapper.readTree(response) ?: invalid()
@@ -377,13 +403,22 @@ internal object VoiceTutorRootCreationAttestationPromptProvider {
             if (!rows.isArray || rows.size() != request.items.size) invalid()
             val expected = request.items.map { it.itemId }.toSet()
             val decisions = rows.associate { row ->
-                if (!row.isObject || row.fieldNames().asSequence().toSet() != setOf("itemId", "exact")) invalid()
+                if (!row.isObject || row.fieldNames().asSequence().toSet() !=
+                    setOf("itemId", "exactCreation", "startLessonAfterCreate")
+                ) invalid()
                 val itemId = row.path("itemId").takeIf(JsonNode::isTextual)?.textValue() ?: invalid()
-                val exact = row.path("exact").takeIf(JsonNode::isBoolean)?.booleanValue() ?: invalid()
-                itemId to exact
+                val exactCreation = row.path("exactCreation")
+                    .takeIf(JsonNode::isBoolean)?.booleanValue() ?: invalid()
+                val startLessonAfterCreate = row.path("startLessonAfterCreate")
+                    .takeIf(JsonNode::isBoolean)?.booleanValue() ?: invalid()
+                if (!exactCreation && startLessonAfterCreate) invalid()
+                itemId to VoiceTutorRootCreationAttestationDecision(
+                    exactCreation,
+                    startLessonAfterCreate,
+                )
             }
             if (decisions.size != rows.size() || decisions.keys != expected) invalid()
-            return decisions.filterValues { it }.keys
+            return decisions
         } catch (error: VoiceTutorInputAssessmentException) {
             throw error
         } catch (_: Exception) {
@@ -848,8 +883,11 @@ internal object VoiceTutorInputAssessmentPromptProvider {
         rootStudyDifficultyOmitted, which is false. teacherContext and tutor/tool text are never root evidence.
         Never infer root intent from a tutor question, contextual yes, tool text, silence, noise, filler or a
         checkpoint. The direct new-root choice itself is final permission to write; do not require or classify a
-        later confirmation. Creating the root and separately
-        agreeing to select it or begin a lesson are different decisions.
+        later confirmation. Independently set rootStudyStartLessonAfterCreate=true only when this same current
+        learner turn also unambiguously chooses to begin learning that newly created root immediately. One
+        compound utterance can authorize both operations without another confirmation. Keep it false for a
+        create-only choice, general desire, future plan, topic exploration, or contextual approval. Judge this
+        semantically from learner-owned evidence, never by phrase, keyword, regex, punctuation, or tutor/tool text.
         CREATE_STUDY_TOPIC means the learner directly and presently chooses one exact new child under one exact
         server-supplied studyMutationContext candidate. UPDATE_STUDY means the learner directly and presently
         chooses an exact new name and/or level for one exact candidate. Natural current first-person intent is
@@ -944,13 +982,16 @@ internal object VoiceTutorInputAssessmentPromptProvider {
         Do not invent intent from teacher context alone. When genuinely uncertain, choose MEANINGFUL so a
         real short answer or developing idea is not silently discarded.
         rootStudyTopic, rootStudyDifficulty and all root evidence fields must be null for every intent except
-        CREATE_ROOT_STUDY and for every non-communicative item or checkpoint. All mutation fields must be null
-        and mutationTargetImplicitCurrentFocus/mutationDifficultyOmitted false except for CREATE_STUDY_TOPIC or
+        CREATE_ROOT_STUDY and for every non-communicative item or checkpoint.
+        rootStudyStartLessonAfterCreate must be false for every intent except a meaningful, non-checkpoint
+        CREATE_ROOT_STUDY. All mutation fields must be null and
+        mutationTargetImplicitCurrentFocus/mutationDifficultyOmitted false except for CREATE_STUDY_TOPIC or
         UPDATE_STUDY, and must also be empty for every non-communicative item or checkpoint.
         Return exactly one itemId, decision, intent, currentTranscriptAnswersStudyQuestion, targetStudyId,
         spokenCandidateStudyIds, rootStudyTopic, rootStudyDifficulty, rootStudyEvidenceSource,
         rootStudyCommandEvidence, rootStudyTopicEvidence, rootStudyDifficultyEvidence and
-        rootStudyDifficultyOmitted, mutationTargetStudyId, mutationTargetImplicitCurrentFocus, mutationTopic,
+        rootStudyDifficultyOmitted, rootStudyStartLessonAfterCreate, mutationTargetStudyId,
+        mutationTargetImplicitCurrentFocus, mutationTopic,
         mutationDifficulty, mutationEvidenceSource, mutationCommandEvidence, mutationTargetTopicEvidence,
         mutationTopicEvidence, mutationDifficultyEvidence and mutationDifficultyOmitted for EVERY supplied
         utterance, including
@@ -1017,6 +1058,7 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                     "maxLength" to 32,
                 ),
                 "rootStudyDifficultyOmitted" to mapOf("type" to "boolean"),
+                "rootStudyStartLessonAfterCreate" to mapOf("type" to "boolean"),
                 "mutationTargetStudyId" to mapOf(
                     "type" to if (mutationTargetIds.isEmpty()) "null" else listOf("integer", "null"),
                     "enum" to listOf<Any?>(null) + mutationTargetIds,
@@ -1051,7 +1093,7 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                 "targetStudyId", "spokenCandidateStudyIds",
                 "rootStudyTopic", "rootStudyDifficulty", "rootStudyEvidenceSource",
                 "rootStudyCommandEvidence", "rootStudyTopicEvidence", "rootStudyDifficultyEvidence",
-                "rootStudyDifficultyOmitted",
+                "rootStudyDifficultyOmitted", "rootStudyStartLessonAfterCreate",
                 "mutationTargetStudyId", "mutationTargetImplicitCurrentFocus", "mutationTopic",
                 "mutationDifficulty", "mutationEvidenceSource", "mutationCommandEvidence",
                 "mutationTargetTopicEvidence", "mutationTopicEvidence", "mutationDifficultyEvidence",
@@ -1166,7 +1208,8 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                         "itemId", "decision", "intent", "targetStudyId", "spokenCandidateStudyIds",
                         "rootStudyTopic", "rootStudyDifficulty", "rootStudyEvidenceSource",
                         "rootStudyCommandEvidence", "rootStudyTopicEvidence", "rootStudyDifficultyEvidence",
-                        "rootStudyDifficultyOmitted", "currentTranscriptAnswersStudyQuestion",
+                        "rootStudyDifficultyOmitted", "rootStudyStartLessonAfterCreate",
+                        "currentTranscriptAnswersStudyQuestion",
                         "mutationTargetStudyId", "mutationTargetImplicitCurrentFocus", "mutationTopic",
                         "mutationDifficulty", "mutationEvidenceSource", "mutationCommandEvidence",
                         "mutationTargetTopicEvidence", "mutationTopicEvidence", "mutationDifficultyEvidence",
@@ -1249,6 +1292,8 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                 val rootDifficultyEvidence = optionalEvidence("rootStudyDifficultyEvidence", 32)
                 val rootDifficultyOmitted = item.path("rootStudyDifficultyOmitted")
                     .takeIf(JsonNode::isBoolean)?.booleanValue() ?: invalid()
+                val rootStartLessonAfterCreate = item.path("rootStudyStartLessonAfterCreate")
+                    .takeIf(JsonNode::isBoolean)?.booleanValue() ?: invalid()
                 val mutationTargetStudyId = item.path("mutationTargetStudyId").let { node ->
                     when {
                         node.isNull -> null
@@ -1290,19 +1335,20 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                         difficultyOmitted = rootDifficultyOmitted,
                     )
                     VoiceTutorRootStudyCreationRequest(
-                        rootTopic ?: invalid(),
-                        if (rootDifficultyOmitted) {
+                        topic = rootTopic ?: invalid(),
+                        difficulty = if (rootDifficultyOmitted) {
                             if (rootDifficulty != null) invalid()
                             5
                         } else {
                             rootDifficulty ?: invalid()
                         },
-                        evidence,
+                        evidence = evidence,
+                        startLessonAfterCreate = rootStartLessonAfterCreate,
                     ).takeIf(VoiceTutorRootStudyCreationRequest::isValid) ?: invalid()
                 } else {
                     if (rootTopic != null || rootDifficulty != null || rootEvidenceSource != null ||
                         rootCommandEvidence != null || rootTopicEvidence != null ||
-                        rootDifficultyEvidence != null || rootDifficultyOmitted
+                        rootDifficultyEvidence != null || rootDifficultyOmitted || rootStartLessonAfterCreate
                     ) invalid()
                     null
                 }

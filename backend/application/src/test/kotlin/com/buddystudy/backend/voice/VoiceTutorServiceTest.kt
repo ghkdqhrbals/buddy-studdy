@@ -323,7 +323,7 @@ class VoiceTutorServiceTest {
     }
 
     @Test
-    fun `voice root creation writes on a direct natural new study choice and keeps separate lesson consent`() =
+    fun `voice root creation supports create only and independently attested compound start`() =
         runBlocking<Unit> {
             val persistence = FakePersistence(now)
             val instructions = service(persistence).connect(principal, persistence.session.id).instructions
@@ -342,13 +342,17 @@ class VoiceTutorServiceTest {
                 .contains("A generic yes")
                 .contains("never authorizes creation")
                 .contains("one-shot write to the exact topic and effective level")
-                .contains("saved in My Studies but is not yet the lesson focus")
-                .contains("does not by itself start learning")
-                .contains("After created=true, call get_study with the returned id")
-                .contains("ask once whether to start learning it")
-                .contains("wait for a NEW agreement and use select_voice_study")
-                .contains("If created=false, the existing root was preserved unchanged")
-                .contains("Only after select_voice_study returns voiceLessonFocus")
+                .contains("only no-second-confirmation exception")
+                .contains("server independently attests as both create_root_study and startLessonAfterCreate")
+                .contains("voiceLessonFocusChange=CREATED_ROOT_IMMEDIATE_START")
+                .contains("A create_root_study result never by itself establishes lesson focus")
+                .contains("create-only result with voiceLessonChangeApplies=REQUIRES_SELECTION")
+                .contains("wait for a NEW agreement")
+                .contains("server-attested compound result with voiceLessonChangeApplies=AUTO_FOCUS_PENDING")
+                .contains("do not speak a confirmation question")
+                .contains("server-owned exact get_study and select_voice_study results")
+                .contains("ask that first substantive question immediately without another readiness or permission prompt")
+                .contains("If the compound readback or focus fails")
                 .contains("study-tree changes are separate from generating a question and consume no question quota")
         }
 

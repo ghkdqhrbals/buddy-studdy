@@ -210,6 +210,7 @@ class VoiceTutorInputAssessmentServiceTest {
             valid.copy(candidates = listOf(VoiceTutorStudyTargetCandidate(101, 0, "Redis"))),
             valid.copy(candidates = listOf(VoiceTutorStudyTargetCandidate(101, null, " "))),
             valid.copy(candidates = listOf(VoiceTutorStudyTargetCandidate(101, null, "x".repeat(256)))),
+            valid.copy(candidates = listOf(VoiceTutorStudyTargetCandidate(101, null, "Redis", difficulty = 11))),
             valid.copy(candidateTraversals = emptyMap()),
             valid.copy(candidateTraversals = mapOf(
                 202L to VoiceTutorStudyTargetTraversal(),

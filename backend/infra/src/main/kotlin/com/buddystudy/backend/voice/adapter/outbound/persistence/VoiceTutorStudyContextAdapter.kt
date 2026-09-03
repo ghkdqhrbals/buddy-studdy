@@ -136,7 +136,8 @@ class VoiceTutorStudyContextAdapter(
             expectedCandidate?.let {
                 it.studyId != studyId || it.studyId <= 0 ||
                     it.parentStudyId?.let { parent -> parent <= 0 } == true ||
-                    it.topic.isBlank() || it.topic.length > 255
+                    it.topic.isBlank() || it.topic.length > 255 ||
+                    it.difficulty?.let { difficulty -> difficulty !in 1..10 } == true
             } == true || expectedTraversal?.let { traversal ->
                 expectedCandidate?.let(traversal::isValidFor) != true
             } == true
@@ -157,7 +158,8 @@ class VoiceTutorStudyContextAdapter(
         val live = readOwned(userId, listOf(studyId)).singleOrNull()?.takeIf(::validMetadata) ?: return null
         if (expectedCandidate != null && (
                 live.parentStudyId != expectedCandidate.parentStudyId ||
-                    live.topic != expectedCandidate.topic
+                    live.topic != expectedCandidate.topic ||
+                    expectedCandidate.difficulty?.let { live.difficulty != it } == true
             )
         ) return null
         if (expectedParentStudyId != null && (
@@ -459,7 +461,8 @@ class VoiceTutorStudyContextAdapter(
         return path.all { candidate ->
             val live = lockedById[candidate.studyId] ?: return@all false
             val offeredMetadataStillExact = expectedCandidate?.takeIf { it.studyId == candidate.studyId }?.let {
-                live.parentStudyId == it.parentStudyId && live.topic == it.topic
+                live.parentStudyId == it.parentStudyId && live.topic == it.topic &&
+                    it.difficulty?.let { expectedDifficulty -> live.difficulty == expectedDifficulty } != false
             } ?: true
             validMetadata(live) && offeredMetadataStillExact && live.parentStudyId == candidate.parentStudyId &&
                 (candidate.studyId in frozenIds ||

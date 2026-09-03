@@ -21,14 +21,14 @@ internal fun voiceTutorMcpToolRelay(
     executionTimeoutMillis: Long = 15_000,
 ): Mono<Void> = controller.toolActions().concatMap({ call ->
     mono {
-        if (!controller.beginToolExecution(call.callId)) return@mono
+        val dialogueBoundary = controller.claimToolExecution(call.callId) ?: return@mono
         val result = if (call.arguments == null) {
             toolError("INVALID_ARGUMENTS", "Tool arguments must be a bounded JSON object.")
         } else {
             try {
                 withTimeout(executionTimeoutMillis) {
                     tools.execute(
-                        context.copy(dialogueBoundary = controller.mutationDialogueBoundary(call.callId)),
+                        context.copy(dialogueBoundary = dialogueBoundary),
                         call.name,
                         call.arguments,
                     )
@@ -49,7 +49,7 @@ internal fun voiceTutorMcpToolRelay(
         val validDeletion = kind != VoiceTutorStudyChangeKind.DELETED ||
             (result.deletedStudyIds.size in 1..128 && studyId in result.deletedStudyIds &&
                 result.deletedStudyIds.all { it > 0 } && result.deletedStudyIds.distinct().size == result.deletedStudyIds.size)
-        if (controller.acceptsInputEvents()) {
+        if (controller.shouldRelayLessonFocusEvent(call.callId) && controller.acceptsInputEvents()) {
             voiceTutorLessonFocusEvent(result)?.let { onProviderEvent(it, false, true) }
         }
         if (!result.isError && result.studyTreeChanged && studyId != null && kind != null && validDeletion && controller.acceptsInputEvents()) {

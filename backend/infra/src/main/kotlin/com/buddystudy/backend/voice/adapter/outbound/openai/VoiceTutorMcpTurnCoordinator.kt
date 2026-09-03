@@ -25,6 +25,14 @@ internal data class VoiceTutorScheduledMcpCall(
     val providerEvent: Map<String, Any?>,
 )
 
+/** Bounded identity of one exact server-owned function item rejected before it could execute. */
+internal data class VoiceTutorRejectedServerCall(
+    val callId: String,
+    val toolName: String,
+    /** False for an idempotent duplicate observation of the same exact provider rejection. */
+    val newlyTombstoned: Boolean,
+)
+
 /**
  * All transitions run under VoiceTutorDuplexTurnController's lock. Only a
  * correlated, successfully completed response can enqueue work. Tool execution
@@ -36,6 +44,7 @@ internal class VoiceTutorMcpTurnCoordinator(
 ) {
     private val seenCallIds = linkedSetOf<String>()
     private val pending = linkedMapOf<String, Pending>()
+    private val rejectedServerCallsByEventId = linkedMapOf<String, RejectedServerCall>()
     private var roundCount = 0
     private var closed = false
     var continuationReady: Boolean = false
@@ -115,6 +124,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         }
         val callItemId = "vtmcp_c_${UUID.randomUUID().toString().replace("-", "").take(24)}"
         val outputItemId = "vtmcp_${UUID.randomUUID().toString().replace("-", "").take(26)}"
+        val providerCallEventId = "buddystudy-internal-server-tool-call-${UUID.randomUUID()}"
         val call = VoiceTutorMcpCall(callId, name, frozenArguments)
         if (!seenCallIds.add(callId)) throw VoiceTutorMcpProtocolException()
         // This is the first tool round for the newly persisted learner turn.
@@ -125,11 +135,12 @@ internal class VoiceTutorMcpTurnCoordinator(
             outputItemId = outputItemId,
             toolName = name,
             providerCallItemId = callItemId,
+            providerCallEventId = providerCallEventId,
             serverCall = call,
             providerCallAcknowledgementDeadline = nowNanos + acknowledgementTimeout.toNanos(),
         )
         val event = linkedMapOf<String, Any?>(
-            "event_id" to "buddystudy-internal-server-tool-call-${UUID.randomUUID()}",
+            "event_id" to providerCallEventId,
             "type" to "conversation.item.create",
             "item" to linkedMapOf(
                 "id" to callItemId,
@@ -146,6 +157,27 @@ internal class VoiceTutorMcpTurnCoordinator(
             throw VoiceTutorMcpProtocolException()
         }
         return VoiceTutorScheduledMcpCall(callId, event)
+    }
+
+    /**
+     * Tombstones only the exact synthetic item-create event while its call is still wholly
+     * unobserved by the provider. The call id remains in [seenCallIds], so neither a late ACK nor
+     * any replay can enqueue or execute it. Repeating the same exact rejection is a safe no-op.
+     * Unknown, already released, or already started calls return null and retain their state.
+     */
+    fun tombstoneRejectedServerCall(providerEventId: String): VoiceTutorRejectedServerCall? {
+        rejectedServerCallsByEventId[providerEventId]?.let { rejected ->
+            return VoiceTutorRejectedServerCall(rejected.callId, rejected.toolName, newlyTombstoned = false)
+        }
+        val entry = pending.entries.singleOrNull { (_, call) ->
+            call.providerCallEventId == providerEventId && call.serverCall != null &&
+                !call.serverCallReleased && !call.started && call.expectedOutput == null &&
+                call.providerCallAcknowledgementDeadline != null && call.acknowledgementDeadline == null
+        } ?: return null
+        val removed = pending.remove(entry.key) ?: return null
+        val rejected = RejectedServerCall(entry.key, removed.toolName)
+        rejectedServerCallsByEventId[providerEventId] = rejected
+        return VoiceTutorRejectedServerCall(rejected.callId, rejected.toolName, newlyTombstoned = true)
     }
 
     /** Duplicate or mutated provider ACKs never release server-owned work. */
@@ -170,7 +202,7 @@ internal class VoiceTutorMcpTurnCoordinator(
 
     fun beginExecution(callId: String): Boolean {
         val call = pending[callId] ?: return false
-        if (closed || call.started) return false
+        if (closed || call.started || (call.serverCall != null && !call.serverCallReleased)) return false
         call.started = true
         return true
     }
@@ -238,6 +270,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         closed = true
         pending.clear()
         seenCallIds.clear()
+        rejectedServerCallsByEventId.clear()
         continuationReady = false
     }
 
@@ -264,12 +297,18 @@ internal class VoiceTutorMcpTurnCoordinator(
         val outputItemId: String,
         val toolName: String,
         val providerCallItemId: String? = null,
+        val providerCallEventId: String? = null,
         val serverCall: VoiceTutorMcpCall? = null,
         var serverCallReleased: Boolean = false,
         var providerCallAcknowledgementDeadline: Long? = null,
         var started: Boolean = false,
         var expectedOutput: String? = null,
         var acknowledgementDeadline: Long? = null,
+    )
+
+    private data class RejectedServerCall(
+        val callId: String,
+        val toolName: String,
     )
 
     companion object {

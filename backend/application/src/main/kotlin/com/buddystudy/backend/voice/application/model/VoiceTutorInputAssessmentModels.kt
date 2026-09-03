@@ -4,6 +4,8 @@ data class VoiceTutorStudyTargetCandidate(
     val studyId: Long,
     val parentStudyId: Long?,
     val topic: String,
+    /** Server-private focus evidence. Assessment/provider payloads intentionally omit this field. */
+    val difficulty: Int? = null,
 )
 
 /** Bounded server-read targets that one learner turn may mutate; provider text cannot add an ID. */
@@ -18,7 +20,8 @@ data class VoiceTutorStudyMutationContext(
             candidates.singleOrNull { it.studyId == currentFocusStudyId } != null &&
             candidates.all {
                 it.studyId > 0 && it.parentStudyId?.let { parent -> parent > 0 && parent != it.studyId } != false &&
-                    it.topic.isNotBlank() && it.topic == it.topic.trim() && it.topic.length <= 255
+                    it.topic.isNotBlank() && it.topic == it.topic.trim() && it.topic.length <= 255 &&
+                    it.difficulty?.let { difficulty -> difficulty in 1..10 } != false
             }
 }
 
@@ -252,6 +255,8 @@ data class VoiceTutorRootStudyCreationRequest(
     val topic: String,
     val difficulty: Int,
     val evidence: VoiceTutorRootStudyCreationEvidence,
+    /** True only when two independent semantic assessments agree this same turn also starts the lesson now. */
+    val startLessonAfterCreate: Boolean = false,
 ) {
     fun isValid(): Boolean =
         topic.isNotBlank() && topic == topic.trim() && topic.length <= 255 && difficulty in 1..10 &&

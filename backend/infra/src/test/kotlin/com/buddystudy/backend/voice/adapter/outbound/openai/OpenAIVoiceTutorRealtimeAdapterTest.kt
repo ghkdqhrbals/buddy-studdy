@@ -1820,6 +1820,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
                 """{"type":"error","error":{"type":"server_error","code":"service_unavailable","event_id":"unknown-input-event","message":"private"}}""",
                 """{"type":"error","error":{"type":"server_error","code":"service_unavailable","event_id":"buddystudy-internal-duplex-input-commit-unknown","message":"private"}}""",
                 """{"type":"error","error":{"type":"invalid_request_error","code":"invalid_value","event_id":"unknown-input-event","message":"private"}}""",
+                """{"type":"error","error":{"type":"invalid_request_error","code":"string_above_max_length","param":"item.call_id","event_id":"buddystudy-internal-server-tool-call-lookalike","message":"private"}}""",
             ).forEach { raw ->
                 assertThatThrownBy { ambiguousController.observeProviderEvent(raw) }
                     .isInstanceOf(VoiceTutorProviderProtocolException::class.java)

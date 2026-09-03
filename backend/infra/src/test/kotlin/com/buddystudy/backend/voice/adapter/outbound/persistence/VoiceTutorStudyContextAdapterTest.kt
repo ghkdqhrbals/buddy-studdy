@@ -911,6 +911,37 @@ class VoiceTutorStudyContextAdapterTest {
     }
 
     @Test
+    fun `focus rejects a changed exact readback difficulty before consuming its lease or writing a revision`(): Unit =
+        runBlocking {
+            val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+            insertSession(discovery)
+            insertStudy(10, topic = "Spring", difficulty = 8)
+            insertTranscriptTurn(11, discovery.id)
+            val exactReadback = VoiceTutorStudyTargetCandidate(10, null, "Spring", difficulty = 7)
+            val lease = authorization()
+
+            transaction {
+                assertThat(adapter.focus(
+                    7,
+                    discovery.id,
+                    10,
+                    learnerTurnId = 11,
+                    expectedCurrentRevision = 0,
+                    authorization = lease,
+                    expectedCandidate = exactReadback,
+                    commitAuthority = commitAuthority(),
+                    expectedTraversal = VoiceTutorStudyTargetTraversal(),
+                )).isNull()
+            }
+
+            assertThat(lease.isActive()).isTrue()
+            assertThat(snapshotCount()).isZero()
+            assertThat(revisionCount()).isZero()
+            assertThat(focusCount()).isZero()
+            assertThat(focusHeader()).containsExactly(null, null, "", 0)
+        }
+
+    @Test
     fun `focus rejects a stale automatic descent topology without consuming its lease`(): Unit = runBlocking {
         val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
         insertSession(discovery)

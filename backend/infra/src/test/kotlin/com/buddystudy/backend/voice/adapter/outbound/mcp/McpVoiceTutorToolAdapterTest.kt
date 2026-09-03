@@ -9,6 +9,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlCon
 import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorizationPurpose
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
 import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationAuthorization
@@ -25,6 +26,7 @@ import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTu
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMutationConfirmationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearnerTurnAuthorization
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyChangeKind
+import com.buddystudy.backend.voice.adapter.outbound.openai.voiceTutorLessonFocusEvent
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorFocusCommitAuthority
@@ -627,7 +629,9 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(definitions.single { it.name == "create_root_study" }.description)
             .contains(
                 "server-owned", "never originate", "natural first-person new-study intent",
-                "bounded earlier persisted learner speech", "never selects a lesson or creates a question",
+                "bounded earlier persisted learner speech", "never itself selects a lesson or creates a question",
+                "AUTO_FOCUS_PENDING", "do not ask the learner to confirm again",
+                "CREATED_ROOT_IMMEDIATE_START",
             )
         assertThat(definitions.single { it.name == "create_study_topic" }.description).contains(
             "server-owned", "never originate", "current first-person choice", "verified descendant",
@@ -720,6 +724,54 @@ class McpVoiceTutorToolAdapterTest {
         }
 
     @Test
+    fun `compound root creation tells provider to await server focus without a second confirmation`(): Unit =
+        runBlocking {
+            val store = ContextStore().apply {
+                saved[502L] = VoiceTutorStudySnapshot(502, null, "스프링", 7)
+            }
+            val fixture = Fixture(studyContexts = store).apply {
+                handler = { name, _ ->
+                    if (name == "create_root_study") success(linkedMapOf(
+                        "created" to true,
+                        "id" to 502L,
+                        "parentStudyId" to null,
+                        "topic" to "스프링",
+                        "difficultyLevel" to 7,
+                        "enabled" to true,
+                        "activeForQuestions" to true,
+                    )) else failure("UNEXPECTED_TOOL")
+                }
+            }
+
+            val result = fixture.adapter.execute(
+                context(
+                    VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+                    rootTopic = "스프링",
+                    rootDifficulty = 7,
+                    rootStartLessonAfterCreate = true,
+                ),
+                "create_root_study",
+                mapOf("topic" to "스프링", "difficulty_level" to 7),
+            )
+
+            assertThat(result.isError).isFalse()
+            assertThat(result.lessonFocus).isNull()
+            assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
+            assertThat(json(result).path("voiceLessonChangeApplies").asText())
+                .isEqualTo("AUTO_FOCUS_PENDING")
+            assertThat(json(result).path("notice").asText())
+                .contains(
+                    "same persisted learner turn independently authorized starting it now",
+                    "do not ask for agreement again",
+                    "server-owned exact readback",
+                    "CREATED_ROOT_IMMEDIATE_START",
+                )
+                .doesNotContain("wait for a NEW agreement", "speak that exact saved root")
+            assertThat(fixture.focusSelections).isEmpty()
+            assertThat(fixture.calls.map { it.name }).containsExactly("create_root_study")
+        }
+
+    @Test
     fun `existing exact root is returned unchanged without a tree event or lesson focus`(): Unit = runBlocking {
         val store = ContextStore()
         val fixture = Fixture(studyContexts = store).apply {
@@ -750,6 +802,9 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(json(result).path("topic").asText()).isEqualTo("Redis Streams")
         assertThat(json(result).path("difficultyLevel").asInt()).isEqualTo(3)
         assertThat(json(result).path("enabled").asBoolean()).isFalse()
+        assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
+        assertThat(json(result).path("voiceLessonChangeApplies").asText())
+            .isEqualTo("REQUIRES_SELECTION")
         assertThat(json(result).path("notice").asText())
             .contains("already existed", "returned unchanged")
             .doesNotContain("updated", "level 9")
@@ -764,6 +819,46 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(fixture.calls.single().arguments).containsExactlyInAnyOrderEntriesOf(
             mapOf("topic" to "redis streams", "difficulty_level" to 5),
         )
+    }
+
+    @Test
+    fun `compound start on an existing exact root also avoids duplicate confirmation`() = runBlocking {
+        val fixture = Fixture(studyContexts = ContextStore()).apply {
+            handler = { name, _ ->
+                if (name == "create_root_study") success(linkedMapOf(
+                    "created" to false,
+                    "id" to 702L,
+                    "parentStudyId" to null,
+                    "topic" to "Spring",
+                    "difficultyLevel" to 7,
+                    "enabled" to true,
+                    "activeForQuestions" to true,
+                )) else failure("UNEXPECTED_TOOL")
+            }
+        }
+
+        val result = fixture.adapter.execute(
+            context(
+                VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+                rootTopic = "Spring",
+                rootDifficulty = 7,
+                rootStartLessonAfterCreate = true,
+            ),
+            "create_root_study",
+            mapOf("topic" to "Spring", "difficulty_level" to 7),
+        )
+
+        assertThat(result.isError).isFalse()
+        assertThat(result.studyTreeChanged).isFalse()
+        assertThat(result.rootStudyReadbackId).isEqualTo(702L)
+        assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
+        assertThat(json(result).path("voiceLessonChangeApplies").asText())
+            .isEqualTo("AUTO_FOCUS_PENDING")
+        assertThat(json(result).path("notice").asText())
+            .contains("already existed unchanged", "do not ask for agreement again")
+            .doesNotContain("wait for a NEW agreement")
+        assertThat(fixture.focusSelections).isEmpty()
+        assertThat(fixture.calls.map { it.name }).containsExactly("create_root_study")
     }
 
     @Test
@@ -994,6 +1089,115 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(fixture.lastExpectedTraversal).isEqualTo(traversal)
         assertThat(fixture.calls).isEmpty() // no common study/question mutation
         assertThat(fixture.adapter.execute(context, "list_studies", emptyMap()).isError).isFalse()
+    }
+
+    @Test
+    fun `server owned created root start focuses without a second learner selection`(): Unit = runBlocking {
+        val fixture = Fixture().apply {
+            persistedSession = discoverySession()
+            focusResult = VoiceTutorLessonFocusSelection(
+                VoiceTutorLessonFocus(777, 1),
+                VoiceTutorStudySnapshot(777, null, "스프링", 7, 1),
+            )
+        }
+        val startAuthorization = VoiceTutorFocusAuthorization(
+            VoiceTutorFocusAuthorizationPurpose.CREATED_ROOT_IMMEDIATE_START,
+        ).also {
+            check(it.bindToServerCall("direct-adapter-created-root-focus"))
+            check(it.claimExecution("direct-adapter-created-root-focus"))
+        }
+        val base = context(
+            inputIntent = VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+            targetStudyId = 777,
+            targetParentStudyId = null,
+            targetTopic = "스프링",
+            targetDifficulty = 7,
+            targetTraversal = VoiceTutorStudyTargetTraversal(),
+        ).copy(session = discoverySession())
+        val compound = base.copy(dialogueBoundary = requireNotNull(base.dialogueBoundary).copy(
+            latestAcceptedLearnerTargetOfferId = null,
+            focusAuthorization = startAuthorization,
+            rootStudyCreationAuthorization = null,
+        ))
+
+        val result = fixture.adapter.execute(
+            compound,
+            "select_voice_study",
+            mapOf("study_id" to 777L),
+        )
+
+        assertThat(result.isError).isFalse()
+        assertThat(fixture.focusSelections).containsExactly(777L)
+        assertThat(fixture.lastExpectedCandidate)
+            .isEqualTo(VoiceTutorStudyTargetCandidate(777, null, "스프링", difficulty = 7))
+        assertThat(fixture.lastExpectedTraversal).isEqualTo(VoiceTutorStudyTargetTraversal())
+        assertThat(json(result).path("voiceLessonFocusChange").asText())
+            .isEqualTo("CREATED_ROOT_IMMEDIATE_START")
+        assertThat(json(result).path("notice").asText())
+            .contains("immediate lesson start", "ask the first substantive question now")
+            .doesNotContain("wait for clear learner agreement")
+    }
+
+    @Test
+    fun `created root focus rejects a changed readback level without publishing revision or UI focus`(): Unit = runBlocking {
+        val fixture = Fixture().apply {
+            persistedSession = discoverySession()
+            focusResult = VoiceTutorLessonFocusSelection(
+                VoiceTutorLessonFocus(777, 1),
+                VoiceTutorStudySnapshot(777, null, "스프링", 8, 1),
+            )
+        }
+        val base = context(
+            inputIntent = VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+            targetStudyId = 777,
+            targetParentStudyId = null,
+            targetTopic = "스프링",
+            targetDifficulty = 7,
+            targetTraversal = VoiceTutorStudyTargetTraversal(),
+        ).copy(session = discoverySession())
+        val compound = base.copy(dialogueBoundary = requireNotNull(base.dialogueBoundary).copy(
+            latestAcceptedLearnerTargetOfferId = null,
+            focusAuthorization = VoiceTutorFocusAuthorization(
+                VoiceTutorFocusAuthorizationPurpose.CREATED_ROOT_IMMEDIATE_START,
+            ).also {
+                check(it.bindToServerCall("direct-adapter-created-root-focus"))
+                check(it.claimExecution("direct-adapter-created-root-focus"))
+            },
+            rootStudyCreationAuthorization = null,
+        ))
+
+        val result = fixture.adapter.execute(compound, "select_voice_study", mapOf("study_id" to 777L))
+
+        assertCode(result, "LESSON_FOCUS_UNCONFIRMED")
+        assertThat(result.lessonRevision).isNull()
+        assertThat(result.lessonFocus).isNull()
+        assertThat(voiceTutorLessonFocusEvent(result)).isNull()
+        assertThat(fixture.lastExpectedCandidate)
+            .isEqualTo(VoiceTutorStudyTargetCandidate(777, null, "스프링", difficulty = 7))
+    }
+
+    @Test
+    fun `ordinary focus lease cannot turn a root creation into an implicit selection`(): Unit = runBlocking {
+        val fixture = Fixture().apply {
+            persistedSession = discoverySession()
+            focusResult = VoiceTutorLessonFocusSelection(
+                VoiceTutorLessonFocus(777, 1),
+                VoiceTutorStudySnapshot(777, null, "스프링", 7, 1),
+            )
+        }
+        val forged = context(
+            inputIntent = VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+            targetStudyId = 777,
+            targetParentStudyId = null,
+            targetTopic = "스프링",
+            targetTraversal = VoiceTutorStudyTargetTraversal(),
+        ).copy(session = discoverySession())
+
+        assertCode(
+            fixture.adapter.execute(forged, "select_voice_study", mapOf("study_id" to 777L)),
+            "LEARNER_CHOICE_REQUIRED",
+        )
+        assertThat(fixture.focusSelections).isEmpty()
     }
 
     @Test
@@ -2242,6 +2446,7 @@ class McpVoiceTutorToolAdapterTest {
         var lastFocusLearnerTurnId = 0L
         var focusResult: VoiceTutorLessonFocusSelection? = null
         var afterFocus: () -> Unit = {}
+        var lastExpectedCandidate: VoiceTutorStudyTargetCandidate? = null
         var lastExpectedTraversal: VoiceTutorStudyTargetTraversal? = null
         val focusSelections = mutableListOf<Long>()
         val focusHistory = mutableListOf<VoiceTutorLessonFocus>()
@@ -2323,6 +2528,7 @@ class McpVoiceTutorToolAdapterTest {
                     assertThat(commitAuthority).isEqualTo(VoiceTutorFocusCommitAuthority(
                         principal.deviceId, principal.sessionId, session().providerSessionId!!,
                     ))
+                    lastExpectedCandidate = expectedCandidate
                     lastExpectedTraversal = expectedTraversal
                     if (authorization?.consume() != true) return null
                     val selected = selectFocus(userId, sessionId, studyId)
@@ -2348,6 +2554,7 @@ class McpVoiceTutorToolAdapterTest {
                     assertThat(commitAuthority).isEqualTo(VoiceTutorFocusCommitAuthority(
                         principal.deviceId, principal.sessionId, session().providerSessionId!!,
                     ))
+                    lastExpectedCandidate = expectedCandidate
                     lastExpectedTraversal = expectedTraversal
                     if (authorization?.consume() != true) return null
                     if (learnerTurnId <= lastFocusLearnerTurnId) return null
@@ -2461,11 +2668,13 @@ class McpVoiceTutorToolAdapterTest {
             },
             targetParentStudyId: Long? = 101L.takeIf { inputIntent == VoiceTutorInputIntent.CONTINUE_TREE },
             targetTopic: String = if (inputIntent == VoiceTutorInputIntent.CONTINUE_TREE) "Cache" else "Redis",
+            targetDifficulty: Int? = null,
             targetTraversal: VoiceTutorStudyTargetTraversal? = targetStudyId?.let {
                 VoiceTutorStudyTargetTraversal()
             },
             rootTopic: String = "운영체제",
             rootDifficulty: Int = 6,
+            rootStartLessonAfterCreate: Boolean = false,
         ) = VoiceTutorWebRtcControlContext(
             session(), "rtc_synthetic_call", principal,
             dialogueBoundary = VoiceTutorDialogueBoundary(
@@ -2490,12 +2699,20 @@ class McpVoiceTutorToolAdapterTest {
                         studyId = id,
                         parentStudyId = targetParentStudyId,
                         topic = targetTopic,
+                        difficulty = targetDifficulty,
                     )
                 },
                 latestAcceptedLearnerTargetTraversal = targetTraversal,
                 focusAuthorization = targetStudyId?.let { VoiceTutorFocusAuthorization() },
                 rootStudyCreationAuthorization = if (inputIntent == VoiceTutorInputIntent.CREATE_ROOT_STUDY) {
-                    VoiceTutorRootStudyCreationAuthorization(rootTopic, rootDifficulty)
+                    VoiceTutorRootStudyCreationAuthorization(
+                        rootTopic,
+                        rootDifficulty,
+                        startLessonAfterCreate = rootStartLessonAfterCreate,
+                    ).also {
+                        check(it.bindToServerCall("direct-adapter-root-create"))
+                        check(it.claimExecution("direct-adapter-root-create"))
+                    }
                 } else {
                     null
                 },
@@ -2517,7 +2734,10 @@ class McpVoiceTutorToolAdapterTest {
                     parentStudyId,
                     topic,
                     difficulty,
-                ),
+                ).also {
+                    check(it.bindToServerCall("direct-adapter-child-create"))
+                    check(it.claimExecution("direct-adapter-child-create"))
+                },
             ))
         }
 
@@ -2532,7 +2752,11 @@ class McpVoiceTutorToolAdapterTest {
                 lessonRevision = lessonRevision,
             )
             return base.copy(dialogueBoundary = requireNotNull(base.dialogueBoundary).copy(
-                studyUpdateAuthorization = VoiceTutorStudyUpdateAuthorization(studyId, topic, difficulty),
+                studyUpdateAuthorization = VoiceTutorStudyUpdateAuthorization(studyId, topic, difficulty)
+                    .also {
+                        check(it.bindToServerCall("direct-adapter-study-update"))
+                        check(it.claimExecution("direct-adapter-study-update"))
+                    },
             ))
         }
 

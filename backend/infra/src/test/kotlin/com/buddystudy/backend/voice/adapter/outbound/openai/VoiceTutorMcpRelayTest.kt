@@ -431,6 +431,75 @@ class VoiceTutorMcpRelayTest {
     }
 
     @Test
+    fun `exact rejected server item is tombstoned once and a late acknowledgement never executes it`() {
+        val coordinator = VoiceTutorMcpTurnCoordinator()
+        val scheduled = coordinator.scheduleServerCall(
+            name = "create_root_study",
+            arguments = mapOf("topic" to "Spring", "difficulty_level" to 7),
+            nowNanos = 0,
+        )
+        val eventId = scheduled.providerEvent.getValue("event_id") as String
+        val callItem = mapper.valueToTree<JsonNode>(scheduled.providerEvent).path("item")
+
+        assertThat(coordinator.tombstoneRejectedServerCall("different-event-id")).isNull()
+        assertThat(coordinator.hasPending).isTrue()
+        assertThat(coordinator.beginExecution(scheduled.callId)).isFalse()
+        assertThat(coordinator.tombstoneRejectedServerCall(eventId)).isEqualTo(
+            VoiceTutorRejectedServerCall(scheduled.callId, "create_root_study", newlyTombstoned = true),
+        )
+        assertThat(coordinator.hasPending).isFalse()
+        assertThat(coordinator.continuationReady).isFalse()
+        assertThat(coordinator.tombstoneRejectedServerCall(eventId)).isEqualTo(
+            VoiceTutorRejectedServerCall(scheduled.callId, "create_root_study", newlyTombstoned = false),
+        )
+
+        val lateAcknowledgement = mapper.valueToTree<JsonNode>(mapOf(
+            "type" to "conversation.item.created",
+            "item" to callItem,
+        ))
+        assertThat(coordinator.acknowledgeServerCall(lateAcknowledgement, 1)).isNull()
+        assertThat(coordinator.acknowledgeServerCall(lateAcknowledgement, 2)).isNull()
+        assertThat(coordinator.beginExecution(scheduled.callId)).isFalse()
+        coordinator.expire(Long.MAX_VALUE)
+        assertThatThrownBy {
+            coordinator.completedResponse(mapper.valueToTree(mapOf(
+                "output" to listOf(call(scheduled.callId, "create_root_study")),
+            )))
+        }.isInstanceOf(VoiceTutorMcpProtocolException::class.java)
+        coordinator.close()
+    }
+
+    @Test
+    fun `server item rejection cannot tombstone a call after its exact acknowledgement released it`() {
+        val coordinator = VoiceTutorMcpTurnCoordinator()
+        val scheduled = coordinator.scheduleServerCall(
+            name = "get_study",
+            arguments = mapOf("study_id" to 42),
+            nowNanos = 0,
+        )
+        val eventId = scheduled.providerEvent.getValue("event_id") as String
+        val callItem = mapper.valueToTree<JsonNode>(scheduled.providerEvent).path("item")
+        val acknowledgement = mapper.valueToTree<JsonNode>(mapOf(
+            "type" to "conversation.item.created",
+            "item" to callItem,
+        ))
+
+        assertThat(coordinator.acknowledgeServerCall(acknowledgement, 1)?.callId)
+            .isEqualTo(scheduled.callId)
+        assertThat(coordinator.tombstoneRejectedServerCall(eventId)).isNull()
+        assertThat(coordinator.hasPending).isTrue()
+        assertThat(coordinator.beginExecution(scheduled.callId)).isTrue()
+        assertThat(coordinator.tombstoneRejectedServerCall(eventId)).isNull()
+
+        val output = coordinator.complete(scheduled.callId, success(), 2)!!
+        assertThat(coordinator.acknowledge(mapper.valueToTree(mapOf(
+            "type" to "conversation.item.created",
+            "item" to output.getValue("item"),
+        )), 3)).isTrue()
+        coordinator.close()
+    }
+
+    @Test
     fun `too many duplicate and malformed calls fail before any work is queued`() {
         for (items in listOf(List(9) { call("call-$it") }, listOf(call("same"), call("same")), listOf(call("bad id")))) {
             Fixture().use { f ->
