@@ -251,9 +251,9 @@ class VoiceTutorPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
-    fun `summary recovery only retries the exact historical copied call failure once`() = runBlocking<Unit> {
+    fun `summary recovery repairs an exact historical transcript-free copied call failure once`() = runBlocking<Unit> {
         val endedAt = Instant.parse("2031-08-31T11:00:00Z")
-        val session = failedSummarySession(endedAt, transcript = true)
+        val session = failedSummarySession(endedAt, transcript = false)
         // Simulate the old settlement/service combination, only in the isolated
         // Testcontainers database. No real provider or existing user is involved.
         voiceTutor.failUnclaimedResult(session.userId, session.id, "summary-test-v1", session.failureMessage!!, endedAt)
@@ -284,13 +284,13 @@ class VoiceTutorPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
-    fun `summary recovery never claims failed calls without saved speech or another owner's session`() = runBlocking<Unit> {
+    fun `summary recovery claims transcript-free failed calls only for their owner`() = runBlocking<Unit> {
         val endedAt = Instant.parse("2031-08-31T12:00:00Z")
         val empty = failedSummarySession(endedAt, transcript = false)
         val recorded = failedSummarySession(endedAt, transcript = true)
-        assertThat(empty.resultStatus).isEqualTo(VoiceTutorResultStatus.FAILED)
-        assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt, 300).map { it.id }).doesNotContain(empty.id)
-        assertThat(voiceTutor.beginResult(empty.userId, empty.id, "summary-test-v1", endedAt, 300)).isNull()
+        assertThat(empty.resultStatus).isEqualTo(VoiceTutorResultStatus.PENDING)
+        assertThat(voiceTutor.sessionsAwaitingResult(100, endedAt, 300).map { it.id }).contains(empty.id)
+        assertThat(voiceTutor.beginResult(empty.userId, empty.id, "summary-test-v1", endedAt, 300)).isNotNull()
         assertThat(voiceTutor.beginResult(empty.userId, recorded.id, "summary-test-v1", endedAt, 300)).isNull()
         assertThat(voiceTutor.findSession(recorded.userId, recorded.id)!!.resultStatus).isEqualTo(VoiceTutorResultStatus.PENDING)
     }

@@ -10,6 +10,30 @@ extension AppStrings {
         )
     }
 
+    var voiceTutorCallUnavailable: String {
+        voiceTutorPauseText(
+            "연결 실패",
+            "Couldn't connect",
+            "接続できません"
+        )
+    }
+
+    var voiceTutorUpdateRequiredMessage: String {
+        voiceTutorPauseText(
+            "앱을 업데이트한 뒤 다시 통화해 주세요.",
+            "Update the app before starting another call.",
+            "アプリをアップデートしてから、もう一度通話してください。"
+        )
+    }
+
+    var voiceTutorRequestRejected: String {
+        voiceTutorPauseText(
+            "통화 요청을 처리할 수 없습니다. 앱을 다시 실행해 주세요.",
+            "The call request couldn't be processed. Reopen the app and try again.",
+            "通話リクエストを処理できません。アプリを開き直してください。"
+        )
+    }
+
     var voiceTutorTakeBreak: String { voiceTutorPauseText("일시정지", "Pause", "一時停止") }
     var voiceTutorResumeLesson: String { voiceTutorPauseText("계속하기", "Continue", "続ける") }
     var voiceTutorPausing: String {

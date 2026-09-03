@@ -18,10 +18,12 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcAn
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcPort
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.reactor.asFlux
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.reactor.mono
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatusCode
 import org.springframework.http.MediaType
@@ -42,6 +44,8 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.time.Instant
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -61,6 +65,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
     private val mcpTools: VoiceTutorMcpToolPort = UnavailableVoiceTutorMcpToolPort,
 ) : VoiceTutorWebRtcPort {
     private val mapper = JsonMapperProvider.mapper
+    private val logger = LoggerFactory.getLogger(javaClass)
     private val httpClient = HttpClient.create().responseTimeout(
         Duration.ofSeconds(properties.voiceTutor.connectTimeoutSeconds.coerceIn(5, 300)),
     )
@@ -86,36 +91,84 @@ class OpenAIVoiceTutorWebRtcAdapter(
             part("sdp", validatedOffer).contentType(APPLICATION_SDP)
             part("session", webRtcSessionConfiguration(request)).contentType(MediaType.APPLICATION_JSON)
         }.build()
+        val providerCallObserved = AtomicBoolean(false)
 
-        return webClient.post()
-            .uri(OPENAI_REALTIME_CALLS_URL)
-            .headers { headers ->
-                headers.setBearerAuth(properties.openai.userContentApiKey)
-                headers.set(
-                    "OpenAI-Safety-Identifier",
-                    VoiceTutorSafetyIdentifier.create(request.userId, properties.openai.userContentApiKey),
-                )
-            }
-            .contentType(MediaType.MULTIPART_FORM_DATA)
-            .body(BodyInserters.fromMultipartData(multipart))
-            .exchangeToMono { response -> readNegotiationResponse(response, onProviderCallCreated) }
-            .awaitSingle()
+        return retryVoiceTutorWebRtcNegotiation(
+            callIdObserved = providerCallObserved::get,
+            onFailure = ::logNegotiationFailure,
+        ) {
+            webClient.post()
+                .uri(OPENAI_REALTIME_CALLS_URL)
+                .headers { headers ->
+                    headers.setBearerAuth(properties.openai.userContentApiKey)
+                    headers.set(
+                        "OpenAI-Safety-Identifier",
+                        VoiceTutorSafetyIdentifier.create(request.userId, properties.openai.userContentApiKey),
+                    )
+                }
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(multipart))
+                .exchangeToMono { response ->
+                    readNegotiationResponse(
+                        response = response,
+                        onProviderCallObserved = { providerCallObserved.set(true) },
+                        onProviderCallCreated = onProviderCallCreated,
+                    )
+                }
+                .awaitSingle()
+        }
+    }
+
+    private fun logNegotiationFailure(failure: VoiceTutorWebRtcNegotiationFailure) {
+        val provider = failure.provider
+        logger.warn(
+            "voice_tutor_webrtc_negotiation_attempt_failed attempt={} maxAttempts={} retry={} " +
+                "retryDelayMs={} callIdObserved={} upstreamStatus={} openAiRequestId={} " +
+                "providerErrorType={} providerErrorCode={} retryAfter={} errorType={}",
+            failure.attempt,
+            VOICE_TUTOR_WEBRTC_NEGOTIATION_MAX_ATTEMPTS,
+            failure.retry,
+            failure.retryDelay?.toMillis(),
+            failure.callIdObserved,
+            provider?.status,
+            provider?.openAiRequestId,
+            provider?.errorType,
+            provider?.errorCode,
+            provider?.retryAfter,
+            safeVoiceTutorDiagnosticType(failure.error),
+        )
     }
 
     internal fun readNegotiationResponse(
         response: ClientResponse,
+        onProviderCallObserved: () -> Unit = {},
         onProviderCallCreated: suspend (callId: String) -> Unit,
     ): Mono<VoiceTutorWebRtcAnswer> {
         if (!response.statusCode().is2xxSuccessful) {
-            return response.releaseBody().then(
-                Mono.error(VoiceTutorWebRtcProviderException("OpenAI WebRTC negotiation failed.")),
+            val headers = response.headers().asHttpHeaders()
+            val baseDiagnostics = VoiceTutorWebRtcProviderDiagnostics(
+                status = response.statusCode().value(),
+                openAiRequestId = safeVoiceTutorProviderIdentifier(headers.getFirst(OPENAI_REQUEST_ID_HEADER)),
+                retryAfter = safeVoiceTutorRetryAfter(headers.getFirst(HttpHeaders.RETRY_AFTER)),
             )
+            return response.bodyToMono(String::class.java)
+                .defaultIfEmpty("")
+                .onErrorReturn("")
+                .flatMap { body ->
+                    Mono.error(
+                        VoiceTutorWebRtcProviderException(
+                            "OpenAI WebRTC negotiation failed.",
+                            baseDiagnostics.withStructuredError(body),
+                        ),
+                    )
+                }
         }
         val callId = runCatching {
             callIdFromLocation(response.headers().asHttpHeaders().getFirst(HttpHeaders.LOCATION))
         }.getOrElse { error ->
             return response.releaseBody().then(Mono.error(error))
         }
+        onProviderCallObserved()
         return mono { onProviderCallCreated(callId) }
             .then(
                 response.bodyToMono(String::class.java)
@@ -592,6 +645,162 @@ internal fun holdVoiceTutorSignalForGrace(
         if (gracefulTerminalActive()) relayRelease.then() else Mono.empty()
     })
 
+internal data class VoiceTutorWebRtcProviderDiagnostics(
+    val status: Int? = null,
+    val openAiRequestId: String? = null,
+    val errorType: String? = null,
+    val errorCode: String? = null,
+    val retryAfter: String? = null,
+) {
+    fun withStructuredError(body: String): VoiceTutorWebRtcProviderDiagnostics {
+        if (body.isBlank()) return this
+        val error = runCatching { JsonMapperProvider.mapper.readTree(body).path("error") }.getOrNull()
+            ?.takeIf { it.isObject }
+            ?: return this
+        return copy(
+            errorType = safeVoiceTutorProviderToken(error.path("type").takeIf { it.isTextual }?.asText()),
+            errorCode = safeVoiceTutorProviderToken(error.path("code").takeIf { it.isTextual }?.asText()),
+        )
+    }
+}
+
+internal data class VoiceTutorWebRtcNegotiationFailure(
+    val attempt: Int,
+    val retry: Boolean,
+    val retryDelay: Duration?,
+    val callIdObserved: Boolean,
+    val provider: VoiceTutorWebRtcProviderDiagnostics?,
+    val error: Throwable,
+)
+
+internal suspend fun <T> retryVoiceTutorWebRtcNegotiation(
+    callIdObserved: () -> Boolean,
+    sleeper: suspend (Duration) -> Unit = { duration -> delay(duration.toMillis()) },
+    onFailure: (VoiceTutorWebRtcNegotiationFailure) -> Unit = {},
+    attemptRequest: suspend (attempt: Int) -> T,
+): T {
+    var attempt = 1
+    while (true) {
+        try {
+            return attemptRequest(attempt)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            val observed = callIdObserved()
+            val provider = (error as? VoiceTutorWebRtcProviderException)?.diagnostics
+            val retry = attempt < VOICE_TUTOR_WEBRTC_NEGOTIATION_MAX_ATTEMPTS &&
+                !observed &&
+                isRetryableVoiceTutorWebRtcNegotiationFailure(error)
+            val retryDelay = if (retry) {
+                voiceTutorWebRtcNegotiationRetryDelay(attempt, provider?.retryAfter)
+            } else {
+                null
+            }
+            onFailure(
+                VoiceTutorWebRtcNegotiationFailure(
+                    attempt = attempt,
+                    retry = retry,
+                    retryDelay = retryDelay,
+                    callIdObserved = observed,
+                    provider = provider,
+                    error = error,
+                ),
+            )
+            if (!retry) throw error
+            sleeper(requireNotNull(retryDelay))
+            attempt += 1
+        }
+    }
+}
+
+internal fun isRetryableVoiceTutorWebRtcNegotiationFailure(error: Throwable): Boolean = when (error) {
+    is VoiceTutorWebRtcProviderException -> error.diagnostics?.let { diagnostics ->
+        diagnostics.status?.let(::isRetryableVoiceTutorWebRtcStatus) == true &&
+            diagnostics.isExplicitTransientRateLimit() &&
+            !diagnostics.isPermanentQuotaFailure()
+    } == true
+    else -> false
+}
+
+// Creating a Realtime call is not idempotent. A gateway 5xx can arrive after
+// the provider created the paid call but before its Location header reached us,
+// so retry only an explicit rate-limit rejection. Network and 5xx failures must
+// be retried by a fresh user action unless OpenAI documents idempotency support.
+internal fun isRetryableVoiceTutorWebRtcStatus(status: Int): Boolean = status == 429
+
+private fun VoiceTutorWebRtcProviderDiagnostics.isPermanentQuotaFailure(): Boolean = status == 429 &&
+    (errorCode.equals("credit_balance_exhausted", ignoreCase = true) ||
+        errorType.equals("insufficient_quota", ignoreCase = true))
+
+private fun VoiceTutorWebRtcProviderDiagnostics.isExplicitTransientRateLimit(): Boolean = status == 429 &&
+    (errorType.equals("rate_limit_error", ignoreCase = true) ||
+        errorCode.equals("rate_limit_exceeded", ignoreCase = true))
+
+internal fun voiceTutorWebRtcNegotiationRetryDelay(
+    failedAttempt: Int,
+    retryAfter: String?,
+    now: Instant = Instant.now(),
+): Duration {
+    val fallback = VOICE_TUTOR_WEBRTC_NEGOTIATION_RETRY_DELAYS[
+        (failedAttempt - 1).coerceIn(0, VOICE_TUTOR_WEBRTC_NEGOTIATION_RETRY_DELAYS.lastIndex)
+    ]
+    val providerDelay = voiceTutorRetryAfterDelay(retryAfter, now) ?: return fallback
+    return if (providerDelay > fallback) providerDelay else fallback
+}
+
+private fun voiceTutorRetryAfterDelay(retryAfter: String?, now: Instant): Duration? {
+    val value = safeVoiceTutorRetryAfter(retryAfter) ?: return null
+    val seconds = value.toLongOrNull()
+    val requested = if (seconds != null) {
+        Duration.ofSeconds(seconds)
+    } else {
+        val retryAt = runCatching { ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant() }
+            .getOrNull()
+            ?: return null
+        Duration.between(now, retryAt).let { if (it.isNegative) Duration.ZERO else it }
+    }
+    return if (requested > VOICE_TUTOR_WEBRTC_NEGOTIATION_MAX_RETRY_DELAY) {
+        VOICE_TUTOR_WEBRTC_NEGOTIATION_MAX_RETRY_DELAY
+    } else {
+        requested
+    }
+}
+
+internal fun safeVoiceTutorRetryAfter(value: String?): String? {
+    val candidate = value?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_RETRY_AFTER_CHARACTERS }
+        ?: return null
+    if (candidate.all(Char::isDigit) && candidate.toLongOrNull() != null) return candidate
+    return runCatching {
+        ZonedDateTime.parse(candidate, DateTimeFormatter.RFC_1123_DATE_TIME)
+            .format(DateTimeFormatter.RFC_1123_DATE_TIME)
+    }.getOrNull()
+}
+
+internal fun safeVoiceTutorProviderIdentifier(value: String?): String? = value?.trim()
+    ?.takeIf { candidate ->
+        candidate.isNotEmpty() &&
+            candidate.length <= MAX_PROVIDER_IDENTIFIER_CHARACTERS &&
+            candidate.all { character -> character.isAsciiLetterOrDigit() || character == '_' || character == '-' }
+    }
+
+private fun safeVoiceTutorProviderToken(value: String?): String? = value?.trim()
+    ?.takeIf { candidate ->
+        candidate.isNotEmpty() &&
+            candidate.length <= MAX_PROVIDER_TOKEN_CHARACTERS &&
+            candidate.all { character ->
+                character.isAsciiLetterOrDigit() || character == '_' || character == '-' || character == '.'
+            }
+    }
+
+private fun safeVoiceTutorDiagnosticType(error: Throwable): String = error.javaClass.simpleName
+    .take(MAX_PROVIDER_TOKEN_CHARACTERS)
+    .filter { character ->
+        character.isAsciiLetterOrDigit() || character == '_' || character == '-' || character == '.'
+    }
+    .ifBlank { "Throwable" }
+
+private fun Char.isAsciiLetterOrDigit(): Boolean = this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9'
+
 internal fun validateWebRtcSdp(sdp: String): String {
     if (sdp.isBlank() || sdp.toByteArray(StandardCharsets.UTF_8).size > MAX_SDP_BYTES || '\u0000' in sdp) {
         throw VoiceTutorWebRtcSdpException()
@@ -644,7 +853,10 @@ internal fun HttpStatusCode.isAlreadyEndedCall(): Boolean = value() in setOf(404
 
 internal class VoiceTutorWebRtcSdpException : IllegalArgumentException("Invalid WebRTC SDP.")
 internal class VoiceTutorWebRtcCallIdException : IllegalArgumentException("Invalid OpenAI WebRTC call id.")
-internal class VoiceTutorWebRtcProviderException(message: String) : RuntimeException(message)
+internal class VoiceTutorWebRtcProviderException(
+    message: String,
+    val diagnostics: VoiceTutorWebRtcProviderDiagnostics? = null,
+) : RuntimeException(message)
 internal class VoiceTutorTutorTranscriptPersistenceException : RuntimeException(
     "Voice Tutor tutor transcript persistence failed.",
 )
@@ -652,6 +864,16 @@ internal class VoiceTutorTutorTranscriptPersistenceException : RuntimeException(
 private const val MAX_SDP_BYTES = 65_536
 private const val MAX_SDP_LINES = 512
 private const val MAX_SDP_LINE_CHARACTERS = 4_096
+private const val MAX_PROVIDER_IDENTIFIER_CHARACTERS = 128
+private const val MAX_PROVIDER_TOKEN_CHARACTERS = 96
+private const val MAX_RETRY_AFTER_CHARACTERS = 64
+private const val OPENAI_REQUEST_ID_HEADER = "x-request-id"
+internal const val VOICE_TUTOR_WEBRTC_NEGOTIATION_MAX_ATTEMPTS = 3
+private val VOICE_TUTOR_WEBRTC_NEGOTIATION_RETRY_DELAYS = listOf(
+    Duration.ofMillis(250),
+    Duration.ofMillis(750),
+)
+private val VOICE_TUTOR_WEBRTC_NEGOTIATION_MAX_RETRY_DELAY = Duration.ofSeconds(2)
 private val SDP_SHA256_FINGERPRINT = Regex("a=fingerprint:sha-256(?: [0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){31})")
 private val OPENAI_CALL_ID_PATTERN = Regex("rtc_[A-Za-z0-9_-]{1,187}")
 private val OPENAI_CALL_LOCATION_PATTERN = Regex("/v1/realtime/calls/(rtc_[A-Za-z0-9_-]{1,187})")

@@ -12,29 +12,24 @@ class VoiceTutorSummaryRecoveryPolicyTest {
     private val now = Instant.parse("2026-08-31T10:00:00Z")
 
     @Test
-    fun `failed calls retain pending summaries only when saved speech exists`() {
-        assertThat(voiceTutorResultStatusAfterSettlement(VoiceTutorResultStatus.PENDING, true, true))
-            .isEqualTo(VoiceTutorResultStatus.PENDING)
-        assertThat(voiceTutorResultStatusAfterSettlement(VoiceTutorResultStatus.PENDING, true, false))
-            .isEqualTo(VoiceTutorResultStatus.FAILED)
-        assertThat(voiceTutorResultStatusAfterSettlement(VoiceTutorResultStatus.PENDING, false, false))
-            .isEqualTo(VoiceTutorResultStatus.PENDING)
+    fun `transport settlement never becomes a learning result failure`() {
+        VoiceTutorResultStatus.entries.forEach { status ->
+            assertThat(voiceTutorResultStatusAfterSettlement(status)).isEqualTo(status)
+        }
     }
 
     @Test
     fun `settlement cannot erase a claimed completed or genuinely failed summary`() {
         listOf(VoiceTutorResultStatus.PROCESSING, VoiceTutorResultStatus.COMPLETED, VoiceTutorResultStatus.FAILED)
             .forEach { status ->
-                assertThat(voiceTutorResultStatusAfterSettlement(status, true, false)).isEqualTo(status)
-                assertThat(voiceTutorResultStatusAfterSettlement(status, true, true)).isEqualTo(status)
+                assertThat(voiceTutorResultStatusAfterSettlement(status)).isEqualTo(status)
             }
     }
 
     @Test
-    fun `both normally ended and transcribed failed calls can claim a new summary`() {
-        assertThat(claim(session(), null, hasTranscript = false)).isTrue()
-        assertThat(claim(session(VoiceTutorSessionStatus.FAILED), null, hasTranscript = true)).isTrue()
-        assertThat(claim(session(VoiceTutorSessionStatus.FAILED), null, hasTranscript = false)).isFalse()
+    fun `normally ended and failed calls can claim a terminal learning result`() {
+        assertThat(claim(session(), null)).isTrue()
+        assertThat(claim(session(VoiceTutorSessionStatus.FAILED), null)).isTrue()
     }
 
     @Test
@@ -49,7 +44,6 @@ class VoiceTutorSummaryRecoveryPolicyTest {
         val failedSession = session(VoiceTutorSessionStatus.FAILED, VoiceTutorResultStatus.FAILED)
         val failedResult = result(VoiceTutorResultStatus.FAILED, error = CALL_FAILURE)
         assertThat(claim(failedSession, failedResult)).isTrue()
-        assertThat(claim(failedSession, failedResult, hasTranscript = false)).isFalse()
         assertThat(claim(failedSession, failedResult.copy(model = "gpt-test"))).isFalse()
         assertThat(claim(failedSession, failedResult.copy(errorMessage = "$CALL_FAILURE "))).isFalse()
         assertThat(claim(failedSession, failedResult.copy(errorMessage = CALL_FAILURE.lowercase()))).isFalse()
@@ -70,15 +64,15 @@ class VoiceTutorSummaryRecoveryPolicyTest {
     fun `fresh processing leases reject concurrent claim and expired leases recover exactly at boundary`() {
         val session = session(VoiceTutorSessionStatus.FAILED, VoiceTutorResultStatus.PROCESSING)
         val processing = result(VoiceTutorResultStatus.PROCESSING).copy(updatedAt = now.minusSeconds(300))
-        assertThat(voiceTutorSummaryCanBeClaimed(session, processing, true, now.minusNanos(1), 300)).isFalse()
-        assertThat(voiceTutorSummaryCanBeClaimed(session, processing, true, now, 300)).isTrue()
-        assertThat(voiceTutorSummaryCanBeClaimed(session, processing.copy(updatedAt = now), true, now, 300)).isFalse()
+        assertThat(voiceTutorSummaryCanBeClaimed(session, processing, now.minusNanos(1), 300)).isFalse()
+        assertThat(voiceTutorSummaryCanBeClaimed(session, processing, now, 300)).isTrue()
+        assertThat(voiceTutorSummaryCanBeClaimed(session, processing.copy(updatedAt = now), now, 300)).isFalse()
     }
 
     @Test
     fun `minimum lease and matching processing statuses are both required`() {
         val processing = result(VoiceTutorResultStatus.PROCESSING).copy(updatedAt = now.minusSeconds(29))
-        assertThat(voiceTutorSummaryCanBeClaimed(session(resultStatus = VoiceTutorResultStatus.PROCESSING), processing, true, now, 1))
+        assertThat(voiceTutorSummaryCanBeClaimed(session(resultStatus = VoiceTutorResultStatus.PROCESSING), processing, now, 1))
             .isFalse()
         assertThat(claim(session(), processing.copy(updatedAt = now.minusSeconds(600)))).isFalse()
     }
@@ -92,8 +86,8 @@ class VoiceTutorSummaryRecoveryPolicyTest {
         assertThat(claim(session(resultStatus = VoiceTutorResultStatus.FAILED), null)).isFalse()
     }
 
-    private fun claim(session: VoiceTutorSession, result: VoiceTutorResult?, hasTranscript: Boolean = true) =
-        voiceTutorSummaryCanBeClaimed(session, result, hasTranscript, now, 300)
+    private fun claim(session: VoiceTutorSession, result: VoiceTutorResult?) =
+        voiceTutorSummaryCanBeClaimed(session, result, now, 300)
 
     private fun result(status: VoiceTutorResultStatus, error: String? = null) = VoiceTutorResult(
         sessionId = "summary-policy-session", status = status, summaryMarkdown = null,

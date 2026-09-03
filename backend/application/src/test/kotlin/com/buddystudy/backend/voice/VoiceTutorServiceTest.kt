@@ -1130,16 +1130,18 @@ class VoiceTutorServiceTest {
     }
 
     @Test
-    fun `a failed call without saved speech fails its result without calling the summary provider`() = runBlocking<Unit> {
+    fun `a failed call without verified learning completes an empty result without calling the summary provider`() = runBlocking<Unit> {
         val persistence = FakePersistence(now)
         val summaries = FakeSummary()
         val service = service(persistence, summaries = summaries)
 
         val ended = service.finish(principal, persistence.session.id, "PROVIDER_ERROR", true, "Realtime provider connection failed.")
 
-        assertThat(ended.resultStatus).isEqualTo(VoiceTutorResultStatus.FAILED)
-        assertThat(persistence.failedResultCalls).isEqualTo(1)
-        assertThat(persistence.storedResult?.errorMessage).isEqualTo("Realtime provider connection failed.")
+        assertThat(ended.resultStatus).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+        assertThat(persistence.failedResultCalls).isZero()
+        assertThat(persistence.storedResult?.status).isEqualTo(VoiceTutorResultStatus.COMPLETED)
+        assertThat(persistence.storedResult?.summaryMarkdown).isEmpty()
+        assertThat(persistence.storedResult?.errorMessage).isNull()
         assertThat(summaries.calls).isZero()
     }
 
@@ -1766,9 +1768,7 @@ class VoiceTutorServiceTest {
             if (session.finalizedAt != null) return session
             session = session.copy(
                 status = if (failed) VoiceTutorSessionStatus.FAILED else VoiceTutorSessionStatus.COMPLETED,
-                resultStatus = if (failed && turns.none { it.transcript.isNotBlank() }) {
-                    VoiceTutorResultStatus.FAILED
-                } else session.resultStatus,
+                resultStatus = session.resultStatus,
                 endedAt = session.endedAt ?: now,
                 finalizedAt = session.finalizedAt ?: now,
                 endReason = session.endReason ?: reason,

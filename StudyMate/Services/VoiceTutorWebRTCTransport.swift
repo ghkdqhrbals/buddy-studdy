@@ -3,12 +3,76 @@ import AVFoundation
 import Foundation
 import LiveKitWebRTC
 
+struct VoiceTutorWebRTCBackendFailure: Equatable, Sendable {
+    let code: String?
+    let message: String?
+
+    private struct Payload: Decodable {
+        let code: String?
+        let message: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case errorCode
+            case code
+            case message
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            code = (try? container.decodeIfPresent(String.self, forKey: .errorCode))
+                ?? (try? container.decodeIfPresent(String.self, forKey: .code))
+            message = try? container.decodeIfPresent(String.self, forKey: .message)
+        }
+    }
+
+    private struct Envelope: Decodable {
+        let error: Payload
+    }
+
+    /// The SDP endpoint returns the regular BuddyStudy error envelope even
+    /// though its success response is `application/sdp`. Keep only bounded,
+    /// structured fields. The server message is diagnostic context and is
+    /// deliberately never rendered or logged by the call UI.
+    static func decode(from data: Data) -> Self? {
+        guard !data.isEmpty, data.count <= 16_384 else { return nil }
+        let decoder = JSONDecoder()
+        let payload = (try? decoder.decode(Envelope.self, from: data).error)
+            ?? (try? decoder.decode(Payload.self, from: data))
+        guard let payload else { return nil }
+        let code = safeCode(payload.code)
+        let message = safeMessage(payload.message)
+        guard code != nil || message != nil else { return nil }
+        return Self(code: code, message: message)
+    }
+
+    private static func safeCode(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.utf8.count <= 128,
+              trimmed.unicodeScalars.allSatisfy({ scalar in
+                  CharacterSet.alphanumerics.contains(scalar)
+                      || scalar == "_" || scalar == "-" || scalar == "."
+              }) else { return nil }
+        return trimmed
+    }
+
+    private static func safeMessage(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.utf8.count <= 512,
+              trimmed.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+            return nil
+        }
+        return trimmed
+    }
+}
+
 enum VoiceTutorWebRTCError: Error {
     case peerConnectionCreationFailed
     case localTrackCreationFailed
     case offerCreationFailed
     case invalidSDPResponse
-    case sdpExchangeFailed(Int)
+    case sdpExchangeFailed(statusCode: Int, backendFailure: VoiceTutorWebRTCBackendFailure?)
     case mediaConnectionFailed
     case mediaConnectionTimedOut
     case speechActivityUnavailable
@@ -1182,7 +1246,10 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             throw VoiceTutorWebRTCError.invalidSDPResponse
         }
         guard (200..<300).contains(response.statusCode) else {
-            throw VoiceTutorWebRTCError.sdpExchangeFailed(response.statusCode)
+            throw VoiceTutorWebRTCError.sdpExchangeFailed(
+                statusCode: response.statusCode,
+                backendFailure: VoiceTutorWebRTCBackendFailure.decode(from: data)
+            )
         }
         guard let answer = String(data: data, encoding: .utf8),
               answer.contains("v=0"),

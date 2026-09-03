@@ -24,14 +24,18 @@ import org.junit.jupiter.api.TestFactory
 import org.junit.jupiter.api.DynamicTest.dynamicTest
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.web.reactive.function.client.ClientResponse
+import org.springframework.web.reactive.function.client.WebClientRequestException
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import reactor.core.publisher.Sinks
 import reactor.core.scheduler.Schedulers
 import reactor.test.StepVerifier
 import reactor.core.Disposable
+import java.io.IOException
+import java.net.URI
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
@@ -150,6 +154,166 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         assertThat(HttpStatus.CONFLICT.isAlreadyEndedCall()).isTrue()
         assertThat(HttpStatus.GONE.isAlreadyEndedCall()).isTrue()
         assertThat(HttpStatus.INTERNAL_SERVER_ERROR.isAlreadyEndedCall()).isFalse()
+    }
+
+    @Test
+    fun `provider rejection retains bounded diagnostics without exposing its message`() = runBlocking<Unit> {
+        val response = ClientResponse.create(HttpStatus.TOO_MANY_REQUESTS)
+            .header("x-request-id", "req_voice_123")
+            .header(HttpHeaders.RETRY_AFTER, "3")
+            .header(HttpHeaders.CONTENT_TYPE, "application/json")
+            .body(
+                """{"error":{"message":"sensitive provider detail","type":"rate_limit_error","code":"rate_limit_exceeded"}}""",
+            )
+            .build()
+
+        val failure = runCatching {
+            adapter.readNegotiationResponse(response) {}.awaitSingle()
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(VoiceTutorWebRtcProviderException::class.java)
+        val providerFailure = failure as VoiceTutorWebRtcProviderException
+        assertThat(providerFailure.message).isEqualTo("OpenAI WebRTC negotiation failed.")
+        assertThat(providerFailure.message).doesNotContain("sensitive provider detail")
+        assertThat(providerFailure.diagnostics).isEqualTo(
+            VoiceTutorWebRtcProviderDiagnostics(
+                status = 429,
+                openAiRequestId = "req_voice_123",
+                errorType = "rate_limit_error",
+                errorCode = "rate_limit_exceeded",
+                retryAfter = "3",
+            ),
+        )
+    }
+
+    @Test
+    fun `negotiation retries explicit rate limit rejections at most three total attempts`() = runBlocking {
+        val attempts = mutableListOf<Int>()
+        val sleeps = mutableListOf<Duration>()
+        val failures = mutableListOf<VoiceTutorWebRtcNegotiationFailure>()
+
+        val answer = retryVoiceTutorWebRtcNegotiation(
+            callIdObserved = { false },
+            sleeper = { sleeps += it },
+            onFailure = { failures += it },
+        ) { attempt ->
+            attempts += attempt
+            when (attempt) {
+                1 -> throw VoiceTutorWebRtcProviderException(
+                    "generic",
+                    VoiceTutorWebRtcProviderDiagnostics(
+                        status = 429,
+                        errorType = "rate_limit_error",
+                        retryAfter = "1",
+                    ),
+                )
+                2 -> throw VoiceTutorWebRtcProviderException(
+                    "generic",
+                    VoiceTutorWebRtcProviderDiagnostics(status = 429, errorType = "rate_limit_error"),
+                )
+                else -> "connected"
+            }
+        }
+
+        assertThat(answer).isEqualTo("connected")
+        assertThat(attempts).containsExactly(1, 2, 3)
+        assertThat(sleeps).containsExactly(Duration.ofSeconds(1), Duration.ofMillis(750))
+        assertThat(failures.map { it.retry }).containsExactly(true, true)
+    }
+
+    @Test
+    fun `negotiation never retries an uncertain request failure`() = runBlocking<Unit> {
+        val attempts = mutableListOf<Int>()
+        val sleeps = mutableListOf<Duration>()
+
+        val failure = runCatching {
+            retryVoiceTutorWebRtcNegotiation(
+                callIdObserved = { false },
+                sleeper = { sleeps += it },
+            ) { attempt ->
+                attempts += attempt
+                throw webClientRequestFailure()
+            }
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(WebClientRequestException::class.java)
+        assertThat(attempts).containsExactly(1)
+        assertThat(sleeps).isEmpty()
+    }
+
+    @Test
+    fun `negotiation stops after third transient failure`() = runBlocking<Unit> {
+        val attempts = mutableListOf<Int>()
+        val sleeps = mutableListOf<Duration>()
+        val failures = mutableListOf<VoiceTutorWebRtcNegotiationFailure>()
+
+        val failure = runCatching {
+            retryVoiceTutorWebRtcNegotiation(
+                callIdObserved = { false },
+                sleeper = { sleeps += it },
+                onFailure = { failures += it },
+            ) { attempt ->
+                attempts += attempt
+                throw VoiceTutorWebRtcProviderException(
+                    "generic",
+                    VoiceTutorWebRtcProviderDiagnostics(status = 429, errorType = "rate_limit_error"),
+                )
+            }
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(VoiceTutorWebRtcProviderException::class.java)
+        assertThat(attempts).containsExactly(1, 2, 3)
+        assertThat(sleeps).containsExactly(Duration.ofMillis(250), Duration.ofMillis(750))
+        assertThat(failures.map { it.retry }).containsExactly(true, true, false)
+    }
+
+    @Test
+    fun `negotiation never retries a request failure after observing a provider call id`() = runBlocking<Unit> {
+        var callIdObserved = false
+        val attempts = mutableListOf<Int>()
+        val sleeps = mutableListOf<Duration>()
+
+        val failure = runCatching {
+            retryVoiceTutorWebRtcNegotiation(
+                callIdObserved = { callIdObserved },
+                sleeper = { sleeps += it },
+            ) { attempt ->
+                attempts += attempt
+                callIdObserved = true
+                throw webClientRequestFailure()
+            }
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(WebClientRequestException::class.java)
+        assertThat(attempts).containsExactly(1)
+        assertThat(sleeps).isEmpty()
+    }
+
+    @Test
+    fun `only rate limiting and server statuses are retryable`() {
+        assertThat(isRetryableVoiceTutorWebRtcStatus(429)).isTrue()
+        assertThat(listOf(400, 408, 499, 500, 503, 599, 600).any(::isRetryableVoiceTutorWebRtcStatus)).isFalse()
+
+        val exhaustedCredit = VoiceTutorWebRtcProviderException(
+            "generic",
+            VoiceTutorWebRtcProviderDiagnostics(
+                status = 429,
+                errorType = "insufficient_quota",
+                errorCode = "credit_balance_exhausted",
+            ),
+        )
+        val transientRateLimit = VoiceTutorWebRtcProviderException(
+            "generic",
+            VoiceTutorWebRtcProviderDiagnostics(status = 429, errorType = "rate_limit_error"),
+        )
+        val ambiguousRateLimit = VoiceTutorWebRtcProviderException(
+            "generic",
+            VoiceTutorWebRtcProviderDiagnostics(status = 429),
+        )
+        assertThat(isRetryableVoiceTutorWebRtcNegotiationFailure(exhaustedCredit)).isFalse()
+        assertThat(isRetryableVoiceTutorWebRtcNegotiationFailure(transientRateLimit)).isTrue()
+        assertThat(isRetryableVoiceTutorWebRtcNegotiationFailure(ambiguousRateLimit)).isFalse()
+        assertThat(isRetryableVoiceTutorWebRtcNegotiationFailure(webClientRequestFailure())).isFalse()
     }
 
     @Test
@@ -1088,6 +1252,13 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
             append("a=sctp-port:5000\r\n")
         }
     }
+
+    private fun webClientRequestFailure(): WebClientRequestException = WebClientRequestException(
+        IOException("connection reset"),
+        HttpMethod.POST,
+        URI.create("https://api.openai.com/v1/realtime/calls"),
+        HttpHeaders.EMPTY,
+    )
 
     private companion object {
         const val RESPONSE_ID = "response-post-relay"

@@ -245,6 +245,91 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertGreaterThan(try XCTUnwrap(second.httpBody).count, 0)
     }
 
+    func testSDPFailureDecodesOnlyBoundedStructuredBackendFields() throws {
+        let failure = try XCTUnwrap(
+            VoiceTutorWebRTCBackendFailure.decode(
+                from: Data(
+                    #"{"error":{"errorCode":"VOICE_TUTOR_PROVIDER_UNAVAILABLE","code":50302,"message":"Voice Tutor provider is temporarily unavailable.","requestId":"private-request"}}"#.utf8
+                )
+            )
+        )
+
+        XCTAssertEqual(failure.code, "VOICE_TUTOR_PROVIDER_UNAVAILABLE")
+        XCTAssertEqual(failure.message, "Voice Tutor provider is temporarily unavailable.")
+        XCTAssertNil(
+            VoiceTutorWebRTCBackendFailure.decode(
+                from: Data(#"{"error":{"code":"unsafe code","message":"never trusted"}}"#.utf8)
+            )?.code
+        )
+        XCTAssertNil(
+            VoiceTutorWebRTCBackendFailure.decode(
+                from: Data(repeating: 0x41, count: 16_385)
+            )
+        )
+    }
+
+    func testSDPProviderStartupFailureUsesLocalizedServiceUnavailablePresentation() {
+        let backendFailure = VoiceTutorWebRTCBackendFailure(
+            code: "VOICE_TUTOR_PROVIDER_UNAVAILABLE",
+            message: "This raw server text must not be shown."
+        )
+
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            let coded = VoiceTutorStartupFailurePolicy.presentation(
+                for: VoiceTutorWebRTCError.sdpExchangeFailed(
+                    statusCode: 502,
+                    backendFailure: backendFailure
+                ),
+                strings: strings
+            )
+            XCTAssertEqual(coded.cause, .providerUnavailable)
+            XCTAssertEqual(coded.message, strings.serviceTemporarilyUnavailable)
+            XCTAssertNotEqual(coded.message, backendFailure.message)
+
+            let statusOnly = VoiceTutorStartupFailurePolicy.presentation(
+                for: VoiceTutorWebRTCError.sdpExchangeFailed(
+                    statusCode: 503,
+                    backendFailure: nil
+                ),
+                strings: strings
+            )
+            XCTAssertEqual(statusOnly.cause, .providerUnavailable)
+            XCTAssertEqual(statusOnly.message, strings.serviceTemporarilyUnavailable)
+        }
+    }
+
+    func testPermanentSDPStartupFailuresDoNotOfferAnEndlessRetry() {
+        let strings = AppStrings(language: .korean)
+        let rejected = VoiceTutorStartupFailurePolicy.presentation(
+            for: VoiceTutorWebRTCError.sdpExchangeFailed(
+                statusCode: 422,
+                backendFailure: VoiceTutorWebRTCBackendFailure(
+                    code: "VALIDATION_ERROR",
+                    message: "Invalid request."
+                )
+            ),
+            strings: strings
+        )
+        XCTAssertEqual(rejected.cause, .requestRejected)
+        XCTAssertEqual(rejected.message, strings.voiceTutorRequestRejected)
+        XCTAssertEqual(
+            VoiceTutorCallPresentation(phase: .failed, failureCause: rejected.cause).primaryAction,
+            .dismiss
+        )
+
+        let update = VoiceTutorStartupFailurePolicy.presentation(
+            for: VoiceTutorWebRTCError.sdpExchangeFailed(statusCode: 426, backendFailure: nil),
+            strings: strings
+        )
+        XCTAssertEqual(update.cause, .updateRequired)
+        XCTAssertEqual(update.message, strings.voiceTutorUpdateRequiredMessage)
+        XCTAssertEqual(
+            VoiceTutorCallPresentation(phase: .failed, failureCause: update.cause).primaryAction,
+            .dismiss
+        )
+    }
+
     func testMediaReadinessWaitsForCombinedICEAndDTLSConnection() {
         XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .new, elapsedSeconds: 0), .waiting)
         XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .connecting, elapsedSeconds: 14.9), .waiting)
@@ -1760,6 +1845,10 @@ final class VoiceTutorContractTests: XCTestCase {
                 strings.serviceTemporarilyUnavailable
             )
 
+            let unavailable = VoiceTutorCallPresentation(phase: .failed, failureCause: .providerUnavailable)
+            XCTAssertFalse(unavailable.showsConnectionFailure(strings, errorMessage: strings.serviceTemporarilyUnavailable))
+            XCTAssertEqual(unavailable.statusText(strings), strings.voiceTutorCallUnavailable)
+
             let connection = VoiceTutorCallPresentation(phase: .failed, failureCause: .connection)
             XCTAssertTrue(connection.showsConnectionFailure(strings, errorMessage: strings.voiceTutorConnectionFailed))
             XCTAssertEqual(connection.statusText(strings), strings.voiceTutorCallFailed)
@@ -1772,6 +1861,14 @@ final class VoiceTutorContractTests: XCTestCase {
                 XCTAssertFalse(stopped.showsConnectionFailure(strings, errorMessage: nil))
                 XCTAssertEqual(stopped.statusText(strings), strings.voiceTutorCallEnded)
             }
+
+            let update = VoiceTutorCallPresentation(phase: .failed, failureCause: .updateRequired)
+            XCTAssertEqual(update.statusText(strings), strings.updateRequired)
+            XCTAssertEqual(update.primaryAction, .dismiss)
+
+            let rejected = VoiceTutorCallPresentation(phase: .failed, failureCause: .requestRejected)
+            XCTAssertEqual(rejected.statusText(strings), strings.voiceTutorCallUnavailable)
+            XCTAssertEqual(rejected.primaryAction, .dismiss)
         }
     }
 
@@ -1779,6 +1876,9 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(AppStrings(language: .korean).voiceTutorProviderCallFailed, "AI 응답 중단됨")
         XCTAssertEqual(AppStrings(language: .english).voiceTutorProviderCallFailed, "AI response stopped")
         XCTAssertEqual(AppStrings(language: .japanese).voiceTutorProviderCallFailed, "AIの応答が中断されました")
+        XCTAssertEqual(AppStrings(language: .korean).voiceTutorCallUnavailable, "연결 실패")
+        XCTAssertEqual(AppStrings(language: .english).voiceTutorCallUnavailable, "Couldn't connect")
+        XCTAssertEqual(AppStrings(language: .japanese).voiceTutorCallUnavailable, "接続できません")
     }
 
     func testCompactVoiceCallSummaryStatesDistinguishPendingFailedReadyAndAbsentContent() throws {

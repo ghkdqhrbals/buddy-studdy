@@ -562,7 +562,11 @@ struct VoiceTutorCallPresentation {
             return .dismiss
         }
         switch phase {
-        case .failed: return .retry
+        case .failed:
+            switch failureCause {
+            case .updateRequired, .requestRejected: return .dismiss
+            default: return .retry
+            }
         case .ended: return .dismiss
         default: return .wait
         }
@@ -621,6 +625,9 @@ struct VoiceTutorCallPresentation {
         case .failed:
             switch failureCause {
             case .provider: return strings.voiceTutorProviderCallFailed
+            case .providerUnavailable: return strings.voiceTutorCallUnavailable
+            case .updateRequired: return strings.updateRequired
+            case .requestRejected: return strings.voiceTutorCallUnavailable
             case .connection, .none: return strings.voiceTutorCallFailed
             case .microphone, .audio, .localControl, .service, .unknown:
                 return strings.voiceTutorCallEnded
@@ -1654,7 +1661,8 @@ struct VoiceTutorCallScreen: View {
         case .microphone: return "mic.slash.fill"
         case .audio: return "speaker.slash.fill"
         case .localControl: return "pause.circle.fill"
-        case .provider, .service, .unknown: return "exclamationmark"
+        case .provider, .providerUnavailable, .updateRequired, .requestRejected, .service, .unknown:
+            return "exclamationmark"
         }
     }
 

@@ -305,16 +305,7 @@ class VoiceTutorPersistenceAdapter(
         from voice_tutor_sessions session
         left join voice_tutor_results result on result.session_id = session.id
         where session.finalized_at is not null
-          and (
-                session.status = 'COMPLETED'
-                or (
-                    session.status = 'FAILED'
-                    and exists (
-                        select 1 from voice_tutor_transcript_turns turn
-                        where turn.session_id = session.id and char_length(trim(turn.transcript)) > 0
-                    )
-                )
-              )
+          and session.status in ('COMPLETED', 'FAILED')
           and (
                 (session.result_status = 'PENDING' and result.session_id is null)
                 or (
@@ -901,7 +892,6 @@ class VoiceTutorPersistenceAdapter(
         if (!voiceTutorSummaryCanBeClaimed(
                 session,
                 existing,
-                hasUsableTranscript = session.status == VoiceTutorSessionStatus.FAILED && hasUsableTranscript(session.id),
                 now = now,
                 processingLeaseSeconds = processingLeaseSeconds,
             )
@@ -1137,11 +1127,7 @@ class VoiceTutorPersistenceAdapter(
             minInstant(usageEndedAt, session.hardEndsAt)
         }
         val charged = voiceTutorChargedSeconds(session, effectiveEnd)
-        val resultStatus = voiceTutorResultStatusAfterSettlement(
-            session.resultStatus,
-            failed,
-            hasUsableTranscript = failed && hasUsableTranscript(session.id),
-        )
+        val resultStatus = voiceTutorResultStatusAfterSettlement(session.resultStatus)
         val quota = quotaRow(session.userId, lock = true)
         if (quota != null && quota.periodStartedAt == session.periodStartedAt && quota.periodEndsAt == session.periodEndsAt) {
             database.sql(
@@ -1386,25 +1372,18 @@ internal fun voiceTutorReservationExhaustsMonthlyQuota(
 
 internal fun voiceTutorResultStatusAfterSettlement(
     current: VoiceTutorResultStatus,
-    failed: Boolean,
-    hasUsableTranscript: Boolean,
-): VoiceTutorResultStatus = if (failed && !hasUsableTranscript && current == VoiceTutorResultStatus.PENDING) {
-    VoiceTutorResultStatus.FAILED
-} else {
-    current
-}
+): VoiceTutorResultStatus = current
 
 internal fun voiceTutorSummaryCanBeClaimed(
     session: VoiceTutorSession,
     existing: VoiceTutorResult?,
-    hasUsableTranscript: Boolean,
     now: Instant,
     processingLeaseSeconds: Long,
 ): Boolean {
     if (session.finalizedAt == null || session.resultStatus == VoiceTutorResultStatus.COMPLETED) return false
-    if (session.status != VoiceTutorSessionStatus.COMPLETED &&
-        (session.status != VoiceTutorSessionStatus.FAILED || !hasUsableTranscript)
-    ) return false
+    if (session.status != VoiceTutorSessionStatus.COMPLETED && session.status != VoiceTutorSessionStatus.FAILED) {
+        return false
+    }
     return when (existing?.status) {
         null -> session.resultStatus == VoiceTutorResultStatus.PENDING
         VoiceTutorResultStatus.PROCESSING -> session.resultStatus == VoiceTutorResultStatus.PROCESSING &&

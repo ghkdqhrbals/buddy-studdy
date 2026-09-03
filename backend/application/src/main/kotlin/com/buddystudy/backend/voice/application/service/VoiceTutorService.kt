@@ -497,24 +497,11 @@ class VoiceTutorService(
             now = now,
         ) ?: throw notFound("Voice Tutor session was not found.")
 
-        // Transport outcome is not a learning-result outcome. A failed call
-        // with already persisted evidence is still eligible for the summary
-        // worker; a late duplicate finish must not fail a completed/claimed one.
-        if (finalized.status == VoiceTutorSessionStatus.FAILED &&
-            finalized.resultStatus == VoiceTutorResultStatus.FAILED &&
-            persistence.transcript(
-                registered.userId, sessionId,
-                properties.voiceTutor.transcriptMaxCharacters.coerceIn(1, MAX_TRANSCRIPT_CHARACTERS),
-            ).none { it.transcript.isNotBlank() }
-        ) {
-            persistence.failUnclaimedResult(
-                registered.userId,
-                sessionId,
-                properties.voiceTutor.summaryPromptVersion,
-                finalized.failureMessage ?: "The realtime session failed before a learning summary could be generated.",
-                clock.instant(),
-            )
-        } else if (finalized.resultStatus == VoiceTutorResultStatus.PENDING &&
+        // Transport outcome is not a learning-result outcome. A call that
+        // never produced a verified study Q&A has no summary to fail, even if
+        // its media setup or relay failed. Complete that technical result as
+        // empty so iOS does not present an unrelated "summary failed" state.
+        if (finalized.resultStatus == VoiceTutorResultStatus.PENDING &&
             !persistence.hasVerifiedLearningExchange(registered.userId, sessionId)
         ) {
             // Topic discovery, tree mutation and lesson-consent calls are not

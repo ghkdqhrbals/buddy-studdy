@@ -45,11 +45,92 @@ enum VoiceTutorSessionPhase: Equatable {
 enum VoiceTutorFailureCause: Equatable {
     case connection
     case provider
+    case providerUnavailable
+    case updateRequired
+    case requestRejected
     case microphone
     case audio
     case localControl
     case service
     case unknown
+}
+
+struct VoiceTutorStartupFailurePresentation: Equatable {
+    let cause: VoiceTutorFailureCause
+    let message: String
+}
+
+enum VoiceTutorStartupFailurePolicy {
+    static func presentation(
+        for error: Error,
+        strings: AppStrings
+    ) -> VoiceTutorStartupFailurePresentation {
+        if let webRTCPresentation = webRTCFailurePresentation(for: error, strings: strings) {
+            return webRTCPresentation
+        }
+        if error is VoiceTutorSileroError {
+            return VoiceTutorStartupFailurePresentation(
+                cause: .unknown,
+                message: strings.voiceTutorInputPreparationFailed
+            )
+        }
+        if let preparationError = error as? VoiceTutorPreparationError {
+            let message: String
+            switch preparationError {
+            case .signInRequired:
+                message = strings.voiceTutorSignInRequired
+            case .missingRegistration:
+                message = strings.voiceTutorAccountNotReady
+            case .invalidWebSocketURL:
+                message = strings.voiceTutorInvalidConnection
+            }
+            return VoiceTutorStartupFailurePresentation(cause: .unknown, message: message)
+        }
+        if let audioError = error as? VoiceTutorAudioEngine.AudioError {
+            let message: String
+            switch audioError {
+            case .microphonePermissionDenied:
+                message = strings.voiceTutorMicrophoneDenied
+            case .unsupportedInputFormat, .invalidOutputAudio:
+                message = strings.voiceTutorConnectionFailed
+            }
+            return VoiceTutorStartupFailurePresentation(cause: .unknown, message: message)
+        }
+        return VoiceTutorStartupFailurePresentation(
+            cause: .unknown,
+            message: strings.voiceTutorConnectionFailed
+        )
+    }
+
+    private static func webRTCFailurePresentation(
+        for error: Error,
+        strings: AppStrings
+    ) -> VoiceTutorStartupFailurePresentation? {
+        guard let webRTCError = error as? VoiceTutorWebRTCError,
+              case let .sdpExchangeFailed(statusCode, backendFailure) = webRTCError else {
+            return nil
+        }
+        if statusCode == 503
+            || backendFailure?.code?.uppercased() == "VOICE_TUTOR_PROVIDER_UNAVAILABLE" {
+            return VoiceTutorStartupFailurePresentation(
+                cause: .providerUnavailable,
+                message: strings.serviceTemporarilyUnavailable
+            )
+        }
+        if statusCode == 426 {
+            return VoiceTutorStartupFailurePresentation(
+                cause: .updateRequired,
+                message: strings.voiceTutorUpdateRequiredMessage
+            )
+        }
+        if [400, 413, 415, 422].contains(statusCode) {
+            return VoiceTutorStartupFailurePresentation(
+                cause: .requestRejected,
+                message: strings.voiceTutorRequestRejected
+            )
+        }
+        return nil
+    }
 }
 
 private enum VoiceTutorStopSource: String {
@@ -737,8 +818,12 @@ final class VoiceTutorViewModel: ObservableObject {
         } catch {
             guard connectionAttemptFence.isCurrent(attemptID), !isFinalizing,
                   phase.isLive else { return }
-            errorMessage = localizedMessage(for: error)
-            failureCause = .unknown
+            let failure = VoiceTutorStartupFailurePolicy.presentation(
+                for: error,
+                strings: appState.strings
+            )
+            errorMessage = failure.message
+            failureCause = failure.cause
             logDiagnostic("event=startup_failed \(VoiceTutorDiagnosticError.fields(for: error))", isWarning: true)
             await stop(shouldNotifyServerOverSocket: false, outcome: .failed, source: .startupFailure)
         }
@@ -1912,29 +1997,5 @@ final class VoiceTutorViewModel: ObservableObject {
         sessionSecondsRemaining = max(0, Int(hardEndsAt.timeIntervalSinceNow.rounded(.up)))
     }
 
-    private func localizedMessage(for error: Error) -> String {
-        if error is VoiceTutorSileroError {
-            return appState.strings.voiceTutorInputPreparationFailed
-        }
-        if let preparationError = error as? VoiceTutorPreparationError {
-            switch preparationError {
-            case .signInRequired:
-                return appState.strings.voiceTutorSignInRequired
-            case .missingRegistration:
-                return appState.strings.voiceTutorAccountNotReady
-            case .invalidWebSocketURL:
-                return appState.strings.voiceTutorInvalidConnection
-            }
-        }
-        if let audioError = error as? VoiceTutorAudioEngine.AudioError {
-            switch audioError {
-            case .microphonePermissionDenied:
-                return appState.strings.voiceTutorMicrophoneDenied
-            case .unsupportedInputFormat, .invalidOutputAudio:
-                return appState.strings.voiceTutorConnectionFailed
-            }
-        }
-        return appState.strings.voiceTutorConnectionFailed
-    }
 }
 #endif
