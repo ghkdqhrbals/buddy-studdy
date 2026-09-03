@@ -299,6 +299,10 @@ internal class VoiceTutorDuplexTurnController(
      * reused and a later semantic turn can only select, never replay the write.
     */
     private var pendingStudyUpdateSelectionOffer: CandidateOfferPool? = null
+    /** One server-owned candidate may be spoken again after a misunderstood setup reply. */
+    private var pendingSavedTopicSelectionReoffer: CandidateOfferPool? = null
+    /** A forced re-offer cannot recursively schedule itself after another NONE reply. */
+    private var lastSavedTopicSelectionReofferOfferId: Long? = null
     private var activeTargetOfferExchangeEvidence: TargetOfferExchangeEvidence? = null
     private var activeSpeechTargetOffer: VoiceTutorStudyTargetOffer? = null
     private val toolDiscoveryFences = linkedMapOf<String, ToolDiscoveryFence>()
@@ -1497,6 +1501,8 @@ internal class VoiceTutorDuplexTurnController(
         activeTargetOfferExchangeEvidence = null
         activeSpeechTargetOffer = null
         pendingStudyUpdateSelectionOffer = null
+        pendingSavedTopicSelectionReoffer = null
+        lastSavedTopicSelectionReofferOfferId = null
         toolDiscoveryFences.clear()
     }
 
@@ -1740,6 +1746,15 @@ internal class VoiceTutorDuplexTurnController(
                         } == true
                     val studyUpdateStartCurrent = studyUpdateIntentCurrent &&
                         publication.studyUpdateRequest?.startLessonAfterUpdate == true
+                    // NONE means the semantic assessor could not establish an operative
+                    // choice. A direct refusal has its own non-authorizing intent and
+                    // must return to normal conversation without repeating the offer.
+                    pendingSavedTopicSelectionReoffer = currentBinding?.targetOffer?.takeIf {
+                        persisted && !ready.checkpoint && focusPublicationCurrent &&
+                            publication.intent == VoiceTutorInputIntent.NONE &&
+                            it.lessonRevision == currentLessonRevision && it.candidates.size == 1 &&
+                            it.offerId != lastSavedTopicSelectionReofferOfferId
+                    }?.asCandidateOfferPool(CandidateOfferPurpose.SAVED_TOPIC_REOFFER)
                     val studyActionAtStaleRevision = persisted && focusPublicationCurrent && binding != null &&
                         currentBinding == null && publication.intent in setOf(
                             VoiceTutorInputIntent.SELECT_SAVED_TOPIC,
@@ -3396,10 +3411,13 @@ internal class VoiceTutorDuplexTurnController(
             studyUpdateCommittedFocusSupersededFollowupPending
         val studyUpdateSelectionFollowupReady = !opening &&
             pendingStudyUpdateSelectionOffer?.lessonRevision == currentLessonRevision
+        val savedTopicSelectionReofferReady = !opening &&
+            pendingSavedTopicSelectionReoffer?.lessonRevision == currentLessonRevision
         val studyMutationFailureFollowupReady = !opening && studyMutationFailureFollowupPending
         val toolChoice = if (opening || rootStudyFollowupReady ||
             studyUpdateCommittedFocusSupersededFollowupReady ||
             studyUpdateAutoFocusFailedFollowupReady || studyUpdateSelectionFollowupReady ||
+            savedTopicSelectionReofferReady ||
             studyMutationFailureFollowupReady
         ) {
             "none"
@@ -3426,6 +3444,7 @@ internal class VoiceTutorDuplexTurnController(
             studyUpdateAutoFocusFailedFollowupReady ->
                 STUDY_UPDATE_START_UNCONFIRMED_FOLLOWUP_INSTRUCTIONS
             studyUpdateSelectionFollowupReady -> STUDY_UPDATE_SELECTION_FOLLOWUP_INSTRUCTIONS
+            savedTopicSelectionReofferReady -> SAVED_TOPIC_SELECTION_REOFFER_INSTRUCTIONS
             studyMutationFailureFollowupReady -> STUDY_MUTATION_UNCONFIRMED_FOLLOWUP_INSTRUCTIONS
             studyQuestionPurposeReady -> STUDY_QUESTION_RESPONSE_INSTRUCTIONS
             else -> null
@@ -3573,12 +3592,18 @@ internal class VoiceTutorDuplexTurnController(
                 it.lessonRevision == currentLessonRevision && validCandidateOfferPool(it)
         }
         if (revisedUpdateOffer != null) pendingStudyUpdateSelectionOffer = null
+        val savedTopicReoffer = pendingSavedTopicSelectionReoffer?.takeIf {
+            instructionOverride == SAVED_TOPIC_SELECTION_REOFFER_INSTRUCTIONS &&
+                it.lessonRevision == currentLessonRevision && validCandidateOfferPool(it)
+        }
+        if (savedTopicReoffer != null) pendingSavedTopicSelectionReoffer = null
         activateResponse(
             createEventId,
             PendingProviderResponseRetry(
                 toolChoice = toolChoice,
                 lessonRevision = currentLessonRevision,
-                candidateDiscovery = revisedUpdateOffer ?: candidateDiscoveryGraph?.offerPool()?.takeIf {
+                candidateDiscovery = revisedUpdateOffer ?: savedTopicReoffer ?:
+                candidateDiscoveryGraph?.offerPool()?.takeIf {
                     it.lessonRevision == currentLessonRevision
                 },
                 respondsToStudyAnswer = responseStudyAnswer != null,
@@ -3921,13 +3946,21 @@ internal class VoiceTutorDuplexTurnController(
         activeResponseHadCandidateNavigation = false
         if (discovery == null) return
         val tutorAudioTranscript = completedActiveTutorTranscriptContext() ?: return
+        if (discovery.purpose == CandidateOfferPurpose.SAVED_TOPIC_REOFFER &&
+            discovery.candidates.singleOrNull()?.topic?.let(tutorAudioTranscript::contains) != true
+        ) {
+            // The forced response failed to repeat the exact server-owned name.
+            // Do not expose its hidden candidate metadata as a spoken offer.
+            return
+        }
         if (nextTargetOfferId <= 0 || nextTargetOfferId == Long.MAX_VALUE ||
             lastTutorSpeechStoppedOrder <= 0 || lastSpokenResponseGeneration != activeResponseGeneration
         ) {
             return
         }
+        val offerId = nextTargetOfferId++
         activeTargetOffer = VoiceTutorStudyTargetOffer(
-            offerId = nextTargetOfferId++,
+            offerId = offerId,
             lessonRevision = discovery.lessonRevision,
             tutorResponseGeneration = activeResponseGeneration,
             tutorSpeechStoppedOrder = lastTutorSpeechStoppedOrder,
@@ -3936,6 +3969,9 @@ internal class VoiceTutorDuplexTurnController(
             tutorAudioTranscript = tutorAudioTranscript,
             candidateTraversals = discovery.candidateTraversals,
         )
+        if (discovery.purpose == CandidateOfferPurpose.SAVED_TOPIC_REOFFER) {
+            lastSavedTopicSelectionReofferOfferId = offerId
+        }
     }
 
     private fun validCandidateOfferPool(pool: CandidateOfferPool): Boolean =
@@ -3949,6 +3985,17 @@ internal class VoiceTutorDuplexTurnController(
                     pool.candidateTraversals[candidate.studyId]
                         ?.isValidFor(candidate, MAX_DISCOVERY_TREE_DEPTH) == true
             }
+
+    private fun VoiceTutorStudyTargetOffer.asCandidateOfferPool(
+        purpose: CandidateOfferPurpose = CandidateOfferPurpose.DISCOVERY,
+    ): CandidateOfferPool? =
+        CandidateOfferPool(
+            lessonRevision = lessonRevision,
+            currentFocusStudyId = currentFocusStudyId,
+            candidates = candidates,
+            candidateTraversals = candidateTraversals,
+            purpose = purpose,
+        ).takeIf(::validCandidateOfferPool)
 
     private fun retireCompletedTargetOffer() {
         activeTargetOffer = null
@@ -5323,7 +5370,7 @@ internal class VoiceTutorDuplexTurnController(
         val purpose: CandidateOfferPurpose = CandidateOfferPurpose.DISCOVERY,
     )
 
-    private enum class CandidateOfferPurpose { DISCOVERY, UPDATED_STUDY_SELECTION }
+    private enum class CandidateOfferPurpose { DISCOVERY, UPDATED_STUDY_SELECTION, SAVED_TOPIC_REOFFER }
 
     /**
      * Call-local graph assembled only from exact server-validated page slices.
@@ -5621,6 +5668,10 @@ internal class VoiceTutorDuplexTurnController(
                 "Briefly say that the change was saved, speak the exact revised saved-topic name from the tool result, and ask only whether the learner wants to start that topic now. " +
                 "This is one direct lesson-start offer for the revised node, not another update confirmation. " +
                 "Do not begin teaching, call any tool, ask a study question, or produce a learning summary."
+        const val SAVED_TOPIC_SELECTION_REOFFER_INSTRUCTIONS =
+            "The learner's last meaningful reply did not complete a saved-topic choice, while one exact server-read candidate from the immediately preceding spoken offer is still available. " +
+                "Never call any tool in this response. Briefly and naturally speak that exact saved-topic name from conversation context and ask once whether to start learning it now. " +
+                "Do not say that the learner was unrecognized or unclear, require special wording, ask them to repeat a fixed phrase, mention internal confirmation or server state, begin teaching, ask a study question, or produce a learning summary."
         const val STUDY_QUESTION_RESPONSE_INSTRUCTIONS =
             "The server has authorized exactly one substantive study question for the current confirmed saved focus and level. " +
                 "If prior node learning history is needed, first emit a strict tool-only response using only list_records, get_record, list_study_learning_records, get_voice_learning_record, get_topic_stats, or get_study_growth; never mix audio with that tool response. " +

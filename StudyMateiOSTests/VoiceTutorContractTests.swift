@@ -1656,8 +1656,10 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(compact.contains("callOrb(diameter:"))
         XCTAssertTrue(compact.contains("Text(topic)"))
         XCTAssertTrue(compact.contains("callTime"))
-        XCTAssertTrue(compact.contains("integratedConversationPreview"))
-        XCTAssertFalse(compact.contains("transcriptPanel"))
+        XCTAssertTrue(compact.contains("transcriptPanel"))
+        XCTAssertTrue(compact.contains("voiceCall.liveTranscript"))
+        XCTAssertTrue(compact.contains("compactHeaderMaximumHeight"))
+        XCTAssertFalse(compact.contains("integratedConversationPreview"))
 
         XCTAssertTrue(transcript.contains("transcriptPanel"))
         XCTAssertTrue(transcript.contains("transcriptHeader"))
@@ -1681,6 +1683,10 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(source.contains("onMute"))
         XCTAssertFalse(source.contains("transcriptSheet"))
         XCTAssertFalse(source.contains("transcriptSheetGesture"))
+        XCTAssertTrue(source.contains("LazyVStack(alignment: .leading"))
+        XCTAssertTrue(source.contains(".onChange(of: captions.last?.id)"))
+        XCTAssertTrue(source.contains(".onChange(of: assistantTranscriptDraft)"))
+        XCTAssertTrue(source.contains(".simultaneousGesture(transcriptFollowGesture"))
 
         let presentationStart = try XCTUnwrap(source.range(of: "struct VoiceTutorCallPresentation"))
         let presentationEnd = try XCTUnwrap(

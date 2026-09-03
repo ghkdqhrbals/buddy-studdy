@@ -232,6 +232,8 @@ enum class VoiceTutorInputIntent {
     UPDATE_STUDY,
     /** The learner explicitly names a saved topic they want to enter or switch to. */
     SELECT_SAVED_TOPIC,
+    /** The learner explicitly rejects the currently spoken server-owned saved-topic offer. */
+    DECLINE_SAVED_TOPIC_OFFER,
     /** The learner explicitly asks to continue deeper from the current saved-tree node. */
     CONTINUE_TREE,
     /** The learner names a saved area to browse before any exact server-owned candidate was offered. */
@@ -544,10 +546,12 @@ fun VoiceTutorInputAssessmentResult.correlatedTo(
                     decision.currentTranscriptAnswersStudyQuestion &&
                         decision.intent != VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION -> true
                     !spokenValid -> true
+                    decision.intent == VoiceTutorInputIntent.DECLINE_SAVED_TOPIC_OFFER && offer == null -> true
                     utterance.checkpoint -> target != null || targetIntent || spoken.isNotEmpty() ||
                         decision.intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY ||
                         decision.intent == VoiceTutorInputIntent.CREATE_STUDY_TOPIC ||
                         decision.intent == VoiceTutorInputIntent.UPDATE_STUDY ||
+                        decision.intent == VoiceTutorInputIntent.DECLINE_SAVED_TOPIC_OFFER ||
                         decision.intent == VoiceTutorInputIntent.ASK_STUDY_QUESTION ||
                         decision.intent == VoiceTutorInputIntent.CONTINUE_STUDY
                     decision.intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY &&

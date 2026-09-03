@@ -1045,6 +1045,19 @@ internal object VoiceTutorInputAssessmentPromptProvider {
         SELECT_SAVED_TOPIC means the learner explicitly chooses exactly one candidate from this utterance's
         targetOffer that the tutorAudioTranscript actually and explicitly proposed as a topic to choose or study,
         including a contextual yes only when that final audio transcript proposed one unambiguous exact candidate.
+        A direct named or referential start choice is already the final selection: for example, after the tutor
+        offers the saved topic “스프링”, learner speech such as “스프링으로 시작할게”, “그걸로 시작하자”,
+        or an unambiguous contextual “응” is SELECT_SAVED_TOPIC. It does not need to repeat words equivalent
+        to saved, study, now, confirm, or selection; never downgrade it to readiness or NONE merely because those
+        words are absent, and never require the learner to state the same choice a second time. These are semantic
+        examples, never phrase, suffix, keyword, regex, or template rules.
+        DECLINE_SAVED_TOPIC_OFFER means the learner directly and presently rejects the saved-topic choice that
+        this utterance's targetOffer was just spoken to offer. This includes a natural contextual refusal when the
+        completed tutor audio made the offered choice unambiguous. It is not NONE merely because the refusal is
+        short. Use NONE for a refusal about anything else, an ambiguous response, or when this utterance has no
+        targetOffer. This classification is semantic: never infer it with keywords, word lists, regex, exact text,
+        punctuation, or transcript length. DECLINE_SAVED_TOPIC_OFFER never selects or mutates a study and therefore
+        always has null targetStudyId and an empty spokenCandidateStudyIds list.
         First return every actually proposed candidate ID in spokenCandidateStudyIds (at most three), then set
         targetStudyId to the one the learner chose. A server-read candidate that appears only in the candidate list,
         tool data, an explanation, or the learner's words was not spoken as an offer. Do not choose it. Do not choose
@@ -1086,6 +1099,7 @@ internal object VoiceTutorInputAssessmentPromptProvider {
         Do not choose it while a tutor study question is awaiting an answer, before a confirmed focus, for a request
         to explain the same answer further, or from teacherContext alone. A checkpoint is never CONTINUE_STUDY.
         targetStudyId and spokenCandidateStudyIds must be null/empty for NONE, END_CURRENT_VOICE_LESSON,
+        DECLINE_SAVED_TOPIC_OFFER,
         CREATE_ROOT_STUDY, CREATE_STUDY_TOPIC, UPDATE_STUDY, DISCOVER_SAVED_TOPIC,
         ANSWER_TO_STUDY_QUESTION, ASK_STUDY_QUESTION and CONTINUE_STUDY,
         for every NON_COMMUNICATIVE item,
@@ -1368,6 +1382,7 @@ internal object VoiceTutorInputAssessmentPromptProvider {
                     "CREATE_STUDY_TOPIC" -> VoiceTutorInputIntent.CREATE_STUDY_TOPIC
                     "UPDATE_STUDY" -> VoiceTutorInputIntent.UPDATE_STUDY
                     "SELECT_SAVED_TOPIC" -> VoiceTutorInputIntent.SELECT_SAVED_TOPIC
+                    "DECLINE_SAVED_TOPIC_OFFER" -> VoiceTutorInputIntent.DECLINE_SAVED_TOPIC_OFFER
                     "CONTINUE_TREE" -> VoiceTutorInputIntent.CONTINUE_TREE
                     "DISCOVER_SAVED_TOPIC" -> VoiceTutorInputIntent.DISCOVER_SAVED_TOPIC
                     "ANSWER_TO_STUDY_QUESTION" -> VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION

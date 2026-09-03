@@ -2673,3 +2673,70 @@ the contextual meaningful-input classifier, or the user's 60-minute allowance.
   200.
 - The new opening and tree traversal apply to a **new** voice session. Existing
   sessions retain the immutable instructions captured when they were created.
+
+## 2026-09-03 — Natural saved-topic selection and continuously scrolling call transcript
+
+### Selection and call display
+
+- The compact call reserves its lower region for the complete live conversation
+  instead of showing only the latest line. Completed learner/tutor captions and
+  the current tutor draft append to one lazy, independently scrollable list.
+  While the learner is at the latest edge the list follows new speech; scrolling
+  into older history suspends that behavior until the bottom is reached again.
+  Full-conversation mode renders the same source in the destination rather than
+  presenting or owning a separate sheet.
+- A single server-read topic offer now accepts one natural named, referential or
+  contextual choice as the final selection. Successful ordinary focus selection
+  immediately authorizes the first substantive level-matched question instead of
+  asking for readiness, special wording or the same selection again.
+- If a meaningful reply genuinely has no operative choice, one exact single
+  candidate may be spoken again once. The old offer is never reused: the response
+  is tool-free, completed audio must contain the exact server-read name and a new
+  playout boundary mints a fresh offer identity. A dedicated semantic
+  `DECLINE_SAVED_TOPIC_OFFER` signal requires an actual spoken offer, carries no
+  target IDs or write/focus authority, and bypasses the re-offer. It is assessed
+  by the model rather than keywords or regex, and another non-operative response
+  cannot recurse into a confirmation loop.
+- Owner-scoped saved-topic search first sends the exact voice query. Only a
+  verified empty first page permits one retry with trailing conversational
+  sentence punctuation removed. Raw-first ordering preserves genuine names that
+  end in punctuation, intrinsic forms such as `C#`, `C++`, `.NET` and `Node.js`
+  remain intact, the transcript is never rewritten, and the fallback read grants
+  no selection or mutation authority.
+
+### Verification and existing dev refresh
+
+- Full backend regression passed **1,610 tests**: **1,607 passed**, zero failures
+  or errors, and three intentional opt-in live-provider tests skipped. After the
+  final negative boundary was added, focused selection suites passed input
+  assessment (**51/51**) and the realtime meaningful-input relay (**86/86**).
+  They cover one-turn natural selection, fresh offer identity, rejection when a
+  forced re-offer omits the exact spoken name, refusal of the original offer,
+  refusal after the one re-offer and return to normal discovery.
+- Four selected iOS call-display tests passed with zero failures. They cover the
+  integrated compact/full transcript source, lazy live appends, content-growth
+  following, user-owned older-history scrolling and latest-edge restoration. The
+  unsigned generic `StudyMateiOS` Debug device build and the normal signed iPhone
+  build passed; deep/strict signature verification passed, and the signed app was
+  installed and launched on the paired iPhone 16 Pro. Rendered compact, paused and
+  full-conversation fixtures were inspected. This does not claim that automation
+  placed a real microphone/provider call.
+- Spring AOT processing and `:tutor:bootJar` passed. The verified JAR is
+  331,840,518 bytes, SHA-256
+  `0354ebbc51ba418ad1eb807e9f54737effc52ab3e16698da176a6641860e8ef4`.
+  No database migration was added or changed.
+- Immediately before cutover there were zero `READY`/`ACTIVE`/`ENDING` voice
+  sessions and zero `PENDING`/`PROCESSING` voice results. Only the JAR in the
+  existing `buddystudy-feature20-dev-app` volume was atomically replaced and the
+  existing `backend-backend-1` API restarted. Its `dev` profile, AWS
+  `buddystudy/dev` Secrets Manager import, environment, network and mounts remain
+  unchanged; DB, Redis, LibreTranslate and backup containers retained their IDs
+  and uptime. The copy/swap helpers were auto-removed, and only the stable
+  `previous.jar` rollback file was updated so this refresh added no timestamped
+  backup JAR or persistent container.
+- The mounted JAR hash matches the verified artifact, Flyway reported schema V114
+  current with no migration, startup completed without ERROR entries, and both
+  local `127.0.0.1:8080` and public `https://lowfidev.cloud` actuator health
+  returned HTTP 200/`UP`. The corrected selection policy is captured when a
+  **new** voice session is created; a session opened before this refresh keeps its
+  immutable earlier instructions.

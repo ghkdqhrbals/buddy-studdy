@@ -233,7 +233,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         assertThat(item.path("properties").path("intent").path("enum").map { it.asText() })
             .containsExactly(
                 "NONE", "END_CURRENT_VOICE_LESSON", "CREATE_ROOT_STUDY", "CREATE_STUDY_TOPIC", "UPDATE_STUDY",
-                "SELECT_SAVED_TOPIC", "CONTINUE_TREE",
+                "SELECT_SAVED_TOPIC", "DECLINE_SAVED_TOPIC_OFFER", "CONTINUE_TREE",
                 "DISCOVER_SAVED_TOPIC", "ANSWER_TO_STUDY_QUESTION", "ASK_STUDY_QUESTION", "CONTINUE_STUDY",
             )
         assertThat(item.path("properties").path("currentTranscriptAnswersStudyQuestion").path("type").asText())
@@ -289,6 +289,102 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             .isEqualTo("Redis 주제로 이야기해 볼까요?")
         assertThat(targetOffer.path("candidates").map { it.path("studyId").longValue() })
             .containsExactly(101L, 202L)
+    }
+
+    @Test
+    fun `one natural start answer is the final saved topic selection without another confirmation`() {
+        val offered = offeredRequest(
+            candidates = listOf(VoiceTutorStudyTargetCandidate(101, null, "스프링", difficulty = 5)),
+            currentFocusStudyId = null,
+            tutorAudioTranscript = "저장된 스프링 토픽으로 학습을 시작할까요?",
+        )
+        val body = mapper.valueToTree<JsonNode>(
+            VoiceTutorInputAssessmentPromptProvider.requestBody(offered, "gpt-5.4"),
+        )
+        val instruction = body.path("messages")[0].path("content").asText()
+
+        assertThat(instruction).contains(
+            "direct named or referential start choice is already the final selection",
+            "스프링으로 시작할게",
+            "never require the learner to state the same choice a second time",
+            "never phrase, suffix, keyword, regex, or template rules",
+        )
+        for (transcript in listOf("스프링으로 시작할게.", "그걸로 시작하자.", "응.")) {
+            val request = offered.copy(utterances = listOf(
+                offered.utterances.single().copy(transcript = transcript),
+            ))
+            val parsed = VoiceTutorInputAssessmentPromptProvider.parseResponse(
+                request,
+                envelope(decisionsWithIntent(
+                    "item_1",
+                    "MEANINGFUL",
+                    "SELECT_SAVED_TOPIC",
+                    targetStudyId = 101,
+                    spokenCandidateStudyIds = listOf(101),
+                )),
+            )
+            assertThat(parsed.decisions.single().intent).isEqualTo(VoiceTutorInputIntent.SELECT_SAVED_TOPIC)
+            assertThat(parsed.decisions.single().targetStudyId).isEqualTo(101)
+        }
+    }
+
+    @Test
+    fun `a semantic refusal of the current saved topic offer is explicit and grants no target authority`() {
+        val offered = offeredRequest(
+            candidates = listOf(VoiceTutorStudyTargetCandidate(101, null, "스프링", difficulty = 5)),
+            currentFocusStudyId = null,
+            tutorAudioTranscript = "저장된 스프링 토픽으로 학습을 시작할까요?",
+        ).let { request ->
+            request.copy(utterances = listOf(request.utterances.single().copy(transcript = "아니, 다른 주제로 할래.")))
+        }
+        val body = mapper.valueToTree<JsonNode>(
+            VoiceTutorInputAssessmentPromptProvider.requestBody(offered, "gpt-5.4"),
+        )
+        assertThat(body.path("messages")[0].path("content").asText()).contains(
+            "DECLINE_SAVED_TOPIC_OFFER means the learner directly and presently rejects",
+            "It is not NONE merely because the refusal",
+            "short. Use NONE for a refusal about anything else",
+            "never infer it with keywords, word lists, regex, exact text",
+            "never selects or mutates a study",
+        )
+
+        val parsed = VoiceTutorInputAssessmentPromptProvider.parseResponse(
+            offered,
+            envelope(decisionsWithIntent(
+                "item_1",
+                "MEANINGFUL",
+                "DECLINE_SAVED_TOPIC_OFFER",
+                targetStudyId = null,
+                spokenCandidateStudyIds = emptyList(),
+            )),
+        ).decisions.single()
+
+        assertThat(parsed.intent).isEqualTo(VoiceTutorInputIntent.DECLINE_SAVED_TOPIC_OFFER)
+        assertThat(parsed.targetStudyId).isNull()
+        assertThat(parsed.spokenCandidateStudyIds).isEmpty()
+
+        assertReason(
+            request().copy(utterances = listOf(VoiceTutorInputUtterance("item_1", "아니, 다른 주제로 할래."))),
+            envelope(decisionsWithIntent(
+                "item_1",
+                "MEANINGFUL",
+                "DECLINE_SAVED_TOPIC_OFFER",
+                targetStudyId = null,
+                spokenCandidateStudyIds = emptyList(),
+            )),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+        assertReason(
+            offered,
+            envelope(decisionsWithIntent(
+                "item_1",
+                "MEANINGFUL",
+                "DECLINE_SAVED_TOPIC_OFFER",
+                targetStudyId = 101,
+                spokenCandidateStudyIds = listOf(101),
+            )),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
     }
 
     @Test

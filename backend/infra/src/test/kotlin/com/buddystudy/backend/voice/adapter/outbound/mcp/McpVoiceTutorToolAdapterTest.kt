@@ -200,6 +200,49 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
+    fun `empty voice topic lookup retries without trailing sentence punctuation only`(): Unit = runBlocking {
+        val fixture = Fixture(studyContexts = ContextStore()).apply {
+            handler = { name, arguments ->
+                check(name == "list_studies")
+                val query = arguments["query"] as String
+                val row = when (query) {
+                    "스프링" -> mapOf("id" to 301L, "parentStudyId" to null, "topic" to "스프링")
+                    "C#" -> mapOf("id" to 302L, "parentStudyId" to null, "topic" to "C#")
+                    "Node.js." -> mapOf("id" to 303L, "parentStudyId" to null, "topic" to "Node.js.")
+                    else -> null
+                }
+                success(completePage(
+                    studies = listOfNotNull(row),
+                    totalCount = if (row == null) 0 else 1,
+                    limit = 10,
+                    offset = 0,
+                ))
+            }
+        }
+
+        val naturalQuestion = fixture.adapter.execute(
+            context(), "list_studies", mapOf("query" to "스프링? ", "limit" to 10, "offset" to 0),
+        )
+        assertThat(naturalQuestion.isError).isFalse()
+        assertThat(naturalQuestion.candidateDiscovery?.scope).isEqualTo(
+            VoiceTutorCandidateDiscoveryScope.CompleteQueryPage("스프링", 0, 10, 1),
+        )
+        assertThat(naturalQuestion.candidateDiscovery?.candidates).containsExactly(
+            VoiceTutorStudyTargetCandidate(301L, null, "스프링"),
+        )
+
+        for (query in listOf("C#", "Node.js.", "???")) {
+            assertThat(fixture.adapter.execute(
+                context(), "list_studies", mapOf("query" to query, "limit" to 10, "offset" to 0),
+            ).isError).isFalse()
+        }
+
+        assertThat(fixture.calls.map { it.arguments["query"] }).containsExactly(
+            "스프링? ", "스프링", "C#", "Node.js.", "???",
+        )
+    }
+
+    @Test
     fun `validated paginated slices retain exact query and direct child scope`(): Unit = runBlocking {
         val queryCandidates = (201L..211L).map { candidate(it, null) }
         val childCandidates = (301L..311L).map { candidate(it, 101L) }
@@ -1089,6 +1132,14 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(fixture.persistedSession?.studyId).isEqualTo(101)
         assertThat(fixture.focusSelections).containsExactly(101L)
         assertThat(fixture.lastExpectedTraversal).isEqualTo(traversal)
+        assertThat(json(result).path("voiceLessonFocusChange").asText()).isEqualTo("EXPLICIT_SELECTION")
+        assertThat(json(result).path("notice").asText())
+            .contains(
+                "learner's start agreement are confirmed",
+                "ask the first substantive question now",
+                "without requesting readiness, permission, or another confirmation",
+            )
+            .doesNotContain("wait for clear learner agreement")
         assertThat(fixture.calls).isEmpty() // no common study/question mutation
         assertThat(fixture.adapter.execute(context, "list_studies", emptyMap()).isError).isFalse()
     }
@@ -1550,7 +1601,15 @@ class McpVoiceTutorToolAdapterTest {
         val fixture = Fixture().apply { persistedSession = discoverySession(); focusResult = focusSelection(101, 1) }
         val context = context().copy(session = discoverySession())
         fixture.learnerTurnId = null
-        assertCode(fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L)), "LEARNER_CHOICE_REQUIRED")
+        val missingDurableChoice = fixture.adapter.execute(
+            context,
+            "select_voice_study",
+            mapOf("study_id" to 101L),
+        )
+        assertCode(missingDurableChoice, "LEARNER_CHOICE_REQUIRED")
+        assertThat(json(missingDurableChoice).path("error").path("message").asText())
+            .contains("one newly persisted natural choice", "never prescribe special wording")
+            .doesNotContain("more clearly", "explicit topic choice")
         fixture.learnerTurnId = 11
         fixture.authorized = false
         assertCode(fixture.adapter.execute(context, "select_voice_study", mapOf("study_id" to 101L)), "CALL_NOT_AUTHORIZED")

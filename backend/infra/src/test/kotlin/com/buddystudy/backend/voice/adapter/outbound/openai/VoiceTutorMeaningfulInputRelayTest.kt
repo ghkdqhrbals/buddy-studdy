@@ -171,6 +171,119 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
+    fun `a repeated exact saved topic offer gets a fresh boundary after a misunderstood natural reply`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-repeated-topic", 101, null, null)
+            f.utterance(2, "misunderstood-start", "지금")
+            val originalOffer = requireNotNull(f.assessments().last().utterances.single().targetOffer)
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            f.confirm(f.publications().last(), persisted = true)
+
+            val reofferResponse = f.responses().last()
+            assertThat(reofferResponse.path("response").path("tool_choice").asText()).isEqualTo("none")
+            assertThat(reofferResponse.path("response").path("instructions").asText())
+                .contains(
+                    "speak that exact saved-topic name",
+                    "Do not say that the learner was unrecognized",
+                    "repeat a fixed phrase",
+                )
+
+            // The tutor repeats the exact server-read choice after the first
+            // reply was not operative. The prior offer id/transcript are not
+            // reused; completion of this new spoken boundary mints a new offer.
+            val repeatedTranscript = "저장된 Redis 토픽으로 지금 학습을 시작할까요?"
+            f.finishCurrentSpokenOffer(repeatedTranscript, "repeated-topic-offer")
+            f.utterance(3, "natural-selection", "Redis로 지금 학습을 시작하자")
+
+            val repeatedOffer = requireNotNull(f.assessments().last().utterances.single().targetOffer)
+            assertThat(repeatedOffer.offerId).isNotEqualTo(originalOffer.offerId)
+            assertThat(repeatedOffer.tutorAudioTranscript).isEqualTo(repeatedTranscript)
+            assertThat(repeatedOffer.candidates).containsExactlyElementsOf(originalOffer.candidates)
+            assertThat(repeatedOffer.candidateTraversals)
+                .containsExactlyEntriesOf(originalOffer.candidateTraversals)
+
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.SELECT_SAVED_TOPIC)
+            f.confirm(f.publications().last(), persisted = true)
+
+            val boundary = f.controller.mutationDialogueBoundary()
+            assertThat(boundary.latestAcceptedLearnerProviderItemId).isEqualTo("natural-selection")
+            assertThat(boundary.latestAcceptedLearnerIntent).isEqualTo(VoiceTutorInputIntent.SELECT_SAVED_TOPIC)
+            assertThat(boundary.latestAcceptedLearnerTargetStudyId).isEqualTo(101)
+            assertThat(boundary.latestAcceptedLearnerTargetOfferId).isEqualTo(repeatedOffer.offerId)
+            assertThat(boundary.focusAuthorization?.isActive()).isTrue()
+        }
+
+    @Test
+    fun `a forced saved topic reoffer that omits the exact name cannot mint a hidden offer`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-before-unnamed-reoffer", 101, null, null)
+            f.utterance(2, "misunderstood-before-unnamed-reoffer", "지금")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            f.confirm(f.publications().last(), persisted = true)
+            assertThat(f.responses().last().path("response").path("instructions").asText())
+                .contains("speak that exact saved-topic name")
+
+            // Candidate metadata remains server-side, but this completed audio did
+            // not actually repeat “Redis”. It therefore cannot become a selectable
+            // spoken offer for the next learner turn.
+            f.finishCurrentSpokenOffer("그 주제로 지금 시작할까요?", "unnamed-repeated-topic-offer")
+            f.utterance(3, "choose-hidden-reoffer", "응, 시작하자")
+
+            assertThat(f.assessments().last().utterances.single().targetOffer).isNull()
+            assertThat(f.controller.mutationDialogueBoundary().focusAuthorization).isNull()
+        }
+
+    @Test
+    fun `declining the one forced saved topic reoffer returns to normal flow without looping`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-before-decline", 101, null, null)
+            f.utterance(2, "misunderstood-before-decline", "지금")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            f.confirm(f.publications().last(), persisted = true)
+            assertThat(f.responses().last().path("response").path("instructions").asText())
+                .contains("speak that exact saved-topic name")
+
+            f.finishCurrentSpokenOffer(
+                "저장된 Redis 토픽으로 지금 학습을 시작할까요?",
+                "declinable-repeated-topic-offer",
+            )
+            f.utterance(3, "decline-reoffer", "아니")
+            assertThat(f.assessments().last().utterances.single().targetOffer).isNotNull()
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.DECLINE_SAVED_TOPIC_OFFER)
+            f.confirm(f.publications().last(), persisted = true)
+
+            // A semantic decline is neither selection authority nor permission
+            // to ask the same setup question forever.
+            assertThat(f.responses().last().path("response").has("instructions")).isFalse()
+            f.finishCurrentSpokenOffer("알겠어요. 다른 주제를 말씀해 주세요.", "normal-after-decline")
+            f.utterance(4, "after-decline", "다른 걸 볼게")
+            assertThat(f.assessments().last().utterances.single().targetOffer).isNull()
+        }
+
+    @Test
+    fun `declining the original saved topic offer never schedules a forced reoffer`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-before-original-decline", 101, null, null)
+            f.utterance(2, "decline-original-offer", "아니, 다른 주제를 볼게")
+            assertThat(f.assessments().last().utterances.single().targetOffer).isNotNull()
+
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.DECLINE_SAVED_TOPIC_OFFER)
+            val publication = f.publications().last()
+            assertThat(publication.intent).isEqualTo(VoiceTutorInputIntent.DECLINE_SAVED_TOPIC_OFFER)
+            assertThat(publication.targetStudyId).isNull()
+            f.confirm(publication, persisted = true)
+
+            val normalResponse = f.responses().last().path("response")
+            assertThat(normalResponse.has("instructions")).isFalse()
+            assertThat(normalResponse.path("tool_choice").asText()).isEqualTo("auto")
+            assertThat(f.controller.mutationDialogueBoundary().focusAuthorization).isNull()
+
+            f.finishCurrentSpokenOffer("알겠어요. 어떤 주제로 바꿔 볼까요?", "normal-after-original-decline")
+            f.utterance(3, "after-original-decline", "운영체제를 찾아줘")
+            assertThat(f.assessments().last().utterances.single().targetOffer).isNull()
+        }
+
+    @Test
     fun `persisted root creation intent reaches mutation boundary without inventing a study target`() =
         fixture().use { f ->
             f.utterance(1, "create-root", "운영체제를 새 루트로 만들어 줘")

@@ -588,7 +588,7 @@ struct VoiceTutorCallPresentation {
     }
 }
 
-/// Shared scroll-edge rule for both the compact preview and the integrated
+/// Shared scroll-edge rule for both the compact call and the integrated
 /// full-screen transcript. Presentation changes never own call state.
 struct VoiceTutorTranscriptInteraction {
     static func transcriptIsAtLatest(
@@ -771,35 +771,46 @@ struct VoiceTutorCallScreen: View {
     }
 
     private func compactCall(in geometry: GeometryProxy) -> some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                Spacer(minLength: max(10, geometry.size.height * 0.035))
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 10) {
+                    callOrb(diameter: compactOrbDiameter(in: geometry))
 
-                callOrb(diameter: compactOrbDiameter(in: geometry))
+                    VStack(spacing: 8) {
+                        Text(topic)
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                VStack(spacing: 8) {
-                    Text(topic)
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    callTime
-                    callNotices
-                    summaryRow
-                    if showsSummary && presentation.summaryState == .ready {
-                        VoiceTutorResultSections(detail: presentation.detail, strings: strings)
+                        callTime
+                        callNotices
+                        summaryRow
+                        if showsSummary && presentation.summaryState == .ready {
+                            VoiceTutorResultSections(detail: presentation.detail, strings: strings)
+                        }
                     }
                 }
-                integratedConversationPreview
-
-                Spacer(minLength: 16)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: max(0, geometry.size.height - 82))
+            .frame(maxHeight: compactHeaderMaximumHeight(in: geometry))
+            .scrollBounceBehavior(.basedOnSize)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 0) {
+                Label(strings.voiceTutorCallTranscript, systemImage: "bubble.left.and.bubble.right")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+
+                transcriptPanel
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .accessibilityIdentifier("voiceCall.liveTranscript")
         }
-        .scrollBounceBehavior(.basedOnSize)
         .accessibilityIdentifier("voiceCall.callView")
     }
 
@@ -1155,47 +1166,6 @@ struct VoiceTutorCallScreen: View {
     }
 
     @ViewBuilder
-    private var integratedConversationPreview: some View {
-        if let preview = latestConversationPreview {
-            VStack(alignment: .leading, spacing: 10) {
-                Divider()
-
-                Label(
-                    strings.voiceTutorCallLatestConversation,
-                    systemImage: "bubble.left.and.bubble.right"
-                )
-                .font(.subheadline.weight(.medium))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(
-                        preview.speaker == .learner
-                            ? strings.voiceTutorYou : strings.voiceTutorTeacher
-                    )
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                    Text(preview.text)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
-                        .multilineTextAlignment(.leading)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("voiceCall.latestTranscript")
-        }
-    }
-
-    private var latestConversationPreview: VoiceTutorCaption? {
-        let draft = assistantTranscriptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !draft.isEmpty {
-            return VoiceTutorCaption(speaker: .tutor, text: draft)
-        }
-        return captions.last
-    }
-
-    @ViewBuilder
     private var interactionDock: some View {
         VStack(spacing: 0) {
             Divider()
@@ -1408,9 +1378,15 @@ struct VoiceTutorCallScreen: View {
     }
 
     private func compactOrbDiameter(in geometry: GeometryProxy) -> CGFloat {
-        let minimum: CGFloat = dynamicTypeSize.isAccessibilitySize ? 124 : 136
-        let available = min(geometry.size.width - 72, geometry.size.height * 0.34)
-        return max(minimum, min(preferredOrbDiameter, available))
+        let minimum: CGFloat = dynamicTypeSize.isAccessibilitySize ? 104 : 112
+        let available = min(geometry.size.width - 96, geometry.size.height * 0.25)
+        return max(minimum, min(preferredOrbDiameter, 152, available))
+    }
+
+    private func compactHeaderMaximumHeight(in geometry: GeometryProxy) -> CGFloat {
+        let fraction = dynamicTypeSize.isAccessibilitySize ? 0.58 : 0.46
+        let maximum: CGFloat = dynamicTypeSize.isAccessibilitySize ? 430 : 350
+        return max(210, min(geometry.size.height * fraction, maximum))
     }
 
     private var orbScale: CGFloat {

@@ -136,7 +136,8 @@ class McpVoiceTutorToolAdapter(
             if (!validator.validate(specification.tool().inputSchema(), mcpArguments).valid()) {
                 return failure("INVALID_ARGUMENTS", "Arguments do not match this tool's input schema.")
             }
-            val candidateReadRequest = candidateReadRequest(toolName, arguments)
+            var effectiveArguments = arguments
+            var candidateReadRequest = candidateReadRequest(toolName, effectiveArguments)
             if (!isAuthorized(context)) return inactiveCall()
             if (toolName == CREATE_ROOT) return createRootStudy(context, specification, arguments)
             if (toolName == CREATE_TOPIC) return createStudyTopic(context, specification, arguments)
@@ -161,8 +162,18 @@ class McpVoiceTutorToolAdapter(
             val candidateRevisionBefore = candidateReadRequest?.let {
                 runCatching { studyContexts.currentRevision(context.session.userId, context.session.id) }.getOrNull()
             }
-            val result = invoke(context.principal!!, specification, arguments)
+            var result = invoke(context.principal!!, specification, effectiveArguments)
             val readOnly = toolName !in setOf(CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY)
+            val queryFallback = voiceStudyQueryFallbackArguments(toolName, effectiveArguments)
+            if (queryFallback != null && emptyStudyQueryResult(result)) {
+                // Keep the original query authoritative when it names a saved topic that
+                // genuinely ends in punctuation. Only an empty, read-only lookup may retry
+                // with sentence punctuation added by conversational transcription removed.
+                if (!isAuthorized(context)) return inactiveCall()
+                effectiveArguments = queryFallback
+                candidateReadRequest = candidateReadRequest(toolName, effectiveArguments)
+                result = invoke(context.principal!!, specification, effectiveArguments)
+            }
             // A saved-study search is private too. Ending a call or revoking a device
             // while its handler is suspended must suppress the late read result.
             if (readOnly && !isAuthorized(context)) return inactiveCall()
@@ -185,7 +196,9 @@ class McpVoiceTutorToolAdapter(
                     if (!isAuthorized(context)) return inactiveCall()
                 }
             }
-            val enriched = withLessonContext(context, boundedResult(result, toolName), toolName, arguments)
+            val enriched = withLessonContext(
+                context, boundedResult(result, toolName), toolName, effectiveArguments,
+            )
             if (readOnly && !isAuthorized(context)) return inactiveCall()
             return attachCandidateDiscovery(
                 context, enriched, result, candidateReadRequest, candidateRevisionBefore,
@@ -197,6 +210,52 @@ class McpVoiceTutorToolAdapter(
             return failure("MCP_UNAVAILABLE", "The study tool could not complete. Do not assume the action succeeded.")
         }
     }
+
+    private fun voiceStudyQueryFallbackArguments(
+        toolName: String,
+        arguments: Map<String, Any>,
+    ): Map<String, Any>? {
+        if (toolName != "list_studies" || "parent_study_id" in arguments) return null
+        val query = arguments["query"] as? String ?: return null
+        var end = query.length
+        while (end > 0) {
+            val codePoint = query.codePointBefore(end)
+            if (!Character.isWhitespace(codePoint)) break
+            end -= Character.charCount(codePoint)
+        }
+        var sawSentenceTerminator = false
+        while (end > 0) {
+            val codePoint = query.codePointBefore(end)
+            when {
+                isVoiceSentenceTerminator(codePoint) -> sawSentenceTerminator = true
+                isVoiceClosingPunctuation(codePoint) -> Unit
+                else -> break
+            }
+            end -= Character.charCount(codePoint)
+        }
+        if (!sawSentenceTerminator) return null
+        val normalized = query.substring(0, end).trimEnd()
+        if (normalized.isBlank() || normalized == query) return null
+        return arguments + ("query" to normalized)
+    }
+
+    private fun emptyStudyQueryResult(result: McpSchema.CallToolResult): Boolean {
+        if (result.isError() == true) return false
+        val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
+            ?: return false
+        val totalCount = payload.path("totalCount")
+        val studies = payload.path("studies")
+        return totalCount.isIntegralNumber && totalCount.canConvertToLong() &&
+            totalCount.longValue() == 0L && studies.isArray && studies.isEmpty
+    }
+
+    private fun isVoiceSentenceTerminator(codePoint: Int): Boolean =
+        codePoint in VOICE_SENTENCE_TERMINATORS
+
+    private fun isVoiceClosingPunctuation(codePoint: Int): Boolean =
+        Character.getType(codePoint) == Character.END_PUNCTUATION.toInt() ||
+            Character.getType(codePoint) == Character.FINAL_QUOTE_PUNCTUATION.toInt() ||
+            codePoint == '"'.code || codePoint == '\''.code
 
     private fun candidateReadRequest(toolName: String, arguments: Map<String, Any>): CandidateReadRequest? {
         return when (toolName) {
@@ -467,7 +526,7 @@ class McpVoiceTutorToolAdapter(
                 if (guidedAdvance) {
                     "Wait for a newly persisted learner request or contextual agreement to continue down the saved tree."
                 } else {
-                    "Ask what the learner wants to discuss and wait for their newly persisted explicit topic choice."
+                    "Speak one exact server-read saved candidate as a natural offer, then wait for one newly persisted natural choice. A named start, referential start, or contextual agreement to one candidate is sufficient; never prescribe special wording or demand a second restatement."
                 },
             )
         }
@@ -498,7 +557,7 @@ class McpVoiceTutorToolAdapter(
         if (attestedTarget == null || dialogue.latestAcceptedLearnerTargetOfferId?.let { it > 0 } != true) {
             return failure(
                 if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
-                "Wait for the learner to confirm one exact saved topic that was actually offered in this call.",
+                "Speak the exact server-read saved topic as one natural offer, then accept one natural named, referential, or contextual choice; never ask for a special phrase or second restatement.",
             )
         }
         if (attestedTarget != id) {
@@ -577,7 +636,11 @@ class McpVoiceTutorToolAdapter(
             dialogue.precedingTutorNavigationOfferProviderItemId,
         ) ?: return failure(
             if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
-            "The exact learner topic intent was not durably accepted. Wait for a fresh reply instead of guessing.",
+            if (guidedAdvance) {
+                "The learner's continuation was not durably accepted. Wait for a fresh reply instead of guessing."
+            } else {
+                "The natural topic choice was not durably accepted. Speak the exact candidate as one natural offer and wait for one newly persisted natural choice; never prescribe special wording or demand a second restatement."
+            },
         )
         if (guidedAdvance && (!authorization.completedExchange ||
                 !dialogue.precedingTutorFeedbackForStudyAnswer ||
@@ -594,7 +657,11 @@ class McpVoiceTutorToolAdapter(
         }
         val learnerTurnId = authorization.turnId.takeIf { it > 0 } ?: return failure(
             if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
-            "The exact learner topic intent was not durably accepted. Wait for a fresh reply instead of guessing.",
+            if (guidedAdvance) {
+                "The learner's continuation was not durably accepted. Wait for a fresh reply instead of guessing."
+            } else {
+                "The natural topic choice was not durably accepted. Speak the exact candidate as one natural offer and wait for one newly persisted natural choice; never prescribe special wording or demand a second restatement."
+            },
         )
         if (!isAuthorized(context)) return inactiveCall()
         val principal = requireNotNull(context.principal)
@@ -684,7 +751,7 @@ class McpVoiceTutorToolAdapter(
                     updatedStudyImmediateStart ->
                         "The saved-node update, exact revised readback and immediate lesson focus are confirmed. Use the revised frozen name and level and ask the first substantive question now without requesting readiness or permission again."
                     else ->
-                        "The saved lesson focus is confirmed. Use its frozen level for the next new question, review only its node history first, and wait for clear learner agreement before teaching; prior questions and navigation turns keep their original context."
+                        "The saved lesson focus and the learner's start agreement are confirmed. Review only its node history, then ask the first substantive question now at its frozen level without requesting readiness, permission, or another confirmation; prior questions and navigation turns keep their original context."
                 },
             )),
             isError = false, lessonRevision = selection.revision, lessonFocus = selection,
@@ -1554,8 +1621,11 @@ class McpVoiceTutorToolAdapter(
         val CREATED_TOPIC_FIELDS = listOf(
             "created", "id", "parentStudyId", "topic", "sortOrder", "difficultyLevel", "activeForQuestions", "enabled",
         )
+        val VOICE_SENTENCE_TERMINATORS = setOf(
+            '.'.code, '?'.code, '!'.code, '\u2026'.code, '\u3002'.code, '\uFF01'.code, '\uFF0E'.code,
+            '\uFF1F'.code,
+        )
         const val DEFAULT_ROOT_DIFFICULTY = 5
-
         fun focusParameters(description: String): Map<String, Any?> = mapOf(
             "type" to "object", "additionalProperties" to false,
             "properties" to mapOf(
