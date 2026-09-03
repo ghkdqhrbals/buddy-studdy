@@ -3202,6 +3202,48 @@ class VoiceTutorMeaningfulInputRelayTest {
     }
 
     @Test
+    fun `quota fence bypasses pending feedback assessment and preserves only generic tutor transcript`() {
+        fixture().use { f ->
+            val terminalBatches = CopyOnWriteArrayList<List<String>>()
+            val terminalTranscriptSubscription = f.controller.quotaTerminalTutorTranscriptBatches()
+                .subscribe({ terminalBatches += it.tutorTranscriptEvents }, f.errors::add)
+            try {
+                f.establishVerifiedStudyQuestion(
+                    question = "Redis의 만료 정책을 설명해 보세요.",
+                )
+                f.utterance(2, "quota-answer-item", "TTL이 끝나면 키를 만료시킵니다")
+                f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION)
+                f.confirmStudyAnswer(f.publications().last())
+                f.finishCurrentSpokenOffer(
+                    spokenTranscript = "만료 동작을 정확히 설명했어요.",
+                    spokenProviderItemId = "pending-feedback-at-quota",
+                )
+                val pendingAssessment = f.feedbackAssessments.last()
+                val responseCountBeforeQuota = f.responses().size
+
+                f.controller.requestQuotaExhaustionNotice()
+
+                assertThat(f.responses()).hasSize(responseCountBeforeQuota + 1)
+                assertThat(f.responses().last().path("response").path("metadata")
+                    .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean()).isTrue()
+                assertThat(terminalBatches).hasSize(1)
+                val transcript = mapper.readTree(terminalBatches.single().single())
+                assertThat(transcript.path("transcript").asText()).isEqualTo("만료 동작을 정확히 설명했어요.")
+                assertThat(transcript.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID)).isFalse()
+                assertThat(
+                    f.controller.completeSpokenFeedbackAssessment(
+                        pendingAssessment.token,
+                        Result.success(true),
+                    ),
+                ).isNull()
+                assertThat(f.errors).isEmpty()
+            } finally {
+                terminalTranscriptSubscription.dispose()
+            }
+        }
+    }
+
+    @Test
     fun `separate completed feedback and later navigation offer remain distinct for fresh consent`() {
         fixture().use { f ->
             f.establishVerifiedStudyQuestion(

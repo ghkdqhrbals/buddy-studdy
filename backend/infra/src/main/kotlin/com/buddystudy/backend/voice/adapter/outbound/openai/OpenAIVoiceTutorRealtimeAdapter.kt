@@ -253,6 +253,7 @@ internal class VoiceTutorDuplexTurnController(
     initialStudyMutationSnapshot: com.buddystudy.backend.voice.application.model.VoiceTutorInitialStudyMutationSnapshot? = null,
     sessionLanguage: String = QuestionLanguage.KOREAN,
     private val onProviderTurnFailure: (VoiceTutorProviderTurnFailureDiagnostic) -> Unit = {},
+    private val wallClock: () -> java.time.Instant = java.time.Instant::now,
 ) {
     init {
         require(initialLessonRevision >= 0) { "Voice Tutor lesson revision was invalid." }
@@ -262,7 +263,8 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     private var currentLessonRevision = initialLessonRevision
-    private val openingResponseInstructions = openingResponseInstructions(sessionLanguage)
+    private val normalizedSessionLanguage = QuestionLanguage.normalize(sessionLanguage)
+    private val openingResponseInstructions = openingResponseInstructions(normalizedSessionLanguage)
     /** Consumed when the first final learner item receives a meaningful dual-semantic verdict. */
     private var initialStudyMutationSnapshot = initialStudyMutationSnapshot
     /** The sole meaningful item allowed to retain an already-frozen initial snapshot copy. */
@@ -363,8 +365,25 @@ internal class VoiceTutorDuplexTurnController(
     private val finishedToolCallIds = linkedSetOf<String>()
     private var toolAcknowledgementTimer: Disposable? = null
     private val terminalInputFailure = Sinks.one<Throwable>()
+    private val quotaExhaustionNoticeCompleted = Sinks.one<Boolean>()
+    private val quotaTerminalPersistenceCompleted = Sinks.one<Boolean>()
+    private var quotaTerminalPersistenceFinished = false
+    /**
+     * A quota fence may overtake optional question/feedback attestation. The
+     * already completed tutor sentence still belongs in the ordinary
+     * transcript, but must not block the terminal response or gain learning
+     * evidence from a classifier that completes after the cutoff.
+     */
+    private val quotaTerminalTutorTranscripts = Sinks.many().unicast()
+        .onBackpressureBuffer(Queues.get<VoiceTutorQuotaTerminalTranscriptBatch>(MAX_BUFFERED_CONTROLS).get())
+    private val postRelayPersistenceWork = Sinks.many().unicast()
+        .onBackpressureBuffer(Queues.get<VoiceTutorPostRelayBoundary>(MAX_BUFFERED_CONTROLS).get())
+    private val pendingQuotaTerminalTranscriptTokens = linkedSetOf<Long>()
+    private var nextQuotaTerminalTranscriptToken = 1L
     /** Assessment evidence is frozen here; an async persistence receipt carries only item identity. */
     private val pendingInputPublications = linkedMapOf<String, VoiceTutorInputTurnCoordinator.Action.Publish>()
+    /** Trusted wall-clock receipt for completed ASR observed before a terminal cutoff. */
+    private val acceptedInputTranscriptTimes = linkedMapOf<String, java.time.Instant>()
     /**
      * A checkpoint is durable context only. Its semantic answer contribution is
      * cached by speech sequence and promoted only by the exact final publication.
@@ -444,6 +463,8 @@ internal class VoiceTutorDuplexTurnController(
     private val recentFailedResponseIds = LinkedHashSet<String>()
     private var playbackTimer: Disposable? = null
     private var responseTimer: Disposable? = null
+    /** Fences a disposed timer whose Reactor callback was already dispatched. */
+    private var responseTimerEpoch = 0L
     private var openingResponseRequested = false
     private var openingResponsePending = false
     private var queuedCommittedTurn = false
@@ -457,6 +478,15 @@ internal class VoiceTutorDuplexTurnController(
     private var spokenLessonEndRequested = false
     private var pendingSpokenLessonEnd: PendingSpokenLessonEnd? = null
     private var spokenLessonEndLifecycleEmitted = false
+    /**
+     * A monthly boundary is terminal input state but not an immediate provider
+     * disconnect: one tool-free notice must cross the ordinary audio/transcript
+     * completion gates before the relay is released.
+     */
+    private var quotaExhaustionNoticeRequested = false
+    private var quotaExhaustionNoticeFinished = false
+    private var activeResponseIsQuotaExhaustionNotice = false
+    private var quotaExhaustionNoticeClientPlayoutDrained = false
     @Volatile
     private var closed = false
 
@@ -1519,7 +1549,109 @@ internal class VoiceTutorDuplexTurnController(
     fun inputFailure(): Mono<Void> = terminalInputFailure.asMono().flatMap { Mono.error(it) }
 
     @Synchronized
-    fun acceptsInputEvents(): Boolean = !closed && !spokenLessonEndRequested
+    fun acceptsInputEvents(): Boolean =
+        !closed && !spokenLessonEndRequested && !quotaExhaustionNoticeRequested
+
+    fun quotaExhaustionNoticeCompletion(): Mono<Void> =
+        quotaExhaustionNoticeCompleted.asMono().then()
+
+    fun quotaTerminalPersistenceCompletion(): Mono<Void> =
+        quotaTerminalPersistenceCompleted.asMono().then()
+
+    fun quotaTerminalTutorTranscriptBatches(): Flux<VoiceTutorQuotaTerminalTranscriptBatch> =
+        quotaTerminalTutorTranscripts.asFlux().filter { !closed }
+
+    fun postRelayPersistenceBoundaries(): Flux<VoiceTutorPostRelayBoundary> =
+        postRelayPersistenceWork.asFlux().filter { !closed }
+
+    /**
+     * Stops learner input immediately, but lets an already-speaking tutor finish
+     * its sentence before creating the final quota notice. The adapter applies
+     * the outer hard-end/grace deadline, so this method never owns billing time.
+     */
+    @Synchronized
+    fun requestQuotaExhaustionNotice() {
+        if (closed || quotaExhaustionNoticeRequested) return
+        quotaExhaustionNoticeRequested = true
+        cancelInputCheckpointTimer()
+        inputCheckpointDue = false
+        inputCommitTimer?.dispose()
+        inputCommitTimer = null
+        delayedStopCommitTimer?.dispose()
+        delayedStopCommitTimer = null
+        delayedStopCommit = null
+        inputAssessmentTimer?.dispose()
+        inputAssessmentTimer = null
+        userSpeaking = false
+        activeClientSpeechSequence = null
+        pendingInputCommits.clear()
+        pendingSpeechCommitCount = 0
+        queuedCommittedTurn = false
+        // A speech stop deferred behind the tutor's response is not an accepted
+        // ASR item yet. Clear both halves of that gate so finishing the ordinary
+        // sentence cannot commit an empty/post-cutoff provider buffer.
+        speechAwaitingTutorFinalizationGeneration = null
+        stopAwaitingTutorFinalization = null
+        // Keep only completed pre-cutoff ASR. Its classifier/persistence work
+        // drains in the ordinary serial input worker, but terminal handling
+        // suppresses response creation and every study-tree/tool mutation.
+        val terminalDrain = inputCoordinator?.beginTerminalDrain(nanoTime())
+        terminalDrain?.discardedItemIds.orEmpty().forEach(::discardTerminalInputState)
+        terminalDrain?.actions.orEmpty().let(::handleInputCoordinatorActions)
+        pendingLessonEndPublications.clear()
+        // Optional semantic attestation and tool acknowledgement must never
+        // consume the bounded final-notice grace. Preserve only a transcript
+        // batch which has not already been claimed by a persistence worker;
+        // every semantic proposal is deliberately discarded at this fence.
+        pendingPostRelayBoundary?.takeIf { !it.claimed }?.let { pending ->
+            emitQuotaTerminalTutorTranscripts(pending.tutorTranscriptEvents)
+            pendingPostRelayBoundary = null
+        }
+        toolAcknowledgementTimer?.dispose()
+        toolAcknowledgementTimer = null
+        toolCoordinator?.close()
+        heldToolActions.clear()
+        dispatchedToolActions.clear()
+        toolDispatchBoundaries.clear()
+        toolExecutionBoundaries.clear()
+        eligibleFocusToolCallIds.clear()
+        toolDiscoveryFences.clear()
+        // Provider-side audio accumulated after the last accepted boundary is
+        // no longer billable learner input and must not become a late turn.
+        emit(
+            linkedMapOf(
+                "event_id" to internalEventId("quota-input-clear"),
+                "type" to "input_audio_buffer.clear",
+            ),
+        )
+        armQuotaTerminalAudioStartWatchdogIfNeeded()
+        createQuotaExhaustionNoticeIfReady()
+        maybeCompleteQuotaTerminalPersistence()
+    }
+
+    private fun emitQuotaTerminalTutorTranscripts(events: List<String>) {
+        if (events.isEmpty()) return
+        val token = nextQuotaTerminalTranscriptToken
+        nextQuotaTerminalTranscriptToken = if (token == Long.MAX_VALUE) 1 else token + 1
+        pendingQuotaTerminalTranscriptTokens += token
+        val result = quotaTerminalTutorTranscripts.tryEmitNext(
+            VoiceTutorQuotaTerminalTranscriptBatch(token, events),
+        )
+        if (result.isFailure && result != Sinks.EmitResult.FAIL_CANCELLED &&
+            result != Sinks.EmitResult.FAIL_TERMINATED
+        ) {
+            pendingQuotaTerminalTranscriptTokens -= token
+            maybeCompleteQuotaTerminalPersistence()
+            return
+        }
+    }
+
+    @Synchronized
+    fun confirmQuotaTerminalTutorTranscriptBatch(token: Long): Boolean {
+        val removed = pendingQuotaTerminalTranscriptTokens.remove(token)
+        if (removed) maybeCompleteQuotaTerminalPersistence()
+        return removed
+    }
 
     @Synchronized
     fun canPublishInput(itemId: String): Boolean = !closed &&
@@ -1552,11 +1684,17 @@ internal class VoiceTutorDuplexTurnController(
         (node as com.fasterxml.jackson.databind.node.ObjectNode)
             .put(VoiceTutorTranscriptMetadata.LESSON_REVISION, revision)
             .remove(VoiceTutorTranscriptMetadata.STUDY_QUESTION_PROVIDER_ITEM_ID)
+        node.remove(VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS)
         node.remove(VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION)
         node.remove(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION)
         node.remove(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID)
         node.remove(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS)
         val providerItemId = node.path("item_id").takeIf { it.isTextual }?.textValue()
+        if (eventType == "conversation.item.input_audio_transcription.completed") {
+            providerItemId?.let(acceptedInputTranscriptTimes::get)?.let { acceptedAt ->
+                node.put(VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS, acceptedAt.toEpochMilli())
+            }
+        }
         providerItemId?.let(pendingStudyAnswerGroups::remove)
         if (eventType == "conversation.item.input_audio_transcription.completed" &&
             verifiedStudyAnswer && !checkpoint && speechSequence != null
@@ -1673,7 +1811,7 @@ internal class VoiceTutorDuplexTurnController(
     @Synchronized
     fun canAssessInput(token: Long): Boolean {
         if (closed) return false
-        withInputCoordinator { expire(nanoTime()) }
+        if (!quotaExhaustionNoticeRequested) withInputCoordinator { expire(nanoTime()) }
         return !closed && inputCoordinator?.isAssessmentCurrent(token) == true
     }
 
@@ -1693,6 +1831,15 @@ internal class VoiceTutorDuplexTurnController(
         val binding = inputLessonBindings.remove(itemId)
         val studyAnswerGroup = pendingStudyAnswerGroups.remove(itemId)
         val lessonEndSequence = pendingLessonEndPublications.remove(itemId)
+        acceptedInputTranscriptTimes.remove(itemId)
+        if (quotaExhaustionNoticeRequested) {
+            if (publication.checkpoint) {
+                rememberPersistedStudyAnswerCheckpoint(publication, binding, persisted)
+            }
+            withInputCoordinator { confirmPublished(itemId, nanoTime(), persisted) }
+            maybeCompleteQuotaTerminalPersistence()
+            return
+        }
         val acceptedLessonEnd = persisted && lessonEndSequence != null &&
             lessonEndSequence == lastClientSpeechSequence && activeClientSpeechSequence == null
         if (acceptedLessonEnd) {
@@ -2245,6 +2392,11 @@ internal class VoiceTutorDuplexTurnController(
             terminate(error)
             return
         }
+        if (quotaExhaustionNoticeRequested) {
+            handleInputCoordinatorActions(actions)
+            maybeCompleteQuotaTerminalPersistence()
+            return
+        }
         for (action in actions) {
             when (action) {
                 is VoiceTutorInputTurnCoordinator.Action.Delete -> emit(
@@ -2301,6 +2453,64 @@ internal class VoiceTutorDuplexTurnController(
             // the correct side of the semantic decision boundary.
             releaseHeldToolActionsIfReady()
             createNormalResponseIfReady()
+        }
+    }
+
+    /**
+     * Drains only work whose completed ASR crossed the cutoff beforehand. This
+     * deliberately performs no provider delete/retry, response creation, lesson
+     * end, focus change, or MCP mutation after terminal ownership is established.
+     */
+    private fun handleInputCoordinatorActions(
+        initial: List<VoiceTutorInputTurnCoordinator.Action>,
+    ) {
+        val coordinator = inputCoordinator ?: return
+        val actions = ArrayDeque(initial)
+        while (actions.isNotEmpty() && !closed) {
+            when (val action = actions.removeFirst()) {
+                is VoiceTutorInputTurnCoordinator.Action.Assess -> {
+                    val emitted = inputWork.tryEmitNext(action)
+                    if (emitted.isFailure && !closed) {
+                        terminate(VoiceTutorPendingInputCommitOverflowException())
+                        return
+                    }
+                }
+                is VoiceTutorInputTurnCoordinator.Action.Publish -> {
+                    pendingInputPublications[action.itemId] = action
+                    val emitted = inputWork.tryEmitNext(action)
+                    if (emitted.isFailure && !closed) {
+                        terminate(VoiceTutorPendingInputCommitOverflowException())
+                        return
+                    }
+                }
+                is VoiceTutorInputTurnCoordinator.Action.Delete -> {
+                    discardTerminalInputState(action.itemId)
+                    actions.addAll(coordinator.confirmDeleted(action.itemId, nanoTime()))
+                }
+                is VoiceTutorInputTurnCoordinator.Action.Retry,
+                is VoiceTutorInputTurnCoordinator.Action.Ready,
+                -> Unit
+            }
+        }
+    }
+
+    private fun discardTerminalInputState(itemId: String) {
+        pendingInputPublications.remove(itemId)
+        pendingLessonEndPublications.remove(itemId)
+        pendingStudyAnswerGroups.remove(itemId)
+        inputLessonBindings.remove(itemId)
+        acceptedInputTranscriptTimes.remove(itemId)
+    }
+
+    private fun maybeCompleteQuotaTerminalPersistence() {
+        if (!quotaExhaustionNoticeRequested || closed || quotaTerminalPersistenceFinished) return
+        val ordinaryResponseStillActive = responseActive && !activeResponseIsQuotaExhaustionNotice
+        if (!ordinaryResponseStillActive && pendingPostRelayBoundary == null &&
+            pendingQuotaTerminalTranscriptTokens.isEmpty() && inputCoordinator?.hasPending != true &&
+            pendingInputPublications.isEmpty()
+        ) {
+            quotaTerminalPersistenceFinished = true
+            quotaTerminalPersistenceCompleted.tryEmitValue(true)
         }
     }
 
@@ -2409,9 +2619,17 @@ internal class VoiceTutorDuplexTurnController(
                 true
             }
             VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT -> {
-                // Older iOS clients report an inferred PCM quiet period here.
-                // NetEq may keep rendering comfort noise after real audio ends,
-                // so this is optional compatibility telemetry, never a turn gate.
+                // Ordinary turns keep this as compatibility telemetry. The
+                // terminal quota sentence is different: session.ended must not
+                // race the device's final rendered samples.
+                val responseId = node.path("responseId").asText()
+                if (activeResponseIsQuotaExhaustionNotice && responseActive &&
+                    providerResponseDone && providerOutputBufferStopped &&
+                    responseId.isNotBlank() && responseId == activeResponseId
+                ) {
+                    quotaExhaustionNoticeClientPlayoutDrained = true
+                    advancePlaybackGate()
+                }
                 true
             }
             else -> false
@@ -2443,11 +2661,32 @@ internal class VoiceTutorDuplexTurnController(
         return VoiceTutorProviderObservation(disposition, boundary)
     }
 
+    /** Hands an already-claimed immutable boundary to a worker off the provider receive loop. */
+    @Synchronized
+    fun enqueuePostRelayPersistence(boundary: VoiceTutorPostRelayBoundary): Boolean {
+        val pending = pendingPostRelayBoundary?.takeIf {
+            it.claimed && it.token == boundary.token && it.tutorTranscriptEvents == boundary.tutorTranscriptEvents
+        } ?: return false
+        val emitted = postRelayPersistenceWork.tryEmitNext(boundary)
+        if (emitted.isFailure && !closed) {
+            terminate(VoiceTutorProviderProtocolException())
+            return false
+        }
+        return true
+    }
+
     @Synchronized
     fun acknowledgePostRelayBoundary(token: Long): Boolean {
         val pending = pendingPostRelayBoundary
             ?.takeIf { it.claimed && it.token == token } ?: return false
+        if (quotaExhaustionNoticeRequested && !pending.quotaExhaustionNotice) {
+            pendingPostRelayBoundary = null
+            maybeCompleteQuotaTerminalPersistence()
+            createQuotaExhaustionNoticeIfReady()
+            return true
+        }
         resumeAfterPostRelayBoundary(pending)
+        maybeCompleteQuotaTerminalPersistence()
         return true
     }
 
@@ -2540,6 +2779,12 @@ internal class VoiceTutorDuplexTurnController(
         if (closed) {
             return terminalDisposition(node)
         }
+        if (quotaExhaustionNoticeRequested && node.path("type").asText() in USER_TRANSCRIPT_EVENTS) {
+            // Post-cutoff ASR may still arrive from the provider's already
+            // committed input item. It is neither persisted nor allowed to
+            // restart assessment/response creation.
+            return VoiceTutorProviderRelayDisposition.DROP
+        }
         return when (node.path("type").asText()) {
             "session.updated" -> {
                 if (transport == VoiceTutorRealtimeTransport.LEGACY_PCM_RELAY) {
@@ -2549,7 +2794,11 @@ internal class VoiceTutorDuplexTurnController(
             }
             "response.output_audio.delta" -> if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
                 val matches = matchesKnownActiveResponse(node.path("response_id").asText())
-                if (matches) providerAudioObserved = true
+                if (matches) {
+                    val firstAudibleEvidence = !providerOutputBufferStarted && !providerAudioObserved
+                    providerAudioObserved = true
+                    if (firstAudibleEvidence) handleQuotaTerminalAudioStarted()
+                }
                 accepted(
                     matches,
                     VoiceTutorProviderRelayDisposition.PERSIST_ONLY,
@@ -2561,7 +2810,11 @@ internal class VoiceTutorDuplexTurnController(
             "output_audio_buffer.started" -> {
                 val matches = transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
                     matchesKnownActiveResponse(node.path("response_id").asText())
-                if (matches) providerOutputBufferStarted = true
+                if (matches) {
+                    val firstAudibleEvidence = !providerOutputBufferStarted && !providerAudioObserved
+                    providerOutputBufferStarted = true
+                    if (firstAudibleEvidence) handleQuotaTerminalAudioStarted()
+                }
                 accepted(matches, VoiceTutorProviderRelayDisposition.FORWARD_ONLY)
             }
             "output_audio_buffer.stopped" -> accepted(
@@ -2589,7 +2842,20 @@ internal class VoiceTutorDuplexTurnController(
                     val itemId = node.path("item_id").asText()
                     val transcript = node.path("transcript")
                     if (transcript.isTextual) {
-                        withInputCoordinator { observeTranscript(itemId, transcript.textValue(), raw, nanoTime()) }
+                        val acceptedAt = wallClock()
+                        if (itemId.isNotBlank()) acceptedInputTranscriptTimes[itemId] = acceptedAt
+                        val trustedNode = node.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().apply {
+                            remove(VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS)
+                            put(VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS, acceptedAt.toEpochMilli())
+                        }
+                        withInputCoordinator {
+                            observeTranscript(
+                                itemId,
+                                transcript.textValue(),
+                                mapper.writeValueAsString(trustedNode),
+                                nanoTime(),
+                            )
+                        }
                     } else {
                         withInputCoordinator { observeTranscriptionFailure(itemId, nanoTime()) }
                     }
@@ -2607,6 +2873,7 @@ internal class VoiceTutorDuplexTurnController(
                 if (inputCoordinator == null) return VoiceTutorProviderRelayDisposition.FORWARD_AND_PERSIST
                 withInputCoordinator { confirmDeleted(node.path("item_id").asText(), nanoTime()) }
                 inputLessonBindings.remove(node.path("item_id").asText())
+                acceptedInputTranscriptTimes.remove(node.path("item_id").asText())
                 VoiceTutorProviderRelayDisposition.DROP
             }
             in VoiceTutorMcpTurnCoordinator.OUTPUT_ACK_EVENTS -> {
@@ -2787,8 +3054,7 @@ internal class VoiceTutorDuplexTurnController(
             inputCheckpointDue = false
             playbackTimer?.dispose()
             playbackTimer = null
-            responseTimer?.dispose()
-            responseTimer = null
+            cancelResponseTimer()
             inputCommitTimer?.dispose()
             inputCommitTimer = null
             inputAssessmentTimer?.dispose()
@@ -2811,6 +3077,7 @@ internal class VoiceTutorDuplexTurnController(
             toolExecutionBoundaries.clear()
             finishedToolCallIds.clear()
             pendingInputPublications.clear()
+            acceptedInputTranscriptTimes.clear()
             persistedStudyAnswerSequences.clear()
             pendingStudyAnswerGroups.clear()
             pendingLessonEndPublications.clear()
@@ -2865,8 +3132,20 @@ internal class VoiceTutorDuplexTurnController(
             spokenQuestionAssessmentWork.tryEmitComplete()
             spokenFeedbackAssessmentWork.tryEmitComplete()
             toolWork.tryEmitComplete()
+            quotaTerminalTutorTranscripts.tryEmitComplete()
+            postRelayPersistenceWork.tryEmitComplete()
             clientControls.tryEmitComplete()
             serverLifecycle.tryEmitComplete()
+            if (quotaExhaustionNoticeRequested && !quotaExhaustionNoticeFinished) {
+                quotaExhaustionNoticeCompleted.tryEmitError(
+                    error ?: VoiceTutorQuotaExhaustionNoticeInterruptedException(),
+                )
+            }
+            if (quotaExhaustionNoticeRequested && !quotaTerminalPersistenceFinished) {
+                quotaTerminalPersistenceCompleted.tryEmitError(
+                    error ?: VoiceTutorQuotaExhaustionNoticeInterruptedException(),
+                )
+            }
         }
     }
 
@@ -3374,6 +3653,11 @@ internal class VoiceTutorDuplexTurnController(
     }
 
     private fun createNormalResponseIfReady() {
+        if (quotaExhaustionNoticeRequested) {
+            if (createProviderResponseRetryIfReady()) return
+            createQuotaExhaustionNoticeIfReady()
+            return
+        }
         if (createProviderResponseRetryIfReady()) return
         if (
             closed || pendingPostRelayBoundary != null ||
@@ -3453,21 +3737,66 @@ internal class VoiceTutorDuplexTurnController(
         emitResponseCreate(responseEventId, toolChoice, instructions)
     }
 
+    private fun createQuotaExhaustionNoticeIfReady() {
+        if (closed || !quotaExhaustionNoticeRequested || quotaExhaustionNoticeFinished ||
+            activeResponseIsQuotaExhaustionNotice || responseActive
+        ) return
+        pendingProviderResponseRetry = null
+        val responseEventId = internalEventId("quota-exhausted-notice")
+        activateResponse(
+            responseEventId,
+            PendingProviderResponseRetry(
+                toolChoice = "none",
+                lessonRevision = currentLessonRevision,
+                candidateDiscovery = null,
+                respondsToStudyAnswer = false,
+                studyAnswer = null,
+                respondsToLearnerQuestion = false,
+                studyQuestionPurpose = null,
+                retryAttempt = 0,
+                replacesGeneration = activeResponseGeneration,
+                boundaryCheckpoint = TutorBoundaryCheckpoint(
+                    lastTutorSpeechStoppedOrder,
+                    lastSpokenResponseGeneration,
+                ),
+                abandonedResponseId = null,
+                instructionOverride = quotaExhaustionNoticeInstructions(normalizedSessionLanguage),
+                quotaExhaustionNotice = true,
+            ),
+        )
+        emitResponseCreate(responseEventId, "none", activeResponseInstructionOverride)
+    }
+
     /** A failed provider response owns one retry and always remains ahead of a new tutor turn. */
     private fun createProviderResponseRetryIfReady(): Boolean {
         val retry = pendingProviderResponseRetry ?: return false
-        if (closed || spokenLessonEndRequested) {
+        if (closed || spokenLessonEndRequested ||
+            (quotaExhaustionNoticeRequested && !retry.quotaExhaustionNotice)
+        ) {
             pendingProviderResponseRetry = null
+            if (quotaExhaustionNoticeRequested) createQuotaExhaustionNoticeIfReady()
             return true
         }
-        if (
-            pauseCoordinator?.blocksResponses == true || userSpeaking || responseActive ||
-            pendingSpeechCommitCount > 0 || pendingInputCommits.isNotEmpty() || delayedStopCommit != null ||
-            toolCoordinator?.hasPending == true
+        if (responseActive || (!retry.quotaExhaustionNotice && (
+                pauseCoordinator?.blocksResponses == true || userSpeaking ||
+                    pendingSpeechCommitCount > 0 || pendingInputCommits.isNotEmpty() ||
+                    delayedStopCommit != null || toolCoordinator?.hasPending == true
+                ))
         ) return true
         pendingProviderResponseRetry = null
         if (retry.lessonRevision != currentLessonRevision) {
-            abandonProviderResponseTurn(abandonedResponseId = retry.abandonedResponseId)
+            abandonProviderResponseTurn(
+                promptForFreshInput = !quotaExhaustionNoticeRequested,
+                abandonedResponseId = retry.abandonedResponseId,
+            )
+            if (retry.quotaExhaustionNotice) {
+                quotaExhaustionNoticeCompleted.tryEmitError(
+                    VoiceTutorQuotaExhaustionNoticeInterruptedException(),
+                )
+            } else if (quotaExhaustionNoticeRequested) {
+                createQuotaExhaustionNoticeIfReady()
+                maybeCompleteQuotaTerminalPersistence()
+            }
             return true
         }
         val responseEventId = internalEventId("turn-retry")
@@ -3615,12 +3944,16 @@ internal class VoiceTutorDuplexTurnController(
                 boundaryCheckpoint = boundary,
                 abandonedResponseId = null,
                 instructionOverride = instructionOverride,
+                quotaExhaustionNotice = false,
             ),
         )
     }
 
     private fun activateResponse(createEventId: String, state: PendingProviderResponseRetry) {
-        inputCoordinator?.teacherResponseStarted()
+        // The terminal quota sentence is not lesson context. Accepted learner
+        // ASR from before the cutoff may keep draining against the last fully
+        // completed ordinary tutor context while this notice is played.
+        if (!state.quotaExhaustionNotice) inputCoordinator?.teacherResponseStarted()
         activeTutorTranscripts.clear()
         activeTutorFinalTranscriptEvents.clear()
         activeTutorTranscriptItemIds.clear()
@@ -3646,6 +3979,8 @@ internal class VoiceTutorDuplexTurnController(
         activeResponseId = null
         activeResponseAllowsTools = state.toolChoice == "auto"
         activeResponseInstructionOverride = state.instructionOverride
+        activeResponseIsQuotaExhaustionNotice = state.quotaExhaustionNotice
+        quotaExhaustionNoticeClientPlayoutDrained = false
         activeResponseAudioBytes = 0
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false
@@ -3656,10 +3991,16 @@ internal class VoiceTutorDuplexTurnController(
         toolOnlyResponse = false
         activeResponseAcceptedToolCalls = false
         activeResponseToolNames = emptySet()
-        responseTimer?.dispose()
         val responseGeneration = activeResponseGeneration
-        responseTimer = Mono.delay(responseTimeout)
-            .subscribe { fireResponseTimeout(responseGeneration, createEventId) }
+        scheduleResponseTimer(
+            if (state.quotaExhaustionNotice) {
+                minOf(responseTimeout, QUOTA_NOTICE_AUDIO_START_TIMEOUT)
+            } else {
+                responseTimeout
+            },
+            responseGeneration,
+            createEventId,
+        )
     }
 
     private fun emitResponseCreate(
@@ -3667,11 +4008,15 @@ internal class VoiceTutorDuplexTurnController(
         toolChoice: String,
         instructionOverride: String?,
     ) {
+        val metadata = linkedMapOf<String, Any?>(
+            VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
+        )
+        if (activeResponseIsQuotaExhaustionNotice) {
+            metadata[VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY] = true
+        }
         val response = linkedMapOf<String, Any?>(
             "tool_choice" to toolChoice,
-            "metadata" to linkedMapOf(
-                VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to responseEventId,
-            ),
+            "metadata" to metadata,
         )
         instructionOverride?.let { response["instructions"] = it }
         emit(
@@ -3685,8 +4030,17 @@ internal class VoiceTutorDuplexTurnController(
 
     private fun observeResponseCreated(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
         if (!responseActive) return false
-        if (!matchesActiveResponseToken(node.path("response"))) return false
-        val responseId = node.path("response").path("id").asText()
+        val response = node.path("response")
+        if (!matchesActiveResponseToken(response)) return false
+        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND &&
+            responseQuotaNoticeMarker(response) != activeResponseIsQuotaExhaustionNotice
+        ) {
+            // A provider-authored marker alone is not terminal authority. It is
+            // accepted only on the exact server-token-correlated response whose
+            // controller state created the quota notice.
+            throw VoiceTutorProviderProtocolException()
+        }
+        val responseId = response.path("id").asText()
         if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && !validProviderResponseId(responseId)) {
             throw VoiceTutorProviderProtocolException()
         }
@@ -3707,6 +4061,13 @@ internal class VoiceTutorDuplexTurnController(
         return true
     }
 
+    private fun responseQuotaNoticeMarker(response: com.fasterxml.jackson.databind.JsonNode): Boolean? {
+        val marker = response.path("metadata").path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY)
+        if (marker.isMissingNode || marker.isNull) return false
+        if (marker.isBoolean) return marker.booleanValue()
+        return null
+    }
+
     private fun observeResponseAudio(node: com.fasterxml.jackson.databind.JsonNode): Boolean {
         if (!responseActive || activeResponseId == null) return false
         val responseId = node.path("response_id").asText()
@@ -3716,14 +4077,72 @@ internal class VoiceTutorDuplexTurnController(
         }
         val bytes = runCatching { Base64.getDecoder().decode(node.path("delta").asText()).size.toLong() }
             .getOrDefault(0)
+        val firstAudibleEvidence = bytes > 0 && activeResponseAudioBytes == 0L
         if (bytes > 0) {
             val receivedAt = nanoTime()
             val playbackStart = maxOf(earliestResponsePlaybackEndNanos ?: receivedAt, receivedAt)
             earliestResponsePlaybackEndNanos = playbackStart + audioDurationNanos(bytes)
         }
         activeResponseAudioBytes = (activeResponseAudioBytes + bytes).coerceAtMost(MAX_RESPONSE_AUDIO_BYTES)
+        if (firstAudibleEvidence) handleQuotaTerminalAudioStarted()
         return true
     }
+
+    /**
+     * Once quota owns the terminal, a response which has not started producing
+     * audio may not consume the entire bounded shutdown grace. This covers the
+     * quota notice itself and an ordinary response which was already active at
+     * the cutoff. An audible ordinary response is still allowed to finish its
+     * current sentence.
+     */
+    private fun armQuotaTerminalAudioStartWatchdogIfNeeded() {
+        if (closed || !quotaExhaustionNoticeRequested || !responseActive || hasAudibleResponseEvidence()) return
+        val responseGeneration = activeResponseGeneration
+        val createEventId = activeResponseCreateEventId ?: return
+        scheduleResponseTimer(
+            minOf(responseTimeout, QUOTA_NOTICE_AUDIO_START_TIMEOUT),
+            responseGeneration,
+            createEventId,
+        )
+    }
+
+    /**
+     * The short terminal watchdog protects only the time before the first
+     * audible sample. Once speech has begun, restore the ordinary response
+     * deadline so the tutor can finish naturally. If response.done arrived
+     * first, generation is already complete and only the playout gate remains.
+     */
+    private fun handleQuotaTerminalAudioStarted() {
+        if (!quotaExhaustionNoticeRequested || !responseActive) return
+        if (providerResponseDone) {
+            cancelResponseTimer()
+            advancePlaybackGate()
+            return
+        }
+        val responseGeneration = activeResponseGeneration
+        val createEventId = activeResponseCreateEventId ?: return
+        scheduleResponseTimer(responseTimeout, responseGeneration, createEventId)
+    }
+
+    private fun scheduleResponseTimer(
+        delay: Duration,
+        responseGeneration: Long,
+        createEventId: String,
+    ) {
+        cancelResponseTimer()
+        val timerEpoch = responseTimerEpoch
+        responseTimer = Mono.delay(delay)
+            .subscribe { fireResponseTimeout(responseGeneration, createEventId, timerEpoch) }
+    }
+
+    private fun cancelResponseTimer() {
+        responseTimer?.dispose()
+        responseTimer = null
+        responseTimerEpoch = if (responseTimerEpoch == Long.MAX_VALUE) 1 else responseTimerEpoch + 1
+    }
+
+    private fun hasAudibleResponseEvidence(): Boolean =
+        providerOutputBufferStarted || providerAudioObserved || activeResponseAudioBytes > 0
 
     private fun observeResponseDone(
         node: com.fasterxml.jackson.databind.JsonNode,
@@ -3751,12 +4170,40 @@ internal class VoiceTutorDuplexTurnController(
         if (activeResponseId == null) {
             activeResponseId = responseId
         }
+        rememberBoundedBinding(responseLessonRevisions, responseId, activeResponseLessonRevision)
+        if (quotaExhaustionNoticeRequested && !activeResponseIsQuotaExhaustionNotice) {
+            // Terminal ownership revokes every tool side effect, including a
+            // function call which the provider completed after the cutoff. A
+            // function-only response has no output-buffer stop, so recognize
+            // that shape directly and release the generation for the notice.
+            val output = response.path("output")
+            val functionOnly = output.isArray && output.size() > 0 &&
+                output.all { it.path("type").asText() == "function_call" } &&
+                !providerOutputBufferStarted && !providerAudioObserved && activeTutorTranscripts.isEmpty()
+            val silentCompletedResponse = !functionOnly && !hasAudibleResponseEvidence() &&
+                completedTutorContext(response).isBlank()
+            if (silentCompletedResponse) {
+                return recoverProviderResponseTurn(
+                    VoiceTutorProviderTurnFailureKind.RESPONSE_INCOMPLETE,
+                    responseId = responseId,
+                )
+            }
+            activeResponseAcceptedToolCalls = false
+            activeResponseToolNames = emptySet()
+            toolOnlyResponse = functionOnly
+            providerResponseDone = true
+            cancelResponseTimer()
+            activeResponseTutorContext = completedTutorContext(response)
+            activeResponseTutorContextForAssessment = tutorContextForAssessment(activeResponseTutorContext)
+            advancePlaybackGate()
+            return VoiceTutorProviderRelayDisposition.FORWARD_ONLY
+        }
         if (response.path("output").any { it.path("type").asText() == "function_call" } && !activeResponseAllowsTools) {
-            // An opening or exhausted tool round never has
-            // permission to execute a function, even if a provider emits one.
+            // An opening or exhausted tool round never has permission to
+            // execute a function. A late ordinary response is handled above:
+            // terminal ownership discards it and still speaks the notice.
             throw VoiceTutorMcpProtocolException()
         }
-        rememberBoundedBinding(responseLessonRevisions, responseId, activeResponseLessonRevision)
         val toolCalls = toolCoordinator?.completedResponse(response) ?: emptyList()
         activeResponseAcceptedToolCalls = toolCalls.isNotEmpty()
         activeResponseToolNames = toolCalls.mapTo(linkedSetOf()) { it.name }
@@ -3775,9 +4222,20 @@ internal class VoiceTutorDuplexTurnController(
         if (toolOnlyResponse) {
             activeResponseCandidateDiscovery = null
         }
+        if (activeResponseIsQuotaExhaustionNotice && !hasAudibleResponseEvidence() &&
+            completedTutorContext(response).isBlank()
+        ) {
+            return recoverProviderResponseTurn(
+                VoiceTutorProviderTurnFailureKind.RESPONSE_INCOMPLETE,
+                responseId = responseId,
+            )
+        }
         providerResponseDone = true
-        responseTimer?.dispose()
-        responseTimer = null
+        val awaitingTerminalAudioStart = quotaExhaustionNoticeRequested &&
+            !hasAudibleResponseEvidence() && !toolOnlyResponse
+        if (!awaitingTerminalAudioStart) {
+            cancelResponseTimer()
+        }
         for (call in toolCalls) {
             dispatchOrHoldToolAction(call, serverOwned = false)
             if (closed) {
@@ -4205,6 +4663,7 @@ internal class VoiceTutorDuplexTurnController(
         val failedGeneration = activeResponseGeneration
         val acceptedToolCalls = activeResponseAcceptedToolCalls
         val learnerInputInFlight = learnerInputFenceActive()
+        val quotaNoticeAttempt = activeResponseIsQuotaExhaustionNotice
         val abandonedResponseId = activeResponseId
         onProviderTurnFailure(
             providerFailureDiagnostic(
@@ -4217,10 +4676,20 @@ internal class VoiceTutorDuplexTurnController(
         )
         rollbackFailedProviderResponse(failedGeneration, abandonedResponseId)
         abandonProviderResponseTurn(
-            promptForFreshInput = !acceptedToolCalls && !learnerInputInFlight,
+            promptForFreshInput = !quotaExhaustionNoticeRequested &&
+                !acceptedToolCalls && !learnerInputInFlight,
             abandonedResponseId = abandonedResponseId,
         )
-        if (learnerInputInFlight) createNormalResponseIfReady()
+        when {
+            quotaNoticeAttempt -> quotaExhaustionNoticeCompleted.tryEmitError(
+                VoiceTutorQuotaExhaustionNoticeInterruptedException(),
+            )
+            quotaExhaustionNoticeRequested -> {
+                createQuotaExhaustionNoticeIfReady()
+                maybeCompleteQuotaTerminalPersistence()
+            }
+            learnerInputInFlight -> createNormalResponseIfReady()
+        }
         return VoiceTutorProviderRelayDisposition.DROP
     }
 
@@ -4234,10 +4703,16 @@ internal class VoiceTutorDuplexTurnController(
         val attempt = activeResponseRetryAttempt + 1
         val acceptedToolCalls = activeResponseAcceptedToolCalls
         val learnerInputInFlight = learnerInputFenceActive()
-        val retryActivationBlocked = learnerInputInFlight ||
-            pauseCoordinator?.blocksResponses == true ||
-            pendingSpokenLessonEnd != null || spokenLessonEndRequested ||
-            toolCoordinator?.hasPending == true ||
+        val quotaNoticeAttempt = activeResponseIsQuotaExhaustionNotice
+        val quotaNoticeWasAudible = quotaNoticeAttempt &&
+            (providerOutputBufferStarted || providerAudioObserved)
+        val retryActivationBlocked = quotaNoticeWasAudible ||
+            (quotaExhaustionNoticeRequested && !quotaNoticeAttempt) ||
+            (!quotaNoticeAttempt && (
+                learnerInputInFlight || pauseCoordinator?.blocksResponses == true ||
+                    pendingSpokenLessonEnd != null || spokenLessonEndRequested ||
+                    toolCoordinator?.hasPending == true
+                )) ||
             activeResponseLessonRevision != currentLessonRevision
         // Once a tool call has been accepted its side effect belongs to this
         // exact response generation. Re-generating it could execute the same
@@ -4275,6 +4750,7 @@ internal class VoiceTutorDuplexTurnController(
                 ?: TutorBoundaryCheckpoint(lastTutorSpeechStoppedOrder, lastSpokenResponseGeneration),
             abandonedResponseId = responseId?.takeIf(::validProviderResponseId),
             instructionOverride = activeResponseInstructionOverride,
+            quotaExhaustionNotice = activeResponseIsQuotaExhaustionNotice,
         )
         rollbackFailedProviderResponse(failedGeneration, responseId)
         if (retryScheduled) {
@@ -4283,10 +4759,21 @@ internal class VoiceTutorDuplexTurnController(
         } else {
             pendingProviderResponseRetry = null
             abandonProviderResponseTurn(
-                promptForFreshInput = !acceptedToolCalls && !learnerInputInFlight,
+                promptForFreshInput = !quotaExhaustionNoticeRequested &&
+                    !retry.quotaExhaustionNotice &&
+                    !acceptedToolCalls && !learnerInputInFlight,
                 abandonedResponseId = responseId,
             )
-            if (learnerInputInFlight) createNormalResponseIfReady()
+            when {
+                retry.quotaExhaustionNotice -> quotaExhaustionNoticeCompleted.tryEmitError(
+                    VoiceTutorQuotaExhaustionNoticeInterruptedException(),
+                )
+                quotaExhaustionNoticeRequested -> {
+                    createQuotaExhaustionNoticeIfReady()
+                    maybeCompleteQuotaTerminalPersistence()
+                }
+                learnerInputInFlight -> createNormalResponseIfReady()
+            }
         }
         return VoiceTutorProviderRelayDisposition.DROP
     }
@@ -4302,7 +4789,7 @@ internal class VoiceTutorDuplexTurnController(
         // Revoke the failed response's staged teacher generation before
         // restoring or retrying. No learner assessment may inherit context
         // from a response that never crossed the exact playout boundary.
-        inputCoordinator?.teacherResponseStarted()
+        if (!activeResponseIsQuotaExhaustionNotice) inputCoordinator?.teacherResponseStarted()
         activeResponseCreateEventId?.let {
             rememberBoundedId(recentFailedResponseCreateEventIds, it, MAX_RECENT_FAILED_RESPONSES)
         }
@@ -4316,13 +4803,14 @@ internal class VoiceTutorDuplexTurnController(
         releaseSpeechAwaitingFailedTutorResponse(failedGeneration)
         playbackTimer?.dispose()
         playbackTimer = null
-        responseTimer?.dispose()
-        responseTimer = null
+        cancelResponseTimer()
         responseActive = false
         activeResponseCreateEventId = null
         activeResponseId = null
         activeResponseAllowsTools = false
         activeResponseInstructionOverride = null
+        activeResponseIsQuotaExhaustionNotice = false
+        quotaExhaustionNoticeClientPlayoutDrained = false
         activeResponseAudioBytes = 0
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false
@@ -4393,7 +4881,7 @@ internal class VoiceTutorDuplexTurnController(
         withInputCoordinator { teacherResponseCompleted("", nanoTime()) }
         if (pendingSpokenLessonEnd != null) {
             emitSpokenLessonEndLifecycle()
-        } else if (promptForFreshInput) {
+        } else if (promptForFreshInput && !quotaExhaustionNoticeRequested) {
             val payload = linkedMapOf<String, Any>("type" to VoiceTutorRealtimeContract.INPUT_RETRY_EVENT)
             abandonedResponseId?.takeIf(::validProviderResponseId)?.let {
                 payload[VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD] = it
@@ -4457,13 +4945,21 @@ internal class VoiceTutorDuplexTurnController(
     private fun advancePlaybackGate() {
         if (!responseActive || !providerResponseDone) return
         if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND) {
+            if (quotaExhaustionNoticeRequested && !hasAudibleResponseEvidence() && !toolOnlyResponse) {
+                // response.done may precede native playout. Keep the short
+                // audio-start watchdog authoritative until audible evidence
+                // arrives instead of replacing it with the long playout timer.
+                return
+            }
             // The same response must finish successfully AND exhaust its server
             // output buffer. Subsequent audio stays on the continuous RTP track;
             // creating a response does not cancel, clear, or reset the old tail.
             // This proves server completion, not that the device heard every sample.
             // A completed, function-only response has no audio buffer and will
             // not emit stopped. This is not a shortcut for spoken responses.
-            if (providerOutputBufferStopped || toolOnlyResponse) {
+            val terminalNoticePlayoutReady = !activeResponseIsQuotaExhaustionNotice ||
+                quotaExhaustionNoticeClientPlayoutDrained
+            if ((providerOutputBufferStopped && terminalNoticePlayoutReady) || toolOnlyResponse) {
                 finishActiveResponse()
             } else if (playbackTimer == null) {
                 val responseGeneration = activeResponseGeneration
@@ -4523,27 +5019,55 @@ internal class VoiceTutorDuplexTurnController(
 
     @Synchronized
     internal fun fireResponseTimeout(createEventId: String?) {
-        fireResponseTimeout(activeResponseGeneration, createEventId)
+        fireResponseTimeout(activeResponseGeneration, createEventId, responseTimerEpoch)
     }
 
     @Synchronized
     internal fun fireResponseTimeout(responseGeneration: Long, createEventId: String?) {
+        fireResponseTimeout(responseGeneration, createEventId, responseTimerEpoch)
+    }
+
+    private fun fireResponseTimeout(
+        responseGeneration: Long,
+        createEventId: String?,
+        timerEpoch: Long,
+    ) {
+        val quotaTerminalNoAudioTimeout = quotaExhaustionNoticeRequested &&
+            !hasAudibleResponseEvidence()
         if (
             closed ||
             !responseActive ||
-            providerResponseDone ||
+            (providerResponseDone && !quotaTerminalNoAudioTimeout) ||
             responseGeneration != activeResponseGeneration ||
-            createEventId != activeResponseCreateEventId
+            createEventId != activeResponseCreateEventId ||
+            timerEpoch != responseTimerEpoch
         ) {
             return
         }
         responseTimer = null
-        emit(
-            linkedMapOf(
-                "event_id" to "buddystudy-internal-response-timeout-${UUID.randomUUID()}",
-                "type" to "response.cancel",
-            ),
-        )
+        responseTimerEpoch = if (responseTimerEpoch == Long.MAX_VALUE) 1 else responseTimerEpoch + 1
+        if (!providerResponseDone) {
+            emit(
+                linkedMapOf(
+                    "event_id" to "buddystudy-internal-response-timeout-${UUID.randomUUID()}",
+                    "type" to "response.cancel",
+                ),
+            )
+        }
+        if (activeResponseIsQuotaExhaustionNotice) {
+            recoverProviderResponseTurn(
+                VoiceTutorProviderTurnFailureKind.RESPONSE_TIMEOUT,
+                responseId = activeResponseId,
+            )
+            return
+        }
+        if (quotaExhaustionNoticeRequested) {
+            recoverProviderResponseTurn(
+                VoiceTutorProviderTurnFailureKind.RESPONSE_TIMEOUT,
+                responseId = activeResponseId,
+            )
+            return
+        }
         terminate(VoiceTutorProviderResponseTimeoutException())
     }
 
@@ -4589,6 +5113,7 @@ internal class VoiceTutorDuplexTurnController(
     private fun finishActiveResponse() {
         if (!responseActive) return
         val completedResponseGeneration = activeResponseGeneration
+        val completedQuotaExhaustionNotice = activeResponseIsQuotaExhaustionNotice
         val completedTutorItemId = activeTutorTranscriptItemIds.singleOrNull()
             ?.takeIf { it.isNotBlank() && it.length <= MAX_PROVIDER_ITEM_ID_CHARACTERS }
         val spokenResponseCompleted = providerOutputBufferStopped &&
@@ -4609,6 +5134,8 @@ internal class VoiceTutorDuplexTurnController(
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?.takeIf { it.length <= MAX_TUTOR_QUESTION_ASSESSMENT_CHARACTERS }
+        val completedQuotaExhaustionNoticeValid = !completedQuotaExhaustionNotice ||
+            completedPersistedTutorTranscript == quotaExhaustionNoticeText(normalizedSessionLanguage)
         val completedRootCreationFollowup = activeResponseInstructionOverride in setOf(
             ROOT_STUDY_CREATION_FOLLOWUP_INSTRUCTIONS,
             ROOT_STUDY_CREATION_UNCONFIRMED_FOLLOWUP_INSTRUCTIONS,
@@ -4758,13 +5285,14 @@ internal class VoiceTutorDuplexTurnController(
         }
         playbackTimer?.dispose()
         playbackTimer = null
-        responseTimer?.dispose()
-        responseTimer = null
+        cancelResponseTimer()
         responseActive = false
         activeResponseCreateEventId = null
         activeResponseId = null
         activeResponseAllowsTools = false
         activeResponseInstructionOverride = null
+        activeResponseIsQuotaExhaustionNotice = false
+        quotaExhaustionNoticeClientPlayoutDrained = false
         activeResponseAudioBytes = 0
         earliestResponsePlaybackEndNanos = null
         providerResponseDone = false
@@ -4804,7 +5332,22 @@ internal class VoiceTutorDuplexTurnController(
         if (spokenResponseCompleted && completedStudyUpdateCommittedFocusSupersededFollowupWithoutTools) {
             studyUpdateCommittedFocusSupersededFollowupPending = false
         }
-        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && spokenResponseCompleted) {
+        if (transport == VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND && spokenResponseCompleted &&
+            !completedQuotaExhaustionNotice
+        ) {
+            if (quotaExhaustionNoticeRequested) {
+                // The tutor sentence which was already in playout may finish,
+                // but terminal ownership cancels optional semantic promotion.
+                // Persist its generic transcript asynchronously and start the
+                // tool-free closing notice without awaiting classification.
+                withInputCoordinator {
+                    teacherResponseCompleted(completedTutorContextForAssessment, nanoTime())
+                }
+                emitQuotaTerminalTutorTranscripts(successfulTutorTranscriptEvents)
+                resumeCompletedResponse(completedResponseGeneration, completedTutorItemId)
+                maybeCompleteQuotaTerminalPersistence()
+                return
+            }
             if (pendingPostRelayBoundary != null) {
                 terminate(VoiceTutorProviderProtocolException())
                 return
@@ -4827,6 +5370,7 @@ internal class VoiceTutorDuplexTurnController(
                 proposedFeedbackContinuationAnchor = proposedFeedbackContinuationAnchor,
                 proposedFeedbackNavigationOffer = proposedFeedbackNavigationOffer,
                 feedbackAssessmentToken = token.takeIf { proposedFeedbackEvidence != null },
+                quotaExhaustionNotice = completedQuotaExhaustionNotice,
             )
             if (proposedStudyQuestionEvidence != null && focus != null && completedPersistedTutorTranscript != null) {
                 val emitted = spokenQuestionAssessmentWork.tryEmitNext(
@@ -4856,10 +5400,25 @@ internal class VoiceTutorDuplexTurnController(
             }
             return
         }
-        resumeCompletedResponse(completedResponseGeneration, completedTutorItemId)
+        if (completedQuotaExhaustionNotice) {
+            if (completedQuotaExhaustionNoticeValid) {
+                finishQuotaExhaustionNotice()
+            } else {
+                quotaExhaustionNoticeCompleted.tryEmitError(
+                    VoiceTutorQuotaExhaustionNoticeInterruptedException(),
+                )
+            }
+        } else {
+            resumeCompletedResponse(completedResponseGeneration, completedTutorItemId)
+        }
     }
 
     private fun resumeAfterPostRelayBoundary(pending: PendingPostRelayBoundary) {
+        if (pending.quotaExhaustionNotice) {
+            pendingPostRelayBoundary = null
+            finishQuotaExhaustionNotice()
+            return
+        }
         // Tutor persistence has succeeded. Release semantic learner work only
         // now, while the fence still prevents a nested next response/lifecycle.
         withInputCoordinator {
@@ -4892,6 +5451,13 @@ internal class VoiceTutorDuplexTurnController(
         continueAfterCompletedResponse(pending.completedResponseGeneration)
     }
 
+    private fun finishQuotaExhaustionNotice() {
+        if (quotaExhaustionNoticeFinished) return
+        quotaExhaustionNoticeFinished = true
+        quotaExhaustionNoticeCompleted.tryEmitValue(true)
+        maybeCompleteQuotaTerminalPersistence()
+    }
+
     private fun resumeCompletedResponse(
         completedResponseGeneration: Long,
         completedTutorItemId: String?,
@@ -4904,6 +5470,11 @@ internal class VoiceTutorDuplexTurnController(
 
     private fun continueAfterCompletedResponse(completedResponseGeneration: Long) {
         if (closed) return
+        if (quotaExhaustionNoticeRequested) {
+            createQuotaExhaustionNoticeIfReady()
+            maybeCompleteQuotaTerminalPersistence()
+            return
+        }
         pendingSpokenLessonEnd?.let { pending ->
             if (
                 pending.waitResponseGeneration == completedResponseGeneration &&
@@ -5252,6 +5823,7 @@ internal class VoiceTutorDuplexTurnController(
         val boundaryCheckpoint: TutorBoundaryCheckpoint,
         val abandonedResponseId: String?,
         val instructionOverride: String?,
+        val quotaExhaustionNotice: Boolean = false,
     )
 
     private data class PendingPostRelayBoundary(
@@ -5271,6 +5843,7 @@ internal class VoiceTutorDuplexTurnController(
         val proposedFeedbackNavigationOffer: PendingFeedbackNavigationOffer? = null,
         val feedbackAssessmentToken: Long? = null,
         val claimed: Boolean = false,
+        val quotaExhaustionNotice: Boolean = false,
     )
 
     private data class StagedTutorTranscript(
@@ -5588,6 +6161,7 @@ internal class VoiceTutorDuplexTurnController(
         const val MAX_RECENT_COMMITTED_ITEMS = 64
         const val MAX_RECENT_FAILED_RESPONSES = 16
         const val MAX_PROVIDER_RESPONSE_RETRIES = 1
+        val QUOTA_NOTICE_AUDIO_START_TIMEOUT: Duration = Duration.ofSeconds(3)
         const val MAX_PROVIDER_ITEM_ID_CHARACTERS = 191
         const val MAX_PERSISTED_STUDY_ANSWER_SEQUENCES = 16
         const val MAX_TUTOR_CONTEXT_CHARACTERS = 4_000
@@ -5622,6 +6196,20 @@ internal class VoiceTutorDuplexTurnController(
                 "Do not translate it. Do not greet the learner, use a lead-in, introduce or name yourself, " +
                 "describe your role, say that you are an AI/tutor/teacher, mention readiness, or call any tool."
         }
+        fun quotaExhaustionNoticeInstructions(language: String): String {
+            val exactNotice = quotaExhaustionNoticeText(language)
+            return "Say exactly this one short sentence and nothing else: $exactNotice " +
+                "Do not translate it, call a tool, ask a question, summarize learning, add a greeting, " +
+                "or continue the lesson."
+        }
+        fun quotaExhaustionNoticeText(language: String): String =
+            when (QuestionLanguage.normalize(language)) {
+                QuestionLanguage.ENGLISH ->
+                    "With this message, your monthly voice time is used up, so I'll end the call now."
+                QuestionLanguage.JAPANESE ->
+                    "この案内で今月の音声利用時間を使い切るため、通話を終了します。"
+                else -> "이번 안내로 이번 달 음성 시간이 모두 소진되어 통화를 종료할게요."
+            }
         val STUDY_FOCUS_TOOLS = setOf(SELECT_VOICE_STUDY_TOOL, "advance_voice_study")
         val SAFE_PURPOSE_PRESERVING_READ_TOOLS = setOf(
             "list_records", "get_record", "list_study_learning_records", "get_voice_learning_record",
@@ -5726,6 +6314,11 @@ internal data class VoiceTutorPostRelayBoundary(
     val tutorTranscriptEvents: List<String>,
 )
 
+internal data class VoiceTutorQuotaTerminalTranscriptBatch(
+    val token: Long,
+    val tutorTranscriptEvents: List<String>,
+)
+
 internal data class VoiceTutorProviderRelayDisposition(
     val persist: Boolean,
     val forwardToClient: Boolean,
@@ -5744,6 +6337,10 @@ internal class VoiceTutorProviderResponseTimeoutException : RuntimeException(
 
 internal class VoiceTutorProviderPlayoutTimeoutException : RuntimeException(
     "Voice Tutor provider playout completion timed out.",
+)
+
+internal class VoiceTutorQuotaExhaustionNoticeInterruptedException : RuntimeException(
+    "Voice Tutor quota exhaustion notice was interrupted.",
 )
 
 internal class VoiceTutorProviderInputCommitTimeoutException : RuntimeException(

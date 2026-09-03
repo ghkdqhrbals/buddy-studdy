@@ -9,6 +9,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorQuotaSnapshot
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionCursor
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuotaExhaustionPolicy
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorResultClaim
 import com.buddystudy.backend.voice.application.port.outbound.VoiceStudyLearningRecordAppendPort
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceStudyLearningRecordAppendPort
@@ -48,18 +49,57 @@ class VoiceTutorPersistenceAdapter(
         readyTimeoutSeconds: Long,
         heartbeatLeaseSeconds: Long,
     ): List<VoiceTutorSession> {
-        if (lockUserCreatedAt(userId) == null) return emptyList()
+        val createdAt = lockUserCreatedAt(userId) ?: return emptyList()
+        val quota = ensureQuota(userId, createdAt, now)
         val active = activeSessionQuery(userId, lock = true) ?: return emptyList()
         val readyLeaseExpired = active.status == VoiceTutorSessionStatus.READY &&
             !active.createdAt.plusSeconds(readyTimeoutSeconds.coerceAtLeast(1)).isAfter(now)
         val relayLeaseExpired = active.status == VoiceTutorSessionStatus.ACTIVE &&
             active.relayHeartbeatAt?.plusSeconds(heartbeatLeaseSeconds.coerceAtLeast(5))?.isAfter(now) != true
+        val quotaNoticeEnding = active.status == VoiceTutorSessionStatus.ENDING &&
+            active.endReason == QUOTA_EXHAUSTED_REASON && active.monthlyQuotaExhaustsAtHardEnd
+        val quotaNoticeGraceActive = quotaNoticeEnding &&
+            active.hardEndsAt.plusSeconds(VoiceTutorQuotaExhaustionPolicy.NOTICE_GRACE_SECONDS).isAfter(now)
+        val verifiedMonthlyBoundary = active.status == VoiceTutorSessionStatus.ACTIVE &&
+            active.providerSessionId?.startsWith(WEBRTC_PROVIDER_ID_PREFIX) == true &&
+            active.monthlyQuotaExhaustsAtHardEnd && !active.hardEndsAt.isAfter(now) &&
+            quota.periodStartedAt == active.periodStartedAt && quota.periodEndsAt == active.periodEndsAt &&
+            quota.remainingSeconds == 0
+        val monthlyBoundaryWithinGrace = verifiedMonthlyBoundary &&
+            active.hardEndsAt.plusSeconds(VoiceTutorQuotaExhaustionPolicy.NOTICE_GRACE_SECONDS).isAfter(now)
+        if (monthlyBoundaryWithinGrace && !relayLeaseExpired) {
+            // Recovery may win the race with the live relay's pre-deadline
+            // timer. Preserve the same spoken-terminal state instead of
+            // settling it as an ordinary per-call TIME_LIMIT. The relay will
+            // observe ENDING on its next heartbeat; an orphan is settled once
+            // the bounded notice grace expires.
+            database.sql(
+                """
+                update voice_tutor_sessions
+                set status = 'ENDING', end_reason = :reason, updated_at = :now
+                where id = :sessionId and user_id = :userId and status = 'ACTIVE'
+                  and monthly_quota_exhausts_at_hard_end = true
+                """.trimIndent(),
+            ).bind("reason", QUOTA_EXHAUSTED_REASON)
+                .bind("now", now.utc())
+                .bind("sessionId", active.id)
+                .bind("userId", userId)
+                .fetch().rowsUpdated().awaitSingle()
+            return emptyList()
+        }
         val endingLeaseExpired = active.status == VoiceTutorSessionStatus.ENDING &&
-            !active.updatedAt.plusSeconds(readyTimeoutSeconds.coerceAtLeast(1)).isAfter(now)
-        if (!active.hardEndsAt.isAfter(now) || readyLeaseExpired || relayLeaseExpired || endingLeaseExpired) {
+            if (quotaNoticeEnding) {
+                !quotaNoticeGraceActive
+            } else {
+                !active.updatedAt.plusSeconds(readyTimeoutSeconds.coerceAtLeast(1)).isAfter(now)
+            }
+        val hardDeadlineExpired = !active.hardEndsAt.isAfter(now) && !quotaNoticeGraceActive
+        if (hardDeadlineExpired || readyLeaseExpired || relayLeaseExpired || endingLeaseExpired) {
             val reason = when {
                 readyLeaseExpired -> "CONNECTION_TIMEOUT"
                 relayLeaseExpired -> "RELAY_HEARTBEAT_TIMEOUT"
+                quotaNoticeEnding -> QUOTA_EXHAUSTED_REASON
+                verifiedMonthlyBoundary -> QUOTA_EXHAUSTED_REASON
                 endingLeaseExpired -> "USER_ENDED"
                 else -> "TIME_LIMIT"
             }
@@ -71,6 +111,8 @@ class VoiceTutorPersistenceAdapter(
                 now = now,
                 usageEndedAt = when {
                     relayLeaseExpired -> staleRelayUsageEnd(active, now)
+                    quotaNoticeEnding -> active.hardEndsAt
+                    verifiedMonthlyBoundary -> active.hardEndsAt
                     endingLeaseExpired -> endingSessionUsageEnd(active, now)
                     else -> now
                 },
@@ -128,6 +170,10 @@ class VoiceTutorPersistenceAdapter(
             min(maxSessionSeconds.coerceAtLeast(1), secondsUntilReset),
         )
         if (reservationSeconds <= 0) return ReserveVoiceTutorSessionResult.Exhausted(quota.toSnapshot())
+        val monthlyQuotaExhaustsAtHardEnd = voiceTutorReservationExhaustsMonthlyQuota(
+            reservationSeconds,
+            quota.remainingSeconds,
+        )
 
         val sessionId = UUID.randomUUID().toString()
         val hardEndsAt = minInstant(now.plusSeconds(reservationSeconds.toLong()), quota.periodEndsAt)
@@ -155,14 +201,16 @@ class VoiceTutorPersistenceAdapter(
                 status, result_status, language, model, voice,
                 topic_snapshot, difficulty_snapshot,
                 period_started_at, period_ends_at, reserved_seconds, charged_seconds,
-                max_session_seconds, hard_ends_at, recording_consented_at, recording_consent_version,
+                max_session_seconds, hard_ends_at, monthly_quota_exhausts_at_hard_end,
+                recording_consented_at, recording_consent_version,
                 created_at, updated_at
             ) values (
                 :id, :userId, :studyId, :acceptedStudyId, :idempotencyKey, null,
                 'READY', 'PENDING', :language, :model, :voice,
                 :topic, :difficulty,
                 :periodStartedAt, :periodEndsAt, :reservedSeconds, 0,
-                :maxSessionSeconds, :hardEndsAt, :recordingConsentedAt, :recordingConsentVersion,
+                :maxSessionSeconds, :hardEndsAt, :monthlyQuotaExhaustsAtHardEnd,
+                :recordingConsentedAt, :recordingConsentVersion,
                 :now, :now
             )
             """.trimIndent(),
@@ -180,6 +228,7 @@ class VoiceTutorPersistenceAdapter(
             .bind("reservedSeconds", reservationSeconds)
             .bind("maxSessionSeconds", maxSessionSeconds)
             .bind("hardEndsAt", hardEndsAt.utc())
+            .bind("monthlyQuotaExhaustsAtHardEnd", monthlyQuotaExhaustsAtHardEnd)
         insert = if (studyId == null) {
             insert.bindNull("studyId", java.lang.Long::class.java)
                 .bindNull("acceptedStudyId", java.lang.Long::class.java)
@@ -356,6 +405,54 @@ class VoiceTutorPersistenceAdapter(
         return findSessionRow(userId, sessionId, lock = false)
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    override suspend fun beginQuotaExhaustionNotice(
+        userId: Long,
+        sessionId: String,
+        now: Instant,
+        noticeLeadSeconds: Long,
+    ): VoiceTutorSession? {
+        val createdAt = lockUserCreatedAt(userId) ?: return null
+        val quota = ensureQuota(userId, createdAt, now)
+        val session = findSessionRow(userId, sessionId, lock = true) ?: return null
+        val earliestEligibleHardEnd = now.minusSeconds(VoiceTutorQuotaExhaustionPolicy.NOTICE_GRACE_SECONDS)
+        val latestEligibleHardEnd = now.plusSeconds(noticeLeadSeconds.coerceAtLeast(0))
+        val eligibleSession = session.monthlyQuotaExhaustsAtHardEnd &&
+            session.providerSessionId?.startsWith(WEBRTC_PROVIDER_ID_PREFIX) == true &&
+            session.hardEndsAt.isAfter(earliestEligibleHardEnd) &&
+            !session.hardEndsAt.isAfter(latestEligibleHardEnd)
+        if (!eligibleSession) return null
+        if (session.status == VoiceTutorSessionStatus.ENDING &&
+            session.endReason == QUOTA_EXHAUSTED_REASON
+        ) return session
+        val currentQuotaExhausted = quota.periodStartedAt == session.periodStartedAt &&
+            quota.periodEndsAt == session.periodEndsAt && quota.remainingSeconds == 0
+        if (!currentQuotaExhausted || session.status != VoiceTutorSessionStatus.ACTIVE) return null
+        database.sql(
+            """
+            update voice_tutor_sessions
+            set status = 'ENDING', end_reason = :reason, updated_at = :now
+            where id = :sessionId and user_id = :userId
+              and status = 'ACTIVE'
+              and monthly_quota_exhausts_at_hard_end = true
+              and hard_ends_at > :earliestEligibleHardEnd
+              and hard_ends_at <= :latestEligibleHardEnd
+            """.trimIndent(),
+        ).bind("reason", QUOTA_EXHAUSTED_REASON)
+            .bind("now", now.utc())
+            .bind("earliestEligibleHardEnd", earliestEligibleHardEnd.utc())
+            .bind("latestEligibleHardEnd", latestEligibleHardEnd.utc())
+            .bind("sessionId", sessionId)
+            .bind("userId", userId)
+            .fetch().rowsUpdated().awaitSingle()
+        return findSessionRow(userId, sessionId, lock = false)?.takeIf {
+            it.status == VoiceTutorSessionStatus.ENDING &&
+                it.endReason == QUOTA_EXHAUSTED_REASON && it.monthlyQuotaExhaustsAtHardEnd &&
+                it.hardEndsAt.isAfter(earliestEligibleHardEnd) &&
+                !it.hardEndsAt.isAfter(latestEligibleHardEnd)
+        }
+    }
+
     override suspend fun heartbeat(
         userId: Long,
         sessionId: String,
@@ -449,13 +546,38 @@ class VoiceTutorPersistenceAdapter(
         askedStudyQuestion: Boolean,
         isStudyQuestion: Boolean,
         studyAnswerProviderItemIds: List<String>,
+        acceptedBeforeQuotaCutoff: Boolean,
     ): Boolean {
         require(lessonRevision >= -1) { "Voice Tutor lesson revision was invalid." }
         val owned = database.sql(
-            "select id from voice_tutor_sessions where id = :sessionId and user_id = :userId and status in ('ACTIVE', 'ENDING') for update",
+            "select status, end_reason, provider_session_id, created_at, connected_at, hard_ends_at " +
+                "from voice_tutor_sessions where id = :sessionId and user_id = :userId for update",
         ).bind("sessionId", sessionId).bind("userId", userId)
-            .map { _, _ -> true }.one().awaitSingleOrNull() ?: return false
-        if (!owned) return false
+            .map { row, _ ->
+                TranscriptSessionBoundary(
+                    status = VoiceTutorSessionStatus.valueOf(row.string("status")),
+                    endReason = row.get("end_reason", String::class.java),
+                    providerSessionId = row.get("provider_session_id", String::class.java),
+                    createdAt = row.instant("created_at"),
+                    connectedAt = row.nullableInstant("connected_at"),
+                    hardEndsAt = row.instant("hard_ends_at"),
+                )
+            }.one().awaitSingleOrNull() ?: return false
+        val acceptedWithinSessionBoundary = !occurredAt.isBefore(owned.connectedAt ?: owned.createdAt) &&
+            !occurredAt.isAfter(owned.hardEndsAt)
+        val acceptedStatus = when (role) {
+            VoiceTutorTranscriptRole.TUTOR -> owned.status == VoiceTutorSessionStatus.ACTIVE ||
+                owned.status == VoiceTutorSessionStatus.ENDING
+            VoiceTutorTranscriptRole.USER -> acceptedWithinSessionBoundary && when (owned.status) {
+                VoiceTutorSessionStatus.ACTIVE ->
+                    owned.providerSessionId?.startsWith(WEBRTC_PROVIDER_ID_PREFIX) != true ||
+                        acceptedBeforeQuotaCutoff
+                VoiceTutorSessionStatus.ENDING ->
+                    owned.endReason == QUOTA_EXHAUSTED_REASON && acceptedBeforeQuotaCutoff
+                else -> false
+            }
+        }
+        if (!acceptedStatus) return false
         val capacity = database.sql(
             """
             select count(*) as turn_count,
@@ -1009,7 +1131,11 @@ class VoiceTutorPersistenceAdapter(
         usageEndedAt: Instant = now,
     ) {
         if (session.finalizedAt != null) return
-        val effectiveEnd = minInstant(usageEndedAt, session.hardEndsAt)
+        val effectiveEnd = if (reason == QUOTA_EXHAUSTED_REASON && session.monthlyQuotaExhaustsAtHardEnd) {
+            session.hardEndsAt
+        } else {
+            minInstant(usageEndedAt, session.hardEndsAt)
+        }
         val charged = voiceTutorChargedSeconds(session, effectiveEnd)
         val resultStatus = voiceTutorResultStatusAfterSettlement(
             session.resultStatus,
@@ -1144,6 +1270,10 @@ class VoiceTutorPersistenceAdapter(
         chargedSeconds = int("charged_seconds"),
         maxSessionSeconds = int("max_session_seconds"),
         hardEndsAt = instant("hard_ends_at"),
+        monthlyQuotaExhaustsAtHardEnd = get(
+            "monthly_quota_exhausts_at_hard_end",
+            java.lang.Boolean::class.java,
+        ) == true,
         connectedAt = nullableInstant("connected_at"),
         relayHeartbeatAt = nullableInstant("relay_heartbeat_at"),
         acceptedAudioBytes = long("accepted_audio_bytes"),
@@ -1246,6 +1376,14 @@ class VoiceTutorPersistenceAdapter(
     }
 }
 
+private const val QUOTA_EXHAUSTED_REASON = "QUOTA_EXHAUSTED"
+private const val WEBRTC_PROVIDER_ID_PREFIX = "rtc_"
+
+internal fun voiceTutorReservationExhaustsMonthlyQuota(
+    reservationSeconds: Int,
+    remainingSecondsBeforeReservation: Int,
+): Boolean = reservationSeconds > 0 && reservationSeconds == remainingSecondsBeforeReservation
+
 internal fun voiceTutorResultStatusAfterSettlement(
     current: VoiceTutorResultStatus,
     failed: Boolean,
@@ -1304,6 +1442,15 @@ internal fun voiceTutorChargedSeconds(session: VoiceTutorSession, effectiveEnd: 
     return maxOf(wallClockSeconds, audioSeconds)
         .coerceIn(0, session.reservedSeconds)
 }
+
+private data class TranscriptSessionBoundary(
+    val status: VoiceTutorSessionStatus,
+    val endReason: String?,
+    val providerSessionId: String?,
+    val createdAt: Instant,
+    val connectedAt: Instant?,
+    val hardEndsAt: Instant,
+)
 
 internal data class TranscriptCapacity(
     val turnCount: Int,

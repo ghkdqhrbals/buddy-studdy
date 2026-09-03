@@ -28,6 +28,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersonal
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuotaExhaustionPolicy
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAuthorizationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSummaryPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
@@ -357,6 +358,21 @@ class VoiceTutorService(
     }
 
     @RequirePermission(Permissions.VOICE_TUTOR_READ)
+    override suspend fun beginQuotaExhaustionNotice(
+        principal: Principal,
+        sessionId: String,
+    ): VoiceTutorSessionStatus? {
+        val registered = registered(principal)
+        val id = requiredSessionId(sessionId)
+        return persistence.beginQuotaExhaustionNotice(
+            userId = registered.userId,
+            sessionId = id,
+            now = clock.instant(),
+            noticeLeadSeconds = VoiceTutorQuotaExhaustionPolicy.NOTICE_LEAD_SECONDS,
+        )?.status
+    }
+
+    @RequirePermission(Permissions.VOICE_TUTOR_READ)
     override suspend fun relayProvider(
         principal: Principal,
         context: VoiceTutorRelayContext,
@@ -397,6 +413,7 @@ class VoiceTutorService(
         askedStudyQuestion: Boolean,
         isStudyQuestion: Boolean,
         studyAnswerProviderItemIds: List<String>,
+        acceptedBeforeQuotaCutoff: Boolean,
     ): Boolean {
         val registered = registered(principal)
         require(lessonRevision >= -1) { "Voice Tutor lesson revision was invalid." }
@@ -425,6 +442,7 @@ class VoiceTutorService(
                 role == VoiceTutorTranscriptRole.USER && ids.size in 1..32 &&
                     ids.all { it.isNotEmpty() && it.length <= 191 } && ids.distinct().size == ids.size
             }.orEmpty(),
+            acceptedBeforeQuotaCutoff = acceptedBeforeQuotaCutoff && role == VoiceTutorTranscriptRole.USER,
         )
     }
 

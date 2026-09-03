@@ -1509,6 +1509,7 @@ class VoiceTutorServiceTest {
             sessionId: String,
             recoverAfter: Instant,
             now: Instant,
+            providerRequestStartedAt: Instant,
         ) = Unit
 
         override suspend fun attachSession(callId: String, userId: Long, sessionId: String, now: Instant): Boolean = true
@@ -1735,6 +1736,7 @@ class VoiceTutorServiceTest {
             askedStudyQuestion: Boolean,
             isStudyQuestion: Boolean,
             studyAnswerProviderItemIds: List<String>,
+            acceptedBeforeQuotaCutoff: Boolean,
         ): Boolean {
             transcriptAppendCalls += 1
             lastTranscriptLessonRevision = lessonRevision

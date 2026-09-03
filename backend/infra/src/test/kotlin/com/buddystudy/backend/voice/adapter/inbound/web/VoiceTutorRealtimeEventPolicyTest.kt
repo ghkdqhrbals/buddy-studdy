@@ -408,6 +408,41 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
+    fun `response created exposes only a boolean quota notice marker and never raw metadata`() {
+        val marked = policy.providerDecision(
+            """{"type":"response.created","response":{"id":"response-quota","status":"in_progress","metadata":{"buddystudy_quota_notice":true,"buddystudy_response_token":"private-token","private":"discard-me"}}}""",
+            "session-1",
+            Instant.EPOCH,
+        )
+        val normal = policy.providerDecision(
+            """{"type":"response.created","response":{"id":"response-normal","status":"in_progress","metadata":{"buddystudy_response_token":"private-token"}}}""",
+            "session-1",
+            Instant.EPOCH,
+        )
+        val stringSpoof = policy.providerDecision(
+            """{"type":"response.created","response":{"id":"response-string","status":"in_progress","metadata":{"buddystudy_quota_notice":"true"}}}""",
+            "session-1",
+            Instant.EPOCH,
+        )
+        val numericSpoof = policy.providerDecision(
+            """{"type":"response.created","response":{"id":"response-number","status":"in_progress","metadata":{"buddystudy_quota_notice":1}}}""",
+            "session-1",
+            Instant.EPOCH,
+        )
+
+        val markedPayload = mapper.readTree(marked.payload)
+        val normalPayload = mapper.readTree(normal.payload)
+        assertThat(markedPayload.path(VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD).asBoolean()).isTrue()
+        assertThat(normalPayload.path(VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD).asBoolean()).isFalse()
+        assertThat(mapper.readTree(stringSpoof.payload)
+            .path(VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD).asBoolean()).isFalse()
+        assertThat(mapper.readTree(numericSpoof.payload)
+            .path(VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD).asBoolean()).isFalse()
+        assertThat(markedPayload.path("response").has("metadata")).isFalse()
+        assertThat(markedPayload.toString()).doesNotContain("private-token", "discard-me", "buddystudy_quota_notice")
+    }
+
+    @Test
     fun `traffic guard counts decoded pcm bytes and rejects malformed base64`() {
         val now = AtomicLong(0)
         val guard = VoiceTutorClientTrafficGuard(policy, maxSessionSeconds = 3_600, nanoTime = now::get)

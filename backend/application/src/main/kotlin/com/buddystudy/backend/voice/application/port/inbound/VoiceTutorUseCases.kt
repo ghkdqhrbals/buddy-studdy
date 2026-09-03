@@ -61,6 +61,10 @@ interface VoiceTutorRelayUseCase {
     suspend fun heartbeat(principal: Principal, sessionId: String): VoiceTutorSessionStatus
     suspend fun recordAcceptedAudioBytes(principal: Principal, sessionId: String, bytes: Long)
     suspend fun relayState(principal: Principal, sessionId: String): VoiceTutorSessionStatus
+    suspend fun beginQuotaExhaustionNotice(
+        principal: Principal,
+        sessionId: String,
+    ): VoiceTutorSessionStatus? = null
 
     suspend fun relayProvider(
         principal: Principal,
@@ -87,6 +91,7 @@ interface VoiceTutorRelayUseCase {
         askedStudyQuestion: Boolean = false,
         isStudyQuestion: Boolean = false,
         studyAnswerProviderItemIds: List<String> = emptyList(),
+        acceptedBeforeQuotaCutoff: Boolean = false,
     ): Boolean
 
     suspend fun finish(

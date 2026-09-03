@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode
 
 /** Internal relay annotation. Unknown (-1) preserves source but cannot establish a lesson level. */
 internal object VoiceTutorTranscriptMetadata {
+    const val ACCEPTED_AT_EPOCH_MILLIS = "_buddystudy_accepted_at_epoch_millis"
     const val LESSON_REVISION = "_buddystudy_lesson_revision"
     const val STUDY_QUESTION_PROVIDER_ITEM_ID = "_buddystudy_study_question_provider_item_id"
     const val STUDY_ANSWER_PROVIDER_ITEM_ID = "_buddystudy_study_answer_provider_item_id"
@@ -14,6 +15,11 @@ internal object VoiceTutorTranscriptMetadata {
     fun lessonRevision(node: JsonNode): Long = node.path(LESSON_REVISION)
         .takeIf { it.isIntegralNumber && it.canConvertToLong() }
         ?.longValue()?.takeIf { it >= -1 } ?: -1
+
+    fun acceptedAt(node: JsonNode): java.time.Instant? = node.path(ACCEPTED_AT_EPOCH_MILLIS)
+        .takeIf { it.isIntegralNumber && it.canConvertToLong() }
+        ?.longValue()
+        ?.let { runCatching { java.time.Instant.ofEpochMilli(it) }.getOrNull() }
 
     fun studyQuestionProviderItemId(node: JsonNode): String? =
         node.path(STUDY_QUESTION_PROVIDER_ITEM_ID)

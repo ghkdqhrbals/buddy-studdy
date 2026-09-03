@@ -2838,6 +2838,17 @@ enum AppLegalLinks {
     }
 }
 
+/// Display policy for the deliberately high per-user voice allowance used as
+/// an effectively-unlimited account override. Only this exact server value is
+/// rendered as unlimited; ordinary large quotas retain their real duration.
+enum VoiceTutorQuotaPresentation {
+    static let unlimitedLimitSeconds = 31_536_000
+
+    static func isUnlimited(limitSeconds: Int) -> Bool {
+        limitSeconds == unlimitedLimitSeconds
+    }
+}
+
 struct AppStrings {
     var language: AppLanguage
 
@@ -3118,6 +3129,14 @@ struct AppStrings {
     var voiceTutorCallSpeaking: String { text("답변 중", "Speaking", "応答中") }
     var voiceTutorCallEnding: String { text("통화 마치는 중", "Ending call", "通話を終了中") }
     var voiceTutorCallEnded: String { text("통화 종료", "Call ended", "通話終了") }
+    var voiceTutorCallQuotaEnded: String {
+        text(
+            "이번 달 음성 시간 모두 사용",
+            "Monthly voice time used",
+            "今月の音声時間を使い切りました"
+        )
+    }
+    var voiceTutorUnlimited: String { text("무제한", "Unlimited", "無制限") }
     var voiceTutorCallFailed: String { text("연결 끊김", "Disconnected", "接続切断") }
     var voiceTutorCallMuted: String { text("마이크 꺼짐", "Mic off", "マイクオフ") }
     var voiceTutorCallTranscript: String { text("대화 내용", "Conversation", "会話内容") }
@@ -3274,7 +3293,10 @@ struct AppStrings {
         let secondText = remainingSeconds < 10 ? "0\(remainingSeconds)" : "\(remainingSeconds)"
         return "\(minuteText):\(secondText)"
     }
-    func voiceTutorRemainingTime(_ seconds: Int) -> String {
+    func voiceTutorRemainingTime(_ seconds: Int, limitSeconds: Int? = nil) -> String {
+        if let limitSeconds, VoiceTutorQuotaPresentation.isUnlimited(limitSeconds: limitSeconds) {
+            return voiceTutorUnlimited
+        }
         let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: true)
         return text("\(duration) 남음", "\(duration) remaining", "残り\(duration)")
     }
@@ -3303,6 +3325,9 @@ struct AppStrings {
         return text("통화 \(duration) 남음", "Call ends in \(duration)", "通話残り\(duration)")
     }
     func voiceTutorMonthlyAllowance(_ seconds: Int) -> String {
+        if VoiceTutorQuotaPresentation.isUnlimited(limitSeconds: seconds) {
+            return text("매월 음성 무제한", "Unlimited voice each month", "毎月の音声時間は無制限")
+        }
         let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: false)
         return text("매월 음성 \(duration)", "\(duration) of voice each month", "毎月音声\(duration)")
     }

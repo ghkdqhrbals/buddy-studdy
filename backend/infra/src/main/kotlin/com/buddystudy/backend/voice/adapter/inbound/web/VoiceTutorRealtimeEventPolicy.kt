@@ -204,7 +204,8 @@ internal class VoiceTutorRealtimeEventPolicy(
     }
 
     private fun withoutInternalTranscriptMetadata(node: JsonNode, raw: String): String {
-        if (!node.has(VoiceTutorTranscriptMetadata.LESSON_REVISION) &&
+        if (!node.has(VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS) &&
+            !node.has(VoiceTutorTranscriptMetadata.LESSON_REVISION) &&
             !node.has(VoiceTutorTranscriptMetadata.STUDY_QUESTION_PROVIDER_ITEM_ID) &&
             !node.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID) &&
             !node.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS) &&
@@ -212,6 +213,7 @@ internal class VoiceTutorRealtimeEventPolicy(
             !node.has(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION)
         ) return raw
         val publicNode = node.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
+        publicNode.remove(VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS)
         publicNode.remove(VoiceTutorTranscriptMetadata.LESSON_REVISION)
         publicNode.remove(VoiceTutorTranscriptMetadata.STUDY_QUESTION_PROVIDER_ITEM_ID)
         publicNode.remove(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID)
@@ -248,22 +250,24 @@ internal class VoiceTutorRealtimeEventPolicy(
         if (type == "response.done" && status == "failed") {
             return providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_ERROR")
         }
-        return ProviderEventDecision(
-            mapper.writeValueAsString(
-                linkedMapOf(
-                    "type" to type,
-                    "response" to linkedMapOf(
-                        "id" to response.path("id").asText(),
-                        "status" to status,
-                    ),
-                    VoiceTutorRealtimeContract.TUTOR_INTERVENTION_FIELD to (
-                        type == "response.created" &&
-                            response.path("metadata").path(VoiceTutorRealtimeContract.TURN_METADATA_KEY).asText() ==
-                            VoiceTutorRealtimeContract.CONTINUOUS_INTERVENTION_TURN
-                        ),
-                ),
+        val payload = linkedMapOf<String, Any>(
+            "type" to type,
+            "response" to linkedMapOf(
+                "id" to response.path("id").asText(),
+                "status" to status,
             ),
+            VoiceTutorRealtimeContract.TUTOR_INTERVENTION_FIELD to (
+                type == "response.created" &&
+                    response.path("metadata").path(VoiceTutorRealtimeContract.TURN_METADATA_KEY).asText() ==
+                    VoiceTutorRealtimeContract.CONTINUOUS_INTERVENTION_TURN
+                ),
         )
+        if (type == "response.created") {
+            val marker = response.path("metadata").path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY)
+            payload[VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD] =
+                marker.isBoolean && marker.booleanValue()
+        }
+        return ProviderEventDecision(mapper.writeValueAsString(payload))
     }
 
     private fun providerFailure(sessionId: String, serverTime: Instant, code: String) = ProviderEventDecision(

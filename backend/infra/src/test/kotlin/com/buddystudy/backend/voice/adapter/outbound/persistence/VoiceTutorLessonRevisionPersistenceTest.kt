@@ -37,6 +37,7 @@ class VoiceTutorLessonRevisionPersistenceTest {
                 period_started_at timestamp not null, period_ends_at timestamp not null,
                 reserved_seconds int not null default 3600, charged_seconds int not null default 0,
                 max_session_seconds int not null default 3600, hard_ends_at timestamp not null,
+                monthly_quota_exhausts_at_hard_end boolean not null default false,
                 connected_at timestamp null, relay_heartbeat_at timestamp null,
                 accepted_audio_bytes bigint not null default 0, recording_consented_at timestamp null,
                 recording_consent_version varchar(64) null, ended_at timestamp null, finalized_at timestamp null,
@@ -124,6 +125,33 @@ class VoiceTutorLessonRevisionPersistenceTest {
         execute("update voice_tutor_sessions set status = 'COMPLETED' where id = 'owned'")
         assertThat(append("late-write", VoiceTutorTranscriptRole.USER, "late source", 2)).isFalse()
         assertThat(adapter.transcript(7, "owned", 4_000)).hasSize(1)
+    }
+
+    @Test
+    fun `active learner transcripts honor the hard boundary and WebRTC trusted receipt`(): Unit = runBlocking {
+        val hardEnd = now.plusSeconds(3_600)
+        assertThat(adapter.appendTranscript(
+            7, "owned", "legacy-at-boundary", VoiceTutorTranscriptRole.USER, "legacy", hardEnd,
+            4_000, 20,
+        )).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "legacy-after-boundary", VoiceTutorTranscriptRole.USER, "late legacy",
+            hardEnd.plusMillis(1), 4_000, 20,
+        )).isFalse()
+
+        execute("update voice_tutor_sessions set provider_session_id = 'rtc_owned' where id = 'owned'")
+        assertThat(adapter.appendTranscript(
+            7, "owned", "rtc-untrusted", VoiceTutorTranscriptRole.USER, "untrusted", now.plusSeconds(1),
+            4_000, 20,
+        )).isFalse()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "rtc-trusted", VoiceTutorTranscriptRole.USER, "trusted", hardEnd,
+            4_000, 20, acceptedBeforeQuotaCutoff = true,
+        )).isTrue()
+        assertThat(adapter.appendTranscript(
+            7, "owned", "rtc-trusted-late", VoiceTutorTranscriptRole.USER, "late trusted",
+            hardEnd.plusMillis(1), 4_000, 20, acceptedBeforeQuotaCutoff = true,
+        )).isFalse()
     }
 
     @Test

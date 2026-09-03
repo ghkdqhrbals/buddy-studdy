@@ -601,8 +601,9 @@ struct VoiceTutorLocalPlayoutTailToken: Equatable, Sendable {
 /// last packet on this device. There is no public WebRTC "speaker drained" API,
 /// and silence is not usable because the RTP track emits concealment/comfort
 /// noise. Instead, preserve the exact response generation and, only when the
-/// server later verifies USER_ENDED, keep the output path alive through a hard
-/// provider-stop-based network-tail window plus the measured Core Audio queue.
+/// server later verifies a spoken terminal response, keep the output path alive
+/// through a hard provider-stop-based network-tail window plus the measured
+/// Core Audio queue.
 /// This is deliberately not an acoustic proof: a packet arriving outside the
 /// bounded window cannot be attributed to this response by the SDK.
 struct VoiceTutorLocalPlayoutTailState: Equatable {
@@ -724,6 +725,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private var isClosed = false
     private var sessionMediaReady = false
     private var microphoneMuted = false
+    private var microphoneInputClosed = false
     private var preparedSpeechScorer: VoiceTutorSileroSpeechScorer?
     private static let audioSessionOwnershipLock = NSLock()
     private nonisolated(unsafe) static var activeAudioSessionOwnerID: UUID?
@@ -882,7 +884,10 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     @discardableResult
     func setMuted(_ muted: Bool) -> Bool {
         stateLock.lock()
-        guard !isClosed else { stateLock.unlock(); return false }
+        guard !isClosed, !microphoneInputClosed || muted else {
+            stateLock.unlock()
+            return false
+        }
         microphoneMuted = muted
         captureTap?.updateGate(mediaReady: sessionMediaReady, muted: muted)
         let peerFactory = factory
@@ -893,9 +898,30 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         return device.setMicrophoneMuted(muted) == 0 && device.isMicrophoneMuted == muted
     }
 
+    /// Permanently closes only this call's learner-input path while preserving
+    /// the remote tutor track. Disabling the sender track is the fail-closed
+    /// boundary when the native audio-device mute operation is unavailable or
+    /// fails during a terminal server transition.
+    @discardableResult
+    func closeMicrophoneInput() -> Bool {
+        stateLock.lock()
+        guard !isClosed else { stateLock.unlock(); return true }
+        microphoneInputClosed = true
+        microphoneMuted = true
+        sessionMediaReady = false
+        captureTap?.updateGate(mediaReady: false, muted: true)
+        let track = localAudioTrack
+        let device = factory?.audioDeviceModule
+        stateLock.unlock()
+
+        track?.isEnabled = false
+        _ = device?.setMicrophoneMuted(true)
+        return track?.isEnabled != true
+    }
+
     func setSessionMediaReady() {
         stateLock.lock()
-        guard !isClosed else { stateLock.unlock(); return }
+        guard !isClosed, !microphoneInputClosed else { stateLock.unlock(); return }
         sessionMediaReady = true
         captureTap?.updateGate(mediaReady: true, muted: microphoneMuted)
         let track = localAudioTrack
@@ -986,6 +1012,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         isClosed = true
         sessionMediaReady = false
         microphoneMuted = true
+        microphoneInputClosed = true
         preparedSpeechScorer = nil
         captureTap?.close()
         shouldDeactivateAudioSession = Self.activeAudioSessionOwnerID == audioSessionOwnerID
@@ -1087,7 +1114,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             stateLock.unlock()
             throw CancellationError()
         }
-        localAudioTrack.isEnabled = sessionMediaReady
+        localAudioTrack.isEnabled = sessionMediaReady && !microphoneInputClosed
         self.captureTap = captureTap
         captureTap?.updateGate(mediaReady: sessionMediaReady, muted: microphoneMuted)
         self.renderTap = renderTap

@@ -53,6 +53,10 @@ class VoiceTutorWebRtcService(
         val id = requiredSessionId(sessionId)
         val normalizedOffer = validatedVoiceTutorSdpOffer(offerSdp)
         val context = relay.connect(registered, id)
+        // Conservative provider-call ceiling anchor: capture before the POST.
+        // Response headers/body may arrive seconds later, but a 3600-second
+        // provider call is already consuming its fixed lifetime during that wait.
+        val providerRequestStartedAt = clock.instant()
         val providerCallId = AtomicReference<String?>()
         val recordProviderCall: suspend (String) -> Unit = { callId ->
             val validatedCallId = callId.takeIf(PROVIDER_CALL_ID::matches)
@@ -73,6 +77,7 @@ class VoiceTutorWebRtcService(
                         properties.voiceTutor.connectTimeoutSeconds.coerceIn(5, 300),
                     ),
                     now = markerNow,
+                    providerRequestStartedAt = providerRequestStartedAt,
                 )
             }
         }
@@ -117,6 +122,7 @@ class VoiceTutorWebRtcService(
                                 sessionId = id,
                                 recoverAfter = retryNow,
                                 now = retryNow,
+                                providerRequestStartedAt = providerRequestStartedAt,
                             )
                         }.onFailure { markerError ->
                             logger.error(

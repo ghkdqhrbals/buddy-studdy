@@ -296,6 +296,107 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
+    func testMonthlyQuotaEndReasonIsAnExactGracefulSpokenTerminalContract() {
+        for reason in ["QUOTA_EXHAUSTED", " quota_exhausted \n"] {
+            XCTAssertTrue(VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(reason))
+            XCTAssertTrue(VoiceTutorServerEndReasonPolicy.isGracefulServerCompletion(reason))
+            XCTAssertTrue(VoiceTutorServerEndReasonPolicy.preservesFinalSpokenPlayout(reason))
+            XCTAssertEqual(
+                VoiceTutorSessionPhase.completed(
+                    outcome: .ended,
+                    serverState: nil,
+                    serverReason: reason
+                ),
+                .ended
+            )
+        }
+
+        for unrelated in ["TIME_LIMIT", "VOICE_TUTOR_QUOTA_EXCEEDED", "MONTHLY_QUOTA_EXHAUSTED", nil] {
+            XCTAssertFalse(VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(unrelated))
+        }
+        XCTAssertFalse(VoiceTutorServerEndReasonPolicy.preservesFinalSpokenPlayout("TIME_LIMIT"))
+        XCTAssertFalse(VoiceTutorServerEndReasonPolicy.isGracefulServerCompletion("PROVIDER_ERROR"))
+    }
+
+    func testInputRetryIsRejectedOnceMonthlyQuotaTerminalOwnsSession() {
+        for reason in ["QUOTA_EXHAUSTED", " quota_exhausted \n"] {
+            XCTAssertFalse(
+                VoiceTutorServerEndReasonPolicy.permitsInputRetry(
+                    reason: reason,
+                    isFinalizing: false
+                )
+            )
+        }
+    }
+
+    func testInputRetryIsRejectedDuringFinalizationButAllowedForLiveNonQuotaSession() {
+        XCTAssertFalse(
+            VoiceTutorServerEndReasonPolicy.permitsInputRetry(
+                reason: nil,
+                isFinalizing: true
+            )
+        )
+        XCTAssertFalse(
+            VoiceTutorServerEndReasonPolicy.permitsInputRetry(
+                reason: "SERVER_FINALIZED",
+                isFinalizing: true
+            )
+        )
+
+        for reason in [nil, "TIME_LIMIT", "MONTHLY_QUOTA_EXHAUSTED", "VOICE_TUTOR_QUOTA_EXCEEDED"] {
+            XCTAssertTrue(
+                VoiceTutorServerEndReasonPolicy.permitsInputRetry(
+                    reason: reason,
+                    isFinalizing: false
+                )
+            )
+        }
+    }
+
+    func testMonthlyQuotaControlLossKeepsMediaForOnlyTheBoundedNoticeWindow() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        XCTAssertEqual(
+            VoiceTutorQuotaControlLossPolicy.mediaHoldSeconds(
+                hardEndsAt: now.addingTimeInterval(8),
+                now: now,
+                hasSealedResponse: false
+            ),
+            28
+        )
+        XCTAssertEqual(
+            VoiceTutorQuotaControlLossPolicy.mediaHoldSeconds(
+                hardEndsAt: now.addingTimeInterval(-5),
+                now: now,
+                hasSealedResponse: false
+            ),
+            15
+        )
+        XCTAssertEqual(
+            VoiceTutorQuotaControlLossPolicy.mediaHoldSeconds(
+                hardEndsAt: now.addingTimeInterval(-21),
+                now: now,
+                hasSealedResponse: false
+            ),
+            0
+        )
+        XCTAssertEqual(
+            VoiceTutorQuotaControlLossPolicy.mediaHoldSeconds(
+                hardEndsAt: now.addingTimeInterval(300),
+                now: now,
+                hasSealedResponse: false
+            ),
+            VoiceTutorQuotaControlLossPolicy.maximumMediaHoldSeconds
+        )
+        XCTAssertEqual(
+            VoiceTutorQuotaControlLossPolicy.mediaHoldSeconds(
+                hardEndsAt: now.addingTimeInterval(8),
+                now: now,
+                hasSealedResponse: true
+            ),
+            0
+        )
+    }
+
     @MainActor
     func testDelayedAttemptDeliveryDropsOldSuccessAndFailureAfterRetry() async {
         for didSend in [true, false] {
@@ -567,7 +668,33 @@ final class VoiceTutorContractTests: XCTestCase {
         )
         XCTAssertEqual(
             intervention,
-            .responseStarted(responseID: "response-1", isTutorIntervention: true)
+            .responseStarted(
+                responseID: "response-1",
+                isTutorIntervention: true,
+                isQuotaExhaustionNotice: false
+            )
+        )
+
+        let quotaNotice = try VoiceTutorRealtimeEventParser.parse(
+            text: #"{"type":"response.created","response":{"id":"quota-response"},"buddystudyQuotaExhaustionNotice":true}"#
+        )
+        XCTAssertEqual(
+            quotaNotice,
+            .responseStarted(
+                responseID: "quota-response",
+                isTutorIntervention: false,
+                isQuotaExhaustionNotice: true
+            )
+        )
+        XCTAssertEqual(
+            try VoiceTutorRealtimeEventParser.parse(
+                text: #"{"type":"response.created","response":{"id":"not-a-marker"},"buddystudyQuotaExhaustionNotice":1}"#
+            ),
+            .responseStarted(
+                responseID: "not-a-marker",
+                isTutorIntervention: false,
+                isQuotaExhaustionNotice: false
+            )
         )
     }
 
@@ -913,11 +1040,75 @@ final class VoiceTutorContractTests: XCTestCase {
         )
 
         XCTAssertEqual(
+            VoiceTutorServerEndPlayoutPolicy.acceptedQuotaNoticeResponseID(
+                reason: "QUOTA_EXHAUSTED",
+                phase: .ending,
+                responseID: "response-1",
+                isQuotaExhaustionNotice: true
+            ),
+            "response-1"
+        )
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.acceptedQuotaNoticeResponseID(
+            reason: "QUOTA_EXHAUSTED",
+            phase: .speaking,
+            responseID: "response-1",
+            isQuotaExhaustionNotice: true
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.acceptedQuotaNoticeResponseID(
+            reason: "QUOTA_EXHAUSTED",
+            phase: .ending,
+            responseID: "response-1",
+            isQuotaExhaustionNotice: false
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.acceptedQuotaNoticeResponseID(
+            reason: "TIME_LIMIT",
+            phase: .ending,
+            responseID: "response-1",
+            isQuotaExhaustionNotice: true
+        ))
+        XCTAssertTrue(VoiceTutorServerEndPlayoutPolicy.isExactAbandonedQuotaNotice(
+            reason: "QUOTA_EXHAUSTED",
+            phase: .ending,
+            responseID: "response-1",
+            quotaNoticeResponseID: "response-1"
+        ))
+        XCTAssertFalse(VoiceTutorServerEndPlayoutPolicy.isExactAbandonedQuotaNotice(
+            reason: "QUOTA_EXHAUSTED",
+            phase: .ending,
+            responseID: "ordinary-response",
+            quotaNoticeResponseID: "response-1"
+        ))
+        XCTAssertFalse(VoiceTutorServerEndPlayoutPolicy.isExactAbandonedQuotaNotice(
+            reason: "QUOTA_EXHAUSTED",
+            phase: .speaking,
+            responseID: "response-1",
+            quotaNoticeResponseID: "response-1"
+        ))
+
+        XCTAssertEqual(
             VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
                 reason: "user_ended", usesWebRTC: true, pending: token
             ),
             token
         )
+        XCTAssertEqual(
+            VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
+                reason: "QUOTA_EXHAUSTED",
+                usesWebRTC: true,
+                pending: token,
+                quotaNoticeResponseID: "response-1"
+            ),
+            token
+        )
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
+            reason: "QUOTA_EXHAUSTED",
+            usesWebRTC: true,
+            pending: token,
+            quotaNoticeResponseID: "ordinary-response"
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
+            reason: "QUOTA_EXHAUSTED", usesWebRTC: true, pending: token
+        ))
         XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
             reason: "TIME_LIMIT", usesWebRTC: true, pending: token
         ))
@@ -937,6 +1128,20 @@ final class VoiceTutorContractTests: XCTestCase {
             "response-1"
         )
         XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
+            reason: "QUOTA_EXHAUSTED",
+            usesWebRTC: true,
+            pending: nil,
+            activeResponseID: "response-1",
+            quotaNoticeResponseID: "response-1"
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
+            reason: "QUOTA_EXHAUSTED",
+            usesWebRTC: true,
+            pending: nil,
+            activeResponseID: "ordinary-response",
+            quotaNoticeResponseID: "quota-response"
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
             reason: "USER_ENDED",
             usesWebRTC: true,
             pending: token,
@@ -948,6 +1153,96 @@ final class VoiceTutorContractTests: XCTestCase {
             pending: nil,
             activeResponseID: "response-1"
         ))
+
+        XCTAssertEqual(
+            VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+                reason: "QUOTA_EXHAUSTED",
+                phase: .ending,
+                usesWebRTC: true,
+                pending: token,
+                quotaNoticeResponseID: "response-1"
+            ),
+            "response-1"
+        )
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+            reason: "QUOTA_EXHAUSTED",
+            phase: .ending,
+            usesWebRTC: true,
+            pending: token,
+            quotaNoticeResponseID: "ordinary-response"
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+            reason: "TIME_LIMIT",
+            phase: .ending,
+            usesWebRTC: true,
+            pending: token
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+                reason: "QUOTA_EXHAUSTED",
+                phase: .speaking,
+                usesWebRTC: true,
+                pending: token,
+                quotaNoticeResponseID: "response-1"
+            ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+                reason: "QUOTA_EXHAUSTED",
+                phase: .ending,
+                usesWebRTC: false,
+                pending: token,
+                quotaNoticeResponseID: "response-1"
+            ))
+    }
+
+    func testQuotaPlayoutAcknowledgementFollowsTheExactBoundedLocalTail() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift"),
+            encoding: .utf8
+        )
+        let start = try XCTUnwrap(source.range(of: "private func scheduleTerminalPlayoutDrainIfReady"))
+        let end = try XCTUnwrap(
+            source.range(of: "private func cancelTerminalPlayoutDrain", range: start.upperBound..<source.endIndex)
+        )
+        let method = String(source[start.lowerBound..<end.lowerBound])
+        let localTail = try XCTUnwrap(method.range(of: "waitForLocalPlayoutTail(token)"))
+        let acknowledgement = try XCTUnwrap(method.range(of: "sendPlayoutDrained(responseID: responseID)"))
+
+        XCTAssertLessThan(localTail.lowerBound, acknowledgement.lowerBound)
+        XCTAssertTrue(method.contains("VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID"))
+        XCTAssertTrue(method.contains("connectionAttemptFence.isCurrent(attemptID)"))
+        XCTAssertFalse(method.contains("renderedPCM"), "PCM silence must not authorize a terminal ACK")
+    }
+
+    func testServerEndingClosesLearnerInputFailClosedWithoutClosingTutorAudio() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let transportSource = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/VoiceTutorWebRTCTransport.swift"),
+            encoding: .utf8
+        )
+        let closeStart = try XCTUnwrap(transportSource.range(of: "func closeMicrophoneInput()"))
+        let closeEnd = try XCTUnwrap(
+            transportSource.range(of: "func setSessionMediaReady()", range: closeStart.upperBound..<transportSource.endIndex)
+        )
+        let closeMethod = String(transportSource[closeStart.lowerBound..<closeEnd.lowerBound])
+        XCTAssertTrue(closeMethod.contains("captureTap?.updateGate(mediaReady: false, muted: true)"))
+        XCTAssertTrue(closeMethod.contains("track?.isEnabled = false"))
+        XCTAssertFalse(closeMethod.contains("remoteAudioTrack"), "The final tutor sentence must remain audible")
+
+        let viewModelSource = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift"),
+            encoding: .utf8
+        )
+        let endingStart = try XCTUnwrap(viewModelSource.range(of: "case .sessionEnding(let reason"))
+        let endingEnd = try XCTUnwrap(
+            viewModelSource.range(of: "case .sessionEnded", range: endingStart.upperBound..<viewModelSource.endIndex)
+        )
+        let endingHandler = String(viewModelSource[endingStart.lowerBound..<endingEnd.lowerBound])
+        XCTAssertTrue(endingHandler.contains("webRTCTransport?.closeMicrophoneInput()"))
+        XCTAssertFalse(endingHandler.contains("webRTCTransport?.setMuted(true)"))
     }
 
     func testServerEndingCanStillSealTheExactResponseButExplicitStopCannot() {
@@ -1240,7 +1535,8 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(sources.contains(#""type":"output_audio_buffer.clear""#))
         XCTAssertTrue(sources.contains("completionCallbackType: .dataPlayedBack"))
         XCTAssertTrue(sources.contains("sendPlaybackCompleted"))
-        XCTAssertFalse(sources.contains("sendPlayoutDrained"), "WebRTC PCM silence is not a response gate")
+        XCTAssertTrue(sources.contains("sendPlayoutDrained"))
+        XCTAssertTrue(sources.contains("buddystudy.voice.playout.drained"))
     }
 
     func testCompactVoiceCallUsesTheReservedSessionCountdownWhileLive() {
@@ -1366,6 +1662,63 @@ final class VoiceTutorContractTests: XCTestCase {
             XCTAssertEqual(presentation.primaryAction, .wait, "Retry must wait for the original call to settle")
             XCTAssertFalse(presentation.showsConnectionFailure(strings, errorMessage: nil))
             XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorCallEnding)
+        }
+    }
+
+    func testCompactVoiceCallShowsQuotaExhaustionAsPlannedTerminalState() {
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            var prearmed = VoiceTutorCallPresentation(
+                phase: .ending,
+                failureCause: .connection,
+                serverEndReason: "QUOTA_EXHAUSTED",
+                sessionSecondsRemaining: 8
+            )
+            XCTAssertEqual(prearmed.statusText(strings), strings.voiceTutorCallEnding)
+            XCTAssertEqual(prearmed.remainingTime, .call(8))
+            prearmed.sessionSecondsRemaining = 0
+            XCTAssertEqual(prearmed.statusText(strings), strings.voiceTutorCallQuotaEnded)
+            XCTAssertEqual(prearmed.remainingTime, .call(0))
+
+            let ending = VoiceTutorCallPresentation(
+                phase: .ending,
+                failureCause: .connection,
+                serverEndReason: "QUOTA_EXHAUSTED"
+            )
+            XCTAssertFalse(
+                ending.showsConnectionFailure(
+                    strings,
+                    errorMessage: strings.voiceTutorConnectionFailed
+                )
+            )
+            XCTAssertEqual(ending.statusText(strings), strings.voiceTutorCallQuotaEnded)
+            XCTAssertNil(
+                ending.supplementaryError(
+                    strings,
+                    errorMessage: strings.voiceTutorConnectionFailed
+                )
+            )
+            XCTAssertEqual(ending.primaryAction, .wait)
+
+            let ended = VoiceTutorCallPresentation(
+                phase: .ended,
+                serverEndReason: "QUOTA_EXHAUSTED",
+                quotaRemainingSeconds: 0,
+                quotaReservedSeconds: 0,
+                quotaLimitSeconds: 3_600
+            )
+            XCTAssertEqual(ended.statusText(strings), strings.voiceTutorCallQuotaEnded)
+            XCTAssertEqual(ended.primaryAction, .dismiss)
+            XCTAssertEqual(ended.remainingTime, .monthly(0))
+
+            let defensiveFailure = VoiceTutorCallPresentation(
+                phase: .failed,
+                failureCause: .connection,
+                serverEndReason: "QUOTA_EXHAUSTED"
+            )
+            XCTAssertEqual(defensiveFailure.orbState, .ended)
+            XCTAssertEqual(defensiveFailure.primaryAction, .dismiss)
+            XCTAssertEqual(defensiveFailure.statusText(strings), strings.voiceTutorCallQuotaEnded)
         }
     }
 
@@ -1498,6 +1851,47 @@ final class VoiceTutorContractTests: XCTestCase {
             XCTAssertEqual(japanese.voiceTutorCallRemaining(seconds), "残り\(clock)")
             XCTAssertEqual(japanese.voiceTutorCallMonthlyRemaining(seconds), "今月の残り\(clock)")
         }
+    }
+
+    func testEffectivelyUnlimitedVoiceQuotaUsesOnlyTheExactOverrideValue() {
+        let unlimited = VoiceTutorQuotaPresentation.unlimitedLimitSeconds
+        XCTAssertEqual(unlimited, 31_536_000)
+        XCTAssertTrue(VoiceTutorQuotaPresentation.isUnlimited(limitSeconds: unlimited))
+        XCTAssertFalse(VoiceTutorQuotaPresentation.isUnlimited(limitSeconds: unlimited - 1))
+        XCTAssertFalse(VoiceTutorQuotaPresentation.isUnlimited(limitSeconds: unlimited + 1))
+
+        let expected: [(AppLanguage, String, String)] = [
+            (.korean, "무제한", "매월 음성 무제한"),
+            (.english, "Unlimited", "Unlimited voice each month"),
+            (.japanese, "無制限", "毎月の音声時間は無制限")
+        ]
+        for (language, remaining, allowance) in expected {
+            let strings = AppStrings(language: language)
+            XCTAssertEqual(
+                strings.voiceTutorRemainingTime(
+                    unlimited - 120,
+                    limitSeconds: unlimited
+                ),
+                remaining
+            )
+            XCTAssertEqual(strings.voiceTutorMonthlyAllowance(unlimited), allowance)
+        }
+
+        let ordinary = AppStrings(language: .korean)
+        XCTAssertEqual(
+            ordinary.voiceTutorRemainingTime(3_480, limitSeconds: 3_600),
+            "58분 남음"
+        )
+        XCTAssertEqual(ordinary.voiceTutorMonthlyAllowance(3_600), "매월 음성 60분")
+        XCTAssertEqual(
+            VoiceTutorCallPresentation(
+                phase: .ended,
+                quotaRemainingSeconds: unlimited - 120,
+                quotaReservedSeconds: 0,
+                quotaLimitSeconds: unlimited
+            ).remainingTime,
+            .monthlyUnlimited
+        )
     }
 
     func testNewVoiceCallAttemptResetsTranscriptAndSummaryDisclosure() {
@@ -1736,7 +2130,7 @@ final class VoiceTutorContractTests: XCTestCase {
             contentsOf: root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift"),
             encoding: .utf8
         )
-        let retryStart = try XCTUnwrap(source.range(of: "case .responseStarted(let responseID"))
+        let retryStart = try XCTUnwrap(source.range(of: "case .responseStarted("))
         let retryEnd = try XCTUnwrap(source.range(of: "case .responseFinished", range: retryStart.upperBound..<source.endIndex))
         let retry = String(source[retryStart.lowerBound..<retryEnd.lowerBound])
         XCTAssertTrue(retry.contains("duplexPlaybackState.assistantResponseActive"))
@@ -1909,7 +2303,13 @@ final class VoiceTutorContractTests: XCTestCase {
             .init(name: "06-ended-summary-pending", phase: .ended, detail: pending),
             .init(name: "07-expanded-conversation", phase: .speaking, showsTranscript: true),
             .init(
-                name: "08-narrow-accessibility-english", phase: .listening,
+                name: "08-monthly-quota-ended", phase: .ended,
+                serverEndReason: "QUOTA_EXHAUSTED",
+                quotaRemainingSeconds: 0,
+                quotaLimitSeconds: 3_600
+            ),
+            .init(
+                name: "09-narrow-accessibility-english", phase: .listening,
                 showsTranscript: true, language: .english,
                 topic: "Redis caching and concurrent updates",
                 size: CGSize(width: 320, height: 696), dynamicType: .accessibility3
@@ -3415,12 +3815,14 @@ final class VoiceTutorContractTests: XCTestCase {
                 presentation: VoiceTutorCallPresentation(
                     phase: fixture.phase,
                     failureCause: fixture.failureCause,
+                    serverEndReason: fixture.serverEndReason,
                     isRecording: fixture.isRecording,
                     pauseState: fixture.pauseState,
                     sessionSecondsRemaining: fixture.seconds,
-                    quotaRemainingSeconds: fixture.phase.isLive ? 0 : 3_540,
+                    quotaRemainingSeconds: fixture.quotaRemainingSeconds
+                        ?? (fixture.phase.isLive ? 0 : 3_540),
                     quotaReservedSeconds: fixture.phase.isLive ? 3_600 : 0,
-                    quotaLimitSeconds: 3_600,
+                    quotaLimitSeconds: fixture.quotaLimitSeconds,
                     detail: fixture.detail
                 ),
                 strings: strings,
@@ -3659,6 +4061,9 @@ private struct VoiceTutorCompactCallSnapshot {
     var isRecording = false
     var pauseState = VoiceTutorCallPauseState()
     var failureCause: VoiceTutorFailureCause? = nil
+    var serverEndReason: String? = nil
+    var quotaRemainingSeconds: Int? = nil
+    var quotaLimitSeconds = 3_600
     var detail: BackendVoiceTutorSessionDetail?
     var showsTranscript = false
     var showsPreview = false

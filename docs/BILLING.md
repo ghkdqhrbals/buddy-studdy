@@ -665,6 +665,10 @@ or answer drafts. The plan catalog stores the authoritative monthly allowance in
   `monthlyVoiceSecondsLimitOverride`, parallel to the question-limit override.
   A value overrides only that user's monthly voice base; `null` restores the
   current tier value without resetting used/reserved seconds or the period.
+- The exact administrative override sentinel `31,536,000` seconds is returned as
+  a numeric effective monthly base but presented by iOS as effectively unlimited.
+  It remains an override for one user, not a tier-catalog change, and does not
+  bypass the provider's 3,600-second maximum for one call.
 - `VOICE_TUTOR_MAX_SESSION_SECONDS` is an independent environment-configured
   ceiling for one session. Its default is `3,600` and the application hard-clamps
   it to the provider's 60-minute Realtime session limit; the reservable duration
@@ -687,7 +691,11 @@ Session accounting follows these rules:
 1. `POST /api/v1/voice-tutor/sessions` locks or atomically updates the current
    voice quota after applying any overdue rollover. It rejects an ineffective
    TIER1 entitlement or zero remaining time and reserves at most
-   `min(remaining_seconds, VOICE_TUTOR_MAX_SESSION_SECONDS)`.
+   `min(remaining_seconds, VOICE_TUTOR_MAX_SESSION_SECONDS)`. The accepted
+   session freezes whether that reservation consumes all finite remaining
+   monthly capacity at hard end; a later terminal decision still rechecks the
+   current quota so an administrative increase cannot produce a false monthly-
+   exhaustion notice.
 2. The backend, not iOS, timestamps accepted WebRTC/control activity and
    enforces the deadline. Direct WebRTC media bypasses BuddyStudy, so its charge
    is server-observed connected time; the bounded PCM fallback additionally
@@ -705,6 +713,25 @@ Session accounting follows these rules:
 5. Remaining seconds are `max(0, base_seconds - used_seconds -
    reserved_seconds)`. Concurrent starts cannot reserve the same capacity twice,
    and no failure path may produce negative remaining or reserved seconds.
+6. Actual monthly exhaustion during an active WebRTC call atomically closes
+   learner input and owns the `QUOTA_EXHAUSTED` terminal reason. The server asks
+   for one short localized notice whose exact provider response ID carries a
+   server-only metadata marker; the sanitized control stream exposes only its
+   boolean exhaustion identity. Settlement and provider cleanup wait for that
+   response to complete, its output audio buffer to stop, and a matching client
+   playout-drained acknowledgement. Early, stale, unmarked, or wrong-response
+   acknowledgements do not release reserved seconds or authorize teardown.
+7. When the finite monthly reservation and the provider's 3,600-second hard cap
+   coincide, the notice may be pre-armed eight seconds before hard end so it can
+   be heard before the provider disconnects. The notice uses those final reserved
+   service seconds, iOS keeps their call countdown visible, and settlement occurs
+   at the exact hard boundary. A generation with no audible evidence after three
+   seconds is cancelled and retried once; once output starts, the ordinary
+   response deadline applies so the spoken notice is not regenerated or cut by
+   the short watchdog.
+   A normal provider/per-call ceiling with monthly capacity remaining is instead
+   `TIME_LIMIT`; it must not say that monthly time is exhausted and does not use
+   the marked monthly-notice terminal boundary.
 
 Tier lifecycle behavior matches the financial entitlement boundary without
 granting a fresh voice allowance mid-period. An immediate paid upgrade or active

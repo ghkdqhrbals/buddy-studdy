@@ -245,6 +245,10 @@ private struct VoiceTutorQuotaView: View {
         return min(1, Double(usedSeconds) / Double(status.quota.limitSeconds))
     }
 
+    private var isUnlimited: Bool {
+        VoiceTutorQuotaPresentation.isUnlimited(limitSeconds: status.quota.limitSeconds)
+    }
+
     var body: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 8) {
@@ -272,7 +276,9 @@ private struct VoiceTutorQuotaView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if status.quota.remainingSeconds == 0 && status.quota.reservedSeconds == 0 {
+                if !isUnlimited,
+                   status.quota.remainingSeconds == 0,
+                   status.quota.reservedSeconds == 0 {
                     Text(strings.voiceTutorQuotaReached)
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -281,9 +287,11 @@ private struct VoiceTutorQuotaView: View {
             .padding(.vertical, 6)
         } label: {
             HStack(alignment: .firstTextBaseline) {
-                Text(status.quota.reservedSeconds > 0
-                    ? strings.voiceTutorUnreservedTime(status.quota.remainingSeconds)
-                    : strings.voiceTutorRemainingTime(status.quota.remainingSeconds))
+                Text(isUnlimited
+                    ? strings.voiceTutorUnlimited
+                    : status.quota.reservedSeconds > 0
+                        ? strings.voiceTutorUnreservedTime(status.quota.remainingSeconds)
+                        : strings.voiceTutorRemainingTime(status.quota.remainingSeconds))
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(strings.membershipTierName(status.tierCode))
@@ -374,6 +382,7 @@ struct VoiceTutorSessionView: View {
             presentation: VoiceTutorCallPresentation(
                 phase: viewModel.phase,
                 failureCause: viewModel.failureCause,
+                serverEndReason: viewModel.serverEndReason,
                 isRecording: viewModel.isRecording,
                 inputNeedsRepeat: viewModel.inputNeedsRepeat,
                 pauseState: viewModel.pauseState,
@@ -437,6 +446,7 @@ struct VoiceTutorCallPresentation {
     enum RemainingTime: Equatable {
         case call(Int)
         case monthly(Int)
+        case monthlyUnlimited
     }
 
     enum SummaryState: Equatable {
@@ -457,6 +467,7 @@ struct VoiceTutorCallPresentation {
 
     var phase: VoiceTutorSessionPhase
     var failureCause: VoiceTutorFailureCause? = nil
+    var serverEndReason: String? = nil
     var isRecording = false
     var inputNeedsRepeat = false
     var pauseState = VoiceTutorCallPauseState()
@@ -472,6 +483,9 @@ struct VoiceTutorCallPresentation {
         showsPauseControl && (phase == .listening || phase == .speaking) && !pauseState.isAwaitingAcknowledgement
     }
     var orbState: OrbState {
+        if isMonthlyQuotaExhausted, phase == .failed {
+            return .ended
+        }
         if phase == .listening || phase == .speaking {
             switch pauseState.mode {
             case .pausing: return .pausing
@@ -500,18 +514,26 @@ struct VoiceTutorCallPresentation {
     }
 
     var remainingTime: RemainingTime? {
-        if phase.isLive {
+        if phase.isLive || hasQuotaTerminalCountdown {
             // Monthly availability excludes the current reservation and can be
-            // zero during a healthy call. Never substitute it for the countdown.
+            // zero during a healthy call. A pre-armed final quota notice uses
+            // the last reserved seconds, so keep showing that same countdown
+            // until the exact hard boundary instead of claiming it ended early.
             return sessionSecondsRemaining.map { .call(max(0, $0)) }
         }
         guard phase == .ended || phase == .failed,
               quotaLimitSeconds > 0, quotaReservedSeconds == 0 else { return nil }
+        if VoiceTutorQuotaPresentation.isUnlimited(limitSeconds: quotaLimitSeconds) {
+            return .monthlyUnlimited
+        }
         return .monthly(max(0, quotaRemainingSeconds))
     }
 
     var primaryAction: PrimaryAction {
         if phase.isLive { return .end }
+        if isMonthlyQuotaExhausted, phase == .ended || phase == .failed {
+            return .dismiss
+        }
         switch phase {
         case .failed: return .retry
         case .ended: return .dismiss
@@ -537,6 +559,7 @@ struct VoiceTutorCallPresentation {
     }
 
     func showsConnectionFailure(_ strings: AppStrings, errorMessage: String?) -> Bool {
+        if isMonthlyQuotaExhausted { return false }
         if let failureCause {
             return (phase == .failed || phase == .ending) && failureCause == .connection
         }
@@ -545,6 +568,11 @@ struct VoiceTutorCallPresentation {
     }
 
     func statusText(_ strings: AppStrings, errorMessage: String? = nil) -> String {
+        if isMonthlyQuotaExhausted,
+           phase == .ended || phase == .failed ||
+            (phase == .ending && !isQuotaNoticeUsingFinalSeconds) {
+            return strings.voiceTutorCallQuotaEnded
+        }
         if showsConnectionFailure(strings, errorMessage: errorMessage) {
             return strings.voiceTutorCallFailed
         }
@@ -576,6 +604,10 @@ struct VoiceTutorCallPresentation {
     func supplementaryError(_ strings: AppStrings, errorMessage: String?) -> String? {
         guard let error = errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
               !error.isEmpty else { return nil }
+        if isMonthlyQuotaExhausted,
+           error == strings.voiceTutorConnectionFailed || error == strings.voiceTutorQuotaReached {
+            return nil
+        }
         if showsConnectionFailure(strings, errorMessage: error),
            error == strings.voiceTutorConnectionFailed { return nil }
         return error
@@ -585,6 +617,18 @@ struct VoiceTutorCallPresentation {
         guard phase == .listening || phase == .speaking else { return true }
         return pauseState.mode != .active || inputNeedsRepeat
             || supplementaryError(strings, errorMessage: errorMessage) != nil
+    }
+
+    var isMonthlyQuotaExhausted: Bool {
+        VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(serverEndReason)
+    }
+
+    private var hasQuotaTerminalCountdown: Bool {
+        isMonthlyQuotaExhausted && phase == .ending && sessionSecondsRemaining != nil
+    }
+
+    private var isQuotaNoticeUsingFinalSeconds: Bool {
+        hasQuotaTerminalCountdown && (sessionSecondsRemaining ?? 0) > 0
     }
 }
 
@@ -1024,6 +1068,9 @@ struct VoiceTutorCallScreen: View {
             case .monthly(let seconds):
                 Label(strings.voiceTutorCallMonthlyRemaining(seconds), systemImage: "clock")
                     .accessibilityIdentifier("voiceCall.remainingTime")
+            case .monthlyUnlimited:
+                Label(strings.voiceTutorUnlimited, systemImage: "infinity")
+                    .accessibilityIdentifier("voiceCall.remainingTime")
             case nil:
                 EmptyView()
             }
@@ -1396,6 +1443,7 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var orbTint: Color {
+        if presentation.isMonthlyQuotaExhausted { return .orange }
         switch presentation.orbState {
         case .listening: return .green
         case .speaking: return .accentColor
@@ -1437,6 +1485,7 @@ struct VoiceTutorCallScreen: View {
         switch presentation.remainingTime {
         case .call(let seconds): parts.append(strings.voiceTutorCallRemaining(seconds))
         case .monthly(let seconds): parts.append(strings.voiceTutorCallMonthlyRemaining(seconds))
+        case .monthlyUnlimited: parts.append(strings.voiceTutorUnlimited)
         case nil: break
         }
         if presentation.isRecording { parts.append(strings.voiceTutorCallRecording) }
@@ -1511,6 +1560,7 @@ struct VoiceTutorCallScreen: View {
 
     private var statusSymbol: String {
         if showsConnectionFailure { return "wifi.exclamationmark" }
+        if presentation.isMonthlyQuotaExhausted { return "clock.fill" }
         if presentation.phase.isLive && presentation.pauseState.mode == .paused { return "pause.fill" }
         switch presentation.phase {
         case .speaking: return "waveform"
@@ -1523,6 +1573,7 @@ struct VoiceTutorCallScreen: View {
 
     private var statusColor: Color {
         if showsConnectionFailure { return .red }
+        if presentation.isMonthlyQuotaExhausted { return .orange }
         if presentation.phase.isLive && presentation.pauseState.holdsMicrophone { return .secondary }
         switch presentation.phase {
         case .failed: return .red

@@ -9,7 +9,10 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuotaExhaustionPolicy
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSpokenTerminationNotice
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcPort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.reactor.awaitSingle
@@ -30,6 +33,7 @@ import reactor.core.scheduler.Schedulers
 import reactor.test.StepVerifier
 import reactor.core.Disposable
 import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -146,6 +150,155 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         assertThat(HttpStatus.CONFLICT.isAlreadyEndedCall()).isTrue()
         assertThat(HttpStatus.GONE.isAlreadyEndedCall()).isTrue()
         assertThat(HttpStatus.INTERNAL_SERVER_ERROR.isAlreadyEndedCall()).isFalse()
+    }
+
+    @Test
+    fun `quota relay release waits for exact notice playout and paid boundary`() {
+        val base = Instant.parse("2031-08-30T00:00:00Z")
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            sessionLanguage = "ko",
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val output = controller.providerEvents().subscribe(controls::add)
+        val termination = VoiceTutorRelayTermination(
+            cancelActiveResponse = false,
+            spokenNotice = VoiceTutorSpokenTerminationNotice.MONTHLY_QUOTA_EXHAUSTED,
+            notBefore = base.plusSeconds(5),
+        )
+        try {
+            StepVerifier.withVirtualTime {
+                quotaExhaustionRelayRelease(controller, termination) { base }
+            }
+                .then {
+                    controller.requestQuotaExhaustionNotice()
+                    val create = controls.last()
+                    controller.observeProviderEvent(providerResponseEvent("response.created", create))
+                    controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started"))
+                    controller.observeProviderEvent(
+                        tutorTranscriptEvent("이번 안내로 이번 달 음성 시간이 모두 소진되어 통화를 종료할게요."),
+                    )
+                    controller.observeProviderEvent(providerResponseEvent("response.done", create))
+                    controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped"))
+                    controller.observeClientEvent(
+                        """{"type":"${VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT}","responseId":"$RESPONSE_ID"}""",
+                    )
+                }
+                .expectNoEvent(Duration.ofSeconds(4))
+                .thenAwait(Duration.ofSeconds(1))
+                .verifyComplete()
+        } finally {
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `quota relay release times out after boundary grace when device never drains playout`() {
+        val base = Instant.parse("2031-08-30T00:00:00Z")
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val output = controller.providerEvents().subscribe(controls::add)
+        val termination = VoiceTutorRelayTermination(
+            cancelActiveResponse = false,
+            spokenNotice = VoiceTutorSpokenTerminationNotice.MONTHLY_QUOTA_EXHAUSTED,
+            notBefore = base.plusSeconds(5),
+        )
+        try {
+            StepVerifier.withVirtualTime {
+                quotaExhaustionRelayRelease(controller, termination) { base }
+            }
+                .then {
+                    controller.requestQuotaExhaustionNotice()
+                    val create = controls.last()
+                    controller.observeProviderEvent(providerResponseEvent("response.created", create))
+                    controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started"))
+                    controller.observeProviderEvent(
+                        tutorTranscriptEvent("이번 안내로 이번 달 음성 시간이 모두 소진되어 통화를 종료할게요."),
+                    )
+                    controller.observeProviderEvent(providerResponseEvent("response.done", create))
+                    controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped"))
+                    // Deliberately omit the exact client playout-drained ACK.
+                }
+                .expectNoEvent(Duration.ofSeconds(24))
+                .thenAwait(Duration.ofSeconds(1))
+                .verifyComplete()
+        } finally {
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `quota relay release uses only grace remaining after the hard end`() {
+        val hardEndsAt = Instant.parse("2031-08-30T00:00:00Z")
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+        )
+        val termination = VoiceTutorRelayTermination(
+            cancelActiveResponse = false,
+            spokenNotice = VoiceTutorSpokenTerminationNotice.MONTHLY_QUOTA_EXHAUSTED,
+            notBefore = hardEndsAt,
+        )
+        val oneSecondBeforeDeadline = hardEndsAt.plusSeconds(
+            VoiceTutorQuotaExhaustionPolicy.NOTICE_GRACE_SECONDS - 1,
+        )
+
+        StepVerifier.withVirtualTime {
+            quotaExhaustionRelayRelease(controller, termination) { oneSecondBeforeDeadline }
+        }
+            .expectSubscription()
+            .expectNoEvent(Duration.ofMillis(999))
+            .thenAwait(Duration.ofMillis(1))
+            .verifyComplete()
+
+        assertThat(controller.acceptsInputEvents()).isFalse()
+    }
+
+    @Test
+    fun `quota relay release expires immediately at the absolute grace deadline`() {
+        val hardEndsAt = Instant.parse("2031-08-30T00:00:00Z")
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+        )
+        val termination = VoiceTutorRelayTermination(
+            cancelActiveResponse = false,
+            spokenNotice = VoiceTutorSpokenTerminationNotice.MONTHLY_QUOTA_EXHAUSTED,
+            notBefore = hardEndsAt,
+        )
+        val absoluteDeadline = hardEndsAt.plusSeconds(VoiceTutorQuotaExhaustionPolicy.NOTICE_GRACE_SECONDS)
+
+        StepVerifier.withVirtualTime {
+            quotaExhaustionRelayRelease(controller, termination) { absoluteDeadline }
+        }
+            .expectSubscription()
+            .verifyComplete()
+
+        assertThat(controller.acceptsInputEvents()).isFalse()
+    }
+
+    @Test
+    fun `ancillary completion and error cannot beat an active quota relay grace`() {
+        listOf(Mono.empty<Void>(), Mono.error<Void>(IllegalStateException("assessment failed"))).forEach { work ->
+            val release = Sinks.one<Boolean>()
+            StepVerifier.create(
+                holdVoiceTutorSignalForGrace(work, release.asMono()) { true },
+            )
+                .expectSubscription()
+                .expectNoEvent(Duration.ofMillis(20))
+                .then { release.tryEmitValue(true) }
+                .verifyComplete()
+        }
     }
 
     @Test
@@ -562,7 +715,7 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
             val relay = relayVoiceTutorProviderEvent(
                 controller,
                 outputBufferEvent("output_audio_buffer.stopped"),
-                onProviderEvent,
+                onProviderEvent = onProviderEvent,
             ).subscribeOn(Schedulers.boundedElastic())
                 .doFinally { relayFinished.countDown() }
                 .subscribe({}, errors::add)
@@ -868,12 +1021,17 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         responseControl: String,
         tutorFallback: String? = null,
     ): String {
-        val token = mapper.readTree(responseControl).path("response").path("metadata")
-            .path("buddystudy_response_token").asText()
+        val controlMetadata = mapper.readTree(responseControl).path("response").path("metadata")
+        val token = controlMetadata.path("buddystudy_response_token").asText()
+        val metadata = linkedMapOf<String, Any>("buddystudy_response_token" to token)
+        val quotaMarker = controlMetadata.path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY)
+        if (quotaMarker.isBoolean && quotaMarker.booleanValue()) {
+            metadata[VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY] = true
+        }
         val response = linkedMapOf<String, Any>(
             "id" to RESPONSE_ID,
             "status" to if (type == "response.created") "in_progress" else "completed",
-            "metadata" to mapOf("buddystudy_response_token" to token),
+            "metadata" to metadata,
         )
         tutorFallback?.let { transcript ->
             response["output"] = listOf(

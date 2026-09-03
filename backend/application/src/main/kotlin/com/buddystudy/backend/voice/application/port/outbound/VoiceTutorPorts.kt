@@ -100,6 +100,17 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
     suspend fun terminalWebRtcSessionsAwaitingHangup(limit: Int): List<VoiceTutorSession>
     suspend fun markActive(userId: Long, sessionId: String, now: Instant): VoiceTutorSession?
     suspend fun requestEnd(userId: Long, sessionId: String, now: Instant): VoiceTutorSession?
+    /**
+     * Atomically moves the exact monthly-exhaustion session into its spoken
+     * terminal window. Repeated calls observe the same ENDING row; a normal
+     * per-session deadline can never enter this path.
+     */
+    suspend fun beginQuotaExhaustionNotice(
+        userId: Long,
+        sessionId: String,
+        now: Instant,
+        noticeLeadSeconds: Long,
+    ): VoiceTutorSession? = null
     suspend fun heartbeat(userId: Long, sessionId: String, now: Instant): VoiceTutorSessionStatus?
     suspend fun addAcceptedAudioBytes(userId: Long, sessionId: String, bytes: Long): Boolean
     suspend fun attachProviderSession(userId: Long, sessionId: String, providerSessionId: String, now: Instant): Boolean
@@ -139,6 +150,8 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
          * with studyQuestionProviderItemId and is promoted atomically.
          */
         studyAnswerProviderItemIds: List<String> = emptyList(),
+        /** Trusted server receipt proves this USER final ASR preceded the quota fence. */
+        acceptedBeforeQuotaCutoff: Boolean = false,
     ): Boolean
 
     suspend fun transcript(userId: Long, sessionId: String, maxCharacters: Int): List<VoiceTutorTranscriptTurn>
@@ -392,7 +405,24 @@ data class VoiceTutorRealtimeRequest(
 
 data class VoiceTutorRelayTermination(
     val cancelActiveResponse: Boolean,
+    val spokenNotice: VoiceTutorSpokenTerminationNotice? = null,
+    /** Do not release/finalize a pre-armed spoken terminal before this instant. */
+    val notBefore: Instant? = null,
 )
+
+enum class VoiceTutorSpokenTerminationNotice {
+    MONTHLY_QUOTA_EXHAUSTED,
+}
+
+/**
+ * The notice is pre-armed so it can be heard before a provider's own 60-minute
+ * ceiling, while settlement remains capped at the exact reserved boundary.
+ */
+object VoiceTutorQuotaExhaustionPolicy {
+    const val PROVIDER_HARD_CAP_SECONDS: Int = 3_600
+    const val NOTICE_LEAD_SECONDS: Long = 8
+    const val NOTICE_GRACE_SECONDS: Long = 20
+}
 
 /**
  * Server-to-server realtime provider boundary. The caller owns client framing and

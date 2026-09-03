@@ -6505,7 +6505,10 @@ private struct MobileProfilePage: View {
     private var voiceTutorProfileSubtitle: String {
         if let status = appState.voiceTutorStatus {
             if status.eligible || status.reason?.uppercased() == "QUOTA_EXHAUSTED" {
-                return strings.voiceTutorRemainingTime(status.quota.remainingSeconds)
+                return strings.voiceTutorRemainingTime(
+                    status.quota.remainingSeconds,
+                    limitSeconds: status.quota.limitSeconds
+                )
             }
             if status.reason?.uppercased() == "UNAVAILABLE" {
                 return strings.serviceTemporarilyUnavailable
@@ -6514,7 +6517,10 @@ private struct MobileProfilePage: View {
         if let voiceTutor = appState.billingStatus?.voiceTutor,
            voiceTutor.enabled,
            let quota = voiceTutor.quota {
-            return strings.voiceTutorRemainingTime(quota.remainingSeconds)
+            return strings.voiceTutorRemainingTime(
+                quota.remainingSeconds,
+                limitSeconds: quota.limitSeconds
+            )
         }
         return strings.voiceTutorProRequired
     }

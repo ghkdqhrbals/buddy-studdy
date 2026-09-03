@@ -58,6 +58,43 @@ private enum VoiceTutorStopSource: String {
     case localSpeechDeliveryFailure, pauseControlFailure
 }
 
+/// Exact server protocol reasons, kept separate from natural-language intent.
+/// This is deliberately an allow-list rather than fuzzy text matching: an
+/// unknown reason must never turn a transport failure into a successful call.
+enum VoiceTutorServerEndReasonPolicy {
+    static let quotaExhausted = "QUOTA_EXHAUSTED"
+
+    static func isMonthlyQuotaExhausted(_ reason: String?) -> Bool {
+        switch normalized(reason) {
+        case quotaExhausted: true
+        default: false
+        }
+    }
+
+    static func isGracefulServerCompletion(_ reason: String?) -> Bool {
+        switch normalized(reason) {
+        case "USER_ENDED", "TIME_LIMIT", quotaExhausted, "SERVER_FINALIZED": true
+        default: false
+        }
+    }
+
+    static func preservesFinalSpokenPlayout(_ reason: String?) -> Bool {
+        switch normalized(reason) {
+        case "USER_ENDED", quotaExhausted: true
+        default: false
+        }
+    }
+
+    static func permitsInputRetry(reason: String?, isFinalizing: Bool) -> Bool {
+        !isFinalizing && !isMonthlyQuotaExhausted(reason)
+    }
+
+    private static func normalized(_ reason: String?) -> String? {
+        let value = reason?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return value?.isEmpty == false ? value : nil
+    }
+}
+
 enum VoiceTutorDiagnosticError {
     static func fields(for error: Error) -> String {
         let value = error as NSError
@@ -313,22 +350,73 @@ struct VoiceTutorWebRTCResponseState: Equatable {
 
 enum VoiceTutorServerEndPlayoutPolicy {
     static func permitsTail(reason: String?, usesWebRTC: Bool) -> Bool {
-        usesWebRTC && reason?.uppercased() == "USER_ENDED"
+        usesWebRTC && VoiceTutorServerEndReasonPolicy.preservesFinalSpokenPlayout(reason)
     }
 
-    /// Only an unsolicited, server-verified learner end can use this path.
-    /// Explicit UI end is already finalizing inside stop() and never calls it.
+    static func acceptedQuotaNoticeResponseID(
+        reason: String?,
+        phase: VoiceTutorSessionPhase,
+        responseID: String?,
+        isQuotaExhaustionNotice: Bool
+    ) -> String? {
+        guard phase == .ending,
+              VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(reason),
+              isQuotaExhaustionNotice,
+              let responseID,
+              !responseID.isEmpty else { return nil }
+        return responseID
+    }
+
+    static func isExactAbandonedQuotaNotice(
+        reason: String?,
+        phase: VoiceTutorSessionPhase,
+        responseID: String?,
+        quotaNoticeResponseID: String?
+    ) -> Bool {
+        phase == .ending &&
+            VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(reason) &&
+            responseID != nil && responseID == quotaNoticeResponseID
+    }
+
+    /// Only an unsolicited, server-verified spoken terminal response can use
+    /// this path. Explicit UI end is already finalizing inside stop() and never
+    /// calls it.
     static func spokenEndToken(
         reason: String?,
         usesWebRTC: Bool,
-        pending: VoiceTutorLocalPlayoutTailToken?
+        pending: VoiceTutorLocalPlayoutTailToken?,
+        quotaNoticeResponseID: String? = nil
     ) -> VoiceTutorLocalPlayoutTailToken? {
         guard permitsTail(reason: reason, usesWebRTC: usesWebRTC) else { return nil }
+        if VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(reason) {
+            guard let pending,
+                  let quotaNoticeResponseID,
+                  pending.responseID == quotaNoticeResponseID else { return nil }
+            return pending
+        }
         return pending
     }
 
-    /// The backend emits its spoken-end lifecycle only after the exact active
-    /// response reached both provider completion boundaries. That lifecycle can
+    /// Only the monthly-quota terminal flow is a two-sided playout handshake:
+    /// session.ending closes learner input, the server speaks one final notice,
+    /// and session.ended follows this exact response acknowledgement.
+    static func playoutDrainedResponseID(
+        reason: String?,
+        phase: VoiceTutorSessionPhase,
+        usesWebRTC: Bool,
+        pending: VoiceTutorLocalPlayoutTailToken?,
+        quotaNoticeResponseID: String? = nil
+    ) -> String? {
+        guard phase == .ending, usesWebRTC,
+              VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(reason),
+              let pending,
+              let quotaNoticeResponseID,
+              pending.responseID == quotaNoticeResponseID else { return nil }
+        return quotaNoticeResponseID
+    }
+
+    /// The backend emits its spoken terminal lifecycle only after the exact
+    /// active response reached both provider completion boundaries. It can
     /// race ahead of the second raw provider event on the control socket. In that
     /// ordering, the still-active response ID is the exact boundary attested by
     /// the server and may be sealed locally before transport teardown.
@@ -336,11 +424,39 @@ enum VoiceTutorServerEndPlayoutPolicy {
         reason: String?,
         usesWebRTC: Bool,
         pending: VoiceTutorLocalPlayoutTailToken?,
-        activeResponseID: String?
+        activeResponseID: String?,
+        quotaNoticeResponseID: String? = nil
     ) -> String? {
         guard permitsTail(reason: reason, usesWebRTC: usesWebRTC), pending == nil,
               let activeResponseID, !activeResponseID.isEmpty else { return nil }
+        // QUOTA_EXHAUSTED session.ended is also emitted after the bounded
+        // fallback when the provider rejected or interrupted the notice. Only
+        // the raw exact response boundaries plus the device ACK can attest that
+        // notice; the generic lifecycle is not sufficient fallback evidence.
+        guard !VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(reason) else { return nil }
         return activeResponseID
+    }
+}
+
+/// If the control socket disappears after the server has announced a monthly
+/// quota ending, that frame alone is not proof that the final sentence played.
+/// Keep the direct WebRTC media path alive through the same bounded server
+/// grace instead of immediately turning a planned close into an audio cutoff.
+enum VoiceTutorQuotaControlLossPolicy {
+    static let serverNoticeGraceSeconds: TimeInterval = 20
+    static let maximumMediaHoldSeconds: TimeInterval = 30
+
+    static func mediaHoldSeconds(
+        hardEndsAt: Date?,
+        now: Date,
+        hasSealedResponse: Bool
+    ) -> TimeInterval {
+        guard !hasSealedResponse else { return 0 }
+        guard let hardEndsAt else {
+            return min(maximumMediaHoldSeconds, serverNoticeGraceSeconds)
+        }
+        let absoluteNoticeDeadline = hardEndsAt.addingTimeInterval(serverNoticeGraceSeconds)
+        return min(maximumMediaHoldSeconds, max(0, absoluteNoticeDeadline.timeIntervalSince(now)))
     }
 }
 
@@ -359,6 +475,7 @@ final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var pauseState = VoiceTutorCallPauseState()
     @Published private(set) var isRecording = false
     @Published private(set) var inputNeedsRepeat = false
+    @Published private(set) var serverEndReason: String?
 
     var quotaRemainingSeconds: Int { sessionQuota.remainingSeconds }
     var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
@@ -390,6 +507,8 @@ final class VoiceTutorViewModel: ObservableObject {
     private var duplexPlaybackState = VoiceTutorDuplexPlaybackState()
     private var webRTCResponseState = VoiceTutorWebRTCResponseState()
     private var pendingSpokenEndPlayoutTail: VoiceTutorLocalPlayoutTailToken?
+    private var quotaExhaustionNoticeResponseID: String?
+    private var terminalPlayoutDrainTask: Task<Void, Never>?
     private var connectionAttemptFence = VoiceTutorConnectionAttemptFence()
     private var summaryRequestID = UUID()
     private var summaryContextValidity: (@MainActor @Sendable () -> Bool)?
@@ -418,11 +537,13 @@ final class VoiceTutorViewModel: ObservableObject {
         summaryContextValidity = nil
         summaryRefreshState = .idle
         stopLocalSpeechEventPump()
+        cancelTerminalPlayoutDrain()
         sessionID = nil
         clearSessionCountdown()
         isMuted = false
         pauseState = VoiceTutorCallPauseState()
         inputNeedsRepeat = false
+        serverEndReason = nil
         errorMessage = nil
         failureCause = nil
         detail = nil
@@ -431,6 +552,7 @@ final class VoiceTutorViewModel: ObservableObject {
         duplexPlaybackState.reset()
         webRTCResponseState.reset()
         pendingSpokenEndPlayoutTail = nil
+        quotaExhaustionNoticeResponseID = nil
         usesWebRTC = false
         isRecording = false
         phase = .requestingPermission
@@ -739,6 +861,7 @@ final class VoiceTutorViewModel: ObservableObject {
             return
         }
         logDiagnostic("event=stop_requested source=\(source.rawValue) socketEnd=\(shouldNotifyServerOverSocket ? 1 : 0)", isWarning: outcome == .failed)
+        cancelTerminalPlayoutDrain()
         recorder?.stopAcceptingFrames()
         isFinalizing = true
         phase = .ending
@@ -749,7 +872,7 @@ final class VoiceTutorViewModel: ObservableObject {
             webRTCTransport?.close()
         }
         if usesWebRTC {
-            webRTCTransport?.setMuted(true)
+            webRTCTransport?.closeMicrophoneInput()
         } else {
             audioEngine.stop()
         }
@@ -807,6 +930,7 @@ final class VoiceTutorViewModel: ObservableObject {
         summaryRefreshState = .idle
         captions = []
         assistantTranscriptState.discard()
+        cancelTerminalPlayoutDrain()
         audioEngine.stop()
         webRTCTransport?.close()
         stopAudioSendPump()
@@ -1031,6 +1155,54 @@ final class VoiceTutorViewModel: ObservableObject {
                   !isFinalizing, phase.isLive || phase == .ending else {
                 return
             }
+            if VoiceTutorServerEndReasonPolicy.isGracefulServerCompletion(serverEndReason) {
+                logDiagnostic("event=planned_server_close")
+                errorMessage = nil
+                failureCause = nil
+                if VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(serverEndReason),
+                   usesWebRTC {
+                    let hasSealedQuotaNotice = VoiceTutorServerEndPlayoutPolicy
+                        .playoutDrainedResponseID(
+                            reason: serverEndReason,
+                            phase: phase,
+                            usesWebRTC: usesWebRTC,
+                            pending: pendingSpokenEndPlayoutTail,
+                            quotaNoticeResponseID: quotaExhaustionNoticeResponseID
+                        ) != nil
+                    let holdSeconds = VoiceTutorQuotaControlLossPolicy.mediaHoldSeconds(
+                        hardEndsAt: hardEndsAt,
+                        now: Date(),
+                        hasSealedResponse: hasSealedQuotaNotice
+                    )
+                    if holdSeconds > 0 {
+                        logDiagnostic("event=quota_control_loss_media_hold_started")
+                        do {
+                            try await Task.sleep(
+                                nanoseconds: UInt64((holdSeconds * 1_000_000_000).rounded(.up))
+                            )
+                        } catch {
+                            return
+                        }
+                        guard connectionAttemptFence.isCurrent(attemptID),
+                              activeConnection?.isCurrent() == true,
+                              !isFinalizing,
+                              phase == .ending else { return }
+                        logDiagnostic("event=quota_control_loss_media_hold_finished")
+                    }
+                }
+                await finishFromServer(
+                    VoiceTutorRealtimeEnded(
+                        reason: serverEndReason,
+                        endedAt: nil,
+                        durationSeconds: 0,
+                        chargedSeconds: 0,
+                        resultStatus: nil,
+                        pollAfterMilliseconds: nil
+                    ),
+                    permitsServerVerifiedResponseFallback: false
+                )
+                return
+            }
             let closeCode = await transport.diagnosticCloseCode()
             guard connectionAttemptFence.isCurrent(attemptID), !isFinalizing,
                   phase.isLive || phase == .ending else { return }
@@ -1099,15 +1271,28 @@ final class VoiceTutorViewModel: ObservableObject {
                     remainingSeconds: quota.remainingSeconds
                 )
             )
-        case .sessionEnding(_, let hardEndsAt):
+        case .sessionEnding(let reason, let hardEndsAt):
+            serverEndReason = reason ?? serverEndReason
+            if VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(serverEndReason) {
+                errorMessage = nil
+                failureCause = nil
+                inputNeedsRepeat = false
+                cancelTerminalPlayoutDrain()
+                if pendingSpokenEndPlayoutTail?.responseID != quotaExhaustionNoticeResponseID {
+                    // A completed ordinary tutor turn is not the terminal quota
+                    // sentence and must never authorize immediate teardown.
+                    pendingSpokenEndPlayoutTail = nil
+                }
+            }
             self.hardEndsAt = hardEndsAt ?? self.hardEndsAt
             if usesWebRTC {
-                webRTCTransport?.setMuted(true)
+                webRTCTransport?.closeMicrophoneInput()
             } else {
                 audioEngine.setMuted(true)
             }
             phase = .ending
         case .sessionEnded(let ended):
+            serverEndReason = ended.reason ?? serverEndReason
             if isFinalizing {
                 serverEndContinuation?.yield(ended)
                 serverEndContinuation?.finish()
@@ -1142,6 +1327,10 @@ final class VoiceTutorViewModel: ObservableObject {
         case .inputRetry:
             // This is not a disconnected call. Keep native capture/output alive
             // and show a small retry hint after the tutor finishes speaking.
+            guard VoiceTutorServerEndReasonPolicy.permitsInputRetry(
+                reason: serverEndReason,
+                isFinalizing: isFinalizing
+            ) else { break }
             inputNeedsRepeat = true
         case .providerTurnAbandoned(let responseID):
             abandonProviderTurn(responseID: responseID)
@@ -1234,7 +1423,20 @@ final class VoiceTutorViewModel: ObservableObject {
             }
         case .userSpeechStopped:
             duplexPlaybackState.userSpeechStopped()
-        case .responseStarted(let responseID, let isTutorIntervention):
+        case .responseStarted(
+            let responseID,
+            let isTutorIntervention,
+            let isQuotaExhaustionNotice
+        ):
+            if let acceptedResponseID = VoiceTutorServerEndPlayoutPolicy
+                .acceptedQuotaNoticeResponseID(
+                    reason: serverEndReason,
+                    phase: phase,
+                    responseID: responseID,
+                    isQuotaExhaustionNotice: isQuotaExhaustionNotice
+                ) {
+                quotaExhaustionNoticeResponseID = acceptedResponseID
+            }
             if !duplexPlaybackState.matchesActiveResponse(responseID: responseID) {
                 if duplexPlaybackState.assistantResponseActive {
                     // A provider retry replaces, rather than extends, the
@@ -1242,6 +1444,7 @@ final class VoiceTutorViewModel: ObservableObject {
                     // replacement response or persist it as completed teaching.
                     assistantTranscriptState.discard()
                 }
+                cancelTerminalPlayoutDrain()
                 pendingSpokenEndPlayoutTail = nil
                 duplexPlaybackState.responseStarted(
                     responseID: responseID,
@@ -1315,22 +1518,52 @@ final class VoiceTutorViewModel: ObservableObject {
         // its output buffer. Publish tutor chat only after both exact WebRTC
         // completion boundaries have arrived in either order.
         commitAssistantTranscript()
-        pendingSpokenEndPlayoutTail = webRTCTransport?.sealLocalPlayoutResponse(
+        let sealedToken = webRTCTransport?.sealLocalPlayoutResponse(
             responseID: responseID
         )
+        if VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(serverEndReason) {
+            pendingSpokenEndPlayoutTail = responseID == quotaExhaustionNoticeResponseID
+                ? sealedToken
+                : nil
+        } else {
+            pendingSpokenEndPlayoutTail = sealedToken
+        }
         // This ends only the UI's server-streaming state. Never stop/mute/clear
         // the remote track: its remaining RTP samples play before the next
         // response on the same continuous stream, even after these controls.
         logDiagnostic("event=provider_response_stream_finished")
+        scheduleTerminalPlayoutDrainIfReady()
         if phase.isLive { phase = .listening }
     }
 
     private func abandonProviderTurn(responseID: String?) {
+        if VoiceTutorServerEndPlayoutPolicy.isExactAbandonedQuotaNotice(
+            reason: serverEndReason,
+            phase: phase,
+            responseID: responseID,
+            quotaNoticeResponseID: quotaExhaustionNoticeResponseID
+        ), let responseID {
+            assistantTranscriptState.discard()
+            cancelTerminalPlayoutDrain()
+            pendingSpokenEndPlayoutTail = nil
+            quotaExhaustionNoticeResponseID = nil
+            _ = duplexPlaybackState.abandonResponse(responseID: responseID)
+            if usesWebRTC {
+                _ = webRTCResponseState.abandonResponse(responseID)
+                _ = webRTCTransport?.abandonLocalPlayoutResponse(responseID: responseID)
+            }
+            logDiagnostic("event=quota_notice_abandoned", isWarning: true)
+            return
+        }
         guard phase.isLive,
               let responseID,
               duplexPlaybackState.abandonResponse(responseID: responseID) else { return }
         assistantTranscriptState.discard()
+        cancelTerminalPlayoutDrain()
         pendingSpokenEndPlayoutTail = nil
+        if quotaExhaustionNoticeResponseID == responseID {
+            quotaExhaustionNoticeResponseID = nil
+        }
         if usesWebRTC {
             _ = webRTCResponseState.abandonResponse(responseID)
             _ = webRTCTransport?.abandonLocalPlayoutResponse(responseID: responseID)
@@ -1342,11 +1575,75 @@ final class VoiceTutorViewModel: ObservableObject {
         logDiagnostic("event=provider_turn_abandoned")
     }
 
-    private func finishFromServer(_ ended: VoiceTutorRealtimeEnded) async {
+    private func scheduleTerminalPlayoutDrainIfReady() {
+        guard terminalPlayoutDrainTask == nil,
+              let responseID = VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+                reason: serverEndReason,
+                phase: phase,
+                usesWebRTC: usesWebRTC,
+                pending: pendingSpokenEndPlayoutTail,
+                quotaNoticeResponseID: quotaExhaustionNoticeResponseID
+              ),
+              let token = pendingSpokenEndPlayoutTail,
+              token.responseID == responseID,
+              let webRTCTransport,
+              activeConnection?.isCurrent() == true else { return }
+
+        let attemptID = connectionAttemptFence.currentID
+        logDiagnostic("event=quota_playout_drain_started")
+        terminalPlayoutDrainTask = Task { [weak self] in
+            await webRTCTransport.waitForLocalPlayoutTail(token)
+            guard let self else { return }
+            defer {
+                if self.connectionAttemptFence.isCurrent(attemptID) {
+                    self.terminalPlayoutDrainTask = nil
+                }
+            }
+            guard !Task.isCancelled,
+                  self.connectionAttemptFence.isCurrent(attemptID),
+                  self.activeConnection?.isCurrent() == true,
+                  !self.isFinalizing,
+                  VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+                    reason: self.serverEndReason,
+                    phase: self.phase,
+                    usesWebRTC: self.usesWebRTC,
+                    pending: self.pendingSpokenEndPlayoutTail,
+                    quotaNoticeResponseID: self.quotaExhaustionNoticeResponseID
+                  ) == responseID else { return }
+            do {
+                try await self.transport.sendPlayoutDrained(responseID: responseID)
+                self.logDiagnostic("event=quota_playout_drained")
+            } catch {
+                // The backend owns a bounded fallback deadline. Losing this ACK
+                // must not replace an intentional quota end with a connection
+                // failure or cut off the already-rendering final sentence.
+                self.logDiagnostic(
+                    "event=quota_playout_drain_send_failed \(VoiceTutorDiagnosticError.fields(for: error))",
+                    isWarning: true
+                )
+            }
+        }
+    }
+
+    private func cancelTerminalPlayoutDrain() {
+        terminalPlayoutDrainTask?.cancel()
+        terminalPlayoutDrainTask = nil
+    }
+
+    private func finishFromServer(
+        _ ended: VoiceTutorRealtimeEnded,
+        permitsServerVerifiedResponseFallback: Bool = true
+    ) async {
         guard !isFinalizing else {
             return
         }
-        let outcome = VoiceTutorSessionPhase.completed(outcome: .ended, serverState: nil, serverReason: ended.reason)
+        serverEndReason = ended.reason ?? serverEndReason
+        let effectiveServerEndReason = serverEndReason
+        let outcome = VoiceTutorSessionPhase.completed(
+            outcome: .ended,
+            serverState: nil,
+            serverReason: effectiveServerEndReason
+        )
         if outcome == .failed, pauseState.holdsMicrophone, errorMessage == nil {
             errorMessage = appState.strings.voiceTutorPauseFailed
             failureCause = .localControl
@@ -1356,6 +1653,7 @@ final class VoiceTutorViewModel: ObservableObject {
         logDiagnostic("event=server_ended")
         isFinalizing = true
         phase = .ending
+        cancelTerminalPlayoutDrain()
         stopLocalSpeechEventPump()
         stopHeartbeat()
         clearSessionCountdown()
@@ -1364,25 +1662,27 @@ final class VoiceTutorViewModel: ObservableObject {
             // request. Keep the exact completed response's native output path
             // alive briefly so NetEq/Core Audio can render its tail. The red
             // button goes through stop() and intentionally never awaits this.
-            webRTCTransport?.setMuted(true)
+            webRTCTransport?.closeMicrophoneInput()
             var token = VoiceTutorServerEndPlayoutPolicy.spokenEndToken(
-                reason: ended.reason,
+                reason: effectiveServerEndReason,
                 usesWebRTC: usesWebRTC,
-                pending: pendingSpokenEndPlayoutTail
+                pending: pendingSpokenEndPlayoutTail,
+                quotaNoticeResponseID: quotaExhaustionNoticeResponseID
             )
-            let serverVerifiedFallbackResponseID = token == nil
+            let serverVerifiedFallbackResponseID = token == nil && permitsServerVerifiedResponseFallback
                 ? VoiceTutorServerEndPlayoutPolicy.serverVerifiedFallbackResponseID(
-                   reason: ended.reason,
+                   reason: effectiveServerEndReason,
                    usesWebRTC: usesWebRTC,
                    pending: pendingSpokenEndPlayoutTail,
-                   activeResponseID: webRTCResponseState.responseID
+                   activeResponseID: webRTCResponseState.responseID,
+                   quotaNoticeResponseID: quotaExhaustionNoticeResponseID
                 )
                 : nil
             if let responseID = serverVerifiedFallbackResponseID {
-                // USER_ENDED is emitted only after the backend observed both
-                // completion boundaries for this exact response. The lifecycle
-                // can beat the final raw response.done over the control socket,
-                // so seal its provisional transcript here before teardown.
+                // A spoken terminal lifecycle is emitted only after the backend
+                // observed both completion boundaries for this exact response.
+                // It can beat the final raw response.done over the control
+                // socket, so seal its provisional transcript before teardown.
                 if duplexPlaybackState.matchesActiveResponse(responseID: responseID) {
                     commitAssistantTranscript()
                 }
@@ -1477,7 +1777,9 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         duplexPlaybackState.reset()
         webRTCResponseState.reset()
+        cancelTerminalPlayoutDrain()
         pendingSpokenEndPlayoutTail = nil
+        quotaExhaustionNoticeResponseID = nil
         pauseState = VoiceTutorCallPauseState()
         usesWebRTC = false
         isFinalizing = false

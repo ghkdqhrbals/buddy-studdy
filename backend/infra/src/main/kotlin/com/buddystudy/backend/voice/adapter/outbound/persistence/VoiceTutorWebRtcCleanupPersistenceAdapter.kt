@@ -23,6 +23,7 @@ class VoiceTutorWebRtcCleanupPersistenceAdapter(
         sessionId: String,
         recoverAfter: Instant,
         now: Instant,
+        providerRequestStartedAt: Instant,
     ) {
         database.sql(
             """
@@ -31,7 +32,7 @@ class VoiceTutorWebRtcCleanupPersistenceAdapter(
                 claimed_at, claim_token, attempt_count, last_error, created_at, updated_at
             ) values (
                 :callId, :userId, :sessionId, null, :recoverAfter,
-                null, null, 0, null, :now, :now
+                null, null, 0, null, :providerRequestStartedAt, :now
             )
             on duplicate key update
                 recover_after = least(recover_after, values(recover_after)),
@@ -41,6 +42,7 @@ class VoiceTutorWebRtcCleanupPersistenceAdapter(
             .bind("userId", userId)
             .bind("sessionId", sessionId)
             .bind("recoverAfter", recoverAfter.utc())
+            .bind("providerRequestStartedAt", providerRequestStartedAt.utc())
             .bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
     }
@@ -54,7 +56,7 @@ class VoiceTutorWebRtcCleanupPersistenceAdapter(
     ): Boolean {
         val marker = database.sql(
             """
-            select call_id, user_id, session_id, attached_at, claim_token
+            select call_id, user_id, session_id, attached_at, claim_token, created_at
             from voice_tutor_webrtc_cleanup_outbox
             where call_id = :callId
             for update
@@ -67,6 +69,7 @@ class VoiceTutorWebRtcCleanupPersistenceAdapter(
                     sessionId = row.get("session_id", String::class.java)!!,
                     attachedAt = row.get("attached_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC),
                     claimToken = row.get("claim_token", String::class.java),
+                    providerCreatedAt = row.get("created_at", LocalDateTime::class.java)!!.toInstant(ZoneOffset.UTC),
                 )
             }
             .one().awaitSingleOrNull() ?: return false
@@ -79,7 +82,20 @@ class VoiceTutorWebRtcCleanupPersistenceAdapter(
             """
             update voice_tutor_sessions
             set provider_session_id = coalesce(provider_session_id, :callId),
-                connected_at = coalesce(connected_at, :now),
+                hard_ends_at = case
+                    when connected_at is null then least(
+                        period_ends_at,
+                        timestampadd(second, reserved_seconds, :providerCreatedAt)
+                    )
+                    else hard_ends_at
+                end,
+                monthly_quota_exhausts_at_hard_end = case
+                    when connected_at is null then
+                        monthly_quota_exhausts_at_hard_end
+                        and timestampadd(second, reserved_seconds, :providerCreatedAt) <= period_ends_at
+                    else monthly_quota_exhausts_at_hard_end
+                end,
+                connected_at = coalesce(connected_at, :providerCreatedAt),
                 updated_at = :now
             where id = :sessionId
               and user_id = :userId
@@ -87,6 +103,7 @@ class VoiceTutorWebRtcCleanupPersistenceAdapter(
               and (provider_session_id is null or provider_session_id = :callId)
             """.trimIndent(),
         ).bind("callId", callId)
+            .bind("providerCreatedAt", marker.providerCreatedAt.utc())
             .bind("now", now.utc())
             .bind("sessionId", sessionId)
             .bind("userId", userId)
@@ -220,6 +237,7 @@ class VoiceTutorWebRtcCleanupPersistenceAdapter(
         val sessionId: String,
         val attachedAt: Instant?,
         val claimToken: String?,
+        val providerCreatedAt: Instant,
     )
 
     private data class CleanupCandidate(

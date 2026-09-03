@@ -89,6 +89,7 @@ interface VoiceTutorWebRtcCleanupPort {
         sessionId: String,
         recoverAfter: Instant,
         now: Instant,
+        providerRequestStartedAt: Instant = now,
     )
 
     suspend fun attachSession(
@@ -116,6 +117,7 @@ object UnavailableVoiceTutorWebRtcCleanupPort : VoiceTutorWebRtcCleanupPort {
         sessionId: String,
         recoverAfter: Instant,
         now: Instant,
+        providerRequestStartedAt: Instant,
     ) = error("Voice Tutor WebRTC cleanup persistence is not configured.")
 
     override suspend fun attachSession(callId: String, userId: Long, sessionId: String, now: Instant): Boolean = false

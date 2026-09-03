@@ -125,6 +125,7 @@ class VoiceTutorWebRtcServiceTest {
         assertThat(cleanup.recordedUserId).isEqualTo(principal.userId)
         assertThat(cleanup.recordedSessionId).isEqualTo(SESSION_ID)
         assertThat(cleanup.recoverAfter).isEqualTo(now.plusSeconds(15))
+        assertThat(cleanup.providerRequestStartedAt).isEqualTo(now)
     }
 
     @Test
@@ -560,6 +561,7 @@ class VoiceTutorWebRtcServiceTest {
         var recordedUserId: Long? = null
         var recordedSessionId: String? = null
         var recoverAfter: Instant? = null
+        var providerRequestStartedAt: Instant? = null
         var recordAttempts = 0
         val completedCalls = mutableListOf<String>()
 
@@ -569,6 +571,7 @@ class VoiceTutorWebRtcServiceTest {
             sessionId: String,
             recoverAfter: Instant,
             now: Instant,
+            providerRequestStartedAt: Instant,
         ) {
             calls.lifecycle += "marker-record"
             recordAttempts += 1
@@ -580,6 +583,7 @@ class VoiceTutorWebRtcServiceTest {
             recordedUserId = userId
             recordedSessionId = sessionId
             this.recoverAfter = recoverAfter
+            this.providerRequestStartedAt = providerRequestStartedAt
         }
 
         override suspend fun attachSession(callId: String, userId: Long, sessionId: String, now: Instant): Boolean {

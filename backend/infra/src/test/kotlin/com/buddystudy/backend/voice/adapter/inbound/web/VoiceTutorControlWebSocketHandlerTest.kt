@@ -16,6 +16,7 @@ import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorRelayUseC
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorWebRtcUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSpokenTerminationNotice
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcAnswer
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
@@ -48,6 +49,101 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceTutorControlWebSocketHandlerTest {
+    @Test
+    fun `only a true provider cap collision prearms the monthly closing notice`() {
+        val boundary = Instant.parse("2031-08-30T01:00:00Z")
+        val session = activeSession(boundary.minusSeconds(3_600)).copy(
+            hardEndsAt = boundary,
+            monthlyQuotaExhaustsAtHardEnd = true,
+        )
+
+        assertThat(voiceTutorTerminationTriggerAt(session))
+            .isEqualTo(boundary.minusSeconds(8))
+        assertThat(voiceTutorTerminationTriggerAt(session.copy(
+            reservedSeconds = 1_800,
+            maxSessionSeconds = 1_800,
+        ))).isEqualTo(boundary)
+        assertThat(voiceTutorTerminationTriggerAt(session.copy(
+            reservedSeconds = 900,
+        ))).isEqualTo(boundary)
+        assertThat(voiceTutorTerminationTriggerAt(session.copy(
+            monthlyQuotaExhaustsAtHardEnd = false,
+        ))).isEqualTo(boundary)
+    }
+
+    @Test
+    fun `queued input retry is not sent after monthly quota terminal begins`() {
+        val result = runControlScenario(
+            monthlyQuotaExhaustsNow = true,
+            providerEventsAfterTerminal = listOf(
+                """{"type":"${VoiceTutorRealtimeContract.INPUT_RETRY_EVENT}"}""",
+            ),
+            provider = { _, _ -> },
+        )
+
+        assertThat(result.failed).isFalse()
+        assertThat(result.reason).isEqualTo("QUOTA_EXHAUSTED")
+        assertThat(result.deliveryOrder).containsSubsequence(
+            "sent:buddystudy.voice.session.ending",
+            "sent:buddystudy.voice.session.ended",
+        )
+        assertThat(result.deliveryOrder)
+            .doesNotContain("sent:${VoiceTutorRealtimeContract.INPUT_RETRY_EVENT}")
+    }
+
+    @Test
+    fun `client heartbeat preserves a persisted monthly quota ending as the spoken terminal`() {
+        withControlLogs { logs ->
+            val result = runControlScenario(
+                clientAfterReady = listOf(
+                    """{"type":"${VoiceTutorRealtimeEventPolicy.CLIENT_HEARTBEAT_EVENT}"}""",
+                ),
+                heartbeatState = VoiceTutorSessionStatus.ENDING,
+                persistedQuotaEnding = true,
+                provider = { _, terminal ->
+                    val termination = terminal.first()
+                    assertThat(termination.cancelActiveResponse).isFalse()
+                    assertThat(termination.spokenNotice)
+                        .isEqualTo(VoiceTutorSpokenTerminationNotice.MONTHLY_QUOTA_EXHAUSTED)
+                },
+            )
+
+            assertThat(result.failed).isFalse()
+            assertThat(result.reason).isEqualTo("QUOTA_EXHAUSTED")
+            assertThat(result.finishCalls).isEqualTo(1)
+            assertThat(result.deliveryOrder).containsSubsequence(
+                "sent:buddystudy.voice.heartbeat.ack",
+                "sent:buddystudy.voice.session.ending",
+                "sent:buddystudy.voice.session.ended",
+            )
+            assertThat(logs.list.map { it.formattedMessage }.filter {
+                it.startsWith("voice_tutor_control_terminal ")
+            }).singleElement().asString().contains(
+                "source=CLIENT_HEARTBEAT_FINALIZED", "reason=QUOTA_EXHAUSTED",
+                "cancelActiveResponse=false",
+            )
+        }
+    }
+
+    @Test
+    fun `client heartbeat does not turn an ordinary ending into quota exhaustion`() {
+        val result = runControlScenario(
+            clientAfterReady = listOf(
+                """{"type":"${VoiceTutorRealtimeEventPolicy.CLIENT_HEARTBEAT_EVENT}"}""",
+            ),
+            heartbeatState = VoiceTutorSessionStatus.ENDING,
+            provider = { _, terminal ->
+                val termination = terminal.first()
+                assertThat(termination.cancelActiveResponse).isTrue()
+                assertThat(termination.spokenNotice).isNull()
+            },
+        )
+
+        assertThat(result.failed).isFalse()
+        assertThat(result.reason).isEqualTo("USER_ENDED")
+        assertThat(result.finishCalls).isEqualTo(1)
+    }
+
     @Test
     fun `missing or unsupported local vad capability closes before claiming the provider call`() {
         listOf(null, "", "local-vad-v0").forEach { capability ->
@@ -398,11 +494,24 @@ class VoiceTutorControlWebSocketHandlerTest {
         serverLifecycleEventBeforeCompletion: String? = null,
         clientAfterReady: List<String> = emptyList(),
         clientEndsOnProviderError: Boolean = false,
+        monthlyQuotaExhaustsNow: Boolean = false,
+        heartbeatState: VoiceTutorSessionStatus = VoiceTutorSessionStatus.ACTIVE,
+        persistedQuotaEnding: Boolean = false,
+        providerEventsAfterTerminal: List<String> = emptyList(),
         provider: suspend (Flow<String>, Flow<VoiceTutorRelayTermination>) -> Unit,
     ): ControlResult {
         val now = Instant.now()
         val principal = Principal(7, "device-7", 70, anonymous = false)
-        val session = activeSession(now)
+        val session = activeSession(now).let {
+            if (monthlyQuotaExhaustsNow) {
+                it.copy(
+                    hardEndsAt = now,
+                    monthlyQuotaExhaustsAtHardEnd = true,
+                )
+            } else {
+                it
+            }
+        }
         val result = ControlResult()
         val afterReady = Sinks.many().unicast().onBackpressureBuffer<WebSocketMessage>()
         val webRtc = object : VoiceTutorWebRtcUseCase {
@@ -445,6 +554,12 @@ class VoiceTutorControlWebSocketHandlerTest {
                 if (serverLifecycleEventBeforeCompletion != null) {
                     onProviderEvent(serverLifecycleEventBeforeCompletion, false, false)
                 }
+                if (providerEventsAfterTerminal.isNotEmpty()) {
+                    terminalEvents.first()
+                    providerEventsAfterTerminal.forEach { raw ->
+                        onProviderEvent(raw, false, true)
+                    }
+                }
                 provider(clientEvents, terminalEvents)
             }
 
@@ -452,6 +567,12 @@ class VoiceTutorControlWebSocketHandlerTest {
         }
         val relay = proxy<VoiceTutorRelayUseCase> { method, arguments ->
             when (method) {
+                "beginQuotaExhaustionNotice" -> if (monthlyQuotaExhaustsNow || persistedQuotaEnding) {
+                    VoiceTutorSessionStatus.ENDING
+                } else {
+                    null
+                }
+                "heartbeat" -> heartbeatState
                 "finishWebRtc" -> {
                     result.finishCalls += 1
                     result.reason = arguments[3] as String

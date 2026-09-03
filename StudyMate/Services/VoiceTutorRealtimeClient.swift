@@ -97,7 +97,11 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case studyTreeChanged(studyID: Int)
     case studyTreeUpdated(studyID: Int)
     case studyTreeDeleted(studyIDs: Set<Int>)
-    case responseStarted(responseID: String?, isTutorIntervention: Bool)
+    case responseStarted(
+        responseID: String?,
+        isTutorIntervention: Bool,
+        isQuotaExhaustionNotice: Bool
+    )
     case responseFinished(responseID: String?)
     case outputAudioBufferStarted(responseID: String?)
     case outputAudioBufferStopped(responseID: String?)
@@ -270,7 +274,11 @@ enum VoiceTutorRealtimeEventParser {
             let response = object["response"] as? [String: Any]
             return .responseStarted(
                 responseID: response.flatMap { string("id", in: $0) },
-                isTutorIntervention: boolean("buddystudyTutorIntervention", in: object) ?? false
+                isTutorIntervention: boolean("buddystudyTutorIntervention", in: object) ?? false,
+                isQuotaExhaustionNotice: exactBoolean(
+                    "buddystudyQuotaExhaustionNotice",
+                    in: object
+                ) ?? false
             )
         case "response.done", "response.completed":
             let response = object["response"] as? [String: Any]
@@ -338,6 +346,12 @@ enum VoiceTutorRealtimeEventParser {
             return value.boolValue
         }
         return nil
+    }
+
+    private static func exactBoolean(_ key: String, in object: [String: Any]) -> Bool? {
+        guard let value = object[key] as? NSNumber,
+              CFGetTypeID(value) == CFBooleanGetTypeID() else { return nil }
+        return value.boolValue
     }
 
     private static func date(_ key: String, in object: [String: Any]) -> Date? {
@@ -415,6 +429,25 @@ actor VoiceTutorWebSocketTransport {
         let payload = try JSONSerialization.data(
             withJSONObject: [
                 "type": "buddystudy.voice.playback.completed",
+                "responseId": responseID
+            ]
+        )
+        guard let text = String(data: payload, encoding: .utf8) else {
+            throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8
+        }
+        try await socketTask.send(.string(text))
+    }
+
+    /// Confirms that the exact WebRTC response named by the server has crossed
+    /// this device's bounded native playout tail. This is separate from the
+    /// legacy PCM playback callback used by the non-WebRTC transport.
+    func sendPlayoutDrained(responseID: String) async throws {
+        guard let socketTask else {
+            throw TransportError.notConnected
+        }
+        let payload = try JSONSerialization.data(
+            withJSONObject: [
+                "type": "buddystudy.voice.playout.drained",
                 "responseId": responseID
             ]
         )

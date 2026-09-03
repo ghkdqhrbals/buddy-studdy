@@ -13,6 +13,7 @@ internal enum class VoiceTutorProviderErrorDisposition {
 
 internal enum class VoiceTutorProviderTurnFailureKind(val diagnosticValue: String) {
     PROVIDER_ERROR("provider-error"),
+    RESPONSE_TIMEOUT("response-timeout"),
     RESPONSE_CANCELLED("response-cancelled"),
     RESPONSE_INCOMPLETE("response-incomplete"),
     RESPONSE_FAILED("response-failed"),

@@ -62,6 +62,13 @@ data class VoiceTutorSession(
     val updatedAt: Instant,
     /** Accepted lesson identity survives the nullable live-study FK when that node is deleted. */
     val acceptedStudyId: Long? = studyId,
+    /**
+     * Frozen at reservation time. True only when this session owns every
+     * remaining second in its finite monthly allowance. Keeping this on the
+     * session avoids reclassifying a 60-minute call after an administrator
+     * changes the user's allowance while the call is active.
+     */
+    val monthlyQuotaExhaustsAtHardEnd: Boolean = false,
 )
 
 data class VoiceTutorRecording(

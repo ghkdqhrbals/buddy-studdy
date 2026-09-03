@@ -93,9 +93,38 @@ internal class VoiceTutorInputTurnCoordinator(
     val pendingCount: Int get() = pending.size
     val bufferedTranscriptCount: Int get() = earlyTranscripts.size
 
+    data class TerminalDrain(
+        val discardedItemIds: Set<String>,
+        val actions: List<Action>,
+    )
+
     fun isAssessmentCurrent(token: Long): Boolean = !isClosed && batch?.token == token
 
     fun isPublicationPending(itemId: String): Boolean = !isClosed && pending[itemId]?.stage == Stage.WAITING_PUBLISH
+
+    /**
+     * Freezes the acoustic boundary without throwing away final ASR that was
+     * accepted before it. Items which still lacked a completed transcript at
+     * the cutoff have no durable learner meaning and are discarded. Completed
+     * transcript assessment/publication is allowed to drain, but its caller
+     * must suppress every subsequent response or mutation side effect.
+     */
+    fun beginTerminalDrain(nowNanos: Long): TerminalDrain {
+        if (isClosed) return TerminalDrain(emptySet(), emptyList())
+        earlyTranscripts.clear()
+        val discarded = linkedSetOf<String>()
+        pending.entries.removeAll { (_, item) ->
+            val discard = item.stage == Stage.WAITING_TRANSCRIPT || item.stage == Stage.WAITING_DELETE
+            if (discard) {
+                discarded += item.itemId
+                if (!item.checkpoint) checkpointContextBySequence.remove(item.sequence)
+            }
+            discard
+        }
+        val actions = mutableListOf<Action>()
+        startAssessmentIfPossible(nowNanos, actions)
+        return TerminalDrain(discarded, actions)
+    }
 
     init {
         require(this.limits.timeoutMilliseconds in 1..15_000) { "Invalid voice input assessment timeout." }

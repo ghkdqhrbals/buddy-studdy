@@ -379,7 +379,7 @@ class VoiceTutorPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
             recordingConsentVersion = "voice-recording-v1",
         ) as ReserveVoiceTutorSessionResult.Reserved
         assertThat(reserved.value.session.reservedSeconds).isEqualTo(3_600)
-        assertThat(reserved.value.quota.remainingSeconds).isEqualTo(14_400)
+        assertThat(reserved.value.quota.remainingSeconds).isZero()
         assertThat(reserved.value.session.recordingConsentedAt).isEqualTo(now)
         assertThat(reserved.value.session.recordingConsentVersion).isEqualTo("voice-recording-v1")
 
@@ -423,6 +423,230 @@ class VoiceTutorPersistenceIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(afterRetry.usedSeconds).isEqualTo(3)
         assertThat(afterRetry.reservedSeconds).isZero()
     }
+
+    @Test
+    fun `WebRTC first attach anchors billing to provider call creation and duplicate attach never extends it`() =
+        runBlocking<Unit> {
+            val reservedAt = Instant.now().truncatedTo(ChronoUnit.MICROS)
+            val fixture = paidUser(reservedAt.minusSeconds(86_400))
+            admin.setVoiceLimit(fixture.userId, 3_600)
+            val reserved = voiceTutor.reserve(
+                fixture.userId,
+                fixture.studyId,
+                "webrtc-anchor-${fixture.suffix}",
+                "ko",
+                "gpt-realtime-2.1",
+                "marin",
+                3_600,
+                reservedAt,
+            ) as ReserveVoiceTutorSessionResult.Reserved
+            assertThat(reserved.value.session.monthlyQuotaExhaustsAtHardEnd).isTrue()
+            voiceTutor.markActive(fixture.userId, reserved.value.session.id, reservedAt.plusSeconds(1))
+            val callId = "rtc_${fixture.suffix.replace("-", "")}"
+            val providerCreatedAt = reservedAt.plusSeconds(1)
+            webRtcCleanup.recordPending(
+                callId,
+                fixture.userId,
+                reserved.value.session.id,
+                recoverAfter = reservedAt.plusSeconds(300),
+                now = providerCreatedAt,
+            )
+            val attachedAt = reservedAt.plusSeconds(47)
+
+            assertThat(webRtcCleanup.attachSession(
+                callId,
+                fixture.userId,
+                reserved.value.session.id,
+                attachedAt,
+            )).isTrue()
+            val attached = voiceTutor.findSession(fixture.userId, reserved.value.session.id)!!
+            assertThat(attached.connectedAt).isEqualTo(providerCreatedAt)
+            assertThat(attached.hardEndsAt).isEqualTo(providerCreatedAt.plusSeconds(3_600))
+            assertThat(attached.monthlyQuotaExhaustsAtHardEnd).isTrue()
+
+            assertThat(webRtcCleanup.attachSession(
+                callId,
+                fixture.userId,
+                reserved.value.session.id,
+                attachedAt.plusSeconds(120),
+            )).isTrue()
+            val duplicate = voiceTutor.findSession(fixture.userId, reserved.value.session.id)!!
+            assertThat(duplicate.connectedAt).isEqualTo(providerCreatedAt)
+            assertThat(duplicate.hardEndsAt).isEqualTo(providerCreatedAt.plusSeconds(3_600))
+            assertThat(duplicate.monthlyQuotaExhaustsAtHardEnd).isTrue()
+        }
+
+    @Test
+    fun `monthly exhaustion notice closes learner persistence and settles exact reserved boundary after grace`() =
+        runBlocking<Unit> {
+            val reservedAt = Instant.now().truncatedTo(ChronoUnit.MICROS)
+            val fixture = paidUser(reservedAt.minusSeconds(86_400))
+            admin.setVoiceLimit(fixture.userId, 120)
+            val reserved = voiceTutor.reserve(
+                fixture.userId, fixture.studyId, "quota-notice-${fixture.suffix}", "ko",
+                "gpt-realtime-2.1", "marin", 3_600, reservedAt,
+            ) as ReserveVoiceTutorSessionResult.Reserved
+            voiceTutor.markActive(fixture.userId, reserved.value.session.id, reservedAt.plusSeconds(1))
+            val callId = "rtc_${fixture.suffix.replace("-", "")}"
+            val providerCreatedAt = reservedAt.plusSeconds(1)
+            webRtcCleanup.recordPending(
+                callId, fixture.userId, reserved.value.session.id,
+                recoverAfter = reservedAt.plusSeconds(300), now = providerCreatedAt,
+            )
+            assertThat(webRtcCleanup.attachSession(
+                callId, fixture.userId, reserved.value.session.id, reservedAt.plusSeconds(2),
+            )).isTrue()
+            val hardEnd = providerCreatedAt.plusSeconds(120)
+
+            assertThat(voiceTutor.appendTranscript(
+                fixture.userId, reserved.value.session.id, "active-untrusted", VoiceTutorTranscriptRole.USER,
+                "신뢰되지 않은 경계 전 입력", hardEnd.minusSeconds(1), 4_000, 20,
+            )).isFalse()
+            assertThat(voiceTutor.appendTranscript(
+                fixture.userId, reserved.value.session.id, "active-at-boundary", VoiceTutorTranscriptRole.USER,
+                "신뢰된 경계 입력", hardEnd, 4_000, 20, acceptedBeforeQuotaCutoff = true,
+            )).isTrue()
+            assertThat(voiceTutor.appendTranscript(
+                fixture.userId, reserved.value.session.id, "active-after-boundary", VoiceTutorTranscriptRole.USER,
+                "신뢰 표식이 있어도 늦은 입력", hardEnd.plusMillis(1), 4_000, 20,
+                acceptedBeforeQuotaCutoff = true,
+            )).isFalse()
+
+            val ending = voiceTutor.beginQuotaExhaustionNotice(
+                fixture.userId,
+                reserved.value.session.id,
+                hardEnd,
+                noticeLeadSeconds = 8,
+            )!!
+            assertThat(ending.status).isEqualTo(VoiceTutorSessionStatus.ENDING)
+            assertThat(ending.endReason).isEqualTo("QUOTA_EXHAUSTED")
+            assertThat(voiceTutor.appendTranscript(
+                fixture.userId, ending.id, "ending-at-boundary", VoiceTutorTranscriptRole.USER,
+                "지연 저장된 경계 입력", hardEnd, 4_000, 20, acceptedBeforeQuotaCutoff = true,
+            )).isTrue()
+            assertThat(voiceTutor.appendTranscript(
+                fixture.userId, ending.id, "late-learner", VoiceTutorTranscriptRole.USER,
+                "경계 뒤 학습 입력", hardEnd.plusMillis(1), 4_000, 20,
+                acceptedBeforeQuotaCutoff = true,
+            )).isFalse()
+            assertThat(voiceTutor.reconcileExpired(
+                fixture.userId, hardEnd.plusSeconds(19), 30, 60,
+            )).isEmpty()
+
+            val settled = voiceTutor.reconcileExpired(
+                fixture.userId, hardEnd.plusSeconds(20), 30, 60,
+            ).single()
+            assertThat(settled.status).isEqualTo(VoiceTutorSessionStatus.COMPLETED)
+            assertThat(settled.endReason).isEqualTo("QUOTA_EXHAUSTED")
+            assertThat(settled.chargedSeconds).isEqualTo(120)
+            val quota = voiceTutor.quota(fixture.userId, hardEnd.plusSeconds(20))!!
+            assertThat(quota.usedSeconds).isEqualTo(120)
+            assertThat(quota.reservedSeconds).isZero()
+            assertThat(quota.remainingSeconds).isZero()
+        }
+
+    @Test
+    fun `raised monthly limit downgrades frozen exhaustion boundary to ordinary time limit`() = runBlocking<Unit> {
+        val reservedAt = Instant.now().truncatedTo(ChronoUnit.MICROS)
+        val fixture = paidUser(reservedAt.minusSeconds(86_400))
+        admin.setVoiceLimit(fixture.userId, 120)
+        val reserved = voiceTutor.reserve(
+            fixture.userId, fixture.studyId, "quota-raised-${fixture.suffix}", "ko",
+            "gpt-realtime-2.1", "marin", 3_600, reservedAt,
+        ) as ReserveVoiceTutorSessionResult.Reserved
+        voiceTutor.markActive(fixture.userId, reserved.value.session.id, reservedAt.plusSeconds(1))
+        val callId = "rtc_${fixture.suffix.replace("-", "")}"
+        val providerCreatedAt = reservedAt.plusSeconds(1)
+        webRtcCleanup.recordPending(
+            callId, fixture.userId, reserved.value.session.id,
+            recoverAfter = reservedAt.plusSeconds(300), now = providerCreatedAt,
+        )
+        assertThat(webRtcCleanup.attachSession(
+            callId, fixture.userId, reserved.value.session.id, reservedAt.plusSeconds(2),
+        )).isTrue()
+        val hardEnd = providerCreatedAt.plusSeconds(120)
+        admin.setVoiceLimit(fixture.userId, 240)
+        assertThat(voiceTutor.heartbeat(fixture.userId, reserved.value.session.id, hardEnd.minusSeconds(1)))
+            .isEqualTo(VoiceTutorSessionStatus.ACTIVE)
+
+        assertThat(voiceTutor.beginQuotaExhaustionNotice(
+            fixture.userId, reserved.value.session.id, hardEnd, 8,
+        )).isNull()
+        val settled = voiceTutor.reconcileExpired(fixture.userId, hardEnd, 30, 60).single()
+        assertThat(settled.endReason).isEqualTo("TIME_LIMIT")
+        assertThat(settled.chargedSeconds).isEqualTo(120)
+        assertThat(voiceTutor.quota(fixture.userId, hardEnd)!!.remainingSeconds).isEqualTo(120)
+    }
+
+    @Test
+    fun `late recovery preserves verified monthly exhaustion reason without reopening spoken grace`() = runBlocking<Unit> {
+        val reservedAt = Instant.now().truncatedTo(ChronoUnit.MICROS)
+        val fixture = paidUser(reservedAt.minusSeconds(86_400))
+        admin.setVoiceLimit(fixture.userId, 60)
+        val reserved = voiceTutor.reserve(
+            fixture.userId, fixture.studyId, "quota-late-${fixture.suffix}", "ko",
+            "gpt-realtime-2.1", "marin", 3_600, reservedAt,
+        ) as ReserveVoiceTutorSessionResult.Reserved
+        voiceTutor.markActive(fixture.userId, reserved.value.session.id, reservedAt.plusSeconds(1))
+        val callId = "rtc_${fixture.suffix.replace("-", "")}"
+        val providerCreatedAt = reservedAt.plusSeconds(1)
+        webRtcCleanup.recordPending(
+            callId, fixture.userId, reserved.value.session.id,
+            recoverAfter = reservedAt.plusSeconds(300), now = providerCreatedAt,
+        )
+        assertThat(webRtcCleanup.attachSession(
+            callId, fixture.userId, reserved.value.session.id, reservedAt.plusSeconds(2),
+        )).isTrue()
+        val hardEnd = providerCreatedAt.plusSeconds(60)
+        assertThat(voiceTutor.heartbeat(fixture.userId, reserved.value.session.id, hardEnd.minusSeconds(1)))
+            .isEqualTo(VoiceTutorSessionStatus.ACTIVE)
+
+        val settled = voiceTutor.reconcileExpired(
+            fixture.userId,
+            hardEnd.plusSeconds(21),
+            readyTimeoutSeconds = 30,
+            heartbeatLeaseSeconds = 60,
+        ).single()
+        assertThat(settled.status).isEqualTo(VoiceTutorSessionStatus.COMPLETED)
+        assertThat(settled.endReason).isEqualTo("QUOTA_EXHAUSTED")
+        assertThat(settled.chargedSeconds).isEqualTo(60)
+    }
+
+    @Test
+    fun `monthly exhaustion notice idempotency cannot reopen after the absolute grace boundary`() =
+        runBlocking<Unit> {
+            val reservedAt = Instant.now().truncatedTo(ChronoUnit.MICROS)
+            val fixture = paidUser(reservedAt.minusSeconds(86_400))
+            admin.setVoiceLimit(fixture.userId, 60)
+            val reserved = voiceTutor.reserve(
+                fixture.userId, fixture.studyId, "quota-idempotent-grace-${fixture.suffix}", "ko",
+                "gpt-realtime-2.1", "marin", 3_600, reservedAt,
+            ) as ReserveVoiceTutorSessionResult.Reserved
+            voiceTutor.markActive(fixture.userId, reserved.value.session.id, reservedAt.plusSeconds(1))
+            val callId = "rtc_${fixture.suffix.replace("-", "")}"
+            val providerCreatedAt = reservedAt.plusSeconds(1)
+            webRtcCleanup.recordPending(
+                callId, fixture.userId, reserved.value.session.id,
+                recoverAfter = reservedAt.plusSeconds(300), now = providerCreatedAt,
+            )
+            assertThat(webRtcCleanup.attachSession(
+                callId, fixture.userId, reserved.value.session.id, reservedAt.plusSeconds(2),
+            )).isTrue()
+            val hardEnd = providerCreatedAt.plusSeconds(60)
+
+            assertThat(voiceTutor.beginQuotaExhaustionNotice(
+                fixture.userId, reserved.value.session.id, hardEnd, 8,
+            )?.endReason).isEqualTo("QUOTA_EXHAUSTED")
+            admin.setVoiceLimit(fixture.userId, 120)
+            assertThat(voiceTutor.quota(fixture.userId, hardEnd.plusSeconds(1))!!.remainingSeconds)
+                .isEqualTo(60)
+            assertThat(voiceTutor.beginQuotaExhaustionNotice(
+                fixture.userId, reserved.value.session.id, hardEnd.plusSeconds(19), 8,
+            )?.endReason).isEqualTo("QUOTA_EXHAUSTED")
+            assertThat(voiceTutor.beginQuotaExhaustionNotice(
+                fixture.userId, reserved.value.session.id, hardEnd.plusSeconds(20), 8,
+            )).isNull()
+        }
 
     @Test
     fun `terminal WebRTC calls remain selectable until successful cleanup clears only their rtc marker`() = runBlocking<Unit> {

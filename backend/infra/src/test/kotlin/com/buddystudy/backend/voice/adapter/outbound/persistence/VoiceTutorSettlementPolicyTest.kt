@@ -11,6 +11,14 @@ class VoiceTutorSettlementPolicyTest {
     private val connectedAt = Instant.parse("2026-08-30T00:00:00Z")
 
     @Test
+    fun `reservation is a monthly exhaustion boundary only when it owns every remaining second`() {
+        assertThat(voiceTutorReservationExhaustsMonthlyQuota(3_600, 3_600)).isTrue()
+        assertThat(voiceTutorReservationExhaustsMonthlyQuota(3_600, 31_536_000)).isFalse()
+        assertThat(voiceTutorReservationExhaustsMonthlyQuota(30, 3_600)).isFalse()
+        assertThat(voiceTutorReservationExhaustsMonthlyQuota(0, 0)).isFalse()
+    }
+
+    @Test
     fun `stale relay charges only through the last persisted server relay heartbeat`() {
         val session = session(
             relayHeartbeatAt = connectedAt.plusMillis(31_100),

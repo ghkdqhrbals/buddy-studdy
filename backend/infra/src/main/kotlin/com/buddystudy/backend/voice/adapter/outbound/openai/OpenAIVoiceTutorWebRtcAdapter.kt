@@ -11,7 +11,9 @@ import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAsse
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuotaExhaustionPolicy
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSpokenTerminationNotice
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcAnswer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorWebRtcPort
 import kotlinx.coroutines.flow.Flow
@@ -39,7 +41,9 @@ import reactor.netty.http.client.WebsocketClientSpec
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Creates an OpenAI WebRTC call with the standard API key kept on the server,
@@ -170,13 +174,26 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 sessionLanguage = context.session.language,
                 onProviderTurnFailure = diagnostics::observeProviderTurnFailure,
             )
+            val gracefulTerminalActive = AtomicBoolean(false)
             val terminal = terminalEvents.asFlux()
                 .next()
                 .doOnNext { termination ->
                     diagnostics.markLocalTerminal(termination)
-                    turnController.close()
+                    if (termination.spokenNotice == VoiceTutorSpokenTerminationNotice.MONTHLY_QUOTA_EXHAUSTED) {
+                        gracefulTerminalActive.set(true)
+                        turnController.requestQuotaExhaustionNotice()
+                    } else {
+                        turnController.close()
+                    }
                 }
                 .cache()
+            val relayRelease = terminal.flatMap { termination ->
+                if (termination.spokenNotice == VoiceTutorSpokenTerminationNotice.MONTHLY_QUOTA_EXHAUSTED) {
+                    quotaExhaustionRelayRelease(turnController, termination)
+                } else {
+                    Mono.empty()
+                }.thenReturn(termination)
+            }.cache()
             val observedClientEvents = clientEvents.asFlux()
                 .doOnNext { raw ->
                     diagnostics.observeClientEvent(raw)
@@ -184,12 +201,12 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 }
                 .ignoreElements()
                 .thenMany(Flux.empty<String>())
-                .doFinally { turnController.close() }
+                .takeUntilOther(relayRelease)
             val liveControls = Flux.concat(
                 sessionHandshake.initialProviderEvents(),
                 Flux.merge(turnController.providerEvents(), observedClientEvents),
-            ).takeUntilOther(terminal)
-            val terminalProviderEvents = terminal.flatMapMany { termination ->
+            ).takeUntilOther(relayRelease)
+            val terminalProviderEvents = relayRelease.flatMapMany { termination ->
                 if (termination.cancelActiveResponse) {
                     Flux.just(responseCancelEvent("relay-terminal"))
                 } else {
@@ -205,7 +222,12 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 .concatMap { raw ->
                     diagnostics.observeProviderEvent(raw)
                     if (sessionHandshake.observeProviderEvent(raw)) return@concatMap Mono.empty<Void>()
-                    relayVoiceTutorProviderEvent(turnController, raw, onProviderEvent)
+                    relayVoiceTutorProviderEvent(
+                        turnController,
+                        raw,
+                        deferPostRelayPersistence = true,
+                        onProviderEvent = onProviderEvent,
+                    )
                 }
                 .then()
             // Assessment/persistence is a separate subscriber: never await a
@@ -236,6 +258,14 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 assessment = inputAssessment,
                 onProviderEvent = onProviderEvent,
             )
+            val quotaTerminalTranscriptWork = voiceTutorQuotaTerminalTranscriptRelay(
+                controller = turnController,
+                onProviderEvent = onProviderEvent,
+            )
+            val postRelayPersistenceWork = voiceTutorPostRelayPersistenceRelay(
+                controller = turnController,
+                onProviderEvent = onProviderEvent,
+            )
             val clientControls = turnController.clientEvents().concatMap { raw ->
                 mono { onProviderEvent(raw, false, true) }.then()
             }.then()
@@ -245,14 +275,20 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 mono { onProviderEvent(raw, false, false) }.then()
             }.then()
             val receive = Mono.firstWithSignal(
-                providerReceive,
-                turnController.inputFailure(),
-                inputWork,
-                toolWork,
-                spokenQuestionWork,
-                spokenFeedbackWork,
-                clientControls,
-                serverLifecycle,
+                holdVoiceTutorSignalForGrace(providerReceive, relayRelease, gracefulTerminalActive::get),
+                holdVoiceTutorSignalForGrace(turnController.inputFailure(), relayRelease, gracefulTerminalActive::get),
+                holdVoiceTutorSignalForGrace(inputWork, relayRelease, gracefulTerminalActive::get),
+                holdVoiceTutorSignalForGrace(toolWork, relayRelease, gracefulTerminalActive::get),
+                holdVoiceTutorSignalForGrace(spokenQuestionWork, relayRelease, gracefulTerminalActive::get),
+                holdVoiceTutorSignalForGrace(spokenFeedbackWork, relayRelease, gracefulTerminalActive::get),
+                holdVoiceTutorSignalForGrace(
+                    quotaTerminalTranscriptWork,
+                    relayRelease,
+                    gracefulTerminalActive::get,
+                ),
+                holdVoiceTutorSignalForGrace(postRelayPersistenceWork, relayRelease, gracefulTerminalActive::get),
+                holdVoiceTutorSignalForGrace(clientControls, relayRelease, gracefulTerminalActive::get),
+                holdVoiceTutorSignalForGrace(serverLifecycle, relayRelease, gracefulTerminalActive::get),
             )
             val ready = sessionHandshake.awaitConfirmation().then(
                 mono {
@@ -420,6 +456,54 @@ internal fun voiceTutorSpokenFeedbackAssessmentRelay(
 }.then()
 
 /**
+ * Persists a tutor sentence which completed before/during the quota fence as
+ * ordinary transcript only. This path deliberately has no semantic assessment
+ * or acknowledgement gate, so it cannot delay the terminal notice.
+ */
+internal fun voiceTutorQuotaTerminalTranscriptRelay(
+    controller: VoiceTutorDuplexTurnController,
+    onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
+): Mono<Void> = controller.quotaTerminalTutorTranscriptBatches().concatMap { batch ->
+    Flux.fromIterable(batch.tutorTranscriptEvents).concatMap { transcript ->
+        mono {
+            if (!onProviderEvent(transcript, true, false)) {
+                throw VoiceTutorTutorTranscriptPersistenceException()
+            }
+        }.then()
+    }.then(Mono.fromRunnable {
+        if (!controller.confirmQuotaTerminalTutorTranscriptBatch(batch.token) && controller.acceptsInputEvents()) {
+            throw VoiceTutorProviderProtocolException()
+        }
+    })
+}.then()
+
+/** Serial durable worker for completed tutor boundaries, never the provider receive loop. */
+internal fun voiceTutorPostRelayPersistenceRelay(
+    controller: VoiceTutorDuplexTurnController,
+    onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
+): Mono<Void> = controller.postRelayPersistenceBoundaries().concatMap { boundary ->
+    persistVoiceTutorPostRelayBoundary(controller, boundary, onProviderEvent)
+}.then()
+
+private fun persistVoiceTutorPostRelayBoundary(
+    controller: VoiceTutorDuplexTurnController,
+    boundary: VoiceTutorPostRelayBoundary,
+    onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
+): Mono<Void> = Flux.fromIterable(boundary.tutorTranscriptEvents)
+    .concatMap { transcript ->
+        mono {
+            if (!onProviderEvent(transcript, true, false)) {
+                throw VoiceTutorTutorTranscriptPersistenceException()
+            }
+        }.then()
+    }
+    .then(Mono.fromRunnable {
+        if (!controller.acknowledgePostRelayBoundary(boundary.token) && controller.acceptsInputEvents()) {
+            throw VoiceTutorProviderProtocolException()
+        }
+    })
+
+/**
  * Ordered production boundary for a single sideband event. Observation and
  * completed-transcript batch ownership are atomic inside the controller; the
  * exact proof is relayed before staged tutor rows, and only successful storage
@@ -428,6 +512,7 @@ internal fun voiceTutorSpokenFeedbackAssessmentRelay(
 internal fun relayVoiceTutorProviderEvent(
     controller: VoiceTutorDuplexTurnController,
     raw: String,
+    deferPostRelayPersistence: Boolean = false,
     onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
 ): Mono<Void> {
     // Take ownership eagerly while the provider concatMap is handling this
@@ -448,27 +533,64 @@ internal fun relayVoiceTutorProviderEvent(
         Mono.empty()
     }
     val boundary = observation.postRelayBoundary ?: return currentProviderEventWork
-    val finalTranscriptWork = Flux.fromIterable(boundary.tutorTranscriptEvents)
-        .concatMap { transcript ->
-            mono {
-                val persisted = onProviderEvent(
-                    transcript,
-                    true,
-                    false,
-                )
-                if (!persisted) throw VoiceTutorTutorTranscriptPersistenceException()
-            }.then()
+    if (deferPostRelayPersistence) {
+        return if (controller.enqueuePostRelayPersistence(boundary)) {
+            currentProviderEventWork
+        } else {
+            Mono.error(VoiceTutorProviderProtocolException())
         }
-        .then()
-    return currentProviderEventWork.then(finalTranscriptWork).then(
-        Mono.fromRunnable {
-            val acknowledged = controller.acknowledgePostRelayBoundary(boundary.token)
-            if (!acknowledged && controller.acceptsInputEvents()) {
-                throw VoiceTutorProviderProtocolException()
-            }
-        },
+    }
+    return currentProviderEventWork.then(
+        persistVoiceTutorPostRelayBoundary(controller, boundary, onProviderEvent),
     )
 }
+
+/**
+ * Holds the provider relay until both the spoken terminal response has crossed
+ * its device playout gate and the paid reservation boundary has arrived. A
+ * missing provider/client acknowledgement is bounded after that boundary; the
+ * caller can then finalize through the ordinary idempotent settlement path.
+ */
+internal fun quotaExhaustionRelayRelease(
+    controller: VoiceTutorDuplexTurnController,
+    termination: VoiceTutorRelayTermination,
+    now: () -> Instant = Instant::now,
+): Mono<Void> {
+    require(termination.spokenNotice == VoiceTutorSpokenTerminationNotice.MONTHLY_QUOTA_EXHAUSTED)
+    val hardEndsAt = requireNotNull(termination.notBefore) {
+        "A monthly quota exhaustion notice requires the session hard end."
+    }
+    val observedAt = now()
+    val untilBoundary = Duration.between(observedAt, hardEndsAt)
+        .let { if (it.isNegative) Duration.ZERO else it }
+    val untilRelayDeadline = Duration.between(
+        observedAt,
+        hardEndsAt.plusSeconds(VoiceTutorQuotaExhaustionPolicy.NOTICE_GRACE_SECONDS),
+    ).let { if (it.isNegative) Duration.ZERO else it }
+    val boundaryFloor = Mono.delay(untilBoundary).then()
+    val noticeComplete = controller.quotaExhaustionNoticeCompletion().onErrorComplete()
+    val durableTerminalWork = controller.quotaTerminalPersistenceCompletion().onErrorComplete()
+    return Mono.`when`(noticeComplete, durableTerminalWork, boundaryFloor)
+        .timeout(untilRelayDeadline)
+        .onErrorComplete()
+        .doFinally { controller.close() }
+}
+
+/**
+ * Once the quota terminal owns the call, no in-flight classifier, tool, or
+ * persistence branch may close the shared provider relay ahead of its notice.
+ */
+internal fun holdVoiceTutorSignalForGrace(
+    work: Mono<Void>,
+    relayRelease: Mono<*>,
+    gracefulTerminalActive: () -> Boolean,
+): Mono<Void> = work
+    .onErrorResume { error ->
+        if (gracefulTerminalActive()) relayRelease.then() else Mono.error(error)
+    }
+    .then(Mono.defer {
+        if (gracefulTerminalActive()) relayRelease.then() else Mono.empty()
+    })
 
 internal fun validateWebRtcSdp(sdp: String): String {
     if (sdp.isBlank() || sdp.toByteArray(StandardCharsets.UTF_8).size > MAX_SDP_BYTES || '\u0000' in sdp) {

@@ -982,6 +982,766 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
     }
 
     @Test
+    fun `monthly quota notice blocks learner input and completes only after exact final playout acknowledgement`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val providerErrors = CopyOnWriteArrayList<Throwable>()
+        val completionErrors = CopyOnWriteArrayList<Throwable>()
+        val completed = AtomicBoolean()
+        val output = controller.providerEvents().subscribe(controls::add, providerErrors::add)
+        val completion = controller.quotaExhaustionNoticeCompletion().subscribe(
+            {},
+            completionErrors::add,
+            { completed.set(true) },
+        )
+        try {
+            controller.requestQuotaExhaustionNotice()
+
+            assertThat(controller.acceptsInputEvents()).isFalse()
+            assertThat(controls.map { mapper.readTree(it).path("type").asText() })
+                .containsExactly("input_audio_buffer.clear", "response.create")
+            val create = controls.last()
+            val response = mapper.readTree(create).path("response")
+            assertThat(response.path("tool_choice").asText()).isEqualTo("none")
+            assertThat(response.path("metadata")
+                .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean()).isTrue()
+            assertThat(response.path("instructions").asText())
+                .contains("이번 안내로 이번 달 음성 시간이 모두 소진되어 통화를 종료할게요.")
+                .contains("exactly this one short sentence")
+            assertThat(controller.observeProviderEvent(
+                """{"type":"conversation.item.input_audio_transcription.completed","item_id":"late-user","transcript":"경계 뒤 입력"}""",
+            )).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+
+            controller.observeProviderEvent(responseEvent("response.created", "response-quota-1", create))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started", "response-quota-1"))
+            controller.observeProviderEvent(mapper.writeValueAsString(linkedMapOf(
+                "type" to "response.output_audio_transcript.done",
+                "response_id" to "response-quota-1",
+                "item_id" to "quota-notice-item",
+                "content_index" to 0,
+                "transcript" to "이번 안내로 이번 달 음성 시간이 모두 소진되어 통화를 종료할게요.",
+            )))
+
+            // An ACK cannot be replayed or guessed before the provider's exact
+            // response.done + output_audio_buffer.stopped boundary.
+            controller.observeClientEvent(playoutDrainedEvent("response-quota-1"))
+            controller.observeProviderEvent(responseEvent("response.done", "response-quota-1", create))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "response-quota-1"))
+            assertThat(completed.get()).isFalse()
+            controller.observeClientEvent(playoutDrainedEvent("wrong-response"))
+            assertThat(completed.get()).isFalse()
+
+            controller.observeClientEvent(playoutDrainedEvent("response-quota-1"))
+            assertThat(completed.get()).isTrue()
+            assertThat(completionErrors).isEmpty()
+            assertThat(providerErrors).isEmpty()
+            assertThat(controls.count { mapper.readTree(it).path("type").asText() == "response.create" })
+                .isEqualTo(1)
+        } finally {
+            completion.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `monthly quota notice fails closed when provider speaks a different sentence`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val completionErrors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add)
+        val completion = controller.quotaExhaustionNoticeCompletion().subscribe({}, completionErrors::add)
+        try {
+            controller.requestQuotaExhaustionNotice()
+            val create = controls.last()
+            controller.observeProviderEvent(responseEvent("response.created", "response-quota-wrong", create))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started", "response-quota-wrong"))
+            controller.observeProviderEvent(mapper.writeValueAsString(linkedMapOf(
+                "type" to "response.output_audio_transcript.done",
+                "response_id" to "response-quota-wrong",
+                "item_id" to "quota-wrong-item",
+                "content_index" to 0,
+                "transcript" to "계속 공부해 볼까요?",
+            )))
+            controller.observeProviderEvent(responseEvent("response.done", "response-quota-wrong", create))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "response-quota-wrong"))
+            controller.observeClientEvent(playoutDrainedEvent("response-quota-wrong"))
+
+            assertThat(completionErrors).singleElement()
+                .isInstanceOf(VoiceTutorQuotaExhaustionNoticeInterruptedException::class.java)
+            assertThat(controls.count { mapper.readTree(it).path("type").asText() == "response.create" })
+                .isEqualTo(1)
+        } finally {
+            completion.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `monthly quota notice retries at most once and never regenerates after audible failure`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val completionErrors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add)
+        val completion = controller.quotaExhaustionNoticeCompletion().subscribe({}, completionErrors::add)
+        try {
+            controller.requestQuotaExhaustionNotice()
+            val first = controls.last()
+            controller.observeProviderEvent(responseEvent("response.created", "response-quota-failed-1", first))
+            controller.observeProviderEvent(
+                responseEvent("response.done", "response-quota-failed-1", first, status = "failed"),
+            )
+            val retry = controls.last()
+            assertThat(mapper.readTree(retry).path("event_id").asText())
+                .startsWith("buddystudy-internal-duplex-turn-retry-")
+            assertThat(mapper.readTree(retry).path("response").path("metadata")
+                .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean()).isTrue()
+            controller.observeProviderEvent(responseEvent("response.created", "response-quota-failed-2", retry))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started", "response-quota-failed-2"))
+            controller.observeProviderEvent(
+                responseEvent("response.done", "response-quota-failed-2", retry, status = "failed"),
+            )
+
+            assertThat(controls.count { mapper.readTree(it).path("type").asText() == "response.create" })
+                .isEqualTo(2)
+            assertThat(completionErrors).singleElement()
+                .isInstanceOf(VoiceTutorQuotaExhaustionNoticeInterruptedException::class.java)
+        } finally {
+            completion.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `silent monthly quota notice timeout cancels and retries exactly once`() {
+        val diagnostics = CopyOnWriteArrayList<VoiceTutorProviderTurnFailureDiagnostic>()
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+            onProviderTurnFailure = diagnostics::add,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val clientControls = CopyOnWriteArrayList<String>()
+        val completionErrors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add)
+        val clientOutput = controller.clientEvents().subscribe(clientControls::add)
+        val completion = controller.quotaExhaustionNoticeCompletion().subscribe({}, completionErrors::add)
+        try {
+            controller.requestQuotaExhaustionNotice()
+            val firstCreate = controls.last()
+            val firstCreateEventId = mapper.readTree(firstCreate).path("event_id").asText()
+            controller.observeProviderEvent(
+                responseEvent("response.created", "response-quota-timeout-1", firstCreate),
+            )
+
+            controller.fireResponseTimeout(firstCreateEventId)
+
+            assertThat(controls.map { mapper.readTree(it).path("type").asText() })
+                .containsExactly(
+                    "input_audio_buffer.clear",
+                    "response.create",
+                    "response.cancel",
+                    "response.create",
+                )
+            val retry = controls.last()
+            assertThat(mapper.readTree(retry).path("event_id").asText())
+                .startsWith("buddystudy-internal-duplex-turn-retry-")
+            assertThat(
+                mapper.readTree(retry).path("response").path("metadata")
+                    .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean(),
+            ).isTrue()
+            assertThat(diagnostics).hasSize(1)
+            assertThat(diagnostics.single().kind)
+                .isEqualTo(VoiceTutorProviderTurnFailureKind.RESPONSE_TIMEOUT)
+            assertThat(diagnostics.single().action)
+                .isEqualTo(VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED)
+
+            // Completion from the cancelled generation cannot seal the retry.
+            assertThat(
+                controller.observeProviderEvent(
+                    responseEvent("response.done", "response-quota-timeout-1", firstCreate),
+                ),
+            ).isEqualTo(VoiceTutorProviderRelayDisposition.DROP)
+            assertThat(completionErrors).isEmpty()
+
+            val retryCreateEventId = mapper.readTree(retry).path("event_id").asText()
+            controller.observeProviderEvent(
+                responseEvent("response.created", "response-quota-timeout-2", retry),
+            )
+            controller.fireResponseTimeout(retryCreateEventId)
+
+            assertThat(controls.count { mapper.readTree(it).path("type").asText() == "response.create" })
+                .isEqualTo(2)
+            assertThat(controls.count { mapper.readTree(it).path("type").asText() == "response.cancel" })
+                .isEqualTo(2)
+            assertThat(completionErrors).singleElement()
+                .isInstanceOf(VoiceTutorQuotaExhaustionNoticeInterruptedException::class.java)
+            assertThat(diagnostics.last().kind)
+                .isEqualTo(VoiceTutorProviderTurnFailureKind.RESPONSE_TIMEOUT)
+            assertThat(diagnostics.last().action)
+                .isEqualTo(VoiceTutorProviderTurnFailureAction.TURN_ABANDONED)
+            assertThat(clientControls).isEmpty()
+        } finally {
+            completion.dispose()
+            clientOutput.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `completed silent monthly quota notice retries once without cancelling or prompting for input`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val clientControls = CopyOnWriteArrayList<String>()
+        val completionErrors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add)
+        val clientOutput = controller.clientEvents().subscribe(clientControls::add)
+        val completion = controller.quotaExhaustionNoticeCompletion().subscribe({}, completionErrors::add)
+        try {
+            controller.requestQuotaExhaustionNotice()
+            val first = controls.last()
+            controller.observeProviderEvent(responseEvent("response.created", "quota-silent-done-1", first))
+            controller.observeProviderEvent(responseEvent("response.done", "quota-silent-done-1", first))
+
+            val retry = controls.last()
+            assertThat(mapper.readTree(retry).path("event_id").asText())
+                .startsWith("buddystudy-internal-duplex-turn-retry-")
+            assertThat(mapper.readTree(retry).path("response").path("metadata")
+                .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean()).isTrue()
+            controller.observeProviderEvent(responseEvent("response.created", "quota-silent-done-2", retry))
+            controller.observeProviderEvent(responseEvent("response.done", "quota-silent-done-2", retry))
+
+            val controlTypes = controls.map { mapper.readTree(it).path("type").asText() }
+            assertThat(controlTypes).containsExactly(
+                "input_audio_buffer.clear",
+                "response.create",
+                "response.create",
+            )
+            assertThat(controlTypes).doesNotContain("response.cancel")
+            assertThat(clientControls).isEmpty()
+            assertThat(completionErrors).singleElement()
+                .isInstanceOf(VoiceTutorQuotaExhaustionNoticeInterruptedException::class.java)
+        } finally {
+            completion.dispose()
+            clientOutput.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `quota watchdog abandons a silent ordinary response and creates the exact terminal notice`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val clientControls = CopyOnWriteArrayList<String>()
+        val output = controller.providerEvents().subscribe(controls::add)
+        val clientOutput = controller.clientEvents().subscribe(clientControls::add)
+        try {
+            controller.startOpeningResponse()
+            val ordinary = controls.single()
+            val ordinaryCreateEventId = mapper.readTree(ordinary).path("event_id").asText()
+            controller.observeProviderEvent(responseEvent("response.created", "ordinary-silent-at-quota", ordinary))
+
+            controller.requestQuotaExhaustionNotice()
+            controller.fireResponseTimeout(ordinaryCreateEventId)
+
+            assertThat(controls.map { mapper.readTree(it).path("type").asText() }).containsExactly(
+                "response.create",
+                "input_audio_buffer.clear",
+                "response.cancel",
+                "response.create",
+            )
+            val notice = mapper.readTree(controls.last()).path("response")
+            assertThat(notice.path("tool_choice").asText()).isEqualTo("none")
+            assertThat(notice.path("metadata")
+                .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean()).isTrue()
+            assertThat(notice.path("instructions").asText())
+                .contains("이번 안내로 이번 달 음성 시간이 모두 소진되어 통화를 종료할게요.")
+            assertThat(clientControls).isEmpty()
+        } finally {
+            clientOutput.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `disposed quota audio start watchdog cannot cancel after audible evidence`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val completionErrors = CopyOnWriteArrayList<Throwable>()
+        val completed = AtomicBoolean()
+        val output = controller.providerEvents().subscribe(controls::add)
+        val completion = controller.quotaExhaustionNoticeCompletion().subscribe(
+            {},
+            completionErrors::add,
+            { completed.set(true) },
+        )
+        try {
+            controller.requestQuotaExhaustionNotice()
+            val create = controls.last()
+            val createEventId = mapper.readTree(create).path("event_id").asText()
+            controller.observeProviderEvent(responseEvent("response.created", "quota-audible-race", create))
+
+            val timerEpoch = controller.javaClass.getDeclaredField("responseTimerEpoch")
+                .also { it.isAccessible = true }
+            val responseGeneration = controller.javaClass.getDeclaredField("activeResponseGeneration")
+                .also { it.isAccessible = true }
+            val staleShortTimerEpoch = timerEpoch.getLong(controller)
+            val generation = responseGeneration.getLong(controller)
+
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started", "quota-audible-race"))
+            assertThat(timerEpoch.getLong(controller)).isNotEqualTo(staleShortTimerEpoch)
+
+            controller.javaClass.getDeclaredMethod(
+                "fireResponseTimeout",
+                java.lang.Long.TYPE,
+                String::class.java,
+                java.lang.Long.TYPE,
+            ).also { it.isAccessible = true }
+                .invoke(controller, generation, createEventId, staleShortTimerEpoch)
+
+            assertThat(controls.map { mapper.readTree(it).path("type").asText() })
+                .doesNotContain("response.cancel")
+            assertThat(controls.count { mapper.readTree(it).path("type").asText() == "response.create" })
+                .isEqualTo(1)
+
+            controller.observeProviderEvent(mapper.writeValueAsString(linkedMapOf(
+                "type" to "response.output_audio_transcript.done",
+                "response_id" to "quota-audible-race",
+                "item_id" to "quota-audible-race-item",
+                "content_index" to 0,
+                "transcript" to "이번 안내로 이번 달 음성 시간이 모두 소진되어 통화를 종료할게요.",
+            )))
+            controller.observeProviderEvent(responseEvent("response.done", "quota-audible-race", create))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "quota-audible-race"))
+            controller.observeClientEvent(playoutDrainedEvent("quota-audible-race"))
+
+            assertThat(completed.get()).isTrue()
+            assertThat(completionErrors).isEmpty()
+        } finally {
+            completion.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `silent quota done stopped and device acknowledgement cannot complete the notice`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val completionErrors = CopyOnWriteArrayList<Throwable>()
+        val completed = AtomicBoolean()
+        val output = controller.providerEvents().subscribe(controls::add)
+        val completion = controller.quotaExhaustionNoticeCompletion().subscribe(
+            {},
+            completionErrors::add,
+            { completed.set(true) },
+        )
+        try {
+            controller.requestQuotaExhaustionNotice()
+            val create = controls.last()
+            controller.observeProviderEvent(responseEvent("response.created", "quota-silent-ack", create))
+            controller.observeProviderEvent(mapper.writeValueAsString(linkedMapOf(
+                "type" to "response.output_audio_transcript.done",
+                "response_id" to "quota-silent-ack",
+                "item_id" to "quota-silent-ack-item",
+                "content_index" to 0,
+                "transcript" to "이번 안내로 이번 달 음성 시간이 모두 소진되어 통화를 종료할게요.",
+            )))
+            controller.observeProviderEvent(responseEvent("response.done", "quota-silent-ack", create))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "quota-silent-ack"))
+            controller.observeClientEvent(playoutDrainedEvent("quota-silent-ack"))
+
+            assertThat(completed.get()).isFalse()
+            assertThat(completionErrors).isEmpty()
+            assertThat(controls.count { mapper.readTree(it).path("type").asText() == "response.create" })
+                .isEqualTo(1)
+        } finally {
+            completion.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `quota fence lets the current tutor sentence finish then persists it generically before the notice`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val transcriptBatches = CopyOnWriteArrayList<List<String>>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add, errors::add)
+        val transcripts = controller.quotaTerminalTutorTranscriptBatches()
+            .subscribe({ transcriptBatches += it.tutorTranscriptEvents }, errors::add)
+        try {
+            controller.startOpeningResponse()
+            val current = controls.single()
+            controller.observeProviderEvent(responseEvent("response.created", "response-before-quota", current))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.started", "response-before-quota"))
+            controller.observeProviderEvent(mapper.writeValueAsString(linkedMapOf(
+                "type" to "response.output_audio_transcript.done",
+                "response_id" to "response-before-quota",
+                "item_id" to "tutor-before-quota",
+                "content_index" to 0,
+                "transcript" to "현재 설명하던 문장을 마칠게요.",
+            )))
+
+            controller.requestQuotaExhaustionNotice()
+            assertThat(controls.map { mapper.readTree(it).path("type").asText() })
+                .containsExactly("response.create", "input_audio_buffer.clear")
+
+            controller.observeProviderEvent(responseEvent("response.done", "response-before-quota", current))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "response-before-quota"))
+
+            assertThat(transcriptBatches).hasSize(1)
+            val transcript = mapper.readTree(transcriptBatches.single().single())
+            assertThat(transcript.path("transcript").asText()).isEqualTo("현재 설명하던 문장을 마칠게요.")
+            assertThat(transcript.has(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION)).isFalse()
+            assertThat(transcript.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID)).isFalse()
+            val notice = controls.last()
+            assertThat(mapper.readTree(notice).path("response").path("metadata")
+                .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean()).isTrue()
+            assertThat(errors).isEmpty()
+        } finally {
+            transcripts.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `quota fence closes an unacknowledged tool round and starts the notice without waiting for timeout`() {
+        val controller = VoiceTutorDuplexTurnController(
+            mapper = mapper,
+            continuousSpeechLimit = Duration.ofSeconds(30),
+            responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            toolsEnabled = true,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add, errors::add)
+        try {
+            controller.startOpeningResponse()
+            val opening = controls.single()
+            controller.observeProviderEvent(responseEvent("response.created", "opening-tool-test", opening))
+            controller.observeProviderEvent(responseEvent("response.done", "opening-tool-test", opening))
+            controller.observeProviderEvent(outputBufferEvent("output_audio_buffer.stopped", "opening-tool-test"))
+            controller.observeClientEvent(clientSpeechEvent(started = true, sequence = 1))
+            controller.observeClientEvent(clientSpeechEvent(started = false, sequence = 1))
+            controller.observeProviderEvent(committedEvent("tool-learner"))
+            val toolResponse = controls.last()
+            val token = mapper.readTree(toolResponse).path("response").path("metadata")
+                .path(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY).asText()
+            controller.observeProviderEvent(responseEvent("response.created", "tool-response", toolResponse))
+            controller.observeProviderEvent(mapper.writeValueAsString(mapOf(
+                "type" to "response.done",
+                "response" to mapOf(
+                    "id" to "tool-response",
+                    "status" to "completed",
+                    "metadata" to mapOf(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to token),
+                    "output" to listOf(mapOf(
+                        "type" to "function_call",
+                        "status" to "completed",
+                        "call_id" to "pending-tool-call",
+                        "name" to "list_studies",
+                        "arguments" to "{}",
+                    )),
+                ),
+            )))
+
+            controller.requestQuotaExhaustionNotice()
+
+            assertThat(controller.beginToolExecution("pending-tool-call")).isFalse()
+            controller.expireToolAcknowledgements()
+            assertThat(controls.map(mapper::readTree)
+                .filter { it.path("type").asText() == "response.create" }
+                .last().path("response").path("metadata")
+                .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean()).isTrue()
+            assertThat(errors).isEmpty()
+        } finally {
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `quota fence discards a late function only opening response and still starts its notice`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add, errors::add)
+        try {
+            controller.startOpeningResponse()
+            val opening = controls.single()
+            controller.observeProviderEvent(responseEvent("response.created", "late-opening-tool", opening))
+            controller.requestQuotaExhaustionNotice()
+            val metadata = mapper.readTree(opening).path("response").path("metadata")
+            val token = metadata.path(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY).asText()
+
+            controller.observeProviderEvent(mapper.writeValueAsString(mapOf(
+                "type" to "response.done",
+                "response" to mapOf(
+                    "id" to "late-opening-tool",
+                    "status" to "completed",
+                    "metadata" to mapOf(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to token),
+                    "output" to listOf(mapOf(
+                        "type" to "function_call",
+                        "status" to "completed",
+                        "call_id" to "forbidden-late-call",
+                        "name" to "list_studies",
+                        "arguments" to "{}",
+                    )),
+                ),
+            )))
+
+            val creates = controls.map(mapper::readTree)
+                .filter { it.path("type").asText() == "response.create" }
+            assertThat(creates).hasSize(2)
+            assertThat(creates.last().path("response").path("metadata")
+                .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean()).isTrue()
+            assertThat(controller.beginToolExecution("forbidden-late-call")).isFalse()
+            assertThat(errors).isEmpty()
+        } finally {
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `quota fence routes an uncorrelated ordinary provider error to its notice without input retry`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val clientControls = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add, errors::add)
+        val clientOutput = controller.clientEvents().subscribe(clientControls::add, errors::add)
+        try {
+            controller.startOpeningResponse()
+            val ordinary = controls.single()
+            controller.observeProviderEvent(responseEvent("response.created", "quota-ordinary-error", ordinary))
+            controller.requestQuotaExhaustionNotice()
+
+            controller.observeProviderEvent(
+                """{"type":"error","error":{"type":"server_error","code":"service_unavailable"}}""",
+            )
+
+            val creates = controls.map(mapper::readTree)
+                .filter { it.path("type").asText() == "response.create" }
+            assertThat(creates).hasSize(2)
+            assertThat(creates.last().path("response").path("metadata")
+                .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean()).isTrue()
+            assertThat(clientControls).isEmpty()
+            assertThat(errors).isEmpty()
+        } finally {
+            clientOutput.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `quota fence abandons an exhausted ordinary retry into the terminal notice`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val clientControls = CopyOnWriteArrayList<String>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add, errors::add)
+        val clientOutput = controller.clientEvents().subscribe(clientControls::add, errors::add)
+        try {
+            controller.startOpeningResponse()
+            val first = controls.single()
+            controller.observeProviderEvent(responseEvent("response.created", "quota-ordinary-retry-1", first))
+            controller.observeProviderEvent(
+                providerErrorEvent(mapper.readTree(first).path("event_id").asText(), "first failure"),
+            )
+            val retry = controls.last()
+            controller.observeProviderEvent(responseEvent("response.created", "quota-ordinary-retry-2", retry))
+
+            controller.requestQuotaExhaustionNotice()
+            controller.observeProviderEvent(
+                providerErrorEvent(mapper.readTree(retry).path("event_id").asText(), "second failure"),
+            )
+
+            val creates = controls.map(mapper::readTree)
+                .filter { it.path("type").asText() == "response.create" }
+            assertThat(creates).hasSize(3)
+            assertThat(creates.last().path("response").path("metadata")
+                .path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean()).isTrue()
+            assertThat(clientControls).isEmpty()
+            assertThat(errors).isEmpty()
+        } finally {
+            clientOutput.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `uncorrelated provider error during the quota notice resolves terminal failure`() {
+        val controller = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val controls = CopyOnWriteArrayList<String>()
+        val clientControls = CopyOnWriteArrayList<String>()
+        val completionErrors = CopyOnWriteArrayList<Throwable>()
+        val output = controller.providerEvents().subscribe(controls::add)
+        val clientOutput = controller.clientEvents().subscribe(clientControls::add)
+        val completion = controller.quotaExhaustionNoticeCompletion().subscribe({}, completionErrors::add)
+        try {
+            controller.requestQuotaExhaustionNotice()
+            val notice = controls.last()
+            controller.observeProviderEvent(responseEvent("response.created", "quota-uncorrelated-error", notice))
+
+            controller.observeProviderEvent(
+                """{"type":"error","error":{"type":"server_error","code":"service_unavailable"}}""",
+            )
+
+            assertThat(controls.count { mapper.readTree(it).path("type").asText() == "response.create" })
+                .isEqualTo(1)
+            assertThat(clientControls).isEmpty()
+            assertThat(completionErrors).singleElement()
+                .isInstanceOf(VoiceTutorQuotaExhaustionNoticeInterruptedException::class.java)
+        } finally {
+            completion.dispose()
+            clientOutput.dispose()
+            output.dispose()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `provider cannot mark a normal response as quota notice or omit the marker from the real notice`() {
+        val normal = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val normalControls = CopyOnWriteArrayList<String>()
+        val normalOutput = normal.providerEvents().subscribe(normalControls::add)
+        try {
+            normal.startOpeningResponse()
+            val control = normalControls.single()
+            val token = mapper.readTree(control).path("response").path("metadata")
+                .path(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY).asText()
+            assertThatThrownBy {
+                normal.observeProviderEvent(mapper.writeValueAsString(mapOf(
+                    "type" to "response.created",
+                    "response" to mapOf(
+                        "id" to "spoofed-quota",
+                        "status" to "in_progress",
+                        "metadata" to mapOf(
+                            VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to token,
+                            VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY to true,
+                        ),
+                    ),
+                )))
+            }.isInstanceOf(VoiceTutorProviderProtocolException::class.java)
+        } finally {
+            normalOutput.dispose()
+            normal.close()
+        }
+
+        val quota = controller(
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+            readyForLearnerTurns = false,
+        )
+        val quotaControls = CopyOnWriteArrayList<String>()
+        val quotaOutput = quota.providerEvents().subscribe(quotaControls::add)
+        try {
+            quota.requestQuotaExhaustionNotice()
+            val control = quotaControls.last()
+            val token = mapper.readTree(control).path("response").path("metadata")
+                .path(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY).asText()
+            assertThatThrownBy {
+                quota.observeProviderEvent(mapper.writeValueAsString(mapOf(
+                    "type" to "response.created",
+                    "response" to mapOf(
+                        "id" to "missing-quota-marker",
+                        "status" to "in_progress",
+                        "metadata" to mapOf(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to token),
+                    ),
+                )))
+            }.isInstanceOf(VoiceTutorProviderProtocolException::class.java)
+        } finally {
+            quotaOutput.dispose()
+            quota.close()
+        }
+    }
+
+    @Test
+    fun `quota response marker must remain an actual JSON boolean`() {
+        listOf<Any>("true", 1).forEachIndexed { index, spoofedMarker ->
+            val controller = controller(
+                transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
+                readyForLearnerTurns = false,
+            )
+            val controls = CopyOnWriteArrayList<String>()
+            val output = controller.providerEvents().subscribe(controls::add)
+            try {
+                controller.requestQuotaExhaustionNotice()
+                val control = controls.last { event ->
+                    mapper.readTree(event).path("type").asText() == "response.create"
+                }
+                val token = mapper.readTree(control).path("response").path("metadata")
+                    .path(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY).asText()
+                assertThatThrownBy {
+                    controller.observeProviderEvent(mapper.writeValueAsString(mapOf(
+                        "type" to "response.created",
+                        "response" to mapOf(
+                            "id" to "quota-marker-spoof-$index",
+                            "status" to "in_progress",
+                            "metadata" to mapOf(
+                                VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to token,
+                                VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY to spoofedMarker,
+                            ),
+                        ),
+                    )))
+                }.isInstanceOf(VoiceTutorProviderProtocolException::class.java)
+            } finally {
+                output.dispose()
+                controller.close()
+            }
+        }
+    }
+
+    @Test
     fun `webrtc missing provider stop remains terminal even after a matching device acknowledgement`() {
         val controller = controller(transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND)
         val activeControl = AtomicReference<String>()
@@ -2030,18 +2790,19 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         responseControl: String,
         status: String = if (type == "response.created") "in_progress" else "completed",
     ): String {
-        val token = mapper.readTree(responseControl)
-            .path("response")
-            .path("metadata")
-            .path(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY)
-            .asText()
+        val controlMetadata = mapper.readTree(responseControl).path("response").path("metadata")
+        val token = controlMetadata.path(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY).asText()
+        val metadata = linkedMapOf<String, Any>(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to token)
+        if (controlMetadata.path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY).asBoolean(false)) {
+            metadata[VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY] = true
+        }
         return mapper.writeValueAsString(
             mapOf(
                 "type" to type,
                 "response" to mapOf(
                     "id" to id,
                     "status" to status,
-                    "metadata" to mapOf(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to token),
+                    "metadata" to metadata,
                 ),
             ),
         )

@@ -9,7 +9,10 @@ import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorRelayUseC
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorWebRtcUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuotaExhaustionPolicy
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorSpokenTerminationNotice
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
+import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import kotlinx.coroutines.reactive.asFlow
@@ -89,6 +92,8 @@ class VoiceTutorControlWebSocketHandler(
             .onBackpressureBuffer(Queues.get<String>(MAX_PENDING_CLIENT_CONTROLS).get())
         val terminalSignal = Sinks.one<VoiceTutorRelayTermination>()
         val relayTerminated = AtomicBoolean(false)
+        val gracefulTerminal = AtomicBoolean(false)
+        val providerRelayDone = Sinks.one<Boolean>()
         val terminalGate = Any()
 
         fun elapsedMs(): Long = (System.nanoTime() - startedNanos).coerceAtLeast(0) / 1_000_000
@@ -99,6 +104,8 @@ class VoiceTutorControlWebSocketHandler(
             reason: String? = null,
             error: Throwable? = null,
             payload: String? = null,
+            spokenNotice: VoiceTutorSpokenTerminationNotice? = null,
+            notBefore: Instant? = null,
         ): Boolean = synchronized(terminalGate) {
             if (relayTerminated.compareAndSet(false, true)) {
                 // The first terminal decision owns its outcome as well as
@@ -107,6 +114,7 @@ class VoiceTutorControlWebSocketHandler(
                 reason?.let(endReason::set)
                 error?.let(failure::set)
                 terminalSource.set(source)
+                gracefulTerminal.set(spokenNotice != null)
                 // Only internal state and numeric close codes belong here. Do
                 // not log provider/client payloads, close reasons, or errors'
                 // messages: they can contain private speech or credentials.
@@ -117,7 +125,9 @@ class VoiceTutorControlWebSocketHandler(
                     cancelActiveResponse, elapsedMs(), failure.get()?.javaClass?.simpleName ?: "none",
                 )
                 payload?.let { emit(outgoing, it) }
-                terminalSignal.tryEmitValue(VoiceTutorRelayTermination(cancelActiveResponse))
+                terminalSignal.tryEmitValue(
+                    VoiceTutorRelayTermination(cancelActiveResponse, spokenNotice, notBefore),
+                )
                 true
             } else {
                 false
@@ -126,8 +136,44 @@ class VoiceTutorControlWebSocketHandler(
 
         fun emitProviderPayload(value: String) {
             synchronized(terminalGate) {
-                if (!relayTerminated.get()) emitRequired(outgoing, value)
+                val type = runCatching { mapper.readTree(value).path("type").asText() }.getOrDefault("")
+                val terminalInputRetry = relayTerminated.get() && gracefulTerminal.get() &&
+                    type == VoiceTutorRealtimeContract.INPUT_RETRY_EVENT
+                if ((!relayTerminated.get() || gracefulTerminal.get()) && !terminalInputRetry) {
+                    emitRequired(outgoing, value)
+                }
             }
+        }
+
+        suspend fun classifyRelayTerminalReason(
+            authorized: Boolean,
+            state: VoiceTutorSessionStatus?,
+        ): String {
+            val quotaEnding = authorized && state == VoiceTutorSessionStatus.ENDING &&
+                relay.beginQuotaExhaustionNotice(principal, sessionId) == VoiceTutorSessionStatus.ENDING
+            return when {
+                !authorized -> "AUTH_REVOKED"
+                quotaEnding -> "QUOTA_EXHAUSTED"
+                state == VoiceTutorSessionStatus.ENDING -> "USER_ENDED"
+                else -> "SERVER_FINALIZED"
+            }
+        }
+
+        fun signalRelayTerminal(source: String, reason: String) {
+            val quotaExhausted = reason == "QUOTA_EXHAUSTED"
+            signalTerminal(
+                source = source,
+                cancelActiveResponse = !quotaExhausted,
+                reason = reason,
+                payload = synthetic(
+                    "buddystudy.voice.session.ending",
+                    sessionId,
+                    mapOf("reason" to reason, "hardEndsAt" to context.session.hardEndsAt),
+                ),
+                spokenNotice = VoiceTutorSpokenTerminationNotice.MONTHLY_QUOTA_EXHAUSTED
+                    .takeIf { quotaExhausted },
+                notBefore = context.session.hardEndsAt.takeIf { quotaExhausted },
+            )
         }
 
         val sendToClient = clientSession.send(outgoing.asFlux().map(clientSession::textMessage))
@@ -142,18 +188,46 @@ class VoiceTutorControlWebSocketHandler(
                 }
             }
             .onErrorResume { Mono.empty() }
-        val untilDeadline = Duration.between(Instant.now(), context.session.hardEndsAt).coerceAtLeast(Duration.ZERO)
-        val deadline = Mono.delay(untilDeadline).map {
-            signalTerminal("DEADLINE", cancelActiveResponse = true, reason = "TIME_LIMIT")
-            emit(
-                outgoing,
-                synthetic(
+        val noticeTriggerAt = voiceTutorTerminationTriggerAt(context.session)
+        val untilDeadline = Duration.between(Instant.now(), noticeTriggerAt).coerceAtLeast(Duration.ZERO)
+        val deadline = Mono.delay(untilDeadline).flatMap {
+            if (!context.session.monthlyQuotaExhaustsAtHardEnd) {
+                Mono.just("TIME_LIMIT")
+            } else {
+                mono { relay.beginQuotaExhaustionNotice(principal, sessionId) }
+                    .flatMap { state ->
+                        if (state == VoiceTutorSessionStatus.ENDING) {
+                            Mono.just("QUOTA_EXHAUSTED")
+                        } else {
+                            val remaining = Duration.between(Instant.now(), context.session.hardEndsAt)
+                                .coerceAtLeast(Duration.ZERO)
+                            Mono.delay(remaining).thenReturn("TIME_LIMIT")
+                        }
+                    }
+                    .switchIfEmpty(
+                        Mono.defer {
+                            val remaining = Duration.between(Instant.now(), context.session.hardEndsAt)
+                                .coerceAtLeast(Duration.ZERO)
+                            Mono.delay(remaining).thenReturn("TIME_LIMIT")
+                        },
+                    )
+            }
+        }.map { reason ->
+            val quotaExhausted = reason == "QUOTA_EXHAUSTED"
+            signalTerminal(
+                source = "DEADLINE",
+                cancelActiveResponse = !quotaExhausted,
+                reason = reason,
+                payload = synthetic(
                     "buddystudy.voice.session.ending",
                     sessionId,
-                    mapOf("reason" to "TIME_LIMIT", "hardEndsAt" to context.session.hardEndsAt),
+                    mapOf("reason" to reason, "hardEndsAt" to context.session.hardEndsAt),
                 ),
+                spokenNotice = VoiceTutorSpokenTerminationNotice.MONTHLY_QUOTA_EXHAUSTED
+                    .takeIf { quotaExhausted },
+                notBefore = context.session.hardEndsAt.takeIf { quotaExhausted },
             )
-            "TIME_LIMIT"
+            reason
         }
         val serverControl = Flux.interval(Duration.ofSeconds(2))
             .concatMap {
@@ -166,24 +240,18 @@ class VoiceTutorControlWebSocketHandler(
             }
             .filter { !it.authorized || it.state != VoiceTutorSessionStatus.ACTIVE }
             .next()
-            .map { control ->
-                val reason = when {
-                    !control.authorized -> "AUTH_REVOKED"
-                    control.state == VoiceTutorSessionStatus.ENDING -> "USER_ENDED"
-                    else -> "SERVER_FINALIZED"
-                }
-                signalTerminal("SERVER_CONTROL", cancelActiveResponse = true, reason = reason)
-                emit(
-                    outgoing,
-                    synthetic(
-                        "buddystudy.voice.session.ending",
-                        sessionId,
-                        mapOf("reason" to reason, "hardEndsAt" to context.session.hardEndsAt),
-                    ),
-                )
+            .flatMap { control ->
+                mono { classifyRelayTerminalReason(control.authorized, control.state) }
+            }
+            .map { reason ->
+                signalRelayTerminal("SERVER_CONTROL", reason)
                 reason
             }
+        // This watcher arms both timers. Cancel it after another terminal
+        // source has finished the provider relay, otherwise a client/provider
+        // close could remain blocked until a far-future session deadline.
         val serverStop = Mono.firstWithSignal(deadline, serverControl)
+            .takeUntilOther(providerRelayDone.asMono())
 
         val clientInput = clientSession.receive()
             .doOnComplete {
@@ -197,11 +265,35 @@ class VoiceTutorControlWebSocketHandler(
                     )
                 val type = node.path("type").asText()
                 val traffic = clientTraffic.inspect(raw)
+                if (relayTerminated.get() && gracefulTerminal.get()) {
+                    return@concatMap when (type) {
+                        VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT ->
+                            if (traffic.acceptedLocalEvent) Mono.just(raw) else Mono.empty()
+                        VoiceTutorRealtimeEventPolicy.CLIENT_HEARTBEAT_EVENT ->
+                            if (traffic.acceptedLocalEvent) {
+                                mono { relay.heartbeat(principal, sessionId) }
+                                    .doOnNext { state ->
+                                        emit(
+                                            outgoing,
+                                            synthetic(
+                                                "buddystudy.voice.heartbeat.ack",
+                                                sessionId,
+                                                mapOf("state" to state.name),
+                                            ),
+                                        )
+                                    }
+                                    .then(Mono.empty())
+                            } else {
+                                Mono.empty()
+                            }
+                        else -> Mono.empty()
+                    }
+                }
                 when (type) {
                     VoiceTutorRealtimeEventPolicy.CLIENT_HEARTBEAT_EVENT -> {
                         if (traffic.acceptedLocalEvent) {
                             mono { relay.heartbeat(principal, sessionId) }
-                                .doOnNext { state ->
+                                .flatMap { state ->
                                     emit(
                                         outgoing,
                                         synthetic(
@@ -210,11 +302,14 @@ class VoiceTutorControlWebSocketHandler(
                                             mapOf("state" to state.name),
                                         ),
                                     )
-                                    if (state != VoiceTutorSessionStatus.ACTIVE) {
-                                        signalTerminal(
-                                            "CLIENT_HEARTBEAT_FINALIZED", cancelActiveResponse = true,
-                                            reason = "SERVER_FINALIZED",
-                                        )
+                                    if (state == VoiceTutorSessionStatus.ACTIVE) {
+                                        Mono.empty<Void>()
+                                    } else {
+                                        mono { classifyRelayTerminalReason(authorized = true, state = state) }
+                                            .doOnNext { reason ->
+                                                signalRelayTerminal("CLIENT_HEARTBEAT_FINALIZED", reason)
+                                            }
+                                            .then()
                                     }
                                 }
                                 .then(Mono.empty<String>())
@@ -267,8 +362,7 @@ class VoiceTutorControlWebSocketHandler(
                     )
                 }
             }
-            .takeUntilOther(serverStop)
-            .takeUntilOther(terminalSignal.asMono())
+            .takeUntilOther(providerRelayDone.asMono())
             .doOnNext { raw -> emitClientControl(providerControlEvents, raw) }
             .onErrorResume { error ->
                 signalTerminal(
@@ -407,6 +501,7 @@ class VoiceTutorControlWebSocketHandler(
                     )
                 }
             }
+            .doFinally { providerRelayDone.tryEmitValue(true) }
         val providerFlow = Mono.usingWhen(
             Mono.just(callId),
             { providerWork },
@@ -445,7 +540,7 @@ class VoiceTutorControlWebSocketHandler(
                 )
             },
             {
-                Mono.`when`(sendToClient, clientInput, providerFlow)
+                Mono.`when`(sendToClient, clientInput, providerFlow, serverStop.then())
                     .then(Mono.defer {
                         localCloseInitiated.set(true)
                         clientSession.close()
@@ -515,6 +610,7 @@ class VoiceTutorControlWebSocketHandler(
                 VoiceTutorTranscriptMetadata.studyQuestionProviderItemId(node),
                 askedStudyQuestion = VoiceTutorTranscriptMetadata.askedStudyQuestion(node),
                 studyAnswerProviderItemIds = VoiceTutorTranscriptMetadata.studyAnswerProviderItemIds(node),
+                acceptedAt = VoiceTutorTranscriptMetadata.acceptedAt(node),
             )
             "response.output_audio_transcript.done" -> appendTranscript(
                 principal,
@@ -542,6 +638,7 @@ class VoiceTutorControlWebSocketHandler(
         askedStudyQuestion: Boolean = false,
         isStudyQuestion: Boolean = false,
         studyAnswerProviderItemIds: List<String> = emptyList(),
+        acceptedAt: Instant? = null,
     ): Mono<Boolean> = if (transcript.isBlank()) {
         Mono.just(false)
     } else {
@@ -552,13 +649,14 @@ class VoiceTutorControlWebSocketHandler(
                 providerItemId = providerItemId,
                 role = role,
                 transcript = transcript,
-                occurredAt = Instant.now(),
+                occurredAt = acceptedAt ?: Instant.now(),
                 lessonRevision = lessonRevision,
                 studyQuestionProviderItemId = studyQuestionProviderItemId,
                 studyAnswerProviderItemId = studyAnswerProviderItemId,
                 askedStudyQuestion = askedStudyQuestion,
                 isStudyQuestion = isStudyQuestion,
                 studyAnswerProviderItemIds = studyAnswerProviderItemIds,
+                acceptedBeforeQuotaCutoff = acceptedAt != null,
             )
         }
     }
@@ -612,3 +710,18 @@ class VoiceTutorControlWebSocketHandler(
         )
     }
 }
+
+/**
+ * Only the provider-cap collision needs an early notice. A shorter monthly
+ * reservation owns the media session past its quota boundary, so learner input
+ * stays open until the exact paid cutoff.
+ */
+internal fun voiceTutorTerminationTriggerAt(session: VoiceTutorSession): Instant =
+    if (session.monthlyQuotaExhaustsAtHardEnd &&
+        session.maxSessionSeconds == VoiceTutorQuotaExhaustionPolicy.PROVIDER_HARD_CAP_SECONDS &&
+        session.reservedSeconds == VoiceTutorQuotaExhaustionPolicy.PROVIDER_HARD_CAP_SECONDS
+    ) {
+        session.hardEndsAt.minusSeconds(VoiceTutorQuotaExhaustionPolicy.NOTICE_LEAD_SECONDS)
+    } else {
+        session.hardEndsAt
+    }
