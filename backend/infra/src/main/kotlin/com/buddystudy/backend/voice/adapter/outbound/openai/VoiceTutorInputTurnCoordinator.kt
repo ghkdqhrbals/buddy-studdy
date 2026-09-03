@@ -220,6 +220,15 @@ internal class VoiceTutorInputTurnCoordinator(
             if (correlated == null) {
                 rejectBatch(current, RetryReason.INVALID_ASSESSMENT_RESULT, nowNanos, actions)
             } else {
+                correlated.decisions.zip(current.utterances)
+                    .singleOrNull { (decision, utterance) ->
+                        decision.decision == VoiceTutorInputDecision.MEANINGFUL && !utterance.checkpoint &&
+                            utterance.studyMutationContext?.source ==
+                            com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT
+                    }
+                    ?.first
+                    ?.itemId
+                    ?.let(::consumeInitialStudyMutationSnapshot)
                 correlated.decisions.forEach { decision ->
                     val item = pending.getValue(decision.itemId)
                     when (decision.decision) {
@@ -289,6 +298,24 @@ internal class VoiceTutorInputTurnCoordinator(
     /** Consume old referential slots after one attested study mutation owns them. */
     fun clearPersistedLearnerContext() {
         if (!isClosed) persistedLearnerContext.clear()
+    }
+
+    /**
+     * Revoke copies of the fresh-call owner snapshot that were frozen on already acknowledged
+     * commits before the first meaningful assessment linearized. The winning item keeps its
+     * exact context until its persistence acknowledgement; every later item must earn a focus
+     * or spoken-offer context instead.
+     */
+    fun consumeInitialStudyMutationSnapshot(winnerItemId: String) {
+        if (isClosed) return
+        pending.values.forEach { item ->
+            if (item.itemId != winnerItemId &&
+                item.studyMutationContext?.source ==
+                com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT
+            ) {
+                item.studyMutationContext = null
+            }
+        }
     }
 
     fun expire(nowNanos: Long): List<Action> {
@@ -365,6 +392,13 @@ internal class VoiceTutorInputTurnCoordinator(
         // An older unpersisted/deleting item cannot be overtaken by a new batch.
         for (item in pending.values) {
             if (item.stage != Stage.WAITING_ASSESSMENT) break
+            // A study-tree mutation can span two rapid, separately committed
+            // utterances (for example a corrected name followed by "start").
+            // Assess every mutation-capable boundary only after all earlier
+            // USER items have reached their durable publish acknowledgement, so
+            // the later semantic assessment can use those bounded learner rows.
+            // This is ordering/provenance, not text or regex intent detection.
+            if (selected.isNotEmpty() && item.studyMutationContext != null) break
             val text = requireNotNull(item.transcript)
             val offerCharacters = item.targetOffer?.tutorAudioTranscript?.length ?: 0
             val mutationCharacters = item.studyMutationContext?.candidates.orEmpty().sumOf { it.topic.length }
@@ -386,6 +420,7 @@ internal class VoiceTutorInputTurnCoordinator(
             persistedContexts[item.itemId] = persistedContext
             characters += text.length + offerCharacters + mutationCharacters + persistedContextCharacters +
                 (sameSpeechContext?.length ?: 0)
+            if (item.studyMutationContext != null) break
             // Every item in this batch receives the same frozen snapshot made
             // only of earlier persistence acknowledgements. Co-batched USER
             // items can still correct one another's conversational intent, but
@@ -547,7 +582,7 @@ internal class VoiceTutorInputTurnCoordinator(
         var stage: Stage,
         var stageStartedAt: Long,
         val targetOffer: VoiceTutorStudyTargetOffer? = null,
-        val studyMutationContext: VoiceTutorStudyMutationContext? = null,
+        var studyMutationContext: VoiceTutorStudyMutationContext? = null,
         var transcript: String? = null,
         var rawEvent: String? = null,
     )

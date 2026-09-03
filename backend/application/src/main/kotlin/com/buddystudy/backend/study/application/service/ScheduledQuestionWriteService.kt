@@ -94,8 +94,9 @@ class ScheduledQuestionWriteService(
 
     @Transactional
     override suspend fun deferUntilNextInterval(study: StudyEntity, now: Instant) {
-        study.markScheduleCompleted(now)
-        studies.save(study)
+        val current = studies.findByIdAndUserId(study.id, study.userId) ?: return
+        current.markScheduleCompleted(now)
+        studies.save(current)
     }
 
     @Transactional
@@ -107,8 +108,13 @@ class ScheduledQuestionWriteService(
         now: Instant,
     ) {
         questionKey?.let { questionKeys.releaseQuestionReservation(it, now) }
-        study.markScheduleFailed(error, retryAt, now)
-        studies.save(study)
+        // An earlier optimistic-lock failure may already have incremented the
+        // mutable caller entity's version. Reusing that object can make a retry
+        // look current and overwrite a concurrent voice rename. Always base the
+        // recovery write on a freshly loaded owned row instead.
+        val current = studies.findByIdAndUserId(study.id, study.userId) ?: return
+        current.markScheduleFailed(error, retryAt, now)
+        studies.save(current)
     }
 }
 

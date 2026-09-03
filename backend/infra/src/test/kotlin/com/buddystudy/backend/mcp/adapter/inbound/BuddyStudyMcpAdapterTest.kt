@@ -12,6 +12,7 @@ import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
+import com.buddystudy.backend.study.application.port.inbound.ExpectedStudyMetadata
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
@@ -285,6 +286,47 @@ class BuddyStudyMcpAdapterTest {
             listOf(principal, 42L, UpdateStudyCommand(difficultyLevel = 1)),
             listOf(principal, 42L, UpdateStudyCommand(topic = "Redis", difficultyLevel = 10)),
         )
+    }
+
+    @Test
+    fun `voice metadata fence stays private and reaches the transactional update command`() {
+        var forwarded: UpdateStudyCommand? = null
+        val adapter = adapter(proxyUseCase { name, arguments ->
+            assertThat(name).isEqualTo("updateStudy")
+            forwarded = arguments[2] as UpdateStudyCommand
+            studyRoom()
+        })
+        val arguments = mapOf<String, Any>(
+            "study_id" to 42L,
+            "topic" to "Redis Streams",
+            BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT to "Redis",
+            BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT to 4,
+            BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT to 0L,
+        )
+
+        assertThat(call(adapter, "update_study", arguments, authenticatedContext).isError()).isFalse()
+        assertThat(forwarded).isEqualTo(
+            UpdateStudyCommand(
+                topic = "Redis Streams",
+                expectedCurrent = ExpectedStudyMetadata(null, "Redis", 4),
+            ),
+        )
+        val publicProperties = adapter.tools().single { it.tool().name() == "update_study" }
+            .tool().inputSchema()["properties"] as Map<*, *>
+        assertThat(publicProperties.keys).doesNotContain(
+            BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT,
+            BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT,
+            BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT,
+        )
+
+        val incomplete = call(
+            adapter,
+            "update_study",
+            arguments - BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT,
+            authenticatedContext,
+        )
+        assertThat(incomplete.isError()).isTrue()
+        assertThat(errorDetails(incomplete)["code"]).isEqualTo("VALIDATION_ERROR")
     }
 
     @Test

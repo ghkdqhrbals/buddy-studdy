@@ -13,10 +13,11 @@ import org.springframework.data.domain.Sort
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
 import org.springframework.data.relational.core.query.Criteria
 import org.springframework.data.relational.core.query.Query
-import org.springframework.data.relational.core.query.Update
 import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 
 @Repository
 class StudyRepository(
@@ -41,16 +42,70 @@ class StudyRepository(
         require(topic != null || difficultyLevel != null) { "A study metadata field is required." }
         require(topic == null || (topic.isNotBlank() && topic.length <= 255)) { "Invalid study topic." }
         require(difficultyLevel == null || difficultyLevel in 1..10) { "Invalid study difficulty." }
-        var patch = Update.update("updated_at", now)
-        topic?.let { patch = patch.set("topic", it) }
-        difficultyLevel?.let { patch = patch.set("difficulty_level", it) }
-        val changed = template.update(StudyEntity::class.java)
-            .matching(Query.query(Criteria.where("id").`is`(id).and("user_id").`is`(userId)))
-            .apply(patch).awaitSingle()
+        val assignments = buildList {
+            add("updated_at = :updatedAt")
+            add("version = version + 1")
+            if (topic != null) add("topic = :topic")
+            if (difficultyLevel != null) add("difficulty_level = :difficultyLevel")
+        }
+        var statement = template.databaseClient.sql(
+            "update studies set ${assignments.joinToString(", ")} where id = :id and user_id = :userId",
+        ).bind("updatedAt", now.utc()).bind("id", id).bind("userId", userId)
+        topic?.let { statement = statement.bind("topic", it) }
+        difficultyLevel?.let { statement = statement.bind("difficultyLevel", it) }
+        val changed = statement.fetch().rowsUpdated().awaitSingle()
         // Repeating a patch is idempotent. Drivers may report changed rows rather
         // than matched rows, so still resolve the owned row after a zero count.
         check(changed in 0L..1L) { "A metadata patch affected an unexpected number of study rows." }
         return findByIdAndUserId(id, userId)
+    }
+
+    override suspend fun updateTopicMetadataIfCurrent(
+        id: Long,
+        userId: Long,
+        topic: String?,
+        difficultyLevel: Int?,
+        expectedParentStudyId: Long?,
+        expectedTopic: String,
+        expectedDifficultyLevel: Int,
+        now: Instant,
+    ): StudyEntity? {
+        require(topic != null || difficultyLevel != null) { "A study metadata field is required." }
+        require(topic == null || (topic.isNotBlank() && topic.length <= 255)) { "Invalid study topic." }
+        require(difficultyLevel == null || difficultyLevel in 1..10) { "Invalid study difficulty." }
+        require(expectedParentStudyId?.let { it > 0 && it != id } != false) { "Invalid expected study parent." }
+        require(expectedTopic.isNotBlank() && expectedTopic.length <= 255) { "Invalid expected study topic." }
+        require(expectedDifficultyLevel in 1..10) { "Invalid expected study difficulty." }
+
+        val assignments = buildList {
+            add("updated_at = :updatedAt")
+            add("version = version + 1")
+            if (topic != null) add("topic = :topic")
+            if (difficultyLevel != null) add("difficulty_level = :difficultyLevel")
+        }
+        val parentPredicate = if (expectedParentStudyId == null) {
+            "parent_study_id is null"
+        } else {
+            "parent_study_id = :expectedParentStudyId"
+        }
+        var statement = template.databaseClient.sql(
+            """
+            update studies set ${assignments.joinToString(", ")}
+            where id = :id and user_id = :userId
+              and topic = :expectedTopic and difficulty_level = :expectedDifficultyLevel
+              and $parentPredicate
+            """.trimIndent(),
+        ).bind("updatedAt", now.utc())
+            .bind("id", id)
+            .bind("userId", userId)
+            .bind("expectedTopic", expectedTopic)
+            .bind("expectedDifficultyLevel", expectedDifficultyLevel)
+        expectedParentStudyId?.let { statement = statement.bind("expectedParentStudyId", it) }
+        topic?.let { statement = statement.bind("topic", it) }
+        difficultyLevel?.let { statement = statement.bind("difficultyLevel", it) }
+        val changed = statement.fetch().rowsUpdated().awaitSingle()
+        check(changed in 0L..1L) { "A conditional metadata patch affected an unexpected number of study rows." }
+        return if (changed == 1L) findByIdAndUserId(id, userId) else null
     }
 
     override suspend fun findSubtreeIdsForMutation(userId: Long, studyId: Long, limit: Int): List<Long>? {
@@ -228,15 +283,22 @@ class StudyRepository(
             .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
             .all().collectList().awaitSingle()
         if (ids.isEmpty()) return emptyList()
-        template.update(StudyEntity::class.java)
-            .matching(Query.query(Criteria.where("id").`in`(ids)))
-            .apply(
-                Update.update("schedule_claimed_until", claimUntil)
-                    .set("updated_at", now),
-            )
-            .awaitSingle()
+        val idParameters = ids.indices.joinToString(", ") { ":studyId$it" }
+        var claim = template.databaseClient.sql(
+            """
+            update studies
+            set schedule_claimed_until = :claimUntil, updated_at = :updatedAt, version = version + 1
+            where id in ($idParameters)
+            """.trimIndent(),
+        ).bind("claimUntil", claimUntil).bind("updatedAt", now)
+        ids.forEachIndexed { index, id -> claim = claim.bind("studyId$index", id) }
+        check(claim.fetch().rowsUpdated().awaitSingle() == ids.size.toLong()) {
+            "A due-study claim affected an unexpected number of rows."
+        }
         val byId = template.select(Query.query(Criteria.where("id").`in`(ids)), StudyEntity::class.java)
             .collectList().awaitSingle().associateBy { it.id }
         return ids.mapNotNull(byId::get)
     }
 }
+
+private fun Instant.utc(): LocalDateTime = LocalDateTime.ofInstant(this, ZoneOffset.UTC)

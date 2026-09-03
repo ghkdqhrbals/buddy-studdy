@@ -3,15 +3,98 @@
 Verification date: 2026-09-03. This is implementation verification, not a
 production rollout or a measured ChatGPT-equivalent latency guarantee.
 
-Latest implementation: [one-turn root creation and immediate lesson start](#one-turn-root-creation-and-immediate-lesson-start).
-It extends the existing guided saved-tree descent, single-orb,
-Silero/contextual-input, MCP and source-backed summary contracts; it does not
-regrade past answers.
+Latest implementation: [direct opening and update-and-start](#direct-opening-and-update-and-start).
+It extends the existing one-turn root creation, guided saved-tree descent,
+single-orb, Silero/contextual-input, MCP and source-backed summary contracts; it
+does not regrade past answers.
 Earlier checks below are historical and do not all describe the current
 implementation.
 Source/fixture tests, iPhone tests and actual dev runtime observations are
 recorded separately; none implies a new human microphone-to-tutor conversation
 unless that specific check is explicitly recorded.
+
+## Direct opening and update-and-start
+
+Current acceptance contract and source-level verification on 2026-09-03,
+branch `feature/2.0`:
+
+- After media, manual turn detection and the MCP catalog are acknowledged, the
+  one opening response is only a short topic-discovery question in the session
+  language, such as “어떤 주제로 이야기해 볼까요?”. It contains no
+  greeting, self-reference, tutor/teacher/AI name or role description, lead-in,
+  predetermined topic or readiness check. The response-scoped opening override
+  is retained by the single provider-local retry, so a retry cannot fall back to
+  the older self-introduction.
+- One final persisted learner turn may both rename and/or change the 1–10 level
+  of an exact owned saved node and ask to begin that revised topic immediately.
+  Natural first-person meaning is sufficient; the learner does not have to
+  repeat the request, issue an imperative command or answer a second
+  “시작할까요?”. The structured GPT decision and independent semantic
+  attestation must both approve the exact update, and both must independently
+  set `startLessonAfterUpdate`; no regex, keyword list, punctuation, duration or
+  word-count classifier can grant that compound authority.
+- The compound path is server-owned: `update_study` applies the exact partial
+  patch and captures its revised metadata, returns `AUTO_FOCUS_PENDING`, and the
+  turn controller schedules exactly one bound `select_voice_study` against that
+  post-update revision. Only a successful
+  `UPDATED_STUDY_IMMEDIATE_START` result establishes the revised frozen name and
+  level and permits the first substantive question. An update-only result keeps
+  the ordinary flow: `NEXT_QUESTION` applies to a prepared current focus, while
+  an updated but unselected offered candidate still requires fresh selection.
+- The persisted learner item remains fenced by its original lesson revision
+  while the automatic focus is separately fenced by the exact post-update
+  revision and target proof. A newer meaningful learner turn invalidates the
+  pending start authority; noise and semantically non-communicative audio cannot
+  create or replace it. A write/readback/focus mismatch never retries a possibly
+  committed update, reuses the old learner permission or asks a question with
+  stale name/level metadata.
+- A brand-new call can apply the first natural rename/level request without a
+  preceding focus or tool round when that speech contains the exact old title.
+  The server supplies only a complete owner-scoped snapshot of at most 17 active
+  studies; overflow, malformed rows, duplicate IDs and canonical-title ambiguity
+  disable this convenience. The first meaningful persisted learner publication
+  consumes it once across concurrent assessments. Noise, checkpoints and failed
+  persistence do not consume it, and an already-emitted losing assessment is
+  revoked before it can schedule a write.
+- After the tutor has spoken exactly one server-read candidate, a natural
+  reference such as “그 이름으로 바꿔” may bind that candidate without making
+  the learner repeat its old name. An update-only turn then exposes the revised
+  exact identity as a fresh one-shot start offer; a following “시작하자” runs
+  selection and cannot replay the update.
+- Updating the already confirmed current focus remains `NEXT_QUESTION` and does
+  not manufacture another “start this topic?” offer. Only an updated node that
+  was not already selected receives the fresh selection offer above.
+- V114 adds study-row optimistic versions. The voice mutation passes the exact
+  server-read parent/topic/level as a conditional SQL expectation, every partial
+  metadata or scheduler-claim write advances the version, and scheduler failure
+  recovery reloads the latest owned row instead of reusing an entity whose
+  version was advanced by a failed update. Concurrent settings or scheduled
+  question work therefore cannot silently restore the old name or level.
+- Automated coverage includes the direct opening and retry override,
+  dual-assessment update/start agreement and disagreement, exact offered-node
+  and first-turn rename, current-focus update without a redundant start offer,
+  update `AUTO_FOCUS_PENDING`, original-versus-post-update revision fencing,
+  wrong intent/target/revision rejection, replay rejection and persistence
+  ordering of rapid mutation-capable turns. The final application/domain/infra
+  run discovered 1,600 tests: 574 application, 30 domain and 996 infrastructure;
+  zero failed or errored and three opt-in infrastructure tests were skipped.
+- The final AOT boot JAR is 331,835,781 bytes with SHA-256
+  `42dbb982f31dab0e1fa3ab0cea340b7af60af0069ade1ba185c036cbd3e5b31c`.
+  Immediately before replacement there were zero active/ending voice sessions
+  and zero processing results. Only the existing `backend-backend-1` container
+  on localhost 8080 was restarted; its ID was retained, the `dev` profile loaded,
+  Flyway V114 applied successfully, and local plus public dev dependency health
+  returned HTTP 200. DB, Redis, LibreTranslate and backup retained their prior
+  container IDs. The replaced JAR is retained as
+  `/app/buddystudy-backend.previous-b9c79b39.jar`; staging reused the existing
+  next-JAR slot rather than accumulating another image or infrastructure stack.
+- This documentation does not claim a new physical iPhone
+  microphone-to-tutor conversation; that remains the learner's runtime check on
+  the already-installed app.
+- Opening, renaming, level changes and focus preparation remain setup-only. They
+  call neither the summary model nor the canonical/public record projector until
+  a server-authorized substantive tutor question and the learner's exact complete
+  answer have both been durably linked.
 
 ## One-turn root creation and immediate lesson start
 
@@ -277,10 +360,11 @@ Migration roles:
 | V111 | Adds database invariants requiring question-linked answers to be USER rows and forbidding the same row from also carrying learner-question attestation. |
 | V112 | Adds TUTOR-only `is_study_question`, the durable proof that the exact completed tutor item consumed a server-owned substantive-question purpose. |
 | V113 | Adds nullable positive TUTOR-only `study_answer_turn_id`, linking exact feedback to the final learner-answer row and forbidding that feedback row from also being a study question. |
+| V114 | Adds optimistic versions to study rows so metadata-only voice updates and ordinary whole-row settings/scheduler writes cannot silently overwrite one another. |
 
 The persistence layer supplies the owner/session/focus, role, sequence, lesson
 revision, multipart completeness, final-answer and intervening-turn checks that
-cannot be expressed by these column checks alone. V109–V113 are additive and do
+cannot be expressed by these column checks alone. V109–V114 are additive and do
 not delete, rewrite, regrade or republish older transcripts, summaries or records.
 Final verification evidence for this contract on 2026-09-02:
 
@@ -779,8 +863,10 @@ xcodebuild -project StudyMate.xcodeproj -scheme StudyMateiOS \
   or failures after retry; cleanup avoids cancelling its own settlement work.
 - iOS rejects empty/non-audio SDP locally, preserves authenticated request
   headers and exact SDP bytes, and waits for combined ICE/DTLS connection before
-  opening control. The teacher-first greeting and readiness-confirmation
-  instructions use the existing one-sentence response/playout policy.
+  opening control. At that historical checkpoint, the teacher-first greeting
+  and readiness-confirmation instructions used the existing one-sentence
+  response/playout policy; the current direct-opening contract above supersedes
+  those spoken instructions.
 - Backend follow-up tests passed: 25 application voice-session tests, 34
   realtime adapter/turn-controller tests, 12 WebRTC adapter tests, and 15
   control-handshake/logging tests. Startup regressions cover a fully committed

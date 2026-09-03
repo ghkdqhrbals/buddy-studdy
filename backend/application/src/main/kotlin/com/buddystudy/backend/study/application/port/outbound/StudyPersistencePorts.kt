@@ -24,6 +24,22 @@ interface StudyPort {
         now: Instant,
     ): StudyEntity? = throw UnsupportedOperationException("Metadata-only study updates are not supported.")
     /**
+     * Atomically applies the patch only while the persisted parent, topic, and
+     * level still match the frozen voice-call identity. A null result means the
+     * row is missing or the expectation is stale; the caller distinguishes by
+     * re-reading while it still owns the mutation transaction.
+     */
+    suspend fun updateTopicMetadataIfCurrent(
+        id: Long,
+        userId: Long,
+        topic: String?,
+        difficultyLevel: Int?,
+        expectedParentStudyId: Long?,
+        expectedTopic: String,
+        expectedDifficultyLevel: Int,
+        now: Instant,
+    ): StudyEntity? = throw UnsupportedOperationException("Conditional study metadata updates are not supported.")
+    /**
      * Includes the root and at most [limit] IDs. Callers request one overflow ID.
      * Requires the owner mutation lock; null rejects cycles or mixed-owner descendants.
      */

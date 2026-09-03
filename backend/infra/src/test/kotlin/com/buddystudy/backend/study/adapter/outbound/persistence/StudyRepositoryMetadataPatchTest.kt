@@ -6,6 +6,7 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.ExpectedStudyMetadata
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.mockito.Mockito
 import org.springframework.core.convert.converter.Converter
+import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.data.convert.ReadingConverter
 import org.springframework.data.convert.WritingConverter
 import org.springframework.data.r2dbc.convert.MappingR2dbcConverter
@@ -97,6 +99,7 @@ class StudyRepositoryMetadataPatchTest {
                 last_error text,
                 created_at timestamp(6) not null default current_timestamp,
                 updated_at timestamp(6) not null default current_timestamp,
+                version bigint not null default 0,
                 foreign key (user_id) references users(id),
                 foreign key (parent_study_id) references studies(id) on delete cascade
             )
@@ -139,7 +142,9 @@ class StudyRepositoryMetadataPatchTest {
         assertThat(changed.id).isEqualTo(11)
         assertThat(changed.parentStudyId).isEqualTo(10)
         assertThat(changed.nextDueAt).isEqualTo(now)
-        assertThat(after).usingRecursiveComparison().ignoringFields("topic", "difficultyLevel", "updatedAt").isEqualTo(before)
+        assertThat(after).usingRecursiveComparison()
+            .ignoringFields("topic", "difficultyLevel", "updatedAt", "version")
+            .isEqualTo(before)
         assertThat(after.topic).isEqualTo("Redis Streams")
         assertThat(after.difficultyLevel).isEqualTo(7)
         Mockito.verifyNoInteractions(questions, stats, localizations)
@@ -157,6 +162,24 @@ class StudyRepositoryMetadataPatchTest {
         assertThat(repository.findByIdAndUserId(99, 99)?.topic).isEqualTo("Private")
         assertThat(repository.findByIdAndUserId(11, 7)?.updatedAt).isEqualTo(now)
         assertThat(transaction { repository.lockMutationOwner(123456) }).isFalse()
+    }
+
+    @Test
+    fun `a migrated existing row at version zero is updated instead of inserted`(): Unit = runBlocking {
+        insertStudy(11, "Redis")
+        val existing = requireNotNull(repository.findByIdAndUserId(11, 7))
+        assertThat(existing.version).isZero()
+        existing.intervalMinutes = 45
+
+        val saved = transaction { repository.save(existing) }
+
+        assertThat(saved.id).isEqualTo(11)
+        assertThat(saved.version).isEqualTo(1)
+        assertThat(repository.findByIdAndUserId(11, 7)?.intervalMinutes).isEqualTo(45)
+        val rowCount = database.sql("select count(*) from studies where id = 11")
+            .map { row, _ -> row.get(0, java.lang.Long::class.java)!!.toLong() }
+            .one().awaitSingle()
+        assertThat(rowCount).isEqualTo(1)
     }
 
     @Test
@@ -190,6 +213,75 @@ class StudyRepositoryMetadataPatchTest {
         }
         assertThat(repository.findByIdAndUserId(11, 7)?.topic).isEqualTo("Streams")
         assertThat(repository.findByIdAndUserId(11, 7)?.difficultyLevel).isEqualTo(8)
+    }
+
+    @Test
+    fun `voice patch waits for a concurrent app update then rejects its stale frozen identity`(): Unit = runBlocking {
+        insertStudy(11, "Redis")
+        val appPatched = CompletableDeferred<Unit>()
+        val releaseApp = CompletableDeferred<Unit>()
+        val voiceEntered = CompletableDeferred<Unit>()
+        val app = async(Dispatchers.IO) {
+            transaction {
+                service.updateStudy(principal, 11, UpdateStudyCommand(topic = "Redis Streams"))
+                appPatched.complete(Unit)
+                releaseApp.await()
+            }
+        }
+        try {
+            withTimeout(5_000) { appPatched.await() }
+            val voice = async(Dispatchers.IO) {
+                runCatching {
+                    transaction {
+                        voiceEntered.complete(Unit)
+                        service.updateStudy(
+                            principal,
+                            11,
+                            UpdateStudyCommand(
+                                topic = "Voice rename",
+                                expectedCurrent = ExpectedStudyMetadata(null, "Redis", 5),
+                            ),
+                        )
+                    }
+                }
+            }
+            withTimeout(5_000) { voiceEntered.await() }
+            assertThat(withTimeoutOrNull(100) { voice.await() }).isNull()
+            releaseApp.complete(Unit)
+            withTimeout(5_000) { app.await() }
+            val conflict = withTimeout(5_000) { voice.await() }.exceptionOrNull() as ApiException
+            assertThat(conflict.status.value()).isEqualTo(409)
+            assertThat(conflict.code).isEqualTo(ApiErrorCode.STUDY_TREE_CHANGED)
+        } finally {
+            releaseApp.complete(Unit)
+        }
+        assertThat(repository.findByIdAndUserId(11, 7)?.topic).isEqualTo("Redis Streams")
+    }
+
+    @Test
+    fun `stale full row save cannot undo a committed voice metadata patch`(): Unit = runBlocking {
+        insertStudy(11, "Redis")
+        val staleSettingsRow = requireNotNull(repository.findByIdAndUserId(11, 7))
+
+        transaction {
+            service.updateStudy(
+                principal,
+                11,
+                UpdateStudyCommand(
+                    topic = "Redis Streams",
+                    expectedCurrent = ExpectedStudyMetadata(null, "Redis", 5),
+                ),
+            )
+        }
+        staleSettingsRow.intervalMinutes = 90
+        val failure = runCatching {
+            transaction { repository.save(staleSettingsRow) }
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(OptimisticLockingFailureException::class.java)
+        val current = requireNotNull(repository.findByIdAndUserId(11, 7))
+        assertThat(current.topic).isEqualTo("Redis Streams")
+        assertThat(current.intervalMinutes).isEqualTo(15)
     }
 
     @Test

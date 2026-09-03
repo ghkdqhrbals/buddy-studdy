@@ -6,6 +6,7 @@ import com.buddystudy.backend.learningcontext.application.model.LearningContextP
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.ExpectedStudyMetadata
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.modelcontextprotocol.common.McpTransportContext
@@ -137,6 +138,7 @@ class BuddyStudyMcpAdapter(
                     UpdateStudyCommand(
                         topic = args.optionalString("topic"),
                         difficultyLevel = args.optionalInt("difficulty_level"),
+                        expectedCurrent = args.voiceStudyMetadataExpectation(),
                     ),
                 )
             },
@@ -625,6 +627,34 @@ class BuddyStudyMcpAdapter(
     }
 
     private class Arguments(private val values: Map<String, Any>) {
+        fun voiceStudyMetadataExpectation(): ExpectedStudyMetadata? {
+            val names = setOf(
+                BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT,
+                BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT,
+                BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT,
+            )
+            val supplied = names.count(values::containsKey)
+            if (supplied == 0) return null
+            if (supplied != names.size) {
+                throw McpArgumentException("The internal voice study metadata fence is incomplete.")
+            }
+            val topic = string(BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT)
+            val difficulty = optionalInt(BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT)
+                ?: throw McpArgumentException("The internal expected study level is required.")
+            val parentMarker = optionalLong(BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT)
+                ?: throw McpArgumentException("The internal expected study parent is required.")
+            if (topic.isBlank() || topic != topic.trim() || topic.length > 255 ||
+                difficulty !in 1..10 || parentMarker < 0
+            ) {
+                throw McpArgumentException("The internal voice study metadata fence is invalid.")
+            }
+            return ExpectedStudyMetadata(
+                parentStudyId = parentMarker.takeIf { it > 0 },
+                topic = topic,
+                difficultyLevel = difficulty,
+            )
+        }
+
         fun string(name: String): String =
             optionalString(name) ?: throw McpArgumentException("$name is required.")
 

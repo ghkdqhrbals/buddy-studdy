@@ -13,6 +13,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearnerUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContextSource
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
@@ -219,10 +220,11 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "rootStudyTopic", "rootStudyDifficulty", "rootStudyEvidenceSource",
                 "rootStudyCommandEvidence", "rootStudyTopicEvidence", "rootStudyDifficultyEvidence",
                 "rootStudyDifficultyOmitted", "rootStudyStartLessonAfterCreate",
-                "mutationTargetStudyId", "mutationTargetImplicitCurrentFocus", "mutationTopic",
+                "mutationTargetStudyId", "mutationTargetImplicitCurrentFocus",
+                "mutationTargetImplicitSpokenOffer", "mutationTopic",
                 "mutationDifficulty", "mutationEvidenceSource", "mutationCommandEvidence",
                 "mutationTargetTopicEvidence", "mutationTopicEvidence", "mutationDifficultyEvidence",
-                "mutationDifficultyOmitted",
+                "mutationDifficultyOmitted", "mutationStartLessonAfterUpdate",
             )
         assertThat(item.path("properties").path("itemId").path("enum").map { it.asText() }).containsExactly("item_a", "item_b")
         assertThat(item.path("properties").path("decision").path("enum").map { it.asText() })
@@ -629,7 +631,9 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                             )))
                         } else {
                             attestationBody = mapper.readTree(rawBody)
-                            response(envelope("""{"attestations":[{"itemId":"item_1","exact":true}]}"""))
+                            response(envelope(
+                                """{"attestations":[{"itemId":"item_1","exact":true,"startLessonAfterUpdate":false}]}""",
+                            ))
                         }
                     }
                 })
@@ -664,6 +668,310 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "server-frozen target", "direct, present, unambiguous first-person", "bare mentions",
                 "recommendations", "third-party wishes", "Do not use keywords, word lists, regexes",
             )
+        }
+
+    @Test
+    fun `first learner turn can rename one explicitly named initial owner snapshot target`() =
+        runBlocking<Unit> {
+            val source = "Redis 이름을 Redis 기초로 바꾸고 바로 시작하자"
+            val target = VoiceTutorStudyTargetCandidate(101, null, "Redis", difficulty = 5)
+            val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+                itemId = "item_1",
+                transcript = source,
+                studyMutationContext = VoiceTutorStudyMutationContext(
+                    lessonRevision = 0,
+                    currentFocusStudyId = null,
+                    candidates = listOf(target),
+                    source = VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT,
+                ),
+            )))
+            val calls = AtomicInteger()
+            var attestationBody: JsonNode? = null
+            val adapter = adapter(properties(), ExchangeFunction { request ->
+                val output = MockClientHttpRequest(request.method(), request.url())
+                request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                    output.bodyAsString.map { rawBody ->
+                        if (calls.incrementAndGet() == 1) {
+                            response(envelope(decisionsWithIntent(
+                                id = "item_1",
+                                decision = "MEANINGFUL",
+                                intent = "UPDATE_STUDY",
+                                mutationTargetStudyId = target.studyId,
+                                mutationTopic = "Redis 기초",
+                                mutationEvidenceSource = "TRANSCRIPT",
+                                mutationCommandEvidence = source,
+                                mutationTargetTopicEvidence = target.topic,
+                                mutationTopicEvidence = "Redis 기초",
+                                mutationStartLessonAfterUpdate = true,
+                            )))
+                        } else {
+                            attestationBody = mapper.readTree(rawBody)
+                            response(envelope(mutationAttestation(true, true)))
+                        }
+                    }
+                })
+            })
+
+            val result = adapter.assess(assessmentRequest).decisions.single()
+
+            assertThat(calls).hasValue(2)
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.UPDATE_STUDY)
+            assertThat(result.studyUpdateRequest?.studyId).isEqualTo(target.studyId)
+            assertThat(result.studyUpdateRequest?.startLessonAfterUpdate).isTrue()
+            val evidence = mapper.readTree(attestationBody!!.path("messages")[1].path("content").asText())
+                .path("items")[0]
+            assertThat(evidence.path("mutationContextSource").asText()).isEqualTo("INITIAL_OWNER_SNAPSHOT")
+            assertThat(evidence.path("targetImplicitSpokenOffer").booleanValue()).isFalse()
+            assertThat(evidence.path("tutorAudioTranscript").isNull).isTrue()
+        }
+
+    @Test
+    fun `natural anaphora can rename the one exact candidate just spoken by tutor`() =
+        runBlocking<Unit> {
+            val source = "그 이름을 스프링 심화로 바꿔 줘"
+            val target = VoiceTutorStudyTargetCandidate(83, null, "Spring", difficulty = 7)
+            val offer = VoiceTutorStudyTargetOffer(
+                offerId = 9,
+                lessonRevision = 0,
+                tutorResponseGeneration = 11,
+                tutorSpeechStoppedOrder = 11,
+                currentFocusStudyId = null,
+                candidates = listOf(target),
+                tutorAudioTranscript = "저장된 Spring 주제가 있어요.",
+                candidateTraversals = mapOf(target.studyId to VoiceTutorStudyTargetTraversal()),
+            )
+            val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+                itemId = "item_1",
+                transcript = source,
+                targetOffer = offer,
+                studyMutationContext = VoiceTutorStudyMutationContext(0, null, listOf(target)),
+            )))
+            val calls = AtomicInteger()
+            val adapter = adapter(properties(), ExchangeFunction { request ->
+                val output = MockClientHttpRequest(request.method(), request.url())
+                request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                    output.bodyAsString.map {
+                        if (calls.incrementAndGet() == 1) {
+                            response(envelope(decisionsWithIntent(
+                                id = "item_1",
+                                decision = "MEANINGFUL",
+                                intent = "UPDATE_STUDY",
+                                mutationTargetStudyId = target.studyId,
+                                mutationTargetImplicitSpokenOffer = true,
+                                mutationTopic = "스프링 심화",
+                                mutationEvidenceSource = "TRANSCRIPT",
+                                mutationCommandEvidence = source,
+                                mutationTopicEvidence = "스프링 심화",
+                            )))
+                        } else {
+                            response(envelope(mutationAttestation(true, false)))
+                        }
+                    }
+                })
+            })
+
+            val result = adapter.assess(assessmentRequest).decisions.single()
+
+            assertThat(calls).hasValue(2)
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.UPDATE_STUDY)
+            assertThat(result.studyUpdateRequest?.evidence?.targetImplicitSpokenOffer).isTrue()
+            assertThat(result.studyUpdateRequest?.evidence?.targetTopic).isNull()
+        }
+
+    @Test
+    fun `persisted learner rename can update an exact offered root without focus and start immediately`() =
+        runBlocking<Unit> {
+            val target = VoiceTutorStudyTargetCandidate(83, null, "스프링 관련해서", difficulty = 7)
+            val prior = listOf(
+                VoiceTutorPersistedLearnerUtterance("prior-target", "아니, 스프링 관련해서가 아니라"),
+                VoiceTutorPersistedLearnerUtterance("prior-name", "주제 자체가 스프링이라고."),
+                VoiceTutorPersistedLearnerUtterance("prior-action", "이름 바꿔서"),
+            )
+            val current = "시작하자."
+            val source = (prior.map { it.transcript } + current).joinToString("\n")
+            val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+                itemId = "item_1",
+                transcript = current,
+                targetOffer = VoiceTutorStudyTargetOffer(
+                    offerId = 9,
+                    lessonRevision = 0,
+                    tutorResponseGeneration = 11,
+                    tutorSpeechStoppedOrder = 11,
+                    currentFocusStudyId = null,
+                    candidates = listOf(target),
+                    tutorAudioTranscript = "현재 저장된 주제 이름은 스프링 관련해서입니다. 이름을 바꿀 수 있어요.",
+                    candidateTraversals = mapOf(target.studyId to VoiceTutorStudyTargetTraversal()),
+                ),
+                priorPersistedLearnerUtterances = prior,
+                studyMutationContext = VoiceTutorStudyMutationContext(
+                    lessonRevision = 0,
+                    currentFocusStudyId = null,
+                    candidates = listOf(target),
+                ),
+            )))
+            val calls = AtomicInteger()
+            var primaryBody: JsonNode? = null
+            var attestationBody: JsonNode? = null
+            val adapter = adapter(properties(), ExchangeFunction { request ->
+                val output = MockClientHttpRequest(request.method(), request.url())
+                request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                    output.bodyAsString.map { rawBody ->
+                        if (calls.incrementAndGet() == 1) {
+                            primaryBody = mapper.readTree(rawBody)
+                            response(envelope(decisionsWithIntent(
+                                id = "item_1",
+                                decision = "MEANINGFUL",
+                                intent = "UPDATE_STUDY",
+                                mutationTargetStudyId = target.studyId,
+                                mutationTopic = "스프링",
+                                mutationEvidenceSource = "PERSISTED_LEARNER_CONTEXT",
+                                mutationCommandEvidence = source,
+                                mutationTargetTopicEvidence = target.topic,
+                                mutationTopicEvidence = "스프링",
+                                mutationStartLessonAfterUpdate = true,
+                            )))
+                        } else {
+                            attestationBody = mapper.readTree(rawBody)
+                            response(envelope(mutationAttestation(
+                                exact = true,
+                                startLessonAfterUpdate = true,
+                            )))
+                        }
+                    }
+                })
+            })
+
+            val result = adapter.assess(assessmentRequest).decisions.single()
+
+            assertThat(calls).hasValue(2)
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.UPDATE_STUDY)
+            assertThat(result.studyUpdateRequest?.studyId).isEqualTo(target.studyId)
+            assertThat(result.studyUpdateRequest?.topic).isEqualTo("스프링")
+            assertThat(result.studyUpdateRequest?.startLessonAfterUpdate).isTrue()
+            val primaryEvidence = mapper.readTree(primaryBody!!.path("messages")[1].path("content").asText())
+            assertThat(primaryEvidence.path("utterances")[0].path("studyMutationContext")
+                .path("currentFocusStudyId").isNull).isTrue()
+            val attestationEvidence = mapper.readTree(
+                attestationBody!!.path("messages")[1].path("content").asText(),
+            ).path("items")[0]
+            assertThat(attestationEvidence.path("learnerSource").asText()).isEqualTo(source)
+            assertThat(attestationEvidence.path("currentTranscript").asText()).isEqualTo(current)
+            assertThat(attestationEvidence.path("evidenceSource").asText())
+                .isEqualTo("PERSISTED_LEARNER_CONTEXT")
+            assertThat(attestationEvidence.path("currentFocusStudyId").isNull).isTrue()
+            assertThat(attestationEvidence.path("tutorAudioTranscript").asText()).contains(target.topic)
+            assertThat(attestationBody!!.path("messages")[0].path("content").asText()).contains(
+                "PERSISTED_LEARNER_CONTEXT", "currentTranscript itself semantically completes",
+                "status question", "SAME_SPEECH_CONTEXT never authorizes", "startLessonAfterUpdate",
+                "Do not use keywords, word lists, regexes",
+            )
+        }
+
+    @Test
+    fun `unfocused update fails closed without the matching explicit target offer`() {
+        val source = "스프링 관련해서 이름을 스프링으로 바꿔 줘"
+        val target = VoiceTutorStudyTargetCandidate(83, null, "스프링 관련해서", difficulty = 7)
+        val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+            itemId = "item_1",
+            transcript = source,
+            studyMutationContext = VoiceTutorStudyMutationContext(
+                lessonRevision = 0,
+                currentFocusStudyId = null,
+                candidates = listOf(target),
+            ),
+        )))
+
+        assertReason(
+            assessmentRequest,
+            envelope(decisionsWithIntent(
+                id = "item_1",
+                decision = "MEANINGFUL",
+                intent = "UPDATE_STUDY",
+                mutationTargetStudyId = target.studyId,
+                mutationTopic = "스프링",
+                mutationEvidenceSource = "TRANSCRIPT",
+                mutationCommandEvidence = source,
+                mutationTargetTopicEvidence = target.topic,
+                mutationTopicEvidence = "스프링",
+            )),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+    }
+
+    @Test
+    fun `unfocused mutation context never authorizes child creation`() {
+        val source = "Redis 아래에 Streams를 새 하위 주제로 만들어 줘"
+        val target = VoiceTutorStudyTargetCandidate(83, null, "Redis", difficulty = 7)
+        val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+            itemId = "item_1",
+            transcript = source,
+            studyMutationContext = VoiceTutorStudyMutationContext(
+                lessonRevision = 0,
+                currentFocusStudyId = null,
+                candidates = listOf(target),
+            ),
+        )))
+
+        assertReason(
+            assessmentRequest,
+            envelope(decisionsWithIntent(
+                id = "item_1",
+                decision = "MEANINGFUL",
+                intent = "CREATE_STUDY_TOPIC",
+                mutationTargetStudyId = target.studyId,
+                mutationTopic = "Streams",
+                mutationEvidenceSource = "TRANSCRIPT",
+                mutationCommandEvidence = source,
+                mutationTargetTopicEvidence = target.topic,
+                mutationTopicEvidence = "Streams",
+                mutationDifficultyOmitted = true,
+            )),
+            VoiceTutorInputAssessmentFailure.INVALID_RESULT,
+        )
+    }
+
+    @Test
+    fun `secondary assessment can reject immediate start without discarding an exact update`() =
+        runBlocking<Unit> {
+            val result = assessPersistedFocusedUpdate(
+                current = "이름을 바꾸고 바로 시작하자.",
+                primaryStartLessonAfterUpdate = true,
+                secondaryExact = true,
+                secondaryStartLessonAfterUpdate = false,
+            )
+
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.UPDATE_STUDY)
+            assertThat(result.studyUpdateRequest?.topic).isEqualTo("Spring")
+            assertThat(result.studyUpdateRequest?.startLessonAfterUpdate).isFalse()
+        }
+
+    @Test
+    fun `secondary assessment cannot upgrade update only into immediate start`() =
+        runBlocking<Unit> {
+            val result = assessPersistedFocusedUpdate(
+                current = "이름을 바꾸자.",
+                primaryStartLessonAfterUpdate = false,
+                secondaryExact = true,
+                secondaryStartLessonAfterUpdate = true,
+            )
+
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.UPDATE_STUDY)
+            assertThat(result.studyUpdateRequest?.startLessonAfterUpdate).isFalse()
+        }
+
+    @Test
+    fun `generic status question cannot reuse persisted rename evidence as write authority`() =
+        runBlocking<Unit> {
+            val result = assessPersistedFocusedUpdate(
+                current = "바뀌었나?",
+                primaryStartLessonAfterUpdate = false,
+                secondaryExact = false,
+                secondaryStartLessonAfterUpdate = false,
+            )
+
+            assertThat(result.decision).isEqualTo(VoiceTutorInputDecision.MEANINGFUL)
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.NONE)
+            assertThat(result.studyUpdateRequest).isNull()
         }
 
     @Test
@@ -747,7 +1055,9 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                             mutationDifficultyOmitted = true,
                         )))
                     } else {
-                        response(envelope("""{"attestations":[{"itemId":"item_1","exact":true}]}"""))
+                        response(envelope(
+                            """{"attestations":[{"itemId":"item_1","exact":true,"startLessonAfterUpdate":false}]}""",
+                        ))
                     }
                 }
             })
@@ -1518,6 +1828,59 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         return result
     }
 
+    private suspend fun assessPersistedFocusedUpdate(
+        current: String,
+        primaryStartLessonAfterUpdate: Boolean,
+        secondaryExact: Boolean,
+        secondaryStartLessonAfterUpdate: Boolean,
+    ): VoiceTutorInputItemAssessment {
+        val prior = listOf(
+            VoiceTutorPersistedLearnerUtterance("prior-name", "새 이름은 Spring"),
+            VoiceTutorPersistedLearnerUtterance("prior-action", "이 주제 이름을 바꿔서"),
+        )
+        val source = (prior.map { it.transcript } + current).joinToString("\n")
+        val calls = AtomicInteger()
+        val adapter = adapter(properties(), ExchangeFunction { request ->
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map {
+                    if (calls.incrementAndGet() == 1) {
+                        response(envelope(decisionsWithIntent(
+                            id = "item_1",
+                            decision = "MEANINGFUL",
+                            intent = "UPDATE_STUDY",
+                            mutationTargetStudyId = 101,
+                            mutationTargetImplicitCurrentFocus = true,
+                            mutationTopic = "Spring",
+                            mutationEvidenceSource = "PERSISTED_LEARNER_CONTEXT",
+                            mutationCommandEvidence = source,
+                            mutationTopicEvidence = "Spring",
+                            mutationStartLessonAfterUpdate = primaryStartLessonAfterUpdate,
+                        )))
+                    } else {
+                        response(envelope(mutationAttestation(
+                            exact = secondaryExact,
+                            startLessonAfterUpdate = secondaryStartLessonAfterUpdate,
+                        )))
+                    }
+                }
+            })
+        })
+        val utterance = VoiceTutorInputUtterance(
+            itemId = "item_1",
+            transcript = current,
+            priorPersistedLearnerUtterances = prior,
+            studyMutationContext = VoiceTutorStudyMutationContext(
+                lessonRevision = 1,
+                currentFocusStudyId = 101,
+                candidates = listOf(VoiceTutorStudyTargetCandidate(101, null, "Spring Boot")),
+            ),
+        )
+        val result = adapter.assess(request().copy(utterances = listOf(utterance))).decisions.single()
+        assertThat(calls).hasValue(2)
+        return result
+    }
+
     private fun response(body: String, status: HttpStatus = HttpStatus.OK): ClientResponse =
         ClientResponse.create(status).header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE).body(body).build()
 
@@ -1540,6 +1903,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "rootStudyStartLessonAfterCreate" to false,
                 "mutationTargetStudyId" to null,
                 "mutationTargetImplicitCurrentFocus" to false,
+                "mutationTargetImplicitSpokenOffer" to false,
                 "mutationTopic" to null,
                 "mutationDifficulty" to null,
                 "mutationEvidenceSource" to null,
@@ -1548,6 +1912,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "mutationTopicEvidence" to null,
                 "mutationDifficultyEvidence" to null,
                 "mutationDifficultyOmitted" to false,
+                "mutationStartLessonAfterUpdate" to false,
             )
         },
     ))
@@ -1569,6 +1934,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         currentTranscriptAnswersStudyQuestion: Boolean = false,
         mutationTargetStudyId: Long? = null,
         mutationTargetImplicitCurrentFocus: Boolean = false,
+        mutationTargetImplicitSpokenOffer: Boolean = false,
         mutationTopic: String? = null,
         mutationDifficulty: Int? = null,
         mutationEvidenceSource: String? = null,
@@ -1577,6 +1943,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         mutationTopicEvidence: String? = null,
         mutationDifficultyEvidence: String? = null,
         mutationDifficultyOmitted: Boolean = false,
+        mutationStartLessonAfterUpdate: Boolean = false,
     ): String =
         mapper.writeValueAsString(mapOf(
             "decisions" to listOf(mapOf(
@@ -1596,6 +1963,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "rootStudyStartLessonAfterCreate" to rootStudyStartLessonAfterCreate,
                 "mutationTargetStudyId" to mutationTargetStudyId,
                 "mutationTargetImplicitCurrentFocus" to mutationTargetImplicitCurrentFocus,
+                "mutationTargetImplicitSpokenOffer" to mutationTargetImplicitSpokenOffer,
                 "mutationTopic" to mutationTopic,
                 "mutationDifficulty" to mutationDifficulty,
                 "mutationEvidenceSource" to mutationEvidenceSource,
@@ -1604,6 +1972,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "mutationTopicEvidence" to mutationTopicEvidence,
                 "mutationDifficultyEvidence" to mutationDifficultyEvidence,
                 "mutationDifficultyOmitted" to mutationDifficultyOmitted,
+                "mutationStartLessonAfterUpdate" to mutationStartLessonAfterUpdate,
             )),
         ))
 
@@ -1615,6 +1984,17 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             "itemId" to "item_1",
             "exactCreation" to exactCreation,
             "startLessonAfterCreate" to startLessonAfterCreate,
+        )),
+    ))
+
+    private fun mutationAttestation(
+        exact: Boolean,
+        startLessonAfterUpdate: Boolean = false,
+    ): String = mapper.writeValueAsString(mapOf(
+        "attestations" to listOf(mapOf(
+            "itemId" to "item_1",
+            "exact" to exact,
+            "startLessonAfterUpdate" to startLessonAfterUpdate,
         )),
     ))
 

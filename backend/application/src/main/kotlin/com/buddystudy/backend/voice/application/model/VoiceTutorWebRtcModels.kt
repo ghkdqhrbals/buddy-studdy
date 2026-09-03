@@ -11,6 +11,8 @@ data class VoiceTutorWebRtcControlContext(
     val principal: Principal? = null,
     // Server-owned lesson epoch restored when the existing call is reattached.
     val initialLessonRevision: Long = 0,
+    // Complete owner-scoped saved-node snapshot, available only before this call's first USER turn.
+    val initialStudyMutationSnapshot: VoiceTutorInitialStudyMutationSnapshot? = null,
     // Observed by the controller at tool execution; never client/provider JSON.
     val dialogueBoundary: VoiceTutorDialogueBoundary? = null,
 )
@@ -48,11 +50,17 @@ data class VoiceTutorDialogueBoundary(
     val childStudyCreationAuthorization: VoiceTutorChildStudyCreationAuthorization? = null,
     /** One-shot exact saved-node patch lease minted only after the assessed USER item is persisted. */
     val studyUpdateAuthorization: VoiceTutorStudyUpdateAuthorization? = null,
+    /**
+     * Exact post-update context revision expected by a server-owned immediate focus.
+     * The accepted USER item remains fenced by [latestAcceptedLearnerLessonRevision].
+     */
+    val focusExpectedCurrentLessonRevision: Long? = null,
 )
 
 enum class VoiceTutorFocusAuthorizationPurpose {
     SPOKEN_SAVED_TOPIC_CHOICE,
     CREATED_ROOT_IMMEDIATE_START,
+    UPDATED_STUDY_IMMEDIATE_START,
 }
 
 private sealed interface VoiceTutorOneShotAuthorizationState {
@@ -147,7 +155,10 @@ class VoiceTutorFocusAuthorization(
     )
 
     fun bindToServerCall(callId: String): Boolean =
-        purpose == VoiceTutorFocusAuthorizationPurpose.CREATED_ROOT_IMMEDIATE_START &&
+        purpose in setOf(
+            VoiceTutorFocusAuthorizationPurpose.CREATED_ROOT_IMMEDIATE_START,
+            VoiceTutorFocusAuthorizationPurpose.UPDATED_STUDY_IMMEDIATE_START,
+        ) &&
             oneShot.bindToServerCall(callId)
 
     fun isBoundToServerCall(callId: String): Boolean = oneShot.isBoundToServerCall(callId)
@@ -233,16 +244,70 @@ class VoiceTutorChildStudyCreationAuthorization(
             "topic=[redacted], difficulty=$difficulty)"
 }
 
+enum class VoiceTutorStudyUpdateAuthorizationScope {
+    /** The exact frozen node must still belong to the currently confirmed lesson tree. */
+    CONFIRMED_FOCUS_TREE,
+
+    /** The exact frozen node was server-read and spoken, but has not been selected as lesson focus. */
+    OFFERED_CANDIDATE,
+
+    /** The exact node came from a complete first-turn owner snapshot, never from provider text. */
+    INITIAL_OWNER_SNAPSHOT,
+}
+
+/** Immutable pre-update identity. New patch values are held separately by the authorization. */
+data class VoiceTutorStudyUpdateTargetProof(
+    val studyId: Long,
+    val parentStudyId: Long?,
+    val topic: String,
+    val difficulty: Int? = null,
+) {
+    init {
+        require(studyId > 0)
+        require(parentStudyId?.let { it > 0 && it != studyId } != false)
+        require(topic.isNotBlank() && topic == topic.trim() && topic.length <= 255)
+        require(difficulty?.let { it in 1..10 } != false)
+    }
+
+    companion object {
+        fun from(candidate: VoiceTutorStudyTargetCandidate) = VoiceTutorStudyUpdateTargetProof(
+            candidate.studyId,
+            candidate.parentStudyId,
+            candidate.topic,
+            candidate.difficulty,
+        )
+    }
+}
+
 class VoiceTutorStudyUpdateAuthorization(
     val studyId: Long,
     val topic: String?,
     val difficulty: Int?,
+    val scope: VoiceTutorStudyUpdateAuthorizationScope?,
+    val targetProof: VoiceTutorStudyUpdateTargetProof?,
+    /** Independently attested compound intent; update success still precedes server-owned focus. */
+    val startLessonAfterUpdate: Boolean = false,
 ) {
+    /**
+     * Source-compatible fail-closed bridge while callers migrate to the explicit
+     * scope/proof constructor. The MCP adapter never executes a proofless lease.
+     */
+    constructor(studyId: Long, topic: String?, difficulty: Int?) : this(
+        studyId,
+        topic,
+        difficulty,
+        scope = null,
+        targetProof = null,
+        startLessonAfterUpdate = false,
+    )
+
     init {
         require(studyId > 0)
         require(topic != null || difficulty != null)
         require(topic?.let { it.isNotBlank() && it == it.trim() && it.length <= 255 } != false)
         require(difficulty?.let { it in 1..10 } != false)
+        require((scope == null) == (targetProof == null))
+        require(targetProof?.studyId?.let { it == studyId } != false)
     }
 
     private val oneShot = VoiceTutorOneShotAuthorization(allowUnboundExecution = false)
@@ -264,5 +329,6 @@ class VoiceTutorStudyUpdateAuthorization(
 
     override fun toString(): String =
         "VoiceTutorStudyUpdateAuthorization(active=${oneShot.isActive()}, studyId=$studyId, " +
-            "hasTopic=${topic != null}, difficulty=$difficulty)"
+            "hasTopic=${topic != null}, difficulty=$difficulty, scope=$scope, hasTargetProof=${targetProof != null}, " +
+            "startLessonAfterUpdate=$startLessonAfterUpdate)"
 }

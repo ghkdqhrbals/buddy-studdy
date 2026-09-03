@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice.application.port.outbound
 
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
+import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 
 data class VoiceTutorMcpToolDefinition(
     val name: String,
@@ -30,6 +31,11 @@ data class VoiceTutorMcpToolResult(
      * inferred from the provider-visible JSON output.
      */
     val rootStudyReadbackId: Long? = null,
+    /**
+     * Exact server-owned snapshot captured after a confirmed update result and a
+     * successful lesson-context revision. Never derive this from provider JSON.
+     */
+    val updatedStudySnapshot: VoiceTutorStudySnapshot? = null,
 )
 
 enum class VoiceTutorCandidateReadKind { LIST_STUDIES, GET_STUDY }

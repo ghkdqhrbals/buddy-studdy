@@ -32,4 +32,15 @@ data class UpdateStudyTopicActivationCommand(
 data class UpdateStudyCommand(
     val topic: String? = null,
     val difficultyLevel: Int? = null,
+    /**
+     * Optional optimistic identity fence used by a server-owned voice mutation.
+     * Ordinary app and MCP updates omit it and keep their existing behavior.
+     */
+    val expectedCurrent: ExpectedStudyMetadata? = null,
+)
+
+data class ExpectedStudyMetadata(
+    val parentStudyId: Long?,
+    val topic: String,
+    val difficultyLevel: Int,
 )

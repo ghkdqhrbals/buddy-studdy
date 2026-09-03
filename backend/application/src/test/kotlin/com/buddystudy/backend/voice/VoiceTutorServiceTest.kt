@@ -729,9 +729,11 @@ class VoiceTutorServiceTest {
             val trustedInstructions = instructions.substringBeforeLast('\n')
 
             assertThat(trustedInstructions)
-                .contains("Your first response must warmly greet the learner as their AI tutor")
-                .contains("ask what topic they would like to talk about today")
-                .contains("without a predetermined topic, quiz or mandatory readiness question")
+                .contains("Your first response must immediately ask what topic the learner would like to talk about today")
+                .contains("with no greeting, lead-in, self-reference, name, title, role description, or readiness check")
+                .contains("어떤 주제로 이야기해 볼까요?")
+                .contains("ask what topic the learner would like to talk about today")
+                .contains("without a predetermined topic or quiz")
                 .contains("clearly agree or explicitly ask to start before teaching")
                 .contains("asking study questions, or assessing answers")
                 .contains("a topic lookup or merely naming a topic is not consent to start")
@@ -743,7 +745,8 @@ class VoiceTutorServiceTest {
                 .contains("never means the lesson has ended or is complete")
                 .contains("acknowledge that the lesson is starting")
                 .contains("exactly one short, complete sentence in each response")
-                .contains("Use $languageName throughout the greeting and conversation")
+                .contains("Use $languageName throughout the conversation")
+                .doesNotContain("AI 선생님이에요", "warmly greet the learner as their AI tutor")
                 .doesNotContain("ask whether they are ready to start the lesson", "check readiness without starting the lesson")
         }
     }

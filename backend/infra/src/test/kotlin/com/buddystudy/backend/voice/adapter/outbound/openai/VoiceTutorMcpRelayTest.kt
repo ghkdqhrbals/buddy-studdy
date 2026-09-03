@@ -134,6 +134,12 @@ class VoiceTutorMcpRelayTest {
             controller.startOpeningResponse()
             val create = mapper.readTree(controls.single())
             assertThat(create.path("response").path("tool_choice").asText()).isEqualTo("none")
+            assertThat(create.path("response").path("instructions").asText())
+                .contains("Ask only one short direct question")
+                .contains("Do not greet the learner")
+                .contains("Do not", "introduce or name yourself", "AI/tutor/teacher")
+                .contains("Use the configured session language")
+                .contains("어떤 주제로 이야기해 볼까요?")
             val token = create.path("event_id").asText()
             controller.observeProviderEvent(response("response.created", emptyList(), token, "in_progress"))
             assertThatThrownBy {
@@ -141,6 +147,32 @@ class VoiceTutorMcpRelayTest {
             }.isInstanceOf(VoiceTutorMcpProtocolException::class.java)
             assertThat(calls).isEmpty()
         } finally { controller.close(); work.dispose(); output.dispose() }
+    }
+
+    @Test
+    fun `opening retry preserves the direct no-self-introduction contract`() {
+        val controller = VoiceTutorDuplexTurnController(
+            continuousSpeechLimit = Duration.ofSeconds(30), responseTimeout = Duration.ofSeconds(60),
+            transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND, toolsEnabled = true,
+        )
+        val controls = mutableListOf<String>()
+        val output = controller.providerEvents().subscribe(controls::add)
+        try {
+            controller.startOpeningResponse()
+            val opening = mapper.readTree(controls.single())
+            val token = opening.path("event_id").asText()
+            controller.observeProviderEvent(response("response.created", emptyList(), token, "in_progress"))
+            controller.observeProviderEvent(response("response.done", emptyList(), token, "incomplete"))
+
+            val retry = controls.map(mapper::readTree).last()
+            assertThat(retry.path("event_id").asText())
+                .startsWith("buddystudy-internal-duplex-turn-retry-")
+            assertThat(retry.path("response").path("tool_choice").asText()).isEqualTo("none")
+            assertThat(retry.path("response").path("instructions").asText())
+                .isEqualTo(opening.path("response").path("instructions").asText())
+                .contains("Do not greet the learner", "introduce or name yourself")
+                .doesNotContain("AI 선생님이에요")
+        } finally { controller.close(); output.dispose() }
     }
 
     @Test

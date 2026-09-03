@@ -166,6 +166,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 inputCoordinator = VoiceTutorInputTurnCoordinator(limits = inputAssessmentProperties),
                 toolsEnabled = mcpTools.definitions().isNotEmpty(),
                 initialLessonRevision = context.initialLessonRevision,
+                initialStudyMutationSnapshot = context.initialStudyMutationSnapshot,
                 onProviderTurnFailure = diagnostics::observeProviderTurnFailure,
             )
             val terminal = terminalEvents.asFlux()

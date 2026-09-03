@@ -15,6 +15,8 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTrave
 import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationAuthorization
 import com.buddystudy.backend.voice.application.model.VoiceTutorChildStudyCreationAuthorization
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateAuthorizationScope
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateTargetProof
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateReadKind
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMcpToolPort
@@ -1139,6 +1141,133 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
+    fun `server owned updated study start uses original learner revision and exact post update fence`(): Unit =
+        runBlocking {
+            val contexts = ContextStore().apply {
+                revision = 1
+                saved[202L] = VoiceTutorStudySnapshot(202, 200, "Spring server", 7, revision = 1)
+            }
+            val fixture = Fixture(studyContexts = contexts).apply {
+                persistedSession = discoverySession()
+                acceptedLessonRevision = 0
+                expectedFocusCurrentRevision = 1
+                focusResult = VoiceTutorLessonFocusSelection(
+                    VoiceTutorLessonFocus(202, 2),
+                    VoiceTutorStudySnapshot(202, 200, "Spring server", 7, revision = 2),
+                )
+            }
+            val startAuthorization = VoiceTutorFocusAuthorization(
+                VoiceTutorFocusAuthorizationPurpose.UPDATED_STUDY_IMMEDIATE_START,
+            ).also {
+                check(it.bindToServerCall("direct-adapter-updated-study-focus"))
+                check(it.claimExecution("direct-adapter-updated-study-focus"))
+            }
+            val base = context(
+                inputIntent = VoiceTutorInputIntent.UPDATE_STUDY,
+                lessonRevision = 0,
+                targetStudyId = 202,
+                targetParentStudyId = 200,
+                targetTopic = "Spring server",
+                targetDifficulty = 7,
+                targetTraversal = VoiceTutorStudyTargetTraversal(),
+            ).copy(session = discoverySession())
+            val compound = base.copy(dialogueBoundary = requireNotNull(base.dialogueBoundary).copy(
+                latestAcceptedLearnerTargetOfferId = null,
+                focusAuthorization = startAuthorization,
+                studyUpdateAuthorization = null,
+                focusExpectedCurrentLessonRevision = 1,
+            ))
+
+            val result = fixture.adapter.execute(
+                compound,
+                "select_voice_study",
+                mapOf("study_id" to 202L),
+            )
+
+            assertThat(result.isError).isFalse()
+            assertThat(fixture.focusSelections).containsExactly(202L)
+            assertThat(fixture.lastExpectedCandidate)
+                .isEqualTo(VoiceTutorStudyTargetCandidate(202, 200, "Spring server", difficulty = 7))
+            assertThat(fixture.lastExpectedTraversal).isEqualTo(VoiceTutorStudyTargetTraversal())
+            assertThat(json(result).path("voiceLessonFocusChange").asText())
+                .isEqualTo("UPDATED_STUDY_IMMEDIATE_START")
+            assertThat(json(result).path("notice").asText())
+                .contains("exact revised readback", "ask the first substantive question now")
+        }
+
+    @Test
+    fun `updated study immediate start rejects wrong intent target and post update revision`(): Unit = runBlocking {
+        fun fixture() = Fixture(studyContexts = ContextStore().apply { revision = 1 }).apply {
+            persistedSession = discoverySession()
+            acceptedLessonRevision = 0
+            expectedFocusCurrentRevision = 1
+            focusResult = VoiceTutorLessonFocusSelection(
+                VoiceTutorLessonFocus(202, 2),
+                VoiceTutorStudySnapshot(202, 200, "Spring server", 7, revision = 2),
+            )
+        }
+
+        fun updatedContext(
+            inputIntent: VoiceTutorInputIntent = VoiceTutorInputIntent.UPDATE_STUDY,
+            targetStudyId: Long = 202,
+            expectedRevision: Long = 1,
+        ): VoiceTutorWebRtcControlContext {
+            val base = context(
+                inputIntent = inputIntent,
+                lessonRevision = 0,
+                targetStudyId = targetStudyId,
+                targetParentStudyId = 200,
+                targetTopic = "Spring server",
+                targetDifficulty = 7,
+                targetTraversal = VoiceTutorStudyTargetTraversal(),
+            ).copy(session = discoverySession())
+            return base.copy(dialogueBoundary = requireNotNull(base.dialogueBoundary).copy(
+                latestAcceptedLearnerTargetOfferId = null,
+                focusAuthorization = VoiceTutorFocusAuthorization(
+                    VoiceTutorFocusAuthorizationPurpose.UPDATED_STUDY_IMMEDIATE_START,
+                ).also {
+                    check(it.bindToServerCall("direct-adapter-updated-study-focus"))
+                    check(it.claimExecution("direct-adapter-updated-study-focus"))
+                },
+                focusExpectedCurrentLessonRevision = expectedRevision,
+            ))
+        }
+
+        val wrongIntent = fixture()
+        assertCode(
+            wrongIntent.adapter.execute(
+                updatedContext(inputIntent = VoiceTutorInputIntent.SELECT_SAVED_TOPIC),
+                "select_voice_study",
+                mapOf("study_id" to 202L),
+            ),
+            "LEARNER_CHOICE_REQUIRED",
+        )
+        assertThat(wrongIntent.focusSelections).isEmpty()
+
+        val wrongTarget = fixture()
+        assertCode(
+            wrongTarget.adapter.execute(
+                updatedContext(targetStudyId = 203),
+                "select_voice_study",
+                mapOf("study_id" to 202L),
+            ),
+            "LEARNER_TARGET_MISMATCH",
+        )
+        assertThat(wrongTarget.focusSelections).isEmpty()
+
+        val wrongRevision = fixture()
+        assertCode(
+            wrongRevision.adapter.execute(
+                updatedContext(expectedRevision = 2),
+                "select_voice_study",
+                mapOf("study_id" to 202L),
+            ),
+            "LEARNER_CHOICE_REQUIRED",
+        )
+        assertThat(wrongRevision.focusSelections).isEmpty()
+    }
+
+    @Test
     fun `created root focus rejects a changed readback level without publishing revision or UI focus`(): Unit = runBlocking {
         val fixture = Fixture().apply {
             persistedSession = discoverySession()
@@ -2149,29 +2278,202 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `explicit update keeps node identity and captures a new question level after the saved write`(): Unit = runBlocking {
+    fun `explicit current-focus update keeps node identity and captures a new question level after the saved write`(): Unit = runBlocking {
         val contexts = ContextStore()
         val fixture = mutationFixture(contexts)
         val result = fixture.adapter.execute(
-            updateContext(102L, difficulty = 6), "update_study",
-            mapOf("study_id" to 102L, "difficulty_level" to 6),
+            updateContext(101L, difficulty = 6), "update_study",
+            mapOf("study_id" to 101L, "difficulty_level" to 6),
         )
         assertThat(result.isError).isFalse()
         assertThat(result.changeKind).isEqualTo(VoiceTutorStudyChangeKind.UPDATED)
         assertThat(result.createdStudyId).isNull()
-        assertThat(result.changedStudyId).isEqualTo(102)
+        assertThat(result.changedStudyId).isEqualTo(101)
         assertThat(result.lessonRevision).isEqualTo(1)
         assertThat(result.lessonFocus?.studyId).isEqualTo(101)
         assertThat(result.lessonFocus?.revision).isEqualTo(1)
         assertThat(result.lessonFocus?.topic).isEqualTo("Selected root")
-        assertThat(result.lessonFocus?.difficulty).isEqualTo(5)
-        assertThat(contexts.remembered).containsExactly(listOf(102L))
-        assertThat(contexts.revised).containsExactly(102)
+        assertThat(result.lessonFocus?.difficulty).isEqualTo(6)
+        assertThat(result.updatedStudySnapshot)
+            .isEqualTo(VoiceTutorStudySnapshot(101, null, "Selected root", 6, revision = 1))
+        assertThat(contexts.remembered).containsExactly(listOf(101L))
+        assertThat(contexts.revised).containsExactly(101)
         assertThat(json(result).path("voiceLessonChangeApplies").asText()).isEqualTo("NEXT_QUESTION")
         assertThat(json(result).path("voiceLessonTopics")[0].path("difficulty").asInt()).isEqualTo(6)
         assertThat(fixture.calls.single { it.name == "update_study" }.arguments)
-            .isEqualTo(mapOf<String, Any>("study_id" to 102L, "difficulty_level" to 6))
+            .isEqualTo(mapOf<String, Any>(
+                "study_id" to 101L,
+                "difficulty_level" to 6,
+                BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT to "Selected root",
+                BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT to 5,
+                BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT to 0L,
+            ))
     }
+
+    @Test
+    fun `off-focus update preserves selected study and returns only the revised target snapshot`(): Unit = runBlocking {
+        val contexts = ContextStore()
+        val fixture = mutationFixture(contexts)
+
+        val result = fixture.adapter.execute(
+            updateContext(102L, difficulty = 6), "update_study",
+            mapOf("study_id" to 102L, "difficulty_level" to 6),
+        )
+
+        assertThat(result.isError).isFalse()
+        assertThat(result.changedStudyId).isEqualTo(102)
+        assertThat(result.lessonRevision).isEqualTo(1)
+        assertThat(result.lessonFocus).isNull()
+        assertThat(result.updatedStudySnapshot)
+            .isEqualTo(VoiceTutorStudySnapshot(102, 101, "Cache", 6, revision = 1))
+        assertThat(fixture.persistedSession?.studyId).isEqualTo(101)
+        assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
+        assertThat(json(result).path("voiceLessonChangeApplies").asText()).isEqualTo("REQUIRES_SELECTION")
+        assertThat(json(result).has("voiceLessonFocus")).isFalse()
+        assertThat(json(result).path("voiceLessonTree").path("selectedStudyId").asLong()).isEqualTo(101)
+        assertThat(json(result).path("notice").asText()).contains("not the lesson focus", "freshly selects it")
+        assertThat(contexts.remembered).containsExactly(listOf(102L))
+        assertThat(contexts.revised).containsExactly(102L)
+    }
+
+    @Test
+    fun `exact spoken candidate can be renamed before selection with owner read and revised readback`(): Unit =
+        runBlocking {
+            val contexts = ContextStore().apply {
+                live[202L] = VoiceTutorStudySnapshot(202, 200, "Spring backend", 7)
+            }
+            val fixture = mutationFixture(contexts).apply { persistedSession = discoverySession() }
+            val proof = VoiceTutorStudyUpdateTargetProof(202, 200, "Spring backend", 7)
+            val updateContext = updateContext(
+                studyId = 202,
+                topic = "Spring server",
+                scope = VoiceTutorStudyUpdateAuthorizationScope.OFFERED_CANDIDATE,
+                targetProof = proof,
+                startLessonAfterUpdate = true,
+            ).copy(session = discoverySession())
+
+            val result = fixture.adapter.execute(
+                updateContext,
+                "update_study",
+                mapOf("study_id" to 202L, "topic" to "Spring server"),
+            )
+
+            assertThat(result.isError).isFalse()
+            assertThat(result.changedStudyId).isEqualTo(202)
+            assertThat(result.lessonRevision).isEqualTo(1)
+            assertThat(result.lessonFocus).isNull()
+            assertThat(result.updatedStudySnapshot)
+                .isEqualTo(VoiceTutorStudySnapshot(202, 200, "Spring server", 7, revision = 1))
+            assertThat(contexts.remembered).containsExactly(listOf(202L))
+            assertThat(contexts.revised).containsExactly(202L)
+            assertThat(fixture.calls.map { it.name }).containsExactly("get_study", "update_study")
+            assertThat(fixture.calls.single { it.name == "update_study" }.arguments)
+                .isEqualTo(mapOf<String, Any>(
+                    "study_id" to 202L,
+                    "topic" to "Spring server",
+                    BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT to "Spring backend",
+                    BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT to 7,
+                    BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT to 200L,
+                ))
+            assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
+            assertThat(json(result).path("voiceLessonChangeApplies").asText()).isEqualTo("AUTO_FOCUS_PENDING")
+            assertThat(json(result).path("voiceLessonTopics")).hasSize(1)
+            assertThat(json(result).path("voiceLessonTopics")[0].path("studyId").asLong()).isEqualTo(202)
+            assertThat(json(result).path("voiceLessonTopics")[0].path("parentStudyId").asLong()).isEqualTo(200)
+            assertThat(json(result).path("voiceLessonTopics")[0].path("topic").asText())
+                .isEqualTo("Spring server")
+            assertThat(json(result).path("voiceLessonTopics")[0].path("difficulty").asInt()).isEqualTo(7)
+            assertThat(json(result).path("notice").asText())
+                .contains("Do not speak", "UPDATED_STUDY_IMMEDIATE_START")
+        }
+
+    @Test
+    fun `offered candidate update denies argument mismatch stale live identity stale baseline and replay`(): Unit =
+        runBlocking {
+            val proof = VoiceTutorStudyUpdateTargetProof(202, 200, "Spring backend", 7)
+
+            val mismatchedContexts = ContextStore().apply {
+                live[202L] = VoiceTutorStudySnapshot(202, 200, "Spring backend", 7)
+            }
+            val mismatched = mutationFixture(mismatchedContexts).apply { persistedSession = discoverySession() }
+            val mismatchedContext = updateContext(
+                202,
+                topic = "Spring server",
+                scope = VoiceTutorStudyUpdateAuthorizationScope.OFFERED_CANDIDATE,
+                targetProof = proof,
+            ).copy(session = discoverySession())
+            assertCode(
+                mismatched.adapter.execute(
+                    mismatchedContext,
+                    "update_study",
+                    mapOf("study_id" to 203L, "topic" to "Spring server"),
+                ),
+                "STUDY_UPDATE_REQUEST_MISMATCH",
+            )
+            assertThat(mismatched.calls).isEmpty()
+
+            val staleLiveContexts = ContextStore().apply {
+                live[202L] = VoiceTutorStudySnapshot(202, 200, "Changed elsewhere", 7)
+            }
+            val staleLive = mutationFixture(staleLiveContexts).apply { persistedSession = discoverySession() }
+            val staleLiveContext = updateContext(
+                202,
+                topic = "Spring server",
+                scope = VoiceTutorStudyUpdateAuthorizationScope.OFFERED_CANDIDATE,
+                targetProof = proof,
+            ).copy(session = discoverySession())
+            assertCode(
+                staleLive.adapter.execute(
+                    staleLiveContext,
+                    "update_study",
+                    mapOf("study_id" to 202L, "topic" to "Spring server"),
+                ),
+                "STUDY_UPDATE_TARGET_STALE",
+            )
+            assertThat(staleLive.calls.map { it.name }).containsExactly("get_study")
+            assertThat(staleLiveContexts.remembered).isEmpty()
+
+            val staleBaselineContexts = ContextStore().apply {
+                live[202L] = VoiceTutorStudySnapshot(202, 200, "Spring backend", 7)
+                saved[202L] = VoiceTutorStudySnapshot(202, 200, "Older captured name", 7)
+            }
+            val staleBaseline = mutationFixture(staleBaselineContexts).apply { persistedSession = discoverySession() }
+            val staleBaselineContext = updateContext(
+                202,
+                topic = "Spring server",
+                scope = VoiceTutorStudyUpdateAuthorizationScope.OFFERED_CANDIDATE,
+                targetProof = proof,
+            ).copy(session = discoverySession())
+            assertCode(
+                staleBaseline.adapter.execute(
+                    staleBaselineContext,
+                    "update_study",
+                    mapOf("study_id" to 202L, "topic" to "Spring server"),
+                ),
+                "STUDY_UPDATE_TARGET_STALE",
+            )
+            assertThat(staleBaseline.calls.map { it.name }).containsExactly("get_study")
+            assertThat(staleBaselineContexts.remembered).containsExactly(listOf(202L))
+            assertThat(staleBaselineContexts.revised).isEmpty()
+
+            val replayContexts = ContextStore().apply {
+                live[202L] = VoiceTutorStudySnapshot(202, 200, "Spring backend", 7)
+            }
+            val replay = mutationFixture(replayContexts).apply { persistedSession = discoverySession() }
+            val replayContext = updateContext(
+                202,
+                topic = "Spring server",
+                scope = VoiceTutorStudyUpdateAuthorizationScope.OFFERED_CANDIDATE,
+                targetProof = proof,
+            ).copy(session = discoverySession())
+            val arguments = mapOf<String, Any>("study_id" to 202L, "topic" to "Spring server")
+            assertThat(replay.adapter.execute(replayContext, "update_study", arguments).isError).isFalse()
+            assertCode(
+                replay.adapter.execute(replayContext, "update_study", arguments),
+                "STUDY_UPDATE_REQUEST_REQUIRED",
+            )
+            assertThat(replay.calls.count { it.name == "update_study" }).isEqualTo(1)
+        }
 
     @Test
     fun `persisted child and update leases execute exact patches once and reject replay or field smuggling`(): Unit =
@@ -2231,7 +2533,11 @@ class McpVoiceTutorToolAdapterTest {
             )
             assertThat(updateFixture.calls.count { it.name == "update_study" }).isEqualTo(1)
             assertThat(updateFixture.calls.single { it.name == "update_study" }.arguments)
-                .isEqualTo(updateArguments)
+                .isEqualTo(updateArguments + mapOf(
+                    BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT to "Cache",
+                    BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT to 3,
+                    BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT to 101L,
+                ))
         }
 
     @Test
@@ -2246,6 +2552,7 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(result.studyTreeChanged).isTrue()
         assertThat(result.changeKind).isEqualTo(VoiceTutorStudyChangeKind.UPDATED)
         assertThat(result.lessonRevision).isNull()
+        assertThat(result.updatedStudySnapshot).isNull()
         assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
         assertThat(json(result).path("voiceLessonChangeApplies").asText()).isEqualTo("NOT_PREPARED")
         assertThat(result.output).doesNotContain("private-revision-detail")
@@ -2413,15 +2720,36 @@ class McpVoiceTutorToolAdapterTest {
             when (name) {
                 "get_study" -> {
                     val id = (args.getValue("study_id") as Number).toLong()
-                    success(mapOf("id" to id, "parentStudyId" to if (id in 102L..103L) 101L else null,
-                        "topic" to "Cache", "difficultyLevel" to 3))
+                    val stored = (studyContexts as? ContextStore)?.live?.get(id)
+                        ?: (studyContexts as? ContextStore)?.saved?.get(id)
+                    success(mapOf(
+                        "id" to id,
+                        "parentStudyId" to (stored?.parentStudyId ?: if (id in 102L..103L) 101L else null),
+                        "topic" to (stored?.topic ?: "Cache"),
+                        "difficultyLevel" to (stored?.difficulty ?: 3),
+                    ))
                 }
                 "list_studies" -> {
                     val children = if (args["parent_study_id"] == 101L) listOf(102L, 103L) else emptyList()
                     success(mapOf("studies" to children.map { mapOf("id" to it, "parentStudyId" to 101L) }, "totalCount" to children.size, "offset" to 0))
                 }
-                "update_study" -> success(mapOf("id" to args["study_id"], "topic" to (args["topic"] ?: "Cache"),
-                    "difficultyLevel" to (args["difficulty_level"] ?: 3), "parentStudyId" to 101L))
+                "update_study" -> {
+                    val id = (args.getValue("study_id") as Number).toLong()
+                    val stored = (studyContexts as? ContextStore)?.live?.get(id)
+                        ?: (studyContexts as? ContextStore)?.saved?.get(id)
+                        ?: VoiceTutorStudySnapshot(id, 101, "Cache", 3)
+                    val updated = stored.copy(
+                        topic = args["topic"] as? String ?: stored.topic,
+                        difficulty = (args["difficulty_level"] as? Number)?.toInt() ?: stored.difficulty,
+                    )
+                    (studyContexts as? ContextStore)?.live?.set(id, updated)
+                    success(mapOf(
+                        "id" to id,
+                        "topic" to updated.topic,
+                        "difficultyLevel" to updated.difficulty,
+                        "parentStudyId" to updated.parentStudyId,
+                    ))
+                }
                 "delete_study" -> success(mapOf("deleted" to true, "studyId" to args["study_id"]))
                 else -> failure("UNEXPECTED_TOOL")
             }
@@ -2443,6 +2771,7 @@ class McpVoiceTutorToolAdapterTest {
         var duringLearnerAuthorization: () -> Unit = {}
         var acceptedProviderItemId = "accepted-user-item"
         var acceptedLessonRevision = 0L
+        var expectedFocusCurrentRevision: Long? = null
         var lastFocusLearnerTurnId = 0L
         var focusResult: VoiceTutorLessonFocusSelection? = null
         var afterFocus: () -> Unit = {}
@@ -2524,7 +2853,8 @@ class McpVoiceTutorToolAdapterTest {
                     expectedTraversal: VoiceTutorStudyTargetTraversal?,
                 ): VoiceTutorLessonFocusSelection? {
                     assertThat(learnerTurnId).isEqualTo(this@Fixture.learnerTurnId)
-                    assertThat(expectedCurrentRevision).isEqualTo(acceptedLessonRevision)
+                    assertThat(expectedCurrentRevision)
+                        .isEqualTo(expectedFocusCurrentRevision ?: acceptedLessonRevision)
                     assertThat(commitAuthority).isEqualTo(VoiceTutorFocusCommitAuthority(
                         principal.deviceId, principal.sessionId, session().providerSessionId!!,
                     ))
@@ -2584,6 +2914,7 @@ class McpVoiceTutorToolAdapterTest {
     private class ContextStore : VoiceTutorStudyContextPort {
         val remembered = mutableListOf<List<Long>>()
         val saved = linkedMapOf(101L to VoiceTutorStudySnapshot(101, null, "Selected root", 5))
+        val live = linkedMapOf<Long, VoiceTutorStudySnapshot>()
         var fail = false
         var failList = false
         var listReads = 0
@@ -2595,7 +2926,7 @@ class McpVoiceTutorToolAdapterTest {
         override suspend fun revise(userId: Long, sessionId: String, studyId: Long): List<VoiceTutorStudySnapshot> {
             if (failRevision) throw IllegalStateException("private-revision-detail")
             revised += studyId
-            val next = saved.getValue(studyId).copy(difficulty = 6, revision = ++revision)
+            val next = (live[studyId] ?: saved.getValue(studyId)).copy(revision = ++revision)
             saved[studyId] = next
             return listOf(next)
         }
@@ -2613,7 +2944,9 @@ class McpVoiceTutorToolAdapterTest {
             assertThat(sessionId).isEqualTo(session().id)
             remembered += studyIds
             if (fail) throw IllegalStateException("private-database-detail")
-            return studyIds.map { id -> saved.getOrPut(id) { VoiceTutorStudySnapshot(id, 101, "Cache", 3) } }
+            return studyIds.map { id ->
+                saved.getOrPut(id) { live[id] ?: VoiceTutorStudySnapshot(id, 101, "Cache", 3) }
+            }
         }
     }
 
@@ -2746,13 +3079,29 @@ class McpVoiceTutorToolAdapterTest {
             topic: String? = null,
             difficulty: Int? = null,
             lessonRevision: Long = 0,
+            scope: VoiceTutorStudyUpdateAuthorizationScope =
+                VoiceTutorStudyUpdateAuthorizationScope.CONFIRMED_FOCUS_TREE,
+            targetProof: VoiceTutorStudyUpdateTargetProof = VoiceTutorStudyUpdateTargetProof(
+                studyId = studyId,
+                parentStudyId = 101L.takeIf { studyId != 101L },
+                topic = if (studyId == 101L) "Selected root" else "Cache",
+                difficulty = if (studyId == 101L) 5 else 3,
+            ),
+            startLessonAfterUpdate: Boolean = false,
         ): VoiceTutorWebRtcControlContext {
             val base = context(
                 inputIntent = VoiceTutorInputIntent.UPDATE_STUDY,
                 lessonRevision = lessonRevision,
             )
             return base.copy(dialogueBoundary = requireNotNull(base.dialogueBoundary).copy(
-                studyUpdateAuthorization = VoiceTutorStudyUpdateAuthorization(studyId, topic, difficulty)
+                studyUpdateAuthorization = VoiceTutorStudyUpdateAuthorization(
+                    studyId,
+                    topic,
+                    difficulty,
+                    scope,
+                    targetProof,
+                    startLessonAfterUpdate,
+                )
                     .also {
                         check(it.bindToServerCall("direct-adapter-study-update"))
                         check(it.claimExecution("direct-adapter-study-update"))

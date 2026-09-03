@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice.adapter.outbound.persistence
 
 import com.buddystudy.backend.voice.application.model.VoiceTutorLessonTreeContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorInitialStudyMutationSnapshot
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetSingleChildEdge
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
@@ -158,6 +159,91 @@ class VoiceTutorStudyContextAdapterTest {
             """.trimIndent(),
         )
     }
+
+    @Test
+    fun `initial mutation snapshot is a complete deterministic owner scoped set of at most seventeen nodes`(): Unit =
+        runBlocking {
+            val fresh = session(id = "fresh-owner-snapshot", studyId = null).copy(topic = "", difficulty = 0)
+            insertSession(fresh)
+            for (id in 17L downTo 1L) {
+                insertStudy(
+                    id = id,
+                    parentId = if (id == 1L) null else 1L,
+                    topic = "Owned $id",
+                    difficulty = ((id - 1) % 10 + 1).toInt(),
+                )
+            }
+            insertStudy(100, userId = 99, topic = "Foreign root", difficulty = 9)
+
+            val snapshot = adapter.initialMutationSnapshot(
+                userId = 7,
+                sessionId = fresh.id,
+                maxCandidates = VoiceTutorInitialStudyMutationSnapshot.MAX_CANDIDATES,
+            )
+
+            assertThat(snapshot?.candidates?.map { it.studyId }).containsExactlyElementsOf(1L..17L)
+            assertThat(snapshot?.candidates).allSatisfy { candidate ->
+                assertThat(candidate.topic).startsWith("Owned ")
+                assertThat(candidate.difficulty).isBetween(1, 10)
+            }
+            assertThat(snapshot?.isValid()).isTrue()
+            assertThat(adapter.initialMutationSnapshot(99, fresh.id)).isNull()
+        }
+
+    @Test
+    fun `initial mutation snapshot fails closed instead of returning a partial eighteenth node window`(): Unit =
+        runBlocking {
+            val fresh = session(id = "overflow-owner-snapshot", studyId = null).copy(topic = "", difficulty = 0)
+            insertSession(fresh)
+            for (id in 1L..18L) insertStudy(id, topic = "Owned $id")
+
+            assertThat(adapter.initialMutationSnapshot(7, fresh.id)).isNull()
+        }
+
+    @Test
+    fun `initial mutation snapshot is unavailable after the first persisted USER turn but not a tutor turn`(): Unit =
+        runBlocking {
+            val fresh = session(id = "resumed-owner-snapshot", studyId = null).copy(topic = "", difficulty = 0)
+            insertSession(fresh)
+            insertStudy(1, topic = "Redis")
+            insertTranscriptTurn(11, fresh.id, role = "TUTOR")
+
+            assertThat(adapter.initialMutationSnapshot(7, fresh.id)?.candidates?.map { it.studyId })
+                .containsExactly(1L)
+
+            insertTranscriptTurn(12, fresh.id, role = "USER")
+
+            assertThat(adapter.initialMutationSnapshot(7, fresh.id)).isNull()
+        }
+
+    @Test
+    fun `initial mutation snapshot fails closed for malformed rows and duplicate identities are invalid evidence`(): Unit =
+        runBlocking {
+            val malformed = session(id = "malformed-owner-snapshot", studyId = null).copy(topic = "", difficulty = 0)
+            insertSession(malformed)
+            insertStudy(1, topic = "Redis", difficulty = 5)
+            insertStudy(2, topic = "", difficulty = 5)
+            insertStudy(3, parentId = 3, topic = "Self parent", difficulty = 11)
+
+            assertThat(adapter.initialMutationSnapshot(7, malformed.id)).isNull()
+
+            // The SQL primary key prevents duplicate rows at source; the transport model still
+            // rejects a duplicated identity if an alternate adapter ever violates that contract.
+            val duplicate = VoiceTutorInitialStudyMutationSnapshot(
+                listOf(
+                    VoiceTutorStudyTargetCandidate(1, null, "Redis", 5),
+                    VoiceTutorStudyTargetCandidate(1, null, "Redis copy", 5),
+                ),
+            )
+            assertThat(duplicate.isValid()).isFalse()
+            val ambiguousName = VoiceTutorInitialStudyMutationSnapshot(
+                listOf(
+                    VoiceTutorStudyTargetCandidate(1, null, "Redis", 5),
+                    VoiceTutorStudyTargetCandidate(2, null, "redis", 7),
+                ),
+            )
+            assertThat(ambiguousName.isValid()).isFalse()
+        }
 
     @Test
     fun `prepare copies accepted selected metadata and selects only the first ten owned direct children`(): Unit = runBlocking {

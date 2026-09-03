@@ -4,7 +4,9 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.voice.application.model.VoiceTutorInitialStudyMutationSnapshot
 import com.buddystudy.backend.voice.application.model.VoiceTutorRelayContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorRelayUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorControlClaimPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
@@ -335,9 +337,14 @@ class VoiceTutorWebRtcServiceTest {
         val calls = Calls()
         val lookups = mutableListOf<Pair<Long, String>>()
         val contexts = proxy<VoiceTutorStudyContextPort> { method, args ->
-            check(method == "currentRevision")
-            lookups += (args[0] as Long) to (args[1] as String)
-            7L
+            when (method) {
+                "currentRevision" -> {
+                    lookups += (args[0] as Long) to (args[1] as String)
+                    7L
+                }
+                "initialMutationSnapshot" -> null
+                else -> error("Unexpected VoiceTutorStudyContextPort call: $method")
+            }
         }
 
         val context = service(calls = calls, studyContexts = contexts)
@@ -351,12 +358,76 @@ class VoiceTutorWebRtcServiceTest {
     }
 
     @Test
+    fun `fresh active control claim forwards the complete bounded owner mutation snapshot`(): Unit = runBlocking {
+        val calls = Calls()
+        val expected = VoiceTutorInitialStudyMutationSnapshot(
+            listOf(
+                VoiceTutorStudyTargetCandidate(11, null, "Redis", 5),
+                VoiceTutorStudyTargetCandidate(12, 11, "Eviction", 7),
+            ),
+        )
+        val lookups = mutableListOf<Triple<String, Long, String>>()
+        var requestedMaximum: Int? = null
+        val contexts = proxy<VoiceTutorStudyContextPort> { method, args ->
+            when (method) {
+                "currentRevision" -> {
+                    lookups += Triple(method, args[0] as Long, args[1] as String)
+                    0L
+                }
+                "initialMutationSnapshot" -> {
+                    lookups += Triple(method, args[0] as Long, args[1] as String)
+                    requestedMaximum = args[2] as Int
+                    expected
+                }
+                else -> error("Unexpected VoiceTutorStudyContextPort call: $method")
+            }
+        }
+
+        val context = service(calls = calls, studyContexts = contexts)
+            .claimControl(principal, SESSION_ID, CONNECTION_ID)
+
+        assertThat(context.initialStudyMutationSnapshot).isSameAs(expected)
+        assertThat(requestedMaximum).isEqualTo(VoiceTutorInitialStudyMutationSnapshot.MAX_CANDIDATES)
+        assertThat(lookups).containsExactly(
+            Triple("currentRevision", principal.userId, SESSION_ID),
+            Triple("initialMutationSnapshot", principal.userId, SESSION_ID),
+        )
+        assertThat(calls.claim).isEqualTo(1)
+    }
+
+    @Test
+    fun `resumed or overflowed control claim preserves an absent initial mutation snapshot`(): Unit = runBlocking {
+        for (reason in listOf("existing USER turn", "owner candidate overflow")) {
+            val calls = Calls()
+            val contextLookups = mutableListOf<String>()
+            val contexts = proxy<VoiceTutorStudyContextPort> { method, _ ->
+                contextLookups += method
+                when (method) {
+                    "currentRevision" -> 3L
+                    // The persistence adapter deliberately collapses both unsafe states to null.
+                    "initialMutationSnapshot" -> null
+                    else -> error("Unexpected VoiceTutorStudyContextPort call for $reason: $method")
+                }
+            }
+
+            val context = service(calls = calls, studyContexts = contexts)
+                .claimControl(principal, SESSION_ID, CONNECTION_ID)
+
+            assertThat(context.initialStudyMutationSnapshot).describedAs(reason).isNull()
+            assertThat(contextLookups).containsExactly("currentRevision", "initialMutationSnapshot")
+            assertThat(calls.claim).isEqualTo(1)
+        }
+    }
+
+    @Test
     fun `a failed revision lookup does not acquire a control claim or start provider work`(): Unit = runBlocking {
         val calls = Calls()
         val unavailable = IllegalStateException("Synthetic metadata storage unavailable.")
         val contexts = proxy<VoiceTutorStudyContextPort> { method, _ ->
-            check(method == "currentRevision")
-            throw unavailable
+            when (method) {
+                "currentRevision" -> throw unavailable
+                else -> error("Unexpected VoiceTutorStudyContextPort call: $method")
+            }
         }
 
         val failure = runCatching {

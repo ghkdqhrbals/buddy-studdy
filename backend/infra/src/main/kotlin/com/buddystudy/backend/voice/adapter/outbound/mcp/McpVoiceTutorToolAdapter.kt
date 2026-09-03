@@ -6,6 +6,8 @@ import com.buddystudy.backend.mcp.adapter.inbound.McpJsonSchemaValidatorProvider
 import com.buddystudy.backend.voice.application.model.VoiceTutorLessonTreeContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorizationPurpose
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateAuthorizationScope
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateTargetProof
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscovery
@@ -69,7 +71,7 @@ class McpVoiceTutorToolAdapter(
             description = tool.description().orEmpty() + when (tool.name()) {
                 CREATE_ROOT -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact call only after independently attesting a persisted direct learner choice, including natural first-person new-study intent and an unambiguous topic or level carried from bounded earlier persisted learner speech. Existing roots are returned unchanged and omitted difficulty defaults to 5. This tool never itself selects a lesson or creates a question. When the same persisted turn was also independently attested to start that new lesson immediately, its result reports AUTO_FOCUS_PENDING and the server performs the exact readback and selection; do not ask the learner to confirm again, and teach only after CREATED_ROOT_IMMEDIATE_START is returned."
                 CREATE_TOPIC -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact call only after independently attesting the current first-person choice of one exact child under the current confirmed focus or one verified descendant. Mere mentions, examples, recommendations, quoted or third-party wishes, and ambiguous targets are not permission."
-                UPDATE_STUDY -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact update only after independently attesting the learner's current first-person choice of an exact saved node and new topic and/or level. Unspecified fields and past question levels are preserved, while mentions, examples, recommendations, quoted or third-party wishes, and ambiguous targets or outcomes are not permission."
+                UPDATE_STUDY -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact update only after independently attesting the learner's current first-person choice of an exact saved node and new topic and/or level. The target may be in the confirmed lesson tree or one exact server-read candidate that the tutor just spoke; both paths require a frozen old identity and a fresh owner-scoped read before the one-shot write. Unspecified fields and past question levels are preserved, while IDs or names from tool arguments, mentions, examples, recommendations, quoted or third-party wishes, and ambiguous targets or outcomes are not permission."
                 DELETE_STUDY -> " In a voice call, first call with confirm=false to preview the exact subtree; ask the learner to confirm its name and descendant count, then wait for a new affirmative spoken turn before calling with confirm=true and the returned confirmation_token. Never skip the preview or reuse a token."
                 in LEARNING_HISTORY_TOOLS -> " In a voice call, read only nodes in the current call's verified study tree; history never changes the agreed lesson focus."
                 else -> ""
@@ -300,6 +302,27 @@ class McpVoiceTutorToolAdapter(
         return VoiceTutorStudyTargetCandidate(id, parent, topic)
     }
 
+    /** Stricter live identity used only immediately before a saved-node write. */
+    private fun verifiedUpdateTarget(node: JsonNode): VoiceTutorStudyTargetCandidate? {
+        val candidate = verifiedTargetCandidate(node) ?: return null
+        val difficultyNode = node.path("difficultyLevel")
+        val difficulty = when {
+            difficultyNode.isMissingNode || difficultyNode.isNull -> null
+            difficultyNode.isIntegralNumber && difficultyNode.canConvertToInt() &&
+                difficultyNode.intValue() in 1..10 -> difficultyNode.intValue()
+            else -> return null
+        }
+        return candidate.copy(difficulty = difficulty)
+    }
+
+    private fun VoiceTutorStudyUpdateTargetProof.matches(candidate: VoiceTutorStudyTargetCandidate): Boolean =
+        studyId == candidate.studyId && parentStudyId == candidate.parentStudyId && topic == candidate.topic &&
+            difficulty?.let { it == candidate.difficulty } != false
+
+    private fun VoiceTutorStudyUpdateTargetProof.matches(snapshot: VoiceTutorStudySnapshot): Boolean =
+        studyId == snapshot.studyId && parentStudyId == snapshot.parentStudyId && topic == snapshot.topic &&
+            difficulty?.let { it == snapshot.difficulty } != false
+
     private fun verifiedCompleteCandidatePage(
         payload: JsonNode,
         requestedOffset: Long,
@@ -425,9 +448,13 @@ class McpVoiceTutorToolAdapter(
         val createdRootImmediateStart = !guidedAdvance &&
             dialogue?.focusAuthorization?.purpose ==
             VoiceTutorFocusAuthorizationPurpose.CREATED_ROOT_IMMEDIATE_START
+        val updatedStudyImmediateStart = !guidedAdvance &&
+            dialogue?.focusAuthorization?.purpose ==
+            VoiceTutorFocusAuthorizationPurpose.UPDATED_STUDY_IMMEDIATE_START
         val requiredIntent = when {
             guidedAdvance -> VoiceTutorInputIntent.CONTINUE_TREE
             createdRootImmediateStart -> VoiceTutorInputIntent.CREATE_ROOT_STUDY
+            updatedStudyImmediateStart -> VoiceTutorInputIntent.UPDATE_STUDY
             else -> VoiceTutorInputIntent.SELECT_SAVED_TOPIC
         }
         val providerItemId = dialogue?.latestAcceptedLearnerProviderItemId
@@ -445,25 +472,26 @@ class McpVoiceTutorToolAdapter(
             )
         }
         val attestedTarget = dialogue.latestAcceptedLearnerTargetStudyId
-        if (createdRootImmediateStart) {
+        if (createdRootImmediateStart || updatedStudyImmediateStart) {
             if (attestedTarget != id) {
                 return failure(
                     "LEARNER_TARGET_MISMATCH",
-                    "The server-read root is not the exact study authorized for this immediate lesson start.",
+                    "The server-read node is not the exact study authorized for this immediate lesson start.",
                 )
             }
             val candidate = dialogue.latestAcceptedLearnerTargetCandidate?.takeIf {
-                it.studyId == id && it.parentStudyId == null &&
+                it.studyId == id && (!createdRootImmediateStart || it.parentStudyId == null) &&
+                    it.parentStudyId?.let { parent -> parent > 0 && parent != id } != false &&
                     it.topic.isNotBlank() && it.topic == it.topic.trim() && it.topic.length <= 255 &&
                     it.difficulty?.let { difficulty -> difficulty in 1..10 } == true
             } ?: return failure(
                 "LEARNER_TARGET_MISMATCH",
-                "The exact server-read root metadata is missing or stale; do not start teaching.",
+                "The exact server-read saved-node metadata is missing or stale; do not start teaching.",
             )
             dialogue.latestAcceptedLearnerTargetTraversal?.takeIf { it.isValidFor(candidate) }
                 ?: return failure(
                     "LEARNER_TARGET_MISMATCH",
-                    "The exact server-read root path is missing or stale; do not start teaching.",
+                    "The exact server-read saved-node path is missing or stale; do not start teaching.",
                 )
             return null
         }
@@ -513,21 +541,36 @@ class McpVoiceTutorToolAdapter(
         val createdRootImmediateStart = !guidedAdvance &&
             dialogue.focusAuthorization?.purpose ==
             VoiceTutorFocusAuthorizationPurpose.CREATED_ROOT_IMMEDIATE_START
+        val updatedStudyImmediateStart = !guidedAdvance &&
+            dialogue.focusAuthorization?.purpose ==
+            VoiceTutorFocusAuthorizationPurpose.UPDATED_STUDY_IMMEDIATE_START
         val providerItemId = requireNotNull(dialogue.latestAcceptedLearnerProviderItemId)
         val attestedCandidate = requireNotNull(dialogue.latestAcceptedLearnerTargetCandidate)
         val attestedTraversal = requireNotNull(dialogue.latestAcceptedLearnerTargetTraversal)
         val currentRevision = studyContexts.currentRevision(context.session.userId, context.session.id)
-        if (currentRevision < 0 || dialogue.latestAcceptedLearnerLessonRevision != currentRevision) {
+        val learnerRevision = dialogue.latestAcceptedLearnerLessonRevision
+        val expectedFocusRevision = dialogue.focusExpectedCurrentLessonRevision
+        val revisionValid = if (updatedStudyImmediateStart) {
+            learnerRevision >= 0 && expectedFocusRevision != null &&
+                expectedFocusRevision > learnerRevision && currentRevision == expectedFocusRevision
+        } else {
+            currentRevision >= 0 && learnerRevision == currentRevision
+        }
+        if (!revisionValid) {
             return failure(
                 if (guidedAdvance) "LEARNER_CONTINUATION_REQUIRED" else "LEARNER_CHOICE_REQUIRED",
-                "The learner's topic intent belongs to an older lesson focus. Wait for a fresh reply in the current topic.",
+                if (updatedStudyImmediateStart) {
+                    "The exact post-update lesson revision does not match the revised saved-node snapshot. Do not start teaching."
+                } else {
+                    "The learner's topic intent belongs to an older lesson focus. Wait for a fresh reply in the current topic."
+                },
             )
         }
         val authorization = confirmations.learnerTurnAuthorization(
             context.session.userId,
             context.session.id,
             providerItemId,
-            currentRevision,
+            learnerRevision,
             dialogue.precedingQuestionProviderItemId,
             dialogue.precedingAnswerProviderItemId,
             dialogue.precedingTutorFeedbackProviderItemId,
@@ -597,13 +640,15 @@ class McpVoiceTutorToolAdapter(
             selection.snapshot.topic.isBlank() || selection.snapshot.topic.length > 255 ||
             selection.snapshot.difficulty !in 1..10 || selection.snapshot.parentStudyId?.let { it > 0 } == false
         ) return failure("LESSON_FOCUS_UNCONFIRMED", "The saved focus result could not be verified; do not begin teaching or repeat a selection automatically.")
-        if (createdRootImmediateStart && (
-                selection.snapshot.parentStudyId != null || selection.snapshot.topic != attestedCandidate.topic ||
+        if ((createdRootImmediateStart || updatedStudyImmediateStart) && (
+                (createdRootImmediateStart && selection.snapshot.parentStudyId != null) ||
+                    selection.snapshot.parentStudyId != attestedCandidate.parentStudyId ||
+                    selection.snapshot.topic != attestedCandidate.topic ||
                     selection.snapshot.difficulty != attestedCandidate.difficulty
             )
         ) return failure(
             "LESSON_FOCUS_UNCONFIRMED",
-            "The created root changed before its exact level could be focused; no lesson was started.",
+            "The saved node changed before its exact revised metadata could be focused; no lesson was started.",
         )
         // Selection already committed. Optional tree enrichment must not turn it into an
         // uncertain failed selection or cause a duplicate focus epoch on retry. In particular,
@@ -628,6 +673,7 @@ class McpVoiceTutorToolAdapter(
                 "voiceLessonFocusChange" to when {
                     guidedAdvance -> "GUIDED_DIRECT_CHILD"
                     createdRootImmediateStart -> "CREATED_ROOT_IMMEDIATE_START"
+                    updatedStudyImmediateStart -> "UPDATED_STUDY_IMMEDIATE_START"
                     else -> "EXPLICIT_SELECTION"
                 },
                 "notice" to when {
@@ -635,6 +681,8 @@ class McpVoiceTutorToolAdapter(
                         "The next direct child focus is confirmed. Review only its node history, then ask one question at its frozen level; do not skip another edge or append a second question."
                     createdRootImmediateStart ->
                         "The newly created root and the learner's immediate lesson start are both confirmed. Use its frozen level and ask the first substantive question now without requesting readiness or permission again."
+                    updatedStudyImmediateStart ->
+                        "The saved-node update, exact revised readback and immediate lesson focus are confirmed. Use the revised frozen name and level and ask the first substantive question now without requesting readiness or permission again."
                     else ->
                         "The saved lesson focus is confirmed. Use its frozen level for the next new question, review only its node history first, and wait for clear learner agreement before teaching; prior questions and navigation turns keep their original context."
                 },
@@ -888,30 +936,72 @@ class McpVoiceTutorToolAdapter(
             )
         }
         val lease = context.dialogueBoundary?.studyUpdateAuthorization
+        val targetProof = lease?.targetProof
         val authorizedPatchKeys = buildSet {
             if (lease?.topic != null) add("topic")
             if (lease?.difficulty != null) add("difficulty_level")
         }
         if (lease == null || lease.studyId != studyId || lease.topic != topic || lease.difficulty != difficulty ||
-            suppliedPatchKeys != authorizedPatchKeys
+            suppliedPatchKeys != authorizedPatchKeys || lease.scope == null || targetProof == null ||
+            targetProof.studyId != studyId
         ) {
             return failure(
                 "STUDY_UPDATE_REQUEST_MISMATCH",
                 "Use the exact saved node and patch from the persisted learner choice; no write was started.",
             )
         }
-        if (!studyIsWithinCallTree(context, studyId)) {
-            return if (!isAuthorized(context)) inactiveCall() else failure(
-                "STUDY_SCOPE_DENIED", "Change only an exact owned node in this call's verified study tree.",
+        if (!lease.isActive()) {
+            return failure(
+                "STUDY_UPDATE_REQUEST_REQUIRED",
+                "This exact saved-node patch was already used or revoked; wait for a fresh direct learner choice.",
             )
         }
         if (!isAuthorized(context)) return inactiveCall()
+        val authorizedScope = when (lease.scope) {
+            null -> false
+            VoiceTutorStudyUpdateAuthorizationScope.CONFIRMED_FOCUS_TREE ->
+                studyIsWithinCallTree(context, studyId)
+            VoiceTutorStudyUpdateAuthorizationScope.OFFERED_CANDIDATE,
+            VoiceTutorStudyUpdateAuthorizationScope.INITIAL_OWNER_SNAPSHOT -> true
+        }
+        if (!authorizedScope) {
+            return if (!isAuthorized(context)) inactiveCall() else failure(
+                "STUDY_SCOPE_DENIED", "Change only the exact frozen owned node in this call's verified study tree.",
+            )
+        }
+        val readStudy = specifications["get_study"] ?: return failure(
+            "LESSON_CONTEXT_UNAVAILABLE",
+            "The saved node could not be safely read before this update. No update was started.",
+        )
+        val readResult = invoke(
+            requireNotNull(context.principal),
+            readStudy,
+            mapOf("study_id" to studyId, "language" to context.session.language),
+        )
+        if (!isAuthorized(context)) return inactiveCall()
+        val liveTarget = readResult.takeIf { it.isError() != true }?.structuredContent()
+            ?.let { objectMapper.valueToTree<JsonNode>(it) }
+            ?.let(::verifiedUpdateTarget)
+        val liveDifficulty = liveTarget?.difficulty
+        if (liveTarget == null || liveDifficulty == null || !targetProof.matches(liveTarget)) {
+            return failure(
+                "STUDY_UPDATE_TARGET_STALE",
+                "The exact saved node changed after it was offered or assessed. Read and speak it again before a fresh update.",
+            )
+        }
         val prepared = studyContexts.remember(context.session.userId, context.session.id, listOf(studyId))
         val baseline = prepared.singleOrNull { it.studyId == studyId }
-        if (baseline == null || studyContexts.currentRevision(context.session.userId, context.session.id) >= 32) {
+        val revisionAfterBaseline = studyContexts.currentRevision(context.session.userId, context.session.id)
+        if (baseline == null || revisionAfterBaseline >= 32 || revisionAfterBaseline != revision) {
             return failure(
                 "LESSON_CONTEXT_UNAVAILABLE",
                 "The change could not be safely prepared in this call. No update was started.",
+            )
+        }
+        if (!targetProof.matches(baseline)) {
+            return failure(
+                "STUDY_UPDATE_TARGET_STALE",
+                "The lesson's saved-node baseline no longer matches the exact offered identity. Read and speak it again before a fresh update.",
             )
         }
         if (!isAuthorized(context)) return inactiveCall()
@@ -924,6 +1014,12 @@ class McpVoiceTutorToolAdapter(
         val exactArguments = linkedMapOf<String, Any>("study_id" to studyId)
         topic?.let { exactArguments["topic"] = it }
         difficulty?.let { exactArguments["difficulty_level"] = it }
+        // The public provider schema never exposes these fields. The local MCP
+        // handler carries the last owner-read identity into the same owner-lock
+        // transaction as the write, closing the read/write race.
+        exactArguments[BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT] = liveTarget.topic
+        exactArguments[BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT] = liveDifficulty
+        exactArguments[BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT] = liveTarget.parentStudyId ?: 0L
         val result = invoke(requireNotNull(context.principal), specification, exactArguments)
         if (result.isError() == true) return boundedResult(result, UPDATE_STUDY)
         val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
@@ -1235,7 +1331,7 @@ class McpVoiceTutorToolAdapter(
         }.distinct()
         if (ids.isEmpty()) return result
         val selectedId = currentStudyAnchor(context)
-        if ((selectedId == null && toolName != CREATE_ROOT) ||
+        if ((selectedId == null && toolName != CREATE_ROOT && toolName != UPDATE_STUDY) ||
             (toolName == "list_studies" && "parent_study_id" !in arguments)
         ) {
             // Discovery pages are browsing, not lesson consent or metadata reservations.
@@ -1268,9 +1364,31 @@ class McpVoiceTutorToolAdapter(
             logger.warn("voice_tutor_study_context_capture_failed errorType={}", error.javaClass.simpleName)
         }
         val frozenIds = snapshots.mapTo(mutableSetOf()) { it.studyId }
+        val updatedUnselectedCandidate = toolName == UPDATE_STUDY &&
+            (selectedId == null || ids.singleOrNull() != selectedId)
+        val updatedReadback = if (toolName == UPDATE_STUDY) {
+            nodes.singleOrNull()?.let(::verifiedUpdateTarget)
+        } else {
+            null
+        }
+        val updatedStudySnapshot = if (toolName == UPDATE_STUDY && ids.size == 1) {
+            snapshots.singleOrNull { it.studyId == ids.single() }?.takeIf { snapshot ->
+                val readback = updatedReadback ?: return@takeIf false
+                readback.difficulty != null && readback.studyId == snapshot.studyId &&
+                    readback.parentStudyId == snapshot.parentStudyId && readback.topic == snapshot.topic &&
+                    readback.difficulty == snapshot.difficulty
+            }
+        } else {
+            null
+        }
+        val acceptedLearnerRevision = context.dialogueBoundary?.latestAcceptedLearnerLessonRevision ?: -1
+        val updateAutoFocusPending = updatedStudySnapshot != null &&
+            context.dialogueBoundary?.studyUpdateAuthorization?.startLessonAfterUpdate == true &&
+            acceptedLearnerRevision >= 0 && updatedStudySnapshot.revision > acceptedLearnerRevision
         payload.put(
             "voiceLessonContextReady",
-            toolName != CREATE_ROOT && nodes.size <= 32 && ids.all { it in frozenIds },
+            toolName != CREATE_ROOT && !updatedUnselectedCandidate &&
+                nodes.size <= 32 && ids.all { it in frozenIds },
         )
         if (toolName == CREATE_ROOT) {
             val compoundStartPending = context.dialogueBoundary
@@ -1289,8 +1407,26 @@ class McpVoiceTutorToolAdapter(
             )
         }
         if (toolName == UPDATE_STUDY) {
-            payload.put("voiceLessonChangeApplies", if (ids.all { it in frozenIds }) "NEXT_QUESTION" else "NOT_PREPARED")
-            payload.put("notice", "Study settings were saved; completed and pending questions keep their original title and level. If lesson context is not ready, do not ask another question on this node or repeat the write.")
+            payload.put(
+                "voiceLessonChangeApplies",
+                when {
+                    updatedStudySnapshot == null -> "NOT_PREPARED"
+                    updateAutoFocusPending -> "AUTO_FOCUS_PENDING"
+                    updatedUnselectedCandidate -> "REQUIRES_SELECTION"
+                    else -> "NEXT_QUESTION"
+                },
+            )
+            payload.put(
+                "notice",
+                when {
+                    updateAutoFocusPending ->
+                        "The exact saved node was updated and its revised metadata was captured. Do not speak, ask for agreement, or originate or retry another tool; wait for the server-owned UPDATED_STUDY_IMMEDIATE_START selection before asking the first question."
+                    updatedUnselectedCandidate ->
+                        "The exact offered saved node was updated and its revised metadata was read back, but it is not the lesson focus. Do not ask a study question until the learner freshly selects it; never repeat the write."
+                    else ->
+                        "Study settings were saved; completed and pending questions keep their original title and level. If lesson context is not ready, do not ask another question on this node or repeat the write."
+                },
+            )
         }
         payload.set<JsonNode>(
             "voiceLessonTopics",
@@ -1311,18 +1447,25 @@ class McpVoiceTutorToolAdapter(
             )),
         )
         val currentView = currentSnapshots(savedTree + snapshots)
-        val updatedRevision = if (toolName == UPDATE_STUDY && ids.all { it in frozenIds })
-            currentView.maxOfOrNull { it.revision } else null
-        val updatedFocus = if (updatedRevision != null) currentView.singleOrNull { it.studyId == selectedId }
-            ?.let { snapshot ->
-                VoiceTutorLessonFocusSelection(
-                    focus = VoiceTutorLessonFocus(snapshot.studyId, updatedRevision),
-                    snapshot = snapshot,
-                    lessonRevision = updatedRevision,
-                )
-            } else null
+        val updatedRevision = updatedStudySnapshot?.revision
+        val updatedFocus = if (updatedRevision != null && !updatedUnselectedCandidate) {
+            currentView.singleOrNull { it.studyId == selectedId }
+                ?.let { snapshot ->
+                    VoiceTutorLessonFocusSelection(
+                        focus = VoiceTutorLessonFocus(snapshot.studyId, updatedRevision),
+                        snapshot = snapshot,
+                        lessonRevision = updatedRevision,
+                    )
+                }
+        } else {
+            null
+        }
         updatedFocus?.let { payload.set<JsonNode>("voiceLessonFocus", objectMapper.valueToTree(focusMetadata(it))) }
-        val revisedResult = result.copy(lessonRevision = updatedRevision, lessonFocus = updatedFocus)
+        val revisedResult = result.copy(
+            lessonRevision = updatedRevision,
+            lessonFocus = updatedFocus,
+            updatedStudySnapshot = updatedStudySnapshot,
+        )
         val enriched = objectMapper.writeValueAsBytes(payload)
         if (enriched.size <= MAX_OUTPUT_BYTES) return revisedResult.copy(output = String(enriched, Charsets.UTF_8))
         if (result.studyTreeChanged) {

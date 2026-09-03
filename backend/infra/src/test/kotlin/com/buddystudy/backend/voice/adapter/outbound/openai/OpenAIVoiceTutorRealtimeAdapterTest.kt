@@ -11,6 +11,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRealtimeRequest
+import com.fasterxml.jackson.databind.JsonNode
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -206,7 +207,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
                         assertThat(node.path("type").asText()).isEqualTo("response.create")
                         assertThat(node.path("event_id").asText())
                             .startsWith("buddystudy-internal-duplex-opening-response-")
-                        assertThat(node.path("response").has("instructions")).isFalse()
+                        assertDirectTopicOpening(node)
                         assertThat(
                             node.path("response").path("metadata")
                                 .path(VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY).asText(),
@@ -349,7 +350,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
                 val node = mapper.readTree(raw)
                 assertThat(node.path("event_id").asText())
                     .startsWith("buddystudy-internal-duplex-opening-response-")
-                assertThat(node.path("response").has("instructions")).isFalse()
+                assertDirectTopicOpening(node)
             }
             .verifyComplete()
 
@@ -2007,6 +2008,15 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
         assertThat(commit.path("type").asText()).isEqualTo("input_audio_buffer.commit")
         assertThat(commit.path("event_id").asText()).startsWith("buddystudy-internal-duplex-input-checkpoint-")
         assertThat(commit.fieldNames().asSequence().toList()).containsExactlyInAnyOrder("event_id", "type")
+    }
+
+    private fun assertDirectTopicOpening(node: JsonNode) {
+        val instructions = node.path("response").path("instructions").asText()
+        assertThat(instructions)
+            .contains("어떤 주제로 이야기해 볼까요?")
+            .contains("Do not greet the learner")
+            .contains("introduce or name yourself")
+            .doesNotContain("AI 선생님이에요")
     }
 
     private fun permutations(values: List<String>): List<List<String>> =

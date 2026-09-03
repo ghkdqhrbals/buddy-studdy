@@ -4,6 +4,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyCon
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorFocusCommitAuthority
 import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorInitialStudyMutationSnapshot
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
@@ -29,6 +30,44 @@ class VoiceTutorStudyContextAdapter(
     private val database: DatabaseClient,
     private val clock: Clock = Clock.systemUTC(),
 ) : VoiceTutorStudyContextPort, VoiceTutorLessonFocusPort {
+    @Transactional(readOnly = true)
+    override suspend fun initialMutationSnapshot(
+        userId: Long,
+        sessionId: String,
+        maxCandidates: Int,
+    ): VoiceTutorInitialStudyMutationSnapshot? {
+        if (userId <= 0 || sessionId.isBlank() || sessionId.length > 191 ||
+            maxCandidates !in 1..VoiceTutorInitialStudyMutationSnapshot.MAX_CANDIDATES
+        ) return null
+        val rows = database.sql(
+            """
+            select study.id, study.parent_study_id, study.topic, study.difficulty_level
+            from studies study
+            where study.user_id = :userId
+              and exists (
+                select 1 from voice_tutor_sessions session
+                where session.id = :sessionId and session.user_id = :userId and session.status = 'ACTIVE'
+              )
+              and not exists (
+                select 1 from voice_tutor_transcript_turns turn
+                where turn.session_id = :sessionId and turn.role = 'USER'
+              )
+            order by study.id
+            limit ${maxCandidates + 1}
+            """.trimIndent(),
+        ).bind("userId", userId).bind("sessionId", sessionId)
+            .map { row, _ -> ownedSnapshot(row) }.all().collectList().awaitSingle()
+        if (rows.isEmpty() || rows.size > maxCandidates || rows.any { !validMetadata(it) }) return null
+        return VoiceTutorInitialStudyMutationSnapshot(rows.map { snapshot ->
+            VoiceTutorStudyTargetCandidate(
+                studyId = snapshot.studyId,
+                parentStudyId = snapshot.parentStudyId,
+                topic = snapshot.topic,
+                difficulty = snapshot.difficulty,
+            )
+        }).takeIf { it.isValid(maxCandidates) }
+    }
+
     @Transactional
     override suspend fun prepare(session: VoiceTutorSession): List<VoiceTutorStudySnapshot> {
         val accepted = lockActive(session.userId, session.id) ?: return emptyList()

@@ -8,20 +8,73 @@ data class VoiceTutorStudyTargetCandidate(
     val difficulty: Int? = null,
 )
 
+enum class VoiceTutorStudyMutationContextSource {
+    /** A confirmed focus and/or a candidate spoken in the immediately preceding tutor response. */
+    FOCUS_OR_SPOKEN_OFFER,
+
+    /** Complete, bounded owner read made before the first eligible learner turn of a fresh call. */
+    INITIAL_OWNER_SNAPSHOT,
+}
+
+/**
+ * Complete only when the owner had at most [MAX_CANDIDATES] saved nodes. An overflow, malformed
+ * row, or resumed call is represented by no snapshot rather than a partial candidate window.
+ */
+data class VoiceTutorInitialStudyMutationSnapshot(
+    val candidates: List<VoiceTutorStudyTargetCandidate>,
+) {
+    fun isValid(maxCandidates: Int = MAX_CANDIDATES): Boolean =
+        candidates.size in 1..maxCandidates &&
+            candidates.map(VoiceTutorStudyTargetCandidate::studyId).distinct().size == candidates.size &&
+            candidates.map { canonicalTopicIdentity(it.topic) }.distinct().size == candidates.size &&
+            candidates.all {
+                    it.studyId > 0 && it.parentStudyId?.let { parent -> parent > 0 && parent != it.studyId } != false &&
+                    it.topic.isNotBlank() && it.topic == it.topic.trim() && it.topic.length <= 255 &&
+                    it.difficulty != null && it.difficulty in 1..10
+            }
+
+    companion object {
+        const val MAX_CANDIDATES = 17
+
+        /** Identity only; semantic intent is always decided by the independent model assessments. */
+        internal fun canonicalTopicIdentity(value: String): String = buildString(value.length) {
+            var pendingSpace = false
+            for (character in value.trim().lowercase()) {
+                if (character.isWhitespace()) {
+                    pendingSpace = isNotEmpty()
+                } else {
+                    if (pendingSpace) append(' ')
+                    append(character)
+                    pendingSpace = false
+                }
+            }
+        }
+    }
+}
+
 /** Bounded server-read targets that one learner turn may mutate; provider text cannot add an ID. */
 data class VoiceTutorStudyMutationContext(
     val lessonRevision: Long,
-    val currentFocusStudyId: Long,
+    val currentFocusStudyId: Long?,
     val candidates: List<VoiceTutorStudyTargetCandidate>,
+    val source: VoiceTutorStudyMutationContextSource = VoiceTutorStudyMutationContextSource.FOCUS_OR_SPOKEN_OFFER,
 ) {
     fun isValid(maxCandidates: Int = 17): Boolean =
-        lessonRevision >= 0 && currentFocusStudyId > 0 && candidates.size in 1..maxCandidates &&
+        lessonRevision >= 0 && currentFocusStudyId?.let { it > 0 } != false &&
+            candidates.size in 1..maxCandidates &&
             candidates.map { it.studyId }.distinct().size == candidates.size &&
-            candidates.singleOrNull { it.studyId == currentFocusStudyId } != null &&
+            currentFocusStudyId?.let { focus ->
+                candidates.singleOrNull { it.studyId == focus } != null
+            } != false &&
             candidates.all {
                 it.studyId > 0 && it.parentStudyId?.let { parent -> parent > 0 && parent != it.studyId } != false &&
                     it.topic.isNotBlank() && it.topic == it.topic.trim() && it.topic.length <= 255 &&
                     it.difficulty?.let { difficulty -> difficulty in 1..10 } != false
+            } && when (source) {
+                VoiceTutorStudyMutationContextSource.FOCUS_OR_SPOKEN_OFFER -> true
+                VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT ->
+                    currentFocusStudyId == null &&
+                        VoiceTutorInitialStudyMutationSnapshot(candidates).isValid()
             }
 }
 
@@ -307,6 +360,7 @@ data class VoiceTutorChildStudyCreationRequest(
 ) {
     fun isValidFor(utterance: VoiceTutorInputUtterance): Boolean {
         val context = utterance.studyMutationContext?.takeIf(VoiceTutorStudyMutationContext::isValid) ?: return false
+        if (context.currentFocusStudyId == null) return false
         val parent = context.candidates.singleOrNull { it.studyId == parentStudyId } ?: return false
         if (topic.isBlank() || topic != topic.trim() || topic.length > 255 || difficulty !in 1..10 ||
             evidence.topic != topic || !evidence.isExactLearnerEvidence(utterance)
@@ -331,24 +385,42 @@ data class VoiceTutorStudyUpdateEvidence(
     val topic: String?,
     val difficulty: String?,
     val targetImplicitCurrentFocus: Boolean,
+    /** True only for a semantic reference to the one exact candidate just spoken by the tutor. */
+    val targetImplicitSpokenOffer: Boolean = false,
 ) {
     fun isExactLearnerEvidence(utterance: VoiceTutorInputUtterance): Boolean {
-        if (source != VoiceTutorRootStudyEvidenceSource.TRANSCRIPT) return false
         val learnerSource = when (source) {
             VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> utterance.transcript
-            VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> utterance.sameSpeechContext ?: return false
+            // Checkpoint text is not durable learner evidence and can never
+            // authorize a saved-tree write.
+            VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> return false
             VoiceTutorRootStudyEvidenceSource.PERSISTED_LEARNER_CONTEXT ->
                 utterance.persistedLearnerSource() ?: return false
         }
-        val targetValid = if (targetImplicitCurrentFocus) {
-            targetTopic == null
-        } else {
-            targetTopic?.takeIf { it.isNotBlank() && it == it.trim() && it.length <= 255 }
+        val currentActionGrounded = when (source) {
+            VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> true
+            VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> false
+            VoiceTutorRootStudyEvidenceSource.PERSISTED_LEARNER_CONTEXT ->
+                command.substringAfterLast('\n').takeIf { it.isNotBlank() }
+                    ?.let(utterance.transcript::contains) == true
+        }
+        // This checks exact persistence framing only; semantic intent remains
+        // exclusively the responsibility of the two independent assessments.
+        val sourceStructureValid = when (source) {
+            VoiceTutorRootStudyEvidenceSource.TRANSCRIPT -> learnerSource.contains(command)
+            VoiceTutorRootStudyEvidenceSource.SAME_SPEECH_CONTEXT -> false
+            VoiceTutorRootStudyEvidenceSource.PERSISTED_LEARNER_CONTEXT ->
+                command.contains('\n') && learnerSource.endsWith(command)
+        }
+        if (targetImplicitCurrentFocus && targetImplicitSpokenOffer) return false
+        val targetValid = when {
+            targetImplicitCurrentFocus || targetImplicitSpokenOffer -> targetTopic == null
+            else -> targetTopic?.takeIf { it.isNotBlank() && it == it.trim() && it.length <= 255 }
                 ?.let(command::contains) == true
         }
         return command.isNotBlank() && command.length <= 4_000 &&
             listOfNotNull(targetTopic, topic, difficulty).all { command.length > it.length } &&
-            learnerSource.contains(command) && targetValid && topic?.let {
+            currentActionGrounded && sourceStructureValid && targetValid && topic?.let {
                 it.isNotBlank() && it == it.trim() && it.length <= 255 && command.contains(it)
             } != false && difficulty?.let {
                 it.isNotBlank() && it == it.trim() && it.length <= 32 && command.contains(it)
@@ -361,6 +433,8 @@ data class VoiceTutorStudyUpdateRequest(
     val topic: String?,
     val difficulty: Int?,
     val evidence: VoiceTutorStudyUpdateEvidence,
+    /** True only when both independent semantic assessments agree the completed update also starts study now. */
+    val startLessonAfterUpdate: Boolean = false,
 ) {
     fun isValidFor(utterance: VoiceTutorInputUtterance): Boolean {
         val context = utterance.studyMutationContext?.takeIf(VoiceTutorStudyMutationContext::isValid) ?: return false
@@ -374,10 +448,30 @@ data class VoiceTutorStudyUpdateRequest(
             difficulty?.let { it !in 1..10 } == true || evidence.topic != topic ||
             !difficultyEvidenceMatches || !evidence.isExactLearnerEvidence(utterance)
         ) return false
-        return if (evidence.targetImplicitCurrentFocus) {
-            studyId == context.currentFocusStudyId
-        } else {
-            evidence.targetTopic == target.topic
+        return when {
+            context.source == VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT -> {
+                utterance.targetOffer == null && context.currentFocusStudyId == null &&
+                    evidence.source == VoiceTutorRootStudyEvidenceSource.TRANSCRIPT &&
+                    !evidence.targetImplicitCurrentFocus && !evidence.targetImplicitSpokenOffer &&
+                    evidence.targetTopic == target.topic &&
+                    context.candidates.filter { it.topic == evidence.targetTopic }.singleOrNull() == target
+            }
+            evidence.targetImplicitCurrentFocus ->
+                context.currentFocusStudyId != null && studyId == context.currentFocusStudyId
+            evidence.targetImplicitSpokenOffer -> {
+                val offer = utterance.targetOffer ?: return false
+                offer.lessonRevision == context.lessonRevision &&
+                    offer.currentFocusStudyId == context.currentFocusStudyId &&
+                    offer.candidates.singleOrNull() == target &&
+                    offer.tutorAudioTranscript.contains(target.topic)
+            }
+            else -> evidence.targetTopic == target.topic && if (studyId != context.currentFocusStudyId) {
+                val offer = utterance.targetOffer ?: return false
+                offer.lessonRevision == context.lessonRevision &&
+                    offer.currentFocusStudyId == context.currentFocusStudyId &&
+                    offer.candidates.singleOrNull { it.studyId == studyId } == target &&
+                    offer.tutorAudioTranscript.contains(target.topic)
+            } else true
         }
     }
 }

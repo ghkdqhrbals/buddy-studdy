@@ -8,6 +8,7 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.ExpectedStudyMetadata
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
@@ -556,6 +557,51 @@ class StudySyncServiceTest {
     }
 
     @Test
+    fun `voice metadata patch compares the frozen identity inside the owner fence`(): Unit = runBlocking {
+        val row = study(11, "Redis").apply {
+            parentStudyId = 10
+            difficultyLevel = 3
+        }
+        studies.rows += row
+        val expected = ExpectedStudyMetadata(parentStudyId = 10, topic = "Redis", difficultyLevel = 3)
+
+        val concurrentChanges = listOf<() -> Unit>(
+            { row.topic = "Changed elsewhere" },
+            { row.parentStudyId = 12 },
+            { row.difficultyLevel = 8 },
+        )
+        concurrentChanges.forEach { change ->
+            row.topic = "Redis"
+            row.parentStudyId = 10
+            row.difficultyLevel = 3
+            change()
+
+            val error = runCatching {
+                service.updateStudy(
+                    principal,
+                    11,
+                    UpdateStudyCommand(topic = "Redis Streams", expectedCurrent = expected),
+                )
+            }.exceptionOrNull() as ApiException
+
+            assertThat(error.status).isEqualTo(HttpStatus.CONFLICT)
+            assertThat(error.code).isEqualTo(ApiErrorCode.STUDY_TREE_CHANGED)
+        }
+        assertThat(studies.metadataUpdateCalls).isZero()
+
+        row.topic = "Redis"
+        row.parentStudyId = 10
+        row.difficultyLevel = 3
+        val saved = service.updateStudy(
+            principal,
+            11,
+            UpdateStudyCommand(topic = "Redis Streams", expectedCurrent = expected),
+        )
+        assertThat(saved.topic).isEqualTo("Redis Streams")
+        assertThat(studies.metadataUpdateCalls).isEqualTo(1)
+    }
+
+    @Test
     fun `create child update and delete acquire the same owner fence before any study read`(): Unit = runBlocking {
         val root = service.createStudy(principal, CreateStudyCommand(topic = "Root"))
         assertThat(studies.events.first()).isEqualTo("lock:7")
@@ -707,6 +753,28 @@ class StudySyncServiceTest {
                 difficultyLevel?.let { value -> it.difficultyLevel = value }
                 it.updatedAt = now
             }
+        }
+        override suspend fun updateTopicMetadataIfCurrent(
+            id: Long,
+            userId: Long,
+            topic: String?,
+            difficultyLevel: Int?,
+            expectedParentStudyId: Long?,
+            expectedTopic: String,
+            expectedDifficultyLevel: Int,
+            now: Instant,
+        ): StudyEntity? {
+            events += "conditional-patch"
+            metadataUpdateCalls += 1
+            beforeMetadataUpdate?.invoke()
+            val row = rows.firstOrNull { it.id == id && it.userId == userId } ?: return null
+            if (row.parentStudyId != expectedParentStudyId || row.topic != expectedTopic ||
+                row.difficultyLevel != expectedDifficultyLevel
+            ) return null
+            topic?.let { row.topic = it }
+            difficultyLevel?.let { row.difficultyLevel = it }
+            row.updatedAt = now
+            return row
         }
         override suspend fun findSubtreeIdsForMutation(userId: Long, studyId: Long, limit: Int): List<Long>? {
             subtreeLimit = limit

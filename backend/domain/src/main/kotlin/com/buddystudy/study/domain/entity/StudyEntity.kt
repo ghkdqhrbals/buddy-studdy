@@ -2,6 +2,7 @@ package com.buddystudy.study.domain.entity
 
 import org.springframework.data.relational.core.mapping.Column
 import org.springframework.data.annotation.Id
+import org.springframework.data.annotation.Version
 import org.springframework.data.relational.core.mapping.Table
 import java.time.Instant
 
@@ -28,4 +29,7 @@ class StudyEntity(
     var lastError: String? = null,
     var createdAt: Instant = Instant.now(),
     var updatedAt: Instant = Instant.now(),
+    /** Prevents a stale full-row settings or scheduler save from undoing a newer metadata patch. */
+    @Version
+    var version: Long = 0,
 )

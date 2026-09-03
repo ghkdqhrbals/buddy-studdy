@@ -2,9 +2,20 @@ package com.buddystudy.backend.voice.application.port.outbound
 
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
+import com.buddystudy.backend.voice.application.model.VoiceTutorInitialStudyMutationSnapshot
 
 /** Session-owned, bounded snapshots keep later summaries independent of renamed/deleted study nodes. */
 interface VoiceTutorStudyContextPort {
+    /**
+     * Complete first-turn owner snapshot or null. Implementations must return null when the call already has a
+     * persisted USER turn, the owner has more than the bounded maximum, or any row is malformed.
+     */
+    suspend fun initialMutationSnapshot(
+        userId: Long,
+        sessionId: String,
+        maxCandidates: Int = VoiceTutorInitialStudyMutationSnapshot.MAX_CANDIDATES,
+    ): VoiceTutorInitialStudyMutationSnapshot? = null
+
     /** Current view only: one effective snapshot per node for the next response. */
     suspend fun prepare(session: VoiceTutorSession): List<VoiceTutorStudySnapshot>
     suspend fun remember(userId: Long, sessionId: String, studyIds: List<Long>): List<VoiceTutorStudySnapshot>

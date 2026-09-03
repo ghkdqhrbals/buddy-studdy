@@ -252,19 +252,67 @@ class StudySyncService(
         if (command.difficultyLevel != null && command.difficultyLevel !in 1..10) {
             throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Study difficulty must be between 1 and 10.")
         }
+        command.expectedCurrent?.let { expected ->
+            if (expected.parentStudyId?.let { it <= 0 || it == studyId } == true ||
+                expected.topic.isBlank() || expected.topic != expected.topic.trim() || expected.topic.length > 255 ||
+                expected.difficultyLevel !in 1..10
+            ) {
+                throw ApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    ApiErrorCode.VALIDATION_ERROR,
+                    "The expected study metadata is invalid.",
+                )
+            }
+        }
         // Creation uses this same owner lock before its reads. There is no normalized
         // topic unique constraint, so a separate row read alone cannot reject races.
         lockStudyOwner(principal.userId)
-        studies.findByIdAndUserId(studyId, principal.userId)
+        val current = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        command.expectedCurrent?.let { expected ->
+            if (current.parentStudyId != expected.parentStudyId || current.topic != expected.topic ||
+                current.difficultyLevel != expected.difficultyLevel
+            ) {
+                throw ApiException(
+                    HttpStatus.CONFLICT,
+                    ApiErrorCode.STUDY_TREE_CHANGED,
+                    "The study name, level, or parent changed before this update. Review the current study and try again.",
+                )
+            }
+        }
         if (topic != null && studies.findAllByUserId(principal.userId).any {
                 it.id != studyId && it.topic.normalizedStudyTopicKey() == topic.normalizedStudyTopicKey()
             }
         ) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A study topic with the same name already exists.")
         }
-        val saved = studies.updateTopicMetadata(studyId, principal.userId, topic, command.difficultyLevel, Instant.now())
-            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        val now = Instant.now()
+        val saved = command.expectedCurrent?.let { expected ->
+            studies.updateTopicMetadataIfCurrent(
+                id = studyId,
+                userId = principal.userId,
+                topic = topic,
+                difficultyLevel = command.difficultyLevel,
+                expectedParentStudyId = expected.parentStudyId,
+                expectedTopic = expected.topic,
+                expectedDifficultyLevel = expected.difficultyLevel,
+                now = now,
+            )
+        } ?: if (command.expectedCurrent == null) {
+            studies.updateTopicMetadata(studyId, principal.userId, topic, command.difficultyLevel, now)
+        } else {
+            null
+        }
+        if (saved == null) {
+            if (studies.findByIdAndUserId(studyId, principal.userId) == null) {
+                throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+            }
+            throw ApiException(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.STUDY_TREE_CHANGED,
+                "The study name, level, or parent changed before this update. Review the current study and try again.",
+            )
+        }
         return saved.toStudyRoomResponse()
     }
 

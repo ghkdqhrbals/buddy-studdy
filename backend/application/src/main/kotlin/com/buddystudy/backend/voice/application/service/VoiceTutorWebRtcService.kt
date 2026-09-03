@@ -7,6 +7,7 @@ import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorInitialStudyMutationSnapshot
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorRelayUseCase
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorWebRtcUseCase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorControlClaimPort
@@ -166,8 +167,19 @@ class VoiceTutorWebRtcService(
         // leave behind an otherwise attachable control connection reservation.
         val lessonRevision = studyContexts.currentRevision(registered.userId, id)
         check(lessonRevision >= 0) { "Voice Tutor lesson revision was invalid." }
+        val initialStudyMutationSnapshot = studyContexts.initialMutationSnapshot(
+            registered.userId,
+            id,
+            VoiceTutorInitialStudyMutationSnapshot.MAX_CANDIDATES,
+        )
         if (!controlClaims.claim(registered.userId, id, normalizedConnectionId, now)) throw conflict()
-        return VoiceTutorWebRtcControlContext(session, callId, registered, lessonRevision)
+        return VoiceTutorWebRtcControlContext(
+            session = session,
+            callId = callId,
+            principal = registered,
+            initialLessonRevision = lessonRevision,
+            initialStudyMutationSnapshot = initialStudyMutationSnapshot,
+        )
     }
 
     override suspend fun relaySideband(

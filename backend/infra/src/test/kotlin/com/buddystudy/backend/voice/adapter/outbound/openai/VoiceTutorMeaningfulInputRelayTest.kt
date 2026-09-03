@@ -12,7 +12,9 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
 import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
 import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorizationPurpose
+import com.buddystudy.backend.voice.application.model.VoiceTutorInitialStudyMutationSnapshot
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorInputAssessmentUseCase
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContextSource
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetSingleChildEdge
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
@@ -24,6 +26,8 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorChildStudyCreati
 import com.buddystudy.backend.voice.application.model.VoiceTutorChildStudyCreationRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateEvidence
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateRequest
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateAuthorizationScope
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateTargetProof
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscovery
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
@@ -577,6 +581,777 @@ class VoiceTutorMeaningfulInputRelayTest {
             } finally {
                 worker.dispose()
             }
+        }
+
+    @Test
+    fun `compound offered study update and start focuses exact revised node and asks once`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-topic", 101, null, null)
+            val responseCountBeforeUpdate = f.responses().size
+            val command = "Redis 이름을 Redis 기초로 바꾸고 레벨 7로 바로 시작하자."
+            f.utterance(2, "rename-and-start", command)
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 101,
+                    command = command,
+                    topic = "Redis 기초",
+                    difficulty = 7,
+                    targetTopic = "Redis",
+                    targetImplicitCurrentFocus = false,
+                    startLessonAfterUpdate = true,
+                ),
+            )
+            f.confirm(f.publications().last(), persisted = true)
+
+            val updateCall = f.awaitServerToolCall("update_study")
+            assertThat(mapper.readTree(updateCall.path("item").path("arguments").asText())).isEqualTo(
+                mapper.readTree("""{"study_id":101,"topic":"Redis 기초","difficulty_level":7}"""),
+            )
+            val updateId = f.startServerToolCall(updateCall)
+            val updateBoundary = f.controller.mutationDialogueBoundary(updateId)
+            assertThat(updateBoundary.studyUpdateAuthorization?.scope)
+                .isEqualTo(VoiceTutorStudyUpdateAuthorizationScope.OFFERED_CANDIDATE)
+            assertThat(updateBoundary.studyUpdateAuthorization?.targetProof)
+                .isEqualTo(VoiceTutorStudyUpdateTargetProof(101, null, "Redis"))
+            assertThat(updateBoundary.studyUpdateAuthorization?.startLessonAfterUpdate).isTrue()
+            assertThat(updateBoundary.studyUpdateAuthorization?.consume()).isTrue()
+            val updateOutput = f.completeStartedServerToolCall(
+                updateId,
+                VoiceTutorMcpToolResult(
+                    output = """{"id":101,"parentStudyId":null,"topic":"Redis 기초","difficultyLevel":7}""",
+                    isError = false,
+                    studyTreeChanged = true,
+                    changedStudyId = 101,
+                    changeKind = VoiceTutorStudyChangeKind.UPDATED,
+                    lessonRevision = 1,
+                    updatedStudySnapshot = VoiceTutorStudySnapshot(101, null, "Redis 기초", 7, 1),
+                ),
+            )
+
+            val focusCall = f.awaitServerToolCall("select_voice_study")
+            assertThat(mapper.readTree(focusCall.path("item").path("arguments").asText()))
+                .isEqualTo(mapper.readTree("""{"study_id":101}"""))
+            assertThat(f.conversationItems().filter {
+                it.path("item").path("name").asText() == "get_study"
+            }).isEmpty()
+            val focusId = f.startServerToolCall(focusCall)
+            val focusBoundary = f.controller.mutationDialogueBoundary(focusId)
+            assertThat(focusBoundary.latestAcceptedLearnerIntent).isEqualTo(VoiceTutorInputIntent.UPDATE_STUDY)
+            assertThat(focusBoundary.latestAcceptedLearnerProviderItemId).isEqualTo("rename-and-start")
+            assertThat(focusBoundary.latestAcceptedLearnerLessonRevision).isZero()
+            assertThat(focusBoundary.focusExpectedCurrentLessonRevision).isEqualTo(1)
+            assertThat(focusBoundary.latestAcceptedLearnerTargetCandidate)
+                .isEqualTo(VoiceTutorStudyTargetCandidate(101, null, "Redis 기초", 7))
+            assertThat(focusBoundary.latestAcceptedLearnerTargetTraversal)
+                .isEqualTo(VoiceTutorStudyTargetTraversal(terminalLeafStudyId = 101))
+            assertThat(focusBoundary.focusAuthorization?.purpose)
+                .isEqualTo(VoiceTutorFocusAuthorizationPurpose.UPDATED_STUDY_IMMEDIATE_START)
+            assertThat(focusBoundary.studyUpdateAuthorization).isNull()
+            assertThat(focusBoundary.focusAuthorization?.consume()).isTrue()
+
+            val focusOutput = f.completeStartedServerToolCall(
+                focusId,
+                VoiceTutorMcpToolResult(
+                    output = """{"selected":true,"voiceLessonFocusChange":"UPDATED_STUDY_IMMEDIATE_START"}""",
+                    isError = false,
+                    lessonRevision = 2,
+                    lessonFocus = VoiceTutorLessonFocusSelection(
+                        VoiceTutorLessonFocus(101, 2),
+                        VoiceTutorStudySnapshot(101, null, "Redis 기초", 7, 2),
+                    ),
+                ),
+            )
+            assertThat(f.controller.shouldRelayLessonFocusEvent(focusId)).isTrue()
+            f.acknowledgeConversationItem(updateOutput)
+            f.acknowledgeConversationItem(focusOutput)
+
+            val question = f.awaitResponseCount(responseCountBeforeUpdate + 1).last()
+            assertThat(question.path("response").path("tool_choice").asText()).isEqualTo("auto")
+            assertThat(question.path("response").path("instructions").asText())
+                .contains("current confirmed saved focus and level", "Ask that one")
+                .doesNotContain("lesson-start consent", "whether the learner wants to start")
+            assertThat(f.conversationItems().count {
+                it.path("item").path("name").asText() == "update_study"
+            }).isEqualTo(1)
+            assertThat(f.conversationItems().count {
+                it.path("item").path("name").asText() == "select_voice_study"
+            }).isEqualTo(1)
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `fresh owner snapshot survives noncommunicative noise and executes one exact first turn rename`() {
+        val initialSnapshot = VoiceTutorInitialStudyMutationSnapshot(
+            listOf(
+                VoiceTutorStudyTargetCandidate(101, null, "Redis", 5),
+                VoiceTutorStudyTargetCandidate(202, null, "Spring", 7),
+            ),
+        )
+        val invocations = CopyOnWriteArrayList<Pair<String, Map<String, Any>>>()
+        fixture(initialStudyMutationSnapshot = initialSnapshot).use { f ->
+            val tools = object : VoiceTutorMcpToolPort {
+                override fun definitions(): List<VoiceTutorMcpToolDefinition> = emptyList()
+
+                override suspend fun execute(
+                    context: VoiceTutorWebRtcControlContext,
+                    toolName: String,
+                    arguments: Map<String, Any>,
+                ): VoiceTutorMcpToolResult {
+                    invocations += toolName to arguments
+                    assertThat(toolName).isEqualTo("update_study")
+                    val authorization = requireNotNull(context.dialogueBoundary?.studyUpdateAuthorization)
+                    assertThat(authorization.scope)
+                        .isEqualTo(VoiceTutorStudyUpdateAuthorizationScope.INITIAL_OWNER_SNAPSHOT)
+                    assertThat(authorization.targetProof)
+                        .isEqualTo(VoiceTutorStudyUpdateTargetProof(101, null, "Redis", 5))
+                    assertThat(authorization.consume()).isTrue()
+                    return VoiceTutorMcpToolResult(
+                        output = """{"id":101,"parentStudyId":null,"topic":"Redis 기초","difficultyLevel":5}""",
+                        isError = false,
+                        studyTreeChanged = true,
+                        changedStudyId = 101,
+                        changeKind = VoiceTutorStudyChangeKind.UPDATED,
+                        lessonRevision = 1,
+                        updatedStudySnapshot = VoiceTutorStudySnapshot(101, null, "Redis 기초", 5, 1),
+                    )
+                }
+            }
+            val worker = voiceTutorMcpToolRelay(
+                f.controller,
+                controlContext(),
+                tools,
+                { _, _, _ -> },
+            ).subscribe({}, f.errors::add)
+            try {
+                f.utterance(1, "initial-snapshot-noise", "어… 음…")
+                val noiseAssessment = f.assessments().last().utterances.single()
+                assertThat(noiseAssessment.studyMutationContext?.source)
+                    .isEqualTo(VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT)
+                assertThat(noiseAssessment.studyMutationContext?.candidates)
+                    .containsExactlyElementsOf(initialSnapshot.candidates)
+                f.assess(VoiceTutorInputDecision.NON_COMMUNICATIVE)
+                f.deleted("initial-snapshot-noise")
+                assertThat(f.publications()).isEmpty()
+
+                val command = "Redis 이름을 Redis 기초로 바꿔 줘."
+                f.utterance(2, "initial-snapshot-rename", command)
+                val renameAssessment = f.assessments().last().utterances.single()
+                assertThat(renameAssessment.studyMutationContext?.source)
+                    .isEqualTo(VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT)
+                assertThat(renameAssessment.targetOffer).isNull()
+                f.assess(
+                    VoiceTutorInputDecision.MEANINGFUL,
+                    VoiceTutorInputIntent.UPDATE_STUDY,
+                    studyUpdateRequest = updateRequest(
+                        studyId = 101,
+                        command = command,
+                        topic = "Redis 기초",
+                        targetTopic = "Redis",
+                        targetImplicitCurrentFocus = false,
+                    ),
+                )
+                f.confirm(f.publications().single(), persisted = true)
+
+                val updateCall = f.awaitServerToolCall("update_study")
+                f.acknowledgeConversationItem(updateCall)
+                val updateOutput = f.awaitToolOutput(updateCall.path("item").path("call_id").asText())
+                f.acknowledgeConversationItem(updateOutput)
+
+                assertThat(invocations).containsExactly(
+                    "update_study" to mapOf("study_id" to 101, "topic" to "Redis 기초"),
+                )
+                assertThat(f.conversationItems().count {
+                    it.path("item").path("name").asText() == "update_study"
+                }).isEqualTo(1)
+                assertThat(f.errors).isEmpty()
+                f.assertNoAudioDisruption()
+            } finally {
+                worker.dispose()
+            }
+        }
+    }
+
+    @Test
+    fun `first persisted meaningful turn spends owner snapshot so a later rename cannot reuse it`() =
+        fixture(
+            initialStudyMutationSnapshot = VoiceTutorInitialStudyMutationSnapshot(
+                listOf(VoiceTutorStudyTargetCandidate(101, null, "Redis", 5)),
+            ),
+        ).use { f ->
+            f.utterance(1, "initial-snapshot-first-meaningful", "저장된 공부를 먼저 둘러볼게.")
+            assertThat(f.assessments().last().utterances.single().studyMutationContext?.source)
+                .isEqualTo(VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT)
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            f.confirm(f.publications().single(), persisted = true)
+            f.finishCurrentSpokenOffer("어떤 내용을 바꾸고 싶나요?")
+
+            val command = "Redis 이름을 Redis 기초로 바꿔 줘."
+            f.utterance(2, "initial-snapshot-second-rename", command)
+            assertThat(f.assessments().last().utterances.single().studyMutationContext).isNull()
+            val publicationCount = f.publications().size
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 101,
+                    command = command,
+                    topic = "Redis 기초",
+                    targetTopic = "Redis",
+                    targetImplicitCurrentFocus = false,
+                ),
+            )
+
+            assertThat(f.publications()).hasSize(publicationCount)
+            assertThat(f.deletions().last().path("item_id").asText())
+                .isEqualTo("initial-snapshot-second-rename")
+            f.deleted("initial-snapshot-second-rename")
+            assertThat(f.conversationItems().none {
+                it.path("item").path("name").asText() == "update_study"
+            }).isTrue()
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `first semantic publication revokes initial snapshot copies already frozen on queued commits`() =
+        fixture(
+            initialStudyMutationSnapshot = VoiceTutorInitialStudyMutationSnapshot(
+                listOf(VoiceTutorStudyTargetCandidate(101, null, "Redis", 5)),
+            ),
+        ).use { f ->
+            f.utterance(1, "initial-snapshot-winner", "저장된 공부를 먼저 둘러볼게.")
+            val winnerAssessment = f.assessments().single()
+            assertThat(winnerAssessment.utterances.single().studyMutationContext?.source)
+                .isEqualTo(VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT)
+
+            // Provider commit/ASR for the next turn can race ahead while the first semantic
+            // assessment is outstanding. Both bindings initially freeze the same snapshot.
+            f.utterance(2, "initial-snapshot-loser", "Redis 이름을 Redis 기초로 바꿔 줘.")
+            assertThat(f.assessments()).hasSize(1)
+
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            val winnerPublication = f.publications().single()
+            f.confirm(winnerPublication, persisted = true)
+            val loserAssessment = f.assessments().last()
+            assertThat(loserAssessment.utterances.single().itemId).isEqualTo("initial-snapshot-loser")
+            assertThat(loserAssessment.utterances.single().studyMutationContext).isNull()
+
+            val loserCommand = "Redis 이름을 Redis 기초로 바꿔 줘."
+            val publicationCount = f.publications().size
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 101,
+                    command = loserCommand,
+                    topic = "Redis 기초",
+                    targetTopic = "Redis",
+                    targetImplicitCurrentFocus = false,
+                ),
+            )
+            assertThat(f.publications()).hasSize(publicationCount)
+            assertThat(f.deletions().last().path("item_id").asText())
+                .isEqualTo("initial-snapshot-loser")
+            f.deleted("initial-snapshot-loser")
+
+            assertThat(f.controller.mutationDialogueBoundary().studyUpdateAuthorization).isNull()
+            assertThat(f.conversationItems().none {
+                it.path("item").path("name").asText() == "update_study"
+            }).isTrue()
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `failed persistence of first semantic publication still prevents initial snapshot reuse`() =
+        fixture(
+            initialStudyMutationSnapshot = VoiceTutorInitialStudyMutationSnapshot(
+                listOf(VoiceTutorStudyTargetCandidate(101, null, "Redis", 5)),
+            ),
+        ).use { f ->
+            f.utterance(1, "initial-snapshot-not-persisted", "저장된 공부를 먼저 둘러볼게.")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            f.confirm(f.publications().single(), persisted = false)
+            f.finishCurrentSpokenOffer("어떤 내용을 바꾸고 싶나요?")
+
+            val command = "Redis 이름을 Redis 기초로 바꿔 줘."
+            f.utterance(2, "initial-snapshot-after-failed-persist", command)
+            assertThat(f.assessments().last().utterances.single().studyMutationContext).isNull()
+            val publicationCount = f.publications().size
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 101,
+                    command = command,
+                    topic = "Redis 기초",
+                    targetTopic = "Redis",
+                    targetImplicitCurrentFocus = false,
+                ),
+            )
+
+            assertThat(f.publications()).hasSize(publicationCount)
+            assertThat(f.deletions().last().path("item_id").asText())
+                .isEqualTo("initial-snapshot-after-failed-persist")
+            f.deleted("initial-snapshot-after-failed-persist")
+            assertThat(f.controller.mutationDialogueBoundary().studyUpdateAuthorization).isNull()
+            assertThat(f.conversationItems().none {
+                it.path("item").path("name").asText() == "update_study"
+            }).isTrue()
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `meaningful checkpoint does not consume initial snapshot before the same speech final turn`() =
+        fixture(
+            initialStudyMutationSnapshot = VoiceTutorInitialStudyMutationSnapshot(
+                listOf(VoiceTutorStudyTargetCandidate(101, null, "Redis", 5)),
+            ),
+        ).use { f ->
+            f.start(1)
+            f.controller.fireContinuousSpeechDeadline()
+            assertThat(f.inputCommits()).hasSize(1)
+            f.commit("initial-snapshot-checkpoint")
+            f.transcript("initial-snapshot-checkpoint", "Redis 이름을 바꾸는 걸 생각 중인데")
+            val checkpointAssessment = f.assessments().single()
+            assertThat(checkpointAssessment.utterances.single().checkpoint).isTrue()
+            assertThat(checkpointAssessment.utterances.single().studyMutationContext).isNull()
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            val checkpointPublication = f.publications().single()
+            assertThat(checkpointPublication.checkpoint).isTrue()
+            f.confirm(checkpointPublication, persisted = true)
+
+            f.stop(1)
+            assertThat(f.inputCommits()).hasSize(2)
+            f.commit("initial-snapshot-final-tail")
+            f.transcript("initial-snapshot-final-tail", "Redis 기초로 바꿔 줘.")
+
+            val finalAssessment = f.assessments().last().utterances.single()
+            assertThat(finalAssessment.itemId).isEqualTo("initial-snapshot-final-tail")
+            assertThat(finalAssessment.checkpoint).isFalse()
+            assertThat(finalAssessment.studyMutationContext?.source)
+                .isEqualTo(VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT)
+            assertThat(finalAssessment.studyMutationContext?.candidates)
+                .containsExactly(VoiceTutorStudyTargetCandidate(101, null, "Redis", 5))
+            assertThat(f.controller.mutationDialogueBoundary().studyUpdateAuthorization).isNull()
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `update only then next meaningful start selects refreshed target without replaying write`() =
+        fixture().use { f ->
+            val invocations = CopyOnWriteArrayList<Pair<String, Map<String, Any>>>()
+            val tools = object : VoiceTutorMcpToolPort {
+                override fun definitions(): List<VoiceTutorMcpToolDefinition> = emptyList()
+
+                override suspend fun execute(
+                    context: VoiceTutorWebRtcControlContext,
+                    toolName: String,
+                    arguments: Map<String, Any>,
+                ): VoiceTutorMcpToolResult {
+                    invocations += toolName to arguments
+                    return when (toolName) {
+                        "update_study" -> {
+                            val authorization = requireNotNull(
+                                context.dialogueBoundary?.studyUpdateAuthorization,
+                            )
+                            assertThat(authorization.consume()).isTrue()
+                            VoiceTutorMcpToolResult(
+                                output = """{"id":101,"parentStudyId":null,"topic":"Redis 기초","difficultyLevel":7}""",
+                                isError = false,
+                                studyTreeChanged = true,
+                                changedStudyId = 101,
+                                changeKind = VoiceTutorStudyChangeKind.UPDATED,
+                                lessonRevision = 1,
+                                updatedStudySnapshot = VoiceTutorStudySnapshot(101, null, "Redis 기초", 7, 1),
+                            )
+                        }
+                        "select_voice_study" -> {
+                            assertThat(context.dialogueBoundary?.latestAcceptedLearnerIntent)
+                                .isEqualTo(VoiceTutorInputIntent.SELECT_SAVED_TOPIC)
+                            assertThat(context.dialogueBoundary?.latestAcceptedLearnerTargetCandidate)
+                                .isEqualTo(VoiceTutorStudyTargetCandidate(101, null, "Redis 기초", 7))
+                            val authorization = requireNotNull(context.dialogueBoundary?.focusAuthorization)
+                            assertThat(authorization.consume()).isTrue()
+                            VoiceTutorMcpToolResult(
+                                output = """{"selected":true}""",
+                                isError = false,
+                                lessonRevision = 2,
+                                lessonFocus = VoiceTutorLessonFocusSelection(
+                                    VoiceTutorLessonFocus(101, 2),
+                                    VoiceTutorStudySnapshot(101, null, "Redis 기초", 7, 2),
+                                ),
+                            )
+                        }
+                        else -> error("unexpected tool: $toolName")
+                    }
+                }
+            }
+            val worker = voiceTutorMcpToolRelay(
+                f.controller,
+                controlContext(),
+                tools,
+                { _, _, _ -> },
+            ).subscribe({}, f.errors::add)
+            try {
+                f.offerCandidate(1, "browse-before-split-update", 101, null, null)
+                val responseCountBeforeUpdate = f.responses().size
+                val updateCommand = "Redis 이름을 Redis 기초로 바꾸고 레벨 7로 해 줘."
+                f.utterance(2, "split-update", updateCommand)
+                f.assess(
+                    VoiceTutorInputDecision.MEANINGFUL,
+                    VoiceTutorInputIntent.UPDATE_STUDY,
+                    studyUpdateRequest = updateRequest(
+                        studyId = 101,
+                        command = updateCommand,
+                        topic = "Redis 기초",
+                        difficulty = 7,
+                        targetTopic = "Redis",
+                        targetImplicitCurrentFocus = false,
+                    ),
+                )
+                f.confirm(f.publications().last(), persisted = true)
+
+                val updateCall = f.awaitServerToolCall("update_study")
+                f.acknowledgeConversationItem(updateCall)
+                val updateOutput = f.awaitToolOutput(updateCall.path("item").path("call_id").asText())
+                f.acknowledgeConversationItem(updateOutput)
+
+                val followup = f.awaitResponseCount(responseCountBeforeUpdate + 1).last()
+                assertThat(followup.path("response").path("tool_choice").asText()).isEqualTo("none")
+                assertThat(followup.path("response").path("instructions").asText())
+                    .contains(
+                        "already committed once",
+                        "Never call or retry update_study",
+                        "exact revised saved-topic name",
+                        "start that topic now",
+                    )
+                f.finishCurrentSpokenOffer("Redis 기초로 변경했어요. 지금 이 주제로 시작할까요?")
+
+                // Acoustic filler is deleted and must not consume the one
+                // refreshed offer. The next actual semantic item receives it
+                // from the controller; the test never injects that context.
+                f.utterance(3, "split-update-noise", "어… 음…")
+                f.assess(VoiceTutorInputDecision.NON_COMMUNICATIVE)
+                f.deleted("split-update-noise")
+
+                f.utterance(4, "split-update-start", "시작하자")
+                val startAssessment = f.assessments().last()
+                assertThat(startAssessment.utterances.single().targetOffer?.candidates)
+                    .containsExactly(VoiceTutorStudyTargetCandidate(101, null, "Redis 기초", 7))
+                assertThat(startAssessment.utterances.single().targetOffer?.lessonRevision).isEqualTo(1)
+                assertThat(startAssessment.utterances.single().studyMutationContext?.lessonRevision).isEqualTo(1)
+                f.assessTarget(VoiceTutorInputIntent.SELECT_SAVED_TOPIC, 101, listOf(101))
+                f.confirm(f.publications().last(), persisted = true)
+                f.dispatchModelToolCall("split-update-focus", "select_voice_study", "{\"study_id\":101}")
+                val focusOutput = f.awaitToolOutput("split-update-focus")
+                f.acknowledgeConversationItem(focusOutput)
+
+                assertThat(invocations.map { it.first }).containsExactly("update_study", "select_voice_study")
+                assertThat(f.conversationItems().count {
+                    it.path("item").path("name").asText() == "update_study"
+                }).isEqualTo(1)
+                assertThat(f.errors).isEmpty()
+                f.assertNoAudioDisruption()
+            } finally {
+                worker.dispose()
+            }
+        }
+
+    @Test
+    fun `compound update start without exact typed revised snapshot never focuses or asks`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-topic-unprepared", 101, null, null)
+            val responseCountBeforeUpdate = f.responses().size
+            val command = "Redis 이름을 Redis 기초로 바꾸고 바로 시작하자."
+            f.utterance(2, "rename-start-unprepared", command)
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 101,
+                    command = command,
+                    topic = "Redis 기초",
+                    targetTopic = "Redis",
+                    targetImplicitCurrentFocus = false,
+                    startLessonAfterUpdate = true,
+                ),
+            )
+            f.confirm(f.publications().last(), persisted = true)
+
+            val updateCall = f.awaitServerToolCall("update_study")
+            val updateId = f.startServerToolCall(updateCall)
+            assertThat(f.controller.mutationDialogueBoundary(updateId).studyUpdateAuthorization?.consume()).isTrue()
+            val updateOutput = f.completeStartedServerToolCall(
+                updateId,
+                VoiceTutorMcpToolResult(
+                    output = """{"id":101,"parentStudyId":null,"topic":"Redis 기초","difficultyLevel":5,"voiceLessonChangeApplies":"NOT_PREPARED"}""",
+                    isError = false,
+                    studyTreeChanged = true,
+                    changedStudyId = 101,
+                    changeKind = VoiceTutorStudyChangeKind.UPDATED,
+                    updatedStudySnapshot = null,
+                ),
+            )
+            f.acknowledgeConversationItem(updateOutput)
+
+            val followup = f.awaitResponseCount(responseCountBeforeUpdate + 1).last()
+            assertThat(f.conversationItems().filter {
+                it.path("item").path("name").asText() == "select_voice_study"
+            }).isEmpty()
+            assertThat(followup.path("response").path("tool_choice").asText()).isEqualTo("none")
+            assertThat(followup.path("response").path("instructions").asText())
+                .contains("change was saved", "could not safely enter")
+                .doesNotContain("authorized exactly one substantive study question")
+            assertThat(f.conversationItems().count {
+                it.path("item").path("name").asText() == "update_study"
+            }).isEqualTo(1)
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `newer persisted turn retires claimed update start without leaving auto focus pending`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-stale-update", 101, null, null)
+            val responseCountBeforeUpdate = f.responses().size
+            val command = "Redis 이름을 Redis 기초로 바꾸고 바로 시작하자."
+            f.utterance(2, "stale-update-start", command)
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 101,
+                    command = command,
+                    topic = "Redis 기초",
+                    targetTopic = "Redis",
+                    targetImplicitCurrentFocus = false,
+                    startLessonAfterUpdate = true,
+                ),
+            )
+            f.confirm(f.publications().last(), persisted = true)
+
+            val updateCall = f.awaitServerToolCall("update_study")
+            val updateId = f.startServerToolCall(updateCall)
+            val updateAuthorization = requireNotNull(
+                f.controller.mutationDialogueBoundary(updateId).studyUpdateAuthorization,
+            )
+            assertThat(updateAuthorization.consume()).isTrue()
+
+            // This durable turn owns the eventual single response. It retires
+            // the old update-and-start conversational owner while the already
+            // claimed write is still in flight.
+            f.utterance(3, "newer-persisted-turn", "그 전에 방금 바꾼 이름부터 알려 줘.")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            f.confirm(f.publications().last(), persisted = true)
+            assertThat(updateAuthorization.isActive()).isFalse()
+
+            val updateOutput = f.completeStartedServerToolCall(
+                updateId,
+                VoiceTutorMcpToolResult(
+                    output = """{"id":101,"parentStudyId":null,"topic":"Redis 기초","difficultyLevel":5,"voiceLessonChangeApplies":"AUTO_FOCUS_PENDING","voiceLessonContextReady":true,"voiceLessonFocus":{"studyId":101,"revision":1},"notice":"wait for server focus"}""",
+                    isError = false,
+                    studyTreeChanged = true,
+                    changedStudyId = 101,
+                    changeKind = VoiceTutorStudyChangeKind.UPDATED,
+                    lessonRevision = 1,
+                    lessonFocus = VoiceTutorLessonFocusSelection(
+                        VoiceTutorLessonFocus(101, 1),
+                        VoiceTutorStudySnapshot(101, null, "Redis 기초", 5, 1),
+                    ),
+                    updatedStudySnapshot = VoiceTutorStudySnapshot(101, null, "Redis 기초", 5, 1),
+                ),
+            )
+            assertThat(f.controller.shouldRelayLessonFocusEvent(updateId)).isFalse()
+            val normalizedOutput = mapper.readTree(updateOutput.path("item").path("output").asText())
+            assertThat(normalizedOutput.path("voiceLessonChangeApplies").asText())
+                .isEqualTo("REQUIRES_SELECTION")
+            assertThat(normalizedOutput.path("voiceLessonContextReady").asBoolean()).isFalse()
+            assertThat(normalizedOutput.has("voiceLessonFocus")).isFalse()
+            assertThat(normalizedOutput.path("notice").asText())
+                .contains("superseded immediate-start", "fresh topic choice")
+                .doesNotContain("wait for server focus")
+            assertThat(f.conversationItems().filter {
+                it.path("item").path("name").asText() == "select_voice_study"
+            }).isEmpty()
+
+            f.acknowledgeConversationItem(updateOutput)
+            val followup = f.awaitResponseCount(responseCountBeforeUpdate + 1).last()
+            assertThat(f.responses()).hasSize(responseCountBeforeUpdate + 1)
+            assertThat(followup.path("response").path("tool_choice").asText()).isEqualTo("none")
+            assertThat(followup.path("response").path("instructions").asText())
+                .contains("exact saved-study update committed", "could not safely enter")
+                .doesNotContain("authorized exactly one substantive study question")
+            assertThat(f.conversationItems().count {
+                it.path("item").path("name").asText() == "update_study"
+            }).isEqualTo(1)
+            f.acknowledgeConversationItem(updateOutput)
+            assertThat(f.responses()).hasSize(responseCountBeforeUpdate + 1)
+            assertThat(f.controller.completeToolExecution(updateId, VoiceTutorMcpToolResult("{}", false)))
+                .isFalse()
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `compound current focus update accepts same focus at the exact revised revision`() =
+        fixture().use { f ->
+            f.establishVerifiedStudyQuestion(question = "Redis의 eviction 정책을 설명해 보세요.")
+            val responseCountBeforeUpdate = f.responses().size
+            val command = "이 주제 레벨을 6으로 바꾸고 계속 공부하자."
+            f.utterance(2, "current-focus-update-start", command)
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 101,
+                    command = command,
+                    difficulty = 6,
+                    startLessonAfterUpdate = true,
+                ),
+            )
+            f.confirm(f.publications().last(), persisted = true)
+
+            val updateId = f.startServerToolCall(f.awaitServerToolCall("update_study"))
+            assertThat(f.controller.mutationDialogueBoundary(updateId).studyUpdateAuthorization?.scope)
+                .isEqualTo(VoiceTutorStudyUpdateAuthorizationScope.CONFIRMED_FOCUS_TREE)
+            assertThat(f.controller.mutationDialogueBoundary(updateId).studyUpdateAuthorization?.consume()).isTrue()
+            val updateOutput = f.completeStartedServerToolCall(
+                updateId,
+                VoiceTutorMcpToolResult(
+                    output = """{"id":101,"parentStudyId":null,"topic":"Redis","difficultyLevel":6}""",
+                    isError = false,
+                    studyTreeChanged = true,
+                    changedStudyId = 101,
+                    changeKind = VoiceTutorStudyChangeKind.UPDATED,
+                    lessonRevision = 2,
+                    updatedStudySnapshot = VoiceTutorStudySnapshot(101, null, "Redis", 6, 2),
+                ),
+            )
+            val focusId = f.startServerToolCall(f.awaitServerToolCall("select_voice_study"))
+            assertThat(f.controller.mutationDialogueBoundary(focusId).focusExpectedCurrentLessonRevision)
+                .isEqualTo(2)
+            assertThat(f.controller.mutationDialogueBoundary(focusId).focusAuthorization?.consume()).isTrue()
+            val focusOutput = f.completeStartedServerToolCall(
+                focusId,
+                VoiceTutorMcpToolResult(
+                    output = """{"selected":true,"voiceLessonFocusChange":"UPDATED_STUDY_IMMEDIATE_START"}""",
+                    isError = false,
+                    lessonRevision = 2,
+                    lessonFocus = VoiceTutorLessonFocusSelection(
+                        VoiceTutorLessonFocus(101, 1),
+                        VoiceTutorStudySnapshot(101, null, "Redis", 6, 2),
+                        lessonRevision = 2,
+                    ),
+                ),
+            )
+            f.acknowledgeConversationItem(updateOutput)
+            f.acknowledgeConversationItem(focusOutput)
+
+            val question = f.awaitResponseCount(responseCountBeforeUpdate + 1).last()
+            assertThat(question.path("response").path("tool_choice").asText()).isEqualTo("auto")
+            assertThat(question.path("response").path("instructions").asText())
+                .contains("current confirmed saved focus and level", "Ask that one")
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
+        }
+
+    @Test
+    fun `newer persisted turn keeps claimed update focus but supersedes its automatic question`() =
+        fixture().use { f ->
+            f.offerCandidate(1, "browse-stale-update-focus", 101, null, null)
+            val responseCountBeforeUpdate = f.responses().size
+            val command = "Redis 이름을 Redis 기초로 바꾸고 바로 시작하자."
+            f.utterance(2, "update-before-stale-focus", command)
+            f.assess(
+                VoiceTutorInputDecision.MEANINGFUL,
+                VoiceTutorInputIntent.UPDATE_STUDY,
+                studyUpdateRequest = updateRequest(
+                    studyId = 101,
+                    command = command,
+                    topic = "Redis 기초",
+                    targetTopic = "Redis",
+                    targetImplicitCurrentFocus = false,
+                    startLessonAfterUpdate = true,
+                ),
+            )
+            f.confirm(f.publications().last(), persisted = true)
+
+            val updateId = f.startServerToolCall(f.awaitServerToolCall("update_study"))
+            assertThat(f.controller.mutationDialogueBoundary(updateId).studyUpdateAuthorization?.consume()).isTrue()
+            val updateOutput = f.completeStartedServerToolCall(
+                updateId,
+                VoiceTutorMcpToolResult(
+                    output = """{"id":101,"parentStudyId":null,"topic":"Redis 기초","difficultyLevel":5,"voiceLessonChangeApplies":"AUTO_FOCUS_PENDING"}""",
+                    isError = false,
+                    studyTreeChanged = true,
+                    changedStudyId = 101,
+                    changeKind = VoiceTutorStudyChangeKind.UPDATED,
+                    lessonRevision = 1,
+                    updatedStudySnapshot = VoiceTutorStudySnapshot(101, null, "Redis 기초", 5, 1),
+                ),
+            )
+            val focusCall = f.awaitServerToolCall("select_voice_study")
+            val focusId = f.startServerToolCall(focusCall)
+            val focusAuthorization = requireNotNull(
+                f.controller.mutationDialogueBoundary(focusId).focusAuthorization,
+            )
+            assertThat(focusAuthorization.consume()).isTrue()
+
+            // The DB focus is already in flight, so newer speech may supersede
+            // its conversational question authority but cannot undo the commit.
+            f.utterance(3, "newer-turn-after-focus-claim", "잠깐, 그 전에 변경된 내용부터 알려 줘.")
+            f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE)
+            f.confirm(f.publications().last(), persisted = true)
+            assertThat(focusAuthorization.isActive()).isFalse()
+
+            val focusOutput = f.completeStartedServerToolCall(
+                focusId,
+                VoiceTutorMcpToolResult(
+                    output = """{"selected":true,"voiceLessonContextReady":true,"voiceLessonFocus":{"studyId":101,"parentStudyId":null,"topic":"Redis 기초","difficulty":5,"revision":2},"voiceLessonFocusChange":"UPDATED_STUDY_IMMEDIATE_START","notice":"Use the revised frozen name and level and ask the first substantive question now."}""",
+                    isError = false,
+                    lessonRevision = 2,
+                    lessonFocus = VoiceTutorLessonFocusSelection(
+                        VoiceTutorLessonFocus(101, 2),
+                        VoiceTutorStudySnapshot(101, null, "Redis 기초", 5, 2),
+                    ),
+                ),
+            )
+            assertThat(f.controller.shouldRelayLessonFocusEvent(focusId)).isTrue()
+            val normalizedOutput = mapper.readTree(focusOutput.path("item").path("output").asText())
+            assertThat(normalizedOutput.path("voiceLessonFocusChange").asText())
+                .isEqualTo("FOCUS_COMMITTED_QUESTION_SUPERSEDED")
+            assertThat(normalizedOutput.path("voiceLessonContextReady").asBoolean()).isTrue()
+            assertThat(normalizedOutput.path("voiceLessonFocus").path("studyId").asLong()).isEqualTo(101)
+            assertThat(normalizedOutput.path("notice").asText())
+                .contains("focus committed", "automatic first question", "newer learner speech")
+                .doesNotContain("ask the first substantive question now", "UPDATED_STUDY_IMMEDIATE_START")
+
+            f.acknowledgeConversationItem(updateOutput)
+            f.acknowledgeConversationItem(focusOutput)
+            val followup = f.awaitResponseCount(responseCountBeforeUpdate + 1).last()
+            assertThat(f.responses()).hasSize(responseCountBeforeUpdate + 1)
+            assertThat(followup.path("response").path("tool_choice").asText()).isEqualTo("none")
+            assertThat(followup.path("response").path("instructions").asText())
+                .contains("focus committed", "authoritative", "automatic first question was paused")
+                .doesNotContain("authorized exactly one substantive study question")
+            assertThat(f.conversationItems().count {
+                it.path("item").path("name").asText() == "update_study"
+            }).isEqualTo(1)
+            assertThat(f.conversationItems().count {
+                it.path("item").path("name").asText() == "select_voice_study"
+            }).isEqualTo(1)
+            f.acknowledgeConversationItem(focusOutput)
+            assertThat(f.responses()).hasSize(responseCountBeforeUpdate + 1)
+            assertThat(f.controller.completeToolExecution(focusId, VoiceTutorMcpToolResult("{}", false)))
+                .isFalse()
+            assertThat(f.errors).isEmpty()
+            f.assertNoAudioDisruption()
         }
 
     @Test
@@ -1566,6 +2341,81 @@ class VoiceTutorMeaningfulInputRelayTest {
         assertThat(refreshedMutationContext?.lessonRevision).isEqualTo(2)
         assertThat(refreshedMutationContext?.currentFocusStudyId).isEqualTo(101)
         assertThat(refreshedMutationContext?.candidates?.single()?.topic).isEqualTo("Redis")
+        assertThat(f.errors).isEmpty()
+    }
+
+    @Test
+    fun `spoken readback of current focus keeps richer identity for a name and level update`() = fixture().use { f ->
+        f.establishVerifiedStudyQuestion(question = "Redis의 eviction 정책을 설명해 보세요.")
+        f.utterance(2, "read-current-focus", "현재 선택된 주제를 확인해 줘")
+        f.assess(VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.DISCOVER_SAVED_TOPIC)
+        f.confirm(f.publications().last(), persisted = true)
+        f.finishCurrentResponseWithCandidateReads(
+            discoveries = listOf(VoiceTutorCandidateDiscovery(
+                VoiceTutorCandidateReadKind.LIST_STUDIES,
+                lessonRevision = 1,
+                currentFocusStudyId = 101,
+                candidates = listOf(VoiceTutorStudyTargetCandidate(101, null, "Redis")),
+                scope = VoiceTutorCandidateDiscoveryScope.CompleteQueryPage("Redis", 0, 3, 1),
+            )),
+            spokenTranscript = "현재 선택된 Redis 주제는 레벨 5입니다.",
+        )
+
+        val command = "Redis 이름을 Redis 기초로 바꾸고 레벨을 6으로 수정해 줘"
+        f.utterance(3, "rename-current-focus", command)
+        val mutationContext = f.assessments().last().utterances.single().studyMutationContext
+        assertThat(mutationContext?.currentFocusStudyId).isEqualTo(101)
+        assertThat(mutationContext?.candidates).containsExactly(
+            VoiceTutorStudyTargetCandidate(101, null, "Redis", difficulty = 5),
+        )
+        f.assess(
+            VoiceTutorInputDecision.MEANINGFUL,
+            VoiceTutorInputIntent.UPDATE_STUDY,
+            studyUpdateRequest = updateRequest(
+                101,
+                command,
+                topic = "Redis 기초",
+                difficulty = 6,
+                targetTopic = "Redis",
+                targetImplicitCurrentFocus = false,
+            ),
+        )
+        f.confirm(f.publications().last(), persisted = true)
+
+        val updateCall = f.awaitServerToolCall("update_study")
+        assertThat(mapper.readTree(updateCall.path("item").path("arguments").asText())).isEqualTo(
+            mapper.readTree("""{"study_id":101,"topic":"Redis 기초","difficulty_level":6}"""),
+        )
+        val authorization = f.controller.mutationDialogueBoundary().studyUpdateAuthorization
+        assertThat(authorization?.targetProof)
+            .isEqualTo(VoiceTutorStudyUpdateTargetProof(101, null, "Redis", difficulty = 5))
+
+        val responseCountBeforeUpdate = f.responses().size
+        val callId = f.startServerToolCall(updateCall)
+        val output = f.completeStartedServerToolCall(
+            callId,
+            VoiceTutorMcpToolResult(
+                output = """{"id":101,"parentStudyId":null,"topic":"Redis 기초","difficultyLevel":6,"voiceLessonChangeApplies":"NEXT_QUESTION"}""",
+                isError = false,
+                studyTreeChanged = true,
+                changedStudyId = 101,
+                changeKind = VoiceTutorStudyChangeKind.UPDATED,
+                lessonRevision = 2,
+                lessonFocus = VoiceTutorLessonFocusSelection(
+                    VoiceTutorLessonFocus(101, 2),
+                    VoiceTutorStudySnapshot(101, null, "Redis 기초", 6, 2),
+                ),
+                updatedStudySnapshot = VoiceTutorStudySnapshot(101, null, "Redis 기초", 6, 2),
+            ),
+        )
+        f.acknowledgeConversationItem(output)
+
+        val followup = f.awaitResponseCount(responseCountBeforeUpdate + 1).last()
+        assertThat(followup.path("response").path("instructions").asText())
+            .doesNotContain("start that topic now", "ask only whether")
+        f.finishCurrentSpokenOffer("Redis 기초로 변경했어요.")
+        f.utterance(4, "after-current-focus-update", "계속하자")
+        assertThat(f.assessments().last().utterances.single().targetOffer).isNull()
         assertThat(f.errors).isEmpty()
     }
 
@@ -3387,8 +4237,12 @@ class VoiceTutorMeaningfulInputRelayTest {
         }
     }
 
-    private fun fixture(finishOpening: Boolean = true, captureInputActions: Boolean = true, controlDemand: Long = Long.MAX_VALUE) =
-        Fixture(finishOpening, captureInputActions, controlDemand)
+    private fun fixture(
+        finishOpening: Boolean = true,
+        captureInputActions: Boolean = true,
+        controlDemand: Long = Long.MAX_VALUE,
+        initialStudyMutationSnapshot: VoiceTutorInitialStudyMutationSnapshot? = null,
+    ) = Fixture(finishOpening, captureInputActions, controlDemand, initialStudyMutationSnapshot)
 
     private fun assertOverlappingNewerSpeechCannotMintMutation(
         intent: VoiceTutorInputIntent,
@@ -3471,6 +4325,9 @@ class VoiceTutorMeaningfulInputRelayTest {
         command: String,
         topic: String? = null,
         difficulty: Int? = null,
+        targetTopic: String? = null,
+        targetImplicitCurrentFocus: Boolean = true,
+        startLessonAfterUpdate: Boolean = false,
     ) = VoiceTutorStudyUpdateRequest(
         studyId,
         topic,
@@ -3478,11 +4335,12 @@ class VoiceTutorMeaningfulInputRelayTest {
         VoiceTutorStudyUpdateEvidence(
             source = VoiceTutorRootStudyEvidenceSource.TRANSCRIPT,
             command = command,
-            targetTopic = null,
+            targetTopic = targetTopic,
             topic = topic,
             difficulty = difficulty?.toString(),
-            targetImplicitCurrentFocus = true,
+            targetImplicitCurrentFocus = targetImplicitCurrentFocus,
         ),
+        startLessonAfterUpdate = startLessonAfterUpdate,
     )
 
     private fun exactRootReadback(id: Long, topic: String) = VoiceTutorCandidateDiscovery(
@@ -3530,7 +4388,12 @@ class VoiceTutorMeaningfulInputRelayTest {
         )
     }
 
-    private inner class Fixture(finishOpening: Boolean, captureInputActions: Boolean, controlDemand: Long) : AutoCloseable {
+    private inner class Fixture(
+        finishOpening: Boolean,
+        captureInputActions: Boolean,
+        controlDemand: Long,
+        initialStudyMutationSnapshot: VoiceTutorInitialStudyMutationSnapshot?,
+    ) : AutoCloseable {
         val now = AtomicLong()
         val controls = CopyOnWriteArrayList<String>()
         val serverLifecycle = CopyOnWriteArrayList<String>()
@@ -3548,6 +4411,7 @@ class VoiceTutorMeaningfulInputRelayTest {
             transport = VoiceTutorRealtimeTransport.WEBRTC_SIDEBAND,
             inputCoordinator = VoiceTutorInputTurnCoordinator(),
             toolsEnabled = true,
+            initialStudyMutationSnapshot = initialStudyMutationSnapshot,
             onProviderTurnFailure = diagnostics::add,
         )
         private var syntheticToolSequence = 0L

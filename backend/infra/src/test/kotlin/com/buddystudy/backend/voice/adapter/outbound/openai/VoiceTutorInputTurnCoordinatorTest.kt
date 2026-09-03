@@ -9,6 +9,8 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentR
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -437,6 +439,36 @@ class VoiceTutorInputTurnCoordinatorTest {
             .containsExactly("스프링 레벨 세븐", "만들어 줄래?")
         assertThat(batch.utterances)
             .allMatch { it.priorPersistedLearnerUtterances.isEmpty() }
+    }
+
+    @Test
+    fun `rapid mutation-capable turns are serialized through persistence before later assessment`() {
+        val coordinator = VoiceTutorInputTurnCoordinator()
+        val mutationContext = VoiceTutorStudyMutationContext(
+            lessonRevision = 0,
+            currentFocusStudyId = null,
+            candidates = listOf(VoiceTutorStudyTargetCandidate(83, null, "스프링 관련해서")),
+        )
+        coordinator.teacherResponseStarted()
+        coordinator.observeCommitted("rename", 1, false, 0, studyMutationContext = mutationContext)
+        coordinator.observeTranscript("rename", "이름 바꿔서", "rename-raw", 1)
+        coordinator.observeCommitted("start", 2, false, 1, studyMutationContext = mutationContext)
+        coordinator.observeTranscript("start", "시작하자", "start-raw", 2)
+
+        val first = assess(coordinator.teacherResponseCompleted("어느 쪽인지 말씀해 주세요.", 3))
+        assertThat(first.utterances.map { it.itemId }).containsExactly("rename")
+        assertThat(first.utterances.single().priorPersistedLearnerUtterances).isEmpty()
+
+        assertThat(coordinator.completeAssessment(first.token, meaningful(first), 4))
+            .containsExactly(Action.Publish("rename", "rename-raw", sequence = 1))
+        val next = coordinator.confirmPublished("rename", 5, persisted = true)
+        assertThat(next.first()).isEqualTo(Action.Ready(1, false))
+        val second = next.filterIsInstance<Action.Assess>().single()
+        assertThat(second.utterances.map { it.itemId }).containsExactly("start")
+        assertThat(second.utterances.single().priorPersistedLearnerUtterances.map { it.itemId })
+            .containsExactly("rename")
+        assertThat(second.utterances.single().persistedLearnerSource())
+            .isEqualTo("이름 바꿔서\n시작하자")
     }
 
     @Test
