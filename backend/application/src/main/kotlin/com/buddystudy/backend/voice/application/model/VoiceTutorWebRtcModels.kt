@@ -50,6 +50,8 @@ data class VoiceTutorDialogueBoundary(
     val childStudyCreationAuthorization: VoiceTutorChildStudyCreationAuthorization? = null,
     /** One-shot exact saved-node patch lease minted only after the assessed USER item is persisted. */
     val studyUpdateAuthorization: VoiceTutorStudyUpdateAuthorization? = null,
+    /** Exact owned subtree deletion requested by a freshly assessed, persisted learner turn. */
+    val studyDeletionAuthorization: VoiceTutorStudyDeletionAuthorization? = null,
     /**
      * Exact post-update context revision expected by a server-owned immediate focus.
      * The accepted USER item remains fenced by [latestAcceptedLearnerLessonRevision].
@@ -245,6 +247,8 @@ class VoiceTutorChildStudyCreationAuthorization(
 }
 
 enum class VoiceTutorStudyUpdateAuthorizationScope {
+    /** A bounded owner read, independent of whether the learner has selected a lesson. */
+    OWNER_READ,
     /** The exact frozen node must still belong to the currently confirmed lesson tree. */
     CONFIRMED_FOCUS_TREE,
 
@@ -253,6 +257,18 @@ enum class VoiceTutorStudyUpdateAuthorizationScope {
 
     /** The exact node came from a complete first-turn owner snapshot, never from provider text. */
     INITIAL_OWNER_SNAPSHOT,
+}
+
+class VoiceTutorStudyDeletionAuthorization(val targetProof: VoiceTutorStudyUpdateTargetProof) {
+    val studyId: Long get() = targetProof.studyId
+    private val oneShot = VoiceTutorOneShotAuthorization(allowUnboundExecution = false)
+    fun bindToServerCall(callId: String): Boolean = oneShot.bindToServerCall(callId)
+    fun isBoundToServerCall(callId: String): Boolean = oneShot.isBoundToServerCall(callId)
+    fun claimExecution(callId: String): Boolean = oneShot.claimExecution(callId)
+    fun invalidate() = oneShot.invalidate()
+    fun consume(): Boolean = oneShot.consume()
+    fun isActive(): Boolean = oneShot.isActive()
+    override fun toString(): String = "VoiceTutorStudyDeletionAuthorization(studyId=$studyId, active=${oneShot.isActive()})"
 }
 
 /** Immutable pre-update identity. New patch values are held separately by the authorization. */

@@ -59,7 +59,6 @@ class McpVoiceTutorToolAdapter(
 ) : VoiceTutorMcpToolPort {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val validator by lazy { McpJsonSchemaValidatorProvider.create() }
-    private val deletionConfirmations = VoiceTutorDeletionConfirmations(clock)
     private val specifications by lazy {
         mcp.tools().filter { it.tool().name() in ALLOWED_TOOLS }.associateBy { it.tool().name() }
     }
@@ -69,10 +68,10 @@ class McpVoiceTutorToolAdapter(
         VoiceTutorMcpToolDefinition(
             name = tool.name(),
             description = tool.description().orEmpty() + when (tool.name()) {
-                CREATE_ROOT -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact call only after independently attesting a persisted direct learner choice, including natural first-person new-study intent and an unambiguous topic or level carried from bounded earlier persisted learner speech. Existing roots are returned unchanged and omitted difficulty defaults to 5. This tool never itself selects a lesson or creates a question. When the same persisted turn was also independently attested to start that new lesson immediately, its result reports AUTO_FOCUS_PENDING and the server performs the exact readback and selection; do not ask the learner to confirm again, and teach only after CREATED_ROOT_IMMEDIATE_START is returned."
-                CREATE_TOPIC -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact call only after independently attesting the current first-person choice of one exact child under the current confirmed focus or one verified descendant. Mere mentions, examples, recommendations, quoted or third-party wishes, and ambiguous targets are not permission."
-                UPDATE_STUDY -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. The server inserts one exact update only after independently attesting the learner's current first-person choice of an exact saved node and new topic and/or level. The target may be in the confirmed lesson tree or one exact server-read candidate that the tutor just spoke; both paths require a frozen old identity and a fresh owner-scoped read before the one-shot write. Unspecified fields and past question levels are preserved, while IDs or names from tool arguments, mentions, examples, recommendations, quoted or third-party wishes, and ambiguous targets or outcomes are not permission."
-                DELETE_STUDY -> " In a voice call, first call with confirm=false to preview the exact subtree; ask the learner to confirm its name and descendant count, then wait for a new affirmative spoken turn before calling with confirm=true and the returned confirmation_token. Never skip the preview or reuse a token."
+                CREATE_ROOT -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. A natural new-study choice prepares one exact proposal; ask its one confirmation question naming the new root and level, then fresh natural agreement authorizes that unchanged creation. Earlier persisted learner speech may supply an unambiguous omitted topic or level but never substitutes for fresh agreement. Existing roots are returned unchanged and omitted difficulty defaults to 5. This tool never itself selects a lesson or creates a question. When the confirmed proposal also explicitly included starting the lesson immediately, AUTO_FOCUS_PENDING leads to exact readback and selection; do not ask again and teach only after CREATED_ROOT_IMMEDIATE_START."
+                CREATE_TOPIC -> " In a voice call this mutation is server-owned: never originate the function call or ask the learner for special wording. A natural first-person choice of an exact child under a verified owned parent prepares a proposal; ask one confirmation question naming the parent, child and level, then fresh natural agreement authorizes that unchanged creation. Mere mentions, examples, recommendations, quoted or third-party wishes, and ambiguous targets are not permission. Never demand a repeated command."
+                UPDATE_STUDY -> " A clear learner request prepares an exact owned topic name or level change, including an unambiguous reference to the topic just discussed. Selecting a lesson or reading its children is not required. Ask one exact confirmation question, then fresh natural agreement executes the unchanged patch once. Never originate the function yourself, ask for repeated wording or describe internal execution; report only the confirmed outcome briefly."
+                DELETE_STUDY -> " A clear learner request prepares deletion of the exact owned topic and its descendants. Ask one confirmation question naming that topic and subtree, then fresh natural agreement executes that unchanged deletion once. Do not ask a second confirmation, originate the call yourself, demand a repeated command, or describe servers, leases and permissions. Report only the confirmed outcome briefly; prior learning records are retained."
                 in LEARNING_HISTORY_TOOLS -> " In a voice call, read only nodes in the current call's verified study tree; history never changes the agreed lesson focus."
                 else -> ""
             },
@@ -125,14 +124,10 @@ class McpVoiceTutorToolAdapter(
                 ?: return failure("MCP_UNAVAILABLE", "This study tool is currently unavailable.")
             // Use the SDK's existing validator, not its logging wrapper: validation errors
             // can contain private argument values and must never enter application logs.
-            if (toolName == DELETE_STUDY && (arguments.keys.any { it !in DELETE_ARGUMENTS } ||
-                    ("confirmation_token" in arguments && (arguments["confirmation_token"] !is String ||
-                        (arguments["confirmation_token"] as String).length !in 1..100)))
-            ) return failure("INVALID_ARGUMENTS", "Deletion requires the exact preview's confirmation token.")
-            val mcpArguments = when (toolName) {
-                DELETE_STUDY -> arguments - "confirmation_token"
-                else -> arguments
+            if (toolName == DELETE_STUDY && arguments.keys.any { it !in DELETE_ARGUMENTS }) {
+                return failure("INVALID_ARGUMENTS", "Use only the authorized target and deletion flag.")
             }
+            val mcpArguments = arguments
             if (!validator.validate(specification.tool().inputSchema(), mcpArguments).valid()) {
                 return failure("INVALID_ARGUMENTS", "Arguments do not match this tool's input schema.")
             }
@@ -144,11 +139,6 @@ class McpVoiceTutorToolAdapter(
             if (toolName == UPDATE_STUDY) return updateStudy(context, specification, arguments)
             if (toolName == DELETE_STUDY) {
                 val studyId = (arguments.getValue("study_id") as Number).toLong()
-                if (!studyIsWithinCallTree(context, studyId)) {
-                    return if (!isAuthorized(context)) inactiveCall() else failure(
-                        "STUDY_SCOPE_DENIED", "Change only an exact owned node in this call's verified study tree; no change was made.",
-                    )
-                }
                 if (!isAuthorized(context)) return inactiveCall()
                 return deleteStudy(context, specification, arguments, studyId)
             }
@@ -864,8 +854,7 @@ class McpVoiceTutorToolAdapter(
         return original + mapOf(
             "properties" to linkedMapOf(
                 "study_id" to properties["study_id"],
-                "confirm" to mapOf("type" to "boolean", "description" to "false previews only; true requires the learner's new explicit confirmation after hearing the preview."),
-                "confirmation_token" to mapOf("type" to "string", "minLength" to 1, "maxLength" to 100, "description" to "Exact token returned by this call's delete preview; omit when confirm=false."),
+                "confirm" to mapOf("type" to "boolean", "description" to "The server sets true only after fresh natural agreement to the exact completed deletion question; never request another confirmation or originate this call yourself."),
             ),
         )
     }
@@ -948,7 +937,13 @@ class McpVoiceTutorToolAdapter(
             changedStudyId = null,
             changeKind = null,
         )
-        return withLessonContext(context, truthful, CREATE_TOPIC, exactArguments)
+        val verifiedChild = truthful.copy(savedMutationTarget = VoiceTutorStudyTargetCandidate(
+            studyId = createdId,
+            parentStudyId = parentStudyId,
+            topic = requireNotNull(returnedTopic),
+            difficulty = requireNotNull(returnedDifficulty),
+        ).takeUnless { truthful.isError })
+        return withLessonContext(context, verifiedChild, CREATE_TOPIC, exactArguments)
     }
 
     private fun existingChildAvailableOutput(output: String, difficulty: Int): String {
@@ -1029,6 +1024,7 @@ class McpVoiceTutorToolAdapter(
             VoiceTutorStudyUpdateAuthorizationScope.CONFIRMED_FOCUS_TREE ->
                 studyIsWithinCallTree(context, studyId)
             VoiceTutorStudyUpdateAuthorizationScope.OFFERED_CANDIDATE,
+            VoiceTutorStudyUpdateAuthorizationScope.OWNER_READ,
             VoiceTutorStudyUpdateAuthorizationScope.INITIAL_OWNER_SNAPSHOT -> true
         }
         if (!authorizedScope) {
@@ -1251,51 +1247,44 @@ class McpVoiceTutorToolAdapter(
         arguments: Map<String, Any>,
         studyId: Long,
     ): VoiceTutorMcpToolResult {
-        if (arguments["confirm"] != true) {
-            val preview = deletionPreview(context, studyId) ?: return failure(
-                "DELETE_PREVIEW_UNAVAILABLE", "The complete owned subtree could not be verified within the 128-node voice limit. No deletion occurred; use the study-tree screen for this operation.",
-            )
-            if (!isAuthorized(context)) return inactiveCall()
-            val learnerTurn = confirmations.latestLearnerTurnId(context.session.userId, context.session.id)
-                ?: return failure("CONFIRMATION_REQUIRED", "Wait for the learner's explicit spoken deletion request before preparing a deletion.")
-            val ticket = deletionConfirmations.prepare(context, studyId, preview.ids, learnerTurn)
-                ?: return failure("CONFIRMATION_UNAVAILABLE", "Deletion confirmation is not available; no data was deleted.")
-            return VoiceTutorMcpToolResult(objectMapper.writeValueAsString(linkedMapOf(
-                "deleted" to false, "requiresConfirmation" to true, "studyId" to studyId,
-                "topic" to preview.topic, "descendantCount" to preview.ids.size - 1,
-                "totalStudyCount" to preview.ids.size, "confirmation_token" to ticket.token,
-                "expiresInSeconds" to 120,
-                "notice" to "Ask whether to delete this named study and ALL its counted descendant topics, then wait for a NEW explicit affirmative learner reply. Existing question/answer and voice session history are retained. This is only a preview; nothing was deleted. Never read the token aloud.",
-            )), isError = false)
+        val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
+        val lease = context.dialogueBoundary?.studyDeletionAuthorization
+        if (arguments["confirm"] != true || lease == null || lease.studyId != studyId || !lease.isActive() ||
+            rootStudyLearnerTurnId(context, revision, VoiceTutorInputIntent.DELETE_STUDY) == null
+        ) return failure("DELETE_REQUEST_REQUIRED", "No authorized deletion was executed. Do not claim success or ask for special wording.")
+        val preview = deletionPreview(context, studyId) ?: return failure(
+            "DELETE_PREVIEW_UNAVAILABLE", "This subtree could not be checked completely; nothing was deleted.",
+        )
+        if (!lease.targetProof.matches(preview.target)) {
+            return failure("DELETE_TARGET_STALE", "The saved target changed; nothing was deleted.")
         }
-        val token = arguments["confirmation_token"] as? String
-            ?: return failure("CONFIRMATION_REQUIRED", "First preview with confirm=false, explain the exact subtree, and wait for a new explicit affirmative learner reply.")
-        val ticket = deletionConfirmations.consume(
-            context, studyId, token,
-            confirmations.latestLearnerTurnId(context.session.userId, context.session.id),
-        ) ?: return failure("CONFIRMATION_REQUIRED", "The preview is missing, expired, consumed, or lacks a new learner reply after the tutor's confirmation question. Do not delete; ask again with a fresh preview if needed.")
         if (!isAuthorized(context)) return inactiveCall()
-        // The common MCP use case locks this owner and compares the complete set in
-        // the SAME transaction as deletion. Added children require a new preview.
+        if (studyContexts.currentRevision(context.session.userId, context.session.id) != revision || !lease.consume()) {
+            return failure("DELETE_REQUEST_REQUIRED", "This deletion was superseded or already processed; do not repeat it.")
+        }
+        // The controller issues this lease only after fresh agreement to its frozen proposal. Resolve the
+        // whole owned subtree internally; compare its membership in the deletion transaction.
         val selectedId = currentStudyAnchor(context)
         val result = invoke(context.principal!!, specification, mapOf(
-            "study_id" to studyId, "confirm" to true, "expected_study_ids" to ticket.studyIds,
+            "study_id" to studyId, "confirm" to true, "expected_study_ids" to preview.ids,
         ))
         if (result.isError() == true) return boundedResult(result, DELETE_STUDY)
         val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
-        if (payload?.path("deleted")?.asBoolean() != true || positiveId(payload.path("studyId")) != studyId) {
-            return failure("DELETE_RESULT_UNCONFIRMED", "The delete result cannot be verified. Read saved studies before any retry; do not repeat the write automatically.")
+        if (payload?.path("deleted")?.takeIf { it.isBoolean }?.booleanValue() != true ||
+            positiveId(payload.path("studyId")) != studyId
+        ) {
+            return failure("DELETE_RESULT_UNCONFIRMED", "The deletion result is uncertain. Read saved studies before any retry; never repeat the write automatically.")
         }
         return VoiceTutorMcpToolResult(
             output = objectMapper.writeValueAsString(linkedMapOf(
-                "deleted" to true, "studyId" to studyId, "deletedStudyIds" to ticket.studyIds,
-                "voiceLessonDeletedStudyIds" to ticket.studyIds,
-                "voiceLessonSelectionDeleted" to (selectedId in ticket.studyIds),
-                "notice" to "The confirmed subtree was deleted. Keep existing transcripts and prior answers; stop asking or scoring new questions on deleted nodes. The call is still connected. Briefly acknowledge, then wait; only continue teaching after the learner chooses a verified surviving saved topic.",
+                "deleted" to true, "studyId" to studyId, "topic" to preview.target.topic,
+                "deletedStudyIds" to preview.ids, "voiceLessonDeletedStudyIds" to preview.ids,
+                "voiceLessonSelectionDeleted" to (selectedId in preview.ids),
+                "notice" to "Briefly acknowledge that this named topic was deleted. Do not mention servers, permissions, tokens or internal checks. Existing learning records remain. Stay connected; do not teach on deleted nodes.",
             )),
             isError = false, studyTreeChanged = true, changedStudyId = studyId,
-            changeKind = VoiceTutorStudyChangeKind.DELETED, deletedStudyIds = ticket.studyIds,
-            lessonFocusCleared = selectedId in ticket.studyIds,
+            changeKind = VoiceTutorStudyChangeKind.DELETED, deletedStudyIds = preview.ids,
+            lessonFocusCleared = selectedId in preview.ids,
         )
     }
 
@@ -1328,7 +1317,7 @@ class McpVoiceTutorToolAdapter(
                 queue.add(id)
             }
         }
-        return DeletionPreview(root.path("topic").asText().take(255), ids.toList())
+        return DeletionPreview(verifiedUpdateTarget(root) ?: return null, ids.toList())
     }
 
     private fun mutationResult(output: String, isError: Boolean, changed: Boolean, id: Long?, toolName: String) =
@@ -1344,7 +1333,7 @@ class McpVoiceTutorToolAdapter(
         it.isIntegralNumber && it.canConvertToLong() && it.longValue() > 0
     }?.longValue()
 
-    private data class DeletionPreview(val topic: String, val ids: List<Long>)
+    private data class DeletionPreview(val target: VoiceTutorStudyTargetCandidate, val ids: List<Long>)
 
     private fun boundedResult(result: McpSchema.CallToolResult, toolName: String): VoiceTutorMcpToolResult {
         val isError = result.isError() == true
@@ -1452,6 +1441,24 @@ class McpVoiceTutorToolAdapter(
         val updateAutoFocusPending = updatedStudySnapshot != null &&
             context.dialogueBoundary?.studyUpdateAuthorization?.startLessonAfterUpdate == true &&
             acceptedLearnerRevision >= 0 && updatedStudySnapshot.revision > acceptedLearnerRevision
+        val currentView = currentSnapshots(savedTree + snapshots)
+        val updatedRevision = updatedStudySnapshot?.revision
+        val updatedFocus = if (updatedRevision != null &&
+            (!updatedUnselectedCandidate || selectedId != null && !updateAutoFocusPending)
+        ) {
+            currentView.singleOrNull { it.studyId == selectedId }
+                ?.takeIf { it.revision <= updatedRevision }
+                ?.let { snapshot ->
+                    // Revising a different node advances the call's metadata epoch,
+                    // not its selected lesson. Keep that lesson's frozen name/level;
+                    // do not select the edited node or rewrite historical snapshots.
+                    VoiceTutorLessonFocusSelection(
+                        focus = VoiceTutorLessonFocus(snapshot.studyId, updatedRevision),
+                        snapshot = snapshot.copy(revision = updatedRevision),
+                        lessonRevision = updatedRevision,
+                    )
+                }
+        } else null
         payload.put(
             "voiceLessonContextReady",
             toolName != CREATE_ROOT && !updatedUnselectedCandidate &&
@@ -1488,6 +1495,8 @@ class McpVoiceTutorToolAdapter(
                 when {
                     updateAutoFocusPending ->
                         "The exact saved node was updated and its revised metadata was captured. Do not speak, ask for agreement, or originate or retry another tool; wait for the server-owned UPDATED_STUDY_IMMEDIATE_START selection before asking the first question."
+                    updatedUnselectedCandidate && updatedFocus != null ->
+                        "The exact saved node was updated but is not the lesson focus. REQUIRES_SELECTION applies only to studying that edited node; the existing selected lesson stays active with its unchanged name and level. Briefly acknowledge the edit without asking to switch or start again; never repeat the write."
                     updatedUnselectedCandidate ->
                         "The exact offered saved node was updated and its revised metadata was read back, but it is not the lesson focus. Do not ask a study question until the learner freshly selects it; never repeat the write."
                     else ->
@@ -1513,20 +1522,6 @@ class McpVoiceTutorToolAdapter(
                 selectedId, currentSnapshots(savedTree + snapshots), ids,
             )),
         )
-        val currentView = currentSnapshots(savedTree + snapshots)
-        val updatedRevision = updatedStudySnapshot?.revision
-        val updatedFocus = if (updatedRevision != null && !updatedUnselectedCandidate) {
-            currentView.singleOrNull { it.studyId == selectedId }
-                ?.let { snapshot ->
-                    VoiceTutorLessonFocusSelection(
-                        focus = VoiceTutorLessonFocus(snapshot.studyId, updatedRevision),
-                        snapshot = snapshot,
-                        lessonRevision = updatedRevision,
-                    )
-                }
-        } else {
-            null
-        }
         updatedFocus?.let { payload.set<JsonNode>("voiceLessonFocus", objectMapper.valueToTree(focusMetadata(it))) }
         val revisedResult = result.copy(
             lessonRevision = updatedRevision,
@@ -1617,7 +1612,7 @@ class McpVoiceTutorToolAdapter(
         val LEARNING_HISTORY_TOOLS = setOf(LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD)
         val STUDY_CONTEXT_TOOLS = setOf("list_studies", "get_study", CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY)
         val CREATION_TOOLS = setOf(CREATE_ROOT, CREATE_TOPIC)
-        val DELETE_ARGUMENTS = setOf("study_id", "confirm", "confirmation_token")
+        val DELETE_ARGUMENTS = setOf("study_id", "confirm")
         val CREATED_TOPIC_FIELDS = listOf(
             "created", "id", "parentStudyId", "topic", "sortOrder", "difficultyLevel", "activeForQuestions", "enabled",
         )

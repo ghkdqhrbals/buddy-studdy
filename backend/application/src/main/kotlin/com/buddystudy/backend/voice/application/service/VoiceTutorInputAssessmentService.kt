@@ -217,6 +217,12 @@ class VoiceTutorInputAssessmentService(
                 }
                 characters += context.candidates.sumOf { it.topic.length }
             }
+            utterance.mutationProposal?.let { proposal ->
+                if (utterance.checkpoint || !proposal.isValid()) {
+                    throw failure(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
+                }
+                characters += proposal.tutorAudioTranscript.length
+            }
             characters += utterance.transcript.length
             characters += utterance.sameSpeechContext?.length ?: 0
             characters += priorLearnerItems.sumOf { it.transcript.length }

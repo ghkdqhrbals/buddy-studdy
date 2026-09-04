@@ -22,6 +22,47 @@ class VoiceTutorStudyUpdateRequestTest {
     )
 
     @Test
+    fun `owner read permits independently assessed ASR aliases without lesson traversal or formal offers`() {
+        val command = "스프링 레벨을 7로 바꿔 줘"
+        val request = updateRequest(offered).copy(
+            topic = null, difficulty = 7,
+            evidence = VoiceTutorStudyUpdateEvidence(
+                VoiceTutorRootStudyEvidenceSource.TRANSCRIPT, command,
+                targetTopic = "스프링", topic = null, difficulty = "7", targetImplicitCurrentFocus = false,
+            ),
+        )
+        val input = utterance(null, command).copy(studyMutationContext = context.copy(
+            currentFocusStudyId = null,
+            source = VoiceTutorStudyMutationContextSource.OWNER_READ,
+        ))
+
+        assertThat(request.isValidFor(input)).isTrue()
+        assertThat(request.copy(studyId = 999).isValidFor(input)).isFalse()
+    }
+
+    @Test
+    fun `owner read resolves natural reference with actual speech without exposing a formal lesson offer`() {
+        val command = "그걸 레벨 칠로 바꿔 줘"
+        val request = updateRequest(offered).copy(
+            topic = null, difficulty = 7,
+            evidence = VoiceTutorStudyUpdateEvidence(
+                VoiceTutorRootStudyEvidenceSource.TRANSCRIPT, command,
+                targetTopic = null, topic = null, difficulty = "칠", targetImplicitCurrentFocus = false,
+                targetImplicitSpokenOffer = true,
+            ),
+        )
+        val readContext = context.copy(
+            currentFocusStudyId = null,
+            source = VoiceTutorStudyMutationContextSource.OWNER_READ,
+        )
+        val input = utterance(null, command).copy(studyMutationContext = readContext)
+        assertThat(request.isValidFor(input)).isFalse()
+        assertThat(request.isValidFor(input.copy(studyMutationContext = readContext.copy(
+            referentTranscript = "저장된 스프링 주제는 레벨 5입니다.",
+        )))).isTrue()
+    }
+
+    @Test
     fun `off-focus explicit update requires the exact spoken offer even while another study is focused`() {
         val request = updateRequest(offered)
         val exactOffer = targetOffer()

@@ -15,6 +15,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearner
 import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyEvidenceSource
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContextSource
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationProposal
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
@@ -42,6 +43,184 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class OpenAIVoiceTutorInputAssessmentAdapterTest {
     private val mapper = JsonMapperProvider.mapper
+
+    @Test
+    fun `mutation confirmation schema binds the actual spoken immutable proposal and allows natural agreement`() {
+        val proposal = mutationProposal().copy(startLessonAfterMutation = true,
+            tutorAudioTranscript = "스프링을 레벨 7로 바꾸고 바로 학습을 시작할까요?")
+        val assessment = request().copy(utterances = listOf(
+            VoiceTutorInputUtterance("item_1", "응 그렇게 해", mutationProposal = proposal),
+        ))
+        val body = mapper.valueToTree<JsonNode>(VoiceTutorInputAssessmentPromptProvider.requestBody(assessment, "gpt-5.4"))
+        val data = mapper.readTree(body.path("messages")[1].path("content").asText())
+        assertThat(data.path("utterances")[0].path("mutationProposal").path("proposalId").asText())
+            .isEqualTo(proposal.proposalId)
+        assertThat(data.path("utterances")[0].path("mutationProposal").path("startLessonAfterMutation").booleanValue()).isTrue()
+        assertThat(body.path("response_format").path("json_schema").path("schema").path("properties")
+            .path("decisions").path("items").path("properties").path("mutationProposalId").path("enum")
+            .map { if (it.isNull) null else it.asText() }).containsExactly(null, proposal.proposalId)
+        assertThat(body.path("messages")[0].path("content").asText()).contains(
+            "CONFIRM_STUDY_MUTATION", "REJECT_STUDY_MUTATION", "one server-spoken exact mutation question",
+            "do not confirm the old proposal", "earlier sameSpeechContext cannot supply agreement",
+        ).doesNotContain("final permission without a later confirmation", "itself is final permission to write")
+
+        val primary = VoiceTutorInputAssessmentPromptProvider.parseResponse(assessment, envelope(decisionsWithIntent(
+            "item_1", "MEANINGFUL", "CONFIRM_STUDY_MUTATION", mutationProposalId = proposal.proposalId,
+        )))
+        val verification = VoiceTutorStudyMutationConfirmationPromptProvider.request(assessment, primary)!!
+        val verificationBody = mapper.valueToTree<JsonNode>(
+            VoiceTutorStudyMutationConfirmationPromptProvider.requestBody(verification, "gpt-5.4"),
+        )
+        val verificationData = mapper.readTree(verificationBody.path("messages")[1].path("content").asText())
+        val item = verificationData.path("items")[0]
+        assertThat(item.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("itemId", "transcript", "mutationProposal")
+        assertThat(item.path("mutationProposal").path("tutorAudioTranscript").asText()).isEqualTo(proposal.tutorAudioTranscript)
+        assertThat(item.path("mutationProposal").path("targetStudyId").asLong()).isEqualTo(101)
+        assertThat(verificationBody.path("messages")[0].path("content").asText()).contains(
+            "entire current utterance", "actual completed tutorAudioTranscript", "changes the proposal's target",
+            "startLessonAfterMutation", "Earlier learner intent", "UNTRUSTED",
+        )
+        assertThat(verificationData.has("teacherContext")).isFalse()
+        assertThat(verificationBody.has("tools")).isFalse()
+        assertThat(verificationBody.path("store").booleanValue()).isFalse()
+    }
+
+    @Test
+    fun `natural Korean agreement confirms each frozen mutation after independent agreement only`() = runBlocking<Unit> {
+        val proposals = listOf(
+            mutationProposal(),
+            VoiceTutorStudyMutationProposal("root", VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+                topic = "스프링", difficulty = 7, tutorAudioTranscript = "스프링을 레벨 7 새 주제로 만들까요?"),
+            VoiceTutorStudyMutationProposal("child", VoiceTutorInputIntent.CREATE_STUDY_TOPIC,
+                parentStudyId = 101, parentTopic = "스프링", topic = "DI", difficulty = 5,
+                tutorAudioTranscript = "스프링 아래 DI를 레벨 5 하위 주제로 만들까요?"),
+            VoiceTutorStudyMutationProposal("delete", VoiceTutorInputIntent.DELETE_STUDY,
+                targetStudyId = 101, targetTopic = "스프링", tutorAudioTranscript = "스프링 주제와 그 하위 주제를 삭제할까요?"),
+        )
+        proposals.zip(listOf("응", "네", "좋아", "그렇게 해")).forEach { (proposal, transcript) ->
+            val calls = AtomicInteger()
+            val adapter = adapter(properties(), ExchangeFunction {
+                Mono.just(response(envelope(if (calls.incrementAndGet() == 1) decisionsWithIntent(
+                    "item_1", "MEANINGFUL", "CONFIRM_STUDY_MUTATION", mutationProposalId = proposal.proposalId,
+                ) else confirmationAttestation(proposal.proposalId, "CONFIRM"))))
+            })
+            val result = adapter.assess(request().copy(utterances = listOf(
+                VoiceTutorInputUtterance("item_1", transcript, mutationProposal = proposal),
+            ))).decisions.single()
+            assertThat(calls).hasValue(2)
+            assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.CONFIRM_STUDY_MUTATION)
+            assertThat(result.mutationProposalId).isEqualTo(proposal.proposalId)
+            assertThat(result.rootStudyCreationRequest).isNull()
+            assertThat(result.childStudyCreationRequest).isNull()
+            assertThat(result.studyUpdateRequest).isNull()
+            assertThat(result.deleteStudyRequest).isNull()
+        }
+    }
+
+    @Test
+    fun `natural refusal is distinct and unrelated changed target or incomplete question cannot confirm`() = runBlocking<Unit> {
+        data class Case(val transcript: String, val primary: String, val agreement: String, val expected: VoiceTutorInputIntent)
+        val cases = listOf(
+            Case("아니", "REJECT_STUDY_MUTATION", "REJECT", VoiceTutorInputIntent.REJECT_STUDY_MUTATION),
+            Case("하지 마", "REJECT_STUDY_MUTATION", "REJECT", VoiceTutorInputIntent.REJECT_STUDY_MUTATION),
+            Case("오늘 날씨가 좋네", "CONFIRM_STUDY_MUTATION", "NEITHER", VoiceTutorInputIntent.NONE),
+            Case("응, 그런데 Redis로 바꿔", "CONFIRM_STUDY_MUTATION", "NEITHER", VoiceTutorInputIntent.NONE),
+            Case("아니", "CONFIRM_STUDY_MUTATION", "REJECT", VoiceTutorInputIntent.NONE),
+            Case("응, 레벨은 9로", "CONFIRM_STUDY_MUTATION", "NEITHER", VoiceTutorInputIntent.NONE),
+        )
+        cases.forEach { case ->
+            val calls = AtomicInteger()
+            val proposal = mutationProposal()
+            val adapter = adapter(properties(), ExchangeFunction {
+                Mono.just(response(envelope(if (calls.incrementAndGet() == 1) decisionsWithIntent(
+                    "item_1", "MEANINGFUL", case.primary, mutationProposalId = proposal.proposalId,
+                ) else confirmationAttestation(proposal.proposalId, case.agreement))))
+            })
+            val result = adapter.assess(request().copy(utterances = listOf(
+                VoiceTutorInputUtterance("item_1", case.transcript, mutationProposal = proposal),
+            ))).decisions.single()
+            assertThat(calls).hasValue(2)
+            assertThat(result.intent).isEqualTo(case.expected)
+            assertThat(result.mutationProposalId).isEqualTo(
+                if (case.expected == VoiceTutorInputIntent.NONE) null else proposal.proposalId,
+            )
+        }
+    }
+
+    @Test
+    fun `unrelated primary decision does not trigger proposal attestation`() = runBlocking<Unit> {
+        val calls = AtomicInteger()
+        val adapter = adapter(properties(), ExchangeFunction {
+            calls.incrementAndGet()
+            Mono.just(response(envelope(decisions("item_1" to "MEANINGFUL"))))
+        })
+        val result = adapter.assess(request().copy(utterances = listOf(
+            VoiceTutorInputUtterance("item_1", "지금 몇 시야?", mutationProposal = mutationProposal()),
+        ))).decisions.single()
+        assertThat(calls).hasValue(1)
+        assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.NONE)
+        assertThat(result.mutationProposalId).isNull()
+    }
+
+    @Test
+    fun `confirmation parser rejects missing cross proposal checkpoint and detached authorization`() {
+        val proposal = mutationProposal()
+        val utterance = VoiceTutorInputUtterance("item_1", "응", mutationProposal = proposal)
+        val valid = decisionsWithIntent("item_1", "MEANINGFUL", "CONFIRM_STUDY_MUTATION", mutationProposalId = proposal.proposalId)
+        val failures = listOf(
+            utterance.copy(mutationProposal = null) to valid,
+            utterance.copy(checkpoint = true) to valid,
+            utterance.copy(mutationProposal = proposal.copy(tutorAudioTranscript = "")) to valid,
+            utterance to valid.replace(proposal.proposalId, "other-proposal"),
+            utterance to valid.replace("\"mutationProposalId\":\"${proposal.proposalId}\"", "\"mutationProposalId\":null"),
+            utterance to valid.replace("CONFIRM_STUDY_MUTATION", "NONE"),
+            utterance to valid.replace("MEANINGFUL", "NON_COMMUNICATIVE"),
+            utterance to valid.replace("\"mutationDifficulty\":null", "\"mutationDifficulty\":9"),
+        )
+        failures.forEach { (input, content) ->
+            val error = runCatching {
+                VoiceTutorInputAssessmentPromptProvider.parseResponse(request().copy(utterances = listOf(input)), envelope(content))
+            }.exceptionOrNull() as VoiceTutorInputAssessmentException
+            assertThat(error.reason).isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_RESULT)
+        }
+    }
+
+    @Test
+    fun `confirmation attestation strictly correlates identities and rejects malformed extra or duplicate results`() {
+        val proposal = mutationProposal()
+        val request = VoiceTutorStudyMutationConfirmationRequest("ko", listOf(
+            VoiceTutorStudyMutationConfirmationItem("item_1", "네", proposal),
+        ))
+        listOf("CONFIRM", "REJECT", "NEITHER").forEach { relation ->
+            assertThat(VoiceTutorStudyMutationConfirmationPromptProvider.parseResponse(
+                request, envelope(confirmationAttestation(proposal.proposalId, relation)),
+            )).hasSize(1)
+        }
+        val valid = confirmationAttestation(proposal.proposalId, "CONFIRM")
+        listOf(
+            valid.replace(proposal.proposalId, "another-proposal"),
+            valid.replace("item_1", "another-item"),
+            valid.replace("\"CONFIRM\"", "true"),
+            valid.replace("\"CONFIRM\"", "\"CONFIRM\",\"difficulty\":9"),
+            valid.replace("\"agreement\":", "\"agreement\":\"REJECT\",\"agreement\":"),
+            "{}", "null", valid + valid,
+        ).forEach { content ->
+            val error = runCatching {
+                VoiceTutorStudyMutationConfirmationPromptProvider.parseResponse(request, envelope(content))
+            }.exceptionOrNull() as VoiceTutorInputAssessmentException
+            assertThat(error.reason).isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_RESULT)
+        }
+    }
+
+    private fun mutationProposal() = VoiceTutorStudyMutationProposal(
+        proposalId = "proposal-update-101", intent = VoiceTutorInputIntent.UPDATE_STUDY,
+        targetStudyId = 101, targetTopic = "스프링", difficulty = 7,
+        tutorAudioTranscript = "스프링을 레벨 7로 바꿀까요?",
+    )
+
+    private fun confirmationAttestation(proposalId: String, agreement: String): String = mapper.writeValueAsString(mapOf(
+        "attestations" to listOf(mapOf("itemId" to "item_1", "proposalId" to proposalId, "agreement" to agreement)),
+    ))
 
     @Test
     fun `spoken feedback proof is a separate strict exact answer contract`() {
@@ -216,7 +395,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         assertThat(item.path("additionalProperties").booleanValue()).isFalse()
         assertThat(item.path("required").map { it.asText() })
             .containsExactly(
-                "itemId", "decision", "intent", "currentTranscriptAnswersStudyQuestion",
+                "itemId", "decision", "intent", "mutationProposalId", "currentTranscriptAnswersStudyQuestion",
                 "targetStudyId", "spokenCandidateStudyIds",
                 "rootStudyTopic", "rootStudyDifficulty", "rootStudyEvidenceSource",
                 "rootStudyCommandEvidence", "rootStudyTopicEvidence", "rootStudyDifficultyEvidence",
@@ -232,7 +411,8 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             .containsExactly("MEANINGFUL", "NON_COMMUNICATIVE")
         assertThat(item.path("properties").path("intent").path("enum").map { it.asText() })
             .containsExactly(
-                "NONE", "END_CURRENT_VOICE_LESSON", "CREATE_ROOT_STUDY", "CREATE_STUDY_TOPIC", "UPDATE_STUDY",
+                "NONE", "END_CURRENT_VOICE_LESSON", "CREATE_ROOT_STUDY", "CREATE_STUDY_TOPIC", "UPDATE_STUDY", "DELETE_STUDY",
+                "CONFIRM_STUDY_MUTATION", "REJECT_STUDY_MUTATION",
                 "SELECT_SAVED_TOPIC", "DECLINE_SAVED_TOPIC_OFFER", "CONTINUE_TREE",
                 "DISCOVER_SAVED_TOPIC", "ANSWER_TO_STUDY_QUESTION", "ASK_STUDY_QUESTION", "CONTINUE_STUDY",
             )
@@ -410,7 +590,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
             "CONTINUE_STUDY", "next substantive", "generic acknowledgement",
             "top-level saved study", "not A; create B", "exact requested new root name",
             "Contextual yes/approval is never CREATE_ROOT_STUDY", "server alone applies level 5",
-            "rootStudyStartLessonAfterCreate=true", "compound utterance", "without another confirmation",
+            "rootStudyStartLessonAfterCreate=true", "compound utterance", "one mutation confirmation",
             "never by phrase, keyword, regex")
         assertThat(instruction).doesNotContain(original, context)
         assertThat(data.path("utterances")[0].path("transcript").asText()).isEqualTo(original)
@@ -766,6 +946,146 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "recommendations", "third-party wishes", "Do not use keywords, word lists, regexes",
             )
         }
+
+    @Test
+    fun `owner read reference changes level without a formal offer or selected lesson`() = runBlocking<Unit> {
+        val source = "아니 그걸 레벨 칠로 바꿔 줘"
+        val referent = "저장된 스프링 주제는 레벨 5입니다."
+        val candidates = listOf(
+            VoiceTutorStudyTargetCandidate(101, null, "Spring", 5),
+            VoiceTutorStudyTargetCandidate(202, null, "Redis", 6),
+        )
+        val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+            "item_1", source,
+            studyMutationContext = VoiceTutorStudyMutationContext(
+                0, null, candidates, VoiceTutorStudyMutationContextSource.OWNER_READ, referent,
+            ),
+        )))
+        val bodies = mutableListOf<JsonNode>()
+        val adapter = adapter(properties(), ExchangeFunction { request ->
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map { raw ->
+                    bodies.add(mapper.readTree(raw))
+                    response(envelope(if (bodies.size == 1) decisionsWithIntent(
+                        "item_1", "MEANINGFUL", "UPDATE_STUDY",
+                        mutationTargetStudyId = 101,
+                        mutationTargetImplicitSpokenOffer = true,
+                        mutationDifficulty = 7,
+                        mutationEvidenceSource = "TRANSCRIPT",
+                        mutationCommandEvidence = source,
+                        mutationDifficultyEvidence = "칠",
+                    ) else mutationAttestation(true)))
+                }
+            })
+        })
+
+        val result = adapter.assess(assessmentRequest).decisions.single()
+
+        assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.UPDATE_STUDY)
+        assertThat(result.studyUpdateRequest?.studyId).isEqualTo(101)
+        assertThat(result.studyUpdateRequest?.difficulty).isEqualTo(7)
+        assertThat(bodies).hasSize(2)
+        val primary = mapper.readTree(bodies[0].path("messages")[1].path("content").asText())
+        assertThat(primary.path("utterances")[0].path("targetOffer").isNull).isTrue()
+        assertThat(primary.path("utterances")[0].path("studyMutationContext").path("referentTranscript").asText())
+            .isEqualTo(referent)
+        val verification = mapper.readTree(bodies[1].path("messages")[1].path("content").asText()).path("items")[0]
+        assertThat(verification.path("targetCandidates").map { it.path("studyId").asLong() })
+            .containsExactly(101L, 202L)
+        assertThat(verification.path("tutorAudioTranscript").asText()).isEqualTo(referent)
+        assertThat(bodies[1].path("messages")[0].path("content").asText())
+            .contains("ALL supplied", "OWNER_READ does not require", "Spring / 스프링")
+    }
+
+    @Test
+    fun `deletion proposal for an owner read target uses independent intent verification`() = runBlocking<Unit> {
+        val source = "스프링은 이제 삭제해 줘"
+        val calls = AtomicInteger()
+        val adapter = adapter(properties(), ExchangeFunction {
+            Mono.just(response(envelope(if (calls.incrementAndGet() == 1) decisionsWithIntent(
+                "item_1", "MEANINGFUL", "DELETE_STUDY",
+                mutationTargetStudyId = 101,
+                mutationEvidenceSource = "TRANSCRIPT",
+                mutationCommandEvidence = source,
+                mutationTargetTopicEvidence = "스프링",
+            ) else mutationAttestation(true))))
+        })
+        val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+            "item_1", source,
+            studyMutationContext = VoiceTutorStudyMutationContext(
+                0, null, listOf(VoiceTutorStudyTargetCandidate(101, null, "Spring", 5)),
+                VoiceTutorStudyMutationContextSource.OWNER_READ,
+            ),
+        )))
+
+        val result = adapter.assess(assessmentRequest).decisions.single()
+
+        assertThat(calls).hasValue(2)
+        assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.DELETE_STUDY)
+        assertThat(result.deleteStudyRequest?.studyId).isEqualTo(101)
+        assertThat(result.deleteStudyRequest?.evidence?.targetTopic).isEqualTo("스프링")
+        assertThat(result.studyUpdateRequest).isNull()
+        assertThat(result.currentTranscriptAnswersStudyQuestion).isFalse()
+    }
+
+    @Test
+    fun `ambiguous deletion referent rejected by independent semantics loses all write authority`() = runBlocking<Unit> {
+        val source = "그거 지워 줘"
+        val calls = AtomicInteger()
+        val adapter = adapter(properties(), ExchangeFunction {
+            Mono.just(response(envelope(if (calls.incrementAndGet() == 1) decisionsWithIntent(
+                "item_1", "MEANINGFUL", "DELETE_STUDY",
+                mutationTargetStudyId = 101,
+                mutationTargetImplicitSpokenOffer = true,
+                mutationEvidenceSource = "TRANSCRIPT",
+                mutationCommandEvidence = source,
+            ) else mutationAttestation(false))))
+        })
+        val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+            "item_1", source,
+            studyMutationContext = VoiceTutorStudyMutationContext(
+                0, null, listOf(VoiceTutorStudyTargetCandidate(101, null, "Spring", 5),
+                    VoiceTutorStudyTargetCandidate(202, null, "Redis", 5)),
+                VoiceTutorStudyMutationContextSource.OWNER_READ,
+                "스프링과 Redis가 저장돼 있어요.",
+            ),
+        )))
+
+        val result = adapter.assess(assessmentRequest).decisions.single()
+
+        assertThat(calls).hasValue(2)
+        assertThat(result.intent).isEqualTo(VoiceTutorInputIntent.NONE)
+        assertThat(result.deleteStudyRequest).isNull()
+    }
+
+    @Test
+    fun `deletion parser rejects patches checkpoints and unowned candidates before attestation`() {
+        val source = "Spring 삭제해 줘"
+        val assessmentRequest = request().copy(utterances = listOf(VoiceTutorInputUtterance(
+            "item_1", source,
+            studyMutationContext = VoiceTutorStudyMutationContext(
+                0, null, listOf(VoiceTutorStudyTargetCandidate(101, null, "Spring", 5)),
+                VoiceTutorStudyMutationContextSource.OWNER_READ,
+            ),
+        )))
+        val baseline = decisionsWithIntent(
+            "item_1", "MEANINGFUL", "DELETE_STUDY", mutationTargetStudyId = 101,
+            mutationEvidenceSource = "TRANSCRIPT", mutationCommandEvidence = source,
+            mutationTargetTopicEvidence = "Spring",
+        )
+        listOf(
+            assessmentRequest.copy(utterances = assessmentRequest.utterances.map { it.copy(checkpoint = true) }) to baseline,
+            assessmentRequest to baseline.replace("\"mutationTargetStudyId\":101", "\"mutationTargetStudyId\":999"),
+            assessmentRequest to baseline.replace("\"mutationDifficulty\":null", "\"mutationDifficulty\":7"),
+            assessmentRequest to baseline.replace("\"mutationStartLessonAfterUpdate\":false", "\"mutationStartLessonAfterUpdate\":true"),
+        ).forEach { (request, payload) ->
+            val error = runCatching {
+                VoiceTutorInputAssessmentPromptProvider.parseResponse(request, envelope(payload))
+            }.exceptionOrNull() as? VoiceTutorInputAssessmentException
+            assertThat(error?.reason).isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_RESULT)
+        }
+    }
 
     @Test
     fun `first learner turn can rename one explicitly named initial owner snapshot target`() =
@@ -2061,6 +2381,7 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
                 "itemId" to id,
                 "decision" to decision,
                 "intent" to "NONE",
+                "mutationProposalId" to null,
                 "currentTranscriptAnswersStudyQuestion" to false,
                 "targetStudyId" to null,
                 "spokenCandidateStudyIds" to emptyList<Long>(),
@@ -2115,12 +2436,14 @@ class OpenAIVoiceTutorInputAssessmentAdapterTest {
         mutationDifficultyEvidence: String? = null,
         mutationDifficultyOmitted: Boolean = false,
         mutationStartLessonAfterUpdate: Boolean = false,
+        mutationProposalId: String? = null,
     ): String =
         mapper.writeValueAsString(mapOf(
             "decisions" to listOf(mapOf(
                 "itemId" to id,
                 "decision" to decision,
                 "intent" to intent,
+                "mutationProposalId" to mutationProposalId,
                 "currentTranscriptAnswersStudyQuestion" to currentTranscriptAnswersStudyQuestion,
                 "targetStudyId" to targetStudyId,
                 "spokenCandidateStudyIds" to spokenCandidateStudyIds,

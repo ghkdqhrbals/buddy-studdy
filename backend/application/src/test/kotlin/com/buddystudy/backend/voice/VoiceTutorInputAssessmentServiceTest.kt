@@ -11,6 +11,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessm
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearnerUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationProposal
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetSingleChildEdge
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
@@ -31,6 +32,38 @@ import org.springframework.boot.context.properties.source.MapConfigurationProper
 import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceTutorInputAssessmentServiceTest {
+    @Test
+    fun `spoken mutation proposal accepts natural yes but invalid or checkpoint proposals never reach provider`() =
+        runBlocking<Unit> {
+            val proposal = VoiceTutorStudyMutationProposal(
+                proposalId = "proposal-1", intent = VoiceTutorInputIntent.UPDATE_STUDY,
+                targetStudyId = 84, targetTopic = "스프링", difficulty = 7,
+                tutorAudioTranscript = "스프링을 레벨 7로 바꿀까요?",
+            )
+            val input = VoiceTutorInputUtterance("yes", "응", mutationProposal = proposal)
+            val calls = AtomicInteger()
+            val service = service { request ->
+                calls.incrementAndGet()
+                VoiceTutorInputAssessmentResult(listOf(VoiceTutorInputItemAssessment(
+                    request.utterances.single().itemId, VoiceTutorInputDecision.MEANINGFUL,
+                    intent = VoiceTutorInputIntent.CONFIRM_STUDY_MUTATION,
+                    mutationProposalId = proposal.proposalId,
+                )))
+            }
+            assertThat(service.assess(request().copy(utterances = listOf(input))).decisions.single().intent)
+                .isEqualTo(VoiceTutorInputIntent.CONFIRM_STUDY_MUTATION)
+            for (invalid in listOf(
+                input.copy(checkpoint = true),
+                input.copy(mutationProposal = proposal.copy(tutorAudioTranscript = "")),
+                input.copy(mutationProposal = proposal.copy(difficulty = 11)),
+            )) {
+                val failure = runCatching { service.assess(request().copy(utterances = listOf(invalid))) }.exceptionOrNull()
+                assertThat((failure as VoiceTutorInputAssessmentException).reason)
+                    .isEqualTo(VoiceTutorInputAssessmentFailure.INVALID_INPUT)
+            }
+            assertThat(calls.get()).isEqualTo(1)
+        }
+
     @Test
     fun `short answers names numbers partial ideas and hesitation reach provider unchanged`() = runBlocking<Unit> {
         val originals = listOf("응", "아니", "김민수", "2", "주제 알려줘", "레디스는 데이터를", "  어, 준비됐어.  ", "음...")

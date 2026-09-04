@@ -17,6 +17,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorChildStudyCreati
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateAuthorization
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateAuthorizationScope
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateTargetProof
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyDeletionAuthorization
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateReadKind
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMcpToolPort
@@ -673,22 +674,28 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(rootCreation.path("properties").has("interval_minutes")).isFalse()
         assertThat(definitions.single { it.name == "create_root_study" }.description)
             .contains(
-                "server-owned", "never originate", "natural first-person new-study intent",
-                "bounded earlier persisted learner speech", "never itself selects a lesson or creates a question",
-                "AUTO_FOCUS_PENDING", "do not ask the learner to confirm again",
+                "server-owned", "never originate", "natural new-study choice",
+                "Earlier persisted learner speech", "never itself selects a lesson or creates a question",
+                "one confirmation question", "fresh natural agreement", "AUTO_FOCUS_PENDING", "do not ask again",
                 "CREATED_ROOT_IMMEDIATE_START",
             )
         assertThat(definitions.single { it.name == "create_study_topic" }.description).contains(
-            "server-owned", "never originate", "current first-person choice", "verified descendant",
+            "server-owned", "never originate", "natural first-person choice", "verified owned parent",
+            "one confirmation question", "fresh natural agreement",
             "Mere mentions", "ambiguous targets",
         )
         assertThat(definitions.single { it.name == "update_study" }.description).contains(
-            "server-owned", "never originate", "current first-person choice",
-            "Unspecified fields", "ambiguous targets or outcomes",
+            "clear learner request", "exact owned topic", "topic just discussed",
+            "one exact confirmation question", "fresh natural agreement",
+            "Selecting a lesson or reading its children is not required", "confirmed outcome",
         )
         val deletion = mapper.valueToTree<JsonNode>(definitions.single { it.name == "delete_study" }.parameters)
-        assertThat(deletion.path("properties").has("confirmation_token")).isTrue()
+        assertThat(deletion.path("properties").has("confirmation_token")).isFalse()
         assertThat(deletion.path("properties").has("expected_study_ids")).isFalse()
+        assertThat(definitions.single { it.name == "delete_study" }.description).contains(
+            "clear learner request", "one confirmation question", "fresh natural agreement",
+            "Do not ask a second confirmation", "prior learning records are retained",
+        )
         assertThat(definitions.filter { it.name in setOf("list_study_learning_records", "get_voice_learning_record") })
             .allSatisfy { assertThat(it.description).contains("verified study tree") }
         fixture.adapter.definitions()
@@ -1082,7 +1089,7 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `discovery can browse owned studies but cannot mutate or read lesson history before a chosen focus`(): Unit = runBlocking {
+    fun `discovery browsing alone grants neither mutation authority nor lesson history access`(): Unit = runBlocking {
         val store = ContextStore()
         val fixture = Fixture(studyContexts = store).apply {
             persistedSession = discoverySession()
@@ -1102,7 +1109,7 @@ class McpVoiceTutorToolAdapterTest {
                 "CHILD_CREATION_REQUEST_REQUIRED",
             ),
             Triple("update_study", mapOf("study_id" to 101L, "difficulty_level" to 2), "STUDY_UPDATE_REQUEST_REQUIRED"),
-            Triple("delete_study", mapOf("study_id" to 101L, "confirm" to false), "STUDY_SCOPE_DENIED"),
+            Triple("delete_study", mapOf("study_id" to 101L, "confirm" to false), "DELETE_REQUEST_REQUIRED"),
             Triple("list_study_learning_records", mapOf("study_id" to 101L), "STUDY_SCOPE_DENIED"),
         )) assertCode(fixture.adapter.execute(context, name, args), code)
         assertThat(fixture.calls.map { it.name }).containsExactly("list_studies", "get_study")
@@ -2088,6 +2095,7 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(result.isError).isFalse()
         assertThat(result.studyTreeChanged).isTrue()
         assertThat(result.createdStudyId).isEqualTo(102L)
+        assertThat(result.savedMutationTarget).isEqualTo(VoiceTutorStudyTargetCandidate(102, 101, "2", 7))
         assertThat(fixture.calls.map { it.name }).containsExactly("create_study_topic")
         assertThat(fixture.calls.single().arguments)
             .isEqualTo(mapOf("parent_study_id" to 101L, "topic" to "2", "difficulty_level" to 7))
@@ -2124,6 +2132,8 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(result.createdStudyId).isNull()
         assertThat(result.changedStudyId).isNull()
         assertThat(result.changeKind).isNull()
+        assertThat(result.savedMutationTarget)
+            .isEqualTo(VoiceTutorStudyTargetCandidate(102, 101, "Redis Streams", 5))
         assertThat(contexts.remembered).containsExactly(listOf(102L))
         assertCode(
             fixture.adapter.execute(context, "create_study_topic", arguments),
@@ -2266,6 +2276,7 @@ class McpVoiceTutorToolAdapterTest {
             )
             assertCode(result, "CHILD_CREATION_RESULT_UNCONFIRMED")
             assertThat(result.createdStudyId).isNull()
+            assertThat(result.savedMutationTarget).isNull()
         }
         val failureWithId = Fixture().apply {
             handler = { _, _ -> McpSchema.CallToolResult.builder().structuredContent(mapOf("id" to 102L)).isError(true).build() }
@@ -2370,7 +2381,7 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `off-focus update preserves selected study and returns only the revised target snapshot`(): Unit = runBlocking {
+    fun `off-focus update retains frozen selected lesson at the revised epoch without selecting edited child`(): Unit = runBlocking {
         val contexts = ContextStore()
         val fixture = mutationFixture(contexts)
 
@@ -2382,17 +2393,80 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(result.isError).isFalse()
         assertThat(result.changedStudyId).isEqualTo(102)
         assertThat(result.lessonRevision).isEqualTo(1)
-        assertThat(result.lessonFocus).isNull()
+        assertThat(result.lessonFocus?.snapshot)
+            .isEqualTo(VoiceTutorStudySnapshot(101, null, "Selected root", 5, revision = 1))
+        assertThat(result.lessonFocus?.revision).isEqualTo(1)
         assertThat(result.updatedStudySnapshot)
             .isEqualTo(VoiceTutorStudySnapshot(102, 101, "Cache", 6, revision = 1))
         assertThat(fixture.persistedSession?.studyId).isEqualTo(101)
         assertThat(json(result).path("voiceLessonContextReady").asBoolean()).isFalse()
         assertThat(json(result).path("voiceLessonChangeApplies").asText()).isEqualTo("REQUIRES_SELECTION")
-        assertThat(json(result).has("voiceLessonFocus")).isFalse()
+        assertThat(json(result).path("voiceLessonFocus").path("studyId").asLong()).isEqualTo(101)
         assertThat(json(result).path("voiceLessonTree").path("selectedStudyId").asLong()).isEqualTo(101)
-        assertThat(json(result).path("notice").asText()).contains("not the lesson focus", "freshly selects it")
+        assertThat(json(result).path("notice").asText()).contains("not the lesson focus", "existing selected lesson stays active")
+        assertThat(contexts.saved.getValue(101).revision).isZero()
+        assertThat(fixture.focusSelections).isEmpty()
         assertThat(contexts.remembered).containsExactly(listOf(102L))
         assertThat(contexts.revised).containsExactly(102L)
+    }
+
+    @Test
+    fun `unrelated owner edit retains current lesson but compound start leaves focus to the owned pipeline`(): Unit = runBlocking {
+        for (startAfterUpdate in listOf(false, true)) {
+            val contexts = ContextStore().apply {
+                live[202] = VoiceTutorStudySnapshot(202, null, "Spring", 5)
+            }
+            val fixture = mutationFixture(contexts)
+            val request = updateContext(
+                studyId = 202, difficulty = 7,
+                scope = VoiceTutorStudyUpdateAuthorizationScope.OWNER_READ,
+                targetProof = VoiceTutorStudyUpdateTargetProof(202, null, "Spring", 5),
+                startLessonAfterUpdate = startAfterUpdate,
+            )
+
+            val result = fixture.adapter.execute(request, "update_study", mapOf("study_id" to 202L, "difficulty_level" to 7))
+
+            assertThat(result.isError).isFalse()
+            assertThat(result.updatedStudySnapshot).isEqualTo(VoiceTutorStudySnapshot(202, null, "Spring", 7, 1))
+            assertThat(fixture.focusSelections).isEmpty()
+            assertThat(contexts.saved.getValue(101)).isEqualTo(VoiceTutorStudySnapshot(101, null, "Selected root", 5))
+            if (startAfterUpdate) {
+                assertThat(result.lessonFocus).isNull()
+                assertThat(json(result).path("voiceLessonChangeApplies").asText()).isEqualTo("AUTO_FOCUS_PENDING")
+            } else {
+                assertThat(result.lessonFocus?.snapshot)
+                    .isEqualTo(VoiceTutorStudySnapshot(101, null, "Selected root", 5, 1))
+                assertThat(json(result).path("voiceLessonChangeApplies").asText()).isEqualTo("REQUIRES_SELECTION")
+                assertThat(json(result).path("notice").asText()).contains("applies only to studying that edited node")
+            }
+        }
+    }
+
+    @Test
+    fun `owner read authorizes an exact level update without a selected focus or child reads`(): Unit = runBlocking {
+        val contexts = ContextStore().apply {
+            live[202] = VoiceTutorStudySnapshot(202, null, "스프링", 5)
+        }
+        val fixture = mutationFixture(contexts).apply { persistedSession = discoverySession() }
+        val request = updateContext(
+            studyId = 202,
+            difficulty = 7,
+            scope = VoiceTutorStudyUpdateAuthorizationScope.OWNER_READ,
+            targetProof = VoiceTutorStudyUpdateTargetProof(202, null, "스프링", 5),
+        ).copy(session = discoverySession())
+
+        val result = fixture.adapter.execute(request, "update_study", mapOf("study_id" to 202L, "difficulty_level" to 7))
+
+        assertThat(result.isError).isFalse()
+        assertThat(result.updatedStudySnapshot).isEqualTo(VoiceTutorStudySnapshot(202, null, "스프링", 7, 1))
+        assertThat(result.lessonFocus).isNull()
+        assertThat(fixture.focusSelections).isEmpty()
+        assertThat(fixture.calls.map { it.name }).containsExactly("get_study", "update_study")
+        assertThat(fixture.calls.single { it.name == "update_study" }.arguments)
+            .containsEntry("difficulty_level", 7)
+            .containsEntry(BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT, 5)
+        assertCode(fixture.adapter.execute(request, "update_study", mapOf("study_id" to 202L, "difficulty_level" to 7)), "STUDY_UPDATE_REQUEST_REQUIRED")
+        assertThat(fixture.calls.count { it.name == "update_study" }).isEqualTo(1)
     }
 
     @Test
@@ -2635,7 +2709,7 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `mutations cannot escape the verified owned call tree`(): Unit = runBlocking {
+    fun `a focus scoped update cannot escape its tree and an unassessed deletion is denied`(): Unit = runBlocking {
         val fixture = mutationFixture()
         assertCode(fixture.adapter.execute(
             updateContext(900L, difficulty = 6), "update_study",
@@ -2643,56 +2717,138 @@ class McpVoiceTutorToolAdapterTest {
         ), "STUDY_SCOPE_DENIED")
         assertCode(fixture.adapter.execute(
             context(), "delete_study", mapOf("study_id" to 900L, "confirm" to false),
-        ), "STUDY_SCOPE_DENIED")
+        ), "DELETE_REQUEST_REQUIRED")
         assertThat(fixture.calls.none { it.name in listOf("update_study", "delete_study") }).isTrue()
     }
 
     @Test
-    fun `delete requires a spoken preview and a newer learner confirmation then executes exactly once`(): Unit = runBlocking {
-        val fixture = mutationFixture()
-        assertCode(fixture.adapter.execute(context(), "delete_study", mapOf("study_id" to 101L, "confirm" to true)), "CONFIRMATION_REQUIRED")
-        val preview = fixture.adapter.execute(context(), "delete_study", mapOf("study_id" to 101L, "confirm" to false))
-        assertThat(preview.isError).isFalse()
-        assertThat(preview.studyTreeChanged).isFalse()
-        assertThat(json(preview).path("deleted").asBoolean()).isFalse()
-        assertThat(json(preview).path("descendantCount").asInt()).isEqualTo(2)
-        val arguments = mapOf("study_id" to 101L, "confirm" to true, "confirmation_token" to json(preview).path("confirmation_token").asText())
-        assertCode(fixture.adapter.execute(context(), "delete_study", arguments), "CONFIRMATION_REQUIRED")
-        fixture.learnerTurnId = 12 // A new utterance BEFORE a spoken preview is still not confirmation.
-        assertCode(fixture.adapter.execute(context(), "delete_study", arguments), "CONFIRMATION_REQUIRED")
-        fixture.tutorTurnId = 13
-        fixture.learnerTurnId = 14
-        val deleted = fixture.adapter.execute(confirmedContext(), "delete_study", arguments)
+    fun `direct assessed deletion resolves the exact subtree once and retains learning history`(): Unit = runBlocking {
+        val contexts = ContextStore()
+        val existingHistorySnapshots = contexts.saved.toMap()
+        val fixture = mutationFixture(contexts)
+        val request = deletionContext(101)
+        val arguments = mapOf("study_id" to 101L, "confirm" to true)
+
+        val deleted = fixture.adapter.execute(request, "delete_study", arguments)
+
         assertThat(deleted.isError).isFalse()
+        assertThat(deleted.studyTreeChanged).isTrue()
         assertThat(deleted.changeKind).isEqualTo(VoiceTutorStudyChangeKind.DELETED)
         assertThat(deleted.deletedStudyIds).containsExactly(101, 102, 103)
         assertThat(deleted.changedStudyId).isEqualTo(101)
+        assertThat(deleted.lessonFocusCleared).isTrue()
         assertThat(json(deleted).path("voiceLessonSelectionDeleted").asBoolean()).isTrue()
+        assertThat(json(deleted).path("notice").asText()).contains("Existing learning records remain", "Stay connected")
+        assertThat(json(deleted).has("confirmation_token")).isFalse()
         assertThat(fixture.calls.single { it.name == "delete_study" }.arguments)
-            .containsEntry("expected_study_ids", listOf(101L, 102L, 103L))
-            .doesNotContainKey("confirmation_token")
-        assertCode(fixture.adapter.execute(confirmedContext(), "delete_study", arguments), "CONFIRMATION_REQUIRED")
+            .isEqualTo(mapOf("study_id" to 101L, "confirm" to true, "expected_study_ids" to listOf(101L, 102L, 103L)))
+        assertThat(fixture.calls.map { it.name })
+            .containsExactly("get_study", "list_studies", "list_studies", "list_studies", "delete_study")
+        assertThat(contexts.saved).isEqualTo(existingHistorySnapshots)
+        assertThat(fixture.focusSelections).isEmpty()
+        assertCode(fixture.adapter.execute(request, "delete_study", arguments), "DELETE_REQUEST_REQUIRED")
         assertThat(fixture.calls.count { it.name == "delete_study" }).isEqualTo(1)
     }
 
     @Test
-    fun `changed deletion scope consumes the preview without falsely announcing success or replaying`(): Unit = runBlocking {
+    fun `direct deletion of an owned node does not require a selected lesson`(): Unit = runBlocking {
+        val fixture = mutationFixture().apply { persistedSession = discoverySession() }
+        val request = deletionContext(
+            900,
+            targetProof = VoiceTutorStudyUpdateTargetProof(900, null, "Cache", 3),
+        ).copy(session = discoverySession())
+
+        val result = fixture.adapter.execute(request, "delete_study", mapOf("study_id" to 900L, "confirm" to true))
+
+        assertThat(result.isError).isFalse()
+        assertThat(result.deletedStudyIds).containsExactly(900)
+        assertThat(result.lessonFocusCleared).isFalse()
+        assertThat(json(result).path("voiceLessonSelectionDeleted").asBoolean()).isFalse()
+        assertThat(fixture.focusSelections).isEmpty()
+        assertThat(fixture.calls.single { it.name == "delete_study" }.arguments)
+            .containsEntry("expected_study_ids", listOf(900L))
+    }
+
+    @Test
+    fun `deletion rejects missing revoked mismatched and unpersisted learner authority before reading targets`(): Unit = runBlocking {
+        val arguments = mapOf("study_id" to 101L, "confirm" to true)
+        val revoked = deletionContext(101, claimForExecution = false).also {
+            val authorization = requireNotNull(it.dialogueBoundary?.studyDeletionAuthorization)
+            authorization.invalidate()
+            assertThat(authorization.isActive()).isFalse()
+        }
+        val wrongIntent = deletionContext(101).let {
+            it.copy(dialogueBoundary = requireNotNull(it.dialogueBoundary).copy(latestAcceptedLearnerIntent = VoiceTutorInputIntent.NONE))
+        }
+        val wrongPersistedItem = deletionContext(101).let {
+            it.copy(dialogueBoundary = requireNotNull(it.dialogueBoundary).copy(latestAcceptedLearnerProviderItemId = "not-persisted"))
+        }
+        for (request in listOf(context(), revoked, deletionContext(102), wrongIntent, wrongPersistedItem)) {
+            val fixture = mutationFixture()
+            assertCode(fixture.adapter.execute(request, "delete_study", arguments), "DELETE_REQUEST_REQUIRED")
+            assertThat(fixture.calls).isEmpty()
+        }
         val fixture = mutationFixture()
-        val preview = fixture.adapter.execute(context(), "delete_study", mapOf("study_id" to 101L, "confirm" to false))
-        fixture.tutorTurnId = 13
-        fixture.learnerTurnId = 14
+        assertCode(fixture.adapter.execute(deletionContext(101), "delete_study", arguments + ("confirm" to false)), "DELETE_REQUEST_REQUIRED")
+        assertThat(fixture.calls).isEmpty()
+    }
+
+    @Test
+    fun `saved target metadata changed after assessment blocks deletion`(): Unit = runBlocking {
+        for (changed in listOf(
+            VoiceTutorStudySnapshot(101, null, "Renamed root", 5),
+            VoiceTutorStudySnapshot(101, null, "Selected root", 7),
+            VoiceTutorStudySnapshot(101, 900, "Selected root", 5),
+        )) {
+            val fixture = mutationFixture(ContextStore().apply { live[101] = changed })
+            val result = fixture.adapter.execute(deletionContext(101), "delete_study", mapOf("study_id" to 101L, "confirm" to true))
+            assertCode(result, "DELETE_TARGET_STALE")
+            assertThat(result.studyTreeChanged).isFalse()
+            assertThat(result.deletedStudyIds).isEmpty()
+            assertThat(fixture.calls.none { it.name == "delete_study" }).isTrue()
+        }
+    }
+
+    @Test
+    fun `changed subtree membership consumes deletion authority without success or replay`(): Unit = runBlocking {
+        val fixture = mutationFixture()
         val ordinary = fixture.handler
         fixture.handler = { name, args -> if (name == "delete_study") failure("STUDY_TREE_CHANGED") else ordinary(name, args) }
-        val arguments = mapOf("study_id" to 101L, "confirm" to true, "confirmation_token" to json(preview).path("confirmation_token").asText())
-        val result = fixture.adapter.execute(confirmedContext(), "delete_study", arguments)
+        val arguments = mapOf("study_id" to 101L, "confirm" to true)
+        val request = deletionContext(101)
+        val result = fixture.adapter.execute(request, "delete_study", arguments)
         assertCode(result, "STUDY_TREE_CHANGED")
         assertThat(result.studyTreeChanged).isFalse()
-        assertCode(fixture.adapter.execute(confirmedContext(), "delete_study", arguments), "CONFIRMATION_REQUIRED")
+        assertThat(result.deletedStudyIds).isEmpty()
+        assertThat(result.lessonFocusCleared).isFalse()
+        assertCode(fixture.adapter.execute(request, "delete_study", arguments), "DELETE_REQUEST_REQUIRED")
         assertThat(fixture.calls.count { it.name == "delete_study" }).isEqualTo(1)
     }
 
     @Test
-    fun `incomplete cyclic malformed or oversized subtree cannot create a deletion preview`(): Unit = runBlocking {
+    fun `unconfirmed deletion result never reports success or reuses consumed authority`(): Unit = runBlocking {
+        for (payload in listOf(
+            mapOf("deleted" to false, "studyId" to 101L),
+            mapOf("deleted" to "true", "studyId" to 101L),
+            mapOf("deleted" to true, "studyId" to 102L),
+            mapOf("studyId" to 101L),
+        )) {
+            val fixture = mutationFixture()
+            val ordinary = fixture.handler
+            fixture.handler = { name, args -> if (name == "delete_study") success(payload) else ordinary(name, args) }
+            val request = deletionContext(101)
+            val arguments = mapOf("study_id" to 101L, "confirm" to true)
+            val result = fixture.adapter.execute(request, "delete_study", arguments)
+            assertCode(result, "DELETE_RESULT_UNCONFIRMED")
+            assertThat(result.studyTreeChanged).isFalse()
+            assertThat(result.deletedStudyIds).isEmpty()
+            assertCode(fixture.adapter.execute(request, "delete_study", arguments), "DELETE_REQUEST_REQUIRED")
+            assertThat(fixture.calls.count { it.name == "delete_study" }).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `incomplete cyclic malformed or oversized subtree cannot execute an authorized deletion`(): Unit = runBlocking {
         for (page in listOf(
             mapOf("studies" to emptyList<Any>(), "totalCount" to 1, "offset" to 0),
             mapOf("studies" to listOf(mapOf("id" to 101L, "parentStudyId" to 101L)), "totalCount" to 1, "offset" to 0),
@@ -2702,16 +2858,16 @@ class McpVoiceTutorToolAdapterTest {
             val fixture = mutationFixture()
             val ordinary = fixture.handler
             fixture.handler = { name, args -> if (name == "list_studies") success(page) else ordinary(name, args) }
-            assertCode(fixture.adapter.execute(context(), "delete_study", mapOf("study_id" to 101L, "confirm" to false)), "DELETE_PREVIEW_UNAVAILABLE")
+            assertCode(fixture.adapter.execute(deletionContext(101), "delete_study", mapOf("study_id" to 101L, "confirm" to true)), "DELETE_PREVIEW_UNAVAILABLE")
             assertThat(fixture.calls.none { it.name == "delete_study" }).isTrue()
         }
     }
 
     @Test
-    fun `model supplied scope manifests and malformed confirmation tokens are rejected`(): Unit = runBlocking {
+    fun `provider supplied subtree manifests and confirmation tokens are rejected`(): Unit = runBlocking {
         val fixture = mutationFixture()
-        for (extra in listOf(mapOf("expected_study_ids" to listOf(101L)), mapOf("confirmation_token" to 23), mapOf("confirmation_token" to "x".repeat(101)))) {
-            assertCode(fixture.adapter.execute(context(), "delete_study", mapOf("study_id" to 101L, "confirm" to true) + extra), "INVALID_ARGUMENTS")
+        for (extra in listOf(mapOf("expected_study_ids" to listOf(101L)), mapOf("confirmation_token" to "old-preview-token"), mapOf("confirmation_token" to 23))) {
+            assertCode(fixture.adapter.execute(deletionContext(101), "delete_study", mapOf("study_id" to 101L, "confirm" to true) + extra), "INVALID_ARGUMENTS")
         }
         assertThat(fixture.calls).isEmpty()
     }
@@ -3129,6 +3285,26 @@ class McpVoiceTutorToolAdapterTest {
                 ).also {
                     check(it.bindToServerCall("direct-adapter-child-create"))
                     check(it.claimExecution("direct-adapter-child-create"))
+                },
+            ))
+        }
+
+        fun deletionContext(
+            studyId: Long,
+            lessonRevision: Long = 0,
+            claimForExecution: Boolean = true,
+            targetProof: VoiceTutorStudyUpdateTargetProof = VoiceTutorStudyUpdateTargetProof(
+                studyId,
+                101L.takeIf { studyId != 101L },
+                if (studyId == 101L) "Selected root" else "Cache",
+                if (studyId == 101L) 5 else 3,
+            ),
+        ): VoiceTutorWebRtcControlContext {
+            val base = context(inputIntent = VoiceTutorInputIntent.DELETE_STUDY, lessonRevision = lessonRevision)
+            return base.copy(dialogueBoundary = requireNotNull(base.dialogueBoundary).copy(
+                studyDeletionAuthorization = VoiceTutorStudyDeletionAuthorization(targetProof).also {
+                    check(it.bindToServerCall("direct-adapter-study-delete"))
+                    if (claimForExecution) check(it.claimExecution("direct-adapter-study-delete"))
                 },
             ))
         }

@@ -21,7 +21,7 @@ final class VoiceTutorSileroTests: XCTestCase {
         XCTAssertEqual(detector.sequence, 0)
     }
 
-    func testProbabilityHysteresisStartsOnceAndStopsOnlyAfterSevenHundredMilliseconds() {
+    func testProbabilityHysteresisStartsOnceAndStopsAfterFifteenQuietWindows() {
         var detector = enabledDetector()
         XCTAssertNil(detector.process(speechProbability: 0.5, duration: frameDuration))
         XCTAssertNil(detector.process(speechProbability: 0.5, duration: frameDuration))
@@ -30,10 +30,11 @@ final class VoiceTutorSileroTests: XCTestCase {
             // The continuation band does not require repeatedly crossing onset.
             XCTAssertNil(detector.process(speechProbability: 0.35, duration: frameDuration))
         }
-        for _ in 0..<21 {
+        for _ in 0..<14 {
             XCTAssertNil(detector.process(speechProbability: 0.349, duration: frameDuration))
         }
-        XCTAssertTrue(detector.isSpeaking, "21 x 32 ms is only 672 ms")
+        XCTAssertTrue(detector.isSpeaking, "14 x 32 ms is only 448 ms")
+        XCTAssertEqual(VoiceTutorLocalSpeechDetector.quietHoldDuration, 15 * frameDuration, accuracy: 0.000_001)
         XCTAssertEqual(detector.process(speechProbability: 0.349, duration: frameDuration), event(.stopped, 1))
         for _ in 0..<30 {
             XCTAssertNil(detector.process(speechProbability: 0, duration: frameDuration))
@@ -45,12 +46,26 @@ final class VoiceTutorSileroTests: XCTestCase {
     func testProbabilityQuietGapResetsWhenSpeechReturnsAndSequencesStayPaired() {
         var detector = enabledDetector()
         XCTAssertEqual(feed(&detector, probability: 0.9, frames: 4), [event(.started, 1)])
-        XCTAssertTrue(feed(&detector, probability: 0.1, frames: 20).isEmpty)
+        XCTAssertTrue(feed(&detector, probability: 0.1, frames: 13).isEmpty)
         XCTAssertTrue(feed(&detector, probability: 0.8, frames: 1).isEmpty)
-        XCTAssertTrue(feed(&detector, probability: 0.1, frames: 21).isEmpty)
+        XCTAssertTrue(feed(&detector, probability: 0.1, frames: 14).isEmpty)
         XCTAssertEqual(feed(&detector, probability: 0.1, frames: 1), [event(.stopped, 1)])
         XCTAssertEqual(feed(&detector, probability: 0.9, frames: 3), [event(.started, 2)])
-        XCTAssertEqual(feed(&detector, probability: 0.1, frames: 22), [event(.stopped, 2)])
+        XCTAssertEqual(feed(&detector, probability: 0.1, frames: 15), [event(.stopped, 2)])
+    }
+
+    func testProbabilityRepeatedWithinPhrasePausesNeverFinishContinuingSpeech() {
+        var detector = enabledDetector()
+        XCTAssertEqual(feed(&detector, probability: 0.9, frames: 3), [event(.started, 1)])
+        for _ in 0..<60 {
+            XCTAssertTrue(feed(&detector, probability: 0.1, frames: 14).isEmpty)
+            // Quiet but genuine continuation resets the entire quiet window,
+            // without needing another loud onset or a different transcript.
+            XCTAssertNil(detector.process(speechProbability: 0.35, duration: frameDuration))
+        }
+        XCTAssertTrue(detector.isSpeaking)
+        XCTAssertEqual(detector.sequence, 1)
+        XCTAssertEqual(feed(&detector, probability: 0.1, frames: 15), [event(.stopped, 1)])
     }
 
     func testProbabilityInvalidValuesDoNotAdvanceOnsetOrQuietTimers() {
@@ -64,7 +79,7 @@ final class VoiceTutorSileroTests: XCTestCase {
         }
         XCTAssertFalse(detector.isSpeaking)
         XCTAssertEqual(feed(&detector, probability: 0.9, frames: 1), [event(.started, 1)])
-        _ = feed(&detector, probability: 0.1, frames: 21)
+        _ = feed(&detector, probability: 0.1, frames: 14)
         for probability in [Double.nan, .infinity, -1, 2] {
             XCTAssertNil(detector.process(speechProbability: probability, duration: frameDuration))
         }

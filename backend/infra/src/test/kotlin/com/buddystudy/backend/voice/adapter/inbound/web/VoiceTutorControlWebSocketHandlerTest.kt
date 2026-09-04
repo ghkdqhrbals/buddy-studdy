@@ -191,6 +191,24 @@ class VoiceTutorControlWebSocketHandlerTest {
     }
 
     @Test
+    fun `ready local speech stop feeds response latency even without provider VAD`() {
+        val registry = SimpleMeterRegistry()
+        runControlScenario(
+            clientAfterReady = listOf(
+                """{"type":"${VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT}","sequence":1}""",
+                """{"type":"${VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT}","sequence":1}""",
+            ),
+            providerEventsAfterClientWork = listOf(
+                """{"type":"response.created","response":{"id":"resp-local"}}""",
+            ),
+            registry = registry,
+            provider = { events, _ -> events.take(2).toList() },
+        )
+
+        assertThat(registry.get("buddystudy.voice_tutor.turn_to_response").timer().count()).isEqualTo(1)
+    }
+
+    @Test
     fun `fatal provider error stays failed when terminal send wins before receive throws`() {
         withControlLogs { logs ->
             val result = runControlScenario(
@@ -498,6 +516,8 @@ class VoiceTutorControlWebSocketHandlerTest {
         heartbeatState: VoiceTutorSessionStatus = VoiceTutorSessionStatus.ACTIVE,
         persistedQuotaEnding: Boolean = false,
         providerEventsAfterTerminal: List<String> = emptyList(),
+        providerEventsAfterClientWork: List<String> = emptyList(),
+        registry: SimpleMeterRegistry = SimpleMeterRegistry(),
         provider: suspend (Flow<String>, Flow<VoiceTutorRelayTermination>) -> Unit,
     ): ControlResult {
         val now = Instant.now()
@@ -561,6 +581,7 @@ class VoiceTutorControlWebSocketHandlerTest {
                     }
                 }
                 provider(clientEvents, terminalEvents)
+                providerEventsAfterClientWork.forEach { raw -> onProviderEvent(raw, false, true) }
             }
 
             override suspend fun hangup(callId: String) = error("Finalization owns hangup.")
@@ -616,7 +637,7 @@ class VoiceTutorControlWebSocketHandlerTest {
             },
         )
         VoiceTutorControlWebSocketHandler(
-            webRtc, relay, voiceTutor, VoiceTutorRealtimeMetrics(SimpleMeterRegistry()),
+            webRtc, relay, voiceTutor, VoiceTutorRealtimeMetrics(registry),
         ).handle(socket).block(Duration.ofSeconds(2))
         return result
     }

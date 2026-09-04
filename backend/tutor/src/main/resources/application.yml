@@ -85,6 +85,8 @@ buddystudy:
     session-recovery-initial-delay-ms: ${VOICE_TUTOR_SESSION_RECOVERY_INITIAL_DELAY_MS:5000}
     session-recovery-batch-size: ${VOICE_TUTOR_SESSION_RECOVERY_BATCH_SIZE:100}
     summary-model: ${VOICE_TUTOR_SUMMARY_MODEL:${OPENAI_MODEL:gpt-5.4}}
+    input-assessment:
+      model: ${VOICE_TUTOR_INPUT_ASSESSMENT_MODEL:}
     summary-prompt-version: ${VOICE_TUTOR_SUMMARY_PROMPT_VERSION:voice-tutor-summary-v2}
     summary-recovery-poll-ms: ${VOICE_TUTOR_SUMMARY_RECOVERY_POLL_MS:5000}
     summary-recovery-initial-delay-ms: ${VOICE_TUTOR_SUMMARY_RECOVERY_INITIAL_DELAY_MS:5000}

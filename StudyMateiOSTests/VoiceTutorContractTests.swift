@@ -2086,6 +2086,62 @@ final class VoiceTutorContractTests: XCTestCase {
         )
     }
 
+    func testVoiceCallDisclosureTracksTheFingerInBothDirections() {
+        typealias Routing = VoiceTutorOrbGestureRouting
+        XCTAssertEqual(Routing.expansion(
+            for: CGSize(width: 2, height: -75), startsExpanded: false, travel: 300
+        ), 0.25, accuracy: 0.001)
+        XCTAssertEqual(Routing.expansion(
+            for: CGSize(width: 2, height: 75), startsExpanded: true, travel: 300
+        ), 0.75, accuracy: 0.001)
+        XCTAssertEqual(Routing.expansion(
+            for: CGSize(width: 0, height: -900), startsExpanded: false, travel: 300
+        ), 1)
+        XCTAssertEqual(Routing.expansion(
+            for: CGSize(width: 0, height: 900), startsExpanded: true, travel: 300
+        ), 0)
+        XCTAssertEqual(Routing.expansion(
+            for: CGSize(width: 90, height: -50), startsExpanded: false, travel: 300
+        ), 0, "Horizontal movement must not reveal chat")
+        XCTAssertEqual(Routing.expansion(
+            for: CGSize(width: 0, height: -50), startsExpanded: false, travel: 0
+        ), 0)
+    }
+
+    func testVoiceCallShortFlickFinishesButTapAndReversedMovementDoNot() {
+        typealias Routing = VoiceTutorOrbGestureRouting
+        XCTAssertTrue(Routing.settlesExpanded(
+            translation: CGSize(width: 1, height: -22),
+            predictedTranslation: CGSize(width: 2, height: -90), startsExpanded: false
+        ))
+        XCTAssertFalse(Routing.settlesExpanded(
+            translation: CGSize(width: 1, height: 22),
+            predictedTranslation: CGSize(width: 2, height: 90), startsExpanded: true
+        ))
+        XCTAssertFalse(Routing.settlesExpanded(
+            translation: CGSize(width: 0, height: -8),
+            predictedTranslation: CGSize(width: 0, height: -100), startsExpanded: false
+        ), "A tap cannot become a disclosure flick from prediction alone")
+        XCTAssertFalse(Routing.settlesExpanded(
+            translation: CGSize(width: 0, height: -22),
+            predictedTranslation: CGSize(width: 0, height: 90), startsExpanded: false
+        ), "Reversing before release settles back to the current mode")
+    }
+
+    func testVoiceCallUsesOneOrbAlongAContinuousLayoutPath() {
+        let compact = CGRect(x: 100, y: 280, width: 152, height: 152)
+        let transcript = CGRect(x: 310, y: 12, width: 48, height: 48)
+        XCTAssertEqual(VoiceTutorOrbGestureRouting.orbFrame(
+            from: compact, to: transcript, expansion: 0
+        ), compact)
+        XCTAssertEqual(VoiceTutorOrbGestureRouting.orbFrame(
+            from: compact, to: transcript, expansion: 1
+        ), transcript)
+        XCTAssertEqual(VoiceTutorOrbGestureRouting.orbFrame(
+            from: compact, to: transcript, expansion: 0.5
+        ), CGRect(x: 205, y: 146, width: 100, height: 100))
+    }
+
     func testTranscriptFollowingIgnoresContentGrowthButPausesDuringUserInteraction() {
         var state = VoiceTutorTranscriptFollowState()
         let bottom = CGRect(x: 0, y: -250, width: 360, height: 610)
@@ -2127,10 +2183,10 @@ final class VoiceTutorContractTests: XCTestCase {
             2,
             "Auto-follow eligibility must be checked both before scheduling and after layout"
         )
-        XCTAssertTrue(method.contains("showsTranscript"))
+        XCTAssertTrue(method.contains("animated && showsTranscript"), "Hidden appends need no animation")
+        XCTAssertFalse(method.contains("guard showsTranscript"), "The mounted transcript must already be at the latest edge before a reveal drag begins")
         XCTAssertTrue(method.contains("guard !Task.isCancelled"))
         XCTAssertTrue(source.contains(".onChange(of: showsTranscript) { _, isShowingTranscript in"))
-        XCTAssertTrue(source.contains("if !isShowingTranscript {"))
 
         var state = VoiceTutorTranscriptFollowState()
         XCTAssertTrue(state.shouldAutoScrollForContentChange)
@@ -2259,7 +2315,7 @@ final class VoiceTutorContractTests: XCTestCase {
         let compact = String(source[compactStart.lowerBound..<transcriptStart.lowerBound])
         let transcript = String(source[transcriptStart.lowerBound..<orbStart.lowerBound])
 
-        XCTAssertTrue(compact.contains("callOrb(diameter:"))
+        XCTAssertTrue(compact.contains("orbPlaceholder(.call, diameter:"))
         XCTAssertTrue(compact.contains("Text(topic)"))
         XCTAssertTrue(compact.contains("callTime"))
         XCTAssertFalse(compact.contains("transcriptPanel"))
@@ -2273,16 +2329,18 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(transcript.contains("Color(uiColor: .systemBackground)"))
         XCTAssertFalse(transcript.contains("UnevenRoundedRectangle"))
         XCTAssertFalse(transcript.contains("shadow("))
-        XCTAssertTrue(transcript.contains("callOrb(diameter: usesAccessibilityChrome ? 56 : 48)"))
+        XCTAssertTrue(transcript.contains("orbPlaceholder(.transcript, diameter: usesAccessibilityChrome ? 56 : 48)"))
         XCTAssertTrue(source.contains("interactionDock"))
         XCTAssertTrue(source.contains("stableCallControls"))
         XCTAssertTrue(source.contains("Button(action: onPause)"))
-        XCTAssertTrue(source.contains("VoiceTutorOrbGestureRouting.transcriptAction"))
-        XCTAssertTrue(source.contains(".highPriorityGesture(orbTranscriptGesture)"))
+        XCTAssertTrue(source.contains("VoiceTutorOrbGestureRouting.expansion"))
+        XCTAssertTrue(source.contains("VoiceTutorOrbGestureRouting.settlesExpanded"))
+        XCTAssertTrue(source.contains(".highPriorityGesture(orbTranscriptGesture("))
         XCTAssertFalse(source.contains("voiceCall.openTranscript"))
         XCTAssertTrue(source.contains("voiceCall.collapseTranscript"))
-        XCTAssertTrue(source.contains(".move(edge: .bottom).combined(with: .opacity)"))
-        XCTAssertTrue(source.contains(".easeInOut(duration: 0.24)"))
+        XCTAssertTrue(source.contains(".offset(y: reduceMotion ? 0 : geometry.size.height * (1 - expansion))"))
+        XCTAssertTrue(source.contains(".interactiveSpring(response: 0.34, dampingFraction: 1)"))
+        XCTAssertTrue(source.contains("coordinateSpace: .global"), "The moving orb must not move its gesture origin")
         XCTAssertTrue(source.contains("reduceMotion"))
         XCTAssertFalse(source.contains("voiceCall.mute"))
         XCTAssertFalse(source.contains("onMute"))
@@ -2308,6 +2366,13 @@ final class VoiceTutorContractTests: XCTestCase {
             source.range(of: "private struct VoiceTutorCaptionBubble", range: callScreenStart.upperBound..<source.endIndex)
         )
         let callScreenSource = String(source[callScreenStart.lowerBound..<callScreenEnd.lowerBound])
+        XCTAssertFalse(callScreenSource.contains(".transition("), "Disclosure must not destroy and recreate the scroll view")
+        XCTAssertEqual(callScreenSource.components(separatedBy: "callOrb(diameter:").count - 1, 2,
+                       "One orb call site plus its definition; compact and transcript layouts only provide anchors")
+        let disclosureStart = try XCTUnwrap(callScreenSource.range(of: "private func setTranscriptExpanded"))
+        let disclosureEnd = try XCTUnwrap(callScreenSource.range(of: "private var disclosureAnimation"))
+        let disclosure = String(callScreenSource[disclosureStart.lowerBound..<disclosureEnd.lowerBound])
+        XCTAssertFalse(disclosure.contains("resetTranscriptInteraction"), "Hiding/revealing must preserve reading position")
         XCTAssertFalse(
             callScreenSource.contains(".dynamicTypeSize("),
             "The call screen must respect AX2-AX5 instead of forcing a smaller text category"
@@ -2566,7 +2631,7 @@ final class VoiceTutorContractTests: XCTestCase {
         ])
     }
 
-    func testLocalVoiceActivityStartsOnceAndStopsAfterSevenHundredMillisecondsOfQuiet() {
+    func testLocalVoiceActivityStartsOnceAndStopsAfterFourHundredEightyMillisecondsOfQuiet() {
         var detector = VoiceTutorLocalSpeechDetector()
         _ = detector.updateGate(mediaReady: true, muted: false)
         XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 7).isEmpty)
@@ -2576,7 +2641,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(detector.isSpeaking)
         XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 200).isEmpty,
                       "A sustained utterance starts only once")
-        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 69).isEmpty)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 47).isEmpty)
         XCTAssertTrue(detector.isSpeaking, "A brief pause must not end a turn early")
         XCTAssertEqual(detector.process(normalizedRMS: 0, duration: 0.01),
                        VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1))
@@ -2593,10 +2658,10 @@ final class VoiceTutorContractTests: XCTestCase {
         // speaking, it is quiet continuing speech rather than a new onset.
         XCTAssertTrue(localSpeechEvents(&detector, rms: 0.004, frames: 200).isEmpty)
         XCTAssertTrue(detector.isSpeaking)
-        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 60).isEmpty)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 40).isEmpty)
         XCTAssertNil(detector.process(normalizedRMS: 0.004, duration: 0.01))
-        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 69).isEmpty,
-                      "Continuing speech restarts the complete 700ms silence hold")
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 47).isEmpty,
+                      "Continuing speech restarts the complete 480ms silence hold")
         XCTAssertEqual(detector.process(normalizedRMS: 0, duration: 0.01),
                        VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1))
     }
@@ -2682,7 +2747,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8), [
             VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
         ])
-        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 69).isEmpty)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 47).isEmpty)
         for rms in invalidRMS {
             XCTAssertNil(detector.process(normalizedRMS: rms, duration: 0.01))
         }
@@ -4111,8 +4176,11 @@ final class VoiceTutorContractTests: XCTestCase {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 2
         format.opaque = true
-        let image = UIGraphicsImageRenderer(size: fixture.size, format: format).image { context in
-            window.layer.render(in: context.cgContext)
+        let image = UIGraphicsImageRenderer(size: fixture.size, format: format).image { _ in
+            // SwiftUI keeps unchanged symbols/buttons in composited surfaces;
+            // layer.render can omit those layers in subsequent fixtures even
+            // though they remain visible. Capture the presented hierarchy.
+            XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
         }
         return image
     }

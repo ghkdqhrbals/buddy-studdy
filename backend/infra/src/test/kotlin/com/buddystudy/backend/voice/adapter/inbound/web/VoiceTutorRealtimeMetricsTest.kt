@@ -1,10 +1,83 @@
 package com.buddystudy.backend.voice.adapter.inbound.web
 
+import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class VoiceTutorRealtimeMetricsTest {
+    @Test
+    fun `local VAD stop measures response latency without provider VAD events`() {
+        val registry = SimpleMeterRegistry()
+        var now = 0L
+        val tracker = VoiceTutorRealtimeMetrics(registry).webRtcTracker { now }
+
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, 1)
+        now += 1_000_000_000
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT, 1)
+        now += 125_000_000
+        tracker.observeProviderEvent("""{"type":"response.created","response":{"id":"resp-local"}}""")
+
+        val timer = registry.get("buddystudy.voice_tutor.turn_to_response").timer()
+        assertThat(timer.count()).isEqualTo(1)
+        assertThat(timer.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS)).isEqualTo(125.0)
+    }
+
+    @Test
+    fun `local VAD duplicates stale stops and provider VAD cannot move the stop clock`() {
+        val registry = SimpleMeterRegistry()
+        var now = 0L
+        val tracker = VoiceTutorRealtimeMetrics(registry).webRtcTracker { now }
+
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT, 1)
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, 0)
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT, 0)
+        tracker.observeProviderEvent("""{"type":"response.created","response":{"id":"resp-opening"}}""")
+        assertThat(registry.get("buddystudy.voice_tutor.turn_to_response").timer().count()).isZero()
+
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, 1)
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, 1)
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT, 2)
+        now += 1_000_000_000
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT, 1)
+        now += 50_000_000
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT, 1)
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, 1)
+        tracker.observeProviderEvent("""{"type":"input_audio_buffer.speech_stopped"}""")
+        now += 50_000_000
+        repeat(2) {
+            tracker.observeProviderEvent("""{"type":"response.created","response":{"id":"resp-local"}}""")
+        }
+
+        val timer = registry.get("buddystudy.voice_tutor.turn_to_response").timer()
+        assertThat(timer.count()).isEqualTo(1)
+        assertThat(timer.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS)).isEqualTo(100.0)
+    }
+
+    @Test
+    fun `resumed speech replaces an earlier quiet boundary only after its matching stop`() {
+        val registry = SimpleMeterRegistry()
+        var now = 0L
+        val tracker = VoiceTutorRealtimeMetrics(registry).webRtcTracker { now }
+
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, 1)
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT, 1)
+        now += 50_000_000
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT, 2)
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT, 1)
+        // An already queued response is not evidence that this active turn ended.
+        tracker.observeProviderEvent("""{"type":"response.created","response":{"id":"resp-old"}}""")
+        assertThat(registry.get("buddystudy.voice_tutor.turn_to_response").timer().count()).isZero()
+        now += 1_000_000_000
+        tracker.observeClientSpeechEvent(VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT, 2)
+        now += 75_000_000
+        tracker.observeProviderEvent("""{"type":"response.created","response":{"id":"resp-new"}}""")
+
+        val timer = registry.get("buddystudy.voice_tutor.turn_to_response").timer()
+        assertThat(timer.count()).isEqualTo(1)
+        assertThat(timer.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS)).isEqualTo(75.0)
+    }
+
     @Test
     fun `WebRTC latency is measured from learner turn through audible device drain`() {
         val registry = SimpleMeterRegistry()

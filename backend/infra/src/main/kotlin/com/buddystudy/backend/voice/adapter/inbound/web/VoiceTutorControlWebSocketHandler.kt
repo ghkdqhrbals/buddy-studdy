@@ -333,6 +333,7 @@ class VoiceTutorControlWebSocketHandler(
                         } else {
                             // Application controls, not provider API events. The
                             // turn controller owns the eventual input commit.
+                            latency.observeClientSpeechEvent(type, node.path("sequence").longValue())
                             Mono.just(mapper.writeValueAsString(mapOf(
                                 "type" to type,
                                 "sequence" to node.path("sequence").longValue(),

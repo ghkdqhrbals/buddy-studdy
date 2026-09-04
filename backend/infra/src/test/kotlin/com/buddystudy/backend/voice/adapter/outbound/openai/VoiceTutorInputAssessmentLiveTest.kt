@@ -10,6 +10,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearnerUtterance
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationProposal
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetTraversal
@@ -35,6 +36,93 @@ import java.util.concurrent.TimeUnit
  */
 @EnabledIfEnvironmentVariable(named = "BUDDYSTUDY_LIVE_INPUT_ASSESSMENT", matches = "1")
 class VoiceTutorInputAssessmentLiveTest {
+    @Test
+    @Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SAME_THREAD)
+    fun `production semantic model preserves frozen short turns and mutation confirmation`() = runBlocking<Unit> {
+        withTimeout(110_000) {
+            val model = System.getenv("BUDDYSTUDY_LIVE_INPUT_ASSESSMENT_MODEL") ?: "gpt-5.4"
+            check(model in setOf("gpt-5.4", "gpt-5.4-mini")) { "Unsupported bounded comparison model." }
+            val key = System.getenv("OPENAI_API_KEY_USER")?.takeIf { it.isNotBlank() }
+                ?: throw AssertionError("Opt-in live assessment requires OPENAI_API_KEY_USER.")
+            val properties = BuddyStudyProperties().apply { openai.userContentApiKey = key }
+            val limits = VoiceTutorInputAssessmentProperties(model = model)
+            val useCase = VoiceTutorInputAssessmentService(
+                OpenAIVoiceTutorInputAssessmentAdapter(UserContentOpenAIKeyProvider(properties), properties, limits),
+                limits,
+            )
+            val cases = latencyCases()
+            check(cases.size == 8) { "The comparison requires eight frozen individual turns." }
+            val mismatches = mutableListOf<String>()
+            for (case in cases) {
+                val started = System.nanoTime()
+                val result = try {
+                    // One single-turn request exactly as production submits it;
+                    // positive confirmation adds one independent attestation.
+                    // No retries, alternate model, app records or database writes.
+                    useCase.assess(VoiceTutorInputAssessmentRequest(
+                        SYNTHETIC_USER_ID, "ko", case.teacherContext, listOf(case.utterance),
+                    )).decisions.single()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: VoiceTutorInputAssessmentException) {
+                    println("voice_semantic_model case_id=${case.utterance.itemId} model=$model " +
+                        "elapsed_ms=${elapsedMilliseconds(started)} status=FAILED reason=${error.reason.name}")
+                    throw AssertionError("Bounded model comparison failed (${error.reason.name}).")
+                }
+                val matches = result.decision == case.decision && result.intent == case.intent &&
+                    result.mutationProposalId == case.proposalId &&
+                    result.rootStudyCreationRequest == null && result.childStudyCreationRequest == null &&
+                    result.studyUpdateRequest == null && result.deleteStudyRequest == null
+                if (!matches) mismatches += case.utterance.itemId
+                println("voice_semantic_model case_id=${case.utterance.itemId} model=$model " +
+                    "elapsed_ms=${elapsedMilliseconds(started)} decision=${result.decision.name} " +
+                    "intent=${result.intent.name} proposal_match=${result.mutationProposalId == case.proposalId} " +
+                    "match=$matches")
+            }
+            println("voice_semantic_model stage=summary model=$model cases=8 matched=${8 - mismatches.size}")
+            if (mismatches.isNotEmpty()) throw AssertionError("Bounded model comparison mismatched: ${mismatches.joinToString()}")
+        }
+    }
+
+    @Test
+    @Timeout(value = 45, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SAME_THREAD)
+    fun `production GPT edits and deletes from owner read context without a lesson offer`() = runBlocking<Unit> {
+        withTimeout(45_000) {
+            val model = System.getenv("BUDDYSTUDY_LIVE_INPUT_ASSESSMENT_MODEL") ?: "gpt-5.4"
+            check(model in setOf("gpt-5.4", "gpt-5.4-mini")) { "Unsupported bounded comparison model." }
+            val key = System.getenv("OPENAI_API_KEY_USER")?.takeIf { it.isNotBlank() }
+                ?: throw AssertionError("Opt-in live assessment requires OPENAI_API_KEY_USER.")
+            val properties = BuddyStudyProperties().apply { openai.userContentApiKey = key }
+            val limits = VoiceTutorInputAssessmentProperties(model = model)
+            val target = VoiceTutorStudyTargetCandidate(84, null, "스프링", 5)
+            val context = VoiceTutorStudyMutationContext(
+                0, null, listOf(target),
+                com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContextSource.OWNER_READ,
+                referentTranscript = "저장된 루트 주제는 스프링, 수준은 5입니다.",
+            )
+            val request = VoiceTutorInputAssessmentRequest(
+                userId = SYNTHETIC_USER_ID, language = "ko", teacherContext = context.referentTranscript!!,
+                utterances = listOf(
+                    VoiceTutorInputUtterance("owner_level", "아니, 그걸 레벨 칠로 바꿔 줘.", studyMutationContext = context),
+                    VoiceTutorInputUtterance("owner_rename", "그거 이름을 스프링 백엔드로 바꿔 줘.", studyMutationContext = context),
+                    VoiceTutorInputUtterance("owner_delete", "그 주제 지워 줘.", studyMutationContext = context),
+                    VoiceTutorInputUtterance("reported_delete", "친구가 그 주제 지우라고 했어.", studyMutationContext = context),
+                ),
+            )
+            // One primary request plus one independent mutation attestation; no database write.
+            val started = System.nanoTime()
+            val result = OpenAIVoiceTutorInputAssessmentAdapter(
+                UserContentOpenAIKeyProvider(properties), properties, limits,
+            ).assess(request).decisions.associateBy { it.itemId }
+            assertThat(result.getValue("owner_level").studyUpdateRequest?.difficulty).isEqualTo(7)
+            assertThat(result.getValue("owner_rename").studyUpdateRequest?.topic).isEqualTo("스프링 백엔드")
+            assertThat(result.getValue("owner_delete").deleteStudyRequest?.studyId).isEqualTo(84)
+            assertThat(result.getValue("reported_delete").deleteStudyRequest).isNull()
+            println("voice_input_assessment stage=owner_read_mutations model=$model cases=4 " +
+                "elapsed_ms=${elapsedMilliseconds(started)} passed=true")
+        }
+    }
+
     @Test
     @Timeout(value = 30, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SAME_THREAD)
     fun `production GPT authorizes one natural referential level update after a spoken offer`() = runBlocking<Unit> {
@@ -253,6 +341,60 @@ class VoiceTutorInputAssessmentLiveTest {
                     mismatchedIds.joinToString(","))
             }
         }
+    }
+
+    private fun latencyCases(): List<LatencyCase> {
+        val updated = VoiceTutorStudyMutationProposal(
+            "latency-update", VoiceTutorInputIntent.UPDATE_STUDY,
+            targetStudyId = 84, targetTopic = "스프링", difficulty = 7,
+            tutorAudioTranscript = "스프링 주제의 레벨을 5에서 7로 바꿀까요?",
+        )
+        val created = VoiceTutorStudyMutationProposal(
+            "latency-create", VoiceTutorInputIntent.CREATE_ROOT_STUDY,
+            topic = "스프링", difficulty = 7,
+            tutorAudioTranscript = "스프링을 레벨 7 새 주제로 만들까요?",
+        )
+        val deleted = VoiceTutorStudyMutationProposal(
+            "latency-delete", VoiceTutorInputIntent.DELETE_STUDY,
+            targetStudyId = 84, targetTopic = "스프링",
+            tutorAudioTranscript = "스프링 주제와 그 하위 주제를 삭제할까요?",
+        )
+        val finishedExplanation = "현재 확정된 스프링 학습에서 DI는 객체가 사용할 의존성을 외부에서 주입받는 방식입니다. " +
+            "직접 생성하는 것과 달리 구현체 교체와 단위 테스트가 쉬워집니다. 질문하신 차이점에 대한 설명은 여기까지입니다."
+        val focus = VoiceTutorStudyTargetCandidate(84, null, "스프링", 5)
+        val offer = VoiceTutorStudyTargetOffer(
+            1, 0, 1, 1, 84, listOf(focus), finishedExplanation,
+            mapOf(84L to VoiceTutorStudyTargetTraversal()),
+        )
+        fun proposalCase(id: String, text: String, proposal: VoiceTutorStudyMutationProposal, intent: VoiceTutorInputIntent) =
+            LatencyCase(
+                VoiceTutorInputUtterance(id, text, mutationProposal = proposal), proposal.tutorAudioTranscript,
+                VoiceTutorInputDecision.MEANINGFUL, intent,
+                proposal.proposalId.takeIf { intent != VoiceTutorInputIntent.NONE },
+            )
+        return listOf(
+            LatencyCase(VoiceTutorInputUtterance("short_reply", "응"), "공부를 시작할 준비가 됐나요?",
+                VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.NONE),
+            LatencyCase(VoiceTutorInputUtterance("filler", "음…"), "궁금한 점을 말씀해 주세요.",
+                VoiceTutorInputDecision.NON_COMMUNICATIVE, VoiceTutorInputIntent.NONE),
+            LatencyCase(VoiceTutorInputUtterance("continue", "다음 문제 내 줘.", targetOffer = offer), finishedExplanation,
+                VoiceTutorInputDecision.MEANINGFUL, VoiceTutorInputIntent.CONTINUE_STUDY),
+            proposalCase("confirm_create", "네", created, VoiceTutorInputIntent.CONFIRM_STUDY_MUTATION),
+            proposalCase("confirm_update", "응 그렇게 해", updated, VoiceTutorInputIntent.CONFIRM_STUDY_MUTATION),
+            proposalCase("confirm_delete", "좋아 지워 줘", deleted, VoiceTutorInputIntent.CONFIRM_STUDY_MUTATION),
+            proposalCase("reject_update", "아니 하지 마", updated, VoiceTutorInputIntent.REJECT_STUDY_MUTATION),
+            proposalCase("change_not_confirm", "응, 레벨은 9로 바꿔 줘", updated, VoiceTutorInputIntent.NONE),
+        )
+    }
+
+    private data class LatencyCase(
+        val utterance: VoiceTutorInputUtterance,
+        val teacherContext: String,
+        val decision: VoiceTutorInputDecision,
+        val intent: VoiceTutorInputIntent,
+        val proposalId: String? = null,
+    ) {
+        override fun toString(): String = "LatencyCase(id=${utterance.itemId}, decision=$decision, intent=$intent)"
     }
 
     private fun heldOutBatches(): List<SyntheticBatch> = listOf(

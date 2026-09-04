@@ -10,6 +10,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorInputDecision
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputItemAssessment
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationProposal
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -17,6 +18,48 @@ import org.junit.jupiter.api.Test
 
 /** Deterministic state tests: fake classifier decisions and clock, no provider or audio. */
 class VoiceTutorInputTurnCoordinatorTest {
+    @Test
+    fun `a reply near the end of a spoken confirmation receives the actual completed proposal before assessment`() {
+        val coordinator = VoiceTutorInputTurnCoordinator()
+        val proposal = VoiceTutorStudyMutationProposal(
+            "proposal-1", VoiceTutorInputIntent.UPDATE_STUDY, targetStudyId = 84,
+            targetTopic = "스프링", difficulty = 7, tutorAudioTranscript = "스프링을 레벨 7로 바꿀까요?",
+        )
+        coordinator.teacherResponseStarted()
+        coordinator.observeCommitted("yes", 2, false, 0)
+        assertThat(coordinator.observeTranscript("yes", "응", "original-yes", 1)).isEmpty()
+        coordinator.attachSpokenMutationProposal(proposal, afterSequence = 1, eligibleItemIds = setOf("yes"))
+        val assessment = assess(coordinator.teacherResponseCompleted(proposal.tutorAudioTranscript, 2))
+        assertThat(assessment.utterances.single().mutationProposal).isEqualTo(proposal)
+        val publication = coordinator.completeAssessment(assessment.token, Result.success(VoiceTutorInputAssessmentResult(
+            listOf(VoiceTutorInputItemAssessment(
+                "yes", VoiceTutorInputDecision.MEANINGFUL,
+                intent = VoiceTutorInputIntent.CONFIRM_STUDY_MUTATION, mutationProposalId = proposal.proposalId,
+            )),
+        )), 3).filterIsInstance<Action.Publish>().single()
+        assertThat(publication.rawEvent).isEqualTo("original-yes")
+        assertThat(publication.mutationProposalId).isEqualTo(proposal.proposalId)
+        assertThat(publication.studyUpdateRequest).isNull()
+        assertThat(coordinator.confirmPublished("yes", 4)).containsExactly(Action.Ready(2, false))
+    }
+
+    @Test
+    fun `spoken proposals never attach to earlier turns or incomplete speech checkpoints`() {
+        val coordinator = VoiceTutorInputTurnCoordinator()
+        val proposal = VoiceTutorStudyMutationProposal(
+            "proposal-1", VoiceTutorInputIntent.DELETE_STUDY, targetStudyId = 84,
+            targetTopic = "스프링", tutorAudioTranscript = "스프링과 하위 주제를 삭제할까요?",
+        )
+        coordinator.teacherResponseStarted()
+        coordinator.observeCommitted("older", 1, false, 0)
+        coordinator.observeCommitted("checkpoint", 2, true, 0)
+        coordinator.observeTranscript("older", "응", "original-older", 1)
+        coordinator.observeTranscript("checkpoint", "네 그런데", "original-checkpoint", 1)
+        coordinator.attachSpokenMutationProposal(proposal, afterSequence = 1, eligibleItemIds = setOf("older", "checkpoint"))
+        val assessment = assess(coordinator.teacherResponseCompleted(proposal.tutorAudioTranscript, 2))
+        assertThat(assessment.utterances).allMatch { it.mutationProposal == null }
+    }
+
     @Test
     fun `meaningful transcript becomes ready only after exact publication confirmation`() {
         val coordinator = VoiceTutorInputTurnCoordinator()

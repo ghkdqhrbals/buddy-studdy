@@ -3,7 +3,7 @@ package com.buddystudy.backend.config
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.stereotype.Component
 
-/** Independent bounds; the model and key remain the existing voice summary configuration. */
+/** Independent semantic assessment bounds and optional model; the existing user-content key is unchanged. */
 @Component
 @ConfigurationProperties(prefix = "buddystudy.voice-tutor.input-assessment")
 data class VoiceTutorInputAssessmentProperties(
@@ -19,4 +19,6 @@ data class VoiceTutorInputAssessmentProperties(
     var maxTranscriptCharacters: Int = 4_000,
     var maxBatchTranscriptCharacters: Int = 16_000,
     var maxTeacherContextCharacters: Int = 4_000,
+    /** Unset or blank preserves the configured voice summary model without changing summary jobs. */
+    var model: String? = null,
 )

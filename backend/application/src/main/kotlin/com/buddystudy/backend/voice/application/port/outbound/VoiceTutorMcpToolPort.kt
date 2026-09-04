@@ -36,6 +36,8 @@ data class VoiceTutorMcpToolResult(
      * successful lesson-context revision. Never derive this from provider JSON.
      */
     val updatedStudySnapshot: VoiceTutorStudySnapshot? = null,
+    /** Exact owned node returned by a verified mutation, not extracted from provider JSON. */
+    val savedMutationTarget: VoiceTutorStudyTargetCandidate? = null,
 )
 
 enum class VoiceTutorCandidateReadKind { LIST_STUDIES, GET_STUDY }

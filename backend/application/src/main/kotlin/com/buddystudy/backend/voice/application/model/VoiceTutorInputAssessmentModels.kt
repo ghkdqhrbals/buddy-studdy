@@ -14,6 +14,9 @@ enum class VoiceTutorStudyMutationContextSource {
 
     /** Complete, bounded owner read made before the first eligible learner turn of a fresh call. */
     INITIAL_OWNER_SNAPSHOT,
+
+    /** Bounded owned nodes read during this call; they identify a proposed mutation, never authorize a write. */
+    OWNER_READ,
 }
 
 /**
@@ -58,6 +61,8 @@ data class VoiceTutorStudyMutationContext(
     val currentFocusStudyId: Long?,
     val candidates: List<VoiceTutorStudyTargetCandidate>,
     val source: VoiceTutorStudyMutationContextSource = VoiceTutorStudyMutationContextSource.FOCUS_OR_SPOKEN_OFFER,
+    /** Actual completed tutor speech, used only to resolve a learner's natural reference to a saved node. */
+    val referentTranscript: String? = null,
 ) {
     fun isValid(maxCandidates: Int = 17): Boolean =
         lessonRevision >= 0 && currentFocusStudyId?.let { it > 0 } != false &&
@@ -70,8 +75,10 @@ data class VoiceTutorStudyMutationContext(
                 it.studyId > 0 && it.parentStudyId?.let { parent -> parent > 0 && parent != it.studyId } != false &&
                     it.topic.isNotBlank() && it.topic == it.topic.trim() && it.topic.length <= 255 &&
                     it.difficulty?.let { difficulty -> difficulty in 1..10 } != false
-            } && when (source) {
+            } && (referentTranscript == null ||
+                referentTranscript.isNotBlank() && referentTranscript.length <= 4_000) && when (source) {
                 VoiceTutorStudyMutationContextSource.FOCUS_OR_SPOKEN_OFFER -> true
+                VoiceTutorStudyMutationContextSource.OWNER_READ -> true
                 VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT ->
                     currentFocusStudyId == null &&
                         VoiceTutorInitialStudyMutationSnapshot(candidates).isValid()
@@ -149,6 +156,52 @@ data class VoiceTutorPersistedLearnerUtterance(
             transcript.isNotBlank() && transcript.length <= maxTranscriptCharacters
 }
 
+/**
+ * One server-frozen mutation awaiting a fresh answer to its actually completed spoken question.
+ * The controller owns the original attested request; this assessment-only view cannot change its fields.
+ */
+data class VoiceTutorStudyMutationProposal(
+    val proposalId: String,
+    val intent: VoiceTutorInputIntent,
+    val targetStudyId: Long? = null,
+    val targetTopic: String? = null,
+    val parentStudyId: Long? = null,
+    val parentTopic: String? = null,
+    val topic: String? = null,
+    val difficulty: Int? = null,
+    val tutorAudioTranscript: String,
+    val startLessonAfterMutation: Boolean = false,
+) {
+    fun isValid(): Boolean {
+        fun validTopic(value: String?) = value == null ||
+            value.isNotBlank() && value == value.trim() && value.length <= 255
+        if (proposalId.isBlank() || proposalId.length > 191 || proposalId.any(Char::isISOControl) ||
+            tutorAudioTranscript.isBlank() || tutorAudioTranscript.length > 4_000 ||
+            targetStudyId?.let { it <= 0 } == true || parentStudyId?.let { it <= 0 } == true ||
+            !validTopic(targetTopic) || !validTopic(parentTopic) || !validTopic(topic) ||
+            difficulty?.let { it !in 1..10 } == true ||
+            startLessonAfterMutation && intent != VoiceTutorInputIntent.CREATE_ROOT_STUDY &&
+                intent != VoiceTutorInputIntent.UPDATE_STUDY
+        ) return false
+        return when (intent) {
+            VoiceTutorInputIntent.CREATE_ROOT_STUDY ->
+                targetStudyId == null && targetTopic == null && parentStudyId == null && parentTopic == null &&
+                    topic != null && difficulty != null
+            VoiceTutorInputIntent.CREATE_STUDY_TOPIC ->
+                parentStudyId != null && parentTopic != null && topic != null && difficulty != null &&
+                    (targetStudyId == null || targetStudyId == parentStudyId)
+            VoiceTutorInputIntent.UPDATE_STUDY ->
+                targetStudyId != null && targetTopic != null && (topic != null || difficulty != null)
+            VoiceTutorInputIntent.DELETE_STUDY ->
+                targetStudyId != null && targetTopic != null && topic == null && difficulty == null
+            else -> false
+        }
+    }
+
+    override fun toString(): String =
+        "VoiceTutorStudyMutationProposal(intent=$intent, transcriptCharacters=${tutorAudioTranscript.length})"
+}
+
 /** Original ASR text. Assessment never normalizes, rewrites or persists this text. */
 data class VoiceTutorInputUtterance(
     val itemId: String,
@@ -168,6 +221,8 @@ data class VoiceTutorInputUtterance(
     val priorPersistedLearnerUtterances: List<VoiceTutorPersistedLearnerUtterance> = emptyList(),
     /** Frozen at this speech boundary from the current focus and verified call-local tree reads. */
     val studyMutationContext: VoiceTutorStudyMutationContext? = null,
+    /** Available only after this exact server-owned proposal question has finished playing. */
+    val mutationProposal: VoiceTutorStudyMutationProposal? = null,
 ) {
     fun persistedLearnerSource(): String? = priorPersistedLearnerUtterances
         .takeIf { it.isNotEmpty() }
@@ -230,6 +285,12 @@ enum class VoiceTutorInputIntent {
     CREATE_STUDY_TOPIC,
     /** The learner directly chooses an exact name and/or level patch for a server-verified saved node. */
     UPDATE_STUDY,
+    /** The learner directly chooses deletion of one exact owned saved node and its descendants. */
+    DELETE_STUDY,
+    /** Fresh natural agreement to the exact completed server-owned mutation proposal question. */
+    CONFIRM_STUDY_MUTATION,
+    /** Fresh natural refusal of that exact pending mutation, not a new mutation request. */
+    REJECT_STUDY_MUTATION,
     /** The learner explicitly names a saved topic they want to enter or switch to. */
     SELECT_SAVED_TOPIC,
     /** The learner explicitly rejects the currently spoken server-owned saved-topic offer. */
@@ -439,8 +500,6 @@ data class VoiceTutorStudyUpdateRequest(
     val startLessonAfterUpdate: Boolean = false,
 ) {
     fun isValidFor(utterance: VoiceTutorInputUtterance): Boolean {
-        val context = utterance.studyMutationContext?.takeIf(VoiceTutorStudyMutationContext::isValid) ?: return false
-        val target = context.candidates.singleOrNull { it.studyId == studyId } ?: return false
         val difficultyEvidenceMatches = if (difficulty == null) {
             evidence.difficulty == null
         } else {
@@ -450,7 +509,37 @@ data class VoiceTutorStudyUpdateRequest(
             difficulty?.let { it !in 1..10 } == true || evidence.topic != topic ||
             !difficultyEvidenceMatches || !evidence.isExactLearnerEvidence(utterance)
         ) return false
-        return when {
+        return validStudyMutationTarget(utterance, studyId, evidence)
+    }
+}
+
+/** The direct deletion request is final permission; no separate yes/confirmation phrase is required. */
+data class VoiceTutorStudyDeletionRequest(
+    val studyId: Long,
+    val evidence: VoiceTutorStudyUpdateEvidence,
+) {
+    fun isValidFor(utterance: VoiceTutorInputUtterance): Boolean =
+        evidence.topic == null && evidence.difficulty == null &&
+            evidence.isExactLearnerEvidence(utterance) &&
+            validStudyMutationTarget(utterance, studyId, evidence)
+}
+
+private fun validStudyMutationTarget(
+    utterance: VoiceTutorInputUtterance,
+    studyId: Long,
+    evidence: VoiceTutorStudyUpdateEvidence,
+): Boolean {
+    val context = utterance.studyMutationContext?.takeIf(VoiceTutorStudyMutationContext::isValid) ?: return false
+    val target = context.candidates.singleOrNull { it.studyId == studyId } ?: return false
+    return when {
+            context.source == VoiceTutorStudyMutationContextSource.OWNER_READ -> when {
+                evidence.targetImplicitCurrentFocus -> studyId == context.currentFocusStudyId
+                evidence.targetImplicitSpokenOffer -> !context.referentTranscript.isNullOrBlank()
+                // ASR may spell the same name differently (Spring / 스프링). Both model
+                // assessments resolve this evidence against the complete candidate set.
+                // This layer verifies provenance and identity, never linguistic meaning.
+                else -> !evidence.targetTopic.isNullOrBlank()
+            }
             context.source == VoiceTutorStudyMutationContextSource.INITIAL_OWNER_SNAPSHOT -> {
                 utterance.targetOffer == null && context.currentFocusStudyId == null &&
                     evidence.source == VoiceTutorRootStudyEvidenceSource.TRANSCRIPT &&
@@ -474,7 +563,6 @@ data class VoiceTutorStudyUpdateRequest(
                     offer.candidates.singleOrNull { it.studyId == studyId } == target &&
                     offer.tutorAudioTranscript.contains(target.topic)
             } else true
-        }
     }
 }
 
@@ -498,6 +586,10 @@ data class VoiceTutorInputItemAssessment(
     val childStudyCreationRequest: VoiceTutorChildStudyCreationRequest? = null,
     /** Present only for an operative UPDATE_STUDY statement. */
     val studyUpdateRequest: VoiceTutorStudyUpdateRequest? = null,
+    /** Present only for an operative DELETE_STUDY statement. */
+    val deleteStudyRequest: VoiceTutorStudyDeletionRequest? = null,
+    /** Exact frozen proposal identity, present only for CONFIRM/REJECT_STUDY_MUTATION. */
+    val mutationProposalId: String? = null,
 ) {
     override fun toString(): String =
         "VoiceTutorInputItemAssessment(itemId=[redacted], decision=$decision, intent=$intent, currentTranscriptAnswersStudyQuestion=$currentTranscriptAnswersStudyQuestion, hasTarget=${targetStudyId != null}, spokenCandidateCount=${spokenCandidateStudyIds.size})"
@@ -534,15 +626,22 @@ fun VoiceTutorInputAssessmentResult.correlatedTo(
             val rootRequest = decision.rootStudyCreationRequest
             val childRequest = decision.childStudyCreationRequest
             val updateRequest = decision.studyUpdateRequest
+            val deleteRequest = decision.deleteStudyRequest
+            val proposalIntent = decision.intent == VoiceTutorInputIntent.CONFIRM_STUDY_MUTATION ||
+                decision.intent == VoiceTutorInputIntent.REJECT_STUDY_MUTATION
+            val proposalId = decision.mutationProposalId
             if (decision.decision == VoiceTutorInputDecision.NON_COMMUNICATIVE) {
                 decision.intent != VoiceTutorInputIntent.NONE || decision.targetStudyId != null ||
                     decision.currentTranscriptAnswersStudyQuestion || spoken.isNotEmpty() || rootRequest != null ||
-                    childRequest != null || updateRequest != null
+                    childRequest != null || updateRequest != null || deleteRequest != null || proposalId != null
             } else {
                 val targetIntent = decision.intent == VoiceTutorInputIntent.SELECT_SAVED_TOPIC ||
                     decision.intent == VoiceTutorInputIntent.CONTINUE_TREE
                 val target = decision.targetStudyId
                 when {
+                    proposalIntent && (utterance.checkpoint || utterance.mutationProposal?.isValid() != true ||
+                        proposalId != utterance.mutationProposal?.proposalId) -> true
+                    !proposalIntent && proposalId != null -> true
                     decision.currentTranscriptAnswersStudyQuestion &&
                         decision.intent != VoiceTutorInputIntent.ANSWER_TO_STUDY_QUESTION -> true
                     !spokenValid -> true
@@ -551,6 +650,7 @@ fun VoiceTutorInputAssessmentResult.correlatedTo(
                         decision.intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY ||
                         decision.intent == VoiceTutorInputIntent.CREATE_STUDY_TOPIC ||
                         decision.intent == VoiceTutorInputIntent.UPDATE_STUDY ||
+                        decision.intent == VoiceTutorInputIntent.DELETE_STUDY ||
                         decision.intent == VoiceTutorInputIntent.DECLINE_SAVED_TOPIC_OFFER ||
                         decision.intent == VoiceTutorInputIntent.ASK_STUDY_QUESTION ||
                         decision.intent == VoiceTutorInputIntent.CONTINUE_STUDY
@@ -567,6 +667,9 @@ fun VoiceTutorInputAssessmentResult.correlatedTo(
                     decision.intent == VoiceTutorInputIntent.UPDATE_STUDY &&
                         updateRequest?.isValidFor(utterance) != true -> true
                     decision.intent != VoiceTutorInputIntent.UPDATE_STUDY && updateRequest != null -> true
+                    decision.intent == VoiceTutorInputIntent.DELETE_STUDY &&
+                        deleteRequest?.isValidFor(utterance) != true -> true
+                    decision.intent != VoiceTutorInputIntent.DELETE_STUDY && deleteRequest != null -> true
                     targetIntent && target == null -> true
                     targetIntent && (spoken.isEmpty() || target !in spoken) -> true
                     !targetIntent && target != null -> true

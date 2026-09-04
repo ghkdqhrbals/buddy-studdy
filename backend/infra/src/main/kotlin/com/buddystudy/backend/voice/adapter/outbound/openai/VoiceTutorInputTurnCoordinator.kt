@@ -11,6 +11,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorPersistedLearner
 import com.buddystudy.backend.voice.application.model.VoiceTutorChildStudyCreationRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorRootStudyCreationRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationContext
+import com.buddystudy.backend.voice.application.model.VoiceTutorStudyMutationProposal
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyUpdateRequest
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetOffer
 import com.buddystudy.backend.voice.application.model.correlatedTo
@@ -48,7 +49,9 @@ internal class VoiceTutorInputTurnCoordinator(
             val rootStudyCreationRequest: VoiceTutorRootStudyCreationRequest? = null,
             val childStudyCreationRequest: VoiceTutorChildStudyCreationRequest? = null,
             val studyUpdateRequest: VoiceTutorStudyUpdateRequest? = null,
+            val deleteStudyRequest: com.buddystudy.backend.voice.application.model.VoiceTutorStudyDeletionRequest? = null,
             val currentTranscriptAnswersStudyQuestion: Boolean = false,
+            val mutationProposalId: String? = null,
         ) : Action {
             override fun toString(): String = "Publish(itemId=[redacted], eventCharacters=${rawEvent.length})"
         }
@@ -150,6 +153,7 @@ internal class VoiceTutorInputTurnCoordinator(
         nowNanos: Long,
         targetOffer: VoiceTutorStudyTargetOffer? = null,
         studyMutationContext: VoiceTutorStudyMutationContext? = null,
+        mutationProposal: VoiceTutorStudyMutationProposal? = null,
     ): List<Action> {
         if (isClosed || itemId in pending || itemId in recentItemIds) return emptyList()
         if (!validItemId(itemId) || sequence <= 0) fail(VoiceTutorInputTurnCoordinatorFailure.INVALID_COMMITTED_ITEM)
@@ -158,13 +162,23 @@ internal class VoiceTutorInputTurnCoordinator(
         if (pending.size >= MAX_PENDING_ITEMS) fail(VoiceTutorInputTurnCoordinatorFailure.PENDING_CAPACITY_EXCEEDED)
         val item = PendingItem(
             itemId, sequence, checkpoint, Stage.WAITING_TRANSCRIPT, nowNanos,
-            targetOffer, studyMutationContext,
+            targetOffer, studyMutationContext, mutationProposal = mutationProposal,
         )
         pending[itemId] = item
         remember(itemId)
         earlyTranscripts.remove(itemId)?.let { applyTranscript(item, it, nowNanos, actions) }
         startAssessmentIfPossible(nowNanos, actions)
         return actions
+    }
+
+    fun attachSpokenMutationProposal(
+        proposal: VoiceTutorStudyMutationProposal, afterSequence: Long, eligibleItemIds: Set<String>,
+    ) {
+        if (isClosed || !proposal.isValid()) return
+        pending.values.filter {
+            !it.checkpoint && it.sequence > afterSequence && it.itemId in eligibleItemIds &&
+                it.stage in setOf(Stage.WAITING_TRANSCRIPT, Stage.WAITING_ASSESSMENT)
+        }.forEach { it.mutationProposal = proposal }
     }
 
     fun observeTranscript(
@@ -275,6 +289,8 @@ internal class VoiceTutorInputTurnCoordinator(
                                 rootStudyCreationRequest = decision.rootStudyCreationRequest,
                                 childStudyCreationRequest = decision.childStudyCreationRequest,
                                 studyUpdateRequest = decision.studyUpdateRequest,
+                                deleteStudyRequest = decision.deleteStudyRequest,
+                                mutationProposalId = decision.mutationProposalId,
                                 currentTranscriptAnswersStudyQuestion =
                                     decision.currentTranscriptAnswersStudyQuestion,
                             )
@@ -430,7 +446,8 @@ internal class VoiceTutorInputTurnCoordinator(
             if (selected.isNotEmpty() && item.studyMutationContext != null) break
             val text = requireNotNull(item.transcript)
             val offerCharacters = item.targetOffer?.tutorAudioTranscript?.length ?: 0
-            val mutationCharacters = item.studyMutationContext?.candidates.orEmpty().sumOf { it.topic.length }
+            val mutationCharacters = item.studyMutationContext?.candidates.orEmpty().sumOf { it.topic.length } +
+                (item.mutationProposal?.tutorAudioTranscript?.length ?: 0)
             val persistedContext = boundedPersistedLearnerContext(
                 limits.maxBatchTranscriptCharacters - characters - text.length - offerCharacters - mutationCharacters,
             )
@@ -469,6 +486,7 @@ internal class VoiceTutorInputTurnCoordinator(
                 sameSpeechContext = semanticContexts[it.itemId],
                 priorPersistedLearnerUtterances = persistedContexts.getValue(it.itemId),
                 studyMutationContext = it.studyMutationContext,
+                mutationProposal = it.mutationProposal,
             )
         }
         selected.forEach {
@@ -612,6 +630,7 @@ internal class VoiceTutorInputTurnCoordinator(
         var stageStartedAt: Long,
         val targetOffer: VoiceTutorStudyTargetOffer? = null,
         var studyMutationContext: VoiceTutorStudyMutationContext? = null,
+        var mutationProposal: VoiceTutorStudyMutationProposal? = null,
         var transcript: String? = null,
         var rawEvent: String? = null,
     )

@@ -63,9 +63,11 @@ the scorer.
 The native callback copies normalized mono input into a single bounded mailbox.
 One worker keeps an `AVAudioConverter`, residual samples, context, and recurrent
 state across native packets. It consumes quiet samples too. Speech starts after
-at least 80 ms at probability 0.5 or greater, and ends after at least 700 ms below
-0.35; 32 ms windows quantize these to 96 ms and 704 ms respectively. These are
+at least 80 ms at probability 0.5 or greater, and ends after at least 480 ms below
+0.35; 32 ms windows quantize these to 96 ms and 480 ms respectively. These are
 acoustic hysteresis thresholds, not a minimum meaningful-word or sentence length.
+Returning speech resets the quiet hold. An acoustic stop only opens server-side
+transcription/semantic assessment; it never authorizes a tutor response by itself.
 
 Only media readiness, explicit user mute, close, and a native format change
 reset this evidence. The teacher's response/playback state is not an input gate.

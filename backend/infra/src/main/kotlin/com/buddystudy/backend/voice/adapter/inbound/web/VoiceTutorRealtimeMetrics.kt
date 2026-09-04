@@ -1,6 +1,7 @@
 package com.buddystudy.backend.voice.adapter.inbound.web
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
@@ -35,18 +36,46 @@ class VoiceTutorRealtimeMetrics(
         private val nanoTime: () -> Long,
     ) {
         private var lastSpeechStoppedNanos: Long? = null
+        private var lastClientSpeechSequence = 0L
+        private var activeClientSpeechSequence: Long? = null
         private val responseCreatedNanos = linkedMapOf<String, Long>()
         private val firstAudioResponseIds = linkedSetOf<String>()
         private val outputStoppedNanos = linkedMapOf<String, Long>()
         private val deviceDrainedNanos = linkedMapOf<String, Long>()
         private val completedResponseIds = linkedSetOf<String>()
 
+        /** Observe validated local-VAD controls, without retaining any audio or transcript. */
+        @Synchronized
+        fun observeClientSpeechEvent(type: String, sequence: Long) {
+            if (sequence <= 0) return
+            when (type) {
+                VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT -> {
+                    if (sequence <= lastClientSpeechSequence) return
+                    lastClientSpeechSequence = sequence
+                    // A resumed learner turn supersedes the earlier quiet boundary.
+                    // Overlapping/stale controls never replace an active pair.
+                    if (activeClientSpeechSequence != null) return
+                    activeClientSpeechSequence = sequence
+                    lastSpeechStoppedNanos = null
+                }
+                VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT -> {
+                    if (activeClientSpeechSequence != sequence) return
+                    activeClientSpeechSequence = null
+                    lastSpeechStoppedNanos = nanoTime()
+                }
+            }
+        }
+
         @Synchronized
         fun observeProviderEvent(raw: String) {
             val node = runCatching { JsonMapperProvider.mapper.readTree(raw) }.getOrNull() ?: return
             val now = nanoTime()
             when (node.path("type").asText()) {
-                "input_audio_buffer.speech_stopped" -> lastSpeechStoppedNanos = now
+                // Legacy diagnostics may still provide server VAD boundaries.
+                // Once local VAD is observed, provider events cannot move its clock.
+                "input_audio_buffer.speech_stopped" -> if (lastClientSpeechSequence == 0L) {
+                    lastSpeechStoppedNanos = now
+                }
                 "response.created" -> {
                     val responseId = node.path("response").path("id").asText()
                     if (
