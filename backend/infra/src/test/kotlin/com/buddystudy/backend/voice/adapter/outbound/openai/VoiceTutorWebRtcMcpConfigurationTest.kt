@@ -49,7 +49,8 @@ class VoiceTutorWebRtcMcpConfigurationTest {
     fun `SDP and sideband register identical function definitions and automatic tool choice`() {
         var definitionReads = 0
         val toolPort = object : VoiceTutorMcpToolPort {
-            override fun definitions(): List<VoiceTutorMcpToolDefinition> {
+            override fun definitions(): List<VoiceTutorMcpToolDefinition> = error("Use the native catalog.")
+            override fun realtimeDefinitions(): List<VoiceTutorMcpToolDefinition> {
                 definitionReads += 1
                 return definitions
             }
@@ -68,16 +69,18 @@ class VoiceTutorWebRtcMcpConfigurationTest {
         val sdpConfiguration = mapper.readTree(adapter.webRtcSessionConfiguration(
             VoiceTutorRealtimeRequest(userId = 7L, model = "gpt-realtime-test", voice = "marin", instructions = "Finish the sentence.", language = "ko"),
         ))
-        val handshake = newHandshake()
+        val handshake = VoiceTutorWebRtcSessionHandshake("rtc_test", Duration.ofSeconds(5),
+            expectedTools = voiceTutorRealtimeFunctionTools(nativeVoiceTutorDefinitions(toolPort)),
+            transcriptionLanguage = "ko", realtimeNative = true)
         val sideband = dispatch(handshake).path("session")
 
         assertThat(sdpConfiguration.path("tools")).isEqualTo(sideband.path("tools"))
-        assertThat(sdpConfiguration.path("tools").size()).isEqualTo(2)
+        assertThat(sdpConfiguration.path("tools").size()).isEqualTo(3)
         assertThat(sdpConfiguration.path("tool_choice").asText()).isEqualTo("auto")
         assertThat(sideband.path("tool_choice").asText()).isEqualTo("auto")
         assertThat(sdpConfiguration.path("audio").path("input").path("turn_detection").isNull).isTrue()
         assertThat(sideband.path("audio").path("input").path("turn_detection").isNull).isTrue()
-        assertThat(definitionReads).isEqualTo(1)
+        assertThat(definitionReads).isEqualTo(2)
     }
 
     @Test

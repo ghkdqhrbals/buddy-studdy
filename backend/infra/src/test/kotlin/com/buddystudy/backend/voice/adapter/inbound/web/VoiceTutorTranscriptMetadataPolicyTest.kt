@@ -20,6 +20,18 @@ class VoiceTutorTranscriptMetadataPolicyTest {
     private val mapper = JsonMapperProvider.mapper
 
     @Test
+    fun `server-confirmed focus is visible but malformed or legacy focus is not`() {
+        val policy = VoiceTutorRealtimeEventPolicy()
+        val focus = mapOf("studyId" to 5, "parentStudyId" to 2, "topic" to "Spring", "difficulty" to 7, "revision" to 3)
+        val raw = mapper.writeValueAsString(mapOf("type" to "buddystudy.voice.study.focused", "focus" to focus))
+        val valid = policy.providerDecision(raw, "session", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+        assertThat(mapper.readTree(valid.payload).path("focus").path("difficulty").asInt()).isEqualTo(7)
+        assertThat(policy.providerDecision(raw, "session", Instant.EPOCH).payload).isNull()
+        val invalid = mapper.writeValueAsString(mapOf("type" to "buddystudy.voice.study.focused", "focus" to (focus + ("difficulty" to 99))))
+        assertThat(policy.providerDecision(invalid, "session", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+    }
+
+    @Test
     fun `all transcript client payloads strip the internal revision without changing the original content`(): Unit {
         val policy = VoiceTutorRealtimeEventPolicy()
         listOf(
@@ -36,6 +48,8 @@ class VoiceTutorTranscriptMetadataPolicyTest {
                 VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS to
                     listOf("private-answer-part-1", "private-answer-part-2"),
                 VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION to true,
+                VoiceTutorTranscriptMetadata.POST_CALL_EVIDENCE to true,
+                VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE to 7,
             ))
 
             val decision = policy.providerDecision(raw, "session", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
@@ -47,6 +61,8 @@ class VoiceTutorTranscriptMetadataPolicyTest {
             assertThat(payload.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID)).isFalse()
             assertThat(payload.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS)).isFalse()
             assertThat(payload.has(VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION)).isFalse()
+            assertThat(payload.has(VoiceTutorTranscriptMetadata.POST_CALL_EVIDENCE)).isFalse()
+            assertThat(payload.has(VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE)).isFalse()
             assertThat(payload.path(field).asText()).isEqualTo("원문 그대로")
             assertThat(payload.path("response_id").asText()).isEqualTo("owned-response")
             assertThat(VoiceTutorTranscriptMetadata.lessonRevision(mapper.readTree(raw))).isEqualTo(3)
@@ -55,11 +71,50 @@ class VoiceTutorTranscriptMetadataPolicyTest {
             assertThat(VoiceTutorTranscriptMetadata.studyAnswerProviderItemIds(mapper.readTree(raw)))
                 .containsExactly("private-answer-part-1", "private-answer-part-2")
             assertThat(VoiceTutorTranscriptMetadata.askedStudyQuestion(mapper.readTree(raw))).isTrue()
+            assertThat(VoiceTutorTranscriptMetadata.postCallEvidence(mapper.readTree(raw))).isTrue()
+            assertThat(VoiceTutorTranscriptMetadata.conversationSequence(mapper.readTree(raw))).isEqualTo(7)
         }
     }
 
     @Test
+    fun `native incomplete source event persists only the owned session fence and is never public`(): Unit {
+        val principal = Principal(7, "device", 70, anonymous = false)
+        var persisted = false
+        val relay = proxy<VoiceTutorRelayUseCase> { method, args ->
+            check(method == "markTranscriptIncomplete")
+            assertThat(args[0]).isEqualTo(principal)
+            assertThat(args[1]).isEqualTo("owned-session")
+            persisted
+        }
+        val handler = VoiceTutorControlWebSocketHandler(
+            proxy<VoiceTutorWebRtcUseCase> { _, _ -> error("No provider connection is expected.") },
+            relay, proxy<VoiceTutorUseCase> { _, _ -> error("No quota request is expected.") },
+            VoiceTutorRealtimeMetrics(SimpleMeterRegistry()),
+        )
+        val inspect = handler.javaClass.getDeclaredMethod(
+            "inspectProviderEvent", Principal::class.java, String::class.java, String::class.java,
+        ).apply { isAccessible = true }
+        val raw = mapper.writeValueAsString(mapOf("type" to VoiceTutorTranscriptMetadata.INCOMPLETE_EVENT))
+        assertThat((inspect.invoke(handler, principal, "owned-session", raw) as Mono<*>).block()).isEqualTo(false)
+        persisted = true
+        assertThat((inspect.invoke(handler, principal, "owned-session", raw) as Mono<*>).block()).isEqualTo(true)
+        val decision = VoiceTutorRealtimeEventPolicy().providerDecision(
+            raw, "owned-session", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND,
+        )
+        assertThat(decision.payload).isNull()
+        assertThat(decision.terminate).isFalse()
+    }
+
+    @Test
     fun `missing malformed and unassigned metadata never silently fall back to the initial level`(): Unit {
+        listOf("null", "0", "-1", "1.5", "\"1\"", "9223372036854775808").forEach { value ->
+            assertThat(VoiceTutorTranscriptMetadata.conversationSequence(mapper.readTree(
+                """{"${VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE}":$value}""",
+            ))).isNull()
+        }
+        assertThat(VoiceTutorTranscriptMetadata.postCallEvidence(mapper.readTree(
+            """{"${VoiceTutorTranscriptMetadata.POST_CALL_EVIDENCE}":"true"}""",
+        ))).isFalse()
         val invalid = listOf(
             "{}",
             """{"${VoiceTutorTranscriptMetadata.LESSON_REVISION}":null}""",

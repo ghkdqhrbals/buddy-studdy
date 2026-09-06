@@ -20,6 +20,7 @@ internal class VoiceTutorWebRtcSessionHandshake(
     private val onConfiguration: (VoiceTutorWebRtcConfigurationSnapshot) -> Unit = ::logWebRtcConfiguration,
     expectedTools: List<Map<String, Any?>> = emptyList(),
     transcriptionLanguage: String,
+    private val realtimeNative: Boolean = false,
 ) {
     private val callRef = voiceTutorCallReference(callId)
     private val updateRequested = AtomicBoolean()
@@ -52,7 +53,8 @@ internal class VoiceTutorWebRtcSessionHandshake(
                             "audio" to mapOf(
                                 "input" to mapOf(
                                     "transcription" to transcription,
-                                    "turn_detection" to voiceTutorManualWebRtcTurnDetection(),
+                                    "turn_detection" to turnDetectionConfiguration(),
+                                    "noise_reduction" to mapOf("type" to "near_field"),
                                 ),
                             ),
                         ),
@@ -146,6 +148,10 @@ internal class VoiceTutorWebRtcSessionHandshake(
         }
     }
 
+    private fun turnDetectionConfiguration(): JsonNode = if (realtimeNative) {
+        voiceTutorNativeWebRtcTurnDetection()
+    } else voiceTutorManualWebRtcTurnDetection()
+
     private companion object {
         val SESSION_TYPES = setOf("realtime", "transcription")
         val TURN_DETECTION_TYPES = setOf("server_vad", "semantic_vad")
@@ -179,6 +185,13 @@ internal fun voiceTutorRealtimeFunctionTools(definitions: List<VoiceTutorMcpTool
  * A NullNode preserves an explicit JSON null even with NON_NULL map inclusion.
  */
 internal fun voiceTutorManualWebRtcTurnDetection(): JsonNode = NullNode.instance
+
+/**
+ * Native refers to the model's audio understanding/tool choice, not provider VAD.
+ * Keep the tested Silero boundary transport: provider VAD has cleared WebRTC playout
+ * despite interrupt_response=false. No separate intent classifier follows a commit.
+ */
+internal fun voiceTutorNativeWebRtcTurnDetection(): JsonNode = NullNode.instance
 
 internal enum class VoiceTutorWebRtcConfigurationSchema { GA, LEGACY, MISSING }
 

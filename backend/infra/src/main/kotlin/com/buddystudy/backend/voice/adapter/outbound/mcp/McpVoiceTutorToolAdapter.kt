@@ -42,6 +42,8 @@ import org.springframework.context.annotation.Lazy
 import org.springframework.stereotype.Component
 import org.slf4j.LoggerFactory
 import java.time.Clock
+import java.time.Instant
+import java.util.UUID
 
 /** A local bridge to the same MCP catalog and permission-checked handlers used over HTTP. */
 @Component
@@ -59,6 +61,7 @@ class McpVoiceTutorToolAdapter(
 ) : VoiceTutorMcpToolPort {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val validator by lazy { McpJsonSchemaValidatorProvider.create() }
+    private val realtimeProposals = LinkedHashMap<String, RealtimeMutation>()
     private val specifications by lazy {
         mcp.tools().filter { it.tool().name() in ALLOWED_TOOLS }.associateBy { it.tool().name() }
     }
@@ -108,15 +111,234 @@ class McpVoiceTutorToolAdapter(
         ),
     )
 
+    override fun realtimeDefinitions(): List<VoiceTutorMcpToolDefinition> =
+        specifications.values.filter { it.tool().name() !in setOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY) }
+            .map { VoiceTutorMcpToolDefinition(it.tool().name(), it.tool().description().orEmpty(), it.tool().inputSchema().toMap()) } +
+            listOf(
+                VoiceTutorMcpToolDefinition(SELECT_STUDY,
+                    "Select the learner's chosen exact owned saved topic and freeze its real level and parent path for this call. Resolve ordinary contextual choices yourself; no special phrase, separate classifier or extra confirmation is required. Read the saved identity first; do not choose a different topic or create a node. Successful focus permits questions at its returned level when the learner wants to study.",
+                    focusParameters("Exact owned saved study ID chosen in the conversation.")),
+                VoiceTutorMcpToolDefinition(ADVANCE_STUDY,
+                    "Move the lesson to one real direct child of the current focus after feedback and the learner's conversational choice to continue there. Read actual children first; never invent edges, skip a level or switch because of silence. This changes only call focus and requires no mutation confirmation.",
+                    focusParameters("Exact saved direct-child ID chosen for the next lesson.")),
+                VoiceTutorMcpToolDefinition(PREPARE_MUTATION,
+                    "Prepare, but DO NOT execute, the learner's requested new root, child, name/level change or deletion. Understand natural references and intent from the conversation without requiring a repeated command. Read exact owned target/parent IDs first. Returns one immutable proposal_id and confirmation_question; ask that short question once, then wait for the learner. For deletion, the question includes the whole subtree; prior records are preserved. Use difficulty_level 1-10, default 5 for new nodes. A changed target or patch needs a new proposal. Only genuinely missing target or values need clarification.",
+                    mapOf("type" to "object", "additionalProperties" to false,
+                        "properties" to mapOf(
+                            "action" to mapOf("type" to "string", "enum" to listOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY)),
+                            "study_id" to mapOf("type" to "integer", "minimum" to 1),
+                            "parent_study_id" to mapOf("type" to "integer", "minimum" to 1),
+                            "topic" to mapOf("type" to "string", "minLength" to 1, "maxLength" to 255),
+                            "difficulty_level" to mapOf("type" to "integer", "minimum" to 1, "maximum" to 10)),
+                        "required" to listOf("action"))),
+                VoiceTutorMcpToolDefinition(CONFIRM_MUTATION,
+                    "After the prepared confirmation question has finished playing and the learner replies, interpret natural agreement yourself (응, 네, 그렇게 해, yes) and execute the exact proposal with confirm=true. Refusal or cancellation uses false. Never execute on silence, filler, unrelated speech, quoted wishes or changed details; prepare a new proposal for changed details. Never ask for special wording or a second confirmation. This takes no editable patch and cannot change the prepared action. Report only the actual result briefly without internal/server jargon.",
+                    mapOf("type" to "object", "additionalProperties" to false,
+                        "properties" to mapOf("proposal_id" to mapOf("type" to "string", "minLength" to 1, "maxLength" to 191),
+                            "confirm" to mapOf("type" to "boolean")), "required" to listOf("proposal_id", "confirm"))),
+            )
+
+    /** Canonical pending data, never an old classifier authorization or provider-controlled lease. */
+    private data class RealtimeMutation(
+        val id: String, val sessionId: String, val userId: Long, val deviceId: String, val authSessionId: Long,
+        val callId: String, val revision: Long, val learnerTurnId: Long, val responseGeneration: Long,
+        val action: String, val arguments: Map<String, Any>, val target: VoiceTutorStudyTargetCandidate?,
+        val deletedIds: Set<Long>, val question: String, val expiresAt: Instant,
+    ) {
+        fun matches(snapshot: VoiceTutorStudySnapshot): Boolean = target?.let {
+            it.studyId == snapshot.studyId && it.parentStudyId == snapshot.parentStudyId &&
+                it.topic == snapshot.topic && it.difficulty == snapshot.difficulty
+        } == true
+        fun matches(context: VoiceTutorWebRtcControlContext, currentRevision: Long): Boolean =
+            sessionId == context.session.id && userId == context.principal?.userId &&
+                deviceId == context.principal?.deviceId && authSessionId == context.principal?.sessionId &&
+                callId == context.callId && revision == currentRevision
+    }
+
+    private suspend fun realtimeLearnerTurn(context: VoiceTutorWebRtcControlContext, revision: Long): Long? {
+        val dialogue = context.dialogueBoundary ?: return null
+        val itemId = dialogue.latestAcceptedLearnerProviderItemId?.takeIf { it.isNotBlank() && it.length <= 191 }
+            ?: return null
+        val sourceRevision = dialogue.latestAcceptedLearnerLessonRevision
+        if (dialogue.responseGeneration <= 0 || sourceRevision < 0 || sourceRevision > revision ||
+            context.initialLessonRevision != revision) return null
+        return confirmations.persistedLearnerTurnId(context.session.userId, context.session.id, itemId, sourceRevision)
+            ?.takeIf { it > 0 }
+    }
+
+    private suspend fun readRealtimeTarget(context: VoiceTutorWebRtcControlContext, id: Long): VoiceTutorStudyTargetCandidate? {
+        val spec = specifications["get_study"] ?: return null
+        if (!isAuthorized(context)) return null
+        val result = invoke(context.principal!!, spec, mapOf("study_id" to id, "language" to context.session.language))
+        if (result.isError() == true || !isAuthorized(context)) return null
+        return result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
+            ?.let(::verifiedUpdateTarget)?.takeIf { it.studyId == id && it.difficulty != null }
+    }
+
+    private suspend fun prepareRealtimeMutation(context: VoiceTutorWebRtcControlContext, arguments: Map<String, Any>): VoiceTutorMcpToolResult {
+        if (!isAuthorized(context)) return inactiveCall()
+        val action = arguments["action"] as? String
+        val exact = arguments.filterKeys { it != "action" }.toMutableMap()
+        if (action !in setOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY)) return failure("INVALID_ARGUMENTS", "Choose one supported mutation action.")
+        val allowed = when (action) {
+            CREATE_ROOT -> setOf("topic", "difficulty_level")
+            CREATE_TOPIC -> setOf("parent_study_id", "topic", "difficulty_level")
+            UPDATE_STUDY -> setOf("study_id", "topic", "difficulty_level")
+            else -> setOf("study_id")
+        }
+        if (exact.keys.any { it !in allowed }) return failure("INVALID_ARGUMENTS", "Use only the fields belonging to this action.")
+        fun integer(key: String): Long? = exact[key]?.let { value ->
+            objectMapper.valueToTree<JsonNode>(value).let(::positiveId)
+        }
+        val id = if (action == CREATE_TOPIC) integer("parent_study_id") else integer("study_id")
+        if (action != CREATE_ROOT && id == null) return failure("INVALID_ARGUMENTS", "Choose one exact owned target or parent ID.")
+        if ("topic" in exact) {
+            val topic = (exact["topic"] as? String)?.trim()?.takeIf { it.isNotEmpty() && it.length <= 255 }
+                ?: return failure("INVALID_ARGUMENTS", "Provide a topic containing 1 to 255 characters.")
+            exact["topic"] = topic
+        }
+        if (action in CREATION_TOOLS && "topic" !in exact) return failure("INVALID_ARGUMENTS", "The new topic is missing.")
+        if (action in CREATION_TOOLS && "difficulty_level" !in exact) exact["difficulty_level"] = DEFAULT_ROOT_DIFFICULTY
+        if ("difficulty_level" in exact) {
+            val level = integer("difficulty_level")?.takeIf { it in 1..10 }?.toInt()
+                ?: return failure("INVALID_ARGUMENTS", "Choose a level from 1 to 10.")
+            exact["difficulty_level"] = level
+        }
+        if (action == UPDATE_STUDY && exact.keys == setOf("study_id")) return failure("INVALID_ARGUMENTS", "Specify the new name and/or level.")
+        val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
+        val learnerId = realtimeLearnerTurn(context, revision) ?: return persistencePending()
+        val deletion = if (action == DELETE_STUDY) deletionPreview(context, id!!) ?: return failure("DELETE_PREVIEW_UNAVAILABLE", "This subtree could not be checked; nothing was deleted.") else null
+        val target = deletion?.target ?: id?.let { readRealtimeTarget(context, it) ?: return failure("STUDY_NOT_FOUND", "That exact saved topic was not available.") }
+        if (!isAuthorized(context)) return inactiveCall()
+        if (studyContexts.currentRevision(context.session.userId, context.session.id) != revision || realtimeLearnerTurn(context, revision) != learnerId) return persistencePending()
+        val korean = context.session.language.startsWith("ko")
+        val question = when (action) {
+            CREATE_ROOT -> if (korean) "${exact["topic"]} 주제를 레벨 ${exact["difficulty_level"]}로 만들까요?" else "Create ${exact["topic"]} at level ${exact["difficulty_level"]}?"
+            CREATE_TOPIC -> if (korean) "${target!!.topic} 아래에 ${exact["topic"]} 주제를 레벨 ${exact["difficulty_level"]}로 만들까요?" else "Create ${exact["topic"]} under ${target!!.topic} at level ${exact["difficulty_level"]}?"
+            UPDATE_STUDY -> if (korean) "${target!!.topic} 주제를 ${listOfNotNull((exact["topic"] as? String)?.let { "이름 $it" }, exact["difficulty_level"]?.let { "레벨 $it" }).joinToString(", ")}로 바꿀까요?" else "Change ${target!!.topic} to ${listOfNotNull(exact["topic"]?.let { "name $it" }, exact["difficulty_level"]?.let { "level $it" }).joinToString(" and ")}?"
+            else -> if (korean) "${target!!.topic} 주제와 하위 주제를 삭제할까요?" else "Delete ${target!!.topic} and its descendants?"
+        }
+        val principal = context.principal!!
+        val now = clock.instant()
+        val proposed = RealtimeMutation(UUID.randomUUID().toString(), context.session.id, principal.userId, principal.deviceId,
+            principal.sessionId, context.callId, revision, learnerId, context.dialogueBoundary!!.responseGeneration,
+            action!!, exact.toMap(), target, deletion?.ids?.toSet().orEmpty(), question, now.plusSeconds(120))
+        val pending = synchronized(realtimeProposals) {
+            realtimeProposals.entries.removeIf { !now.isBefore(it.value.expiresAt) }
+            val old = realtimeProposals[context.session.id]
+            if (old != null && old.matches(context, revision) && old.learnerTurnId == learnerId &&
+                old.action == proposed.action && old.arguments == proposed.arguments && old.target == target && old.deletedIds == proposed.deletedIds) old
+            else {
+                if (realtimeProposals.size >= 256) realtimeProposals.remove(realtimeProposals.keys.first())
+                realtimeProposals[context.session.id] = proposed
+                proposed
+            }
+        }
+        return VoiceTutorMcpToolResult(objectMapper.writeValueAsString(mapOf("prepared" to true, "executed" to false,
+            "proposal_id" to pending.id, "confirmation_question" to pending.question,
+            "notice" to "Ask this question once, wait for the learner, then use confirm_voice_study_mutation; do not repeat the original command.")), false)
+    }
+
+    private suspend fun confirmRealtimeMutation(context: VoiceTutorWebRtcControlContext, arguments: Map<String, Any>): VoiceTutorMcpToolResult {
+        if (arguments.keys != setOf("proposal_id", "confirm") || arguments["confirm"] !is Boolean) return failure("INVALID_ARGUMENTS", "Use only proposal_id and a boolean confirm.")
+        if (!isAuthorized(context)) return inactiveCall()
+        val id = (arguments["proposal_id"] as? String)?.takeIf { it.isNotBlank() && it.length <= 191 }
+            ?: return failure("INVALID_ARGUMENTS", "Use the prepared proposal ID.")
+        val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
+        val pending = synchronized(realtimeProposals) { realtimeProposals[context.session.id] }
+            ?.takeIf { it.id == id && it.matches(context, revision) && clock.instant().isBefore(it.expiresAt) }
+            ?: return failure("PROPOSAL_EXPIRED", "This proposal is no longer pending; no write was started.")
+        val dialogue = context.dialogueBoundary ?: return persistencePending()
+        val learnerId = dialogue.latestAcceptedLearnerProviderItemId ?: return persistencePending()
+        val tutorId = dialogue.precedingTutorProviderItemId ?: return persistencePending()
+        val sourceRevision = dialogue.latestAcceptedLearnerLessonRevision
+        if (sourceRevision < 0 || sourceRevision > revision || context.initialLessonRevision != revision ||
+            dialogue.precedingSpokenResponseGeneration <= pending.responseGeneration ||
+            dialogue.precedingTutorSpeechStoppedOrder <= 0 ||
+            dialogue.latestAcceptedLearnerSpeechStartedOrder <= dialogue.precedingTutorSpeechStoppedOrder) {
+            return failure("CONFIRMATION_REPLY_REQUIRED", "Wait for the learner's reply after the prepared question has finished playing; do not ask it twice.")
+        }
+        val boundary = confirmations.persistedDialogueBoundary(context.session.userId, context.session.id, learnerId, tutorId, sourceRevision)
+            // Row IDs reflect asynchronous persistence arrival, not spoken order. The native
+            // generation/playout fence and the port's sequence-ordered question<USER proof
+            // establish freshness; identities only distinguish the new reply from its source.
+            ?.takeIf { it.learnerTurnId > 0 && it.tutorTurnId > 0 &&
+                it.learnerTurnId != pending.learnerTurnId && it.tutorTurnId != pending.learnerTurnId &&
+                it.learnerTurnId != it.tutorTurnId }
+            ?: return persistencePending()
+        if (arguments["confirm"] == true && pending.target != null) {
+            if (readRealtimeTarget(context, pending.target.studyId) != pending.target) return failure("MUTATION_TARGET_STALE", "That saved topic changed; no write was started. Read it before preparing a new proposal.")
+        }
+        if (!isAuthorized(context)) return inactiveCall()
+        if (studyContexts.currentRevision(context.session.userId, context.session.id) != revision ||
+            confirmations.persistedDialogueBoundary(context.session.userId, context.session.id, learnerId, tutorId, sourceRevision) != boundary) return persistencePending()
+        // Linearization: remove the exact ticket before the first suspension that can perform a write.
+        val consumed = synchronized(realtimeProposals) {
+            if (realtimeProposals[context.session.id] === pending && clock.instant().isBefore(pending.expiresAt)) {
+                realtimeProposals.remove(context.session.id); true
+            } else false
+        }
+        if (!consumed) return failure("PROPOSAL_ALREADY_PROCESSED", "This proposal was already handled; never repeat the write.")
+        if (arguments["confirm"] == false) return VoiceTutorMcpToolResult("{\"cancelled\":true,\"executed\":false}", false)
+        val spec = specifications[pending.action] ?: return failure("MCP_UNAVAILABLE", "This change could not be completed.")
+        val execution = pending.copy(learnerTurnId = boundary.learnerTurnId)
+        return when (pending.action) {
+            CREATE_ROOT -> createRootStudy(context, spec, pending.arguments, execution)
+            CREATE_TOPIC -> createStudyTopic(context, spec, pending.arguments, execution)
+            UPDATE_STUDY -> updateStudy(context, spec, pending.arguments, execution)
+            else -> deleteStudy(context, spec, pending.arguments + ("confirm" to true), pending.target!!.studyId, execution)
+        }
+    }
+
+    private suspend fun focusRealtimeStudy(context: VoiceTutorWebRtcControlContext, arguments: Map<String, Any>, advance: Boolean): VoiceTutorMcpToolResult {
+        val id = focusStudyId(arguments) ?: return failure("INVALID_ARGUMENTS", "Choose one exact owned study_id.")
+        if (!isAuthorized(context)) return inactiveCall()
+        val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
+        val learnerTurn = realtimeLearnerTurn(context, revision) ?: return persistencePending()
+        val candidate = readRealtimeTarget(context, id) ?: return failure("STUDY_NOT_FOUND", "The chosen saved topic is unavailable.")
+        val parent = if (advance) currentStudyAnchor(context) ?: return failure("GUIDED_FOCUS_REQUIRED", "Select a topic before moving to its child.") else null
+        if (advance && (candidate.parentStudyId != parent || candidate.studyId == parent)) return failure("GUIDED_CHILD_REQUIRED", "Choose one real direct child of the current topic.")
+        if (!isAuthorized(context)) return inactiveCall()
+        val principal = context.principal!!
+        val selected = lessonFocus.focusFromRealtimeModel(context.session.userId, context.session.id, id, learnerTurn,
+            revision, candidate, VoiceTutorFocusCommitAuthority(principal.deviceId, principal.sessionId, context.callId), parent)
+            ?: return failure("LESSON_FOCUS_UNAVAILABLE", "The chosen topic or its path changed; read the saved topic again without creating a replacement.")
+        if (selected.studyId != candidate.studyId || selected.snapshot.parentStudyId != candidate.parentStudyId ||
+            selected.topic != candidate.topic || selected.difficulty != candidate.difficulty) return failure("LESSON_FOCUS_UNCONFIRMED", "The exact saved focus result could not be verified.")
+        val focus = focusMetadata(selected)
+        return VoiceTutorMcpToolResult(objectMapper.writeValueAsString(mapOf("selected" to true,
+            "voiceLessonContextReady" to true, "voiceLessonFocus" to focus, "voiceLessonTopics" to listOf(focus),
+            "notice" to "This exact saved topic is selected; use its returned level for new questions. No further selection confirmation is needed.")),
+            false, lessonRevision = selected.revision, lessonFocus = selected)
+    }
+
+    private fun persistencePending() = failure("INPUT_PERSISTENCE_PENDING", "The current dialogue boundary is still being saved; retry this same tool internally, without asking the learner to repeat anything.")
+
+    private suspend fun realtimeWriteStillCurrent(context: VoiceTutorWebRtcControlContext, mutation: RealtimeMutation): Boolean =
+        isAuthorized(context) && studyContexts.currentRevision(context.session.userId, context.session.id) == mutation.revision &&
+            realtimeLearnerTurn(context, mutation.revision) == mutation.learnerTurnId
+
     override suspend fun execute(
         context: VoiceTutorWebRtcControlContext,
         toolName: String,
         arguments: Map<String, Any>,
     ): VoiceTutorMcpToolResult {
-        if (toolName !in ALLOWED_TOOLS) return failure("TOOL_NOT_ALLOWED", "This tool is not available in voice calls.")
+        if (toolName !in ALLOWED_TOOLS && !(context.realtimeModelTools && toolName in REALTIME_MUTATION_TOOLS)) {
+            return failure("TOOL_NOT_ALLOWED", "This tool is not available in voice calls.")
+        }
         try {
             if (objectMapper.writeValueAsBytes(arguments).size > MAX_ARGUMENT_BYTES) {
                 return failure("INVALID_ARGUMENTS", "Tool arguments are too large.")
+            }
+            if (context.realtimeModelTools) {
+                if (toolName == PREPARE_MUTATION) return prepareRealtimeMutation(context, arguments)
+                if (toolName == CONFIRM_MUTATION) return confirmRealtimeMutation(context, arguments)
+                if (toolName in setOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY)) {
+                    return failure("PROPOSAL_REQUIRED", "Use prepare_voice_study_mutation, ask its question once, then confirm_voice_study_mutation after the learner replies.")
+                }
+                if (toolName == SELECT_STUDY || toolName == ADVANCE_STUDY) {
+                    return focusRealtimeStudy(context, arguments, toolName == ADVANCE_STUDY)
+                }
             }
             if (toolName == SELECT_STUDY) return selectStudy(context, arguments)
             if (toolName == ADVANCE_STUDY) return advanceStudy(context, arguments)
@@ -863,6 +1085,7 @@ class McpVoiceTutorToolAdapter(
         context: VoiceTutorWebRtcControlContext,
         specification: McpStatelessServerFeatures.AsyncToolSpecification,
         arguments: Map<String, Any>,
+        realtime: RealtimeMutation? = null,
     ): VoiceTutorMcpToolResult {
         val parentStudyId = (arguments["parent_study_id"] as? Number)?.toLong()?.takeIf { it > 0 }
             ?: return failure("INVALID_ARGUMENTS", "Choose one exact positive parent_study_id.")
@@ -875,29 +1098,29 @@ class McpVoiceTutorToolAdapter(
             }
         ) return failure("INVALID_ARGUMENTS", "Use only the exact assessed parent, topic, and level.")
         val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
-        if (rootStudyLearnerTurnId(context, revision, VoiceTutorInputIntent.CREATE_STUDY_TOPIC) == null) {
+        if (realtime == null && rootStudyLearnerTurnId(context, revision, VoiceTutorInputIntent.CREATE_STUDY_TOPIC) == null) {
             return failure(
                 "CHILD_CREATION_REQUEST_REQUIRED",
                 "Wait for one newly persisted direct learner choice of an exact child and parent; no write was started.",
             )
         }
         val lease = context.dialogueBoundary?.childStudyCreationAuthorization
-        if (lease == null || lease.parentStudyId != parentStudyId || lease.topic != topic ||
-            lease.difficulty != difficulty
+        if (realtime == null && (lease == null || lease.parentStudyId != parentStudyId || lease.topic != topic ||
+            lease.difficulty != difficulty)
         ) {
             return failure(
                 "CHILD_CREATION_REQUEST_MISMATCH",
                 "Use the exact child, parent, and level from the persisted learner choice; no write was started.",
             )
         }
-        if (!parentIsWithinCallStudy(context, parentStudyId)) {
+        if (realtime == null && !parentIsWithinCallStudy(context, parentStudyId)) {
             return if (!isAuthorized(context)) inactiveCall() else failure(
                 "STUDY_SCOPE_DENIED",
                 "Choose the current call's study or one of its verified descendants as the parent; no write was started.",
             )
         }
         if (!isAuthorized(context)) return inactiveCall()
-        if (!lease.consume()) {
+        if (realtime == null && lease?.consume() != true) {
             return failure(
                 "CHILD_CREATION_REQUEST_REQUIRED",
                 "This exact child choice was already used or revoked; wait for a fresh direct learner choice.",
@@ -908,6 +1131,8 @@ class McpVoiceTutorToolAdapter(
             "topic" to topic,
             "difficulty_level" to difficulty,
         )
+        if (realtime != null && (!realtimeWriteStillCurrent(context, realtime) ||
+                readRealtimeTarget(context, parentStudyId) != realtime.target)) return failure("MUTATION_TARGET_STALE", "The parent or current request changed; no child was created.")
         val result = invoke(requireNotNull(context.principal), specification, exactArguments)
         if (result.isError() == true) return boundedResult(result, CREATE_TOPIC)
         val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
@@ -973,6 +1198,7 @@ class McpVoiceTutorToolAdapter(
         context: VoiceTutorWebRtcControlContext,
         specification: McpStatelessServerFeatures.AsyncToolSpecification,
         arguments: Map<String, Any>,
+        realtime: RealtimeMutation? = null,
     ): VoiceTutorMcpToolResult {
         val studyId = (arguments["study_id"] as? Number)?.toLong()?.takeIf { it > 0 }
             ?: return failure("INVALID_ARGUMENTS", "Choose one exact positive study_id.")
@@ -991,7 +1217,7 @@ class McpVoiceTutorToolAdapter(
             }
         ) return failure("INVALID_ARGUMENTS", "Use only the exact assessed study name and/or level patch.")
         val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
-        if (rootStudyLearnerTurnId(context, revision, VoiceTutorInputIntent.UPDATE_STUDY) == null) {
+        if (realtime == null && rootStudyLearnerTurnId(context, revision, VoiceTutorInputIntent.UPDATE_STUDY) == null) {
             return failure(
                 "STUDY_UPDATE_REQUEST_REQUIRED",
                 "Wait for one newly persisted direct learner choice of an exact saved-node patch; no write was started.",
@@ -1003,23 +1229,23 @@ class McpVoiceTutorToolAdapter(
             if (lease?.topic != null) add("topic")
             if (lease?.difficulty != null) add("difficulty_level")
         }
-        if (lease == null || lease.studyId != studyId || lease.topic != topic || lease.difficulty != difficulty ||
+        if (realtime == null && (lease == null || lease.studyId != studyId || lease.topic != topic || lease.difficulty != difficulty ||
             suppliedPatchKeys != authorizedPatchKeys || lease.scope == null || targetProof == null ||
-            targetProof.studyId != studyId
+            targetProof.studyId != studyId)
         ) {
             return failure(
                 "STUDY_UPDATE_REQUEST_MISMATCH",
                 "Use the exact saved node and patch from the persisted learner choice; no write was started.",
             )
         }
-        if (!lease.isActive()) {
+        if (realtime == null && lease?.isActive() != true) {
             return failure(
                 "STUDY_UPDATE_REQUEST_REQUIRED",
                 "This exact saved-node patch was already used or revoked; wait for a fresh direct learner choice.",
             )
         }
         if (!isAuthorized(context)) return inactiveCall()
-        val authorizedScope = when (lease.scope) {
+        val authorizedScope = realtime != null || when (lease?.scope) {
             null -> false
             VoiceTutorStudyUpdateAuthorizationScope.CONFIRMED_FOCUS_TREE ->
                 studyIsWithinCallTree(context, studyId)
@@ -1046,7 +1272,9 @@ class McpVoiceTutorToolAdapter(
             ?.let { objectMapper.valueToTree<JsonNode>(it) }
             ?.let(::verifiedUpdateTarget)
         val liveDifficulty = liveTarget?.difficulty
-        if (liveTarget == null || liveDifficulty == null || !targetProof.matches(liveTarget)) {
+        if (liveTarget == null || liveDifficulty == null ||
+            (if (realtime != null) realtime.target != liveTarget else targetProof?.matches(liveTarget) != true)
+        ) {
             return failure(
                 "STUDY_UPDATE_TARGET_STALE",
                 "The exact saved node changed after it was offered or assessed. Read and speak it again before a fresh update.",
@@ -1061,14 +1289,14 @@ class McpVoiceTutorToolAdapter(
                 "The change could not be safely prepared in this call. No update was started.",
             )
         }
-        if (!targetProof.matches(baseline)) {
+        if (if (realtime != null) !realtime.matches(baseline) else targetProof?.matches(baseline) != true) {
             return failure(
                 "STUDY_UPDATE_TARGET_STALE",
                 "The lesson's saved-node baseline no longer matches the exact offered identity. Read and speak it again before a fresh update.",
             )
         }
         if (!isAuthorized(context)) return inactiveCall()
-        if (!lease.consume()) {
+        if (realtime == null && lease?.consume() != true) {
             return failure(
                 "STUDY_UPDATE_REQUEST_REQUIRED",
                 "This exact saved-node patch was already used or revoked; wait for a fresh direct learner choice.",
@@ -1083,6 +1311,7 @@ class McpVoiceTutorToolAdapter(
         exactArguments[BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT] = liveTarget.topic
         exactArguments[BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT] = liveDifficulty
         exactArguments[BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT] = liveTarget.parentStudyId ?: 0L
+        if (realtime != null && !realtimeWriteStillCurrent(context, realtime)) return failure("MUTATION_TARGET_STALE", "The current request changed; no update was started.")
         val result = invoke(requireNotNull(context.principal), specification, exactArguments)
         if (result.isError() == true) return boundedResult(result, UPDATE_STUDY)
         val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
@@ -1112,6 +1341,7 @@ class McpVoiceTutorToolAdapter(
         context: VoiceTutorWebRtcControlContext,
         specification: McpStatelessServerFeatures.AsyncToolSpecification,
         arguments: Map<String, Any>,
+        realtime: RealtimeMutation? = null,
     ): VoiceTutorMcpToolResult {
         val topic = (arguments["topic"] as? String)?.trim()
             ?.takeIf { it.isNotEmpty() && it.length <= 255 }
@@ -1119,7 +1349,7 @@ class McpVoiceTutorToolAdapter(
         val difficulty = (arguments["difficulty_level"] as? Number)?.toInt() ?: DEFAULT_ROOT_DIFFICULTY
         if (difficulty !in 1..10) return failure("INVALID_ARGUMENTS", "Choose a root difficulty from 1 to 10.")
         val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
-        if (rootStudyLearnerTurnId(
+        if (realtime == null && rootStudyLearnerTurnId(
             context,
             revision,
             VoiceTutorInputIntent.CREATE_ROOT_STUDY,
@@ -1130,8 +1360,8 @@ class McpVoiceTutorToolAdapter(
             )
         }
         val creationAuthorization = context.dialogueBoundary?.rootStudyCreationAuthorization
-        if (creationAuthorization == null || creationAuthorization.topic != topic ||
-            creationAuthorization.difficulty != difficulty
+        if (realtime == null && (creationAuthorization == null || creationAuthorization.topic != topic ||
+            creationAuthorization.difficulty != difficulty)
         ) {
             return failure(
                 "ROOT_CREATION_REQUEST_MISMATCH",
@@ -1139,12 +1369,13 @@ class McpVoiceTutorToolAdapter(
             )
         }
         if (!isAuthorized(context)) return inactiveCall()
-        if (!creationAuthorization.consume()) {
+        if (realtime == null && creationAuthorization?.consume() != true) {
             return failure(
                 "ROOT_CREATION_REQUEST_REQUIRED",
                 "A newer learner turn revoked this root choice before the write began; no write was started. Wait for a fresh direct choice to begin a new saved root.",
             )
         }
+        if (realtime != null && !realtimeWriteStillCurrent(context, realtime)) return failure("MUTATION_TARGET_STALE", "The current request changed; no root was created.")
         val result = invoke(
             requireNotNull(context.principal),
             specification,
@@ -1178,7 +1409,7 @@ class McpVoiceTutorToolAdapter(
             "ROOT_CREATION_RESULT_UNCONFIRMED",
             "The root write result could not be verified. Read saved studies before any retry; do not repeat this write automatically.",
         )
-        val compoundStartPending = creationAuthorization.startLessonAfterCreate
+        val compoundStartPending = realtime == null && creationAuthorization?.startLessonAfterCreate == true
         val cleanResult = VoiceTutorMcpToolResult(
             output = objectMapper.writeValueAsString(linkedMapOf(
                 "created" to created,
@@ -1195,6 +1426,7 @@ class McpVoiceTutorToolAdapter(
                     "REQUIRES_SELECTION"
                 },
                 "notice" to when {
+                    realtime != null -> "The saved root is available. If the learner already chose to study it, call select_voice_study with this exact id and begin at the returned saved level; do not ask another confirmation. Creation alone does not change focus."
                     compoundStartPending && created ->
                         "The root was created and the same persisted learner turn independently authorized starting it now. This result is not yet a lesson focus: do not ask for agreement again, do not originate or retry a pipeline tool, and wait for the server-owned exact readback and CREATED_ROOT_IMMEDIATE_START selection before asking the first question."
                     compoundStartPending ->
@@ -1246,25 +1478,29 @@ class McpVoiceTutorToolAdapter(
         specification: McpStatelessServerFeatures.AsyncToolSpecification,
         arguments: Map<String, Any>,
         studyId: Long,
+        realtime: RealtimeMutation? = null,
     ): VoiceTutorMcpToolResult {
         val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
         val lease = context.dialogueBoundary?.studyDeletionAuthorization
-        if (arguments["confirm"] != true || lease == null || lease.studyId != studyId || !lease.isActive() ||
-            rootStudyLearnerTurnId(context, revision, VoiceTutorInputIntent.DELETE_STUDY) == null
+        if (realtime == null && (arguments["confirm"] != true || lease == null || lease.studyId != studyId || !lease.isActive() ||
+            rootStudyLearnerTurnId(context, revision, VoiceTutorInputIntent.DELETE_STUDY) == null)
         ) return failure("DELETE_REQUEST_REQUIRED", "No authorized deletion was executed. Do not claim success or ask for special wording.")
         val preview = deletionPreview(context, studyId) ?: return failure(
             "DELETE_PREVIEW_UNAVAILABLE", "This subtree could not be checked completely; nothing was deleted.",
         )
-        if (!lease.targetProof.matches(preview.target)) {
+        if (if (realtime != null) realtime.target != preview.target || realtime.deletedIds != preview.ids.toSet()
+            else lease?.targetProof?.matches(preview.target) != true) {
             return failure("DELETE_TARGET_STALE", "The saved target changed; nothing was deleted.")
         }
         if (!isAuthorized(context)) return inactiveCall()
-        if (studyContexts.currentRevision(context.session.userId, context.session.id) != revision || !lease.consume()) {
+        if (studyContexts.currentRevision(context.session.userId, context.session.id) != revision ||
+            (realtime == null && lease?.consume() != true)) {
             return failure("DELETE_REQUEST_REQUIRED", "This deletion was superseded or already processed; do not repeat it.")
         }
         // The controller issues this lease only after fresh agreement to its frozen proposal. Resolve the
         // whole owned subtree internally; compare its membership in the deletion transaction.
         val selectedId = currentStudyAnchor(context)
+        if (realtime != null && !realtimeWriteStillCurrent(context, realtime)) return failure("MUTATION_TARGET_STALE", "The current request changed; nothing was deleted.")
         val result = invoke(context.principal!!, specification, mapOf(
             "study_id" to studyId, "confirm" to true, "expected_study_ids" to preview.ids,
         ))
@@ -1473,7 +1709,9 @@ class McpVoiceTutorToolAdapter(
             )
             payload.put(
                 "notice",
-                if (compoundStartPending) {
+                if (context.realtimeModelTools) {
+                    "The root was saved. If the learner already chose to study it, call select_voice_study with this exact returned id and begin at its verified saved level without another confirmation. Creation alone does not change the current focus."
+                } else if (compoundStartPending) {
                     "The root was saved and the same persisted learner turn independently authorized starting it now. This result is not yet a lesson focus: do not ask for agreement again, do not originate or retry a pipeline tool, and wait for the server-owned exact readback and CREATED_ROOT_IMMEDIATE_START selection before asking the first question."
                 } else {
                     "The root was saved but is not a lesson focus. Read this exact root, speak it, and wait for a new learner agreement before select_voice_study; creation itself never starts teaching."
@@ -1493,6 +1731,12 @@ class McpVoiceTutorToolAdapter(
             payload.put(
                 "notice",
                 when {
+                    context.realtimeModelTools && updatedStudySnapshot == null ->
+                        "The settings were saved, but the new lesson metadata is not ready. Do not repeat the write or teach from stale settings; read the exact saved topic before selecting it."
+                    context.realtimeModelTools && updatedUnselectedCandidate ->
+                        "The exact saved node was updated. Keep the existing lesson unchanged unless the learner chose to study this node; in that case call select_voice_study on its exact returned id without another confirmation. Never repeat the write."
+                    context.realtimeModelTools ->
+                        "The saved topic was updated. Use this exact new level and name for subsequent questions only; pending and completed questions retain their original metadata. No new selection or confirmation is needed."
                     updateAutoFocusPending ->
                         "The exact saved node was updated and its revised metadata was captured. Do not speak, ask for agreement, or originate or retry another tool; wait for the server-owned UPDATED_STUDY_IMMEDIATE_START selection before asking the first question."
                     updatedUnselectedCandidate && updatedFocus != null ->
@@ -1590,6 +1834,9 @@ class McpVoiceTutorToolAdapter(
         const val CREATE_TOPIC = "create_study_topic"
         const val UPDATE_STUDY = "update_study"
         const val DELETE_STUDY = "delete_study"
+        const val PREPARE_MUTATION = "prepare_voice_study_mutation"
+        const val CONFIRM_MUTATION = "confirm_voice_study_mutation"
+        val REALTIME_MUTATION_TOOLS = setOf(PREPARE_MUTATION, CONFIRM_MUTATION)
         const val LIST_LEARNING_RECORDS = "list_study_learning_records"
         const val GET_VOICE_LEARNING_RECORD = "get_voice_learning_record"
         const val MAX_ARGUMENT_BYTES = 16 * 1_024

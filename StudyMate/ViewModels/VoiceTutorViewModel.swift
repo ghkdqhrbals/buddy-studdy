@@ -478,9 +478,9 @@ enum VoiceTutorServerEndPlayoutPolicy {
         return pending
     }
 
-    /// Only the monthly-quota terminal flow is a two-sided playout handshake:
-    /// session.ending closes learner input, the server speaks one final notice,
-    /// and session.ended follows this exact response acknowledgement.
+    /// Ordinary responses report device playout for conversational confirmation.
+    /// Monthly exhaustion additionally requires the exact server-marked notice;
+    /// an ordinary response can never acknowledge that terminal boundary.
     static func playoutDrainedResponseID(
         reason: String?,
         phase: VoiceTutorSessionPhase,
@@ -488,9 +488,12 @@ enum VoiceTutorServerEndPlayoutPolicy {
         pending: VoiceTutorLocalPlayoutTailToken?,
         quotaNoticeResponseID: String? = nil
     ) -> String? {
-        guard phase == .ending, usesWebRTC,
-              VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(reason),
-              let pending,
+        guard usesWebRTC, let pending else { return nil }
+        if !VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(reason) {
+            guard reason == nil, phase == .listening || phase == .speaking else { return nil }
+            return pending.responseID
+        }
+        guard phase == .ending,
               let quotaNoticeResponseID,
               pending.responseID == quotaNoticeResponseID else { return nil }
         return quotaNoticeResponseID
@@ -749,7 +752,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 // The backend can claim /control only after SDP has attached
                 // the provider call and transitioned this session to ACTIVE.
                 try await transport.connect(
-                    request: VoiceTutorLocalSpeechProtocol.addingCapability(to: webRTCConnection.controlRequest),
+                    request: VoiceTutorTurnProtocol.addingCapability(to: webRTCConnection.controlRequest),
                     localSpeechAttemptID: attemptID
                 )
             } else {
@@ -1062,8 +1065,9 @@ final class VoiceTutorViewModel: ObservableObject {
                             self.duplexPlaybackState.userSpeechStopped()
                         }
                     }
-                    // One consumer awaits each send before taking the next edge.
-                    // Backend alone commits input and creates the next response.
+                    // One consumer sends numbered acoustic boundaries and pause
+                    // fences in order. The backend commits input and releases
+                    // replies; Realtime interprets meaning and tool intent.
                     try await self.transport.sendCallControl(control, attemptID: attemptID)
                     guard !Task.isCancelled, self.connectionAttemptFence.isCurrent(attemptID),
                           connection.isCurrent(), self.phase.isLive, !self.isFinalizing else { return }
@@ -1319,7 +1323,16 @@ final class VoiceTutorViewModel: ObservableObject {
             }
         }
         switch event {
-        case .sessionReady(let hardEndsAt, let remainingSeconds, let pauseProtocol):
+        case .sessionReady(let hardEndsAt, let remainingSeconds, let pauseProtocol, let turnProtocol):
+            if usesWebRTC, !VoiceTutorTurnProtocol.acceptsReady(turnProtocol) {
+                // Keep capture closed unless the server has accepted this
+                // attempt's exact Realtime conversation contract.
+                webRTCTransport?.closeMicrophoneInput()
+                errorMessage = appState.strings.voiceTutorConnectionFailed
+                failureCause = .connection
+                await stop(shouldNotifyServerOverSocket: true, outcome: .failed, source: .localSpeechDeliveryFailure)
+                return
+            }
             recorder?.markSessionReady()
             if usesWebRTC {
                 webRTCTransport?.setSessionMediaReady()
@@ -1675,7 +1688,7 @@ final class VoiceTutorViewModel: ObservableObject {
               activeConnection?.isCurrent() == true else { return }
 
         let attemptID = connectionAttemptFence.currentID
-        logDiagnostic("event=quota_playout_drain_started")
+        logDiagnostic("event=device_playout_drain_started")
         terminalPlayoutDrainTask = Task { [weak self] in
             await webRTCTransport.waitForLocalPlayoutTail(token)
             guard let self else { return }
@@ -1697,13 +1710,12 @@ final class VoiceTutorViewModel: ObservableObject {
                   ) == responseID else { return }
             do {
                 try await self.transport.sendPlayoutDrained(responseID: responseID)
-                self.logDiagnostic("event=quota_playout_drained")
+                self.logDiagnostic("event=device_playout_drained")
             } catch {
-                // The backend owns a bounded fallback deadline. Losing this ACK
-                // must not replace an intentional quota end with a connection
-                // failure or cut off the already-rendering final sentence.
+                // The backend owns the provider-stop fallback and terminal
+                // deadline. Losing this ACK must not cut off tutor playback.
                 self.logDiagnostic(
-                    "event=quota_playout_drain_send_failed \(VoiceTutorDiagnosticError.fields(for: error))",
+                    "event=device_playout_drain_send_failed \(VoiceTutorDiagnosticError.fields(for: error))",
                     isWarning: true
                 )
             }

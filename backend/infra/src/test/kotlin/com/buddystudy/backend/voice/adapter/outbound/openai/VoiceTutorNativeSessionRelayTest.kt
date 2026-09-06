@@ -1,0 +1,501 @@
+package com.buddystudy.backend.voice.adapter.outbound.openai
+
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.voice.VoiceTutorRealtimeContract as Contract
+import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata as Metadata
+import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
+import com.buddystudy.voice.domain.VoiceTutorResultStatus
+import com.buddystudy.voice.domain.VoiceTutorSession
+import com.buddystudy.voice.domain.VoiceTutorSessionStatus
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.reactive.asFlow
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import org.reactivestreams.Publisher
+import org.springframework.core.io.buffer.DefaultDataBufferFactory
+import org.springframework.web.reactive.socket.WebSocketMessage
+import org.springframework.web.reactive.socket.WebSocketSession
+import reactor.core.Disposable
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
+import reactor.core.publisher.Sinks
+import java.lang.reflect.Proxy
+import java.time.Duration
+import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+
+/** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
+class VoiceTutorNativeSessionRelayTest {
+    @Test
+    fun `ordinary native reply proceeds while tutor audit persistence is suspended and learner ASR is absent`() {
+        val release = CompletableDeferred<Unit>()
+        val entered = AtomicBoolean()
+        Fixture(store = {
+            entered.set(true)
+            release.await()
+        }).use { f ->
+            f.opening()
+            f.await("opening audit started") { entered.get() }
+
+            f.learner(1, "learner-1")
+
+            assertThat(f.responses()).hasSize(2)
+            assertThat(release.isCompleted).isFalse()
+            assertThat(f.stored.map { it.path("item_id").asText() }).containsExactly("tutor-0")
+            assertThat(f.tools.invocations).isEmpty()
+            assertThat(f.ui.any { it.path("type").asText() == Contract.SIDEBAND_READY_EVENT }).isTrue()
+            assertThat(f.completed.get()).isFalse()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `read tools bypass transcript IO but a continuation requires the exact tool output acknowledgement`() {
+        val auditRelease = CompletableDeferred<Unit>()
+        Fixture(store = { auditRelease.await() }).use { f ->
+            f.opening()
+            f.learner(1, "learner-1")
+            f.toolResponse("response-1", "read-1", "list_studies")
+            f.await("read tool executed without persisted transcript") { f.outputs().size == 1 }
+
+            val invocation = f.tools.invocations.single()
+            assertThat(invocation.name).isEqualTo("list_studies")
+            assertThat(invocation.context.realtimeModelTools).isTrue()
+            assertThat(invocation.context.dialogueBoundary?.latestAcceptedLearnerProviderItemId)
+                .isEqualTo("learner-1")
+            assertThat(auditRelease.isCompleted).isFalse()
+            assertThat(f.responses()).hasSize(2)
+
+            val output = f.outputs().single()
+            val wrongItem = output.path("item").deepCopy<ObjectNode>().put("output", "{\"wrong\":true}")
+            f.provider("conversation.item.created", "item" to wrongItem)
+            f.await("unmatched output acknowledgement processed") {
+                f.ui.any { it.path("item").path("output").asText() == "{\"wrong\":true}" }
+            }
+            assertThat(f.responses()).hasSize(2)
+
+            f.ack(output)
+            f.await("exact tool result released one continuation") { f.responses().size == 3 }
+            f.ack(output)
+            f.await("duplicate acknowledgement processed") {
+                f.ui.any { it.path("item") == output.path("item") }
+            }
+            assertThat(f.responses()).hasSize(3)
+            assertThat(f.tools.invocations).hasSize(1)
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `mutation tools wait for both tutor and learner transcript IO before executing`() {
+        val tutorRelease = CompletableDeferred<Unit>()
+        val learnerRelease = CompletableDeferred<Unit>()
+        val tutorStored = AtomicBoolean()
+        val learnerStored = AtomicBoolean()
+        val storedAtExecution = CopyOnWriteArrayList<Pair<Boolean, Boolean>>()
+        val tools = FakeTools {
+            storedAtExecution.add(tutorStored.get() to learnerStored.get())
+            success()
+        }
+        Fixture(tools = tools, store = { row ->
+            when (row.path("item_id").asText()) {
+                "tutor-0" -> { tutorRelease.await(); tutorStored.set(true) }
+                "learner-1" -> { learnerRelease.await(); learnerStored.set(true) }
+            }
+        }).use { f ->
+            f.opening()
+            f.await("tutor audit started") { f.stored.size == 1 }
+            f.learner(1, "learner-1")
+            f.transcript("learner-1")
+            f.toolResponse("response-1", "prepare-1", "prepare_voice_study_mutation")
+            // Tool-only response events are deliberately hidden from the UI.
+            // A later provider frame is a FIFO processing barrier, not an audible response.
+            f.provider("conversation.item.created", "item" to mapOf("id" to "mutation-io-barrier", "type" to "message"))
+            f.await("provider processed the mutation response before the barrier") {
+                f.ui.any { it.path("item").path("id").asText() == "mutation-io-barrier" }
+            }
+            assertThat(f.tools.invocations).isEmpty()
+            assertThat(f.ui.none { it.path("type").asText() == "response.done" && it.path("response").path("id").asText() == "response-1" }).isTrue()
+
+            tutorRelease.complete(Unit)
+            f.await("learner audit started after tutor write") { f.stored.size == 2 }
+            assertThat(f.tools.invocations).isEmpty()
+            assertThat(f.outputs()).isEmpty()
+
+            learnerRelease.complete(Unit)
+            f.await("mutation runs only after its two audit writes settle") { f.outputs().size == 1 }
+            assertThat(f.tools.invocations.map { it.name }).containsExactly("prepare_voice_study_mutation")
+            assertThat(storedAtExecution).containsExactly(true to true)
+            assertThat(f.responses()).hasSize(2)
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `normal completion of the control worker does not cancel an in flight tool or close provider IO`() {
+        val result = CompletableDeferred<VoiceTutorMcpToolResult>()
+        val cancelled = AtomicBoolean()
+        val tools = FakeTools {
+            try { result.await() }
+            catch (error: CancellationException) { cancelled.set(true); throw error }
+        }
+        Fixture(tools = tools).use { f ->
+            f.opening()
+            f.learner(1, "learner-1")
+            f.toolResponse("response-1", "read-1", "list_studies")
+            f.await("tool began") { tools.invocations.size == 1 }
+            assertThat(f.controls.tryEmitComplete()).isEqualTo(Sinks.EmitResult.OK)
+
+            // A real provider item event proves the receive/client workers are
+            // still processing after the unrelated control source completed.
+            f.provider("conversation.item.created", "item" to mapOf("id" to "worker-barrier", "type" to "message"))
+            f.await("provider remained connected after control completion") {
+                f.ui.any { it.path("item").path("id").asText() == "worker-barrier" }
+            }
+            assertThat(cancelled.get()).isFalse()
+            assertThat(f.completed.get()).isFalse()
+            assertThat(f.receiveCancelled.get()).isFalse()
+
+            result.complete(success())
+            f.await("in flight tool output survived control completion") { f.outputs().size == 1 }
+            f.ack(f.outputs().single())
+            f.await("tool continuation survived control completion") { f.responses().size == 3 }
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `provider failure cancels suspended persistence but forces a durable integrity fence before finalization`() {
+        val entered = AtomicBoolean()
+        val cancelled = AtomicBoolean()
+        Fixture(store = {
+            entered.set(true)
+            try { CompletableDeferred<Unit>().await() }
+            catch (error: CancellationException) { cancelled.set(true); throw error }
+        }).use { f ->
+            f.opening()
+            f.await("audit write is suspended") { entered.get() }
+            val failure = IllegalStateException("synthetic provider failure")
+            assertThat(f.incoming.tryEmitError(failure)).isEqualTo(Sinks.EmitResult.OK)
+
+            f.await("provider failure escaped while persistence was blocked") { f.errors.isNotEmpty() }
+            f.await("blocked persistence was cancelled") { cancelled.get() }
+            assertThat(f.errors).hasSize(1)
+            assertThat(f.errors.single()).isInstanceOf(VoiceTutorTranscriptIntegrityException::class.java)
+            assertThat(f.completed.get()).isFalse()
+        }
+    }
+
+    @Test
+    fun `provider error after a committed learner turn with absent ASR cannot grade an earlier saved prefix`() {
+        Fixture().use { f ->
+            f.opening()
+            f.learner(1, "learner-1")
+            assertThat(f.incoming.tryEmitError(IllegalStateException("synthetic receive failure")))
+                .isEqualTo(Sinks.EmitResult.OK)
+            f.await("missing learner source is fenced on receive failure") { f.errors.isNotEmpty() }
+            assertThat(f.errors.single()).isInstanceOf(VoiceTutorTranscriptIntegrityException::class.java)
+            assertThat(f.completed.get()).isFalse()
+        }
+    }
+
+    @Test
+    fun `client output worker failure also fences unresolved learner source without waiting for ASR`() {
+        Fixture(onUi = { event ->
+            if (event.path("item").path("id").asText() == "fatal-ui-event") {
+                throw IllegalStateException("synthetic client output failure")
+            }
+        }).use { f ->
+            f.opening()
+            f.learner(1, "learner-1")
+            f.provider("conversation.item.created", "item" to mapOf("id" to "fatal-ui-event", "type" to "message"))
+            f.await("client output failure fences source") { f.errors.isNotEmpty() }
+            assertThat(f.errors.single()).isInstanceOf(VoiceTutorTranscriptIntegrityException::class.java)
+            assertThat(f.completed.get()).isFalse()
+        }
+    }
+
+    @Test
+    fun `unacknowledged learner commit is incomplete evidence even before provider assigns an item id`() {
+        Fixture().use { f ->
+            f.opening()
+            for (type in listOf(Contract.SPEECH_STARTED_EVENT, Contract.SPEECH_STOPPED_EVENT)) {
+                assertThat(f.controls.tryEmitNext(json(mapOf("type" to type, "sequence" to 1))))
+                    .isEqualTo(Sinks.EmitResult.OK)
+            }
+            f.await("learner commit sent without acknowledgement") {
+                f.outgoing.any { it.path("type").asText() == "input_audio_buffer.commit" }
+            }
+            assertThat(f.incoming.tryEmitError(IllegalStateException("synthetic commit failure")))
+                .isEqualTo(Sinks.EmitResult.OK)
+            f.await("unacknowledged commit is fenced") { f.errors.isNotEmpty() }
+            assertThat(f.errors.single()).isInstanceOf(VoiceTutorTranscriptIntegrityException::class.java)
+        }
+    }
+
+    @Test
+    fun `a provider error with only fully stored source preserves the original failure`() {
+        val stored = AtomicBoolean()
+        Fixture(store = { stored.set(true) }).use { f ->
+            f.opening()
+            f.await("opening source stored") { stored.get() }
+            // FIFO persistence completion is synchronous after this non-suspending store callback.
+            f.provider("conversation.item.created", "item" to mapOf("id" to "clean-source-barrier", "type" to "message"))
+            f.await("provider remained idle with clean source") {
+                f.ui.any { it.path("item").path("id").asText() == "clean-source-barrier" }
+            }
+            val failure = IllegalStateException("synthetic idle receive failure")
+            assertThat(f.incoming.tryEmitError(failure)).isEqualTo(Sinks.EmitResult.OK)
+            f.await("original error preserved") { f.errors.isNotEmpty() }
+            assertThat(f.errors).containsExactly(failure)
+        }
+    }
+
+    @Test
+    fun `completed audible tutor output missing its transcript is fenced rather than treated as a silent turn`() {
+        Fixture().use { f ->
+            f.opening()
+            f.learner(1, "learner-1")
+            f.transcript("learner-1")
+            f.created("response-1")
+            f.provider("response.output_item.added", "response_id" to "response-1",
+                "item" to mapOf("id" to "missing-tutor-source", "type" to "message"))
+            f.provider("output_audio_buffer.started", "response_id" to "response-1")
+            f.provider("response.done", "response" to mapOf("id" to "response-1", "status" to "completed",
+                "output" to listOf(mapOf("id" to "missing-tutor-source", "type" to "message",
+                    "content" to listOf(mapOf("type" to "audio"))))))
+            f.provider("output_audio_buffer.stopped", "response_id" to "response-1")
+            f.await("missing completed tutor source fenced") { f.integrityMarkers.size == 1 }
+            assertThat(f.errors).isEmpty()
+            assertThat(f.completed.get()).isFalse()
+        }
+    }
+
+    @Test
+    fun `audit write failures do not terminate ordinary voice or cause automatic tool execution`() {
+        Fixture(store = { throw IllegalStateException("synthetic audit failure") }).use { f ->
+            f.opening()
+            f.learner(1, "learner-1")
+            f.transcript("learner-1")
+            f.await("both audit writes were attempted") { f.stored.size == 2 }
+            f.created("response-1")
+            f.provider("response.done", "response" to mapOf(
+                "id" to "response-1", "status" to "completed", "output" to emptyList<Any>(),
+            ))
+            f.learner(2, "learner-2")
+            f.await("failed audit writes permanently mark incomplete evidence") { f.integrityMarkers.size == 1 }
+
+            assertThat(f.responses()).hasSize(3)
+            assertThat(f.tools.invocations).isEmpty()
+            assertThat(f.completed.get()).isFalse()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `a rejected transcript write marks incomplete evidence without blocking ordinary voice`() {
+        Fixture(persistAccepted = false).use { f ->
+            f.opening()
+            f.learner(1, "learner-1")
+            f.await("rejected write records incomplete evidence") { f.integrityMarkers.size == 1 }
+            assertThat(f.stored).hasSize(1)
+            assertThat(f.responses()).hasSize(2)
+            assertThat(f.completed.get()).isFalse()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `failed ASR marks incomplete evidence without blocking the native audio response`() {
+        Fixture().use { f ->
+            f.opening()
+            f.learner(1, "learner-1")
+            f.provider("conversation.item.input_audio_transcription.failed", "item_id" to "learner-1")
+            f.await("failed ASR records incomplete evidence") { f.integrityMarkers.size == 1 }
+            assertThat(f.responses()).hasSize(2)
+            assertThat(f.completed.get()).isFalse()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `unconfirmed integrity marker fails the relay instead of allowing partial learning evidence`() {
+        val markerResult = CompletableDeferred<Boolean>()
+        Fixture(store = { throw IllegalStateException("synthetic audit failure") }, markIncomplete = { markerResult.await() }).use { f ->
+            f.opening()
+            f.await("incomplete marker was attempted") { f.integrityMarkers.size == 1 }
+            markerResult.complete(false)
+            f.await("unconfirmed marker fails the call") { f.errors.isNotEmpty() }
+            assertThat(f.completed.get()).isFalse()
+            assertThat(f.tools.invocations).isEmpty()
+        }
+    }
+
+    private class Fixture(
+        val tools: FakeTools = FakeTools(),
+        store: suspend (JsonNode) -> Unit = {},
+        persistAccepted: Boolean = true,
+        markIncomplete: suspend () -> Boolean = { true },
+        onUi: suspend (JsonNode) -> Unit = {},
+    ) : AutoCloseable {
+        val incoming = Sinks.many().unicast().onBackpressureBuffer<WebSocketMessage>()
+        val controls = Sinks.many().unicast().onBackpressureBuffer<String>()
+        private val terminal = Sinks.many().unicast().onBackpressureBuffer<VoiceTutorRelayTermination>()
+        val outgoing = CopyOnWriteArrayList<JsonNode>()
+        val stored = CopyOnWriteArrayList<JsonNode>()
+        val ui = CopyOnWriteArrayList<JsonNode>()
+        val integrityMarkers = CopyOnWriteArrayList<JsonNode>()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val completed = AtomicBoolean()
+        val receiveCancelled = AtomicBoolean()
+        private val changed = Semaphore(0)
+        private val buffers = DefaultDataBufferFactory.sharedInstance
+        private val subscription: Disposable
+
+        init {
+            val socket = Proxy.newProxyInstance(WebSocketSession::class.java.classLoader,
+                arrayOf(WebSocketSession::class.java)) { _, method, arguments ->
+                when (method.name) {
+                    "getId" -> "native-relay-fixture"
+                    "receive" -> incoming.asFlux().doOnCancel { receiveCancelled.set(true) }
+                    "send" -> Flux.from(arguments!![0] as Publisher<*>)
+                        .cast(WebSocketMessage::class.java)
+                        .doOnNext { outgoing.add(mapper.readTree(it.payloadAsText)); changed.release() }.then()
+                    "textMessage" -> message(arguments!![0] as String)
+                    "bufferFactory" -> buffers
+                    "isOpen" -> true
+                    "close", "closeStatus" -> Mono.empty<Void>()
+                    "toString" -> "NativeVoiceRelayFixture"
+                    "hashCode" -> 1
+                    "equals" -> false
+                    else -> error("Unexpected WebSocketSession call: ${method.name}")
+                }
+            } as WebSocketSession
+            subscription = relayVoiceTutorNativeSession(
+                socket, context(), controls.asFlux().asFlow(), terminal.asFlux().asFlow(), tools,
+                connectTimeout = Duration.ofSeconds(3), responseTimeout = Duration.ofSeconds(15),
+            ) { raw, persist, forward ->
+                val event = mapper.readTree(raw)
+                if (event.path("type").asText() == Metadata.INCOMPLETE_EVENT) {
+                    assertThat(persist).isFalse()
+                    assertThat(forward).isFalse()
+                    integrityMarkers.add(event)
+                    changed.release()
+                    return@relayVoiceTutorNativeSession markIncomplete()
+                }
+                if (persist) {
+                    stored.add(event)
+                    changed.release()
+                    store(event)
+                }
+                if (forward) { ui.add(event); changed.release(); onUi(event) }
+                persist && persistAccepted
+            }.subscribe({}, { errors += it; changed.release() }, { completed.set(true); changed.release() })
+        }
+
+        fun opening() {
+            await("server-owned session update") { outgoing.any { it.path("type").asText() == "session.update" } }
+            val update = outgoing.first { it.path("type").asText() == "session.update" }
+            assertThat(update.path("session").path("audio").path("input").path("turn_detection").isNull).isTrue()
+            provider("session.updated", "session" to update.path("session"))
+            await("opening native response") { responses().size == 1 }
+            created("response-0")
+            provider("response.output_item.added", "response_id" to "response-0",
+                "item" to mapOf("id" to "tutor-0", "type" to "message"))
+            provider("output_audio_buffer.started", "response_id" to "response-0")
+            provider("response.output_audio_transcript.done", "response_id" to "response-0",
+                "item_id" to "tutor-0", "transcript" to "어떤 주제로 이야기할까요?")
+            provider("response.done", "response" to mapOf("id" to "response-0", "status" to "completed",
+                "output" to listOf(mapOf("id" to "tutor-0", "type" to "message", "content" to listOf(
+                    mapOf("type" to "audio", "transcript" to "어떤 주제로 이야기할까요?"))))))
+            provider("output_audio_buffer.stopped", "response_id" to "response-0")
+        }
+
+        fun learner(sequence: Long, id: String) {
+            for (type in listOf(Contract.SPEECH_STARTED_EVENT, Contract.SPEECH_STOPPED_EVENT)) {
+                assertThat(controls.tryEmitNext(json(mapOf("type" to type, "sequence" to sequence))))
+                    .isEqualTo(Sinks.EmitResult.OK)
+            }
+            await("acoustic stop committed by the server") {
+                outgoing.count { it.path("type").asText() == "input_audio_buffer.commit" } == sequence.toInt()
+            }
+            provider("input_audio_buffer.committed", "item_id" to id)
+            await("native reply released without a text assessor") { responses().size == sequence.toInt() + 1 }
+        }
+
+        fun transcript(id: String) = provider("conversation.item.input_audio_transcription.completed",
+            "item_id" to id, "transcript" to "Redis를 공부하고 싶어요.")
+
+        fun created(id: String) = provider("response.created", "response" to mapOf("id" to id,
+            "metadata" to responses().last().path("response").path("metadata")))
+
+        fun toolResponse(responseId: String, callId: String, name: String) {
+            created(responseId)
+            provider("response.done", "response" to mapOf("id" to responseId, "status" to "completed",
+                "output" to listOf(mapOf("id" to "item-$callId", "type" to "function_call",
+                    "status" to "completed", "call_id" to callId, "name" to name, "arguments" to "{}"))))
+        }
+
+        fun provider(type: String, vararg fields: Pair<String, Any>) {
+            assertThat(incoming.tryEmitNext(message(json(mapOf("type" to type) + fields))))
+                .isEqualTo(Sinks.EmitResult.OK)
+        }
+
+        fun ack(output: JsonNode) = provider("conversation.item.created", "item" to output.path("item"))
+        fun responses() = outgoing.filter { it.path("type").asText() == "response.create" }
+        fun outputs() = outgoing.filter { it.path("item").path("type").asText() == "function_call_output" }
+
+        fun await(reason: String, condition: () -> Boolean) {
+            val deadline = System.nanoTime() + Duration.ofSeconds(3).toNanos()
+            while (!condition() && System.nanoTime() < deadline) changed.tryAcquire(20, TimeUnit.MILLISECONDS)
+            assertThat(condition()).withFailMessage("Timed out: %s; completed=%s, errors=%s", reason,
+                completed.get(), errors.map { it.javaClass.simpleName }).isTrue()
+        }
+
+        private fun message(raw: String) = WebSocketMessage(WebSocketMessage.Type.TEXT, buffers.wrap(raw.toByteArray()))
+        override fun close() { subscription.dispose() }
+    }
+
+    private data class Invocation(val context: VoiceTutorWebRtcControlContext, val name: String)
+    private class FakeTools(private val result: suspend () -> VoiceTutorMcpToolResult = { success() }) : VoiceTutorMcpToolPort {
+        val invocations = CopyOnWriteArrayList<Invocation>()
+        override fun definitions(): List<VoiceTutorMcpToolDefinition> = error("The legacy classified tool catalog must not be used")
+        override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation").map { name ->
+            VoiceTutorMcpToolDefinition(name, "Synthetic native tool", mapOf("type" to "object",
+                "properties" to emptyMap<String, Any>(), "additionalProperties" to false))
+        }
+        override suspend fun execute(context: VoiceTutorWebRtcControlContext, toolName: String, arguments: Map<String, Any>): VoiceTutorMcpToolResult {
+            invocations += Invocation(context, toolName)
+            return result()
+        }
+    }
+
+    private companion object {
+        val mapper = JsonMapperProvider.mapper
+        fun json(value: Any): String = mapper.writeValueAsString(value)
+        fun success() = VoiceTutorMcpToolResult("{\"studies\":[]}", false)
+        fun context(): VoiceTutorWebRtcControlContext {
+            val now = Instant.parse("2026-09-06T00:00:00Z")
+            return VoiceTutorWebRtcControlContext(VoiceTutorSession(
+                id = "native-test-session", userId = 7, studyId = null, idempotencyKey = "native-test-call",
+                providerSessionId = "rtc_native_test", status = VoiceTutorSessionStatus.ACTIVE,
+                resultStatus = VoiceTutorResultStatus.PENDING, language = "ko", model = "gpt-realtime",
+                voice = "marin", topic = "", difficulty = 5, periodStartedAt = now,
+                periodEndsAt = now.plusSeconds(86_400), reservedSeconds = 3_600, chargedSeconds = 0,
+                maxSessionSeconds = 3_600, hardEndsAt = now.plusSeconds(3_600), connectedAt = now,
+                relayHeartbeatAt = now, acceptedAudioBytes = 0, endedAt = null, finalizedAt = null,
+                endReason = null, failureCode = null, failureMessage = null, createdAt = now, updatedAt = now,
+            ), "rtc_native_test")
+        }
+    }
+}

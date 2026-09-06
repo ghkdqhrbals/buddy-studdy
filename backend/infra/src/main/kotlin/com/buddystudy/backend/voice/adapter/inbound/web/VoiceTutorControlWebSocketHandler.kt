@@ -50,7 +50,7 @@ class VoiceTutorControlWebSocketHandler(
     override fun handle(session: WebSocketSession): Mono<Void> {
         if (session.handshakeInfo.subProtocol != CONTROL_PROTOCOL ||
             session.handshakeInfo.headers.getFirst(VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER) !=
-            VoiceTutorRealtimeContract.LOCAL_VAD_TURN_PROTOCOL
+            VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL
         ) {
             return session.close(CloseStatus.PROTOCOL_ERROR)
         }
@@ -77,6 +77,7 @@ class VoiceTutorControlWebSocketHandler(
         val startedNanos = System.nanoTime()
         val endReason = AtomicReference("PROVIDER_CLOSED")
         val failure = AtomicReference<Throwable?>(null)
+        val transcriptIntegrityFailed = AtomicBoolean(false)
         val terminalSource = AtomicReference("NONE")
         val clientCloseCode = AtomicReference<Int?>(null)
         val localCloseInitiated = AtomicBoolean(false)
@@ -387,6 +388,11 @@ class VoiceTutorControlWebSocketHandler(
                 terminalEvents = terminalSignal.asMono().asFlow(),
             ) { raw, persist, forwardToClient ->
                 val type = runCatching { mapper.readTree(raw).path("type").asText() }.getOrDefault("")
+                if (type == VoiceTutorTranscriptMetadata.INCOMPLETE_EVENT) {
+                    // Only the private in-process worker can persist this integrity fence.
+                    if (persist || forwardToClient) return@relaySideband false
+                    return@relaySideband inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull() == true
+                }
                 if (type == VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT) {
                     // Only the server-side semantic input path emits this type.
                     // It is never client/provider data and follows the exact
@@ -437,7 +443,7 @@ class VoiceTutorControlWebSocketHandler(
                 principal = principal,
                 sessionId = sessionId,
                 providerSessionId = callId,
-                reason = endReason.get(),
+                reason = if (transcriptIntegrityFailed.get()) "INCOMPLETE_TRANSCRIPT" else endReason.get(),
                 failed = failure.get() != null,
                 failureMessage = failure.get()?.let {
                     if (it is VoiceTutorClientProtocolException) {
@@ -486,6 +492,9 @@ class VoiceTutorControlWebSocketHandler(
         val providerWork = providerRelay
             .doOnSuccess { signalTerminal("PROVIDER_RELAY_COMPLETE", cancelActiveResponse = false) }
             .doOnError { error ->
+                if (error is com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorTranscriptIntegrityException) {
+                    transcriptIntegrityFailed.set(true)
+                }
                 if (signalTerminal(
                         "PROVIDER_RELAY_ERROR", cancelActiveResponse = false,
                         reason = "PROVIDER_ERROR", error = error,
@@ -576,6 +585,7 @@ class VoiceTutorControlWebSocketHandler(
                     "quotaRemainingSeconds" to status.quota.remainingSeconds,
                     "transport" to "WEBRTC",
                     "pauseProtocol" to VoiceTutorRealtimeContract.PAUSE_PROTOCOL,
+                    "turnProtocol" to VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL,
                 ),
             ),
         )
@@ -601,6 +611,9 @@ class VoiceTutorControlWebSocketHandler(
     ): Mono<Boolean> {
         val node = runCatching { mapper.readTree(raw) }.getOrNull() ?: return Mono.just(false)
         return when (node.path("type").asText()) {
+            VoiceTutorTranscriptMetadata.INCOMPLETE_EVENT -> mono {
+                relay.markTranscriptIncomplete(principal, sessionId)
+            }
             "conversation.item.input_audio_transcription.completed" -> appendTranscript(
                 principal,
                 sessionId,
@@ -612,6 +625,8 @@ class VoiceTutorControlWebSocketHandler(
                 askedStudyQuestion = VoiceTutorTranscriptMetadata.askedStudyQuestion(node),
                 studyAnswerProviderItemIds = VoiceTutorTranscriptMetadata.studyAnswerProviderItemIds(node),
                 acceptedAt = VoiceTutorTranscriptMetadata.acceptedAt(node),
+                postCallEvidence = VoiceTutorTranscriptMetadata.postCallEvidence(node),
+                conversationSequence = VoiceTutorTranscriptMetadata.conversationSequence(node),
             )
             "response.output_audio_transcript.done" -> appendTranscript(
                 principal,
@@ -622,6 +637,9 @@ class VoiceTutorControlWebSocketHandler(
                 VoiceTutorTranscriptMetadata.lessonRevision(node),
                 studyAnswerProviderItemId = VoiceTutorTranscriptMetadata.studyAnswerProviderItemId(node),
                 isStudyQuestion = VoiceTutorTranscriptMetadata.isStudyQuestion(node),
+                acceptedAt = VoiceTutorTranscriptMetadata.acceptedAt(node),
+                postCallEvidence = VoiceTutorTranscriptMetadata.postCallEvidence(node),
+                conversationSequence = VoiceTutorTranscriptMetadata.conversationSequence(node),
             )
             else -> Mono.just(false)
         }
@@ -640,6 +658,8 @@ class VoiceTutorControlWebSocketHandler(
         isStudyQuestion: Boolean = false,
         studyAnswerProviderItemIds: List<String> = emptyList(),
         acceptedAt: Instant? = null,
+        postCallEvidence: Boolean = false,
+        conversationSequence: Long? = null,
     ): Mono<Boolean> = if (transcript.isBlank()) {
         Mono.just(false)
     } else {
@@ -658,6 +678,8 @@ class VoiceTutorControlWebSocketHandler(
                 isStudyQuestion = isStudyQuestion,
                 studyAnswerProviderItemIds = studyAnswerProviderItemIds,
                 acceptedBeforeQuotaCutoff = acceptedAt != null,
+                postCallEvidence = postCallEvidence,
+                conversationSequence = conversationSequence,
             )
         }
     }

@@ -144,6 +144,20 @@ internal class VoiceTutorRealtimeEventPolicy(
                     ProviderEventDecision(payload = null)
                 }
             }
+            VoiceTutorRealtimeContract.STUDY_FOCUSED_EVENT -> {
+                val focus = node.path("focus")
+                val parent = focus.path("parentStudyId")
+                fun positive(field: String) = focus.path(field).let {
+                    it.isIntegralNumber && it.canConvertToLong() && it.longValue() > 0
+                }
+                if (transport != VoiceTutorProviderTransport.WEBRTC_SIDEBAND ||
+                    !(focus.isNull || (focus.isObject && positive("studyId") && positive("revision") &&
+                        (parent.isNull || positive("parentStudyId")) && focus.path("topic").isTextual &&
+                        focus.path("topic").asText().isNotBlank() && focus.path("topic").asText().length <= 255 &&
+                        focus.path("difficulty").isIntegralNumber && focus.path("difficulty").asInt() in 1..10))
+                ) ProviderEventDecision(payload = null)
+                else ProviderEventDecision(mapper.writeValueAsString(mapOf("type" to type, "focus" to focus)))
+            }
             VoiceTutorRealtimeContract.PAUSE_STATE_EVENT -> {
                 val sequence = node.path("sequence")
                 val paused = node.path("paused")
@@ -210,7 +224,9 @@ internal class VoiceTutorRealtimeEventPolicy(
             !node.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_ID) &&
             !node.has(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS) &&
             !node.has(VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION) &&
-            !node.has(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION)
+            !node.has(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION) &&
+            !node.has(VoiceTutorTranscriptMetadata.POST_CALL_EVIDENCE) &&
+            !node.has(VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE)
         ) return raw
         val publicNode = node.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
         publicNode.remove(VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS)
@@ -220,6 +236,8 @@ internal class VoiceTutorRealtimeEventPolicy(
         publicNode.remove(VoiceTutorTranscriptMetadata.STUDY_ANSWER_PROVIDER_ITEM_IDS)
         publicNode.remove(VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION)
         publicNode.remove(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION)
+        publicNode.remove(VoiceTutorTranscriptMetadata.POST_CALL_EVIDENCE)
+        publicNode.remove(VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE)
         return mapper.writeValueAsString(publicNode)
     }
 

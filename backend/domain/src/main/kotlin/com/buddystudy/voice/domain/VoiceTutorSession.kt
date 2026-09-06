@@ -69,6 +69,8 @@ data class VoiceTutorSession(
      * changes the user's allowance while the call is active.
      */
     val monthlyQuotaExhaustsAtHardEnd: Boolean = false,
+    /** Missing native source must never be interpreted as a complete learner answer. */
+    val postCallTranscriptIncomplete: Boolean = false,
 )
 
 data class VoiceTutorRecording(
@@ -110,6 +112,8 @@ data class VoiceTutorTranscriptTurn(
     val askedStudyQuestion: Boolean = false,
     /** Server-owned proof that this completed TUTOR item was issued for a substantive study question. */
     val isStudyQuestion: Boolean = false,
+    /** Clean native-realtime source; learning semantics are verified only after the call. */
+    val postCallEvidence: Boolean = false,
 )
 
 data class VoiceTutorResult(

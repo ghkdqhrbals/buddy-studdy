@@ -1489,6 +1489,33 @@ class VoiceTutorStudyContextAdapterTest {
         assertThat(focusCount()).isZero()
     }
 
+    @Test
+    fun `native focus uses spoken order despite preambles and late ASR while retaining one focus per learner`() = runBlocking<Unit> {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        insertStudy(10, topic = "Redis", difficulty = 3)
+        insertStudy(20, topic = "Spring", difficulty = 7)
+        insertTranscriptTurn(100, discovery.id, sequenceNumber = 2)
+        val first = transaction { requireNotNull(adapter.focusFromRealtimeModel(
+            7, discovery.id, 10, 100, 0, VoiceTutorStudyTargetCandidate(10, null, "Redis", 3), commitAuthority(),
+        )) }
+        assertThat(first.revision).isEqualTo(1)
+        insertTranscriptTurn(200, discovery.id, role = "TUTOR", sequenceNumber = 3)
+        insertTranscriptTurn(50, discovery.id, sequenceNumber = 4)
+        insertTranscriptTurn(300, discovery.id, role = "TUTOR", sequenceNumber = 5)
+        insertTranscriptTurn(400, discovery.id, sequenceNumber = 1) // Older speech whose ASR arrived last.
+        val selected = transaction { requireNotNull(adapter.focusFromRealtimeModel(
+            7, discovery.id, 20, 50, 1, VoiceTutorStudyTargetCandidate(20, null, "Spring", 7), commitAuthority(),
+        )) }
+        assertThat(selected.studyId).isEqualTo(20)
+        assertThat(selected.revision).isEqualTo(2)
+        transaction {
+            assertThat(adapter.focusFromRealtimeModel(7, discovery.id, 10, 50, 2,
+                VoiceTutorStudyTargetCandidate(10, null, "Redis", 3), commitAuthority())).isNull()
+        }
+        assertThat(focusCount()).isEqualTo(2)
+    }
+
     private suspend fun focusCount(): Long = database.sql("select count(*) as count from voice_tutor_lesson_focuses")
         .map { row, _ -> (row.get("count") as Number).toLong() }.one().awaitSingle()
 

@@ -38,6 +38,7 @@ class VoiceTutorLessonRevisionPersistenceTest {
                 reserved_seconds int not null default 3600, charged_seconds int not null default 0,
                 max_session_seconds int not null default 3600, hard_ends_at timestamp not null,
                 monthly_quota_exhausts_at_hard_end boolean not null default false,
+                post_call_transcript_incomplete boolean not null default false,
                 connected_at timestamp null, relay_heartbeat_at timestamp null,
                 accepted_audio_bytes bigint not null default 0, recording_consented_at timestamp null,
                 recording_consent_version varchar(64) null, ended_at timestamp null, finalized_at timestamp null,
@@ -56,11 +57,13 @@ class VoiceTutorLessonRevisionPersistenceTest {
                 study_answer_turn_id bigint null,
                 asked_study_question boolean not null default false,
                 is_study_question boolean not null default false,
+                post_call_evidence boolean not null default false,
                 check (study_question_turn_id is null or role = 'USER'),
                 check (study_question_turn_id is null or asked_study_question = false),
                 check (study_answer_turn_id is null or role = 'TUTOR'),
                 check (is_study_question = false or role = 'TUTOR'),
-                unique (session_id, provider_item_id, role)
+                unique (session_id, provider_item_id, role),
+                unique (session_id, sequence_number)
             )
         """.trimIndent())
         execute("""
@@ -72,6 +75,18 @@ class VoiceTutorLessonRevisionPersistenceTest {
         """.trimIndent())
         seedSession("owned", userId = 7, studyId = 42)
         seedSession("foreign", userId = 8, studyId = 43)
+    }
+
+    @Test
+    fun `native source integrity fence is durable owner bound and idempotent`(): Unit = runBlocking {
+        assertThat(adapter.findSession(7, "owned")!!.postCallTranscriptIncomplete).isFalse()
+        assertThat(adapter.markTranscriptIncomplete(8, "owned", now)).isFalse()
+        assertThat(adapter.markTranscriptIncomplete(7, "owned", now)).isTrue()
+        assertThat(adapter.markTranscriptIncomplete(7, "owned", now.plusSeconds(1))).isTrue()
+        assertThat(adapter.findSession(7, "owned")!!.postCallTranscriptIncomplete).isTrue()
+        assertThat(adapter.findSession(8, "foreign")!!.postCallTranscriptIncomplete).isFalse()
+        execute("update voice_tutor_sessions set result_status = 'COMPLETED' where id = 'foreign'")
+        assertThat(adapter.markTranscriptIncomplete(8, "foreign", now)).isFalse()
     }
 
     @Test
@@ -614,6 +629,35 @@ class VoiceTutorLessonRevisionPersistenceTest {
         ).isFalse()
 
         assertThat(adapter.transcript(7, "owned", 4_000).single().askedStudyQuestion).isFalse()
+    }
+
+    @Test
+    fun `native final ASR arrival order cannot reorder conversation or establish learning`() = runBlocking<Unit> {
+        execute("insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 1, 42, current_timestamp)")
+        assertThat(adapter.appendTranscript(7, "owned", "user", VoiceTutorTranscriptRole.USER, "응", now,
+            4000, 20, lessonRevision = 1, postCallEvidence = true, conversationSequence = 20)).isTrue()
+        assertThat(adapter.appendTranscript(7, "owned", "tutor", VoiceTutorTranscriptRole.TUTOR, "레벨을 바꿀까요?", now,
+            4000, 20, lessonRevision = 1, postCallEvidence = true, conversationSequence = 10)).isTrue()
+        val turns = adapter.transcript(7, "owned", 4000)
+        assertThat(turns.map { it.providerItemId }).containsExactly("tutor", "user")
+        assertThat(turns.map { it.sequenceNumber }).containsExactly(10L, 20L)
+        assertThat(turns.all { it.postCallEvidence && !it.isStudyQuestion && it.studyQuestionTurnId == null }).isTrue()
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isFalse()
+        assertThat(adapter.hasPostCallLearningCandidates(7, "owned")).isTrue()
+        assertThat(adapter.hasPostCallLearningCandidates(8, "owned")).isFalse()
+    }
+
+    @Test
+    fun `native input cannot mix live semantic flags or supply an invalid sequence`() = runBlocking<Unit> {
+        assertThat(adapter.appendTranscript(7, "owned", "invalid", VoiceTutorTranscriptRole.TUTOR, "원문", now,
+            4000, 20, postCallEvidence = true, conversationSequence = 0)).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "invalid", VoiceTutorTranscriptRole.TUTOR, "원문", now,
+            4000, 20, postCallEvidence = true, conversationSequence = 1, isStudyQuestion = true)).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "invalid", VoiceTutorTranscriptRole.USER, "원문", now,
+            4000, 20, postCallEvidence = true, conversationSequence = 1, studyQuestionProviderItemId = "question")).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "invalid", VoiceTutorTranscriptRole.USER, "원문", now,
+            4000, 20, conversationSequence = 1)).isFalse()
+        assertThat(adapter.transcript(7, "owned", 4000)).isEmpty()
     }
 
     private suspend fun append(

@@ -7,9 +7,9 @@ enum VoiceTutorLocalSpeechDeliveryError: Error, Equatable {
     case staleAttempt
 }
 
-enum VoiceTutorLocalSpeechProtocol {
+enum VoiceTutorTurnProtocol {
     static let capabilityHeader = "X-Voice-Turn-Protocol"
-    static let capabilityValue = "local-vad-v1"
+    static let capabilityValue = "realtime-native-v1"
 
     static func addingCapability(to request: URLRequest) -> URLRequest {
         var request = request
@@ -17,9 +17,21 @@ enum VoiceTutorLocalSpeechProtocol {
         return request
     }
 
-    static func payload(for event: VoiceTutorLocalSpeechEvent) throws -> [String: Any] {
-        guard event.sequence > 0 else { throw VoiceTutorLocalSpeechDeliveryError.invalidSequence }
-        return ["type": event.messageType, "sequence": event.sequence]
+    static func acceptsReady(_ protocolValue: String?) -> Bool {
+        protocolValue == capabilityValue
+    }
+
+    /// Silero sends only numbered acoustic boundaries. The backend commits
+    /// audio; the Realtime model interprets meaning and tool intent in context.
+    static func payload(for event: VoiceTutorCallControlEvent) throws -> [String: Any] {
+        switch event {
+        case .speech(let speech):
+            guard speech.sequence > 0 else { throw VoiceTutorLocalSpeechDeliveryError.invalidSequence }
+            return ["type": speech.messageType, "sequence": speech.sequence]
+        case .pause(let command):
+            guard command.sequence > 0 else { throw VoiceTutorLocalSpeechDeliveryError.invalidSequence }
+            return ["type": command.kind.rawValue, "sequence": command.sequence]
+        }
     }
 }
 
@@ -77,7 +89,10 @@ struct VoiceTutorRealtimeAudioDelta: Equatable, Sendable {
 }
 
 enum VoiceTutorRealtimeEvent: Equatable, Sendable {
-    case sessionReady(hardEndsAt: Date?, quotaRemainingSeconds: Int?, pauseProtocol: String? = nil)
+    case sessionReady(
+        hardEndsAt: Date?, quotaRemainingSeconds: Int?, pauseProtocol: String? = nil,
+        turnProtocol: String? = nil
+    )
     case pauseAcknowledged(sequence: Int64, paused: Bool)
     case quotaUpdated(VoiceTutorRealtimeQuotaUpdate)
     case sessionEnding(reason: String?, hardEndsAt: Date?)
@@ -138,7 +153,8 @@ enum VoiceTutorRealtimeEventParser {
             return .sessionReady(
                 hardEndsAt: date("hardEndsAt", in: object),
                 quotaRemainingSeconds: integer("quotaRemainingSeconds", in: object),
-                pauseProtocol: string("pauseProtocol", in: object)
+                pauseProtocol: string("pauseProtocol", in: object),
+                turnProtocol: string("turnProtocol", in: object)
             )
         case "buddystudy.voice.pause.state":
             guard let number = object["sequence"] as? NSNumber,
@@ -457,23 +473,12 @@ actor VoiceTutorWebSocketTransport {
         try await socketTask.send(.string(text))
     }
 
-    func sendInputSpeechActivity(_ event: VoiceTutorLocalSpeechEvent, attemptID: UUID) async throws {
-        try await sendCallControl(.speech(event), attemptID: attemptID)
-    }
-
     func sendCallControl(_ event: VoiceTutorCallControlEvent, attemptID: UUID) async throws {
         guard localSpeechAttemptID == attemptID else { throw VoiceTutorLocalSpeechDeliveryError.staleAttempt }
         guard let socketTask else { throw TransportError.notConnected }
         // Capture this attempt's socket before the first suspension. A delayed
         // old pump can never send its utterance sequence to a retried call.
-        let payload: [String: Any]
-        switch event {
-        case .speech(let speech):
-            payload = try VoiceTutorLocalSpeechProtocol.payload(for: speech)
-        case .pause(let command):
-            guard command.sequence > 0 else { throw VoiceTutorLocalSpeechDeliveryError.invalidSequence }
-            payload = ["type": command.kind.rawValue, "sequence": command.sequence]
-        }
+        let payload = try VoiceTutorTurnProtocol.payload(for: event)
         let data = try JSONSerialization.data(withJSONObject: payload)
         guard let text = String(data: data, encoding: .utf8) else {
             throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8

@@ -188,6 +188,24 @@ class OpenAIVoiceTutorWebRtcAdapter(
         context: VoiceTutorWebRtcControlContext,
         clientEvents: Flow<String>,
         terminalEvents: Flow<VoiceTutorRelayTermination>,
+        onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
+    ) {
+        val callId = validateWebRtcCallId(context.callId)
+        val uri = UriComponentsBuilder.fromUriString(OPENAI_REALTIME_SIDEBAND_URL)
+            .queryParam("call_id", callId).build(true).toUri()
+        val headers = HttpHeaders().apply { setBearerAuth(properties.openai.userContentApiKey) }
+        sidebandClient.execute(uri, headers) { session ->
+            relayVoiceTutorNativeSession(session, context, clientEvents, terminalEvents, mcpTools,
+                Duration.ofSeconds(properties.voiceTutor.connectTimeoutSeconds.coerceIn(5, 300)),
+                Duration.ofSeconds(properties.voiceTutor.responseTimeoutSeconds.coerceIn(10, 120)), onProviderEvent)
+        }.awaitSingleOrNull()
+    }
+
+    /** Retained only for protocol regression fixtures; realtime-native-v1 never enters classifier gates. */
+    private suspend fun relayLegacyManualSideband(
+        context: VoiceTutorWebRtcControlContext,
+        clientEvents: Flow<String>,
+        terminalEvents: Flow<VoiceTutorRelayTermination>,
         onProviderEvent: suspend (
             raw: String,
             persist: Boolean,
@@ -381,12 +399,13 @@ class OpenAIVoiceTutorWebRtcAdapter(
             "model" to request.model,
             "instructions" to request.instructions,
             "output_modalities" to listOf("audio"),
-            "tools" to voiceTutorRealtimeFunctionTools(mcpTools.definitions()),
+            "tools" to voiceTutorRealtimeFunctionTools(nativeVoiceTutorDefinitions(mcpTools)),
             "tool_choice" to "auto",
             "audio" to linkedMapOf(
                 "input" to linkedMapOf(
                     "transcription" to voiceTutorInputTranscription(request.language),
-                    "turn_detection" to voiceTutorManualWebRtcTurnDetection(),
+                    "turn_detection" to voiceTutorNativeWebRtcTurnDetection(),
+                    "noise_reduction" to mapOf("type" to "near_field"),
                 ),
                 "output" to linkedMapOf(
                     "voice" to request.voice,

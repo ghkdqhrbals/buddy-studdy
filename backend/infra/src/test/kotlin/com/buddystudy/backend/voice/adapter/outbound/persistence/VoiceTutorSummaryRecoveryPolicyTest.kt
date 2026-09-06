@@ -61,6 +61,15 @@ class VoiceTutorSummaryRecoveryPolicyTest {
     }
 
     @Test
+    fun `incomplete native source is not mistaken for a recoverable historical transport result`() {
+        val failedSession = session(VoiceTutorSessionStatus.FAILED, VoiceTutorResultStatus.FAILED).copy(
+            postCallTranscriptIncomplete = true,
+            failureMessage = "INCOMPLETE_TRANSCRIPT",
+        )
+        assertThat(claim(failedSession, result(VoiceTutorResultStatus.FAILED, error = "INCOMPLETE_TRANSCRIPT"))).isFalse()
+    }
+
+    @Test
     fun `fresh processing leases reject concurrent claim and expired leases recover exactly at boundary`() {
         val session = session(VoiceTutorSessionStatus.FAILED, VoiceTutorResultStatus.PROCESSING)
         val processing = result(VoiceTutorResultStatus.PROCESSING).copy(updatedAt = now.minusSeconds(300))

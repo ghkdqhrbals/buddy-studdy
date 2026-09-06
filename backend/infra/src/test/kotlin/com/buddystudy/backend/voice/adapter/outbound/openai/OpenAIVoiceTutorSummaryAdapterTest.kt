@@ -563,6 +563,127 @@ class OpenAIVoiceTutorSummaryAdapterTest {
         assertThat(error.message).doesNotContain("PRIVATE_", "private-test-regular-key")
     }
 
+    @Test
+    fun `native setup only verdict completes empty without a prose summary request`() = runBlocking<Unit> {
+        var calls = 0
+        var body: JsonNode? = null
+        val provider = adapter(exchange = ExchangeFunction { request ->
+            calls += 1
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map {
+                    body = mapper.readTree(it)
+                    response(envelope("""{"exchanges":[],"learnerQuestions":[]}"""))
+                }
+            })
+        })
+        val source = nativeTurns().take(2).mapIndexed { index, turn ->
+            turn.copy(transcript = if (index == 0) "스프링을 레벨 7로 바꿀까요?" else "네")
+        }
+        val result = provider.summarize(session(), source)
+        assertThat(calls).isEqualTo(1)
+        assertThat(result.model).isEqualTo("system")
+        assertThat(result.summaryMarkdown).isEmpty()
+        assertThat(result.explorations).isEmpty()
+        assertThat(result.strengths).isEmpty()
+        assertThat(result.improvements).isEmpty()
+        assertThat(result.postCallEvidence!!.exchanges).isEmpty()
+        assertThat(body!!.path("response_format").path("json_schema").path("name").asText())
+            .isEqualTo("voice_tutor_post_call_evidence")
+        assertThat(body!!.path("messages")[0].path("content").asText())
+            .contains("NOT learning", "not a selected prefix/suffix/subset", "untrusted quoted source")
+    }
+
+    @Test
+    fun `native call first verifies exact Q and A then reuses summary evidence without changing raw rows`() = runBlocking<Unit> {
+        val requests = mutableListOf<JsonNode>()
+        val properties = properties()
+        val provider = OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties,
+            ExchangeFunction { request ->
+                val output = MockClientHttpRequest(request.method(), request.url())
+                request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                    output.bodyAsString.map {
+                        requests.add(mapper.readTree(it))
+                        response(envelope(if (requests.size == 1) nativeEvidence() else lessonResult()))
+                    }
+                })
+            }, immutableContext(listOf(VoiceTutorStudySnapshot(43, 42, "Redis eviction", 7, 1))),
+            immutableFocuses(listOf(VoiceTutorLessonFocus(43, 1))),
+        )
+        val source = nativeTurns().map { it.copy(lessonRevision = 1) }
+        val result = provider.summarize(session(), source)
+        assertThat(requests).hasSize(2)
+        assertThat(result.explorations.single().exchanges.single().score).isEqualTo(85)
+        assertThat(result.postCallEvidence!!.exchanges.single().answerTurnIds).containsExactly(2L)
+        val secondInput = mapper.readTree(requests[1].path("messages").last().path("content").textValue())
+        assertThat(secondInput.path("transcriptTurns")[0].path("isStudyQuestion").booleanValue()).isTrue()
+        assertThat(secondInput.path("transcriptTurns")[1].path("studyQuestionTurnId").longValue()).isEqualTo(1)
+        assertThat(secondInput.path("transcriptTurns")[2].path("studyAnswerTurnId").longValue()).isEqualTo(2)
+        assertThat(source.all { !it.isStudyQuestion && it.studyQuestionTurnId == null && it.studyAnswerTurnId == null }).isTrue()
+    }
+
+    @Test
+    fun `native evidence cannot cite an invented or partial answer before summary generation`() = runBlocking<Unit> {
+        listOf(
+            """{"exchanges":[{"questionTurnId":1,"answerTurnIds":[99],"feedbackTurnId":3}],"learnerQuestions":[]}""",
+            """{"exchanges":[{"questionTurnId":1,"answerTurnIds":[2],"feedbackTurnId":null}],"learnerQuestions":[]}""",
+        ).forEach { invalid ->
+            var calls = 0
+            val provider = adapter(exchange = ExchangeFunction {
+                calls += 1
+                Mono.just(response(envelope(invalid)))
+            })
+            val source = nativeTurns().toMutableList().apply {
+                add(2, this[1].copy(id = 4, providerItemId = "continued-answer", sequenceNumber = 3))
+                this[3] = this[3].copy(sequenceNumber = 4)
+            }
+            assertProviderFailure(runCatching { provider.summarize(session(), source) }.exceptionOrNull())
+            assertThat(calls).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `native evidence refuses incomplete model output before summary generation`() = runBlocking<Unit> {
+        var calls = 0
+        val provider = adapter(exchange = ExchangeFunction {
+            calls += 1
+            Mono.just(response(envelope(nativeEvidence(), finishReason = "length")))
+        })
+        assertProviderFailure(runCatching { provider.summarize(session(), nativeTurns()) }.exceptionOrNull())
+        assertThat(calls).isEqualTo(1)
+    }
+
+    private fun nativeTurns() = lessonTurns().map {
+        it.copy(isStudyQuestion = false, studyQuestionTurnId = null, studyAnswerTurnId = null, postCallEvidence = true)
+    }
+
+    @Test
+    fun `second pass rejects setup even when first postcall classifier proposed a Q and A link`() = runBlocking<Unit> {
+        val requests = mutableListOf<JsonNode>()
+        val provider = adapter(exchange = ExchangeFunction { request ->
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map {
+                    requests.add(mapper.readTree(it))
+                    response(envelope(if (requests.size == 1) nativeEvidence() else result(summary = "")))
+                }
+            })
+        })
+        val source = nativeTurns().mapIndexed { index, turn ->
+            turn.copy(transcript = listOf("레벨 7로 바꿀까요?", "네", "레벨 7로 바꿨어요.")[index])
+        }
+        val generated = provider.summarize(session(), source)
+        assertThat(requests).hasSize(2)
+        assertThat(requests[1].path("messages").map { it.path("content").asText() }.joinToString("\n"))
+            .contains("independently verify", "Do not assume the flags alone")
+        assertThat(generated.summaryMarkdown).isEmpty()
+        assertThat(generated.explorations).isEmpty()
+        assertThat(generated.postCallEvidence!!.exchanges).isEmpty()
+    }
+
+    private fun nativeEvidence() =
+        """{"exchanges":[{"questionTurnId":1,"answerTurnIds":[2],"feedbackTurnId":3}],"learnerQuestions":[]}"""
+
     private fun adapter(properties: BuddyStudyProperties = properties(), exchange: ExchangeFunction) =
         OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties, exchange)
 

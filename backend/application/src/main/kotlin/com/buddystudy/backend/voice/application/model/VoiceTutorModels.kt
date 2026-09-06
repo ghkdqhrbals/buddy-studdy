@@ -181,6 +181,8 @@ data class VoiceTutorGeneratedResult(
     val model: String,
     val promptVersion: String,
     val explorations: List<VoiceTutorExploration> = emptyList(),
+    /** Internal source-bound metadata; never included in public/session response DTOs. */
+    val postCallEvidence: com.buddystudy.voice.domain.VoiceTutorPostCallEvidence? = null,
 )
 
 data class VoiceTutorRelayContext(

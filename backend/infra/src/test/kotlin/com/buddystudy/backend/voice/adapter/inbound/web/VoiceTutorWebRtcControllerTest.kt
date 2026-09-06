@@ -18,12 +18,12 @@ class VoiceTutorWebRtcControllerTest {
             override suspend fun negotiate(sessionId: String, offerSdp: String, authentication: Authentication): VoiceTutorWebRtcAnswer =
                 error("Capability must be checked before provider negotiation.")
         })
-        for (capability in listOf(null, "", "local-vad-v0", "local-vad-v1,other")) {
+        for (capability in listOf(null, "", "local-vad-v0", "local-vad-v1", "realtime-native-v1,other")) {
             val result = controller.negotiate("test-session", "test-offer", authentication, capability)
             assertThat(result.statusCode).isEqualTo(HttpStatus.UPGRADE_REQUIRED)
             assertThat(result.body).isNull()
             assertThat(result.headers.getFirst("Cache-Control")).isEqualTo("no-store")
-            assertThat(result.headers.getFirst(VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER)).isEqualTo("local-vad-v1")
+            assertThat(result.headers.getFirst(VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER)).isEqualTo("realtime-native-v1")
         }
     }
 
@@ -39,7 +39,7 @@ class VoiceTutorWebRtcControllerTest {
                 return VoiceTutorWebRtcAnswer("test-answer", "private-provider-call")
             }
         })
-        val result = controller.negotiate("test-session", "test-offer", authentication, VoiceTutorRealtimeContract.LOCAL_VAD_TURN_PROTOCOL)
+        val result = controller.negotiate("test-session", "test-offer", authentication, VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL)
         assertThat(negotiations).isEqualTo(1)
         assertThat(result.statusCode).isEqualTo(HttpStatus.OK)
         assertThat(result.headers.contentType.toString()).isEqualTo("application/sdp")

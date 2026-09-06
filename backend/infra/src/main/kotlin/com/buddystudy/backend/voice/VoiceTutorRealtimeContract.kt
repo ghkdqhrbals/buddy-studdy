@@ -20,6 +20,7 @@ internal object VoiceTutorRealtimeContract {
     const val STUDY_FOCUSED_EVENT = "buddystudy.voice.study.focused"
     const val TURN_PROTOCOL_HEADER = "X-Voice-Turn-Protocol"
     const val LOCAL_VAD_TURN_PROTOCOL = "local-vad-v1"
+    const val REALTIME_NATIVE_TURN_PROTOCOL = "realtime-native-v1"
     const val PAUSE_PROTOCOL = "pause-v1"
     const val PAUSE_REQUEST_EVENT = "buddystudy.voice.pause.request"
     const val PAUSE_INPUT_QUIESCED_EVENT = "buddystudy.voice.pause.input.quiesced"

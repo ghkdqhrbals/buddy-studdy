@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice.adapter.outbound.persistence
 
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMutationConfirmationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearnerTurnAuthorization
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistedDialogueBoundary
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Component
@@ -11,6 +12,65 @@ import org.springframework.stereotype.Component
 class VoiceTutorMutationConfirmationAdapter(private val database: DatabaseClient) : VoiceTutorMutationConfirmationPort {
     override suspend fun latestLearnerTurnId(userId: Long, sessionId: String): Long? = latestTurn(userId, sessionId, "USER")
     override suspend fun latestTutorTurnId(userId: Long, sessionId: String): Long? = latestTurn(userId, sessionId, "TUTOR")
+
+    override suspend fun persistedLearnerTurnId(
+        userId: Long, sessionId: String, providerItemId: String, lessonRevision: Long,
+    ): Long? {
+        if (userId <= 0 || sessionId.isBlank() || !validProviderItemId(providerItemId) || lessonRevision < 0) return null
+        return database.sql(
+            """
+            SELECT t.id FROM voice_tutor_transcript_turns t
+            JOIN voice_tutor_sessions s ON s.id = t.session_id
+            WHERE s.user_id = :userId AND s.id = :sessionId AND s.status = 'ACTIVE' AND s.ended_at IS NULL
+              AND t.role = 'USER' AND t.provider_item_id = :providerItemId AND t.lesson_revision = :revision
+              AND NOT EXISTS (SELECT 1 FROM voice_tutor_transcript_turns newer
+                WHERE newer.session_id = t.session_id AND newer.role = 'USER'
+                  AND newer.sequence_number > t.sequence_number)
+            LIMIT 1
+            """.trimIndent(),
+        ).bind("userId", userId).bind("sessionId", sessionId).bind("providerItemId", providerItemId)
+            .bind("revision", lessonRevision).map { row, _ -> (row.get("id") as Number).toLong() }
+            .one().awaitSingleOrNull()
+    }
+
+    override suspend fun persistedDialogueBoundary(
+        userId: Long,
+        sessionId: String,
+        learnerProviderItemId: String,
+        tutorProviderItemId: String,
+        lessonRevision: Long,
+    ): VoiceTutorPersistedDialogueBoundary? {
+        if (userId <= 0 || sessionId.isBlank() || lessonRevision < 0 ||
+            !validProviderItemId(learnerProviderItemId) || !validProviderItemId(tutorProviderItemId)
+        ) return null
+        return database.sql(
+            """
+            SELECT learner.id AS learner_id, tutor.id AS tutor_id
+            FROM voice_tutor_transcript_turns learner
+            JOIN voice_tutor_sessions s ON s.id = learner.session_id
+            JOIN voice_tutor_transcript_turns tutor ON tutor.session_id = learner.session_id
+            WHERE s.user_id = :userId AND s.id = :sessionId
+              AND s.status = 'ACTIVE' AND s.ended_at IS NULL
+              AND learner.role = 'USER' AND learner.provider_item_id = :learnerItem
+              AND tutor.role = 'TUTOR' AND tutor.provider_item_id = :tutorItem
+              AND learner.lesson_revision = :revision AND tutor.lesson_revision = :revision
+              AND tutor.sequence_number < learner.sequence_number
+              AND NOT EXISTS (SELECT 1 FROM voice_tutor_transcript_turns newer
+                WHERE newer.session_id = learner.session_id AND newer.role = 'USER'
+                  AND newer.sequence_number > learner.sequence_number)
+              AND NOT EXISTS (SELECT 1 FROM voice_tutor_transcript_turns intervening
+                WHERE intervening.session_id = learner.session_id AND intervening.role = 'TUTOR'
+                  AND intervening.sequence_number > tutor.sequence_number
+                  AND intervening.sequence_number < learner.sequence_number)
+            LIMIT 1
+            """.trimIndent(),
+        ).bind("userId", userId).bind("sessionId", sessionId)
+            .bind("learnerItem", learnerProviderItemId).bind("tutorItem", tutorProviderItemId)
+            .bind("revision", lessonRevision)
+            .map { row, _ -> VoiceTutorPersistedDialogueBoundary(
+                (row.get("learner_id") as Number).toLong(), (row.get("tutor_id") as Number).toLong(),
+            ) }.one().awaitSingleOrNull()
+    }
 
     override suspend fun learnerTurnAuthorization(
         userId: Long,

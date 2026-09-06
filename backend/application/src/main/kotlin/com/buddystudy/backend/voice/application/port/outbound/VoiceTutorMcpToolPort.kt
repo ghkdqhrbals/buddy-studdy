@@ -80,10 +80,24 @@ data class VoiceTutorLearnerTurnAuthorization(
     val completedExchange: Boolean,
 )
 
+/** Persisted row identities only; no separate model/regex assessment of their meaning. */
+data class VoiceTutorPersistedDialogueBoundary(val learnerTurnId: Long, val tutorTurnId: Long)
+
 /** Only persisted, accepted learner speech can advance a destructive-action confirmation. */
 interface VoiceTutorMutationConfirmationPort {
     suspend fun latestLearnerTurnId(userId: Long, sessionId: String): Long?
     suspend fun latestTutorTurnId(userId: Long, sessionId: String): Long?
+    /** Native tools may follow a tutor preamble; only a newer USER supersedes their source turn. */
+    suspend fun persistedLearnerTurnId(
+        userId: Long, sessionId: String, providerItemId: String, lessonRevision: Long,
+    ): Long? = null
+    suspend fun persistedDialogueBoundary(
+        userId: Long,
+        sessionId: String,
+        learnerProviderItemId: String,
+        tutorProviderItemId: String,
+        lessonRevision: Long,
+    ): VoiceTutorPersistedDialogueBoundary? = null
     suspend fun learnerTurnAuthorization(
         userId: Long,
         sessionId: String,
@@ -105,6 +119,7 @@ object UnavailableVoiceTutorMutationConfirmationPort : VoiceTutorMutationConfirm
 /** Executes the existing account-scoped MCP tools without exposing account credentials. */
 interface VoiceTutorMcpToolPort {
     fun definitions(): List<VoiceTutorMcpToolDefinition>
+    fun realtimeDefinitions(): List<VoiceTutorMcpToolDefinition> = definitions()
 
     suspend fun execute(
         context: VoiceTutorWebRtcControlContext,

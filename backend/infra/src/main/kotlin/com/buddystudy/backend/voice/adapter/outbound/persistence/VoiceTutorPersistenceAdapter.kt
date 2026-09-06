@@ -19,6 +19,8 @@ import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
+import com.buddystudy.voice.domain.VoiceTutorPostCallEvidence
 import com.fasterxml.jackson.module.kotlin.readValue
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.reactive.awaitSingle
@@ -41,6 +43,21 @@ class VoiceTutorPersistenceAdapter(
     private val learningRecords: VoiceStudyLearningRecordAppendPort = UnavailableVoiceStudyLearningRecordAppendPort,
 ) : VoiceTutorPersistencePort {
     private val mapper = JsonMapperProvider.mapper
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    override suspend fun markTranscriptIncomplete(userId: Long, sessionId: String, now: Instant): Boolean {
+        val session = findSessionRow(userId, sessionId, lock = true) ?: return false
+        if (session.resultStatus == VoiceTutorResultStatus.COMPLETED) return false
+        if (session.postCallTranscriptIncomplete) return true
+        return database.sql(
+            """
+            update voice_tutor_sessions
+            set post_call_transcript_incomplete = true, updated_at = :now
+            where id = :sessionId and user_id = :userId and result_status <> 'COMPLETED'
+            """.trimIndent(),
+        ).bind("now", now.utc()).bind("sessionId", sessionId).bind("userId", userId)
+            .fetch().rowsUpdated().awaitSingle() == 1L
+    }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     override suspend fun reconcileExpired(
@@ -316,6 +333,7 @@ class VoiceTutorPersistenceAdapter(
                 or (
                     session.status = 'FAILED'
                     and session.result_status = 'FAILED'
+                    and session.post_call_transcript_incomplete = false
                     and result.status = 'FAILED'
                     and result.model is null
                     and session.failure_message is not null
@@ -538,8 +556,15 @@ class VoiceTutorPersistenceAdapter(
         isStudyQuestion: Boolean,
         studyAnswerProviderItemIds: List<String>,
         acceptedBeforeQuotaCutoff: Boolean,
+        postCallEvidence: Boolean,
+        conversationSequence: Long?,
     ): Boolean {
         require(lessonRevision >= -1) { "Voice Tutor lesson revision was invalid." }
+        if (postCallEvidence && (conversationSequence == null || conversationSequence <= 0 ||
+                studyQuestionProviderItemId != null || studyAnswerProviderItemId != null ||
+                askedStudyQuestion || isStudyQuestion || studyAnswerProviderItemIds.isNotEmpty())
+        ) return false
+        if (!postCallEvidence && conversationSequence != null) return false
         val owned = database.sql(
             "select status, end_reason, provider_session_id, created_at, connected_at, hard_ends_at " +
                 "from voice_tutor_sessions where id = :sessionId and user_id = :userId for update",
@@ -585,7 +610,7 @@ class VoiceTutorPersistenceAdapter(
             maxSessionCharacters.coerceIn(1, 1_000_000),
             maxSessionTurns.coerceIn(1, 2_000),
         ) ?: return false
-        val sequence = database.sql(
+        val sequence = conversationSequence ?: database.sql(
             "select coalesce(max(sequence_number), 0) + 1 as next_sequence from voice_tutor_transcript_turns where session_id = :sessionId",
         ).bind("sessionId", sessionId)
             .map { row, _ -> row.long("next_sequence") }.one().awaitSingle()
@@ -754,11 +779,11 @@ class VoiceTutorPersistenceAdapter(
             insert ignore into voice_tutor_transcript_turns (
                 session_id, provider_item_id, role, transcript, sequence_number, occurred_at, created_at,
                 lesson_revision, study_question_turn_id, study_answer_turn_id,
-                asked_study_question, is_study_question
+                asked_study_question, is_study_question, post_call_evidence
             ) values (
                 :sessionId, :providerItemId, :role, :transcript, :sequenceNumber, :occurredAt, :occurredAt,
                 :lessonRevision, :studyQuestionTurnId, :studyAnswerTurnId,
-                :askedStudyQuestion, :isStudyQuestion
+                :askedStudyQuestion, :isStudyQuestion, :postCallEvidence
             )
             """.trimIndent(),
         ).bind("sessionId", sessionId).bind("providerItemId", providerItemId)
@@ -767,6 +792,7 @@ class VoiceTutorPersistenceAdapter(
             .bind("lessonRevision", lessonRevision)
             .bind("askedStudyQuestion", verifiedAskedStudyQuestion)
             .bind("isStudyQuestion", verifiedIsStudyQuestion)
+            .bind("postCallEvidence", postCallEvidence)
         insert = if (verifiedStudyQuestionTurnId == null) {
             insert.bindNull("studyQuestionTurnId", java.lang.Long::class.java)
         } else {
@@ -854,6 +880,29 @@ class VoiceTutorPersistenceAdapter(
     ).bind("sessionId", sessionId).bind("userId", userId)
         .map { row, _ -> row.long("verified_count") > 0 }.one().awaitSingle()
 
+    override suspend fun hasPostCallLearningCandidates(userId: Long, sessionId: String): Boolean = database.sql(
+        """
+        select count(*) as candidate_count
+        from voice_tutor_transcript_turns question
+        join voice_tutor_sessions session on session.id = question.session_id
+        where question.session_id = :sessionId and session.user_id = :userId
+          and question.post_call_evidence = true and question.role = 'TUTOR'
+          and question.lesson_revision >= 0
+          and exists (
+              select 1 from voice_tutor_transcript_turns answer
+              where answer.session_id = question.session_id and answer.role = 'USER'
+                and answer.post_call_evidence = true
+                and answer.lesson_revision = question.lesson_revision
+                and answer.sequence_number > question.sequence_number
+          )
+          and exists (
+              select 1 from voice_tutor_lesson_focuses focus
+              where focus.session_id = question.session_id and focus.revision <= question.lesson_revision
+          )
+        """.trimIndent(),
+    ).bind("sessionId", sessionId).bind("userId", userId)
+        .map { row, _ -> row.long("candidate_count") > 0 }.one().awaitSingle()
+
     override suspend fun result(userId: Long, sessionId: String): VoiceTutorResult? = database.sql(
         """
         select result.*
@@ -940,7 +989,15 @@ class VoiceTutorPersistenceAdapter(
     ) {
         // Use the same owner/session lock order as claim and failure. A late
         // completion from an expired claim must not overwrite its replacement.
-        findSessionRow(userId, claim.sessionId, lock = true) ?: return
+        val lockedSession = findSessionRow(userId, claim.sessionId, lock = true) ?: return
+        if (lockedSession.postCallTranscriptIncomplete) {
+            failClaimedResult(
+                userId, claim, generated.promptVersion,
+                com.buddystudy.backend.voice.application.port.outbound.VoiceTutorResultFailureCodes.INCOMPLETE_TRANSCRIPT,
+                now,
+            )
+            return
+        }
         val updated = database.sql(
             """
             update voice_tutor_results result
@@ -971,11 +1028,49 @@ class VoiceTutorPersistenceAdapter(
             .bind("sessionId", claim.sessionId).bind("userId", userId)
             .fetch().rowsUpdated().awaitSingle()
         if (updated == 1L) {
+            generated.postCallEvidence?.let { evidence ->
+                check(lockedSession.finalizedAt != null) { "Post-call evidence requires a finalized session." }
+                persistPostCallEvidence(lockedSession, evidence)
+            }
             database.sql(
                 "update voice_tutor_sessions set result_status = 'COMPLETED', updated_at = :now where id = :sessionId and user_id = :userId and result_status = 'PROCESSING'",
             ).bind("now", now.utc()).bind("sessionId", claim.sessionId).bind("userId", userId)
                 .fetch().rowsUpdated().awaitSingle()
             learningRecords.appendCompletedSession(userId, claim.sessionId, generated.explorations, now)
+        }
+    }
+
+    /** Invoked inside the successful result-claim transaction; failure rolls back every flag/result/record. */
+    private suspend fun persistPostCallEvidence(session: VoiceTutorSession, evidence: VoiceTutorPostCallEvidence) {
+        val original = transcript(session.userId, session.id, 1_000_000)
+        val focuses = database.sql(
+            "select study_id, revision from voice_tutor_lesson_focuses where session_id = :sessionId order by revision",
+        ).bind("sessionId", session.id).map { row, _ ->
+            VoiceTutorLessonFocus(row.long("study_id"), row.long("revision"))
+        }.all().collectList().awaitSingle()
+        val attested = evidence.attestedTranscript(session.id, original, focuses, session.acceptedStudyId)
+            ?: error("Post-call learning source changed or its evidence was invalid.")
+        val originals = original.associateBy { it.id }
+        for (turn in attested) {
+            if (turn == originals[turn.id]) continue
+            var update = database.sql(
+                """
+                update voice_tutor_transcript_turns
+                set is_study_question = :isQuestion, asked_study_question = :askedQuestion,
+                    study_question_turn_id = :questionId, study_answer_turn_id = :answerId
+                where id = :turnId and session_id = :sessionId and post_call_evidence = true
+                  and role = :role and lesson_revision = :revision and sequence_number = :sequence
+                  and is_study_question = false and asked_study_question = false
+                  and study_question_turn_id is null and study_answer_turn_id is null
+                """.trimIndent(),
+            ).bind("isQuestion", turn.isStudyQuestion).bind("askedQuestion", turn.askedStudyQuestion)
+                .bind("turnId", turn.id).bind("sessionId", session.id).bind("role", turn.role.name)
+                .bind("revision", turn.lessonRevision).bind("sequence", turn.sequenceNumber)
+            update = turn.studyQuestionTurnId?.let { update.bind("questionId", it) }
+                ?: update.bindNull("questionId", java.lang.Long::class.java)
+            update = turn.studyAnswerTurnId?.let { update.bind("answerId", it) }
+                ?: update.bindNull("answerId", java.lang.Long::class.java)
+            check(update.fetch().rowsUpdated().awaitSingle() == 1L) { "Post-call learning evidence lost its source fence." }
         }
     }
 
@@ -1273,6 +1368,7 @@ class VoiceTutorPersistenceAdapter(
         createdAt = instant("created_at"),
         updatedAt = instant("updated_at"),
         acceptedStudyId = nullableLong("accepted_study_id"),
+        postCallTranscriptIncomplete = get("post_call_transcript_incomplete", java.lang.Boolean::class.java) == true,
     )
 
     private fun Row.turn() = VoiceTutorTranscriptTurn(
@@ -1288,6 +1384,7 @@ class VoiceTutorPersistenceAdapter(
         studyAnswerTurnId = nullableLong("study_answer_turn_id"),
         askedStudyQuestion = get("asked_study_question", java.lang.Boolean::class.java) == true,
         isStudyQuestion = get("is_study_question", java.lang.Boolean::class.java) == true,
+        postCallEvidence = get("post_call_evidence", java.lang.Boolean::class.java) == true,
     )
 
     private fun Row.result() = VoiceTutorResult(
@@ -1392,6 +1489,7 @@ internal fun voiceTutorSummaryCanBeClaimed(
         // learning result. Recover only that exact signature, never a genuine
         // failed summary observed by another scheduler before its claim.
         VoiceTutorResultStatus.FAILED -> session.status == VoiceTutorSessionStatus.FAILED &&
+            !session.postCallTranscriptIncomplete &&
             session.resultStatus == VoiceTutorResultStatus.FAILED && existing.model == null &&
             session.failureMessage != null && existing.errorMessage == session.failureMessage
         VoiceTutorResultStatus.PENDING, VoiceTutorResultStatus.COMPLETED -> false

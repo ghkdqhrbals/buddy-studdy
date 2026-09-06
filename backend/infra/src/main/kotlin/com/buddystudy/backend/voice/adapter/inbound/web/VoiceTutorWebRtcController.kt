@@ -31,18 +31,18 @@ class VoiceTutorWebRtcController(
         @RequestHeader(name = VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER, required = false)
         turnProtocol: String?,
     ): ResponseEntity<String> {
-        // Never create a paid manual-turn call for a client that cannot report
-        // utterance boundaries. Upgrading only the server must fail before SDP.
-        if (turnProtocol != VoiceTutorRealtimeContract.LOCAL_VAD_TURN_PROTOCOL) {
+        // Refuse a client without the native meaning/tool and ready-handshake contract before billing.
+        if (turnProtocol != VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL) {
             return ResponseEntity.status(HttpStatus.UPGRADE_REQUIRED)
                 .header("Cache-Control", "no-store")
-                .header(VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER, VoiceTutorRealtimeContract.LOCAL_VAD_TURN_PROTOCOL)
+                .header(VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER, VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL)
                 .build()
         }
         val answer = voiceTutor.negotiate(sessionId, offerSdp, authentication)
         return ResponseEntity.ok()
             .contentType(MediaType.parseMediaType("application/sdp"))
             .header("Cache-Control", "no-store")
+            .header(VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER, VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL)
             .body(answer.answerSdp)
     }
 }

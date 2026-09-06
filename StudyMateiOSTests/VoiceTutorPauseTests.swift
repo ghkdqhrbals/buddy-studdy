@@ -30,6 +30,21 @@ final class VoiceTutorPauseTests: XCTestCase {
         XCTAssertFalse(VoiceTutorCallPresentation(phase: .listening).showsPauseControl)
     }
 
+    func testRealtimeNativeReadyMustConfirmTheExactProtocolAndPreservesPauseCapability() throws {
+        let ready = try VoiceTutorRealtimeEventParser.parse(text:
+            #"{"type":"buddystudy.voice.session.ready","pauseProtocol":"pause-v1","turnProtocol":"realtime-native-v1"}"#)
+        XCTAssertEqual(ready, .sessionReady(
+            hardEndsAt: nil, quotaRemainingSeconds: nil,
+            pauseProtocol: "pause-v1", turnProtocol: "realtime-native-v1"
+        ))
+        XCTAssertTrue(VoiceTutorTurnProtocol.acceptsReady("realtime-native-v1"))
+        let unsupportedProtocols: [String?] = [nil, "", "local-vad-v1", "realtime-native-v2", "realtime-native-v1 "]
+        for unsupported in unsupportedProtocols {
+            XCTAssertFalse(VoiceTutorTurnProtocol.acceptsReady(unsupported),
+                           "Capture must stay closed until both sides agree on who commits learner input")
+        }
+    }
+
     func testPauseAndResumeNeedTheExactAcknowledgementBeforeChangingStableState() throws {
         var state = supportedState()
         let pause = try XCTUnwrap(state.requestPause())

@@ -1317,7 +1317,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
 
     static func sdpExchangeRequest(offer: String, authenticatedRequest: URLRequest) throws -> URLRequest {
         let offer = try validatedOfferSDP(offer)
-        var request = VoiceTutorLocalSpeechProtocol.addingCapability(to: authenticatedRequest)
+        var request = VoiceTutorTurnProtocol.addingCapability(to: authenticatedRequest)
         request.httpMethod = "POST"
         request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
         request.setValue("application/sdp", forHTTPHeaderField: "Accept")

@@ -28,6 +28,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyCon
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMutationConfirmationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearnerTurnAuthorization
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistedDialogueBoundary
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyChangeKind
 import com.buddystudy.backend.voice.adapter.outbound.openai.voiceTutorLessonFocusEvent
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
@@ -2971,6 +2972,131 @@ class McpVoiceTutorToolAdapterTest {
         }
     }
 
+    @Test
+    fun `native catalog exposes model selection and immutable proposal tools but hides raw mutations`() = runBlocking<Unit> {
+        val fixture = Fixture()
+        val catalog = fixture.adapter.realtimeDefinitions()
+        assertThat(catalog.map { it.name }).contains("prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study")
+            .doesNotContain("create_root_study", "create_study_topic", "update_study", "delete_study")
+        assertThat(catalog.joinToString { it.description }).doesNotContain("server-owned: never originate", "one-shot target attested")
+        val denied = fixture.adapter.execute(nativeContext(), "create_root_study", mapOf("topic" to "Spring", "difficulty_level" to 7))
+        assertThat(json(denied).path("error").path("code").asText()).isEqualTo("PROPOSAL_REQUIRED")
+        assertThat(fixture.calls).isEmpty()
+    }
+
+    @Test
+    fun `native natural confirmation creates exact root once without any classifier intent or lease`() = runBlocking<Unit> {
+        val fixture = Fixture()
+        fixture.handler = { name, args ->
+            assertThat(name).isEqualTo("create_root_study")
+            success(mapOf("created" to true, "id" to 202L, "parentStudyId" to null,
+                "topic" to args["topic"], "difficultyLevel" to args["difficulty_level"], "enabled" to true, "activeForQuestions" to false))
+        }
+        val args = mapOf("action" to "create_root_study", "topic" to "Spring", "difficulty_level" to 7)
+        val prepared = fixture.adapter.execute(nativeContext(), "prepare_voice_study_mutation", args)
+        val repeated = fixture.adapter.execute(nativeContext(), "prepare_voice_study_mutation", args)
+        val id = json(prepared).path("proposal_id").asText()
+        assertThat(id).isNotBlank()
+        assertThat(json(repeated).path("proposal_id").asText()).isEqualTo(id)
+        assertThat(json(prepared).path("executed").asBoolean()).isFalse()
+        assertThat(fixture.calls).isEmpty()
+        fixture.learnerTurnId = 13; fixture.tutorTurnId = 12
+        val confirmed = fixture.adapter.execute(nativeContext(confirming = true), "confirm_voice_study_mutation", mapOf("proposal_id" to id, "confirm" to true))
+        assertThat(confirmed.isError).isFalse()
+        assertThat(json(confirmed).path("notice").asText()).contains("without another confirmation")
+            .doesNotContain("new learner agreement", "server-owned", "independently authorized")
+        assertThat(fixture.calls.map { it.name }).containsExactly("create_root_study")
+        assertThat(fixture.calls.single().arguments).containsExactlyInAnyOrderEntriesOf(mapOf("topic" to "Spring", "difficulty_level" to 7))
+        val duplicate = fixture.adapter.execute(nativeContext(confirming = true), "confirm_voice_study_mutation", mapOf("proposal_id" to id, "confirm" to true))
+        assertThat(duplicate.isError).isTrue()
+        assertThat(fixture.calls).hasSize(1)
+    }
+
+    @Test
+    fun `native refusal cancels proposal and malformed confirmation cannot alter its patch`() = runBlocking<Unit> {
+        val fixture = Fixture()
+        fixture.learnerTurnId = 50 // Database IDs are identities, not the native spoken-order authority.
+        val prepared = fixture.adapter.execute(nativeContext(), "prepare_voice_study_mutation", mapOf("action" to "create_root_study", "topic" to "Spring"))
+        val id = json(prepared).path("proposal_id").asText()
+        fixture.learnerTurnId = 13; fixture.tutorTurnId = 12
+        val changed = fixture.adapter.execute(nativeContext(true), "confirm_voice_study_mutation", mapOf("proposal_id" to id, "confirm" to true, "topic" to "Different"))
+        assertThat(changed.isError).isTrue()
+        val cancelled = fixture.adapter.execute(nativeContext(true), "confirm_voice_study_mutation", mapOf("proposal_id" to id, "confirm" to false))
+        assertThat(json(cancelled).path("cancelled").asBoolean()).isTrue()
+        val replay = fixture.adapter.execute(nativeContext(true), "confirm_voice_study_mutation", mapOf("proposal_id" to id, "confirm" to true))
+        assertThat(replay.isError).isTrue()
+        assertThat(fixture.calls).isEmpty()
+    }
+
+    @Test
+    fun `native confirmation waits for actual playout and persisted dialogue boundary without consuming proposal`() = runBlocking<Unit> {
+        val fixture = Fixture()
+        val prepared = fixture.adapter.execute(nativeContext(), "prepare_voice_study_mutation", mapOf("action" to "create_root_study", "topic" to "Spring"))
+        val args = mapOf("proposal_id" to json(prepared).path("proposal_id").asText(), "confirm" to false)
+        fixture.learnerTurnId = 13; fixture.tutorTurnId = 12
+        val early = nativeContext(true).let { it.copy(dialogueBoundary = it.dialogueBoundary!!.copy(latestAcceptedLearnerSpeechStartedOrder = 3)) }
+        assertThat(fixture.adapter.execute(early, "confirm_voice_study_mutation", args).isError).isTrue()
+        fixture.dialogueBoundaryPersisted = false
+        val pending = fixture.adapter.execute(nativeContext(true), "confirm_voice_study_mutation", args)
+        assertThat(json(pending).path("error").path("code").asText()).isEqualTo("INPUT_PERSISTENCE_PENDING")
+        fixture.dialogueBoundaryPersisted = true
+        assertThat(fixture.adapter.execute(nativeContext(true), "confirm_voice_study_mutation", args).isError).isFalse()
+        assertThat(fixture.calls).isEmpty()
+    }
+
+    @Test
+    fun `native update carries frozen owner baseline into canonical CAS and never old classifier fields`() = runBlocking<Unit> {
+        val contexts = ContextStore()
+        val fixture = Fixture(studyContexts = contexts)
+        fixture.handler = { name, args -> when (name) {
+            "get_study" -> success(mapOf("id" to 101L, "parentStudyId" to null, "topic" to "Selected root", "difficultyLevel" to 5))
+            "update_study" -> {
+                contexts.live[101] = VoiceTutorStudySnapshot(101, null, "Selected root", 7)
+                assertThat(args).containsEntry(BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT, "Selected root")
+                    .containsEntry(BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT, 5)
+                success(mapOf("id" to 101L, "parentStudyId" to null, "topic" to "Selected root", "difficultyLevel" to 7))
+            }
+            else -> error(name)
+        } }
+        val prepared = fixture.adapter.execute(nativeContext(), "prepare_voice_study_mutation", mapOf("action" to "update_study", "study_id" to 101L, "difficulty_level" to 7))
+        fixture.learnerTurnId = 13; fixture.tutorTurnId = 12
+        val result = fixture.adapter.execute(nativeContext(true), "confirm_voice_study_mutation", mapOf("proposal_id" to json(prepared).path("proposal_id").asText(), "confirm" to true))
+        assertThat(result.isError).isFalse()
+        assertThat(result.lessonRevision).isEqualTo(1)
+        assertThat(fixture.calls.count { it.name == "update_study" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `native deletion binds complete saved subtree and rejects changed target before any write`() = runBlocking<Unit> {
+        val fixture = Fixture()
+        var changed = false
+        fixture.handler = { name, _ -> when (name) {
+            "get_study" -> success(mapOf("id" to 101L, "parentStudyId" to null, "topic" to if (changed) "Renamed" else "Spring", "difficultyLevel" to 5))
+            "list_studies" -> success(mapOf("studies" to emptyList<Any>(), "totalCount" to 0, "offset" to 0))
+            "delete_study" -> success(mapOf("deleted" to true, "studyId" to 101L))
+            else -> error(name)
+        } }
+        val prepared = fixture.adapter.execute(nativeContext(), "prepare_voice_study_mutation", mapOf("action" to "delete_study", "study_id" to 101L))
+        fixture.learnerTurnId = 13; fixture.tutorTurnId = 12
+        changed = true
+        val result = fixture.adapter.execute(nativeContext(true), "confirm_voice_study_mutation", mapOf("proposal_id" to json(prepared).path("proposal_id").asText(), "confirm" to true))
+        assertThat(json(result).path("error").path("code").asText()).isEqualTo("MUTATION_TARGET_STALE")
+        assertThat(fixture.calls.none { it.name == "delete_study" }).isTrue()
+    }
+
+    @Test
+    fun `native focus accepts same learner source epoch after current mutation epoch advances`() = runBlocking<Unit> {
+        val contexts = ContextStore().apply { revision = 1 }
+        val fixture = Fixture(studyContexts = contexts)
+        fixture.tutorTurnId = 12 // A model preamble after USER 11 must not revoke that learner's tool request.
+        fixture.focusResult = focusSelection(101, 2)
+        fixture.handler = { _, _ -> success(mapOf("id" to 101L, "parentStudyId" to null, "topic" to "Redis", "difficultyLevel" to 3)) }
+        val result = fixture.adapter.execute(nativeContext(currentRevision = 1), "select_voice_study", mapOf("study_id" to 101L))
+        assertThat(result.isError).isFalse()
+        assertThat(fixture.focusSelections).containsExactly(101L)
+        assertThat(fixture.lastExpectedCandidate).isEqualTo(VoiceTutorStudyTargetCandidate(101, null, "Redis", 3))
+    }
+
     private class Fixture(
         actualMcp: BuddyStudyMcpPort? = null,
         studyContexts: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
@@ -2982,6 +3108,7 @@ class McpVoiceTutorToolAdapterTest {
         var catalogReads = 0
         var learnerTurnId: Long? = 11
         var tutorTurnId: Long? = 10
+        var dialogueBoundaryPersisted = true
         var completedExchange = true
         var duringLearnerAuthorization: () -> Unit = {}
         var acceptedProviderItemId = "accepted-user-item"
@@ -3038,6 +3165,15 @@ class McpVoiceTutorToolAdapterTest {
             confirmations = object : VoiceTutorMutationConfirmationPort {
                 override suspend fun latestLearnerTurnId(userId: Long, sessionId: String) = learnerTurnId
                 override suspend fun latestTutorTurnId(userId: Long, sessionId: String) = tutorTurnId
+                override suspend fun persistedLearnerTurnId(userId: Long, sessionId: String, providerItemId: String,
+                    lessonRevision: Long): Long? = learnerTurnId?.takeIf {
+                    providerItemId == acceptedProviderItemId && lessonRevision == acceptedLessonRevision
+                }?.also { duringLearnerAuthorization() }
+                override suspend fun persistedDialogueBoundary(userId: Long, sessionId: String, learnerProviderItemId: String,
+                    tutorProviderItemId: String, lessonRevision: Long): VoiceTutorPersistedDialogueBoundary? =
+                    if (dialogueBoundaryPersisted && learnerProviderItemId == acceptedProviderItemId &&
+                        tutorProviderItemId == "native-confirmation-question" && lessonRevision == acceptedLessonRevision &&
+                        learnerTurnId != null && tutorTurnId != null) VoiceTutorPersistedDialogueBoundary(learnerTurnId!!, tutorTurnId!!) else null
                 override suspend fun learnerTurnAuthorization(
                     userId: Long,
                     sessionId: String,
@@ -3055,6 +3191,13 @@ class McpVoiceTutorToolAdapterTest {
                 }
             },
             lessonFocus = object : VoiceTutorLessonFocusPort {
+                override suspend fun focusFromRealtimeModel(userId: Long, sessionId: String, studyId: Long,
+                    learnerTurnId: Long, expectedCurrentRevision: Long, expectedCandidate: VoiceTutorStudyTargetCandidate,
+                    commitAuthority: VoiceTutorFocusCommitAuthority, expectedParentStudyId: Long?): VoiceTutorLessonFocusSelection? {
+                    assertThat(learnerTurnId).isEqualTo(this@Fixture.learnerTurnId)
+                    lastExpectedCandidate = expectedCandidate
+                    return selectFocus(userId, sessionId, studyId)
+                }
                 override suspend fun history(userId: Long, sessionId: String) = focusHistory.toList()
                 override suspend fun focus(
                     userId: Long,
@@ -3168,6 +3311,15 @@ class McpVoiceTutorToolAdapterTest {
     private data class Call(val name: String, val arguments: Map<String, Any>, val principal: Principal?)
 
     private companion object {
+        fun nativeContext(confirming: Boolean = false, currentRevision: Long = 0) = VoiceTutorWebRtcControlContext(
+            session(), "rtc_synthetic_call", principal, initialLessonRevision = currentRevision, realtimeModelTools = true,
+            dialogueBoundary = VoiceTutorDialogueBoundary(responseGeneration = if (confirming) 4 else 2,
+                latestAcceptedLearnerSpeechStartedOrder = if (confirming) 6 else 3,
+                precedingTutorSpeechStoppedOrder = if (confirming) 5 else 2,
+                precedingSpokenResponseGeneration = if (confirming) 3 else 1,
+                precedingTutorProviderItemId = "native-confirmation-question",
+                latestAcceptedLearnerProviderItemId = "accepted-user-item", latestAcceptedLearnerLessonRevision = 0),
+        )
         fun candidate(id: Long, parentStudyId: Long?): Map<String, Any?> = mapOf(
             "id" to id,
             "parentStudyId" to parentStudyId,

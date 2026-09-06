@@ -5,6 +5,8 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
+import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata
+import com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorTranscriptIntegrityException
 import com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorSidebandBranch
 import com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorUnexpectedSidebandCloseException
 import com.buddystudy.backend.voice.application.model.VoiceTutorQuotaResponse
@@ -49,6 +51,28 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceTutorControlWebSocketHandlerTest {
+    @Test
+    fun `private integrity event persists even without transcript persistence or client forwarding`() {
+        val result = runControlScenario(
+            serverLifecycleEventBeforeCompletion = """{"type":"${VoiceTutorTranscriptMetadata.INCOMPLETE_EVENT}"}""",
+            provider = { _, _ -> },
+        )
+
+        assertThat(result.integrityCalls).isEqualTo(1)
+        assertThat(result.lifecycleAcknowledged).isTrue()
+        assertThat(result.deliveryOrder).doesNotContain("sent:${VoiceTutorTranscriptMetadata.INCOMPLETE_EVENT}")
+        assertThat(result.finishCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `unsettled source failure forces durable integrity cleanup instead of generic provider failure`() {
+        val result = runControlScenario(provider = { _, _ -> throw VoiceTutorTranscriptIntegrityException() })
+
+        assertThat(result.failed).isTrue()
+        assertThat(result.reason).isEqualTo("INCOMPLETE_TRANSCRIPT")
+        assertThat(result.finishCalls).isEqualTo(1)
+    }
+
     @Test
     fun `only a true provider cap collision prearms the monthly closing notice`() {
         val boundary = Instant.parse("2031-08-30T01:00:00Z")
@@ -146,7 +170,7 @@ class VoiceTutorControlWebSocketHandlerTest {
 
     @Test
     fun `missing or unsupported local vad capability closes before claiming the provider call`() {
-        listOf(null, "", "local-vad-v0").forEach { capability ->
+        listOf(null, "", "local-vad-v0", "local-vad-v1").forEach { capability ->
             val closed = mutableListOf<CloseStatus>()
             val handler = VoiceTutorControlWebSocketHandler(
                 proxy<VoiceTutorWebRtcUseCase> { _, _ -> error("Must not claim or open a provider call.") },
@@ -446,7 +470,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         receive: Flux<WebSocketMessage>,
         sent: MutableList<String>,
         closeStatus: Mono<CloseStatus> = Mono.empty(),
-        turnProtocol: String? = VoiceTutorRealtimeContract.LOCAL_VAD_TURN_PROTOCOL,
+        turnProtocol: String? = VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL,
         onClose: (CloseStatus) -> Unit = {},
         onServerMessage: (String) -> Unit = {},
     ): WebSocketSession {
@@ -499,6 +523,8 @@ class VoiceTutorControlWebSocketHandlerTest {
         var reason: String? = null
         var failed: Boolean? = null
         var finishCalls = 0
+        var integrityCalls = 0
+        var lifecycleAcknowledged: Boolean? = null
         var clientEndAfterErrorSent = false
         val closeObserverDisposed = AtomicBoolean()
         val deliveryOrder = CopyOnWriteArrayList<String>()
@@ -572,7 +598,7 @@ class VoiceTutorControlWebSocketHandlerTest {
                     }
                 }
                 if (serverLifecycleEventBeforeCompletion != null) {
-                    onProviderEvent(serverLifecycleEventBeforeCompletion, false, false)
+                    result.lifecycleAcknowledged = onProviderEvent(serverLifecycleEventBeforeCompletion, false, false)
                 }
                 if (providerEventsAfterTerminal.isNotEmpty()) {
                     terminalEvents.first()
@@ -588,6 +614,10 @@ class VoiceTutorControlWebSocketHandlerTest {
         }
         val relay = proxy<VoiceTutorRelayUseCase> { method, arguments ->
             when (method) {
+                "markTranscriptIncomplete" -> {
+                    result.integrityCalls += 1
+                    true
+                }
                 "beginQuotaExhaustionNotice" -> if (monthlyQuotaExhaustsNow || persistedQuotaEnding) {
                     VoiceTutorSessionStatus.ENDING
                 } else {

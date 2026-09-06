@@ -104,6 +104,22 @@ class VoiceTutorStudyContextAdapter(
     }
 
     @Transactional
+    override suspend fun focusFromRealtimeModel(
+        userId: Long,
+        sessionId: String,
+        studyId: Long,
+        learnerTurnId: Long,
+        expectedCurrentRevision: Long,
+        expectedCandidate: VoiceTutorStudyTargetCandidate,
+        commitAuthority: VoiceTutorFocusCommitAuthority,
+        expectedParentStudyId: Long?,
+    ): VoiceTutorLessonFocusSelection? = focusLocked(
+        userId, sessionId, studyId, expectedParentStudyId, learnerTurnId,
+        expectedCurrentRevision, null, expectedCandidate, commitAuthority, null,
+        realtimeModelChoice = true,
+    )
+
+    @Transactional
     override suspend fun focus(
         userId: Long,
         sessionId: String,
@@ -165,9 +181,11 @@ class VoiceTutorStudyContextAdapter(
         expectedCandidate: VoiceTutorStudyTargetCandidate?,
         commitAuthority: VoiceTutorFocusCommitAuthority?,
         expectedTraversal: VoiceTutorStudyTargetTraversal?,
+        realtimeModelChoice: Boolean = false,
     ): VoiceTutorLessonFocusSelection? {
         if (studyId <= 0 || learnerTurnId?.let { it <= 0 } == true ||
-            (learnerTurnId != null && (authorization == null || commitAuthority == null)) ||
+            (learnerTurnId != null && ((!realtimeModelChoice && authorization == null) || commitAuthority == null)) ||
+            (realtimeModelChoice && (learnerTurnId == null || expectedCandidate == null || expectedCurrentRevision == null)) ||
             commitAuthority?.let {
                 it.authSessionId <= 0 || it.deviceId.isBlank() || it.deviceId.length > 191 ||
                     it.providerCallId.isBlank() || it.providerCallId.length > 191
@@ -190,7 +208,7 @@ class VoiceTutorStudyContextAdapter(
         val metadataHistory = list(userId, sessionId)
         val revisions = VoiceTutorStudyRevisionIndex(metadataHistory)
         if (expectedCurrentRevision != null && revisions.currentRevision != expectedCurrentRevision) return null
-        if (learnerTurnId != null && !isLatestPersistedLearnerTurn(sessionId, learnerTurnId)) return null
+        if (learnerTurnId != null && !isLatestPersistedLearnerTurn(sessionId, learnerTurnId, realtimeModelChoice)) return null
         val existing = revisions.currentView()
         val previous = VoiceTutorLessonFocusIndex(history(userId, sessionId), accepted.acceptedStudyId)
             .at(revisions.currentRevision)
@@ -227,7 +245,10 @@ class VoiceTutorStudyContextAdapter(
         val existingIds = existing.mapTo(mutableSetOf()) { it.studyId }
         if (existing.size + path.count { it.studyId !in existingIds } > MAX_SNAPSHOTS) return null
         val sameFocus = previous != null && previous.studyId == studyId && previous.revision > 0 && accepted.studyId == studyId
-        if (!sameFocus && learnerTurnId != null && learnerTurnId <= latestFocusLearnerTurn(sessionId)) return null
+        if (!sameFocus && learnerTurnId != null && (
+                if (realtimeModelChoice) alreadyFocusedFromLearnerTurn(sessionId, learnerTurnId)
+                else learnerTurnId <= latestFocusLearnerTurn(sessionId)
+            )) return null
         if (!sameFocus && (revisions.currentRevision >= MAX_REVISIONS || metadataHistory.count { it.revision > 0 } >= MAX_REVISIONS)) {
             return null
         }
@@ -235,7 +256,7 @@ class VoiceTutorStudyContextAdapter(
         // Natural expiry needs no row update, so validate the timestamp read from the locked exact
         // authorization row again at the one-shot consumption boundary.
         if (lockedCommit.authSessionExpiresAt?.let { !utcNow().isBefore(it) } == true) return null
-        if (learnerTurnId != null && authorization?.consume() != true) return null
+        if (learnerTurnId != null && !realtimeModelChoice && authorization?.consume() != true) return null
         val captured = append(sessionId, path, existing, accepted.hardEndsAt)
         check(path.all { candidate -> captured.any { it.studyId == candidate.studyId } }) {
             "Voice lesson focus capture expired."
@@ -265,11 +286,12 @@ class VoiceTutorStudyContextAdapter(
         return VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(studyId, revision), revised)
     }
 
-    private suspend fun isLatestPersistedLearnerTurn(sessionId: String, learnerTurnId: Long): Boolean = database.sql(
+    private suspend fun isLatestPersistedLearnerTurn(sessionId: String, learnerTurnId: Long, allowTutorPreamble: Boolean = false): Boolean = database.sql(
         """
         select id, role
         from voice_tutor_transcript_turns
         where session_id = :sessionId
+          ${if (allowTutorPreamble) "and role = 'USER'" else ""}
         order by sequence_number desc, id desc
         limit 1
         """.trimIndent(),
@@ -278,6 +300,15 @@ class VoiceTutorStudyContextAdapter(
             (row.get("id") as Number).toLong() == learnerTurnId &&
                 row.get("role", String::class.java) == "USER"
         }.one().awaitSingleOrNull() == true
+
+    private suspend fun alreadyFocusedFromLearnerTurn(sessionId: String, learnerTurnId: Long): Boolean = database.sql(
+        """
+        select learner_turn_id from voice_tutor_lesson_focuses
+        where session_id = :sessionId and learner_turn_id = :learnerTurnId
+        limit 1
+        """.trimIndent(),
+    ).bind("sessionId", sessionId).bind("learnerTurnId", learnerTurnId)
+        .map { _, _ -> true }.one().awaitSingleOrNull() == true
 
     private suspend fun latestFocusLearnerTurn(sessionId: String): Long = database.sql(
         """

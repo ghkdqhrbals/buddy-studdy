@@ -55,6 +55,9 @@ interface VoiceTutorRecordingRetentionUseCase {
 }
 
 interface VoiceTutorRelayUseCase {
+    /** Server-only integrity fence; unsupported implementations fail closed. */
+    suspend fun markTranscriptIncomplete(principal: Principal, sessionId: String): Boolean = false
+
     suspend fun connect(principal: Principal, sessionId: String): VoiceTutorRelayContext
     suspend fun relayAuthorized(principal: Principal): Boolean
     suspend fun attachProviderSession(principal: Principal, sessionId: String, providerSessionId: String)
@@ -92,6 +95,8 @@ interface VoiceTutorRelayUseCase {
         isStudyQuestion: Boolean = false,
         studyAnswerProviderItemIds: List<String> = emptyList(),
         acceptedBeforeQuotaCutoff: Boolean = false,
+        postCallEvidence: Boolean = false,
+        conversationSequence: Long? = null,
     ): Boolean
 
     suspend fun finish(

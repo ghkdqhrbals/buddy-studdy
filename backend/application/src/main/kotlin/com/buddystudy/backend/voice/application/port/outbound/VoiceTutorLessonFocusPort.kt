@@ -27,6 +27,17 @@ data class VoiceTutorFocusCommitAuthority(
 )
 
 interface VoiceTutorLessonFocusPort {
+    /** Realtime model selection; retains atomic owner/path/revision/latest USER checks, not classifier leases. */
+    suspend fun focusFromRealtimeModel(
+        userId: Long,
+        sessionId: String,
+        studyId: Long,
+        learnerTurnId: Long,
+        expectedCurrentRevision: Long,
+        expectedCandidate: VoiceTutorStudyTargetCandidate,
+        commitAuthority: VoiceTutorFocusCommitAuthority,
+        expectedParentStudyId: Long? = null,
+    ): VoiceTutorLessonFocusSelection? = null
     /** Select an owned saved node in an active call; no topic/question creation or quota mutation. */
     suspend fun focus(
         userId: Long,

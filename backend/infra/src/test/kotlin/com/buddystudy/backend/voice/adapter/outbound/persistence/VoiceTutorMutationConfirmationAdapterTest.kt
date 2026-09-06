@@ -244,6 +244,65 @@ class VoiceTutorMutationConfirmationAdapterTest {
         assertThat(adapter.learnerTurnAuthorization(7, "owned-call", "choice-item", 1, null, null, null)).isNull()
     }
 
+    @Test
+    fun `native current learner survives tool preamble but not a newer learner in another epoch`(): Unit = runBlocking {
+        insertSession("owned-call", 7)
+        insertTurn(11, "owned-call", "USER", providerItemId = "choice", lessonRevision = 2)
+        insertTurn(12, "owned-call", "TUTOR", providerItemId = "tool-preamble", lessonRevision = 3)
+        assertThat(adapter.persistedLearnerTurnId(7, "owned-call", "choice", 2)).isEqualTo(11)
+        assertThat(adapter.persistedLearnerTurnId(7, "owned-call", "choice", 3)).isNull()
+        assertThat(adapter.persistedLearnerTurnId(99, "owned-call", "choice", 2)).isNull()
+        insertTurn(13, "owned-call", "USER", providerItemId = "newer-choice", lessonRevision = 3)
+        assertThat(adapter.persistedLearnerTurnId(7, "owned-call", "choice", 2)).isNull()
+    }
+
+    @Test
+    fun `native exact question and yes remain valid after tutor preamble while legacy gate stays strict`(): Unit = runBlocking {
+        insertSession("owned-call", 7)
+        insertTurn(11, "owned-call", "TUTOR", providerItemId = "confirmation-question", lessonRevision = 2)
+        insertTurn(12, "owned-call", "USER", providerItemId = "natural-yes", lessonRevision = 2)
+        insertTurn(13, "owned-call", "TUTOR", providerItemId = "execution-preamble", lessonRevision = 2)
+        val boundary = adapter.persistedDialogueBoundary(7, "owned-call", "natural-yes", "confirmation-question", 2)
+        assertThat(boundary?.learnerTurnId).isEqualTo(12)
+        assertThat(boundary?.tutorTurnId).isEqualTo(11)
+        assertThat(adapter.learnerTurnAuthorization(7, "owned-call", "natural-yes", 2, null, null, null)).isNull()
+        assertThat(adapter.persistedDialogueBoundary(7, "owned-call", "natural-yes", "execution-preamble", 2)).isNull()
+        assertThat(adapter.persistedDialogueBoundary(99, "owned-call", "natural-yes", "confirmation-question", 2)).isNull()
+        insertTurn(14, "owned-call", "USER", providerItemId = "newer-reply", lessonRevision = 3)
+        assertThat(adapter.persistedDialogueBoundary(7, "owned-call", "natural-yes", "confirmation-question", 2)).isNull()
+    }
+
+    @Test
+    fun `native confirmation rejects an intervening tutor question and ended session`(): Unit = runBlocking {
+        insertSession("owned-call", 7)
+        insertTurn(11, "owned-call", "TUTOR", providerItemId = "old-question")
+        insertTurn(12, "owned-call", "TUTOR", providerItemId = "current-question")
+        insertTurn(13, "owned-call", "USER", providerItemId = "reply")
+        assertThat(adapter.persistedDialogueBoundary(7, "owned-call", "reply", "old-question", 0)).isNull()
+        assertThat(adapter.persistedDialogueBoundary(7, "owned-call", "reply", "current-question", 0)).isNotNull()
+        execute("update voice_tutor_sessions set status = 'COMPLETED' where id = 'owned-call'")
+        assertThat(adapter.persistedDialogueBoundary(7, "owned-call", "reply", "current-question", 0)).isNull()
+        assertThat(adapter.persistedLearnerTurnId(7, "owned-call", "reply", 0)).isNull()
+    }
+
+    @Test
+    fun `native freshness follows spoken sequence when older ASR persists with a larger row id`(): Unit = runBlocking {
+        insertSession("owned-call", 7)
+        insertTurn(30, "owned-call", "TUTOR", providerItemId = "question", sequenceNumber = 3)
+        insertTurn(20, "owned-call", "USER", providerItemId = "yes", sequenceNumber = 4)
+        insertTurn(40, "owned-call", "TUTOR", providerItemId = "preamble", sequenceNumber = 5)
+        // Old source speech completed ASR last: its row ID is larger but its spoken sequence is older.
+        insertTurn(100, "owned-call", "USER", providerItemId = "late-old-asr", sequenceNumber = 1)
+        assertThat(adapter.persistedLearnerTurnId(7, "owned-call", "yes", 0)).isEqualTo(20)
+        assertThat(adapter.persistedLearnerTurnId(7, "owned-call", "late-old-asr", 0)).isNull()
+        val boundary = adapter.persistedDialogueBoundary(7, "owned-call", "yes", "question", 0)
+        assertThat(boundary?.learnerTurnId).isEqualTo(20)
+        assertThat(boundary?.tutorTurnId).isEqualTo(30)
+        insertTurn(10, "owned-call", "USER", providerItemId = "newer-user", sequenceNumber = 6)
+        assertThat(adapter.persistedLearnerTurnId(7, "owned-call", "yes", 0)).isNull()
+        assertThat(adapter.persistedDialogueBoundary(7, "owned-call", "yes", "question", 0)).isNull()
+    }
+
     private suspend fun insertSession(id: String, userId: Long, status: String = "ACTIVE"): Unit {
         database.sql("insert into voice_tutor_sessions(id, user_id, status) values (:id, :userId, :status)")
             .bind("id", id).bind("userId", userId).bind("status", status).fetch().rowsUpdated().awaitSingle()
@@ -255,11 +314,12 @@ class VoiceTutorMutationConfirmationAdapterTest {
         role: String,
         providerItemId: String = "item-$id",
         lessonRevision: Long = 0,
+        sequenceNumber: Long = id,
     ): Unit {
         database.sql(
             "insert into voice_tutor_transcript_turns(id, session_id, provider_item_id, role, sequence_number, lesson_revision) values (:id, :sessionId, :providerItemId, :role, :sequenceNumber, :lessonRevision)",
         ).bind("id", id).bind("sessionId", sessionId).bind("providerItemId", providerItemId)
-            .bind("role", role).bind("sequenceNumber", id).bind("lessonRevision", lessonRevision)
+            .bind("role", role).bind("sequenceNumber", sequenceNumber).bind("lessonRevision", lessonRevision)
             .fetch().rowsUpdated().awaitSingle()
     }
 

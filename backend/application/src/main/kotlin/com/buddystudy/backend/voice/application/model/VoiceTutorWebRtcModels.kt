@@ -15,6 +15,8 @@ data class VoiceTutorWebRtcControlContext(
     val initialStudyMutationSnapshot: VoiceTutorInitialStudyMutationSnapshot? = null,
     // Observed by the controller at tool execution; never client/provider JSON.
     val dialogueBoundary: VoiceTutorDialogueBoundary? = null,
+    /** Trusted runtime choice; never accepted from client or provider tool JSON. */
+    val realtimeModelTools: Boolean = false,
 )
 
 /** Tutor boundaries are frozen at the last accepted learner item's speech start, not tool completion. */

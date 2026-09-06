@@ -198,7 +198,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-token")
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Device-Id"), "fixture-device")
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Client-Secret"), "fixture-secret")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Voice-Turn-Protocol"), "local-vad-v1")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Voice-Turn-Protocol"), "realtime-native-v1")
         XCTAssertEqual(request.httpBody, Data(offer.utf8))
         XCTAssertEqual(request.url, authenticatedRequest.url)
         XCTAssertEqual(request.timeoutInterval, authenticatedRequest.timeoutInterval)
@@ -1276,6 +1276,32 @@ final class VoiceTutorContractTests: XCTestCase {
                 pending: token,
                 quotaNoticeResponseID: "response-1"
             ))
+    }
+
+    func testOrdinaryTutorPlayoutAcknowledgesOnlyTheCompletedLiveResponse() throws {
+        var playout = VoiceTutorLocalPlayoutTailState()
+        playout.responseStarted("confirmation-question")
+        let token = try XCTUnwrap(playout.responseCompleted("confirmation-question", at: 0))
+        for phase in [VoiceTutorSessionPhase.listening, .speaking] {
+            XCTAssertEqual(VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+                reason: nil, phase: phase, usesWebRTC: true, pending: token
+            ), "confirmation-question")
+        }
+        for phase in [VoiceTutorSessionPhase.idle, .connecting, .ending, .ended, .failed] {
+            XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+                reason: nil, phase: phase, usesWebRTC: true, pending: token
+            ))
+        }
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+            reason: nil, phase: .listening, usesWebRTC: true, pending: nil
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+            reason: nil, phase: .listening, usesWebRTC: false, pending: token
+        ))
+        XCTAssertNil(VoiceTutorServerEndPlayoutPolicy.playoutDrainedResponseID(
+            reason: "QUOTA_EXHAUSTED", phase: .ending, usesWebRTC: true,
+            pending: token, quotaNoticeResponseID: "different-quota-notice"
+        ), "Ordinary confirmation receipt cannot release the quota notice")
     }
 
     func testQuotaPlayoutAcknowledgementFollowsTheExactBoundedLocalTail() throws {
@@ -2884,29 +2910,24 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
-    func testLocalVoiceActivityPayloadContainsOnlyTheAppEventAndUtteranceSequence() throws {
+    func testRealtimeNativeSpeechBoundariesCarryOnlyThePairedAcousticSequence() throws {
         for activity in [VoiceTutorLocalSpeechActivity.started, .stopped] {
             for sequence in [1, 2, Int.max] {
                 let event = VoiceTutorLocalSpeechEvent(activity: activity, sequence: sequence)
-                let payload = try VoiceTutorLocalSpeechProtocol.payload(for: event)
+                let payload = try VoiceTutorTurnProtocol.payload(for: .speech(event))
                 XCTAssertEqual(Set(payload.keys), ["type", "sequence"])
                 XCTAssertEqual(payload["type"] as? String, event.messageType)
                 XCTAssertEqual(payload["sequence"] as? Int, sequence)
                 let serialized = try JSONSerialization.data(withJSONObject: payload)
                 XCTAssertLessThan(serialized.count, 128,
-                                  "Speech activity sends tiny metadata, never microphone audio or provider commands")
+                                  "Speech boundaries carry no microphone audio or direct provider commands")
                 let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: serialized) as? [String: Any])
                 XCTAssertEqual(decoded["sequence"] as? Int, sequence)
                 XCTAssertEqual(decoded["type"] as? String, event.messageType)
             }
-        }
-    }
-
-    func testLocalVoiceActivityPayloadRejectsNonpositiveUtteranceSequences() {
-        for activity in [VoiceTutorLocalSpeechActivity.started, .stopped] {
             for sequence in [Int.min, -1, 0] {
-                XCTAssertThrowsError(try VoiceTutorLocalSpeechProtocol.payload(for:
-                    VoiceTutorLocalSpeechEvent(activity: activity, sequence: sequence)
+                XCTAssertThrowsError(try VoiceTutorTurnProtocol.payload(for:
+                    .speech(VoiceTutorLocalSpeechEvent(activity: activity, sequence: sequence))
                 )) { error in
                     XCTAssertEqual(error as? VoiceTutorLocalSpeechDeliveryError, .invalidSequence)
                 }
@@ -2914,7 +2935,25 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
-    func testLocalVoiceActivityCapabilityPreservesAuthenticatedControlRequests() throws {
+    func testRealtimeNativeControlPreservesPauseFencesAndRejectsInvalidSequences() throws {
+        for kind in [VoiceTutorPauseControl.Kind.pause, .inputQuiesced, .resume] {
+            let payload = try VoiceTutorTurnProtocol.payload(for:
+                .pause(VoiceTutorPauseControl(kind: kind, sequence: 7))
+            )
+            XCTAssertEqual(Set(payload.keys), ["type", "sequence"])
+            XCTAssertEqual(payload["type"] as? String, kind.rawValue)
+            XCTAssertEqual(payload["sequence"] as? Int64, 7)
+            for sequence in [Int64.min, -1, 0] {
+                XCTAssertThrowsError(try VoiceTutorTurnProtocol.payload(for:
+                    .pause(VoiceTutorPauseControl(kind: kind, sequence: sequence))
+                )) { error in
+                    XCTAssertEqual(error as? VoiceTutorLocalSpeechDeliveryError, .invalidSequence)
+                }
+            }
+        }
+    }
+
+    func testRealtimeNativeCapabilityPreservesAuthenticatedControlRequests() throws {
         var original = URLRequest(url: try XCTUnwrap(URL(
             string: "wss://voice-tutor.test/api/v1/voice-tutor/sessions/synthetic/control"
         )))
@@ -2924,10 +2963,10 @@ final class VoiceTutorContractTests: XCTestCase {
         original.setValue("fixture-device", forHTTPHeaderField: "X-Device-Id")
         original.setValue("fixture-secret", forHTTPHeaderField: "X-Client-Secret")
         original.setValue("buddystudy.voice.control.v2", forHTTPHeaderField: "Sec-WebSocket-Protocol")
-        let prepared = VoiceTutorLocalSpeechProtocol.addingCapability(to: original)
-        XCTAssertEqual(VoiceTutorLocalSpeechProtocol.capabilityHeader, "X-Voice-Turn-Protocol")
-        XCTAssertEqual(VoiceTutorLocalSpeechProtocol.capabilityValue, "local-vad-v1")
-        XCTAssertEqual(prepared.value(forHTTPHeaderField: "X-Voice-Turn-Protocol"), "local-vad-v1")
+        let prepared = VoiceTutorTurnProtocol.addingCapability(to: original)
+        XCTAssertEqual(VoiceTutorTurnProtocol.capabilityHeader, "X-Voice-Turn-Protocol")
+        XCTAssertEqual(VoiceTutorTurnProtocol.capabilityValue, "realtime-native-v1")
+        XCTAssertEqual(prepared.value(forHTTPHeaderField: "X-Voice-Turn-Protocol"), "realtime-native-v1")
         XCTAssertNil(original.value(forHTTPHeaderField: "X-Voice-Turn-Protocol"))
         XCTAssertEqual(prepared.url, original.url)
         XCTAssertEqual(prepared.httpMethod, original.httpMethod)
@@ -2935,10 +2974,10 @@ final class VoiceTutorContractTests: XCTestCase {
         for name in ["Authorization", "X-Device-Id", "X-Client-Secret", "Sec-WebSocket-Protocol"] {
             XCTAssertEqual(prepared.value(forHTTPHeaderField: name), original.value(forHTTPHeaderField: name))
         }
-        XCTAssertEqual(VoiceTutorLocalSpeechProtocol.addingCapability(to: prepared), prepared)
+        XCTAssertEqual(VoiceTutorTurnProtocol.addingCapability(to: prepared), prepared)
         var staleCapability = prepared
         staleCapability.setValue("old-capability", forHTTPHeaderField: "X-Voice-Turn-Protocol")
-        XCTAssertEqual(VoiceTutorLocalSpeechProtocol.addingCapability(to: staleCapability), prepared)
+        XCTAssertEqual(VoiceTutorTurnProtocol.addingCapability(to: staleCapability), prepared)
     }
 
     func testLocalVoiceActivityBoundedStreamPreservesPairedFIFOOrder() async throws {

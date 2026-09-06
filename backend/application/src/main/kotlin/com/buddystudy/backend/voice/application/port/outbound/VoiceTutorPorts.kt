@@ -14,6 +14,10 @@ import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 import java.util.UUID
 
+object VoiceTutorResultFailureCodes {
+    const val INCOMPLETE_TRANSCRIPT = "INCOMPLETE_TRANSCRIPT"
+}
+
 data class VoiceTutorPersonalization(
     val resumeMarkdown: String?,
     val interests: List<String>,
@@ -63,6 +67,9 @@ object UnavailableVoiceTutorQuotaQueryPort : VoiceTutorQuotaQueryPort {
 }
 
 interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
+    /** Idempotent owner-bound fence against summarizing incomplete native source. */
+    suspend fun markTranscriptIncomplete(userId: Long, sessionId: String, now: Instant): Boolean = false
+
     suspend fun reconcileExpired(
         userId: Long,
         now: Instant,
@@ -152,10 +159,16 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
         studyAnswerProviderItemIds: List<String> = emptyList(),
         /** Trusted server receipt proves this USER final ASR preceded the quota fence. */
         acceptedBeforeQuotaCutoff: Boolean = false,
+        /** Native realtime raw source, never a live semantic attestation. */
+        postCallEvidence: Boolean = false,
+        /** Frozen provider conversation order, independent of final ASR arrival order. */
+        conversationSequence: Long? = null,
     ): Boolean
 
     suspend fun transcript(userId: Long, sessionId: String, maxCharacters: Int): List<VoiceTutorTranscriptTurn>
     suspend fun hasVerifiedLearningExchange(userId: Long, sessionId: String): Boolean
+    /** Unclassified native dialogue in a saved focus; never itself proves learning. */
+    suspend fun hasPostCallLearningCandidates(userId: Long, sessionId: String): Boolean = false
     suspend fun result(userId: Long, sessionId: String): VoiceTutorResult?
 
     suspend fun finalize(
