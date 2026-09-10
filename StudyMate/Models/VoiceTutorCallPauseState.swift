@@ -60,6 +60,7 @@ struct VoiceTutorCallPauseState: Equatable, Sendable {
 enum VoiceTutorCallControlEvent: Equatable, Sendable {
     case speech(VoiceTutorLocalSpeechEvent)
     case pause(VoiceTutorPauseControl)
+    case answer(VoiceTutorAnswerControl)
 }
 
 /// One bounded sender for speech edges AND hold fences. The capture gate emits
@@ -79,6 +80,7 @@ struct VoiceTutorCallControlEventStream: Sendable {
 
     func yield(_ event: VoiceTutorLocalSpeechEvent) { yield(.speech(event)) }
     func yield(_ control: VoiceTutorPauseControl) { yield(.pause(control)) }
+    func yield(_ control: VoiceTutorAnswerControl) { yield(.answer(control)) }
 
     private func yield(_ event: VoiceTutorCallControlEvent) {
         switch continuation.yield(event) {

@@ -2701,7 +2701,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(transcript.contains("Color(uiColor: .systemBackground)"))
         XCTAssertFalse(transcript.contains("UnevenRoundedRectangle"))
         XCTAssertFalse(transcript.contains("shadow("))
-        XCTAssertTrue(transcript.contains("orbPlaceholder(.transcript, diameter: usesAccessibilityChrome ? 56 : 48)"))
+        XCTAssertTrue(transcript.contains("orbPlaceholder(.transcript, diameter: hasAnswerDraft ? 64 : (usesAccessibilityChrome ? 56 : 48))"))
         XCTAssertTrue(source.contains("interactionDock"))
         XCTAssertTrue(source.contains("stableCallControls"))
         XCTAssertFalse(source.contains("Button(action: onPause)"), "The circle owns taps, swipes and holds through one recognizer")
@@ -3036,6 +3036,56 @@ final class VoiceTutorContractTests: XCTestCase {
             add(attachment)
         }
         XCTAssertEqual(capturedPNGs.count, selectedFixtures.count, "Each state must produce a distinct rendered screen")
+    }
+
+    @MainActor
+    func testManualAnswerScreensRenderWithoutSubmittingOrOpeningAMicrophone() async throws {
+        let answerID = UUID().uuidString
+        func makeState(_ phase: VoiceTutorAnswerDraftState.Phase, text: String) -> VoiceTutorAnswerDraftState {
+            var state = VoiceTutorAnswerDraftState()
+            state.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                              phase: .listening, text: nil, code: nil), existingDraft: text)
+            if phase != .listening {
+                _ = state.requestFinish()
+                state.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                                  phase: .review, text: nil, code: nil))
+                if phase == .submitting { _ = state.requestSubmit() }
+                if phase == .failed {
+                    state.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                                      phase: .failed, text: nil, code: "ANSWER_SUBMISSION_FAILED"))
+                }
+            }
+            return state
+        }
+        let text = "B입니다. 스프링 프레임워크는 핵심 기반을 제공하고, 스프링 부트는 설정을 단순화합니다."
+        let fixtures: [VoiceTutorCompactCallSnapshot] = [
+            .init(name: "answer-listening-orb", phase: .listening,
+                  answerDraftState: makeState(.listening, text: text)),
+            .init(name: "answer-listening-editor", phase: .listening, showsTranscript: true,
+                  answerDraftState: makeState(.listening, text: text)),
+            .init(name: "answer-review-corrected", phase: .listening, showsTranscript: true,
+                  answerDraftState: makeState(.review, text: text + " 스프링 데이터는 데이터 접근을 돕습니다.")),
+            .init(name: "answer-review-empty", phase: .listening, showsTranscript: true,
+                  answerDraftState: makeState(.review, text: "")),
+            .init(name: "answer-submitting", phase: .listening, showsTranscript: true,
+                  answerDraftState: makeState(.submitting, text: text)),
+            .init(name: "answer-retry-accessibility", phase: .listening, showsTranscript: true,
+                  language: .english, size: CGSize(width: 320, height: 696), dynamicType: .accessibility3,
+                  answerDraftState: makeState(.failed, text: "B. Spring supplies the core framework. Spring Boot simplifies configuration.")),
+        ]
+        var captures = Set<Data>()
+        for fixture in fixtures {
+            let image = try await renderCompactCallSnapshot(fixture)
+            let png = try XCTUnwrap(image.pngData(), fixture.name)
+            XCTAssertEqual(image.size, fixture.size)
+            XCTAssertGreaterThan(png.count, 2_000, fixture.name)
+            captures.insert(png)
+            let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+            attachment.name = fixture.name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        XCTAssertEqual(captures.count, fixtures.count, "Each manual answer state must render distinctly")
     }
 
     func testLocalVoiceActivitySilenceNeverStartsASpeakingTurn() {
@@ -4563,7 +4613,11 @@ final class VoiceTutorContractTests: XCTestCase {
                     detail: fixture.detail
                 ),
                 strings: strings,
-                captions: fixture.showsTranscript || fixture.showsPreview ? captions : [],
+                captions: fixture.answerDraftState.isActive
+                    ? [VoiceTutorCaption(speaker: .tutor, text: fixture.language == .english
+                        ? "How do Spring Framework, Spring Boot, and Spring Data differ?"
+                        : "스프링 프레임워크, 스프링 부트, 스프링 데이터의 차이를 설명해 주세요.")]
+                    : (fixture.showsTranscript || fixture.showsPreview ? captions : []),
                 errorMessage: fixture.phase == .failed
                     ? (fixture.failureCause == .provider
                         ? strings.serviceTemporarilyUnavailable
@@ -4573,7 +4627,14 @@ final class VoiceTutorContractTests: XCTestCase {
                 showsSummary: .constant(false),
                 onEnd: { XCTFail("A visual fixture must never end a real call") },
                 onRetry: { XCTFail("A visual fixture must never start a real call") },
-                onDismiss: { XCTFail("A visual fixture must never dismiss the real call screen") }
+                onDismiss: { XCTFail("A visual fixture must never dismiss the real call screen") },
+                answerDraftState: fixture.answerDraftState,
+                answerDraftText: .constant(fixture.answerDraftState.text),
+                canSubmitAnswer: fixture.answerDraftState.canSubmit,
+                onFinishAnswer: { XCTFail("A visual fixture must never finish microphone capture") },
+                onSubmitAnswer: { XCTFail("A visual fixture must never submit an answer") },
+                canSkipAnswer: fixture.answerDraftState.canSkip,
+                onSkipAnswer: { XCTFail("A visual fixture must never skip a saved question") }
             )
             .navigationTitle(strings.voiceTutorCallTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -4874,6 +4935,7 @@ private struct VoiceTutorCompactCallSnapshot {
     var size = CGSize(width: 402, height: 874)
     var dynamicType = DynamicTypeSize.large
     var colorScheme = ColorScheme.dark
+    var answerDraftState = VoiceTutorAnswerDraftState()
 }
 
 private struct VoiceTutorContractRenderFixture {

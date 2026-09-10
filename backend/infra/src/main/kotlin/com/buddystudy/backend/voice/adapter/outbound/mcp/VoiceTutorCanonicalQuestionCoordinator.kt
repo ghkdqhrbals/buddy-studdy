@@ -5,6 +5,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolR
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionChange
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -48,10 +49,47 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
             "request_question" -> request(context, state)
             "get_question_process" -> generation(context, state, arguments.getValue("correlation_id").toString())
             "skip_question" -> skip(context, state)
-            "submit_answer" -> submit(context, state)
+            "submit_answer" -> error("USER_CONFIRMATION_REQUIRED", "Only the learner can finish, edit and submit this answer from the app. Never submit or assess unfinished speech.")
             "get_grading_process" -> grading(context, state, arguments.getValue("correlation_id").toString())
             else -> unavailable()
         }
+    }
+
+    suspend fun submitReviewedAnswer(context: VoiceTutorWebRtcControlContext, reviewed: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult {
+        val state = reviewedState(context, reviewed) ?: return unavailable()
+        if (reviewed.text.isBlank() || reviewed.text.length > 8_000) return error("ANSWER_UNAVAILABLE", "Review a nonempty answer of at most 8000 characters before submitting.")
+        return submit(context, state, reviewed)
+    }
+
+    suspend fun skipReviewedQuestion(context: VoiceTutorWebRtcControlContext, reviewed: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult {
+        val state = reviewedState(context, reviewed) ?: return unavailable()
+        if (reviewed.text.isNotEmpty()) return unavailable()
+        if (!excludeReviewedSource(context, state, reviewed)) return persistencePending()
+        if (!current(context, state)) return unavailable()
+        return skipBoundQuestion(context, state)
+    }
+
+    private suspend fun reviewedState(context: VoiceTutorWebRtcControlContext, reviewed: VoiceTutorReviewedAnswer): State? {
+        val state = state(context) ?: return null
+        if (reviewed.studyId != state.scope.study || reviewed.lessonRevision != state.scope.revision ||
+            reviewed.recordId != recordId(state.question)?.toString() ||
+            runCatching { UUID.fromString(reviewed.answerId).toString() == reviewed.answerId }.getOrDefault(false).not() ||
+            reviewed.learnerProviderItemIds.size > 32 || reviewed.learnerProviderItemIds.distinct().size != reviewed.learnerProviderItemIds.size ||
+            reviewed.learnerProviderItemIds.any { it.isBlank() || it.length > 191 }) return null
+        return state.takeIf { current(context, it) }
+    }
+
+    private suspend fun excludeReviewedSource(context: VoiceTutorWebRtcControlContext, state: State, reviewed: VoiceTutorReviewedAnswer): Boolean {
+        // Typing an answer without any audio is valid. The trusted controller, never
+        // model arguments, freezes the available source IDs at explicit finish.
+        if (reviewed.learnerProviderItemIds.isEmpty()) return true
+        val tutorId = reviewed.precedingTutorProviderItemId ?: return false
+        val source = persistence.canonicalAnswerTurns(context.session.userId, context.session.id,
+            reviewed.learnerProviderItemIds.last(), tutorId, state.scope.revision)
+        if (source.size != reviewed.learnerProviderItemIds.size + 1 || source.firstOrNull()?.role != VoiceTutorTranscriptRole.TUTOR ||
+            source.firstOrNull()?.providerItemId != tutorId || source.drop(1).any { it.role != VoiceTutorTranscriptRole.USER } ||
+            source.drop(1).map { it.providerItemId } != reviewed.learnerProviderItemIds || !current(context, state)) return false
+        return persistence.excludeCanonicalQuestionTurns(context.session.userId, context.session.id, source.map { it.providerItemId })
     }
 
     private suspend fun state(context: VoiceTutorWebRtcControlContext): State? {
@@ -94,7 +132,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
             "gradingQuestions" to records.filter { it.path("questionStatus").asText() == "GRADING" }.map {
                 mapOf("id" to recordId(it).toString(), "questionStatus" to "GRADING")
             },
-            "notice" to if (newlyBound) "Read pendingQuestion.question.question faithfully and wait for the learner's answer. Its original topic and difficulty stay unchanged. Do not invent another question or give its hint/answer. Use skip_question only when the learner asks to skip, and submit_answer only for their actual answer after this question."
+            "notice" to if (newlyBound) "Read pendingQuestion.question.question faithfully and wait for the learner's answer. Its original topic and difficulty stay unchanged. Do not invent another question or give its hint/answer. Wait for the learner to finish, edit and explicitly submit through the app; never call submit_answer or assess unfinished speech."
                 else if (candidate != null) SAME_QUESTION_NOTICE
                 else "No ready unanswered question remains on this exact topic. If the learner wants to start or explicitly requests a new question, call request_question and wait for its saved result. Do not invent a question or resubmit an answer that is already grading.",
         )).copy(questionChange = state.question?.takeIf { newlyBound }?.let { change(state, it) },
@@ -172,6 +210,11 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         val question = state.question ?: return unavailable()
         val turn = learnerTurn(context, state.scope.revision) ?: return persistencePending()
         if (turn <= state.readLearnerTurn || !current(context, state)) return error("FRESH_LEARNER_REQUEST_REQUIRED", "Wait for the learner's request about the question just read.")
+        return skipBoundQuestion(context, state)
+    }
+
+    private suspend fun skipBoundQuestion(context: VoiceTutorWebRtcControlContext, state: State): VoiceTutorMcpToolResult {
+        val question = state.question ?: return unavailable()
         val result = invoke(context, "skip_question", mapOf("record_id" to recordId(question)!!))
         if (result.isError || !current(context, state)) return if (result.isError) result else unavailable()
         val record = mapper.readTree(result.output)
@@ -184,45 +227,26 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
             .copy(questionChange = change(state, record))
     }
 
-    private suspend fun submit(context: VoiceTutorWebRtcControlContext, state: State): VoiceTutorMcpToolResult {
+    private suspend fun submit(context: VoiceTutorWebRtcControlContext, state: State, reviewed: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult {
         val question = state.question ?: return unavailable()
-        val boundary = context.dialogueBoundary ?: return persistencePending()
-        val turn = learnerTurn(context, state.scope.revision) ?: return persistencePending()
-        if (turn <= state.readLearnerTurn || boundary.precedingSpokenResponseGeneration <= state.readGeneration ||
-            boundary.precedingTutorSpeechStoppedOrder <= 0 || boundary.latestAcceptedLearnerSpeechStartedOrder <= boundary.precedingTutorSpeechStoppedOrder) {
-            return error("QUESTION_ANSWER_REQUIRED", "Read the saved question and wait for the learner to answer it. A selection, skip, clarification or generation request is not an answer.")
-        }
-        val source = persistence.canonicalAnswerTurns(context.session.userId, context.session.id,
-            boundary.latestAcceptedLearnerProviderItemId ?: return persistencePending(),
-            boundary.precedingTutorProviderItemId ?: return persistencePending(), state.scope.revision)
-        if (source.size !in 2..33 || source.first().role != VoiceTutorTranscriptRole.TUTOR ||
-            source.drop(1).any { it.role != VoiceTutorTranscriptRole.USER } ||
-            source.last().providerItemId != boundary.latestAcceptedLearnerProviderItemId) return persistencePending()
-        // The native controller owns the exact saved-question readback. Spoken Markdown,
-        // symbols and code need not transcribe byte-for-byte like the displayed question.
-        val answer = source.drop(1).joinToString("\n") { it.transcript }
-        if (answer.isBlank() || answer.length > 50_000) return error("ANSWER_UNAVAILABLE", "The complete original answer is unavailable; do not invent one.")
-        if (!current(context, state) || learnerTurn(context, state.scope.revision) != turn) return unavailable()
+        val answer = reviewed.text
         val existing = invoke(context, "get_record", mapOf("record_id" to recordId(question)!!, "language" to context.session.language, "view" to "original"))
         if (existing.isError || !current(context, state)) return if (existing.isError) existing else unavailable()
         val existingRecord = mapper.readTree(existing.output)
         if (recordId(existingRecord) != recordId(question) || id(existingRecord.path("studyId")) != state.scope.study) return invalidResult()
         if (existingRecord.path("questionStatus").asText() != "UNGRADED" || !existingRecord.path("answer").asText("").isBlank()) {
             val recovered = recoverSubmission(state, existingRecord, answer)
-                ?: return error("QUESTION_ALREADY_HANDLED", "This question was already skipped or answered. Read its saved state; do not replace its answer.")
-            if (!persistence.excludeCanonicalQuestionTurns(context.session.userId, context.session.id, source.map { it.providerItemId })) return persistencePending()
-            if (!current(context, state) || learnerTurn(context, state.scope.revision) != turn) return unavailable()
-            return recovered
+                ?: return error("QUESTION_ALREADY_HANDLED", "This question was already skipped or answered. Do not overwrite its saved answer.")
+            if (!excludeReviewedSource(context, state, reviewed)) return persistencePending()
+            return if (current(context, state)) recovered else unavailable()
         }
-        // Mark these exact source turns before the canonical write; even a failed/uncertain
-        // submission must not create a second VOICE_TUTOR record for this existing question.
-        if (!persistence.excludeCanonicalQuestionTurns(context.session.userId, context.session.id, source.map { it.providerItemId })) return persistencePending()
-        if (!current(context, state) || learnerTurn(context, state.scope.revision) != turn) return unavailable()
+        // The explicit UI text is authoritative. Original ASR remains private and is
+        // excluded as duplicate learning evidence, never rewritten into the edited text.
+        if (!excludeReviewedSource(context, state, reviewed)) return persistencePending()
+        if (!current(context, state)) return unavailable()
         val result = invoke(context, "submit_answer", mapOf("record_id" to recordId(question)!!, "answer" to answer, "source_language" to context.session.language))
         if (!current(context, state)) return unavailable()
         if (result.isError) {
-            // An accepted queue may have lost its response. Read back the same exact
-            // original answer; never replay an uncertain write with invented text.
             val recovered = invoke(context, "get_record", mapOf("record_id" to recordId(question)!!, "language" to context.session.language, "view" to "original"))
             if (!current(context, state)) return unavailable()
             if (!recovered.isError) recoverSubmission(state, mapper.readTree(recovered.output), answer)?.let { return it }
@@ -231,7 +255,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         val record = mapper.readTree(result.output)
         if (recordId(record) != recordId(question) || id(record.path("studyId")) != state.scope.study || record.path("answer").asText().trim() != answer.trim()) return invalidResult()
         rememberSubmission(state, record, answer)
-        return output(mapOf("record" to compact(record), "notice" to "The original transcript answer was submitted to the existing question. Call get_grading_process with gradingRequestId. Speak only its returned verified score and feedback; do not grade from memory or make up a score."))
+        return output(mapOf("record" to feedbackRecord(record), "notice" to "The learner explicitly finished, reviewed and submitted their edited answer. Earlier microphone transcripts may be superseded; never assess them. Call get_grading_process with gradingRequestId and read only its verified score and feedback. Do not submit again."))
             .copy(questionChange = change(state, record))
     }
 
@@ -244,8 +268,8 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         if (recordResult.isError || !current(context, state)) return if (recordResult.isError) recordResult else unavailable()
         val record = mapper.readTree(recordResult.output)
         if (recordId(record) != recordId(question) || id(record.path("studyId")) != state.scope.study || record.path("answer").asText().trim() != submitted.answer.trim()) return invalidResult()
-        return output(mapOf("terminal" to true, "record" to compact(record),
-            "notice" to "Use only this saved gradingResult for score and feedback. If gradingResult is absent, report that grading is not complete; do not invent a grade. Wait for the learner before selecting another question."))
+        return output(mapOf("terminal" to true, "record" to feedbackRecord(record),
+            "notice" to "Use only this saved gradingResult for score and feedback, based on the learner-reviewed edited answer rather than superseded microphone text. If gradingDetailsAvailableInRecord is true, say the saved result can be read in the app. Otherwise, when gradingResult is absent, report that grading is not complete; do not invent a grade. Wait for the learner before selecting another question."))
             .copy(questionChange = change(state, record))
     }
 
@@ -287,7 +311,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
             record.path("answer").asText().trim() != answer.trim() ||
             record.path("questionStatus").asText() !in setOf("GRADING", "GRADED", "COMPLETED") || !correlation(record.path("gradingRequestId"))) return null
         rememberSubmission(state, record, answer)
-        return output(mapOf("record" to compact(record), "notice" to "This exact original answer was already accepted. Continue its gradingRequestId; do not submit again or invent a score."))
+        return output(mapOf("record" to feedbackRecord(record), "notice" to "This exact learner-reviewed answer was already accepted. Continue its gradingRequestId; do not submit again or assess superseded microphone text."))
             .copy(questionChange = change(state, record))
     }
 
@@ -297,6 +321,25 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         "submit_answer", "skip_question" -> args.keys == setOf("record_id") && id(mapper.valueToTree(args["record_id"])) == recordId(state.question)
         "get_question_process", "get_grading_process" -> args.keys == setOf("correlation_id") && args["correlation_id"] is String
         else -> false
+    }
+    private fun feedbackRecord(record: JsonNode): JsonNode = mapper.createObjectNode().apply {
+        // The canonical grader receives the full edited text. Keep model tool output
+        // small and avoid showing an earlier ASR answer or duplicating a long question.
+        listOf("id", "studyId", "topic", "difficulty", "questionStatus", "gradingRequestId", "gradingStatus", "gradingResult", "gradingError").forEach { key -> record.get(key)?.let { set<JsonNode>(key, it) } }
+        // Include the corrected answer when it fits completely; never present a
+        // cut-off excerpt as the learner's entire final answer.
+        record.get("answer")?.let { answer ->
+            set<JsonNode>("answer", answer)
+            if (mapper.writeValueAsBytes(this).size > 12 * 1024) {
+                remove("answer")
+                put("answerOmittedForSize", true)
+            }
+        }
+        if (mapper.writeValueAsBytes(this).size > 12 * 1024) {
+            remove("gradingResult")
+            remove("gradingError")
+            put("gradingDetailsAvailableInRecord", true)
+        }
     }
     private fun compact(record: JsonNode): JsonNode = mapper.createObjectNode().apply {
         listOf("id", "studyId", "topic", "difficulty", "questionStatus", "answer", "gradingRequestId", "gradingStatus", "gradingResult", "gradingError").forEach { key -> record.get(key)?.let { set<JsonNode>(key, it) } }

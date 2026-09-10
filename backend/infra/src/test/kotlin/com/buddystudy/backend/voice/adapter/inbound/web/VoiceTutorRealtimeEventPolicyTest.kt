@@ -14,6 +14,53 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
+    fun `manual answer controls stay local and strictly validate bound identity and edited text`() {
+        val identity = mapOf("answerId" to "00112233-4455-6677-8899-aabbccddeeff", "recordId" to "42")
+        for (type in listOf(VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT, VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT)) {
+            assertThat(policy.shouldForwardClientEvent(mapper.writeValueAsString(identity + mapOf("type" to type, "text" to "수정본")))).isFalse()
+        }
+        for (fields in listOf(identity + mapOf("answerId" to "forged"), identity + mapOf("recordId" to 42),
+            identity + mapOf("recordId" to "9223372036854775808"), identity + mapOf("text" to true))) {
+            assertThatThrownBy { policy.shouldForwardClientEvent(mapper.writeValueAsString(
+                mapOf("type" to VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT, "text" to "수정본") + fields)) }
+                .isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        }
+        for (text in listOf(" ", "가".repeat(8_001))) {
+            assertThat(policy.shouldForwardClientEvent(mapper.writeValueAsString(identity +
+                mapOf("type" to VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT, "text" to text)))).isFalse()
+        }
+    }
+
+    @Test
+    fun `answer state exposes only bounded server owned fields and rejects client forgery`() {
+        val raw = mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.ANSWER_STATE_EVENT,
+            "answerId" to "00112233-4455-6677-8899-aabbccddeeff", "recordId" to "42", "studyId" to 7,
+            "revision" to 0, "phase" to "review", "text" to "검토 답변", "code" to "ANSWER_TRANSCRIPT_INCOMPLETE", "private" to "discard"))
+        val decision = policy.providerDecision(raw, "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+        val payload = mapper.readTree(decision.payload)
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "answerId", "recordId", "studyId", "revision", "phase", "text", "code")
+        assertThat(payload.path("text").asText()).isEqualTo("검토 답변")
+        assertThat(policy.providerDecision(raw, "s1", Instant.EPOCH).payload).isNull()
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+    }
+
+    @Test
+    fun `answer transcript preserves exact bounded item sequence and drops invalid segment identities`() {
+        val fields = mapOf("type" to VoiceTutorRealtimeContract.ANSWER_TRANSCRIPT_EVENT,
+            "answerId" to "00112233-4455-6677-8899-aabbccddeeff", "recordId" to "42", "itemId" to "input-1",
+            "sequence" to 1, "text" to "원문", "private" to "discard")
+        val payload = mapper.readTree(policy.providerDecision(mapper.writeValueAsString(fields), "s1", Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "answerId", "recordId", "itemId", "sequence", "text")
+        for (invalid in listOf(mapOf("sequence" to 0), mapOf("sequence" to 33), mapOf("sequence" to 1.5),
+            mapOf("itemId" to "bad id"), mapOf("text" to "가".repeat(8_001)))) {
+            assertThat(policy.providerDecision(mapper.writeValueAsString(fields + invalid), "s1", Instant.EPOCH,
+                VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
+    }
+
+    @Test
     fun `question changes expose only exact record identity through the server sideband`() {
         val raw = """{"type":"${VoiceTutorRealtimeContract.QUESTION_CHANGED_EVENT}","studyId":42,"recordId":"101","answer":"private","question":"private","score":70}"""
         val decision = policy.providerDecision(raw, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)

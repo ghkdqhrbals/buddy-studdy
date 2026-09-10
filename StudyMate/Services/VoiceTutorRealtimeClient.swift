@@ -31,6 +31,21 @@ enum VoiceTutorTurnProtocol {
         case .pause(let command):
             guard command.sequence > 0 else { throw VoiceTutorLocalSpeechDeliveryError.invalidSequence }
             return ["type": command.kind.rawValue, "sequence": command.sequence]
+        case .answer(let command):
+            guard UUID(uuidString: command.answerID) != nil,
+                  VoiceTutorQuestionChange(studyID: 1, recordID: command.recordID) != nil else {
+                throw VoiceTutorLocalSpeechDeliveryError.invalidSequence
+            }
+            var payload: [String: Any] = ["type": command.kind.rawValue, "answerId": command.answerID, "recordId": command.recordID]
+            if command.kind == .submit {
+                guard let text = command.text, VoiceTutorAnswerDraftState.isValidSubmission(text) else {
+                    throw VoiceTutorLocalSpeechDeliveryError.invalidSequence
+                }
+                payload["text"] = text
+            } else if command.text != nil {
+                throw VoiceTutorLocalSpeechDeliveryError.invalidSequence
+            }
+            return payload
         }
     }
 }
@@ -115,7 +130,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case audioDelta(VoiceTutorRealtimeAudioDelta)
     case assistantTranscriptDelta(responseID: String?, delta: String)
     case assistantTranscriptDone(responseID: String?, transcript: String?)
-    case userTranscript(String)
+    case userTranscript(String, itemID: String? = nil)
     case userSpeechStarted
     case userSpeechStopped
     case inputRetry
@@ -126,6 +141,8 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case studyTreeUpdated(studyID: Int)
     case studyTreeDeleted(studyIDs: Set<Int>)
     case questionChanged(VoiceTutorQuestionChange)
+    case answerState(VoiceTutorAnswerStateEvent)
+    case answerTranscript(VoiceTutorAnswerTranscriptEvent)
     case responseStarted(
         responseID: String?,
         isTutorIntervention: Bool,
@@ -163,6 +180,29 @@ enum VoiceTutorRealtimeEventParser {
         }
 
         switch type {
+        case "buddystudy.voice.answer.state":
+            let required: Set<String> = ["type", "answerId", "studyId", "recordId", "revision", "phase"]
+            guard required.isSubset(of: Set(object.keys)), Set(object.keys).isSubset(of: required.union(["text", "code"])),
+                  let answerID = answerIdentifier(in: object),
+                  let studyID = exactInteger("studyId", in: object).flatMap({ Int(exactly: $0) }),
+                  let recordID = string("recordId", in: object), VoiceTutorQuestionChange(studyID: studyID, recordID: recordID) != nil,
+                  let revision = exactInteger("revision", in: object), revision >= 0,
+                  let rawPhase = string("phase", in: object), let phase = VoiceTutorAnswerDraftState.Phase(rawValue: rawPhase), phase != .inactive,
+                  object["text"] == nil || (object["text"] as? String).map({ $0.utf16.count <= VoiceTutorAnswerDraftState.maximumTextLength }) == true,
+                  object["code"] == nil || (object["code"] as? String).map({
+                      ["ANSWER_TRANSCRIPT_INCOMPLETE", "ANSWER_SUBMISSION_FAILED", "ANSWER_TOO_LONG"].contains($0)
+                  }) == true else { return .ignored(type: type) }
+            return .answerState(VoiceTutorAnswerStateEvent(answerID: answerID, studyID: studyID, recordID: recordID,
+                revision: revision, phase: phase, text: string("text", in: object), code: string("code", in: object)))
+        case "buddystudy.voice.answer.transcript":
+            guard Set(object.keys) == ["type", "answerId", "recordId", "itemId", "sequence", "text"],
+                  let answerID = answerIdentifier(in: object), let recordID = string("recordId", in: object),
+                  VoiceTutorQuestionChange(studyID: 1, recordID: recordID) != nil,
+                  let itemID = providerResponseID("itemId", in: object),
+                  let sequence = exactInteger("sequence", in: object), sequence > 0,
+                  let text = string("text", in: object), text.utf16.count <= VoiceTutorAnswerDraftState.maximumTextLength else { return .ignored(type: type) }
+            return .answerTranscript(VoiceTutorAnswerTranscriptEvent(answerID: answerID, recordID: recordID,
+                itemID: itemID, sequence: sequence, text: text))
         case "buddystudy.voice.question.changed":
             guard Set(object.keys) == ["type", "studyId", "recordId"],
                   let studyID = exactInteger("studyId", in: object).flatMap({ Int(exactly: $0) }),
@@ -307,7 +347,7 @@ enum VoiceTutorRealtimeEventParser {
                 transcript: string("transcript", in: object)
             )
         case "conversation.item.input_audio_transcription.completed":
-            return .userTranscript(string("transcript", in: object) ?? "")
+            return .userTranscript(string("transcript", in: object) ?? "", itemID: providerResponseID("item_id", in: object))
         case "input_audio_buffer.speech_started":
             return .userSpeechStarted
         case "input_audio_buffer.speech_stopped":
@@ -347,6 +387,11 @@ enum VoiceTutorRealtimeEventParser {
 
     private static func string(_ key: String, in object: [String: Any]) -> String? {
         object[key] as? String
+    }
+
+    private static func answerIdentifier(in object: [String: Any]) -> String? {
+        guard let value = string("answerId", in: object), value.count == 36, UUID(uuidString: value) != nil else { return nil }
+        return value
     }
 
     private static func providerResponseID(_ key: String, in object: [String: Any]) -> String? {

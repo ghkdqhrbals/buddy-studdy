@@ -359,6 +359,22 @@ class VoiceTutorControlWebSocketHandler(
                             )))
                         }
                     }
+                    VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT,
+                    VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT,
+                    VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT -> {
+                        val text = node.path("text")
+                        if (!sidebandReady.get() || (type == VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT &&
+                            (!text.isTextual || text.asText().isBlank() || text.asText().length > 8_000))) {
+                            // Invalid editor contents leave the current review intact. These
+                            // are local native controls, never provider-authored tool arguments.
+                            Mono.empty()
+                        } else {
+                            val event = linkedMapOf<String, Any>("type" to type,
+                                "answerId" to node.path("answerId").asText(), "recordId" to node.path("recordId").asText())
+                            if (type == VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT) event["text"] = text.asText()
+                            Mono.just(mapper.writeValueAsString(event))
+                        }
+                    }
                     else -> Mono.error(
                         VoiceTutorClientProtocolException("Unsupported Voice Tutor WebRTC control event."),
                     )

@@ -47,6 +47,19 @@ data class VoiceTutorMcpToolResult(
 data class VoiceTutorQuestionChange(val studyId: Long, val recordId: String)
 data class VoiceTutorQuestionReadback(val studyId: Long, val recordId: String, val question: String)
 
+/** An explicit authenticated UI action bound by the native controller to its saved question.
+ * Edited text is learner-authored. It never comes from model function arguments or rewrites ASR history.
+ */
+data class VoiceTutorReviewedAnswer(
+    val answerId: String,
+    val studyId: Long,
+    val recordId: String,
+    val lessonRevision: Long,
+    val text: String,
+    val precedingTutorProviderItemId: String?,
+    val learnerProviderItemIds: List<String> = emptyList(),
+)
+
 enum class VoiceTutorCandidateReadKind { LIST_STUDIES, GET_STUDY }
 
 /** Exact server-validated read scope. Only complete pages can reach the realtime candidate registry. */
@@ -133,6 +146,20 @@ interface VoiceTutorMcpToolPort {
         toolName: String,
         arguments: Map<String, Any>,
     ): VoiceTutorMcpToolResult
+
+    suspend fun submitReviewedAnswer(
+        context: VoiceTutorWebRtcControlContext,
+        answer: VoiceTutorReviewedAnswer,
+    ): VoiceTutorMcpToolResult = VoiceTutorMcpToolResult(
+        """{"error":{"code":"MANUAL_ANSWER_UNAVAILABLE","message":"Reviewed answer submission is unavailable."}}""", true,
+    )
+
+    suspend fun skipReviewedQuestion(
+        context: VoiceTutorWebRtcControlContext,
+        answer: VoiceTutorReviewedAnswer,
+    ): VoiceTutorMcpToolResult = VoiceTutorMcpToolResult(
+        """{"error":{"code":"MANUAL_ANSWER_UNAVAILABLE","message":"Skipping this question is unavailable."}}""", true,
+    )
 }
 
 /** Legacy transports and test fixtures must not acquire tool permissions implicitly. */

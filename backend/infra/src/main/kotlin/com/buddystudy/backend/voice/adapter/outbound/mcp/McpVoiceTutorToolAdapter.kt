@@ -16,6 +16,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidat
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAuthorizationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
@@ -75,8 +76,29 @@ class McpVoiceTutorToolAdapter(
                 if (spec == null) failure("MCP_UNAVAILABLE", "The canonical question tool is unavailable.")
                 else if (!isAuthorized(context)) inactiveCall()
                 else if (!validator.validate(spec.tool().inputSchema(), args).valid()) failure("INVALID_ARGUMENTS", "Use the documented question tool arguments.")
-                else boundedResult(invoke(context.principal!!, spec, args), name)
+                else canonicalQuestionData(invoke(context.principal!!, spec, args), name)
             })
+    }
+
+    override suspend fun submitReviewedAnswer(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult =
+        reviewedQuestionOperation { canonicalQuestions.submitReviewedAnswer(context, answer) }
+
+    override suspend fun skipReviewedQuestion(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult =
+        reviewedQuestionOperation { canonicalQuestions.skipReviewedQuestion(context, answer) }
+
+    private suspend fun reviewedQuestionOperation(operation: suspend () -> VoiceTutorMcpToolResult): VoiceTutorMcpToolResult = try {
+        operation()
+    } catch (error: CancellationException) { throw error }
+    catch (_: Exception) { failure("TOOL_UNAVAILABLE", "The saved question result could not be confirmed. Keep the reviewed answer and read its saved state before retrying.") }
+
+    private fun canonicalQuestionData(result: McpSchema.CallToolResult, name: String): VoiceTutorMcpToolResult {
+        if (name !in setOf("submit_answer", "get_record", "get_grading_process")) return boundedResult(result, name)
+        // These bodies are private input to the coordinator's exact-answer checks.
+        // A full edited answer may exceed the provider's 16 KiB tool-output limit;
+        // only its compact, verified record/grade is later sent to the model.
+        val bytes = objectMapper.writeValueAsBytes(result.structuredContent() ?: mapOf("content" to result.content()))
+        if (bytes.size > 128 * 1024) return failure("RESULT_TOO_LARGE", "The complete saved record cannot be read safely. Do not invent a result.")
+        return VoiceTutorMcpToolResult(String(bytes, Charsets.UTF_8), result.isError() == true)
     }
 
     override fun definitions(): List<VoiceTutorMcpToolDefinition> = specifications.values.filter { it.tool().name() in ALLOWED_TOOLS }.map { specification ->
@@ -138,7 +160,7 @@ class McpVoiceTutorToolAdapter(
                 val description = when (tool.name()) {
                     "list_pending_questions" -> "Read arrived pending questions for the exact selected study_id before teaching. Read the returned saved question faithfully and preserve its original level. Do not invent a replacement. Grading questions already have submitted answers and must not be asked again."
                     "request_question" -> "Request a new saved question for the selected topic only when the learner wants one and no ready pending question remains. Existing pending questions are returned first. For an unwanted question call skip_question on an explicit skip/change request, then request again. Normal question allowance applies; the server owns retry identity. Poll get_question_process and speak only its saved question."
-                    "submit_answer" -> "Submit the learner's actual answer to the saved question just read. Pass only its record_id: the server loads the complete original persisted learner speech, never model-written answer text. Do not call for silence, filler, a hint, clarification, skip, generation request or other non-answer. Wait for get_grading_process and use only the returned saved grade; never make up a score."
+                    "submit_answer" -> "Reserved for the learner's explicit app submission after finishing and editing their answer. Never call this tool yourself, even if speech seems complete. The server supplies the reviewed text privately after the learner taps Submit. Then use get_grading_process and only its saved grade."
                     "skip_question" -> "Skip only the current arrived unanswered question when the learner explicitly asks to skip or replace it. Pass its exact record_id. Do not grade it, erase drafts, skip a submitted answer, or generate a new question implicitly; check remaining pending questions next."
                     "get_question_process", "get_grading_process" -> tool.description().orEmpty() + " In voice, use only the correlation ID returned in this selected-topic call. Each read waits briefly for progress; if still pending wait/recheck without inventing completion, scores or questions."
                     else -> tool.description().orEmpty()

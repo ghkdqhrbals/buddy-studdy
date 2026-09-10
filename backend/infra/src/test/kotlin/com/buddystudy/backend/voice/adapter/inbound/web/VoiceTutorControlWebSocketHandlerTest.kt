@@ -52,6 +52,40 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceTutorControlWebSocketHandlerTest {
     @Test
+    fun `ready manual answer controls reach only the native controller with exact bounded fields`() {
+        val received = mutableListOf<String>()
+        val id = "00112233-4455-6677-8899-aabbccddeeff"
+        val types = listOf(VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT, VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT)
+        val result = runControlScenario(
+            clientAfterReady = types.map { """{"type":"$it","answerId":"$id","recordId":"42","text":"수정 답변","private":"discard"}""" },
+            provider = { events, _ -> received += events.take(3).toList() },
+        )
+        assertThat(result.failed).isFalse()
+        assertThat(received).hasSize(3)
+        received.zip(types).forEach { (raw, type) ->
+            val node = com.buddystudy.backend.common.application.json.JsonMapperProvider.mapper.readTree(raw)
+            assertThat(node.path("type").asText()).isEqualTo(type)
+            assertThat(node.path("answerId").asText()).isEqualTo(id)
+            assertThat(node.path("recordId").asText()).isEqualTo("42")
+            assertThat(node.has("text")).isEqualTo(type == VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT)
+            assertThat(raw).doesNotContain("discard")
+        }
+    }
+
+    @Test
+    fun `overlong editor submission is ignored without ending review or the call`() {
+        val received = mutableListOf<String>()
+        val identity = """"answerId":"00112233-4455-6677-8899-aabbccddeeff","recordId":"42""""
+        val result = runControlScenario(clientAfterReady = listOf(
+            """{"type":"${VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT}",$identity,"text":"${"가".repeat(8_001)}"}""",
+            """{"type":"${VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT}",$identity,"text":"짧게 수정한 답변"}""",
+        ), provider = { events, _ -> received += events.take(1).toList() })
+        assertThat(result.failed).isFalse()
+        assertThat(received.single()).contains("짧게 수정한 답변")
+    }
+
+    @Test
     fun `private integrity event persists even without transcript persistence or client forwarding`() {
         val result = runControlScenario(
             serverLifecycleEventBeforeCompletion = """{"type":"${VoiceTutorTranscriptMetadata.INCOMPLETE_EVENT}"}""",

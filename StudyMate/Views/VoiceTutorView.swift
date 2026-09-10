@@ -557,7 +557,7 @@ struct VoiceTutorSessionView: View {
                 summaryRefreshState: viewModel.summaryRefreshState
             ),
             strings: strings,
-            captions: viewModel.captions,
+            captions: viewModel.presentationCaptions,
             assistantTranscriptDraft: viewModel.assistantTranscriptDraft,
             errorMessage: viewModel.errorMessage,
             showsTranscript: $disclosureState.showsTranscript,
@@ -569,7 +569,17 @@ struct VoiceTutorSessionView: View {
                 Task { await viewModel.start() }
             },
             onDismiss: { dismiss() },
-            onSummaryRefresh: { Task { await viewModel.refreshSummary() } }
+            onSummaryRefresh: { Task { await viewModel.refreshSummary() } },
+            answerDraftState: viewModel.answerDraftState,
+            answerDraftText: Binding(
+                get: { viewModel.answerDraftText },
+                set: { viewModel.updateAnswerDraft($0) }
+            ),
+            canSubmitAnswer: viewModel.canSubmitReviewedAnswer,
+            onFinishAnswer: { Task { await viewModel.finishAnswerCapture() } },
+            onSubmitAnswer: { Task { await viewModel.submitReviewedAnswer() } },
+            canSkipAnswer: viewModel.canSkipReviewedQuestion,
+            onSkipAnswer: { Task { await viewModel.skipReviewedQuestion() } }
         )
         .navigationTitle(strings.voiceTutorCallTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -946,6 +956,7 @@ struct VoiceTutorCallScreen: View {
     @State private var didRequestEnd = false
     @State private var showsEndConfirmation = false
     @GestureState private var orbDragIsActive = false
+    @FocusState private var answerEditorIsFocused: Bool
     let topic: String
     var discoveryPrompt: String? = nil
     let presentation: VoiceTutorCallPresentation
@@ -960,6 +971,13 @@ struct VoiceTutorCallScreen: View {
     var onRetry: () -> Void = {}
     var onDismiss: () -> Void = {}
     var onSummaryRefresh: () -> Void = {}
+    var answerDraftState = VoiceTutorAnswerDraftState()
+    var answerDraftText: Binding<String> = .constant("")
+    var canSubmitAnswer = false
+    var onFinishAnswer: () -> Void = {}
+    var onSubmitAnswer: () -> Void = {}
+    var canSkipAnswer = false
+    var onSkipAnswer: () -> Void = {}
 
     private var usesAccessibilityChrome: Bool {
         VoiceTutorCallAdaptiveLayout.usesAccessibilityChrome(for: dynamicTypeSize)
@@ -1023,9 +1041,17 @@ struct VoiceTutorCallScreen: View {
             updateOrbAnimation()
         }
         .onChange(of: showsTranscript) { _, isShowingTranscript in
+            if !isShowingTranscript { answerEditorIsFocused = false }
             withAnimation(disclosureAnimation) {
                 transcriptExpansion = isShowingTranscript ? 1 : 0
             }
+        }
+        .onChange(of: answerDraftState.phase) { _, phase in
+            cancelOrbInteraction()
+            if phase == .review {
+                setTranscriptExpanded(true)
+            }
+            if !answerDraftIsEditable { answerEditorIsFocused = false }
         }
         .onChange(of: orbDragIsActive) { _, isTouching in
             guard !isTouching else { return }
@@ -1039,6 +1065,7 @@ struct VoiceTutorCallScreen: View {
         }
         .onChange(of: presentation.phase) { oldPhase, newPhase in
             if !newPhase.isLive {
+                answerEditorIsFocused = false
                 showsEndConfirmation = false
                 cancelOrbInteraction()
             }
@@ -1092,6 +1119,7 @@ struct VoiceTutorCallScreen: View {
                 VStack(spacing: 28) {
                     orbPlaceholder(.call, diameter: compactOrbDiameter(in: geometry))
                     callNotices
+                    if hasAnswerDraft { answerDraftPreview }
                 }
                 .frame(maxWidth: .infinity)
                 Spacer(minLength: 44)
@@ -1143,7 +1171,7 @@ struct VoiceTutorCallScreen: View {
                     }
                 }
                 Spacer(minLength: 0)
-                orbPlaceholder(.transcript, diameter: usesAccessibilityChrome ? 56 : 48)
+                orbPlaceholder(.transcript, diameter: hasAnswerDraft ? 64 : (usesAccessibilityChrome ? 56 : 48))
             }
             if usesAccessibilityChrome {
                 Text(strings.voiceTutorCallConversationAction)
@@ -1199,18 +1227,16 @@ struct VoiceTutorCallScreen: View {
         orbVisual(diameter: diameter)
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(presentation.showsPauseControl ? orbActionLabel : strings.voiceTutorTeacher)
+            .accessibilityLabel(hasAnswerDraft || presentation.showsPauseControl ? orbActionLabel : strings.voiceTutorTeacher)
             .accessibilityValue(orbAccessibilityValue)
             .accessibilityHint(orbActionHint)
             .accessibilityAddTraits(presentation.pauseState.holdsMicrophone ? .isSelected : [])
             .accessibilityIdentifier("voiceCall.orb")
             .accessibilityAction {
-                guard presentation.canChangePause, !didRequestEnd else { return }
-                onPause()
+                performOrbPrimaryAction()
             }
             .accessibilityAction(named: Text(orbActionLabel)) {
-                guard presentation.canChangePause, !didRequestEnd else { return }
-                onPause()
+                performOrbPrimaryAction()
             }
             .accessibilityAction(
                 named: Text(showsTranscript ? strings.voiceTutorCallCollapseConversation : strings.voiceTutorCallRevealConversation)
@@ -1250,6 +1276,22 @@ struct VoiceTutorCallScreen: View {
                         .padding(-7)
                 }
             }
+            .overlay {
+                if hasAnswerDraft, presentation.phase.isLive, orbInteraction.stage == .idle {
+                    if answerDraftIsBusy {
+                        ProgressView()
+                            .tint(Color.black.opacity(0.75))
+                    } else if let label = answerOrbLabel {
+                        Text(label)
+                            .font(diameter < 80 ? .caption2.weight(.semibold) : .headline)
+                            .foregroundStyle(Color.black.opacity(0.8))
+                            .opacity(answerDraftState.phase == .listening || canSubmitAnswer ? 1 : 0.45)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, diameter < 80 ? 7 : 20)
+                    }
+                }
+            }
             .frame(width: diameter, height: diameter)
             .scaleEffect(orbScale)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: orbInteraction.stage)
@@ -1283,6 +1325,8 @@ struct VoiceTutorCallScreen: View {
     private var orbStatusText: String {
         if orbInteraction.stage == .warning { return strings.voiceTutorOrbKeepHoldingToEnd }
         if orbInteraction.stage == .committed { return strings.voiceTutorCallEnding }
+        if hasAnswerDraft, presentation.phase.isLive,
+           presentation.pauseState.mode == .active { return answerDraftStatus }
         return presentation.statusText(strings, errorMessage: errorMessage)
     }
 
@@ -1327,6 +1371,156 @@ struct VoiceTutorCallScreen: View {
             .font(.caption.weight(.medium))
             .foregroundStyle(.red)
             .accessibilityIdentifier("voiceCall.recording")
+    }
+
+    private var hasAnswerDraft: Bool {
+        switch answerDraftState.phase {
+        case .listening, .finalizing, .review, .submitting, .failed: return true
+        case .inactive, .submitted, .cancelled: return false
+        }
+    }
+
+    private var answerDraftIsEditable: Bool {
+        presentation.phase.isLive && (answerDraftState.phase == .listening
+            || answerDraftState.phase == .review || answerDraftState.phase == .failed)
+    }
+
+    private var answerDraftIsBusy: Bool {
+        answerDraftState.phase == .finalizing || answerDraftState.phase == .submitting
+    }
+
+    private var answerOrbLabel: String? {
+        guard presentation.phase.isLive, presentation.pauseState.mode == .active else { return nil }
+        switch answerDraftState.phase {
+        case .listening: return strings.voiceTutorAnswerFinish
+        case .review, .failed: return strings.voiceTutorAnswerSubmit
+        default: return nil
+        }
+    }
+
+    private var answerDraftStatus: String {
+        switch answerDraftState.phase {
+        case .listening: return strings.voiceTutorAnswerListening
+        case .finalizing: return strings.voiceTutorAnswerFinalizing
+        case .review: return strings.voiceTutorAnswerReview
+        case .submitting: return strings.voiceTutorAnswerSubmitting
+        case .failed: return strings.voiceTutorAnswerFailed
+        case .inactive, .submitted, .cancelled:
+            return presentation.statusText(strings, errorMessage: errorMessage)
+        }
+    }
+
+    private var answerDraftPreview: some View {
+        Button {
+            setTranscriptExpanded(true)
+            answerEditorIsFocused = answerDraftIsEditable
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text(strings.voiceTutorAnswerDraftTitle)
+                    Spacer(minLength: 8)
+                    Image(systemName: answerDraftIsEditable ? "pencil" : "chevron.right")
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                Text(answerDraftText.wrappedValue.isEmpty
+                     ? strings.voiceTutorAnswerPlaceholder : answerDraftText.wrappedValue)
+                    .font(.subheadline)
+                    .foregroundStyle(answerDraftText.wrappedValue.isEmpty ? .secondary : .primary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.065), in: RoundedRectangle(cornerRadius: 16))
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.voiceTutorAnswerEdit)
+        .accessibilityValue(answerDraftText.wrappedValue)
+        .accessibilityIdentifier("voiceCall.answerPreview")
+    }
+
+    private var answerDraftCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(strings.voiceTutorAnswerDraftTitle)
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                if answerEditorIsFocused {
+                    Button(strings.done) { answerEditorIsFocused = false }
+                        .font(.subheadline.weight(.medium))
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityIdentifier("voiceCall.answerKeyboardDone")
+                }
+            }
+            ZStack(alignment: .topLeading) {
+                if answerDraftText.wrappedValue.isEmpty {
+                    Text(strings.voiceTutorAnswerPlaceholder)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                TextEditor(text: answerDraftText)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .focused($answerEditorIsFocused)
+                    .disabled(!answerDraftIsEditable)
+                    .frame(height: usesAccessibilityChrome ? 280 : 180)
+                    .accessibilityLabel(strings.voiceTutorAnswerEdit)
+                    .accessibilityHint(strings.voiceTutorAnswerReviewHelp)
+                    .accessibilityIdentifier("voiceCall.answerEditor")
+            }
+            Text(answerDraftState.phase == .listening
+                 ? strings.voiceTutorAnswerCaptureHelp : strings.voiceTutorAnswerReviewHelp)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if answerDraftState.phase == .failed {
+                Text(answerDraftState.failureCode == "ANSWER_TOO_LONG"
+                     ? strings.voiceTutorAnswerTooLong : strings.voiceTutorAnswerFailedHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if answerDraftState.phase == .review || answerDraftState.phase == .failed {
+                Button {
+                    performOrbPrimaryAction()
+                } label: {
+                    Text(strings.voiceTutorAnswerSubmit)
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(voiceAccent)
+                .disabled(!canSubmitAnswer || !presentation.phase.isLive)
+                .accessibilityIdentifier("voiceCall.answerSubmit")
+            } else if answerDraftIsBusy {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(answerDraftStatus).font(.caption)
+                }
+                .foregroundStyle(.secondary)
+            }
+            if canSkipAnswer {
+                Button(strings.voiceTutorAnswerSkip) {
+                    answerEditorIsFocused = false
+                    onSkipAnswer()
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("voiceCall.answerSkip")
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.065), in: RoundedRectangle(cornerRadius: 16))
+        .id("voiceCall.answerDraft")
+        .accessibilityIdentifier("voiceCall.answerCard")
     }
 
     @ViewBuilder
@@ -1413,7 +1607,7 @@ struct VoiceTutorCallScreen: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    if captions.isEmpty && assistantTranscriptDraft.isEmpty,
+                    if captions.isEmpty && assistantTranscriptDraft.isEmpty, !hasAnswerDraft,
                        presentation.phase != .failed && presentation.phase != .ended {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(strings.voiceTutorCallEmptyConversation)
@@ -1430,12 +1624,13 @@ struct VoiceTutorCallScreen: View {
                     ForEach(captions) { caption in
                         VoiceTutorCaptionBubble(caption: caption, strings: strings)
                     }
+                    if hasAnswerDraft { answerDraftCard }
                     if !assistantTranscriptDraft.isEmpty {
                         VoiceTutorCaptionBubble(
                             caption: VoiceTutorCaption(speaker: .tutor, text: assistantTranscriptDraft),
                             strings: strings
                         )
-                    } else if presentation.orbState == .thinking && !captions.isEmpty {
+                    } else if presentation.orbState == .thinking && !captions.isEmpty && !hasAnswerDraft {
                         Label(strings.voiceTutorCallThinking, systemImage: "ellipsis")
                             .font(.subheadline)
                             .foregroundStyle(voiceAccent)
@@ -1491,6 +1686,12 @@ struct VoiceTutorCallScreen: View {
             }
             .onChange(of: assistantTranscriptDraft) { _, _ in
                 scheduleTranscriptAutoScroll(using: proxy)
+            }
+            .onChange(of: answerDraftText.wrappedValue) { _, _ in
+                scheduleTranscriptAutoScroll(using: proxy)
+            }
+            .onChange(of: answerEditorIsFocused) { _, isFocused in
+                if isFocused { proxy.scrollTo("voiceCall.answerDraft", anchor: .bottom) }
             }
             .onChange(of: showsTranscript) { _, isShowingTranscript in
                 if isShowingTranscript { scheduleTranscriptAutoScroll(using: proxy) }
@@ -1556,7 +1757,7 @@ struct VoiceTutorCallScreen: View {
     private func scheduleTranscriptAutoScroll(using proxy: ScrollViewProxy, animated: Bool = false) {
         // The mounted, hidden transcript follows too, so the first drag already
         // reveals the latest turn instead of jumping there only after release.
-        guard transcriptFollowState.shouldAutoScrollForContentChange else { return }
+        guard !answerEditorIsFocused, transcriptFollowState.shouldAutoScrollForContentChange else { return }
         transcriptScrollAnimates = transcriptScrollAnimates || (animated && showsTranscript)
         transcriptAutoScrollTask?.cancel()
         transcriptAutoScrollTask = Task { @MainActor in
@@ -1564,7 +1765,7 @@ struct VoiceTutorCallScreen: View {
             // the new bottom anchor. Wait one main-actor turn, then re-check the
             // learner's position so a concurrent scroll toward history wins.
             await Task.yield()
-            guard !Task.isCancelled,
+            guard !Task.isCancelled, !answerEditorIsFocused,
                   transcriptFollowState.shouldAutoScrollForContentChange else { return }
             let animate = transcriptScrollAnimates && !reduceMotion
             transcriptScrollAnimates = false
@@ -1776,15 +1977,15 @@ struct VoiceTutorCallScreen: View {
                         showsTranscript: showsTranscript
                     ) : nil
                 let startsExpanded = orbDragStartsExpanded ?? (releaseAction != nil ? showsTranscript : nil)
-                let shouldPause = orbInteraction.release(at: ProcessInfo.processInfo.systemUptime)
+                let shouldActivate = orbInteraction.release(at: ProcessInfo.processInfo.systemUptime)
                 if let startsExpanded {
                     setTranscriptExpanded(VoiceTutorOrbGestureRouting.settlesExpanded(
                         translation: value.translation,
                         predictedTranslation: value.predictedEndTranslation,
                         startsExpanded: startsExpanded
                     ))
-                } else if shouldPause, presentation.canChangePause, !didRequestEnd {
-                    onPause()
+                } else if shouldActivate {
+                    performOrbPrimaryAction()
                 }
             }
     }
@@ -1842,12 +2043,39 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var orbActionLabel: String {
-        orbRepresentsResume ? strings.voiceTutorResumeLesson : strings.voiceTutorTakeBreak
+        if let answerOrbLabel { return answerOrbLabel }
+        if hasAnswerDraft, presentation.pauseState.mode == .active { return answerDraftStatus }
+        return orbRepresentsResume ? strings.voiceTutorResumeLesson : strings.voiceTutorTakeBreak
     }
 
     private var orbActionHint: String {
-        let tapHint = orbRepresentsResume ? strings.voiceTutorOrbResumeHint : strings.voiceTutorOrbPauseHint
+        let tapHint: String
+        if answerOrbLabel != nil {
+            tapHint = answerDraftState.phase == .listening
+                ? strings.voiceTutorAnswerFinishHint : strings.voiceTutorAnswerSubmitHint
+        } else {
+            tapHint = orbRepresentsResume ? strings.voiceTutorOrbResumeHint : strings.voiceTutorOrbPauseHint
+        }
         return "\(tapHint) \(orbTranscriptGestureHint) \(strings.voiceTutorOrbHoldToEndHint)"
+    }
+
+    private func performOrbPrimaryAction() {
+        guard presentation.phase.isLive, !didRequestEnd else { return }
+        if hasAnswerDraft, presentation.pauseState.mode == .active {
+            switch answerDraftState.phase {
+            case .listening:
+                answerEditorIsFocused = false
+                onFinishAnswer()
+            case .review, .failed:
+                guard canSubmitAnswer else { return }
+                answerEditorIsFocused = false
+                onSubmitAnswer()
+            default: break
+            }
+            return
+        }
+        guard presentation.canChangePause else { return }
+        onPause()
     }
 
     private var orbTranscriptGestureHint: String {
@@ -1861,7 +2089,7 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var orbAccessibilityValue: String {
-        var parts = [displayTopic, presentation.statusText(strings, errorMessage: errorMessage)]
+        var parts = [displayTopic, orbStatusText]
         if let discoveryPrompt,
            !discoveryPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             parts.append(discoveryPrompt)

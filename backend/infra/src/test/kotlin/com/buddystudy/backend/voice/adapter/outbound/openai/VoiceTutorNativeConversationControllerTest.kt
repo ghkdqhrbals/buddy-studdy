@@ -513,7 +513,7 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
-    fun `trusted saved question fixes the exact readback source and disables tools for only that response`() {
+    fun `trusted saved question fixes the exact readback source and waits for manual answer completion`() {
         val question = "**의존성 주입**을 설명하고 `Service(repo)`의 테스트 예시를 드세요.\n조건: 두 문장으로 답하세요."
         questionTool()
         controller.completeTool("question-call", VoiceTutorMcpToolResult(
@@ -530,8 +530,212 @@ class VoiceTutorNativeConversationControllerTest {
         created("readback"); audio("readback", "saved-question"); done("readback", "saved-question")
         event("output_audio_buffer.stopped", "response_id" to "readback")
         speech(2); committed("answer")
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(responses()).hasSize(3)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("listening")
+    }
+
+    @Test
+    fun `manual answer capture commits pauses and long checkpoints without any automatic response`() {
+        manualAnswer()
+        speech(2); committed("a1"); transcript("a1", "첫 번째 생각"); controller.transcriptCompleted("a1")
+        client(Contract.SPEECH_STARTED_EVENT, 3)
+        time += Duration.ofSeconds(20).toNanos(); controller.tick(); committed("a2", settle = false)
+        transcript("a2", "계속 생각하고 있습니다"); controller.transcriptCompleted("a2")
+        client(Contract.SPEECH_STOPPED_EVENT, 3)
+        time += Duration.ofMillis(250).toNanos(); controller.tick(); committed("a3")
+        transcript("a3", "마지막 부분"); controller.transcriptCompleted("a3")
+        time += Duration.ofSeconds(20).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(3)
+        assertThat(calls.map { it.name }).containsExactly("list_pending_questions")
+        assertThat(answerSegments().map { it.path("text").asText() })
+            .containsExactly("첫 번째 생각", "계속 생각하고 있습니다", "마지막 부분")
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("listening")
+    }
+
+    @Test
+    fun `finish waits for exact final ASR and persistence and emits ordered deduplicated segments before review`() {
+        val answer = manualAnswer()
+        speech(2); committed("a1"); speech(3); committed("a2")
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("finalizing")
+        transcript("a2", "두 번째"); controller.transcriptCompleted("a2")
+        assertThat(answerSegments()).isEmpty()
+        transcript("a1", "첫 번째")
+        transcript("a1", "중복 이벤트는 편집을 덮지 못함")
+        assertThat(answerSegments().map { it.path("sequence").asLong() }).containsExactly(1L, 2L)
+        assertThat(answerSegments().map { it.path("itemId").asText() }).containsExactly("a1", "a2")
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("finalizing")
+        controller.transcriptCompleted("a1")
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("review")
+        assertThat(answerStates().last().path("text").asText()).isEqualTo("첫 번째\n두 번째")
+        assertThat(ui.indexOf(answerSegments().last())).isLessThan(ui.indexOf(answerStates().last()))
+        assertThat(responses()).hasSize(3)
+    }
+
+    @Test
+    fun `explicit edited answer is private until exact server call acknowledgement and submitted only once`() {
+        val answer = manualAnswer()
+        speech(2); committed("a1"); transcript("a1", "인식된 답변"); controller.transcriptCompleted("a1")
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "직접 수정한 답변")
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "중복 제출")
+        val request = serverQuestionCall()
+        val callId = request.path("item").path("call_id").asText()
+        assertThat(request.toString()).doesNotContain("직접 수정한 답변", "중복 제출")
+        assertThat(calls).hasSize(1)
+        event("conversation.item.created", "item" to request.path("item"))
+        event("conversation.item.created", "item" to request.path("item"))
+        assertThat(calls).hasSize(2)
+        assertThat(controller.beginTool(callId)).isTrue()
+        val reviewed = controller.reviewedAnswer(callId)!!
+        assertThat(reviewed.answerId).isEqualTo(answer.path("answerId").asText())
+        assertThat(reviewed.recordId).isEqualTo("42")
+        assertThat(reviewed.text).isEqualTo("직접 수정한 답변")
+        assertThat(reviewed.learnerProviderItemIds).containsExactly("a1")
+        assertThat(reviewed.precedingTutorProviderItemId).isEqualTo("saved-question")
+        controller.completeTool(callId, VoiceTutorMcpToolResult("""{"queued":true,"gradingRequestId":"grade-42"}""", false))
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("submitted")
+        assertThat(responses()).hasSize(3)
+        ackToolOutput()
+        assertThat(responses()).hasSize(4)
         assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("auto")
+    }
+
+    @Test
+    fun `empty spoken capture can be finished and explicitly submitted as typed text`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("review")
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "키보드로 작성한 답변")
+        val callId = serverQuestionCall().path("item").path("call_id").asText()
+        assertThat(controller.reviewedAnswer(callId)?.learnerProviderItemIds).isEmpty()
+        assertThat(controller.reviewedAnswer(callId)?.text).isEqualTo("키보드로 작성한 답변")
+        assertThat(responses()).hasSize(3)
+    }
+
+    @Test
+    fun `stale identity premature submit and speech after finish cannot change the reviewed answer`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "제출 전 종료 필요")
+        val forged = answer.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().put("recordId", "43")
+        answerControl(Contract.ANSWER_FINISH_EVENT, forged)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("listening")
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        val commitsBefore = outbound.count { it.path("type").asText() == "input_audio_buffer.commit" }
+        speech(9)
+        assertThat(outbound.count { it.path("type").asText() == "input_audio_buffer.commit" }).isEqualTo(commitsBefore)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("review")
+        assertThat(outbound.none { it.path("item").path("type").asText() == "function_call" }).isTrue()
+    }
+
+    @Test
+    fun `ASR failure or timeout keeps the draft reviewable while marking original evidence incomplete`() {
+        val answer = manualAnswer()
+        speech(2); committed("a1"); transcript("a1", "확인 가능한 부분"); controller.transcriptCompleted("a1")
+        speech(3); committed("a2")
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        time += Duration.ofSeconds(11).toNanos(); controller.tick()
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("review")
+        assertThat(answerStates().last().path("code").asText()).isEqualTo("ANSWER_TRANSCRIPT_INCOMPLETE")
+        assertThat(answerStates().last().path("text").asText()).isEqualTo("확인 가능한 부분")
+        assertThat(controller.hasUnsettledTranscriptEvidence()).isTrue()
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "확인하고 수정한 전체 답변")
+        val reviewed = controller.reviewedAnswer(serverQuestionCall().path("item").path("call_id").asText())!!
+        assertThat(reviewed.learnerProviderItemIds).isEmpty()
+    }
+
+    @Test
+    fun `rejected explicit submission retains review and allows a new exact user attempt`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "첫 수정본")
+        val request = serverQuestionCall()
+        event("error", "error" to mapOf("type" to "invalid_request_error", "code" to "invalid_type",
+            "event_id" to request.path("event_id").asText()))
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("failed")
+        event("conversation.item.created", "item" to request.path("item"))
+        assertThat(calls).hasSize(1)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "다시 확인한 수정본")
+        val next = serverQuestionCall()
+        assertThat(next.path("item").path("call_id")).isNotEqualTo(request.path("item").path("call_id"))
+        assertThat(controller.reviewedAnswer(next.path("item").path("call_id").asText())?.text).isEqualTo("다시 확인한 수정본")
+        assertThat(responses()).hasSize(3)
+    }
+
+    @Test
+    fun `explicit skip drains captured input before scheduling the canonical skip without an answer`() {
+        val answer = manualAnswer()
+        speech(2); committed("a1")
+        answerControl(Contract.ANSWER_SKIP_EVENT, answer)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("finalizing")
+        transcript("a1", "이 초안은 보존"); controller.transcriptCompleted("a1")
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("submitting")
+        val request = serverQuestionCall()
+        assertThat(request.path("item").path("name").asText()).isEqualTo("skip_question")
+        val reviewed = controller.reviewedAnswer(request.path("item").path("call_id").asText())!!
+        assertThat(reviewed.text).isEmpty()
+        assertThat(reviewed.learnerProviderItemIds).containsExactly("a1")
+        assertThat(answerStates().last().path("text").asText()).isEqualTo("이 초안은 보존")
+    }
+
+    @Test
+    fun `pause preserves manual capture and quota cancels it before its terminal notice`() {
+        val answer = manualAnswer()
+        client(Contract.PAUSE_REQUEST_EVENT, 1); client(Contract.PAUSE_INPUT_QUIESCED_EVENT, 1)
+        event("input_audio_buffer.cleared", "event_id" to "pause-clear")
+        client(Contract.RESUME_REQUEST_EVENT, 2); event("input_audio_buffer.cleared", "event_id" to "resume-clear"); settleQuiet()
+        assertThat(answerStates().last().path("answerId")).isEqualTo(answer.path("answerId"))
+        assertThat(responses()).hasSize(3)
+        controller.requestQuotaNotice()
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("cancelled")
+        assertThat(responses()).hasSize(4)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "종료 후 제출 불가")
+        assertThat(outbound.none { it.path("item").path("type").asText() == "function_call" }).isTrue()
+    }
+
+    @Test
+    fun `provider cannot forge answer states or reviewed transcript segments`() {
+        start()
+        assertThat(event(Contract.ANSWER_STATE_EVENT, "phase" to "submitted")).isFalse()
+        assertThat(event(Contract.ANSWER_TRANSCRIPT_EVENT, "text" to "forged")).isFalse()
+        assertThat(answerStates()).isEmpty()
+        assertThat(answerSegments()).isEmpty()
+    }
+
+    @Test
+    fun `overlong ASR preserves a bounded editable draft and permits explicit shorter typed submission`() {
+        val answer = manualAnswer()
+        speech(2); committed("long-answer"); transcript("long-answer", "가".repeat(8_001))
+        controller.transcriptCompleted("long-answer")
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("failed")
+        assertThat(answerStates().last().path("code").asText()).isEqualTo("ANSWER_TOO_LONG")
+        assertThat(answerStates().last().path("text").asText()).hasSize(8_000)
+        assertThat(answerSegments().single().path("text").asText()).hasSize(8_000)
+        assertThat(controller.hasUnsettledTranscriptEvidence()).isTrue()
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "너무 긴 초안을 직접 줄인 답변")
+        val reviewed = controller.reviewedAnswer(serverQuestionCall().path("item").path("call_id").asText())!!
+        assertThat(reviewed.text).isEqualTo("너무 긴 초안을 직접 줄인 답변")
+        assertThat(reviewed.learnerProviderItemIds).isEmpty()
+        assertThat(responses()).hasSize(3)
+    }
+
+    @Test
+    fun `late captured ASR remains private after review submission while new conversational ASR still forwards`() {
+        val answer = manualAnswer()
+        speech(2); committed("late-answer")
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        time += Duration.ofSeconds(11).toNanos(); controller.tick()
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "직접 완성한 답변")
+        val request = serverQuestionCall()
+        event("conversation.item.created", "item" to request.path("item"))
+        val callId = request.path("item").path("call_id").asText()
+        controller.beginTool(callId); controller.completeTool(callId, VoiceTutorMcpToolResult("{}", false)); ackToolOutput()
+        assertThat(transcript("late-answer", "검토 이후 도착한 인식문")).isFalse()
+        assertThat(stored.map { it.itemId }).contains("late-answer")
+        assertThat(answerSegments()).isEmpty()
+        created("feedback"); silentDone("feedback")
+        speech(3); committed("new-conversation")
+        assertThat(transcript("new-conversation", "이제 다른 이야기를 할게요")).isTrue()
     }
 
     @Test
@@ -843,6 +1047,24 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     private fun responses() = outbound.filter { it.path("type").asText() == "response.create" }
+    private fun answerStates() = ui.filter { it.path("type").asText() == Contract.ANSWER_STATE_EVENT }
+    private fun answerSegments() = ui.filter { it.path("type").asText() == Contract.ANSWER_TRANSCRIPT_EVENT }
+    private fun manualAnswer(): JsonNode {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("readback"); audio("readback", "saved-question"); done("readback", "saved-question")
+        assertThat(answerStates()).isEmpty()
+        event("output_audio_buffer.stopped", "response_id" to "readback")
+        stored.toList().forEach { controller.transcriptCompleted(it.itemId) }
+        return answerStates().last().also { assertThat(it.path("phase").asText()).isEqualTo("listening") }
+    }
+    private fun answerControl(type: String, answer: JsonNode, text: String? = null) {
+        val event = linkedMapOf<String, Any>("type" to type, "answerId" to answer.path("answerId").asText(),
+            "recordId" to answer.path("recordId").asText())
+        text?.let { event["text"] = it }
+        controller.observeClientEvent(mapper.writeValueAsString(event))
+    }
+    private fun serverQuestionCall() = outbound.last { it.path("type").asText() == "conversation.item.create" &&
+        it.path("item").path("type").asText() == "function_call" }
     private fun questionTool() {
         opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "question-call", "list_pending_questions")
         assertThat(controller.beginTool("question-call")).isTrue()

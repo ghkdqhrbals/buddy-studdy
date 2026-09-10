@@ -3120,6 +3120,37 @@ struct AppStrings {
     var voiceTutorCallConnecting: String { text("연결 중", "Connecting", "接続中") }
     var voiceTutorCallListening: String { text("듣는 중", "Listening", "聞いています") }
     var voiceTutorInputRepeat: String { text("다시 말해 주세요", "Please say that again", "もう一度話してください") }
+    var voiceTutorAnswerFinish: String { text("답변 종료", "Finish answer", "回答を終える") }
+    var voiceTutorAnswerSubmit: String { text("제출", "Submit", "送信") }
+    var voiceTutorAnswerSkip: String { text("이 질문 건너뛰기", "Skip this question", "この問題をスキップ") }
+    var voiceTutorAnswerListening: String { text("답변을 듣고 있어요", "Listening to your answer", "回答を聞いています") }
+    var voiceTutorAnswerFinalizing: String { text("마지막 말을 받아쓰는 중", "Finishing the transcript", "最後の言葉を書き起こしています") }
+    var voiceTutorAnswerReview: String { text("답변을 확인해 주세요", "Review your answer", "回答を確認してください") }
+    var voiceTutorAnswerSubmitting: String { text("답변 제출 중", "Submitting your answer", "回答を送信中") }
+    var voiceTutorAnswerFailed: String { text("답변을 제출하지 못했어요", "Answer wasn't submitted", "回答を送信できませんでした") }
+    var voiceTutorAnswerDraftTitle: String { text("내 답변", "Your answer", "自分の回答") }
+    var voiceTutorAnswerEdit: String { text("답변 수정", "Edit answer", "回答を編集") }
+    var voiceTutorAnswerPlaceholder: String {
+        text("말한 내용이 여기에 모여요. 직접 입력해도 돼요.", "Your words appear here. You can type, too.", "話した内容がここに表示されます。直接入力もできます。")
+    }
+    var voiceTutorAnswerCaptureHelp: String {
+        text("다 말했으면 원을 눌러 답변을 확인하세요.", "Tap the circle when you're ready to review.", "話し終えたら円をタップして回答を確認してください。")
+    }
+    var voiceTutorAnswerReviewHelp: String {
+        text("잘못 받아쓴 말은 고쳐 주세요. 제출한 내용으로만 채점해요.", "Correct any transcription errors. Only your submitted answer will be graded.", "書き起こしの誤りを直してください。送信した内容だけを採点します。")
+    }
+    var voiceTutorAnswerFailedHelp: String {
+        text("답변은 여기에 남아 있어요. 확인한 뒤 다시 제출해 주세요.", "Your answer is still here. Review it and try submitting again.", "回答はここに残っています。確認してからもう一度送信してください。")
+    }
+    var voiceTutorAnswerTooLong: String {
+        text("답변이 너무 길어요. 내용을 줄여서 다시 제출해 주세요.", "This answer is too long. Shorten it and submit again.", "回答が長すぎます。内容を短くしてもう一度送信してください。")
+    }
+    var voiceTutorAnswerFinishHint: String {
+        text("받아쓰기를 마치고 수정할 답변을 확인합니다. 아직 제출하지 않습니다.", "Finish listening and review your editable answer. This doesn't submit it.", "聞き取りを終えて編集できる回答を確認します。まだ送信されません。")
+    }
+    var voiceTutorAnswerSubmitHint: String {
+        text("확인한 답변을 제출하고 채점을 시작합니다.", "Submit the answer you've reviewed for grading.", "確認した回答を送信して採点を開始します。")
+    }
     var voiceTutorInputPreparationFailed: String {
         text(
             "음성 입력을 준비하지 못했어요. 다시 시도해 주세요.",

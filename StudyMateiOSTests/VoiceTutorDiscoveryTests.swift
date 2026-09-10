@@ -546,6 +546,44 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
         }
     }
 
+    func testReviewedVoiceDraftUsesTheExistingRecordStoreAndKeepsOtherDraftsAndSelection() throws {
+        let fixture = try VoiceDiscoveryAppFixture()
+        defer { fixture.close() }
+        let change = try XCTUnwrap(VoiceTutorQuestionChange(studyID: 99, recordID: "901"))
+        fixture.store.saveAnswerDraft("원래 키보드 초안", recordID: "901")
+        let existing = try XCTUnwrap(fixture.appState.voiceTutorAnswerDraft(for: change, validity: { true }))
+        var draft = VoiceTutorAnswerDraftState()
+        let answerID = UUID().uuidString
+        XCTAssertTrue(draft.apply(VoiceTutorAnswerStateEvent(answerID: answerID, studyID: 99, recordID: "901",
+            revision: 1, phase: .listening, text: nil, code: nil), existingDraft: existing))
+        XCTAssertTrue(draft.append(VoiceTutorAnswerTranscriptEvent(answerID: answerID, recordID: "901", itemID: "voice-part",
+            sequence: 1, text: "새롭게 인식된 문장")))
+        XCTAssertFalse(draft.shouldPersistAutomatically)
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: "901"), "원래 키보드 초안")
+
+        XCTAssertTrue(draft.edit("사용자가 직접 수정한 확정 초안"))
+        fixture.appState.saveVoiceTutorAnswerDraft(draft.text, for: change, validity: { true })
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: "901"), "사용자가 직접 수정한 확정 초안")
+        XCTAssertNotNil(draft.requestSkip())
+        draft.endLocally()
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: "901"), "사용자가 직접 수정한 확정 초안")
+        fixture.assertDraftsUnchanged()
+        XCTAssertTrue(fixture.requests.isEmpty, "Draft edits must remain local and cannot submit an answer")
+    }
+
+    func testVoiceDraftReadFlushesAnExistingKeyboardEditAndStaleCallsCannotWrite() throws {
+        let fixture = try VoiceDiscoveryAppFixture()
+        defer { fixture.close() }
+        let record = questionRecord(id: "901", status: .ungraded)
+        let change = try XCTUnwrap(VoiceTutorQuestionChange(studyID: 99, recordID: "901"))
+        fixture.appState.updateAnswer("아직 debounce 중인 키보드 수정", for: record)
+        XCTAssertEqual(fixture.appState.voiceTutorAnswerDraft(for: change, validity: { true }), "아직 debounce 중인 키보드 수정")
+        fixture.appState.saveVoiceTutorAnswerDraft("지난 통화의 늦은 저장", for: change, validity: { false })
+        XCTAssertNil(fixture.appState.voiceTutorAnswerDraft(for: change, validity: { false }))
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: "901"), "아직 debounce 중인 키보드 수정")
+        fixture.assertDraftsUnchanged()
+    }
+
     private func questionRecord(id: String, status: QuestionStatus) -> StudyRecord {
         StudyRecord(id: id, studyID: 99,
                     question: QuestionItem(question: "합성 음성 문제 \(id)", expectedAnswerHint: nil,

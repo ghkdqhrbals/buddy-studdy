@@ -88,8 +88,10 @@ internal fun relayVoiceTutorNativeSession(
     val persistence = controller.persistenceEvents().concatMap { transcript ->
         mono {
             // A failed audit write cannot stall speech; mutations separately require exact durable rows.
+            var persisted = false
             try {
-                if (!onProviderEvent(transcript.raw, true, false)) controller.markTranscriptIncomplete()
+                persisted = onProviderEvent(transcript.raw, true, false)
+                if (!persisted) controller.markTranscriptIncomplete()
             }
             catch (error: CancellationException) { throw error }
             catch (error: Exception) {
@@ -100,7 +102,7 @@ internal fun relayVoiceTutorNativeSession(
             }
             // Cancellation is not an acknowledgement. Keep the row pending so
             // the terminal error fence detects a write cancelled by another worker.
-            controller.transcriptCompleted(transcript.itemId)
+            controller.transcriptCompleted(transcript.itemId, successful = persisted)
         }.then()
     }.takeUntilOther(release).then()
     val tools = nativeVoiceTutorToolRelay(controller, context, mcp).takeUntilOther(release)
@@ -148,10 +150,11 @@ internal fun nativeVoiceTutorToolRelay(
 ): Mono<Void> = controller.toolActions().concatMap { call ->
     mono {
         if (!controller.beginTool(call.callId)) return@mono
+        val reviewedAnswer = controller.reviewedAnswer(call.callId)
         val mutating = call.name in setOf("prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study", "advance_voice_study", "request_question", "skip_question", "submit_answer")
         val result = try {
             withTimeout(15_000) {
-                if (mutating) {
+                if (mutating && reviewedAnswer == null && call.name != "submit_answer") {
                     // Only an actual tool execution awaits its source audit rows. No reclassification.
                     withTimeout(5_000) {
                         while (controller.toolCanExecute(call.callId) && !controller.toolTranscriptReady(call.callId)) delay(25)
@@ -159,6 +162,12 @@ internal fun nativeVoiceTutorToolRelay(
                 }
                 if (!controller.toolCanExecute(call.callId)) nativeToolError("STALE_TURN", "The learner has moved on; listen to the latest turn before acting.")
                 else if (call.arguments == null) nativeToolError("INVALID_ARGUMENTS", "Use the documented tool arguments.")
+                else if (reviewedAnswer != null) {
+                    val executionContext = context.copy(realtimeModelTools = true, initialLessonRevision = reviewedAnswer.lessonRevision)
+                    if (call.name == "skip_question") mcp.skipReviewedQuestion(executionContext, reviewedAnswer)
+                    else mcp.submitReviewedAnswer(executionContext, reviewedAnswer)
+                }
+                else if (call.name == "submit_answer") nativeToolError("USER_CONFIRMATION_REQUIRED", "The learner must finish, review and explicitly submit the answer in the app.")
                 else if (call.name == VoiceTutorNativeConversationController.END_CALL_TOOL) {
                     controller.requestSpokenEnd()
                     VoiceTutorMcpToolResult("{\"ending\":true}", false)

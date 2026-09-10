@@ -7,6 +7,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import reactor.core.publisher.Flux
@@ -58,6 +59,8 @@ internal class VoiceTutorNativeConversationController(
     private var endingAfterResponse = false
     private var pendingQuestionReadback: QuestionReadback? = null
     private var questionReadbackEpoch = 0L
+    private var answerCapture: AnswerCapture? = null
+    private val reviewedAnswerCalls = linkedMapOf<String, VoiceTutorReviewedAnswer>()
     private var retryCount = 0
     private var quotaRetryCount = 0
     private var clientSpeechSequence = 0L
@@ -100,7 +103,14 @@ internal class VoiceTutorNativeConversationController(
         val node = mapper.readTree(raw)
         val type = node.path("type").asText()
         lastActivity = nanoTime()
+        if (type in VoiceTutorMcpTurnCoordinator.OUTPUT_ACK_EVENTS) {
+            toolCoordinator.acknowledgeServerCall(node, nanoTime())?.let {
+                publish(tools, it)
+                return false
+            }
+        }
         if (type in VoiceTutorMcpTurnCoordinator.OUTPUT_ACK_EVENTS && toolCoordinator.acknowledge(node, nanoTime())) {
+            answerCapture?.let(::dispatchReviewedAnswer)
             scheduleResponse()
             return false
         }
@@ -108,6 +118,7 @@ internal class VoiceTutorNativeConversationController(
             // Only our completed response state can settle the app's pending input.
             Contract.INPUT_SETTLED_EVENT -> return false
             Contract.QUESTION_CHANGED_EVENT -> return false
+            Contract.ANSWER_STATE_EVENT, Contract.ANSWER_TRANSCRIPT_EVENT -> return false
             // Provider VAD is disabled. Unexpected VAD edges cannot acquire turn authority.
             "input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped" -> return false
             "input_audio_buffer.committed" -> {
@@ -117,6 +128,7 @@ internal class VoiceTutorNativeConversationController(
                 val boundary = commits.removeFirstOrNull() ?: return false
                 val input = input(id, boundary)
                 input.committed = true
+                captureInput(input)
                 earlyTranscripts.remove(id)?.let { early ->
                     if (observeProviderEvent(early)) publish(client, early)
                 }
@@ -129,18 +141,25 @@ internal class VoiceTutorNativeConversationController(
                     // This is the entire ordinary response path: no transcription, classifier or DB await.
                     scheduleResponse()
                 }
+                answerCapture?.let(::dispatchReviewedAnswer)
             }
             "conversation.item.input_audio_transcription.completed" -> {
                 val id = node.path("item_id").asText()
                 val input = inputs[id] ?: run { rememberEarlyTranscript(id, raw); return false }
                 if (!input.committed) return false
                 enqueueTranscript(id, raw, input.sequence, input.revision, input.acceptedAt)
+                if (input.answerId != null) return false
+            }
+            "conversation.item.input_audio_transcription.delta" -> {
+                if (answerCapture != null || inputs[node.path("item_id").asText()]?.answerId != null) return false
             }
             "conversation.item.input_audio_transcription.failed" -> {
                 val id = node.path("item_id").asText()
                 inputs[id]?.transcriptionFailed = true
                 if (id !in inputs) rememberEarlyTranscript(id, raw)
                 else markTranscriptIncomplete()
+                answerCapture?.let(::emitAnswerSegments)
+                advanceAnswerReview()
                 // Native audio remains in context; an ASR failure must not discard the learner's turn.
                 return false
             }
@@ -183,6 +202,7 @@ internal class VoiceTutorNativeConversationController(
                 response.audioStarted = true
                 response.audioStopped = false
                 if (response.superseded) return false
+                armAnswerCapture(response)
                 announceResponse(response)
             }
             "output_audio_buffer.stopped" -> {
@@ -236,6 +256,7 @@ internal class VoiceTutorNativeConversationController(
                 // WebRTC playout-start event. Generated audio is already output evidence.
                 if (type == "response.output_audio.delta" && node.path("delta").asText().isNotEmpty()) {
                     response.audioStarted = true
+                    if (!response.superseded) armAnswerCapture(response)
                 }
                 if (response.superseded) return false
             }
@@ -265,14 +286,15 @@ internal class VoiceTutorNativeConversationController(
         val seq = node.path("sequence").asLong()
         when (node.path("type").asText()) {
             Contract.SPEECH_STARTED_EVENT -> {
-                if (seq > clientSpeechSequence && !draining && !quotaRequested && pause.acceptsSpeechEdges) {
+                if (seq > clientSpeechSequence && !draining && !quotaRequested && pause.acceptsSpeechEdges &&
+                    (answerCapture == null || answerCapture?.phase == "listening")) {
                     invalidateQuestionReadback()
                     clientSpeechSequence = seq
                     speaking = true
                     quietSince = nanoTime()
                     // A rapid restart shares the native buffer with an uncommitted short tail.
                     if (pendingSpeech == null) pendingSpeech = SpeechBoundary(++sequence, seq, revision, ++eventOrder, wallClock(),
-                        latestTutor.takeIf { active == null }, nanoTime())
+                        latestTutor.takeIf { active == null }, nanoTime(), answerId = answerCapture?.id)
                     else pendingSpeech?.clientSequence = seq
                     supersedeUnstartedResponse()
                 }
@@ -287,6 +309,9 @@ internal class VoiceTutorNativeConversationController(
             Contract.PAUSE_REQUEST_EVENT -> applyPause(pause.requestPause(seq, nanoTime()))
             Contract.PAUSE_INPUT_QUIESCED_EVENT -> { pause.confirmInputQuiesced(seq); speaking = false }
             Contract.RESUME_REQUEST_EVENT -> applyPause(pause.requestResume(seq, nanoTime()))
+            Contract.ANSWER_FINISH_EVENT -> finishAnswer(node, skip = false)
+            Contract.ANSWER_SKIP_EVENT -> finishAnswer(node, skip = true)
+            Contract.ANSWER_SUBMIT_EVENT -> submitAnswer(node)
             Contract.PLAYOUT_DRAINED_EVENT -> {
                 val response = active
                 if (response != null && response.id == node.path("responseId").asText()) {
@@ -296,6 +321,7 @@ internal class VoiceTutorNativeConversationController(
             }
         }
         advancePause()
+        answerCapture?.let(::dispatchReviewedAnswer)
         scheduleResponse()
     }
 
@@ -334,6 +360,8 @@ internal class VoiceTutorNativeConversationController(
                 }
             }
             scheduleResponse()
+            advanceAnswerReview()
+            answerCapture?.let(::dispatchReviewedAnswer)
         } catch (error: Exception) { fail(error) }
     }
 
@@ -341,6 +369,7 @@ internal class VoiceTutorNativeConversationController(
     fun requestQuotaNotice() {
         if (closed || quotaRequested) return
         quotaRequested = true
+        cancelAnswerCapture()
         invalidateQuestionReadback()
         queuedInput = false
         speaking = false
@@ -351,6 +380,7 @@ internal class VoiceTutorNativeConversationController(
     @Synchronized
     fun beginDrain(cancelActive: Boolean) {
         draining = true
+        cancelAnswerCapture()
         invalidateQuestionReadback()
         queuedInput = false
         if (cancelActive) active?.id?.let { emit(mapOf("type" to "response.cancel", "response_id" to it)) }
@@ -376,6 +406,11 @@ internal class VoiceTutorNativeConversationController(
     @Synchronized
     fun toolCanExecute(callId: String): Boolean {
         val call = pendingTools[callId] ?: return false
+        reviewedAnswerCalls[callId]?.let { answer ->
+            return !closed && !draining && !quotaRequested && answerCapture?.id == answer.answerId &&
+                answerCapture?.phase == "submitting" && answer.lessonRevision == revision
+        }
+        if (answerCapture != null) return false
         if (closed || draining || quotaRequested || speaking || pendingSpeech != null || commits.isNotEmpty()) return false
         return call.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
             call.revision == revision
@@ -393,16 +428,35 @@ internal class VoiceTutorNativeConversationController(
     fun beginTool(callId: String): Boolean = !closed && toolCoordinator.beginExecution(callId)
 
     @Synchronized
+    fun reviewedAnswer(callId: String): VoiceTutorReviewedAnswer? = reviewedAnswerCalls[callId]
+
+    @Synchronized
     fun completeTool(callId: String, result: VoiceTutorMcpToolResult) {
         if (closed) return
         val output = toolCoordinator.complete(callId, result, nanoTime()) ?: return
         val call = pendingTools.remove(callId)
+        val reviewedAnswer = reviewedAnswerCalls.remove(callId)
+        if (reviewedAnswer != null) {
+            answerCapture?.takeIf { it.id == reviewedAnswer.answerId }?.let { capture ->
+                if (result.isError) {
+                    capture.phase = "failed"
+                    publishAnswerState(capture, "ANSWER_SUBMISSION_FAILED")
+                } else {
+                    capture.phase = if (capture.skip) "cancelled" else "submitted"
+                    publishAnswerState(capture)
+                    answerCapture = null
+                    queuedInput = false
+                }
+            }
+        }
         if (!result.isError) {
             val currentRevision = (result.lessonRevision ?: call?.revision ?: revision) >= revision
             if (currentRevision && (result.lessonRevision?.let { it > revision } == true ||
                 result.lessonFocus != null || result.lessonFocusCleared || result.questionChange != null ||
                 result.questionReadback != null)
             ) invalidateQuestionReadback()
+            if (currentRevision && (result.lessonRevision?.let { it > revision } == true ||
+                result.lessonFocus != null || result.lessonFocusCleared)) cancelAnswerCapture()
             result.lessonRevision?.takeIf { it >= revision }?.let { revision = it }
             voiceTutorLessonFocusEvent(result)?.let { publish(client, it) }
             result.questionChange?.takeIf { it.studyId > 0 && it.recordId.matches(Regex("[1-9][0-9]{0,18}")) && it.recordId.toLongOrNull() != null }?.let {
@@ -429,10 +483,13 @@ internal class VoiceTutorNativeConversationController(
     }
 
     @Synchronized
-    fun requestSpokenEnd() { endingAfterResponse = true; invalidateQuestionReadback() }
+    fun requestSpokenEnd() { endingAfterResponse = true; invalidateQuestionReadback(); cancelAnswerCapture() }
 
     @Synchronized
-    fun transcriptCompleted(itemId: String) { transcripts[itemId]?.complete = true }
+    fun transcriptCompleted(itemId: String, successful: Boolean = true) {
+        transcripts[itemId]?.let { it.complete = true; it.persisted = successful }
+        advanceAnswerReview()
+    }
 
     @Synchronized
     fun markTranscriptIncomplete() {
@@ -460,7 +517,7 @@ internal class VoiceTutorNativeConversationController(
     private fun scheduleResponse() {
         if (!ready || closed || draining || active != null || toolCoordinator.hasPending) return
         val quota = quotaRequested
-        if (!quota && (speaking || pendingSpeech != null || commits.isNotEmpty() || pause.blocksResponses || (!opening && !queuedInput && !toolCoordinator.continuationReady))) return
+        if (!quota && (answerCapture != null || speaking || pendingSpeech != null || commits.isNotEmpty() || pause.blocksResponses || (!opening && !queuedInput && !toolCoordinator.continuationReady))) return
         if (!quota && nanoTime() - quietSince < RESPONSE_QUIET_PERIOD.toNanos()) return
         if (toolCoordinator.continuationReady) toolCoordinator.consumeContinuation() else toolCoordinator.beginLearnerTurn()
         val isOpening = opening && latestLearner == null
@@ -528,6 +585,14 @@ internal class VoiceTutorNativeConversationController(
 
     private fun observeProviderError(node: JsonNode) {
         val eventId = safeProviderCausedEventId(node)
+        eventId?.let { toolCoordinator.tombstoneRejectedServerCall(it) }?.let { rejected ->
+            if (rejected.newlyTombstoned) {
+                pendingTools.remove(rejected.callId)
+                reviewedAnswerCalls.remove(rejected.callId)
+                answerCapture?.let { it.phase = "failed"; publishAnswerState(it, "ANSWER_SUBMISSION_FAILED") }
+            }
+            return
+        }
         if (classifyRealtimeProviderError(node) != VoiceTutorProviderErrorDisposition.RECOVERABLE) {
             reportFailure(VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR,
                 VoiceTutorProviderTurnFailureAction.SESSION_FATAL, eventId, node)
@@ -596,6 +661,7 @@ internal class VoiceTutorNativeConversationController(
         }
         if (response.quota && !response.deviceDrained) return
         if (!response.failed && response.expectsAudio) {
+            armAnswerCapture(response)
             if (response.tutors.isEmpty() || response.tutors.values.any { it.raw == null }) {
                 // Completed audible speech without its source is a gap, not a silent/tool-only turn.
                 markTranscriptIncomplete()
@@ -604,6 +670,14 @@ internal class VoiceTutorNativeConversationController(
                 tutor.raw?.let { enqueueTranscript(id, it, tutor.sequence, response.revision, tutor.acceptedAt) }
                 if (tutor.raw != null) latestTutor = Tutor(id, ++eventOrder, response.generation)
             }
+            answerCapture?.takeIf { it.responseToken == response.token }?.let { capture ->
+                capture.tutorItemId = response.tutors.entries.lastOrNull { it.value.raw != null }?.key
+                capture.questionDrained = true
+                publishAnswerState(capture)
+                emitAnswerSegments(capture)
+            }
+        } else if (response.failed && answerCapture?.responseToken == response.token) {
+            cancelAnswerCapture()
         }
         active = null
         if (response.quota) { quotaDone.tryEmitEmpty(); return }
@@ -661,9 +735,157 @@ internal class VoiceTutorNativeConversationController(
         questionReadbackEpoch++
     }
 
+    private fun armAnswerCapture(response: Response) {
+        val readback = response.questionReadback ?: return
+        if (answerCapture != null || response.superseded || draining || quotaRequested || endingAfterResponse ||
+            readback.revision != revision) return
+        val floor = response.tutors.values.minOfOrNull { it.sequence } ?: sequence
+        answerCapture = AnswerCapture(UUID.randomUUID().toString(), readback.value, revision, response.token, floor)
+        inputs.values.filter { it.sequence > floor }.forEach(::captureInput)
+    }
+
+    private fun captureInput(input: Input) {
+        val capture = answerCapture ?: return
+        if (capture.phase !in setOf("listening", "finalizing") || input.sequence <= capture.sequenceFloor ||
+            input.revision != capture.revision || input.id in capture.inputIds) return
+        input.answerId = capture.id
+        if (capture.inputIds.size >= 32) {
+            overflowAnswer(capture)
+            return
+        }
+        capture.inputIds.add(input.id)
+    }
+
+    private fun emitAnswerSegments(capture: AnswerCapture) {
+        if (!capture.questionDrained || capture.phase !in setOf("listening", "finalizing")) return
+        for (id in capture.inputIds) {
+            if (id in capture.emittedIds) continue
+            val source = transcripts[id]
+            if (source == null) {
+                if (inputs[id]?.transcriptionFailed == true || capture.sourceIncomplete) continue else break
+            }
+            if (capture.text.length + source.text.length + (if (capture.text.isEmpty()) 0 else 1) > 8_000) {
+                val remaining = (8_000 - capture.text.length - (if (capture.text.isEmpty()) 0 else 1)).coerceAtLeast(0)
+                val part = source.text.take(remaining)
+                if (part.isNotEmpty()) {
+                    capture.emittedIds.add(id)
+                    capture.text = listOf(capture.text, part).filter { it.isNotEmpty() }.joinToString("\n")
+                    publish(client, json(mapOf("type" to Contract.ANSWER_TRANSCRIPT_EVENT, "answerId" to capture.id,
+                        "recordId" to capture.question.recordId, "itemId" to id,
+                        "sequence" to capture.emittedIds.size.toLong(), "text" to part)))
+                }
+                overflowAnswer(capture)
+                return
+            }
+            capture.emittedIds.add(id)
+            if (source.text.isNotBlank()) capture.text = listOf(capture.text, source.text).filter { it.isNotEmpty() }.joinToString("\n")
+            publish(client, json(mapOf("type" to Contract.ANSWER_TRANSCRIPT_EVENT, "answerId" to capture.id,
+                "recordId" to capture.question.recordId, "itemId" to id, "sequence" to capture.emittedIds.size.toLong(), "text" to source.text)))
+        }
+    }
+
+    private fun matchingAnswer(node: JsonNode): AnswerCapture? = answerCapture?.takeIf {
+        node.path("answerId").asText() == it.id && node.path("recordId").asText() == it.question.recordId &&
+            it.revision == revision && !draining && !quotaRequested && !endingAfterResponse
+    }
+
+    private fun finishAnswer(node: JsonNode, skip: Boolean) {
+        val capture = matchingAnswer(node) ?: return
+        if (!capture.questionDrained || capture.phase == "submitting") return
+        if (capture.phase in setOf("review", "failed")) {
+            if (skip) { capture.skip = true; scheduleReviewedAnswer(capture, "") }
+            else publishAnswerState(capture)
+            return
+        }
+        if (capture.phase != "listening") return
+        // The client synchronously stops microphone capture and orders its final VAD stop
+        // before this control message. Never forward finish/edited text to the provider.
+        capture.skip = skip
+        capture.phase = "finalizing"
+        capture.finalizingAt = nanoTime()
+        speaking = false
+        commitSpeech()
+        publishAnswerState(capture)
+        advanceAnswerReview()
+    }
+
+    private fun advanceAnswerReview() {
+        val capture = answerCapture ?: return
+        if (capture.phase != "finalizing" || pendingSpeech != null || commits.isNotEmpty()) return
+        emitAnswerSegments(capture)
+        if (capture.overflow) return
+        val incomplete = capture.inputIds.any { id -> inputs[id]?.transcriptionFailed == true ||
+            transcripts[id]?.let { it.complete && !it.persisted } == true } ||
+            capture.tutorItemId?.let { transcripts[it]?.let { row -> row.complete && !row.persisted } == true } != false
+        val awaiting = capture.inputIds.any { id -> inputs[id]?.transcriptionFailed != true && transcripts[id]?.complete != true } ||
+            capture.tutorItemId?.let { transcripts[it]?.complete != true } == true
+        if (awaiting && nanoTime() - capture.finalizingAt < Duration.ofSeconds(10).toNanos()) return
+        if (awaiting || incomplete) markTranscriptIncomplete()
+        capture.sourceIncomplete = awaiting || incomplete
+        emitAnswerSegments(capture)
+        if (capture.overflow) return
+        // Late ASR may remain in private history, but cannot silently edit the reviewed draft.
+        capture.sourceIds = if (capture.sourceIncomplete) emptyList() else capture.inputIds.toList()
+        capture.phase = "review"
+        publishAnswerState(capture, if (awaiting || incomplete) "ANSWER_TRANSCRIPT_INCOMPLETE" else null)
+        if (capture.skip) scheduleReviewedAnswer(capture, "")
+    }
+
+    private fun submitAnswer(node: JsonNode) {
+        val capture = matchingAnswer(node) ?: return
+        val text = node.path("text")
+        if (capture.phase !in setOf("review", "failed") || !text.isTextual ||
+            text.asText().isBlank() || text.asText().length > 8_000) return
+        capture.skip = false
+        scheduleReviewedAnswer(capture, text.asText())
+    }
+
+    private fun scheduleReviewedAnswer(capture: AnswerCapture, text: String) {
+        capture.pendingSubmissionText = text
+        capture.phase = "submitting"
+        publishAnswerState(capture)
+        dispatchReviewedAnswer(capture)
+    }
+
+    private fun dispatchReviewedAnswer(capture: AnswerCapture) {
+        val text = capture.pendingSubmissionText ?: return
+        if (active != null || toolCoordinator.hasPending || closed || draining || quotaRequested ||
+            speaking || pendingSpeech != null || commits.isNotEmpty()) return
+        val answer = VoiceTutorReviewedAnswer(capture.id, capture.question.studyId, capture.question.recordId,
+            capture.revision, text, capture.tutorItemId, capture.sourceIds)
+        val scheduled = toolCoordinator.scheduleServerCall(if (capture.skip) "skip_question" else "submit_answer",
+            mapOf("record_id" to capture.question.recordId), nanoTime())
+        pendingTools[scheduled.callId] = ToolBoundary(boundary(latestLearner), capture.revision)
+        reviewedAnswerCalls[scheduled.callId] = answer
+        capture.pendingSubmissionText = null
+        emit(scheduled.providerEvent)
+    }
+
+    private fun overflowAnswer(capture: AnswerCapture) {
+        capture.phase = "failed"
+        capture.overflow = true
+        capture.sourceIds = emptyList()
+        markTranscriptIncomplete()
+        publishAnswerState(capture, "ANSWER_TOO_LONG")
+    }
+
+    private fun publishAnswerState(capture: AnswerCapture, code: String? = null) {
+        val event = linkedMapOf<String, Any>("type" to Contract.ANSWER_STATE_EVENT, "answerId" to capture.id,
+            "studyId" to capture.question.studyId, "recordId" to capture.question.recordId,
+            "revision" to capture.revision, "phase" to capture.phase, "text" to capture.text)
+        code?.let { event["code"] = it }
+        publish(client, json(event))
+    }
+
+    private fun cancelAnswerCapture() {
+        answerCapture?.let { it.phase = "cancelled"; publishAnswerState(it) }
+        answerCapture = null
+    }
+
     private fun input(id: String, speech: SpeechBoundary): Input = inputs.getOrPut(id) {
         check(inputs.size < 4096) { "Voice call exceeded bounded transcript capacity." }
-        Input(id, speech.sequence, speech.clientSequence, speech.revision, speech.startedOrder, speech.acceptedAt, speech.precedingTutor)
+        Input(id, speech.sequence, speech.clientSequence, speech.revision, speech.startedOrder, speech.acceptedAt, speech.precedingTutor,
+            answerId = speech.answerId)
     }
 
     private fun commitSpeech() {
@@ -710,8 +932,9 @@ internal class VoiceTutorNativeConversationController(
         node.put(Metadata.CONVERSATION_SEQUENCE, order)
         node.put(Metadata.LESSON_REVISION, epoch)
         node.put(Metadata.ACCEPTED_AT_EPOCH_MILLIS, acceptedAt.toEpochMilli())
-        transcripts[id] = TranscriptState()
+        transcripts[id] = TranscriptState(node.path("transcript").asText())
         publish(persistence, NativeTranscript(id, mapper.writeValueAsString(node)))
+        answerCapture?.let(::emitAnswerSegments)
     }
 
     private fun advancePause() = applyPause(pause.advance(active == null && commits.isEmpty() && pendingSpeech == null, nanoTime()))
@@ -737,16 +960,32 @@ internal class VoiceTutorNativeConversationController(
     private fun <T : Any> sink(): Sinks.Many<T> = Sinks.many().unicast().onBackpressureBuffer(Queues.get<T>(512).get())
 
     data class NativeTranscript(val itemId: String, val raw: String)
-    private class TranscriptState(var complete: Boolean = false)
+    private class TranscriptState(val text: String, var complete: Boolean = false, var persisted: Boolean = false)
     private data class Tutor(val id: String, val stoppedOrder: Long, val generation: Long)
     private data class Input(val id: String, val sequence: Long, val clientSequence: Long, val revision: Long, val startedOrder: Long,
-        val acceptedAt: Instant, val precedingTutor: Tutor?, var committed: Boolean = false, var transcriptionFailed: Boolean = false)
+        val acceptedAt: Instant, val precedingTutor: Tutor?, var committed: Boolean = false, var transcriptionFailed: Boolean = false,
+        var answerId: String? = null)
     private data class SpeechBoundary(val sequence: Long, var clientSequence: Long, val revision: Long, val startedOrder: Long,
         val acceptedAt: Instant, val precedingTutor: Tutor?, var committedAt: Long,
-        val commitEventId: String = "buddystudy-internal-native-commit-${UUID.randomUUID()}")
+        val commitEventId: String = "buddystudy-internal-native-commit-${UUID.randomUUID()}", val answerId: String? = null)
     private data class TutorTranscript(val sequence: Long, val acceptedAt: Instant, var raw: String? = null)
     private data class ToolBoundary(val boundary: VoiceTutorDialogueBoundary, val revision: Long)
     private data class QuestionReadback(val value: VoiceTutorQuestionReadback, val revision: Long, val epoch: Long)
+    private class AnswerCapture(val id: String, val question: VoiceTutorQuestionReadback, val revision: Long,
+        val responseToken: String, val sequenceFloor: Long) {
+        var phase = "listening"
+        var questionDrained = false
+        var tutorItemId: String? = null
+        var finalizingAt = 0L
+        var skip = false
+        var overflow = false
+        var sourceIncomplete = false
+        var text = ""
+        var pendingSubmissionText: String? = null
+        val inputIds = linkedSetOf<String>()
+        val emittedIds = linkedSetOf<String>()
+        var sourceIds = emptyList<String>()
+    }
     private class Response(val token: String, val generation: Long, val revision: Long, val startedAt: Long,
         val quota: Boolean, val opening: Boolean, val boundary: VoiceTutorDialogueBoundary, val clientSequence: Long?,
         val questionReadback: QuestionReadback?) {

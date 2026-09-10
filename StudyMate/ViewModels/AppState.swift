@@ -8280,6 +8280,30 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Read and write the existing record-ID draft path only. Voice capture
+    /// never selects a question, replaces another draft, or removes a draft on skip.
+    func voiceTutorAnswerDraft(
+        for change: VoiceTutorQuestionChange,
+        validity: @MainActor () -> Bool
+    ) -> String? {
+        guard validity(), let context = try? makeVoiceTutorRequestContext(), context.isCurrent(),
+              !voiceTutorStudyMetadataFence.isDeleted(studyID: change.studyID) else { return nil }
+        flushPendingAnswerDraftSave()
+        return localStudyRecordUseCase.loadAnswerDraft(recordID: change.recordID)
+    }
+
+    func saveVoiceTutorAnswerDraft(
+        _ text: String,
+        for change: VoiceTutorQuestionChange,
+        validity: @MainActor () -> Bool
+    ) {
+        guard validity(), let context = try? makeVoiceTutorRequestContext(), context.isCurrent(),
+              !voiceTutorStudyMetadataFence.isDeleted(studyID: change.studyID) else { return }
+        flushPendingAnswerDraftSave()
+        let record = studyRecords.first { $0.id == change.recordID && $0.studyID == change.studyID && $0.isQuestion }
+        persistAnswerDraft(PendingAnswerDraft(question: record?.question, recordID: change.recordID, answer: text))
+    }
+
     /// Reconcile only the canonical question confirmed by a voice tool. Stored
     /// drafts and the learner's selected question remain owned by the learner.
     func refreshVoiceTutorQuestion(

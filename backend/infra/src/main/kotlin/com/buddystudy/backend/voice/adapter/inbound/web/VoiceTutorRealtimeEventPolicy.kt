@@ -41,6 +41,12 @@ internal class VoiceTutorRealtimeEventPolicy(
                 throw VoiceTutorClientProtocolException("Voice Tutor speech sequence is invalid.")
             }
         }
+        if (type in ANSWER_CLIENT_EVENTS) {
+            if (!validAnswerId(node.path("answerId")) || !validRecordId(node.path("recordId")) ||
+                (type == VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT &&
+                    !node.path("text").isTextual)
+            ) throw VoiceTutorClientProtocolException("Voice Tutor reviewed answer is invalid.")
+        }
         return type in ALLOWED_CLIENT_EVENTS
     }
 
@@ -163,6 +169,30 @@ internal class VoiceTutorRealtimeEventPolicy(
                 ) ProviderEventDecision(mapper.writeValueAsString(mapOf(
                     "type" to type, "studyId" to studyId.longValue(), "recordId" to recordId.asText(),
                 ))) else ProviderEventDecision(payload = null)
+            }
+            VoiceTutorRealtimeContract.ANSWER_STATE_EVENT, VoiceTutorRealtimeContract.ANSWER_TRANSCRIPT_EVENT -> {
+                if (transport != VoiceTutorProviderTransport.WEBRTC_SIDEBAND ||
+                    !validAnswerId(node.path("answerId")) || !validRecordId(node.path("recordId")) ||
+                    !validProviderText(node, "text", 8_000)) return ProviderEventDecision(payload = null)
+                val payload = linkedMapOf<String, Any>("type" to type, "answerId" to node.path("answerId").asText(),
+                    "recordId" to node.path("recordId").asText(), "text" to node.path("text").asText())
+                if (type == VoiceTutorRealtimeContract.ANSWER_TRANSCRIPT_EVENT) {
+                    val sequence = node.path("sequence")
+                    if (!validProviderResponseId(node.path("itemId")) || !sequence.isIntegralNumber ||
+                        !sequence.canConvertToLong() || sequence.longValue() !in 1..32) return ProviderEventDecision(payload = null)
+                    payload["itemId"] = node.path("itemId").asText()
+                    payload["sequence"] = sequence.longValue()
+                } else {
+                    val studyId = node.path("studyId")
+                    val revision = node.path("revision")
+                    val phase = node.path("phase").asText()
+                    if (!studyId.isIntegralNumber || !studyId.canConvertToLong() || studyId.longValue() <= 0 ||
+                        !revision.isIntegralNumber || !revision.canConvertToLong() || revision.longValue() < 0 ||
+                        phase !in ANSWER_PHASES) return ProviderEventDecision(payload = null)
+                    payload["studyId"] = studyId.longValue(); payload["revision"] = revision.longValue(); payload["phase"] = phase
+                    node.path("code").asText().takeIf { it in ANSWER_CODES }?.let { payload["code"] = it }
+                }
+                ProviderEventDecision(mapper.writeValueAsString(payload))
             }
             VoiceTutorRealtimeContract.STUDY_FOCUSED_EVENT -> {
                 val focus = node.path("focus")
@@ -355,6 +385,10 @@ internal class VoiceTutorRealtimeEventPolicy(
     private fun validProviderResponseId(node: JsonNode): Boolean =
         node.isTextual && PROVIDER_ID_PATTERN.matches(node.asText())
 
+    private fun validAnswerId(node: JsonNode): Boolean = node.isTextual && ANSWER_ID_PATTERN.matches(node.asText())
+    private fun validRecordId(node: JsonNode): Boolean = node.isTextual &&
+        node.asText().matches(Regex("[1-9][0-9]{0,18}")) && node.asText().toLongOrNull() != null
+
     private fun validProviderText(node: JsonNode, field: String, maxCharacters: Int): Boolean {
         val value = node.path(field)
         return value.isTextual && value.asText().length <= maxCharacters
@@ -374,6 +408,11 @@ internal class VoiceTutorRealtimeEventPolicy(
         private const val MAX_TRANSCRIPT_DELTA_CHARACTERS = 4_096
         private const val MAX_TRANSCRIPT_CHARACTERS = 32_000
         private val PROVIDER_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,191}")
+        private val ANSWER_ID_PATTERN = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+        private val ANSWER_CLIENT_EVENTS = setOf(VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT, VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT)
+        private val ANSWER_PHASES = setOf("listening", "finalizing", "review", "submitting", "submitted", "failed", "cancelled")
+        private val ANSWER_CODES = setOf("ANSWER_TRANSCRIPT_INCOMPLETE", "ANSWER_SUBMISSION_FAILED", "ANSWER_TOO_LONG")
         private val ALLOWED_CLIENT_EVENTS = setOf(
             "input_audio_buffer.append",
             "input_audio_buffer.commit",
@@ -388,6 +427,9 @@ internal class VoiceTutorRealtimeEventPolicy(
             VoiceTutorRealtimeContract.PAUSE_REQUEST_EVENT,
             VoiceTutorRealtimeContract.PAUSE_INPUT_QUIESCED_EVENT,
             VoiceTutorRealtimeContract.RESUME_REQUEST_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT,
         )
         private val TUTOR_TRANSCRIPT_DELTA_PROVIDER_EVENTS = setOf(
             "response.output_audio_transcript.delta",
@@ -502,6 +544,9 @@ internal class VoiceTutorClientTrafficGuard(
         const val MAX_CONTROL_EVENTS_PER_SECOND = 8.0
         const val MAX_CONTROL_EVENT_BURST = 8
         val RATE_LIMITED_CONTROL_EVENTS = setOf(
+            VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT,
             VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT,
             VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT,
             VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT,

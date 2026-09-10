@@ -7,6 +7,8 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlCon
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
@@ -36,6 +38,79 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
+    @Test
+    fun `manual finish waits for its audit write then explicit edited submission uses only the reviewed port`() {
+        val writeEntered = AtomicBoolean()
+        val release = CompletableDeferred<Unit>()
+        val tools = FakeTools { VoiceTutorMcpToolResult("{}", false,
+            questionReadback = VoiceTutorQuestionReadback(7, "42", "저장된 문제를 설명하세요.")) }
+        Fixture(tools = tools, store = { row ->
+            if (row.path("item_id").asText() == "answer-1") { writeEntered.set(true); release.await() }
+        }).use { f ->
+            val answer = f.manualQuestion()
+            f.capturedLearner(2, "answer-1")
+            f.provider("conversation.item.input_audio_transcription.completed", "item_id" to "answer-1", "transcript" to "인식된 초안")
+            f.answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+            f.await("answer write remains suspended in finalizing") {
+                writeEntered.get() && f.answerStates().last().path("phase").asText() == "finalizing"
+            }
+            assertThat(f.responses()).hasSize(3)
+            assertThat(tools.reviewed).isEmpty()
+            release.complete(Unit)
+            f.await("durable source releases review") { f.answerStates().last().path("phase").asText() == "review" }
+            f.answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "사용자가 직접 수정한 답변")
+            f.await("explicit submit emits a synthetic call") { f.serverCalls().size == 1 }
+            assertThat(tools.reviewed).isEmpty()
+            val request = f.serverCalls().single()
+            assertThat(request.toString()).doesNotContain("사용자가 직접 수정한 답변")
+            f.ack(request)
+            f.await("reviewed port returned canonical output") { f.outputs().size == 2 }
+            assertThat(tools.reviewed.single().second.text).isEqualTo("사용자가 직접 수정한 답변")
+            assertThat(tools.reviewed.single().second.learnerProviderItemIds).containsExactly("answer-1")
+            assertThat(tools.invocations.map { it.name }).containsExactly("list_studies")
+            assertThat(f.responses()).hasSize(3)
+            f.ack(f.outputs().last())
+            f.await("canonical output acknowledgement releases feedback continuation") { f.responses().size == 4 }
+            assertThat(f.answerStates().last().path("phase").asText()).isEqualTo("submitted")
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `model authored submit is rejected without invoking any canonical answer writer`() {
+        Fixture().use { f ->
+            f.opening(); f.learner(1, "learner-1")
+            f.toolResponse("model-submit", "model-submit-call", "submit_answer")
+            f.await("model submit receives explicit confirmation requirement") { f.outputs().size == 1 }
+            val output = mapper.readTree(f.outputs().single().path("item").path("output").asText())
+            assertThat(output.path("error").path("code").asText()).isEqualTo("USER_CONFIRMATION_REQUIRED")
+            assertThat(f.tools.invocations).isEmpty()
+            assertThat(f.tools.reviewed).isEmpty()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `explicit capture skip uses the reviewed skip port and reopens ordinary dialogue only after result acknowledgement`() {
+        val tools = FakeTools { VoiceTutorMcpToolResult("{}", false,
+            questionReadback = VoiceTutorQuestionReadback(7, "42", "저장된 문제를 설명하세요.")) }
+        Fixture(tools = tools).use { f ->
+            val answer = f.manualQuestion()
+            f.answerControl(Contract.ANSWER_SKIP_EVENT, answer)
+            f.await("skip is scheduled only by explicit control") { f.serverCalls().size == 1 }
+            f.ack(f.serverCalls().single())
+            f.await("canonical skip returned") { f.outputs().size == 2 }
+            assertThat(tools.skipped.single().second.recordId).isEqualTo("42")
+            assertThat(tools.skipped.single().second.text).isEmpty()
+            assertThat(tools.reviewed).isEmpty()
+            assertThat(f.answerStates().last().path("phase").asText()).isEqualTo("cancelled")
+            assertThat(f.responses()).hasSize(3)
+            f.ack(f.outputs().last())
+            f.await("skip continuation released") { f.responses().size == 4 }
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
     @Test
     fun `renewed speech cancels an unstarted reply and the relay tick answers only the latest committed input`() {
         Fixture().use { f ->
@@ -517,6 +592,37 @@ class VoiceTutorNativeSessionRelayTest {
         fun transcript(id: String) = provider("conversation.item.input_audio_transcription.completed",
             "item_id" to id, "transcript" to "Redis를 공부하고 싶어요.")
 
+        fun manualQuestion(): JsonNode {
+            opening(); learner(1, "learner-1"); transcript("learner-1")
+            toolResponse("question-tool", "question-call", "list_studies")
+            await("saved question tool result") { outputs().size == 1 }
+            ack(outputs().single())
+            await("saved question readback response") { responses().size == 3 }
+            completeAudioResponse("readback", "saved-question")
+            await("readback drained and manual capture open") { answerStates().lastOrNull()?.path("phase")?.asText() == "listening" }
+            return answerStates().last()
+        }
+
+        fun capturedLearner(sequence: Long, id: String) {
+            for (type in listOf(Contract.SPEECH_STARTED_EVENT, Contract.SPEECH_STOPPED_EVENT)) {
+                assertThat(controls.tryEmitNext(json(mapOf("type" to type, "sequence" to sequence)))).isEqualTo(Sinks.EmitResult.OK)
+            }
+            await("captured speech committed without response") {
+                outgoing.count { it.path("type").asText() == "input_audio_buffer.commit" } == sequence.toInt()
+            }
+            provider("input_audio_buffer.committed", "item_id" to id)
+        }
+
+        fun answerControl(type: String, answer: JsonNode, text: String? = null) {
+            val event = linkedMapOf<String, Any>("type" to type, "answerId" to answer.path("answerId").asText(),
+                "recordId" to answer.path("recordId").asText())
+            text?.let { event["text"] = it }
+            assertThat(controls.tryEmitNext(json(event))).isEqualTo(Sinks.EmitResult.OK)
+        }
+
+        fun answerStates() = ui.filter { it.path("type").asText() == Contract.ANSWER_STATE_EVENT }
+        fun serverCalls() = outgoing.filter { it.path("item").path("type").asText() == "function_call" }
+
         fun created(id: String) = provider("response.created", "response" to mapOf("id" to id,
             "metadata" to responses().last().path("response").path("metadata")))
 
@@ -550,6 +656,8 @@ class VoiceTutorNativeSessionRelayTest {
     private data class Invocation(val context: VoiceTutorWebRtcControlContext, val name: String)
     private class FakeTools(private val result: suspend () -> VoiceTutorMcpToolResult = { success() }) : VoiceTutorMcpToolPort {
         val invocations = CopyOnWriteArrayList<Invocation>()
+        val reviewed = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
+        val skipped = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
         override fun definitions(): List<VoiceTutorMcpToolDefinition> = error("The legacy classified tool catalog must not be used")
         override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation").map { name ->
             VoiceTutorMcpToolDefinition(name, "Synthetic native tool", mapOf("type" to "object",
@@ -558,6 +666,14 @@ class VoiceTutorNativeSessionRelayTest {
         override suspend fun execute(context: VoiceTutorWebRtcControlContext, toolName: String, arguments: Map<String, Any>): VoiceTutorMcpToolResult {
             invocations += Invocation(context, toolName)
             return result()
+        }
+        override suspend fun submitReviewedAnswer(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult {
+            reviewed += context to answer
+            return VoiceTutorMcpToolResult("""{"queued":true,"gradingRequestId":"grade-42"}""", false)
+        }
+        override suspend fun skipReviewedQuestion(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult {
+            skipped += context to answer
+            return VoiceTutorMcpToolResult("""{"skipped":true,"recordId":"42"}""", false)
         }
     }
 

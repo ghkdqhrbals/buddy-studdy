@@ -5,6 +5,7 @@ import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
@@ -71,9 +72,9 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
         assertThat(refreshed.questionChange).isNull()
         assertThat(fixture.json(refreshed).path("notice").asText()).contains("handle the learner's present answer")
 
-        val submitted = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+        val submitted = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
         assertThat(submitted.isError).isFalse()
-        assertThat(fixture.calls.last().arguments["answer"]).isEqualTo(ANSWER)
+        assertThat(fixture.calls.last().arguments["answer"]).isEqualTo(EDITED_ANSWER)
         assertThat(fixture.excluded).containsExactly("question-read", "answer-1", "answer-2")
     }
 
@@ -111,7 +112,7 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
             assertThat(refreshed.isError).isFalse()
             assertThat(refreshed.questionReadback?.recordId).isEqualTo(id.toString())
             assertThat(refreshed.questionChange?.recordId).isEqualTo(id.toString())
-            assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to id)), "QUESTION_ANSWER_REQUIRED")
+            assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to id)), "USER_CONFIRMATION_REQUIRED")
             assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
         }
     }
@@ -261,52 +262,184 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
     }
 
     @Test
-    fun `a selection input before the actual saved question read cannot become its answer`(): Unit = runBlocking {
+    fun `model submission requires explicit UI confirmation regardless of the completed read boundary`(): Unit = runBlocking {
         val fixture = Fixture()
         fixture.coordinator.selected(fixture.context())
         fixture.learner = 12
         val beforeRead = fixture.answerContext().let { it.copy(dialogueBoundary = it.dialogueBoundary!!.copy(precedingSpokenResponseGeneration = 5)) }
 
-        assertCode(fixture, fixture.coordinator.execute(beforeRead, "submit_answer", mapOf("record_id" to 101L)), "QUESTION_ANSWER_REQUIRED")
+        for (context in listOf(beforeRead, fixture.answerContext())) {
+            assertCode(fixture, fixture.coordinator.execute(context, "submit_answer", mapOf("record_id" to 101L)), "USER_CONFIRMATION_REQUIRED")
+        }
         assertThat(fixture.persistenceCalls).isEmpty()
         assertThat(fixture.excluded).isEmpty()
         assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
     }
 
     @Test
-    fun `missing or empty original learner speech never supplies an invented answer`(): Unit = runBlocking {
-        for (missing in listOf(true, false)) {
-            val fixture = Fixture()
-            fixture.coordinator.selected(fixture.context())
-            fixture.learner = 12
-            fixture.source = if (missing) emptyList() else fixture.source.map {
-                if (it.role == VoiceTutorTranscriptRole.USER) it.copy(transcript = "  ") else it
-            }
-            assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L)),
-                if (missing) "INPUT_PERSISTENCE_PENDING" else "ANSWER_UNAVAILABLE")
-            assertThat(fixture.excluded).isEmpty()
-            assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
-        }
-    }
-
-    @Test
-    fun `submission joins exact server transcript and excludes its source before the canonical write`(): Unit = runBlocking {
+    fun `explicit submission keeps edited text authoritative and excludes unchanged raw source before canonical write`(): Unit = runBlocking {
         val fixture = Fixture()
         fixture.coordinator.selected(fixture.context())
         fixture.learner = 12
         fixture.events.clear()
 
-        val result = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+        val result = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
 
         assertThat(result.isError).isFalse()
         assertThat(fixture.events).containsExactly("read-source", "exclude-source", "submit_answer")
         assertThat(fixture.persistenceCalls.first()).isEqualTo(listOf(7L, SESSION, "answer-2", "question-read", REVISION))
         assertThat(fixture.excluded).containsExactly("question-read", "answer-1", "answer-2")
         assertThat(fixture.calls.last().arguments).isEqualTo(mapOf(
-            "record_id" to 101L, "answer" to ANSWER, "source_language" to "ko",
+            "record_id" to 101L, "answer" to EDITED_ANSWER, "source_language" to "ko",
         ))
-        assertThat(fixture.json(result).path("record").path("answer").asText()).isEqualTo(ANSWER)
+        assertThat(fixture.source.filter { it.role == VoiceTutorTranscriptRole.USER }.joinToString("\n") { it.transcript }).isEqualTo(ANSWER)
         assertThat(result.questionChange?.recordId).isEqualTo("101")
+    }
+
+    @Test
+    fun `an explicitly typed answer without microphone source submits without inventing or excluding transcript rows`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = null
+        fixture.source = emptyList()
+        val reviewed = fixture.reviewed("직접 입력한 답변입니다.").copy(
+            precedingTutorProviderItemId = null, learnerProviderItemIds = emptyList(),
+        )
+
+        val result = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), reviewed)
+
+        assertThat(result.isError).isFalse()
+        assertThat(fixture.calls.single { it.name == "submit_answer" }.arguments["answer"]).isEqualTo(reviewed.text)
+        assertThat(fixture.persistenceCalls).isEmpty()
+        assertThat(fixture.excluded).isEmpty()
+        assertThat(result.questionChange?.recordId).isEqualTo("101")
+    }
+
+    @Test
+    fun `reviewed text must be nonblank and at most 8000 UTF16 units before any canonical read or write`(): Unit = runBlocking {
+        for (text in listOf("", " \n\t", "a".repeat(8_001), "😀".repeat(4_001))) {
+            val fixture = Fixture()
+            fixture.coordinator.selected(fixture.context())
+
+            assertCode(fixture, fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed(text)), "ANSWER_UNAVAILABLE")
+
+            assertThat(fixture.calls.map { it.name }).containsExactly("list_pending_questions")
+            assertThat(fixture.persistenceCalls).isEmpty()
+        }
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        val reviewed = fixture.reviewed("😀".repeat(4_000)).copy(learnerProviderItemIds = emptyList())
+        assertThat(fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), reviewed).isError).isFalse()
+        assertThat(fixture.calls.single { it.name == "submit_answer" }.arguments["answer"]).isEqualTo(reviewed.text)
+    }
+
+    @Test
+    fun `reviewed submission rejects another question topic revision or malformed capture identity before persistence`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        val reviewed = fixture.reviewed()
+        for (invalid in listOf(
+            reviewed.copy(recordId = "999"),
+            reviewed.copy(studyId = STUDY + 1),
+            reviewed.copy(lessonRevision = REVISION + 1),
+            reviewed.copy(answerId = "not-a-uuid"),
+            reviewed.copy(answerId = "1-1-1-1-1"),
+            reviewed.copy(learnerProviderItemIds = listOf("answer-1", "answer-1")),
+            reviewed.copy(learnerProviderItemIds = (1..33).map { "answer-$it" }),
+            reviewed.copy(learnerProviderItemIds = listOf(" ")),
+            reviewed.copy(learnerProviderItemIds = listOf("a".repeat(192))),
+        )) {
+            assertCode(fixture, fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), invalid), "QUESTION_CONTEXT_UNAVAILABLE")
+        }
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_pending_questions")
+        assertThat(fixture.persistenceCalls).isEmpty()
+    }
+
+    @Test
+    fun `reviewed audio source must match the exact complete tutor and ordered learner window before exclusion`(): Unit = runBlocking {
+        for (variant in 0..5) {
+            val fixture = Fixture()
+            fixture.coordinator.selected(fixture.context())
+            fixture.source = when (variant) {
+                0 -> emptyList()
+                1 -> listOf(fixture.source[0], fixture.source[2], fixture.source[1])
+                2 -> fixture.source.mapIndexed { index, turn -> if (index == 0) turn.copy(providerItemId = "other-question") else turn }
+                3 -> fixture.source.mapIndexed { index, turn -> if (index == 1) turn.copy(role = VoiceTutorTranscriptRole.TUTOR) else turn }
+                4 -> fixture.source.dropLast(1)
+                else -> fixture.source + fixture.source.last().copy(providerItemId = "unreviewed-answer")
+            }
+
+            assertCode(fixture, fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed()), "INPUT_PERSISTENCE_PENDING")
+
+            assertThat(fixture.events).containsExactly("read-source")
+            assertThat(fixture.excluded).isEmpty()
+            assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
+        }
+    }
+
+    @Test
+    fun `reviewed audio source without a tutor boundary cannot be excluded or submitted`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+
+        assertCode(fixture, fixture.coordinator.submitReviewedAnswer(
+            fixture.answerContext(), fixture.reviewed().copy(precedingTutorProviderItemId = null),
+        ), "INPUT_PERSISTENCE_PENDING")
+
+        assertThat(fixture.persistenceCalls).isEmpty()
+        assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
+    }
+
+    @Test
+    fun `explicit UI skip needs no invented learner turn and generates no replacement`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = null
+        val reviewed = fixture.reviewed("").copy(precedingTutorProviderItemId = null, learnerProviderItemIds = emptyList())
+
+        val result = fixture.coordinator.skipReviewedQuestion(fixture.answerContext(), reviewed)
+
+        assertThat(result.isError).isFalse()
+        assertThat(result.questionChange?.recordId).isEqualTo("101")
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_pending_questions", "skip_question")
+        assertThat(fixture.calls.last().arguments).isEqualTo(mapOf("record_id" to 101L))
+        assertThat(fixture.persistenceCalls).isEmpty()
+        assertThat(fixture.excluded).isEmpty()
+    }
+
+    @Test
+    fun `explicit UI skip excludes only its exact raw source and never submits reviewed text`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        val rawSource = fixture.source.toList()
+        assertCode(fixture, fixture.coordinator.skipReviewedQuestion(fixture.answerContext(), fixture.reviewed()), "QUESTION_CONTEXT_UNAVAILABLE")
+        assertCode(fixture, fixture.coordinator.skipReviewedQuestion(fixture.answerContext(), fixture.reviewed("").copy(recordId = "999")), "QUESTION_CONTEXT_UNAVAILABLE")
+
+        val result = fixture.coordinator.skipReviewedQuestion(fixture.answerContext(), fixture.reviewed(""))
+
+        assertThat(result.isError).isFalse()
+        assertThat(fixture.events).containsExactly("read-source", "exclude-source")
+        assertThat(fixture.excluded).containsExactly("question-read", "answer-1", "answer-2")
+        assertThat(fixture.source).isEqualTo(rawSource)
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_pending_questions", "skip_question")
+    }
+
+    @Test
+    fun `typed submission rejects owner or focus loss during canonical preflight without touching microphone evidence`(): Unit = runBlocking {
+        for (loseOwner in listOf(true, false)) {
+            val fixture = Fixture()
+            fixture.coordinator.selected(fixture.context())
+            fixture.afterInvoke = { name -> if (name == "get_record") {
+                if (loseOwner) fixture.isAuthorized = false else fixture.focus = (STUDY + 1) to (REVISION + 1)
+            } }
+
+            val result = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed().copy(learnerProviderItemIds = emptyList()))
+
+            assertCode(fixture, result, "QUESTION_CONTEXT_UNAVAILABLE")
+            assertThat(result.questionChange).isNull()
+            assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
+            assertThat(fixture.persistenceCalls).isEmpty()
+        }
     }
 
     @Test
@@ -316,7 +449,7 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
             fixture.coordinator.selected(fixture.context())
             fixture.learner = 12
             fixture.events.clear()
-            val result = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+            val result = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
             assertThat(result.isError).isTrue()
             if (excludeSucceeds) {
                 assertThat(fixture.events).containsExactly("read-source", "exclude-source", "submit_answer")
@@ -333,7 +466,7 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
         val fixture = Fixture()
         fixture.coordinator.selected(fixture.context())
         fixture.learner = 12
-        fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+        fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
         assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "get_grading_process", mapOf("correlation_id" to "someone-elses-grade")), "QUESTION_CONTEXT_UNAVAILABLE")
 
         val result = fixture.coordinator.execute(fixture.answerContext(), "get_grading_process", mapOf("correlation_id" to "grade-1"))
@@ -352,18 +485,22 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
         fixture.coordinator.selected(fixture.context())
         fixture.learner = 12
 
-        val recovered = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+        val recovered = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
         assertThat(recovered.isError).isFalse()
         assertThat(recovered.questionChange?.recordId).isEqualTo("101")
-        assertThat(fixture.json(recovered).path("record").path("answer").asText()).isEqualTo(ANSWER)
+        assertThat(fixture.calls.single { it.name == "submit_answer" }.arguments["answer"]).isEqualTo(EDITED_ANSWER)
         assertThat(fixture.calls.takeLast(2).map { it.name }).containsExactly("submit_answer", "get_record")
 
-        val retried = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+        val retried = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
         assertThat(retried.isError).isFalse()
         assertThat(fixture.calls.count { it.name == "submit_answer" }).isEqualTo(1)
         assertThat(fixture.calls.last().name).isEqualTo("get_record")
 
-        fixture.records = listOf(fixture.record(101, status = "GRADING", answer = ANSWER, gradingId = "grade-1"))
+        val changedAnswer = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed("A different reviewed answer"))
+        assertCode(fixture, changedAnswer, "QUESTION_ALREADY_HANDLED")
+        assertThat(fixture.calls.count { it.name == "submit_answer" }).isEqualTo(1)
+
+        fixture.records = listOf(fixture.record(101, status = "GRADING", answer = EDITED_ANSWER, gradingId = "grade-1"))
         val pending = fixture.coordinator.execute(fixture.answerContext(), "list_pending_questions", mapOf("study_id" to STUDY))
         assertThat(fixture.json(pending).path("pendingQuestion").isNull).isTrue()
         assertThat(pending.questionReadback).isNull()
@@ -407,9 +544,9 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
             if (loseScopeDuringExclusion) fixture.onExclude = { fixture.isAuthorized = false }
             else fixture.onSourceRead = { fixture.focus = (STUDY + 1) to (REVISION + 1) }
 
-            val result = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+            val result = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
 
-            assertCode(fixture, result, "QUESTION_CONTEXT_UNAVAILABLE")
+            assertCode(fixture, result, if (loseScopeDuringExclusion) "QUESTION_CONTEXT_UNAVAILABLE" else "INPUT_PERSISTENCE_PENDING")
             assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
             assertThat(result.questionChange).isNull()
         }
@@ -422,7 +559,7 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
         fixture.learner = 12
         fixture.afterInvoke = { name -> if (name == "submit_answer") fixture.isAuthorized = false }
 
-        val result = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+        val result = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
 
         assertCode(fixture, result, "QUESTION_CONTEXT_UNAVAILABLE")
         assertThat(result.questionChange).isNull()
@@ -541,6 +678,12 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
             7, 130, 120, 6, "question-read", "answer-2", REVISION,
         ))
 
+        fun reviewed(text: String = EDITED_ANSWER) = VoiceTutorReviewedAnswer(
+            answerId = "739a067a-7578-4d42-80bf-f66d80725802", studyId = STUDY, recordId = "101",
+            lessonRevision = REVISION, text = text, precedingTutorProviderItemId = "question-read",
+            learnerProviderItemIds = listOf("answer-1", "answer-2"),
+        )
+
         fun record(
             id: Long, study: Long = STUDY, status: String = "UNGRADED", answer: String? = null,
             difficulty: Int = 3, createdAt: String = "2026-09-09T01:00:00Z", gradingId: String? = null,
@@ -575,5 +718,6 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
         const val SESSION = "canonical-voice-session"
         const val PROMPT = "의존성 주입이 무엇인가요?"
         const val ANSWER = "필요한 객체를  밖에서 받고\n직접 생성하지 않습니다."
+        const val EDITED_ANSWER = "  객체를 직접 만들지 않고 외부에서 전달받습니다.\n테스트에서는 가짜 구현을 주입할 수 있습니다.  "
     }
 }
