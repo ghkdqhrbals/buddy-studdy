@@ -96,6 +96,18 @@ class VoiceTutorServiceTest {
             assertThat(created.quota.reservedSeconds).isEqualTo(3_600)
             assertThat(created.realtimeTransport).isEqualTo("WEBRTC")
             assertThat(requests.single().language).isEqualTo(language)
+            val expectedLanguage = mapOf("ko" to "Korean", "en" to "English", "ja" to "Japanese").getValue(language)
+            val expectedOpening = mapOf(
+                "ko" to "어떤 주제로 이야기해 볼까요?",
+                "en" to "What topic would you like to talk about?",
+                "ja" to "どんなテーマについて話しましょうか？",
+            ).getValue(language)
+            assertThat(requests.single().instructions)
+                .contains("# Language", "app-selected conversation language is $expectedLanguage ($language)")
+                .contains("Do not automatically switch languages", "return to $expectedLanguage on this reply")
+                .contains("foreign technical terms", "quoting or translating a passage does not switch")
+                .contains("Start with one short question: '$expectedOpening'")
+                .doesNotContain("in Korean, without a greeting")
             val data = JsonMapperProvider.mapper.readTree(context.instructions.substringAfterLast('\n'))
             assertThat(data.path("acceptedStudyId").isNull).isTrue()
             assertThat(data.path("lessonFocus").isNull).isTrue()
@@ -677,14 +689,19 @@ class VoiceTutorServiceTest {
         for ((language, languageName) in listOf("ko" to "Korean", "en" to "English", "ja" to "Japanese")) {
             val persistence = FakePersistence(now).apply { session = session.copy(language = language) }
             val trusted = service(persistence).connect(principal, persistence.session.id).instructions.substringBeforeLast('\n')
+            val opening = mapOf(
+                "ko" to "어떤 주제로 이야기해 볼까요?",
+                "en" to "What topic would you like to talk about?",
+                "ja" to "どんなテーマについて話しましょうか？",
+            ).getValue(language)
             assertThat(trusted)
-                .contains("어떤 주제로 이야기해 볼까요?")
+                .contains("Start with one short question: '$opening'")
                 .contains("without a greeting, readiness check or predetermined quiz")
                 .contains("do not introduce or name yourself or describe your role unless directly asked")
                 .contains("Selection is separate from mutation and needs no additional confirmation")
                 .contains("when the learner chooses it or wants to start learning it")
                 .contains("If an arrived unanswered question exists, read its question text faithfully and wait for the answer")
-                .contains("Use $languageName throughout")
+                .contains("app-selected conversation language is $languageName ($language)")
                 .doesNotContain("AI 선생님이에요", "server independently assesses", "wait for one new learner confirmation")
         }
     }

@@ -7,6 +7,90 @@ import XCTest
 /// microphone, recording, account purge, or real voice/question quota operations.
 @MainActor
 final class VoiceTutorVoiceSettingsTests: XCTestCase {
+    func testVoiceLanguageDefaultsToTheAppLanguageAndExplicitChoicesStayFixed() {
+        XCTAssertEqual(StudySettings.default.voiceTutorLanguage, .appDefault)
+        XCTAssertEqual(VoiceTutorLanguage.allCases.map(\.rawValue), ["default", "ko", "en", "ja"])
+        for appLanguage in AppLanguage.allCases {
+            XCTAssertEqual(StudySettings.initial(for: appLanguage).voiceTutorLanguage, .appDefault)
+            XCTAssertEqual(VoiceTutorLanguage.appDefault.resolve(appLanguage: appLanguage), appLanguage)
+            XCTAssertEqual(VoiceTutorLanguage.korean.resolve(appLanguage: appLanguage), .korean)
+            XCTAssertEqual(VoiceTutorLanguage.english.resolve(appLanguage: appLanguage), .english)
+            XCTAssertEqual(VoiceTutorLanguage.japanese.resolve(appLanguage: appLanguage), .japanese)
+        }
+    }
+
+    func testLegacyAndMalformedVoiceLanguagesKeepAllOtherSettings() throws {
+        let expected = makeSettings(voice: .sage)
+        var legacy = try settingsObject(expected)
+        legacy.removeValue(forKey: "voiceTutorLanguage")
+        XCTAssertEqual(try decodeSettings(legacy), expected)
+
+        let invalidValues: [Any] = ["es", "ko-KR", "", "korean", 42, true, NSNull(), [String](), ["language": "ko"]]
+        for value in invalidValues {
+            var object = try settingsObject(expected)
+            object["voiceTutorLanguage"] = value
+            XCTAssertEqual(try decodeSettings(object), expected)
+        }
+    }
+
+    func testEveryVoiceLanguageSurvivesCodableAndLocalPersistence() throws {
+        let fixture = try VoiceSettingsStoreFixture()
+        defer { fixture.close() }
+        fixture.store.saveLastAnswer("합성 답안 초안")
+        fixture.store.saveAnswerDraft("합성 기록별 초안", recordID: "synthetic-language-draft")
+        let useCase = LocalStudySettingsUseCase(
+            repository: SettingsStoreLocalStudySettingsRepository(settingsStore: fixture.store)
+        )
+        for language in VoiceTutorLanguage.allCases {
+            let settings = makeSettings(voice: .cedar, voiceLanguage: language)
+            XCTAssertEqual(try decodeSettings(settingsObject(settings)), settings)
+            XCTAssertEqual(try settingsObject(settings)["voiceTutorLanguage"] as? String, language.rawValue)
+            useCase.saveSettings(settings)
+            XCTAssertEqual(useCase.loadSettings().settings, settings)
+            XCTAssertEqual(fixture.store.loadLastAnswer(), "합성 답안 초안")
+            XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: "synthetic-language-draft"), "합성 기록별 초안")
+        }
+    }
+
+    func testSettingsStoreLoadsInvalidVoiceLanguageWithoutResettingOtherSettings() throws {
+        let fixture = try VoiceSettingsStoreFixture()
+        defer { fixture.close() }
+        let expected = makeSettings(voice: .ballad)
+        var object = try settingsObject(expected)
+        object["voiceTutorLanguage"] = ["unsupported": true]
+        fixture.defaults.set(try JSONSerialization.data(withJSONObject: object), forKey: "studySettings")
+        XCTAssertEqual(fixture.store.loadSettings(), expected)
+    }
+
+    func testCategorySelectionAndPrivacyCopiesKeepVoiceLanguage() {
+        let first = StudyCategory(id: "41", title: "합성 첫 주제", createdAt: Date(timeIntervalSince1970: 0))
+        let second = StudyCategory(id: "42", title: "합성 둘째 주제", createdAt: Date(timeIntervalSince1970: 0))
+        for language in VoiceTutorLanguage.allCases {
+            let settings = makeSettings(voice: .sage, voiceLanguage: language)
+                .withStudyCategories([first, second], selectedID: first.id)
+            XCTAssertEqual(settings.voiceTutorLanguage, language)
+            XCTAssertEqual(settings.withSelectedCategoryID(second.id).voiceTutorLanguage, language)
+            XCTAssertEqual(settings.withSelectedCategoryID(nil).voiceTutorLanguage, language)
+            XCTAssertEqual(settings.withQuestionPrivacy(true).voiceTutorLanguage, language)
+            XCTAssertEqual(settings.withQuestionPrivacy(false).voiceTutorLanguage, language)
+            XCTAssertEqual(settings.withStudyCategories([]).voiceTutorLanguage, language)
+        }
+    }
+
+    func testBackendSettingsRefreshKeepsInstallationVoiceLanguage() throws {
+        let backend = try RemotePushBackendClient.makeDecoder().decode(BackendStudySettings.self, from: Data("""
+        {"topic":"", "difficultyLevel":5, "intervalMinutes":31, "appLanguage":"en", "enabled":false}
+        """.utf8))
+        for language in VoiceTutorLanguage.allCases {
+            let local = makeSettings(voice: .marin, voiceLanguage: language)
+            let refreshed = backend.studySettings(fallback: local)
+            XCTAssertEqual(refreshed.voiceTutorLanguage, language)
+            XCTAssertEqual(refreshed.voiceTutorVoice, .marin)
+            XCTAssertEqual(refreshed.appLanguage, .english)
+            XCTAssertEqual(refreshed.intervalMinutes, 31)
+        }
+    }
+
     func testDefaultSelectionPreservesServerDefaultInEveryAppLanguage() {
         XCTAssertEqual(StudySettings.default.voiceTutorVoice, .serverDefault)
         for language in AppLanguage.allCases {
@@ -394,13 +478,161 @@ final class VoiceTutorVoiceSettingsTests: XCTestCase {
         fixture.assertAnswerDraftsUnchanged()
     }
 
-    private func makeSettings(voice: VoiceTutorVoice) -> StudySettings {
+    func testVoiceLanguageEditingIsDirtyCancelableAndDoesNotStartRequests() throws {
+        let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: .sage, voiceLanguage: .korean))
+        defer { fixture.close() }
+        let original = fixture.appState.settings
+        fixture.appState.beginSettingsEditing()
+        fixture.appState.setDraftVoiceTutorLanguage(.english)
+        XCTAssertTrue(fixture.appState.hasUnsavedSettingsChanges)
+        XCTAssertEqual(fixture.appState.draftSettings.voiceTutorLanguage, .english)
+        XCTAssertEqual(fixture.appState.settings, original)
+        XCTAssertEqual(fixture.storage.store.loadSettings(), original)
+        XCTAssertTrue(fixture.requests.isEmpty)
+
+        for appLanguage in AppLanguage.allCases {
+            fixture.appState.updateDraftAppLanguage(appLanguage)
+            XCTAssertEqual(fixture.appState.draftSettings.voiceTutorLanguage, .english)
+            XCTAssertEqual(fixture.appState.draftSettings.voiceTutorVoice, .sage)
+        }
+        fixture.appState.cancelSettingsEditing()
+        XCTAssertEqual(fixture.appState.settings, original)
+        XCTAssertEqual(fixture.appState.draftSettings, original)
+        XCTAssertFalse(fixture.appState.hasUnsavedSettingsChanges)
+        fixture.assertAnswerDraftsUnchanged()
+    }
+
+    func testSavingVoiceLanguagePersistsItAndCancelKeepsTheSavedChoiceAfterSyncFailure() async throws {
+        let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: .sage, voiceLanguage: .japanese))
+        defer { fixture.close() }
+        let syncAttempted = expectation(description: "Settings sync attempted")
+        fixture.failSettingsUpdate = true
+        fixture.onSettingsUpdate = { syncAttempted.fulfill() }
+        fixture.appState.beginSettingsEditing()
+        fixture.appState.setDraftVoiceTutorLanguage(.korean)
+        fixture.appState.saveSettings()
+        await fulfillment(of: [syncAttempted], timeout: 5)
+
+        XCTAssertEqual(fixture.appState.settings.voiceTutorLanguage, .korean)
+        XCTAssertEqual(fixture.appState.draftSettings.voiceTutorLanguage, .korean)
+        XCTAssertEqual(fixture.storage.store.loadSettings().voiceTutorLanguage, .korean)
+        XCTAssertFalse(fixture.appState.hasUnsavedSettingsChanges)
+        fixture.appState.setDraftVoiceTutorLanguage(.english)
+        fixture.appState.cancelSettingsEditing()
+        XCTAssertEqual(fixture.appState.settings.voiceTutorLanguage, .korean)
+        XCTAssertEqual(fixture.appState.draftSettings.voiceTutorLanguage, .korean)
+        fixture.assertAnswerDraftsUnchanged()
+    }
+
+    func testLoadingBackendSettingsKeepsSavedVoiceLanguageThroughAppStateAndStorage() async throws {
+        let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: .sage, voiceLanguage: .korean))
+        defer { fixture.close() }
+        await fixture.appState.loadBackendSettingsForEditing()
+
+        XCTAssertEqual(fixture.requests.map { $0.url?.path }, ["/api/v1/settings"])
+        XCTAssertEqual(fixture.appState.settings.appLanguage, .english)
+        XCTAssertEqual(fixture.appState.settings.voiceTutorLanguage, .korean)
+        XCTAssertEqual(fixture.appState.draftSettings.voiceTutorLanguage, .korean)
+        XCTAssertEqual(fixture.storage.store.loadSettings().voiceTutorLanguage, .korean)
+        XCTAssertFalse(fixture.appState.hasUnsavedSettingsChanges)
+        fixture.assertAnswerDraftsUnchanged()
+    }
+
+    func testSavedVoiceLanguageTravelsThroughTheSessionRequestIndependentlyOfAppLanguage() async throws {
+        for appLanguage in AppLanguage.allCases {
+            for voiceLanguage in VoiceTutorLanguage.allCases {
+                var settings = makeSettings(voice: .sage, voiceLanguage: voiceLanguage)
+                settings.appLanguage = appLanguage
+                settings.language = appLanguage.studyLanguage
+                let fixture = try VoiceSettingsAppFixture(settings: settings)
+                defer { fixture.close() }
+                _ = try await fixture.appState.createVoiceTutorConnection()
+                XCTAssertEqual(fixture.creationBodies.count, 1)
+                XCTAssertEqual(fixture.creationBodies.first?["language"] as? String,
+                               voiceLanguage.resolve(appLanguage: appLanguage).backendCode)
+                XCTAssertEqual(fixture.creationBodies.first?["voice"] as? String, "sage")
+                XCTAssertEqual(fixture.appState.settings.appLanguage, appLanguage)
+                fixture.assertAnswerDraftsUnchanged()
+            }
+        }
+    }
+
+    func testUnsavedVoiceLanguageDoesNotChangeTheNextCall() async throws {
+        let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: .sage, voiceLanguage: .korean))
+        defer { fixture.close() }
+        fixture.appState.beginSettingsEditing()
+        fixture.appState.setDraftVoiceTutorLanguage(.english)
+        _ = try await fixture.appState.createVoiceTutorConnection()
+        XCTAssertEqual(fixture.creationBodies.first?["language"] as? String, "ko")
+        XCTAssertEqual(fixture.appState.draftSettings.voiceTutorLanguage, .english)
+        XCTAssertEqual(fixture.storage.store.loadSettings().voiceTutorLanguage, .korean)
+        fixture.assertAnswerDraftsUnchanged()
+    }
+
+    func testVoiceLanguageIsCapturedBeforeRegistrationBootstrapSuspends() async throws {
+        for voiceLanguage in [VoiceTutorLanguage.appDefault, .korean] {
+            let fixture = try VoiceSettingsAppFixture(
+                settings: makeSettings(voice: .echo, voiceLanguage: voiceLanguage), requiresBootstrap: true
+            )
+            defer { fixture.close() }
+            fixture.onTokenRequest = { [weak fixture] in
+                fixture?.appState.settings.voiceTutorLanguage = .english
+                fixture?.appState.settings.appLanguage = .english
+            }
+            _ = try await fixture.appState.createVoiceTutorConnection()
+            XCTAssertEqual(fixture.creationBodies.first?["language"] as? String,
+                           voiceLanguage == .appDefault ? "ja" : "ko")
+            XCTAssertEqual(fixture.appState.settings.voiceTutorLanguage, .english)
+            XCTAssertEqual(fixture.requests.map { $0.url?.path }, [
+                "/api/v1/auth/token", "/api/v1/voice-tutor/sessions"
+            ])
+        }
+    }
+
+    func testIdentityRecoveryKeepsCapturedVoiceLanguageUntilTheNextCall() async throws {
+        let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: .verse, voiceLanguage: .korean))
+        defer { fixture.close() }
+        fixture.expireFirstCreate = true
+        fixture.onTokenRequest = { [weak fixture] in
+            fixture?.appState.settings.voiceTutorLanguage = .english
+        }
+        let firstConnection = try await fixture.appState.createVoiceTutorConnection()
+        XCTAssertEqual(fixture.creationBodies.compactMap { $0["language"] as? String }, ["ko", "ko"])
+        let createRequests = fixture.requests.filter { $0.url?.path == "/api/v1/voice-tutor/sessions" }
+        XCTAssertEqual(createRequests.first?.value(forHTTPHeaderField: "Idempotency-Key"),
+                       createRequests.last?.value(forHTTPHeaderField: "Idempotency-Key"))
+
+        _ = try await fixture.appState.createVoiceTutorConnection()
+        XCTAssertEqual(fixture.creationBodies.last?["language"] as? String, "en")
+        XCTAssertTrue(firstConnection.isCurrent())
+        XCTAssertFalse(fixture.requests.contains { $0.url?.path.hasSuffix("/end") == true })
+        fixture.assertAnswerDraftsUnchanged()
+    }
+
+    func testFailedCallCreationKeepsTheSelectedVoiceLanguageAndAnswerDrafts() async throws {
+        let fixture = try VoiceSettingsAppFixture(settings: makeSettings(voice: .ash, voiceLanguage: .korean))
+        defer { fixture.close() }
+        fixture.failCreate = true
+        do {
+            _ = try await fixture.appState.createVoiceTutorConnection()
+            XCTFail("Synthetic call creation must fail")
+        } catch {
+            XCTAssertTrue(error is RemotePushBackendError)
+        }
+        XCTAssertEqual(fixture.appState.settings.voiceTutorLanguage, .korean)
+        XCTAssertEqual(fixture.appState.draftSettings.voiceTutorLanguage, .korean)
+        XCTAssertEqual(fixture.storage.store.loadSettings().voiceTutorLanguage, .korean)
+        fixture.assertAnswerDraftsUnchanged()
+    }
+
+    private func makeSettings(voice: VoiceTutorVoice, voiceLanguage: VoiceTutorLanguage = .appDefault) -> StudySettings {
         StudySettings(
             topic: "합성 주제",
             difficulty: Difficulty(level: 4),
             appLanguage: .japanese,
             language: .japanese,
             voiceTutorVoice: voice,
+            voiceTutorLanguage: voiceLanguage,
             customPrompt: "합성 설정 보존",
             intervalMinutes: 27,
             isQuestionPublic: false
@@ -441,7 +673,10 @@ private final class VoiceSettingsAppFixture {
     var creationBodies: [[String: Any]] = []
     var previewAudio = Data([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00])
     var expireFirstCreate = false
+    var failCreate = false
+    var failSettingsUpdate = false
     var onTokenRequest: (() -> Void)?
+    var onSettingsUpdate: (() -> Void)?
     private let host: String
     private let session: URLSession
     private let question = QuestionItem(
@@ -504,6 +739,7 @@ private final class VoiceSettingsAppFixture {
 
     func close() {
         onTokenRequest = nil
+        onSettingsUpdate = nil
         session.invalidateAndCancel()
         VoiceSettingsURLProtocol.remove(host: host)
         storage.close()
@@ -514,6 +750,22 @@ private final class VoiceSettingsAppFixture {
         let body: String
         var status = 200
         switch request.url?.path {
+        case "/api/v1/settings":
+            if request.httpMethod == "PUT" {
+                let requestBody = try Self.requestBody(request)
+                XCTAssertNil(requestBody["voiceTutorLanguage"], "Voice language remains an installation preference")
+                XCTAssertNil(requestBody["voiceTutorVoice"])
+                onSettingsUpdate?()
+                if failSettingsUpdate {
+                    status = 503
+                    body = #"{"code":"SETTINGS_UNAVAILABLE","message":"Synthetic settings sync failure"}"#
+                } else {
+                    body = "{}"
+                }
+            } else {
+                XCTAssertEqual(request.httpMethod, "GET")
+                body = #"{"topic":"", "difficultyLevel":5, "intervalMinutes":31, "appLanguage":"en", "enabled":false}"#
+            }
         case "/api/v1/auth/token":
             XCTAssertEqual(request.httpMethod, "POST")
             onTokenRequest?()
@@ -523,7 +775,10 @@ private final class VoiceSettingsAppFixture {
         case "/api/v1/voice-tutor/sessions":
             XCTAssertEqual(request.httpMethod, "POST")
             creationBodies.append(try Self.requestBody(request))
-            if expireFirstCreate, creationBodies.count == 1 {
+            if failCreate {
+                status = 503
+                body = #"{"code":"VOICE_TUTOR_PROVIDER_UNAVAILABLE","message":"Synthetic unavailable provider"}"#
+            } else if expireFirstCreate, creationBodies.count == 1 {
                 status = 401
                 body = #"{"code":"AUTH_INVALID_ACCESS_TOKEN","message":"Synthetic expired token"}"#
             } else {

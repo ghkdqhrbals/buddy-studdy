@@ -7,6 +7,7 @@ import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
+import com.buddystudy.backend.voice.application.model.VoiceTutorLanguagePolicy
 import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
 import com.buddystudy.backend.voice.application.model.VoiceTutorChildStudyCreationAuthorization
 import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
@@ -4209,7 +4210,9 @@ internal class VoiceTutorDuplexTurnController(
             "tool_choice" to toolChoice,
             "metadata" to metadata,
         )
-        instructionOverride?.let { response["instructions"] = it }
+        instructionOverride?.let {
+            response["instructions"] = VoiceTutorLanguagePolicy.responseInstructions(normalizedSessionLanguage, it)
+        }
         emit(
             linkedMapOf(
                 "event_id" to responseEventId,

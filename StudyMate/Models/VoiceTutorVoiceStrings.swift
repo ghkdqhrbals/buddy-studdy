@@ -1,6 +1,32 @@
 import Foundation
 
 extension AppStrings {
+    var voiceTutorLanguageSetting: String {
+        switch language {
+        case .korean: "통화 기본 언어"
+        case .english: "Default call language"
+        case .japanese: "通話の基本言語"
+        }
+    }
+
+    var voiceTutorLanguageSettingHelp: String {
+        switch language {
+        case .korean: "선택한 언어로 듣고 답해요. 저장하면 다음 통화부터 적용돼요."
+        case .english: "Listen and respond in your selected language. Save to apply it to your next call."
+        case .japanese: "選択した言語で聞き取り、応答します。保存すると次の通話から適用されます。"
+        }
+    }
+
+    func voiceTutorLanguageName(_ preference: VoiceTutorLanguage, appLanguage: AppLanguage) -> String {
+        let name = preference.resolve(appLanguage: appLanguage).displayName
+        guard preference == .appDefault else { return name }
+        switch language {
+        case .korean: return "앱 언어 · \(name)"
+        case .english: return "App language · \(name)"
+        case .japanese: return "アプリの言語 · \(name)"
+        }
+    }
+
     var voiceTutorVoiceSetting: String {
         switch language {
         case .korean: "AI 선생님 목소리"

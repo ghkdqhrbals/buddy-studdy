@@ -22,3 +22,23 @@ enum VoiceTutorVoice: String, CaseIterable, Codable, Identifiable, Sendable {
         self == .serverDefault ? nil : rawValue
     }
 }
+
+/// An installation preference resolved once when the next call begins.
+/// Following the app language is explicit; speech recognition never selects it.
+enum VoiceTutorLanguage: String, CaseIterable, Codable, Identifiable, Sendable {
+    case appDefault = "default"
+    case korean = "ko"
+    case english = "en"
+    case japanese = "ja"
+
+    var id: String { rawValue }
+
+    func resolve(appLanguage: AppLanguage) -> AppLanguage {
+        switch self {
+        case .appDefault: appLanguage
+        case .korean: .korean
+        case .english: .english
+        case .japanese: .japanese
+        }
+    }
+}

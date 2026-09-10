@@ -5631,6 +5631,7 @@ struct BackendStudySettings: Decodable, Equatable {
             openAIModel: openAIModel,
             notificationSound: NotificationSoundOption(backendSoundName: notificationSound) ?? fallback.notificationSound,
             voiceTutorVoice: fallback.voiceTutorVoice,
+            voiceTutorLanguage: fallback.voiceTutorLanguage,
             customPrompt: customPrompt,
             intervalMinutes: intervalMinutes,
             maxHistoryCount: maxHistoryCount,

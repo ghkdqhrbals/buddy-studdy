@@ -30,6 +30,35 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
+    fun `native opening and terminal overrides preserve the selected spoken language`() {
+        for ((language, name) in mapOf("ko" to "Korean", "en" to "English", "ja" to "Japanese")) {
+            for (quota in listOf(false, true)) {
+                var clock = 0L
+                val selected = VoiceTutorNativeConversationController(Duration.ofSeconds(15),
+                    language = language, nanoTime = { clock })
+                val events = mutableListOf<JsonNode>()
+                val subscription = selected.providerEvents().subscribe { events.add(mapper.readTree(it)) }
+                try {
+                    if (quota) selected.requestQuotaNotice()
+                    selected.start()
+                    clock += Duration.ofMillis(400).toNanos()
+                    selected.tick()
+
+                    val response = events.single { it.path("type").asText() == "response.create" }.path("response")
+                    assertThat(response.path("instructions").asText())
+                        .contains("# Language", "app-selected conversation language is $name ($language)")
+                        .contains("Do not automatically switch languages", "return to $name on this reply")
+                        .contains("# Current response", "Say exactly this one")
+                    assertThat(response.path("tool_choice").asText()).isEqualTo("none")
+                } finally {
+                    selected.close()
+                    subscription.dispose()
+                }
+            }
+        }
+    }
+
+    @Test
     fun `opening waits for the ready quiet period and a learner who speaks first owns the response`() {
         controller.start()
         time += Duration.ofMillis(399).toNanos(); controller.tick()
@@ -524,6 +553,8 @@ class VoiceTutorNativeConversationControllerTest {
         val options = responses().last().path("response")
         assertThat(options.path("instructions").asText()).contains(mapper.writeValueAsString(question))
             .contains("Do not add an introduction, hint, answer, evaluation, follow-up question or tool call")
+            .contains("app-selected conversation language is Korean (ko)", "Do not automatically switch languages")
+            .contains("foreign technical terms", "quoted or pronounced in their original form")
             .doesNotContain("invent a different instant quiz")
         assertThat(options.path("tool_choice").asText()).isEqualTo("none")
         assertThat(options.path("output_modalities").single().asText()).isEqualTo("audio")

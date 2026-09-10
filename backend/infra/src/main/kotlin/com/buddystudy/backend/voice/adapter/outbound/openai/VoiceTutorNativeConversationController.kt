@@ -4,6 +4,7 @@ import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract as Contract
 import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata as Metadata
 import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
+import com.buddystudy.backend.voice.application.model.VoiceTutorLanguagePolicy
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
@@ -562,7 +563,7 @@ internal class VoiceTutorNativeConversationController(
             // Realtime response metadata accepts string values only, including boolean flags.
             "metadata" to mapOf(Contract.RESPONSE_TOKEN_METADATA_KEY to token, Contract.QUOTA_NOTICE_METADATA_KEY to quota.toString()),
         )
-        instructions?.let { options["instructions"] = it }
+        instructions?.let { options["instructions"] = VoiceTutorLanguagePolicy.responseInstructions(language, it) }
         emit(mapOf("type" to "response.create", "event_id" to response.createEventId, "response" to options))
     }
 

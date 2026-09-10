@@ -11480,6 +11480,44 @@ private struct MobileSettingsView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 6) {
+                        Menu {
+                            ForEach(VoiceTutorLanguage.allCases) { language in
+                                Button {
+                                    appState.setDraftVoiceTutorLanguage(language)
+                                } label: {
+                                    let title = strings.voiceTutorLanguageName(
+                                        language, appLanguage: appState.draftSettings.appLanguage
+                                    )
+                                    if appState.draftSettings.voiceTutorLanguage == language {
+                                        Label(title, systemImage: "checkmark")
+                                    } else {
+                                        Text(title)
+                                    }
+                                }
+                            }
+                        } label: {
+                            MobileSettingsRow(
+                                systemImage: "character.bubble",
+                                title: strings.voiceTutorLanguageSetting,
+                                value: strings.voiceTutorLanguageName(
+                                    appState.draftSettings.voiceTutorLanguage,
+                                    appLanguage: appState.draftSettings.appLanguage
+                                )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings.voiceTutorLanguage")
+                        .accessibilityHint(strings.voiceTutorLanguageSettingHelp)
+
+                        Text(strings.voiceTutorLanguageSettingHelp)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
                         Button {
                             isVoiceTutorVoicePickerPresented = true
                         } label: {
@@ -11708,6 +11746,9 @@ private struct MobileVoiceTutorVoiceSettingsView: View {
     @State private var previewTask: Task<Void, Never>?
 
     private var strings: AppStrings { appState.settingsEditorStrings }
+    private var previewLanguage: AppLanguage {
+        appState.draftSettings.voiceTutorLanguage.resolve(appLanguage: appState.draftSettings.appLanguage)
+    }
 
     var body: some View {
         ScrollView {
@@ -11800,6 +11841,13 @@ private struct MobileVoiceTutorVoiceSettingsView: View {
             previewTask = nil
             previewPlayer.stop()
         }
+        .onChange(of: previewLanguage) { _, language in
+            previewCoordinator.reset()
+            previewTask?.cancel()
+            previewTask = nil
+            previewError = nil
+            previewPlayer.prepare(language: language)
+        }
     }
 
     private func selectAndPreview(_ voice: VoiceTutorVoice) {
@@ -11830,6 +11878,8 @@ private struct MobileVoiceTutorVoiceSettingsView: View {
             return
         }
 
+        let language = previewLanguage
+        previewPlayer.prepare(language: language)
         let completion: @MainActor (VoiceTutorVoicePreviewPlaybackResult) -> Void = { result in
             guard previewCoordinator.finishPlayback(voice: voice, requestID: requestID) else {
                 return
@@ -11852,7 +11902,6 @@ private struct MobileVoiceTutorVoiceSettingsView: View {
             }
             return
         }
-        let language = appState.draftSettings.appLanguage
         previewTask = Task { @MainActor in
             do {
                 let data = try await appState.loadVoiceTutorVoicePreview(
@@ -11992,7 +12041,15 @@ private final class VoiceTutorVoicePreviewPlayer: NSObject, ObservableObject, AV
     @Published private(set) var activeVoice: VoiceTutorVoice?
     private var player: AVAudioPlayer?
     private var cachedAudio: [VoiceTutorVoice: Data] = [:]
+    private var cachedLanguage: AppLanguage?
     private var completion: (@MainActor (VoiceTutorVoicePreviewPlaybackResult) -> Void)?
+
+    func prepare(language: AppLanguage) {
+        guard cachedLanguage != language else { return }
+        stop()
+        cachedAudio.removeAll()
+        cachedLanguage = language
+    }
 
     func hasCachedAudio(for voice: VoiceTutorVoice) -> Bool {
         cachedAudio[voice] != nil

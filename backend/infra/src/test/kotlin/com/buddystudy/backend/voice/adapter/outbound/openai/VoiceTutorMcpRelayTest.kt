@@ -174,6 +174,7 @@ class VoiceTutorMcpRelayTest {
                 assertThat(response.path("instructions").asText())
                     .contains("Say exactly this one sentence and nothing else: $expected")
                     .contains("Do not translate it", "Do not greet the learner", "introduce or name yourself")
+                    .contains("# Language", "($language)", "Do not automatically switch languages")
             } finally {
                 controller.close()
                 output.dispose()
