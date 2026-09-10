@@ -139,6 +139,45 @@ class OpenAIRequestExecutorTest {
     }
 
     @Test
+    fun `optional coverage planning has a small output budget and no transport retry`() {
+        val properties = BuddyStudyProperties().apply {
+            openai.requestTimeoutSeconds = 60
+            openai.requestMaxRetries = 2
+        }
+        val executor = OpenAIRequestExecutor(properties, testExternalApiHistoryRecorder())
+        val coverage = executor.options("test-key", "gpt-test", json = true, operation = "generate-coverage-blueprint")
+        val question = executor.options("test-key", "gpt-test", json = true, operation = "generate-question")
+
+        assertThat(coverage.timeout).isEqualTo(Duration.ofSeconds(20))
+        assertThat(coverage.maxRetries).isZero()
+        assertThat(coverage.maxCompletionTokens).isEqualTo(2_000)
+        assertThat(question.timeout).isEqualTo(Duration.ofSeconds(60))
+        assertThat(question.maxRetries).isEqualTo(2)
+        assertThat(question.maxCompletionTokens).isNull()
+
+        properties.openai.requestTimeoutSeconds = 10
+        assertThat(executor.options("test-key", "gpt-test", true, operation = "generate-coverage-blueprint").timeout)
+            .isEqualTo(Duration.ofSeconds(10))
+    }
+
+    @Test
+    fun `curriculum suggestions have a bounded provider attempt before local fallback`() {
+        val properties = BuddyStudyProperties().apply {
+            openai.requestTimeoutSeconds = 90
+            openai.requestMaxRetries = 3
+        }
+        val executor = OpenAIRequestExecutor(properties, testExternalApiHistoryRecorder())
+        val suggestions = executor.options("test-key", "gpt-test", json = true, operation = "suggest-study-topics")
+        assertThat(suggestions.timeout).isEqualTo(Duration.ofSeconds(20))
+        assertThat(suggestions.maxRetries).isZero()
+        assertThat(suggestions.maxCompletionTokens).isEqualTo(2_000)
+        properties.openai.requestTimeoutSeconds = 5
+        val smaller = executor.options("test-key", "gpt-test", true, 500, "suggest-study-topics")
+        assertThat(smaller.timeout).isEqualTo(Duration.ofSeconds(5))
+        assertThat(smaller.maxCompletionTokens).isEqualTo(500)
+    }
+
+    @Test
     fun `grading deadline always finishes before Redis recovery`() {
         val properties = BuddyStudyProperties().apply {
             openai.gradingTimeoutSeconds = 600

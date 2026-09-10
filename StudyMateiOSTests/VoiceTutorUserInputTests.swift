@@ -19,6 +19,27 @@ final class VoiceTutorUserInputTests: XCTestCase {
         XCTAssertEqual(decodedState, acknowledgement)
     }
 
+    func testOptionalOperationIdentityDecodesWithoutChangingControlAuthority() throws {
+        var request = UserInputFixture.request()
+        request.operationId = "call_exact_form"
+        guard case .userInputRequest(let decoded) = try UserInputFixture.parse(request) else {
+            return XCTFail("Expected a correlated card")
+        }
+        XCTAssertEqual(decoded.operationId, request.operationId)
+        var state = UserInputFixture.readyState(decoded)
+        let payload = try XCTUnwrap(state.submit(requestID: decoded.id, cancel: false)).payload()
+        XCTAssertNil(payload["operationId"], "A display anchor is never an action authorization field")
+        let valid = try UserInputFixture.fields(request, type: "buddystudy.voice.user_input.request")
+        let invalidIDs: [Any] = ["", "wrong/id", String(repeating: "x", count: 192), 42, true]
+        for invalidID in invalidIDs {
+            var invalid = valid
+            invalid["operationId"] = invalidID
+            guard case .ignored = try UserInputFixture.parse(invalid) else {
+                return XCTFail("Unsafe operation IDs must not create a card")
+            }
+        }
+    }
+
     func testMalformedWireRequestsAndStatesCannotBecomeInteractiveCards() throws {
         let valid = try UserInputFixture.fields(UserInputFixture.request(), type: "buddystudy.voice.user_input.request")
         var invalidRequests: [[String: Any]] = []
@@ -110,6 +131,7 @@ final class VoiceTutorUserInputTests: XCTestCase {
         XCTAssertFalse(state.holdsMicrophone)
         XCTAssertEqual(state.entries.first?.status, .submitted)
         XCTAssertEqual(state.entries.first?.answers, UserInputFixture.answers(), "The submitted card remains in the transcript.")
+        XCTAssertEqual(state.entries.first?.submittedAnswers, control.answers, "Read-only results are the exact acknowledged submission")
         let payload = try control.payload()
         XCTAssertEqual(payload["type"] as? String, "buddystudy.voice.user_input.submit")
         XCTAssertEqual(payload["requestId"] as? String, request.id)
@@ -201,6 +223,7 @@ final class VoiceTutorUserInputTests: XCTestCase {
         XCTAssertTrue(state.apply(UserInputFixture.event(for: request, sequence: 2, phase: .cancelled)))
         XCTAssertFalse(state.holdsMicrophone)
         XCTAssertEqual(state.entries.first?.answers, UserInputFixture.answers())
+        XCTAssertNil(state.entries.first?.submittedAnswers, "Cancelled draft selections are not submitted answers")
 
         var ended = UserInputFixture.readyState(request)
         ended.endLocally()
@@ -212,6 +235,144 @@ final class VoiceTutorUserInputTests: XCTestCase {
         XCTAssertNil(ended.submit(requestID: request.id, cancel: false))
         ended.update(requestID: request.id, answer: .init(questionId: "notes", text: "뒤늦은 편집"))
         XCTAssertEqual(ended, terminal)
+    }
+
+    func testCompletedAndCancelledCardsKeepTheirCapturedLegacyConversation() throws {
+        let first = VoiceTutorCaption(speaker: .tutor, text: "첫 번째 선택 안내")
+        let second = VoiceTutorCaption(speaker: .tutor, text: "두 번째 선택 안내")
+        let later = VoiceTutorCaption(speaker: .learner, text: "다음 대화")
+        let submitted = UserInputFixture.request()
+        let cancelled = UserInputFixture.request(sequence: 3)
+        var state = VoiceTutorUserInputState()
+        XCTAssertTrue(state.apply(submitted, sessionID: submitted.sessionId, afterCaptionID: first.id))
+        for answer in UserInputFixture.answers() { state.update(requestID: submitted.id, answer: answer) }
+        XCTAssertNotNil(state.submit(requestID: submitted.id, cancel: false))
+        XCTAssertTrue(state.apply(UserInputFixture.event(for: submitted, sequence: 2, phase: .submitted)))
+        XCTAssertTrue(state.apply(cancelled, sessionID: cancelled.sessionId, afterCaptionID: second.id))
+        XCTAssertNotNil(state.submit(requestID: cancelled.id, cancel: true))
+        XCTAssertTrue(state.apply(UserInputFixture.event(for: cancelled, sequence: 4, phase: .cancelled)))
+        state.endLocally()
+        let layout = UserInputFixture.layout(state, captions: [first, second, later])
+        XCTAssertEqual(layout.byCaptionID[first.id]?.map(\.id), [submitted.id])
+        XCTAssertEqual(layout.byCaptionID[second.id]?.map(\.id), [cancelled.id])
+        XCTAssertNil(layout.byCaptionID[later.id])
+        XCTAssertTrue(layout.beforeCaptions.isEmpty)
+        XCTAssertTrue(layout.unresolvedWaiting.isEmpty)
+        XCTAssertEqual(state.entries.first?.submittedAnswers, UserInputFixture.answers())
+        XCTAssertNil(state.entries.last?.submittedAnswers)
+    }
+
+    func testCurriculumCardsStayBelowTheExactSelectingOrQuestionOperation() throws {
+        for name in ["select_voice_study", "advance_voice_study", "request_question", "list_pending_questions"] {
+            for cancelled in [false, true] {
+                var request = UserInputFixture.request()
+                request.operationId = "curriculum_\(name)"
+                let source = VoiceTutorCaption(speaker: .learner, text: "이 주제로 시작해보자", providerItemID: "start_topic")
+                let later = VoiceTutorCaption(speaker: .tutor, text: "다음 대화", responseID: "later")
+                let operation = try UserInputFixture.operation(request.operationId!,
+                    context: .init(operationID: request.operationId!, learnerItemID: "start_topic"), name: name)
+                var state = VoiceTutorUserInputState()
+                XCTAssertTrue(state.apply(request, sessionID: request.sessionId, afterCaptionID: later.id))
+                state.bindOperation(operation)
+                XCTAssertEqual(state.entries.first?.originOperation?.event.name, name)
+                for answer in UserInputFixture.answers() { state.update(requestID: request.id, answer: answer) }
+                XCTAssertNotNil(state.submit(requestID: request.id, cancel: cancelled))
+                XCTAssertTrue(state.apply(UserInputFixture.event(for: request, sequence: 2,
+                    phase: cancelled ? .cancelled : .submitted)))
+                let layout = UserInputFixture.layout(state, captions: [source, later])
+                XCTAssertEqual(layout.byCaptionID[source.id]?.map(\.id), [request.id])
+                XCTAssertNil(layout.byCaptionID[later.id])
+                XCTAssertTrue(layout.unresolvedWaiting.isEmpty)
+                XCTAssertEqual(state.entries.first?.submittedAnswers, cancelled ? nil : UserInputFixture.answers())
+            }
+        }
+    }
+
+    func testExactCardOriginWaitsForLateOperationAndCaptionWithoutBorrowingNewerConversation() throws {
+        var request = UserInputFixture.request()
+        request.operationId = "call_late"
+        let newer = VoiceTutorCaption(speaker: .tutor, text: "새로운 응답", responseID: "response_new")
+        let source = VoiceTutorCaption(speaker: .tutor, text: "원래 선택 안내", responseID: "response_source")
+        var state = VoiceTutorUserInputState()
+        XCTAssertTrue(state.apply(request, sessionID: request.sessionId, afterCaptionID: newer.id, responseID: newer.responseID))
+        var layout = UserInputFixture.layout(state, captions: [newer])
+        XCTAssertEqual(layout.unresolvedWaiting.map(\.id), [request.id], "A pending form remains reachable while its source is delayed")
+        XCTAssertTrue(layout.byCaptionID.isEmpty)
+
+        state.bindOperation(try UserInputFixture.operation("unrelated", context: .init(operationID: "unrelated", responseID: newer.responseID)))
+        XCTAssertNil(state.entries.first?.originOperation)
+        state.bindOperation(try UserInputFixture.operation("call_late", context: .init(operationID: "call_late", responseID: source.responseID)))
+        for answer in UserInputFixture.answers() { state.update(requestID: request.id, answer: answer) }
+        XCTAssertNotNil(state.submit(requestID: request.id, cancel: false))
+        XCTAssertTrue(state.apply(UserInputFixture.event(for: request, sequence: 2, phase: .submitted)))
+        layout = UserInputFixture.layout(state, captions: [newer])
+        XCTAssertTrue(layout.byCaptionID.isEmpty)
+        XCTAssertTrue(layout.unresolvedWaiting.isEmpty, "Unresolved history is retained without attaching to a random current message")
+        XCTAssertEqual(state.entries.count, 1)
+
+        layout = UserInputFixture.layout(state, captions: [newer], responseID: source.responseID, hasDraft: true)
+        XCTAssertEqual(layout.afterAssistantDraft.map(\.id), [request.id])
+        layout = UserInputFixture.layout(state, captions: [source, newer])
+        XCTAssertEqual(layout.byCaptionID[source.id]?.map(\.id), [request.id])
+        XCTAssertNil(layout.byCaptionID[newer.id])
+        state.bindOperation(try UserInputFixture.operation("call_late", context: .init(operationID: "call_late", responseID: newer.responseID)))
+        state.endLocally()
+        layout = UserInputFixture.layout(state, captions: [source, newer])
+        XCTAssertEqual(layout.byCaptionID[source.id]?.map(\.id), [request.id], "A late completion cannot overwrite the first immutable source")
+        XCTAssertTrue(UserInputFixture.layout(state, captions: [newer]).byCaptionID.isEmpty,
+            "Trimming an exact source cannot move its old card under a newer response")
+    }
+
+    func testToolOnlyCardAndFollowupCardStayWithOriginWhenItsTutorCaptionArrivesLate() throws {
+        let learner = VoiceTutorCaption(speaker: .learner, text: "추천해 주세요", providerItemID: "learner_source")
+        let tutor = VoiceTutorCaption(speaker: .tutor, text: "어떤 것을 고를까요?", responseID: "response_source")
+        let later = VoiceTutorCaption(speaker: .tutor, text: "다음 안내", responseID: "response_later")
+        var first = UserInputFixture.request()
+        first.operationId = "call_first"
+        var next = UserInputFixture.request(sequence: 3)
+        next.operationId = "call_followup"
+        var state = VoiceTutorUserInputState()
+        XCTAssertTrue(state.apply(first, sessionID: first.sessionId,
+            operation: try UserInputFixture.operation("call_first", context: .init(operationID: "call_first",
+                responseID: tutor.responseID, learnerItemID: "learner_source"))))
+        XCTAssertEqual(UserInputFixture.layout(state, captions: [learner, later]).byCaptionID[learner.id]?.map(\.id), [first.id])
+        XCTAssertNotNil(state.submit(requestID: first.id, cancel: true))
+        XCTAssertTrue(state.apply(UserInputFixture.event(for: first, sequence: 2, phase: .cancelled)))
+        XCTAssertTrue(state.apply(next, sessionID: next.sessionId,
+            operation: try UserInputFixture.operation("call_followup", context: .init(operationID: "call_followup",
+                responseID: "response_no_text", learnerItemID: "buddystudy-user-input-" + first.id))))
+        var layout = UserInputFixture.layout(state, captions: [learner, later])
+        XCTAssertEqual(layout.byCaptionID[learner.id]?.map(\.id), [first.id, next.id])
+        layout = UserInputFixture.layout(state, captions: [learner, tutor, later])
+        XCTAssertEqual(layout.byCaptionID[tutor.id]?.map(\.id), [first.id, next.id])
+        XCTAssertNil(layout.byCaptionID[learner.id])
+        XCTAssertNil(layout.byCaptionID[later.id])
+    }
+
+    func testCardAfterTypedAnswerMovesWithThatExactAnswerAndPreservesItsSubmissionSnapshot() throws {
+        let answerID = UUID().uuidString.lowercased()
+        let answerCaption = VoiceTutorCaption(speaker: .learner, text: "수정 후 제출한 답변", answerID: answerID)
+        let unrelated = VoiceTutorCaption(speaker: .tutor, text: "다른 안내")
+        var request = UserInputFixture.request()
+        request.operationId = "call_answer"
+        var state = VoiceTutorUserInputState()
+        XCTAssertTrue(state.apply(request, sessionID: request.sessionId,
+            operation: try UserInputFixture.operation("call_answer", context: .init(operationID: "call_answer", answerID: answerID))))
+        let draftLayout = VoiceTutorUserInputTranscriptLayout(entries: state.entries, captions: [unrelated],
+            assistantResponseID: nil, hasAssistantDraft: false, answerDraftID: answerID)
+        XCTAssertEqual(draftLayout.afterAnswerDraft.map(\.id), [request.id])
+        for answer in UserInputFixture.answers() { state.update(requestID: request.id, answer: answer) }
+        XCTAssertNotNil(state.submit(requestID: request.id, cancel: false))
+        XCTAssertTrue(state.apply(UserInputFixture.event(for: request, sequence: 2, phase: .pending, errorCode: "ACTION_FAILED")))
+        XCTAssertNil(state.entries.first?.submittedAnswers)
+        let revised = VoiceTutorUserInputAnswer(questionId: "notes", text: "  재시도 때 바꾼 내용\n그대로  ")
+        state.update(requestID: request.id, answer: revised)
+        let control = try XCTUnwrap(state.submit(requestID: request.id, cancel: false))
+        XCTAssertTrue(state.apply(UserInputFixture.event(for: request, sequence: 3, phase: .submitted)))
+        state.update(requestID: request.id, answer: .init(questionId: "notes", text: "늦은 편집"))
+        XCTAssertEqual(state.entries.first?.submittedAnswers, control.answers)
+        XCTAssertEqual(state.entries.first?.submittedAnswers?.last, revised)
+        XCTAssertEqual(UserInputFixture.layout(state, captions: [answerCaption, unrelated]).byCaptionID[answerCaption.id]?.map(\.id), [request.id])
     }
 }
 
@@ -243,6 +404,20 @@ private enum UserInputFixture {
         _ = state.apply(request, sessionID: request.sessionId)
         for answer in answers() { state.update(requestID: request.id, answer: answer) }
         return state
+    }
+
+    static func operation(_ id: String, context: VoiceTutorOperationContextEvent,
+                          name: String = "request_user_input") throws -> VoiceTutorOperationState.Entry {
+        var operations = VoiceTutorOperationState()
+        XCTAssertTrue(operations.applyContext(context))
+        XCTAssertTrue(operations.apply(.init(sequence: 1, operationID: id, name: name, phase: .started,
+            elapsedMilliseconds: 0), at: 0))
+        return try XCTUnwrap(operations.active.first)
+    }
+
+    static func layout(_ state: VoiceTutorUserInputState, captions: [VoiceTutorCaption], responseID: String? = nil,
+                       hasDraft: Bool = false) -> VoiceTutorUserInputTranscriptLayout {
+        .init(entries: state.entries, captions: captions, assistantResponseID: responseID, hasAssistantDraft: hasDraft)
     }
 
     static func event(for request: VoiceTutorUserInputRequest, sequence: Int64,
@@ -334,6 +509,9 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
         XCTAssertTrue(harness.hasAccessibilityLabel("개념 정리 · 연습 문제"), harness.accessibilityDescription())
         XCTAssertFalse(harness.hasAccessibilityLabel("실제 예시"), "Completed cards omit unselected choices")
         XCTAssertTrue(harness.hasAccessibilityLabel(draft), "The compact completed card retains custom text")
+        XCTAssertTrue(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputSubmittedAnswers))
+        XCTAssertFalse(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputUnsubmittedDraft))
+        XCTAssertEqual(harness.probe.state.entries.first?.submittedAnswers, harness.probe.controls.first?.answers)
         attach(harness, name: "voice-input-compact-completed-card")
     }
 
@@ -378,7 +556,31 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
         XCTAssertTrue(harness.hasAccessibilityLabel("개념 정리 · 연습 문제"), harness.accessibilityDescription())
         XCTAssertFalse(harness.hasAccessibilityLabel("실제 예시"))
         XCTAssertTrue(harness.hasAccessibilityLabel(answer.text))
+        XCTAssertTrue(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputUnsubmittedDraft),
+            "Cancelled local selections must be labeled as drafts, never as submitted answers")
+        XCTAssertFalse(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputSubmittedAnswers))
+        XCTAssertNil(harness.probe.state.entries.first?.submittedAnswers)
         attach(harness, name: "voice-input-large-text-compact-cancelled-card")
+    }
+
+    func testEmptyCancelledCardShowsNoSelectionsOrSubmittedAnswerSummary() async throws {
+        try requireInProcessSwiftUIAccessibility()
+        let harness = try UserInputCardHarness()
+        defer { harness.close() }
+        try await harness.settle()
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: AppStrings(language: .korean).cancel)).accessibilityActivate())
+        try await harness.settle()
+        XCTAssertNil(harness.probe.controls.first?.answers)
+        XCTAssertTrue(harness.probe.state.apply(UserInputFixture.event(for: harness.probe.request, sequence: 2, phase: .cancelled)))
+        try await harness.settle()
+        XCTAssertTrue(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputCancelled))
+        XCTAssertFalse(harness.hasAccessibilityLabel("개념 정리"))
+        XCTAssertFalse(harness.hasAccessibilityLabel("실제 예시"))
+        XCTAssertFalse(harness.hasAccessibilityLabel("연습 문제"))
+        XCTAssertFalse(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputSubmittedAnswers))
+        XCTAssertFalse(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputUnsubmittedDraft))
+        XCTAssertNil(harness.button(label: AppStrings(language: .korean).voiceTutorInputContinue))
+        attach(harness, name: "voice-input-empty-cancelled-card")
     }
 
     /// Runs on simulator AND iPhone. It uses UIKit's real text-input path and
@@ -477,6 +679,9 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
             XCTAssertFalse(harness.probe.state.holdsMicrophone)
             XCTAssertEqual(harness.probe.state.entries.last?.answers, [revisedAnswer])
             XCTAssertNil(harness.editor())
+            // This attachment shows the settled read-only card, after its
+            // pending-to-submitted transition has completely faded out.
+            try await Task.sleep(for: .milliseconds(500))
             attach(harness, name: "voice-input-native-completed-card-\(size)")
         }
         // Additional visual coverage shares the same production card and has

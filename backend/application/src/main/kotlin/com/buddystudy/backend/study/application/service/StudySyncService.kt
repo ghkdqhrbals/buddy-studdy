@@ -230,9 +230,12 @@ class StudySyncService(
     ): StudyTopicsCreationResponse {
         val topics = command.topics.map(String::trim)
         val topicKeys = topics.map { it.normalizedStudyTopicKey() }
+        val terminalKeys = command.curriculumTerminalByTopic.keys.map { it.normalizedStudyTopicKey() }
         if (parentStudyId <= 0 || topics.size !in 1..StudyTreePolicy.MAX_TOPIC_SUGGESTIONS ||
             topics.any { it.isEmpty() || it.length > 255 } || topicKeys.distinct().size != topicKeys.size ||
-            command.difficultyLevel !in 1..10
+            command.difficultyLevel !in 1..10 ||
+            command.curriculumTerminalByTopic.keys.any { it.isBlank() || it.trim().length > 255 } ||
+            terminalKeys.distinct().size != terminalKeys.size || terminalKeys.any { it !in topicKeys }
         ) {
             throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR,
                 "Select 1 to 10 distinct child topics with 1 to 255 characters and difficulty between 1 and 10.")
@@ -257,12 +260,19 @@ class StudySyncService(
         }
         if (topicKeys.any { byTopic[it].isNullOrEmpty() }) requireCanAddChild(parent, allStudies)
         val rootStudy = StudyTreeSelector.rootFor(parent, allStudies)
+        val terminalByKey = command.curriculumTerminalByTopic.mapKeys { it.key.normalizedStudyTopicKey() }
         var nextOrder = allStudies.filter { it.parentStudyId == parentStudyId }
             .maxOfOrNull { it.sortOrder.toLong() }?.plus(1)?.coerceAtLeast(0) ?: 0L
         val outcomes = topics.map { topic ->
             saveChildStudyOutcome(
                 principal, parent, rootStudy,
-                CreateStudyTopicCommand(topic, (nextOrder++).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), command.difficultyLevel),
+                CreateStudyTopicCommand(
+                    topic = topic,
+                    sortOrder = (nextOrder++).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                    difficultyLevel = command.difficultyLevel,
+                    inheritRootDifficulty = command.inheritRootDifficulty,
+                ),
+                curriculumTerminal = terminalByKey[topic.normalizedStudyTopicKey()],
             ).let { it.study.toStudyTopicCreationResponse(it.created) }
         }
         return StudyTopicsCreationResponse(parentStudyId, outcomes)
@@ -273,11 +283,13 @@ class StudySyncService(
         parentStudy: StudyEntity,
         rootStudy: StudyEntity,
         command: CreateStudyTopicCommand,
-    ): SavedStudyOutcome = saveStudyOutcome(
+        curriculumTerminal: Boolean? = null,
+    ): SavedStudyOutcome {
+        val outcome = saveStudyOutcome(
             principal = principal,
             command = CreateStudyCommand(
                 topic = command.topic,
-                difficultyLevel = command.difficultyLevel,
+                difficultyLevel = if (command.inheritRootDifficulty) rootStudy.difficultyLevel else command.difficultyLevel,
                 intervalMinutes = rootStudy.intervalMinutes,
                 enabled = false,
                 notificationSound = rootStudy.notificationSound,
@@ -289,7 +301,17 @@ class StudySyncService(
             sortOrder = command.sortOrder,
             activeForQuestions = command.activeForQuestions,
             scheduleEnabled = false,
+            curriculumTerminal = curriculumTerminal,
         )
+        // A deliberate add-child can refine a previously terminal topic. A replay,
+        // rejected selection, or failed child save must not erase that metadata.
+        if (outcome.created && parentStudy.curriculumTerminal) {
+            parentStudy.curriculumTerminal = false
+            parentStudy.updatedAt = Instant.now()
+            studies.save(parentStudy)
+        }
+        return outcome
+    }
 
     @Transactional
     @RequirePermission(Permissions.STUDY_UPDATE)
@@ -402,6 +424,7 @@ class StudySyncService(
         sortOrder: Int,
         activeForQuestions: Boolean,
         scheduleEnabled: Boolean,
+        curriculumTerminal: Boolean? = null,
     ): SavedStudyOutcome {
         val topic = command.topic.trim()
         if (topic.isEmpty()) {
@@ -426,6 +449,8 @@ class StudySyncService(
                 parentStudyId = parentStudy?.id,
                 topic = topic,
                 createdAt = now,
+                curriculumTerminal = curriculumTerminal == true || (parentStudy != null &&
+                    StudyTreeSelector.pathFromRoot(parentStudy, allStudies).size >= StudyTreePolicy.MAX_DESCENDANT_DEPTH),
             )
         val isNewStudy = study.id == 0L
         val previousEnabled = study.enabled
@@ -565,6 +590,7 @@ internal suspend fun StudyEntity.toStudyRoomResponse(
         latestQuestion = latest,
         createdAt = createdAt,
         updatedAt = updatedAt,
+        curriculumTerminal = curriculumTerminal,
     )
 }
 
@@ -576,6 +602,7 @@ private fun StudyRoomResponse.toRootStudyCreationResponse(created: Boolean) = Ro
     difficultyLevel = difficultyLevel,
     enabled = enabled,
     activeForQuestions = activeForQuestions,
+    curriculumTerminal = curriculumTerminal,
 )
 
 private fun StudyRoomResponse.toStudyTopicCreationResponse(created: Boolean) = StudyTopicCreationResponse(
@@ -586,6 +613,7 @@ private fun StudyRoomResponse.toStudyTopicCreationResponse(created: Boolean) = S
     difficultyLevel = difficultyLevel,
     enabled = enabled,
     activeForQuestions = activeForQuestions,
+    curriculumTerminal = curriculumTerminal,
 )
 
 private fun StudyEntity.toRootStudyCreationResponse(created: Boolean) = RootStudyCreationResponse(
@@ -596,6 +624,7 @@ private fun StudyEntity.toRootStudyCreationResponse(created: Boolean) = RootStud
     difficultyLevel = difficultyLevel,
     enabled = enabled,
     activeForQuestions = activeForQuestions,
+    curriculumTerminal = curriculumTerminal,
 )
 
 private suspend fun StudyEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(

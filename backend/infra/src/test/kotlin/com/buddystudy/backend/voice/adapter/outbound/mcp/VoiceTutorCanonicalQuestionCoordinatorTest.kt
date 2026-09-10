@@ -24,22 +24,45 @@ import java.time.ZoneOffset
 
 class VoiceTutorCanonicalQuestionCoordinatorTest {
     @Test
-    fun `background generation observation waits for its exact process and never consumes the later spoken readback`(): Unit = runBlocking {
+    fun `generation event binds its exact saved question once and later lookup only offers recovery`(): Unit = runBlocking {
         val fixture = Fixture().apply { records = emptyList(); generationReady = false }
         val requested = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
         val progress = requested.learningProgress!!
         assertThat(progress.phase).isEqualTo(VoiceTutorLearningPhase.QUESTION_GENERATING)
         val waiting = fixture.coordinator.pollLearningProgress(fixture.context(), progress)
         assertThat(waiting.learningProgress).isEqualTo(progress)
+        // Losing/closing an observer must not lose the request or spend quota again.
+        repeat(3) {
+            val resumed = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
+            assertThat(resumed.learningProgress?.correlationId).isEqualTo(progress.correlationId)
+        }
         fixture.generationReady = true
         val ready = fixture.coordinator.pollLearningProgress(fixture.context(), progress)
         assertThat(ready.learningProgress?.phase).isEqualTo(VoiceTutorLearningPhase.QUESTION_READY)
         assertThat(ready.questionChange?.recordId).isEqualTo("201")
-        assertThat(ready.questionReadback).isNull()
+        assertThat(ready.questionReadback?.recordId).isEqualTo("201")
         assertThat(ready.output).isEqualTo("{}")
         val spoken = fixture.coordinator.execute(fixture.context(), "get_question_process", mapOf("correlation_id" to progress.correlationId!!))
-        assertThat(spoken.questionReadback?.recordId).isEqualTo("201")
+        assertThat(spoken.questionReadback).isNull()
+        assertThat(spoken.questionReadbackRecovery?.recordId).isEqualTo("201")
         assertThat(fixture.calls.count { it.name == "request_question" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `terminal observed generation is released for a new explicit request and old correlation cannot replace it`(): Unit = runBlocking {
+        for (failed in listOf(false, true)) {
+            val fixture = Fixture().apply { records = emptyList(); if (failed) generationRecord = null }
+            val first = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY)).learningProgress!!
+            val terminal = fixture.coordinator.pollLearningProgress(fixture.context(), first)
+            assertThat(terminal.learningProgress?.phase).isEqualTo(if (failed) VoiceTutorLearningPhase.QUESTION_FAILED else VoiceTutorLearningPhase.QUESTION_READY)
+            // Simulate canonical completion/removal of the prior pending question.
+            fixture.records = emptyList(); fixture.learner = checkNotNull(fixture.learner) + 1
+            val next = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY)).learningProgress!!
+            assertThat(next.correlationId).isNotEqualTo(first.correlationId)
+            assertThat(fixture.coordinator.pollLearningProgress(fixture.context(), first).isError).isTrue()
+            assertThat(fixture.coordinator.execute(fixture.context(), "get_question_process", mapOf("correlation_id" to first.correlationId!!)).isError).isTrue()
+            assertThat(fixture.calls.count { it.name == "request_question" }).isEqualTo(2)
+        }
     }
 
     @Test

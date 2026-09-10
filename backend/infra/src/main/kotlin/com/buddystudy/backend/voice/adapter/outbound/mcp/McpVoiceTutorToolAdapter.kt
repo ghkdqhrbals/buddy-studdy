@@ -41,6 +41,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
 import io.modelcontextprotocol.spec.McpSchema
+import com.buddystudy.backend.study.application.port.outbound.StudyLearningProgressSignalPort
+import com.buddystudy.backend.study.application.port.outbound.NoopStudyLearningProgressSignalPort
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.context.annotation.Lazy
@@ -64,6 +70,7 @@ class McpVoiceTutorToolAdapter(
     private val confirmations: VoiceTutorMutationConfirmationPort = UnavailableVoiceTutorMutationConfirmationPort,
     private val lessonFocus: VoiceTutorLessonFocusPort = UnavailableVoiceTutorLessonFocusPort,
     private val exchangeLogger: McpExchangeLogger = McpExchangeLogger(objectMapper),
+    private val progressSignals: StudyLearningProgressSignalPort = NoopStudyLearningProgressSignalPort,
 ) : VoiceTutorMcpToolPort {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val validator by lazy { McpJsonSchemaValidatorProvider.create() }
@@ -85,6 +92,40 @@ class McpVoiceTutorToolAdapter(
                 else canonicalQuestionData(invoke(context.principal!!, spec, args), name)
             })
     }
+
+    private val curriculum by lazy {
+        VoiceTutorCurriculumCoordinator(objectMapper, clock,
+            current = { context -> context.operationStillCurrent?.invoke() != false && isAuthorized(context) && context.initialLessonRevision ==
+                studyContexts.currentRevision(context.session.userId, context.session.id) },
+            invoke = { context, name, args ->
+                val specification = specifications[name]
+                if (specification == null || !isAuthorized(context)) null
+                else invoke(requireNotNull(context.principal), specification, args).takeIf { it.isError() != true }
+                    ?.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
+            },
+            focus = { context, id -> focusRealtimeStudy(context, mapOf("study_id" to id), false, prepareCurriculum = false) })
+    }
+
+    override suspend fun submitCurriculumUserInput(context: VoiceTutorWebRtcControlContext, proposalId: String,
+        selectedIndex: Int?, text: String): VoiceTutorMcpToolResult = curriculum.submit(context, proposalId, selectedIndex, text)
+
+    private suspend fun originalRoot(context: VoiceTutorWebRtcControlContext, selectedId: Long): VoiceTutorStudyTargetCandidate? {
+        var node = readRealtimeTarget(context, selectedId) ?: return null
+        val seen = mutableSetOf<Long>()
+        repeat(128) {
+            if (!seen.add(node.studyId)) return null
+            val parent = node.parentStudyId ?: return node
+            node = readRealtimeTarget(context, parent) ?: return null
+        }
+        return null
+    }
+
+    override fun observeLearningProgress(context: VoiceTutorWebRtcControlContext,
+        progress: com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress): Flow<VoiceTutorMcpToolResult> =
+        progressSignals.changes(progress.correlationId.orEmpty()).map {
+            // Signals carry no authority or content. Every delivery reads the owned durable snapshot.
+            withTimeout(10_000) { reviewedQuestionOperation { canonicalQuestions.pollLearningProgress(context, progress) } }
+        }.distinctUntilChanged()
 
     override suspend fun pollLearningProgress(context: VoiceTutorWebRtcControlContext,
         progress: com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress): VoiceTutorMcpToolResult =
@@ -199,10 +240,10 @@ class McpVoiceTutorToolAdapter(
                 val description = when (tool.name()) {
                     "list_studies" -> "Browse saved study discovery metadata and exact parent IDs with bounded pages. This result contains no questions, answers or study prompts. Resolve the learner's chosen exact node, select it, then read list_pending_questions separately before teaching. " + tool.description().orEmpty()
                     "list_pending_questions" -> "Read arrived pending questions for the exact selected study_id before teaching. Read the returned saved question faithfully and preserve its original level. Do not invent a replacement. Grading questions already have submitted answers and must not be asked again."
-                    "request_question" -> "Request a new saved question for the selected topic only when the learner wants one and no ready pending question remains. Existing pending questions are returned first. For an unwanted question call skip_question on an explicit skip/change request, then request again. Normal question allowance applies; the server owns retry identity. Poll get_question_process and speak only its saved question."
+                    "request_question" -> "Request a new saved question for the selected topic only when the learner wants one and no ready pending question remains. Existing pending questions are returned first. For an unwanted question call skip_question on an explicit skip/change request, then request again. Normal question allowance applies; the server owns retry identity. The server subscribes to completion and delivers only the saved question. Do not poll get_question_process or ask the learner to repeat the start request."
                     "submit_answer" -> "Reserved for the learner's explicit app submission after finishing and editing their answer. Never call this tool yourself, even if speech seems complete. The server supplies the reviewed text privately after the learner taps Submit. Then use get_grading_process and only its saved grade."
                     "skip_question" -> "Skip only the current arrived unanswered question when the learner explicitly asks to skip or replace it. Pass its exact record_id. Do not grade it, erase drafts, skip a submitted answer, or generate a new question implicitly; check remaining pending questions next."
-                    "get_question_process", "get_grading_process" -> tool.description().orEmpty() + " In voice, use only the correlation ID returned in this selected-topic call. Each read waits briefly for progress; if still pending wait/recheck without inventing completion, scores or questions."
+                    "get_question_process", "get_grading_process" -> tool.description().orEmpty() + " In voice, use only the correlation ID returned in this selected-topic call. The server subscribes to accepted question/grading completion. Use a single read for an explicit status or recovery request only; do not repeatedly poll or invent completion, scores or questions."
                     else -> tool.description().orEmpty()
                 }
                 VoiceTutorMcpToolDefinition(tool.name(), description, schema)
@@ -288,17 +329,18 @@ class McpVoiceTutorToolAdapter(
         val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
         if (context.initialLessonRevision != revision) return null
         val parent = readRealtimeTarget(context, parentStudyId) ?: return null
+        val rootDifficulty = originalRoot(context, parentStudyId)?.difficulty ?: return null
         if (!isAuthorized(context) || studyContexts.currentRevision(context.session.userId, context.session.id) != revision) return null
         val value = VoiceTutorStudyTopicUserInput(UUID.randomUUID().toString(),
             when (context.session.language) { "en" -> "Add subtopics"; "ja" -> "サブトピックを追加"; else -> "하위 주제 추가" },
             when (context.session.language) {
-                "en" -> "Select subtopics under ${parent.topic}. Submit adds only your selections at level $difficultyLevel."
-                "ja" -> "${parent.topic} の下に追加する項目を選択してください。送信すると選択した項目をレベル $difficultyLevel で追加します。"
-                else -> "${parent.topic} 아래에 추가할 주제를 선택하세요. 제출하면 선택한 주제만 레벨 $difficultyLevel 으로 추가합니다."
+                "en" -> "Select subtopics under ${parent.topic}. Submit adds only your selections at level $rootDifficulty."
+                "ja" -> "${parent.topic} の下に追加する項目を選択してください。送信すると選択した項目をレベル $rootDifficulty で追加します。"
+                else -> "${parent.topic} 아래에 추가할 주제를 선택하세요. 제출하면 선택한 주제만 레벨 $rootDifficulty 으로 추가합니다."
             }, topics.toList())
         val principal = context.principal ?: return null
         val now = clock.instant()
-        val pending = TopicInputProposal(value, parent, difficultyLevel, context.session.id, principal.userId,
+        val pending = TopicInputProposal(value, parent, rootDifficulty, context.session.id, principal.userId,
             principal.deviceId, principal.sessionId, context.callId, revision, minOf(now.plusSeconds(600), context.session.hardEndsAt))
         synchronized(topicInputProposals) {
             topicInputProposals.entries.removeIf { !now.isBefore(it.value.expiresAt) && !it.value.submitting }
@@ -326,13 +368,15 @@ class McpVoiceTutorToolAdapter(
             pending.submitting = true
         }
         try {
-            if (readRealtimeTarget(context, pending.parent.studyId) != pending.parent || !isAuthorized(context) ||
+            if (readRealtimeTarget(context, pending.parent.studyId) != pending.parent ||
+                originalRoot(context, pending.parent.studyId)?.difficulty != pending.difficulty || !isAuthorized(context) ||
                 studyContexts.currentRevision(context.session.userId, context.session.id) != revision)
                 return failure("MUTATION_TARGET_STALE", "The exact parent changed; no new write was started.")
             val spec = specifications["create_study_topics"] ?: return failure("MCP_UNAVAILABLE", "Topic creation is unavailable.")
             val selectedTopics = indices.map { pending.value.topics[it] }
             val args = mapOf("parent_study_id" to pending.parent.studyId, "topics" to selectedTopics,
                 "difficulty_level" to pending.difficulty,
+                BuddyStudyMcpPort.VOICE_INHERIT_ROOT_DIFFICULTY_ARGUMENT to true,
                 BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT to pending.parent.topic,
                 BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT to requireNotNull(pending.parent.difficulty),
                 BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT to (pending.parent.parentStudyId ?: 0L))
@@ -401,6 +445,8 @@ class McpVoiceTutorToolAdapter(
         val learnerId = realtimeLearnerTurn(context, revision) ?: return persistencePending()
         val deletion = if (action == DELETE_STUDY) deletionPreview(context, id!!) ?: return failure("DELETE_PREVIEW_UNAVAILABLE", "This subtree could not be checked; nothing was deleted.") else null
         val target = deletion?.target ?: id?.let { readRealtimeTarget(context, it) ?: return failure("STUDY_NOT_FOUND", "That exact saved topic was not available.") }
+        if (action == CREATE_TOPIC) exact["difficulty_level"] = originalRoot(context, requireNotNull(id))?.difficulty
+            ?: return failure("STUDY_TREE_CHANGED", "The original main study could not be resolved.")
         if (!isAuthorized(context)) return inactiveCall()
         if (studyContexts.currentRevision(context.session.userId, context.session.id) != revision || realtimeLearnerTurn(context, revision) != learnerId) return persistencePending()
         val korean = context.session.language.startsWith("ko")
@@ -483,7 +529,7 @@ class McpVoiceTutorToolAdapter(
         }
     }
 
-    private suspend fun focusRealtimeStudy(context: VoiceTutorWebRtcControlContext, arguments: Map<String, Any>, advance: Boolean): VoiceTutorMcpToolResult {
+    private suspend fun focusRealtimeStudy(context: VoiceTutorWebRtcControlContext, arguments: Map<String, Any>, advance: Boolean, prepareCurriculum: Boolean = true): VoiceTutorMcpToolResult {
         val id = focusStudyId(arguments) ?: return failure("INVALID_ARGUMENTS", "Choose one exact owned study_id.")
         if (!isAuthorized(context)) return inactiveCall()
         val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
@@ -491,7 +537,9 @@ class McpVoiceTutorToolAdapter(
         val candidate = readRealtimeTarget(context, id) ?: return failure("STUDY_NOT_FOUND", "The chosen saved topic is unavailable.")
         val parent = if (advance) currentStudyAnchor(context) ?: return failure("GUIDED_FOCUS_REQUIRED", "Select a topic before moving to its child.") else null
         if (advance && (candidate.parentStudyId != parent || candidate.studyId == parent)) return failure("GUIDED_CHILD_REQUIRED", "Choose one real direct child of the current topic.")
+        if (prepareCurriculum) curriculum.prepare(context, id)?.let { return it }
         if (!isAuthorized(context)) return inactiveCall()
+        if (context.operationStillCurrent?.invoke() == false) return failure("STALE_TURN", "The learner chose a newer direction; no focus was started.")
         val principal = context.principal!!
         val selected = lessonFocus.focusFromRealtimeModel(context.session.userId, context.session.id, id, learnerTurn,
             revision, candidate, VoiceTutorFocusCommitAuthority(principal.deviceId, principal.sessionId, context.callId), parent)
@@ -535,7 +583,14 @@ class McpVoiceTutorToolAdapter(
                 return failure("INVALID_ARGUMENTS", "Tool arguments are too large.")
             }
             if (context.realtimeModelTools) {
-                if (toolName in VoiceTutorCanonicalQuestionCoordinator.TOOLS) return canonicalQuestions.execute(context, toolName, arguments)
+                if (toolName in VoiceTutorCanonicalQuestionCoordinator.TOOLS) {
+                    if (toolName in setOf("request_question", "list_pending_questions")) {
+                        val requested = (arguments["study_id"] as? Number)?.toLong()
+                        val selected = currentStudyAnchor(context)
+                        if (requested != null && requested == selected) curriculum.prepare(context, requested)?.let { return it }
+                    }
+                    return canonicalQuestions.execute(context, toolName, arguments)
+                }
                 if (toolName == PREPARE_MUTATION) return prepareRealtimeMutation(context, arguments)
                 if (toolName == CONFIRM_MUTATION) return confirmRealtimeMutation(context, arguments)
                 if (toolName in setOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY)) {
@@ -1342,6 +1397,11 @@ class McpVoiceTutorToolAdapter(
         )
         if (realtime != null && (!realtimeWriteStillCurrent(context, realtime) ||
                 readRealtimeTarget(context, parentStudyId) != realtime.target)) return failure("MUTATION_TARGET_STALE", "The parent or current request changed; no child was created.")
+        if (realtime != null) {
+            if (originalRoot(context, parentStudyId)?.difficulty != difficulty)
+                return failure("MUTATION_TARGET_STALE", "The original main study level changed; prepare the topic again.")
+            exactArguments[BuddyStudyMcpPort.VOICE_INHERIT_ROOT_DIFFICULTY_ARGUMENT] = true
+        }
         val result = invoke(requireNotNull(context.principal), specification, exactArguments)
         if (result.isError() == true) return boundedResult(result, CREATE_TOPIC)
         val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
@@ -2093,7 +2153,7 @@ class McpVoiceTutorToolAdapter(
         )
         val LEARNING_HISTORY_TOOLS = setOf(LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD)
         val STUDY_CONTEXT_TOOLS = setOf("list_studies", "get_study", CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY)
-        val STUDY_DISCOVERY_FIELDS = listOf("id", "parentStudyId", "topic", "difficultyLevel", "sortOrder", "enabled", "activeForQuestions")
+        val STUDY_DISCOVERY_FIELDS = listOf("id", "parentStudyId", "topic", "difficultyLevel", "sortOrder", "enabled", "activeForQuestions", "curriculumTerminal")
         val CREATION_TOOLS = setOf(CREATE_ROOT, CREATE_TOPIC)
         val DELETE_ARGUMENTS = setOf("study_id", "confirm")
         val CREATED_TOPIC_FIELDS = listOf(

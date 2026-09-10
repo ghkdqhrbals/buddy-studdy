@@ -243,10 +243,26 @@ private struct VoiceTutorUncheckedSendable<Value>: @unchecked Sendable {
 
 enum VoiceTutorEchoCancellationPolicy {
     static func communicationOptions() -> LKRTCAudioProcessingOptions {
-        // Automatic mode chooses Apple's coupled AEC/NS path when available,
-        // with software fallback. Do not independently enable a second APM AEC.
-        LKRTCAudioProcessingOptions(echoCancellation: true, noiseSuppression: true,
-                                   autoGainControl: true, highPassFilter: true)
+        // Use WebRTC's render-reference AEC for native duplex audio. Automatic
+        // mode prefers Apple VPIO and leaves this software echo canceller off.
+        // AEC and NS must move together: Apple's shared path cannot remain on
+        // underneath software AEC. This processes samples, not speech/text, and
+        // retains the microphone while the learner talks over tutor playback.
+        let software = LKRTCAudioProcessingComponentOptions(enabled: true, mode: .software)
+        return LKRTCAudioProcessingOptions(echoCancellationOptions: software,
+            noiseSuppressionOptions: software, autoGainControlOptions: software,
+            highPassFilterOptions: software)
+    }
+
+    static func prepareDevice(_ device: LKRTCAudioDeviceModule) throws {
+        // Set policy before PeerConnection initializes the media engine. Its
+        // default AEC/NS request then resolves to software even while our local
+        // track is still muted waiting for SDP/control readiness. Merely storing
+        // track options after muting would not reapply a sender's processing.
+        guard device.setPlatformVoiceProcessingAllowed(false) == 0,
+              !device.isPlatformVoiceProcessingAllowed else {
+            throw VoiceTutorWebRTCError.echoCancellationUnavailable
+        }
     }
 
     @discardableResult
@@ -258,24 +274,22 @@ enum VoiceTutorEchoCancellationPolicy {
 
     static func canOpenMicrophone(engineRunning: Bool, recording: Bool,
                                   hasAudioProcessingModule: Bool, softwareActive: Bool,
-                                  platformActive: Bool, voiceProcessingEnabled: Bool,
-                                  voiceProcessingBypassed: Bool) -> Bool {
-        engineRunning && recording && hasAudioProcessingModule && (softwareActive ||
-            (platformActive && voiceProcessingEnabled && !voiceProcessingBypassed))
+                                  platformActive: Bool, voiceProcessingEnabled: Bool) -> Bool {
+        engineRunning && recording && hasAudioProcessingModule && softwareActive &&
+            !platformActive && !voiceProcessingEnabled
     }
 
     static func isActive(factory: LKRTCPeerConnectionFactory) -> Bool {
         let processing = factory.audioProcessingState
         let device = factory.audioDeviceModule
         let platform = device.platformAudioProcessingState
-        // VPIO properties can stay true after Core Audio has stopped the
-        // engine. They only describe usable processing while I/O is running.
+        // Require actual I/O and one software path, not merely requested
+        // options or a second echo canceller layered over Apple's VPIO graph.
         return canOpenMicrophone(engineRunning: device.isEngineRunning, recording: device.isRecording,
             hasAudioProcessingModule: processing.hasAudioProcessingModule,
             softwareActive: processing.echoCancellation.isSoftwareActive,
             platformActive: processing.echoCancellation.isPlatformActive,
-            voiceProcessingEnabled: platform.isVoiceProcessingEnabledActive,
-            voiceProcessingBypassed: platform.isVoiceProcessingBypassedActive)
+            voiceProcessingEnabled: platform.isVoiceProcessingEnabledActive)
     }
 }
 
@@ -1017,6 +1031,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             decoderFactory: nil,
             audioProcessingModule: processingModule
         )
+        try VoiceTutorEchoCancellationPolicy.prepareDevice(factory.audioDeviceModule)
         try ensureOpen()
 
         let configuration = LKRTCConfiguration()
@@ -1082,14 +1097,12 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         try ensureOpen()
         // This SDK starts ADM for the negotiated sending stream even while
         // track.isEnabled is false; that flag mutes samples rather than closing
-        // Voice Processing I/O. We can therefore validate before session-ready.
+        // the input engine. We can therefore validate before session-ready.
         if !VoiceTutorEchoCancellationPolicy.isActive(factory: factory) {
-            // Restore the platform processing policy before retrying the
-            // automatic request. Capture stays gated until a live readback
-            // confirms an AEC implementation, including software fallback.
-            let device = factory.audioDeviceModule
-            _ = device.setPlatformVoiceProcessingAllowed(true)
-            device.isVoiceProcessingBypassed = false
+            // Keep the selected path stable across delayed engine setup. Never
+            // accept a return to automatic/platform processing as a successful
+            // repair, or open capture on an unverified software request.
+            try VoiceTutorEchoCancellationPolicy.prepareDevice(factory.audioDeviceModule)
             try VoiceTutorEchoCancellationPolicy.configure(track)
             emitMediaDiagnostic("echo_cancellation_reapplying")
         }

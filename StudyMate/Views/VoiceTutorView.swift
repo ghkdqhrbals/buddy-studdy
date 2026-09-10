@@ -1836,8 +1836,9 @@ struct VoiceTutorCallScreen: View {
         }
     }
 
-    private func userInputCards(operations: [String: [VoiceTutorOperationState.Entry]]) -> some View {
-        ForEach(userInputState.entries) { entry in
+    private func userInputCards(_ entries: [VoiceTutorUserInputState.Entry],
+                                operations: [String: [VoiceTutorOperationState.Entry]]) -> some View {
+        ForEach(entries) { entry in
             VStack(alignment: .leading, spacing: 12) {
                 VoiceTutorUserInputCard(entry: entry, strings: strings,
                     onChange: { onUserInputChange(entry.id, $0) },
@@ -2140,6 +2141,9 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var transcriptPanel: some View {
+        let inputs = VoiceTutorUserInputTranscriptLayout(entries: userInputState.entries, captions: captions,
+            assistantResponseID: assistantTranscriptResponseID, hasAssistantDraft: !assistantTranscriptDraft.isEmpty,
+            answerDraftID: hasAnswerDraft ? answerDraftState.answerID : nil)
         let operations = VoiceTutorOperationTranscriptLayout(
             entries: operationState.visibleEntries(at: 0), captions: captions,
             assistantResponseID: assistantTranscriptResponseID,
@@ -2171,16 +2175,22 @@ struct VoiceTutorCallScreen: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     operationStatus(operations.beforeCaptions)
+                    userInputCards(inputs.beforeCaptions, operations: operations.byUserInputID)
+                    // A delayed exact source must not make an interactive form
+                    // inaccessible or attach it to an unrelated recent message.
+                    userInputCards(inputs.unresolvedWaiting, operations: operations.byUserInputID)
                     ForEach(captions) { caption in
                         VStack(alignment: .leading, spacing: 12) {
                             VoiceTutorCaptionBubble(caption: caption, strings: strings)
                             operationStatus(operations.byCaptionID[caption.id] ?? [])
+                            userInputCards(inputs.byCaptionID[caption.id] ?? [], operations: operations.byUserInputID)
                         }
                     }
                     if hasAnswerDraft {
                         VStack(alignment: .leading, spacing: 12) {
                             answerDraftCard
                             operationStatus(operations.afterAnswerDraft)
+                            userInputCards(inputs.afterAnswerDraft, operations: operations.byUserInputID)
                         }
                     }
                     if !assistantTranscriptDraft.isEmpty {
@@ -2190,6 +2200,7 @@ struct VoiceTutorCallScreen: View {
                                 strings: strings
                             )
                             operationStatus(operations.afterAssistantDraft)
+                            userInputCards(inputs.afterAssistantDraft, operations: operations.byUserInputID)
                         }
                     } else if presentation.orbState == .thinking && !captions.isEmpty && !hasAnswerDraft
                         && (presentation.lessonPhase == nil || presentation.lessonPhase == .conversation) {
@@ -2216,7 +2227,6 @@ struct VoiceTutorCallScreen: View {
                         .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 16))
                         .accessibilityIdentifier("voiceCall.conversationNotice")
                     }
-                    userInputCards(operations: operations.byUserInputID)
                     Color.clear.frame(height: 1).id("voiceCall.latestCaption")
                 }
                 .padding(.vertical, 24)

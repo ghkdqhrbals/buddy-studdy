@@ -14,6 +14,9 @@ import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalog
 import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.study.domain.StudyTreePolicy
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
+import com.buddystudy.backend.study.application.port.outbound.StudyCurriculumTopic
+import com.buddystudy.backend.study.application.model.StudyTopicSuggestionDetail
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -64,21 +67,24 @@ class StudyTreeService(
             limit = MAX_CHILDREN,
         )
         val reusable = cached
-            .map { it.topic }
-            .filter { it.normalizedStudyTopicKey() !in existingKeys }
+            .map { StudyCurriculumTopic(it.topic, it.curriculumTerminal || childDepth == MAX_DEPTH) }
+            .filter { it.topic.normalizedStudyTopicKey() !in existingKeys }
         val missingCount = (requestedCount - reusable.size).coerceAtLeast(0)
         val generatedResult = if (missingCount > 0) {
             runCatching {
-                suggestions.suggestTopics(
+                withTimeoutOrNull(8_000) { suggestions.suggestCurriculumTopics(
                     rootTopic = root.topic,
                     parentTopic = parent.topic,
                     existingTopics = allStudies.map { it.topic } + cached.map { it.topic },
                     language = language,
                     count = missingCount,
-                )
+                    rootDifficulty = root.difficultyLevel,
+                ) }?.takeIf { topics -> topics.any { it.topic.isNotBlank() && it.topic.length <= 200 &&
+                    it.topic.normalizedStudyTopicKey() !in existingKeys } }
+                    ?: throw IllegalStateException("Topic recommendation unavailable")
             }
         } else {
-            Result.success(emptyList())
+            Result.success(emptyList<StudyCurriculumTopic>())
         }
         generatedResult.exceptionOrNull()?.let { error ->
             if (error is CancellationException) throw error
@@ -94,31 +100,32 @@ class StudyTreeService(
             fallbackSuggestions(
                 parentTopic = parent.topic,
                 language = language,
-                excludedKeys = existingKeys + reusable.map { it.normalizedStudyTopicKey() },
+                excludedKeys = existingKeys + reusable.map { it.topic.normalizedStudyTopicKey() },
                 count = missingCount,
-            )
+            ).map { StudyCurriculumTopic(it, true) }
         }
-        val unique = linkedMapOf<String, String>()
+        val unique = linkedMapOf<String, StudyCurriculumTopic>()
         (reusable + generated).forEach { raw ->
-            val topic = raw.trim().replace(Regex("\\s+"), " ")
+            val topic = raw.topic.trim().replace(Regex("\\s+"), " ")
             val key = topic.normalizedStudyTopicKey()
             if (topic.isNotEmpty() && key !in existingKeys) {
-                unique.putIfAbsent(key, topic)
+                unique.putIfAbsent(key, StudyCurriculumTopic(topic, raw.curriculumTerminal || childDepth == MAX_DEPTH))
             }
         }
         if (generated.isNotEmpty() && generatedResult.isSuccess) {
-            topicCatalog.saveChildren(
+            topicCatalog.saveCurriculumChildren(
                 rootTopicKey = rootTopicKey,
                 parentPathKey = parentPathKey,
                 language = language,
                 depth = childDepth,
-                topics = generated,
+                topics = generated.map { it.copy(curriculumTerminal = it.curriculumTerminal || childDepth == MAX_DEPTH) },
                 now = Instant.now(),
             )
         }
         return StudyTopicSuggestionsResponse(
             parentStudyId = parentStudyId,
-            suggestions = unique.values.take(requestedCount),
+            suggestions = unique.values.take(requestedCount).map { it.topic },
+            topicDetails = unique.values.take(requestedCount).map { StudyTopicSuggestionDetail(it.topic, it.curriculumTerminal) },
             source = when {
                 generatedResult.isFailure && reusable.isEmpty() -> "FALLBACK"
                 generatedResult.isFailure -> "CATALOG_FALLBACK"

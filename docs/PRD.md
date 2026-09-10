@@ -123,20 +123,28 @@ a different topic, free conversation or continuing later, with custom input.
 An existing pause remains in effect. Already submitted answers and in-flight
 Skip operations are not presented as reversible exercise cancellations.
 
-When a learner wants to study a topic, suggest its actual child topics and offer
-an explicit selection card for creating the chosen children. A server-owned,
-immutable topic proposal makes clear that submission adds the selected topics;
-only that exact submission can execute its batch. Topic creation does not
-consume question quota. Descendants can be added through depth four beneath a
-root (root depth zero); existing deeper data remains readable. Recommendations
-and selected branches materialize lazily instead of eagerly generating an
-exponential tree.
+The study conversation first builds a curriculum with the learner. The main
+topic is the saved root; the selected topic is the current node and may be any
+descendant. Inspect the selected node's actual children before starting its
+questions. When a selected nonterminal topic has no children, automatically
+prepare its direct child topics and offer a server-owned selection card. An
+explicit terminal learning node starts questions without creating unnecessary
+children. An empty child list alone does not identify a terminal node.
+
+New curriculum children inherit the original main topic's level. Root depth is
+zero, descendants stop at depth four, and depth-four nodes are terminal. Expand
+only the selected branch, never every combination upfront. Existing deeper data
+remains readable. Standalone requests to add selected recommended topics still
+use an immutable proposal whose exact submission creates that batch. Curriculum
+setup, root creation and question generation remain separate operations; topic
+creation never consumes question quota.
 
 #### Current conversation contract — `realtime-native-v1`
 
 Speaker output must not become learner input. The iOS transport explicitly
-requests communication audio processing and verifies an active echo canceller
-before opening capture. Keep genuine learner barge-in available during tutor
+selects WebRTC software AEC3 with its render reference, disables the coupled
+platform AEC/NS path before media-engine setup, and verifies active software
+processing and actual recording before opening capture. Keep genuine learner barge-in available during tutor
 playback; do not replace echo cancellation with playback-wide microphone mute
 or transcript similarity filtering. The PCM audio graph also uses actual Voice
 Processing I/O. Diagnostics report processing state and audio routes, without

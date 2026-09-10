@@ -19,11 +19,16 @@ class VoiceTutorRealtimeEventPolicyTest {
         val base = mapOf("requestId" to "00000000-0000-4000-8000-000000000002", "sessionId" to session,
             "attemptId" to "00000000-0000-4000-8000-000000000003", "sequence" to 1)
         val form = base + mapOf("type" to VoiceTutorRealtimeContract.USER_INPUT_REQUEST_EVENT, "title" to "선택",
-            "private" to "not forwarded", "questions" to listOf(mapOf("id" to "one", "prompt" to "목표",
+            "private" to "not forwarded", "operationId" to "call_1", "questions" to listOf(mapOf("id" to "one", "prompt" to "목표",
                 "selectionMode" to "text", "allowFreeText" to true, "options" to emptyList<Any>())))
         val payload = mapper.readTree(policy.providerDecision(mapper.writeValueAsString(form), session, Instant.EPOCH,
             VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
         assertThat(payload.has("private")).isFalse()
+        assertThat(payload.path("operationId").asText()).isEqualTo("call_1")
+        for (id in listOf("../invalid", "x".repeat(192))) {
+            assertThat(policy.providerDecision(mapper.writeValueAsString(form + mapOf("operationId" to id)), session, Instant.EPOCH,
+                VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
         assertThat(payload.path("questions").size()).isEqualTo(1)
         assertThat(policy.providerDecision(mapper.writeValueAsString(form), "wrong-session", Instant.EPOCH,
             VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
@@ -89,6 +94,24 @@ class VoiceTutorRealtimeEventPolicyTest {
         for (invalid in listOf(mapOf("sequence" to 0), mapOf("sequence" to 1.2), mapOf("elapsedMs" to -1),
             mapOf("elapsedMs" to 3_600_001), mapOf("name" to "../private"), mapOf("operationId" to "x".repeat(192)),
             mapOf("phase" to "unknown"), mapOf("phase" to "started"), mapOf("elapsedMs" to "152"))) {
+            assertThat(policy.providerDecision(mapper.writeValueAsString(fields + invalid), "s1", Instant.EPOCH,
+                VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
+    }
+
+    @Test
+    fun `response recovery exposes only exact server response and nonnegative acoustic sequence`() {
+        val fields = mapOf("type" to VoiceTutorRealtimeContract.RESPONSE_RECOVERING_EVENT,
+            "responseId" to "r1", "sequence" to 1, "text" to "private")
+        for (sequence in listOf(0, 1, 99)) {
+            val raw = mapper.writeValueAsString(fields + mapOf("sequence" to sequence))
+            val value = mapper.readTree(policy.providerDecision(raw, "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
+            assertThat(value.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "responseId", "sequence")
+            assertThat(value.path("sequence").asInt()).isEqualTo(sequence)
+            assertThat(policy.providerDecision(raw, "s1", Instant.EPOCH).payload).isNull()
+            assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        }
+        for (invalid in listOf(mapOf("sequence" to -1), mapOf("sequence" to 1.5), mapOf("responseId" to "../x"))) {
             assertThat(policy.providerDecision(mapper.writeValueAsString(fields + invalid), "s1", Instant.EPOCH,
                 VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
         }

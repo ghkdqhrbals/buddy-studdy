@@ -292,12 +292,15 @@ class VoiceTutorServiceTest {
             .contains("You, the realtime model hearing this conversation, decide its meaning")
             .contains("When request_user_input is available", "If this tool is absent, use the existing spoken interaction")
             .contains("you MUST call it", "a spoken list", "allowFreeText=true")
+            .contains("The server subscribes to that saved process", "Do not repeatedly call get_question_process")
             .contains("An already clear choice needs no redundant form", "Only the server-controlled readback")
             .contains("답변 종료", "답변 제출")
             .contains("Do not tell the learner to tap Finish Answer or Submit while those controls are unavailable")
-            .contains("proactively call suggest_study_topics", "request_user_input with studyTopicProposal")
-            .contains("wait silently for the exact submitted/cancelled result", "explicit Submit creates only selected children")
-            .contains("Except for the exact server-owned studyTopicProposal form", "descendants stop at depth four", "build only chosen branches lazily")
+            .contains("The main topic is always the original saved root", "mandatory saved-subtopic choice card",
+                "An empty children list does not mean a leaf", "descendant depth four is always terminal")
+            .contains("wait silently for the exact submitted/cancelled result", "automatically prepared one direct level at a time")
+            .contains("Except for the exact server-owned studyTopicProposal form", "its Submit creates only selected topics",
+                "Selecting a nonterminal child shows the next branch lazily")
             .contains("There is no separate intent classifier")
             .contains("a contextual yes/no, name, number or short question can be meaningful even as one word")
             .contains("For noise or filler only, remain silent with an empty response and call no tool")

@@ -155,6 +155,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case operationContext(VoiceTutorOperationContextEvent)
     case userInputRequest(VoiceTutorUserInputRequest)
     case userInputState(VoiceTutorUserInputStateEvent)
+    case responseRecovering(responseID: String, sequence: Int)
     case responseStarted(
         responseID: String?,
         isTutorIntervention: Bool,
@@ -340,6 +341,12 @@ enum VoiceTutorRealtimeEventParser {
                 return .ignored(type: type)
             }
             return .responseInterrupted(responseID: responseID)
+        case "buddystudy.voice.response.recovering":
+            guard Set(object.keys) == ["type", "responseId", "sequence"],
+                  let responseID = providerResponseID("responseId", in: object),
+                  let sequence = exactInteger("sequence", in: object).flatMap({ Int(exactly: $0) }),
+                  sequence >= 0 else { return .ignored(type: type) }
+            return .responseRecovering(responseID: responseID, sequence: sequence)
         case "buddystudy.voice.study.focused":
             // Only an explicit null clears the current topic. Missing or malformed
             // metadata cannot impersonate discovery, a saved node, or a new epoch.

@@ -238,29 +238,39 @@ struct VoiceTutorUserInputCard: View {
     }
 
     private var completedAnswers: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let displayedAnswers = entry.status == .submitted ? entry.submittedAnswers ?? [] : entry.answers
+        return VStack(alignment: .leading, spacing: 14) {
+            if displayedAnswers.contains(where: { !$0.selectedOptionIds.isEmpty || !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                Text(entry.status == .submitted ? strings.voiceTutorInputSubmittedAnswers : strings.voiceTutorInputUnsubmittedDraft)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier(entry.status == .submitted
+                        ? "voiceConversation.submittedAnswers" : "voiceConversation.unsubmittedDraft")
+            }
             ForEach(entry.request.questions) { question in
-                let answer = answer(for: question)
+                let answer = displayedAnswers.first { $0.questionId == question.id } ?? .init(questionId: question.id)
                 let labels = question.options.filter { answer.selectedOptionIds.contains($0.id) }.map(\.label)
-                if !labels.isEmpty || !answer.text.isEmpty {
+                if !labels.isEmpty || !answer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        if entry.request.questions.count > 1 {
-                            Text(question.prompt).font(.caption).foregroundStyle(.secondary)
-                        }
+                        Text(question.prompt).font(.caption).foregroundStyle(.secondary)
                         if !labels.isEmpty {
                             Text(labels.joined(separator: " · "))
                                 .font(.subheadline.weight(.medium))
                                 .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("voiceConversation.inputResultOptions.\(question.id)")
                         }
-                        if !answer.text.isEmpty {
+                        if !answer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(strings.voiceTutorInputCustom).font(.caption).foregroundStyle(.secondary)
                             Text(verbatim: answer.text).font(.subheadline)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
+                                .accessibilityIdentifier("voiceConversation.inputResultText.\(question.id)")
                         }
                     }
                 }
             }
         }
+        .foregroundStyle(entry.status == .submitted ? Color.primary : Color.secondary)
     }
 }
 
@@ -341,6 +351,8 @@ extension AppStrings {
     var voiceTutorInputSending: String { inputText("보내는 중", "Sending", "送信中") }
     var voiceTutorInputSubmitted: String { inputText("제출 완료", "Submitted", "送信済み") }
     var voiceTutorInputCancelled: String { inputText("취소됨", "Cancelled", "キャンセル済み") }
+    var voiceTutorInputSubmittedAnswers: String { inputText("제출한 답변", "Submitted answers", "送信した回答") }
+    var voiceTutorInputUnsubmittedDraft: String { inputText("제출 미확인 초안", "Draft · submission unconfirmed", "送信未確認の下書き") }
     var voiceTutorInputCustom: String { inputText("직접 입력", "Write your own answer", "自分で入力") }
     var voiceTutorInputCustomHint: String { inputText("다른 생각이나 원하는 방향을 적어주세요", "Add your thoughts or another direction", "考えや希望の方向を入力") }
     var voiceTutorInputPlaceholder: String { inputText("여기에 자유롭게 적어주세요.", "Write your thoughts here.", "ここに自由に入力してください。") }

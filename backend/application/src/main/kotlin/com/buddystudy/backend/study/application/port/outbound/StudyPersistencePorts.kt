@@ -69,6 +69,8 @@ interface StudyPort {
     suspend fun claimDue(now: Instant, limit: Int): List<StudyEntity>
 }
 
+data class StudyCurriculumTopic(val topic: String, val curriculumTerminal: Boolean = false)
+
 interface StudyTopicSuggestionPort {
     suspend fun suggestTopics(
         rootTopic: String,
@@ -77,11 +79,16 @@ interface StudyTopicSuggestionPort {
         language: String,
         count: Int,
     ): List<String>
+
+    suspend fun suggestCurriculumTopics(rootTopic: String, parentTopic: String, existingTopics: Collection<String>,
+        language: String, count: Int, rootDifficulty: Int = 5): List<StudyCurriculumTopic> =
+        suggestTopics(rootTopic, parentTopic, existingTopics, language, count).map { StudyCurriculumTopic(it) }
 }
 
 data class SystemTopicCatalogCandidate(
     val topic: String,
     val sortOrder: Int,
+    val curriculumTerminal: Boolean = false,
 )
 
 interface SystemTopicCatalogPort {
@@ -101,6 +108,10 @@ interface SystemTopicCatalogPort {
         topics: List<String>,
         now: Instant,
     )
+
+    suspend fun saveCurriculumChildren(rootTopicKey: String, parentPathKey: String, language: String, depth: Int,
+        topics: List<StudyCurriculumTopic>, now: Instant) =
+        saveChildren(rootTopicKey, parentPathKey, language, depth, topics.map { it.topic }, now)
 }
 
 interface QuestionPort {

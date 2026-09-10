@@ -4,6 +4,8 @@ import com.buddystudy.backend.study.application.model.AnswerGradingProgress
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
+import com.buddystudy.backend.study.application.port.outbound.NoopStudyLearningProgressSignalPort
+import com.buddystudy.backend.study.application.port.outbound.StudyLearningProgressSignalPort
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.reactive.awaitSingle
@@ -17,6 +19,7 @@ import java.time.ZoneOffset
 @Component
 class AnswerGradingProgressRepository(
     private val databaseClient: DatabaseClient,
+    private val progressSignals: StudyLearningProgressSignalPort = NoopStudyLearningProgressSignalPort,
 ) : AnswerGradingProgressPort {
     override suspend fun append(
         recordId: Long,
@@ -46,9 +49,9 @@ class AnswerGradingProgressRepository(
         } else {
             insert.bind("errorMessage", errorMessage.take(255))
         }
-        insert.fetch().rowsUpdated().awaitSingle()
+        val changed = insert.fetch().rowsUpdated().awaitSingle() > 0
 
-        return databaseClient.sql(
+        val saved = databaseClient.sql(
             """
             select id, question_id, request_id, status, question_status, error_message, created_at
             from question_grading_events
@@ -61,6 +64,8 @@ class AnswerGradingProgressRepository(
             .one()
             .awaitSingleOrNull()
             ?: error("Grading progress event was not persisted.")
+        if (changed) progressSignals.changed(requestId)
+        return saved
     }
 
     override suspend fun findAfter(

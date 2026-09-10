@@ -16,6 +16,27 @@ internal class VoiceTutorMcpTurnCoordinatorTest {
     private val mapper = JsonMapperProvider.mapper
 
     @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `only acknowledged typed curriculum GUI completion resets exhausted human tool rounds`(guiCompleted: Boolean) {
+        val coordinator = VoiceTutorMcpTurnCoordinator()
+        repeat(VoiceTutorMcpTurnCoordinator.MAX_TOOL_ROUNDS) { index ->
+            val id = "curriculum-$index"
+            coordinator.completedResponse(response(function(id)))
+            assertThat(coordinator.beginExecution(id)).isTrue()
+            val output = requireNotNull(coordinator.complete(id,
+                VoiceTutorMcpToolResult("{\"userInputCompleted\":true}", false,
+                    userInputCompleted = guiCompleted && index == VoiceTutorMcpTurnCoordinator.MAX_TOOL_ROUNDS - 1), 0))
+            if (index == VoiceTutorMcpTurnCoordinator.MAX_TOOL_ROUNDS - 1) assertThat(coordinator.toolChoice).isEqualTo("none")
+            assertThat(coordinator.acknowledge(ack(output), 1)).isTrue()
+            coordinator.consumeContinuation()
+        }
+        assertThat(coordinator.toolChoice).isEqualTo(if (guiCompleted) "auto" else "none")
+        if (guiCompleted) assertThat(coordinator.completedResponse(response(function("saved-question-lookup")))).hasSize(1)
+        else assertThatThrownBy { coordinator.completedResponse(response(function("saved-question-lookup"))) }
+            .isInstanceOf(VoiceTutorMcpProtocolException::class.java)
+    }
+
+    @ParameterizedTest
     @EnumSource(VoiceTutorDiscardedResponseReason::class)
     fun `discarded function items are closed without execution and exact acknowledgements never create a response`(
         reason: VoiceTutorDiscardedResponseReason,

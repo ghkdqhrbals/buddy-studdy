@@ -7,6 +7,8 @@ import com.buddystudy.backend.study.application.model.QuestionGenerationSource
 import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
 import com.buddystudy.backend.study.application.model.QuestionGenerationStep
 import com.buddystudy.backend.study.application.port.outbound.QuestionGenerationSagaPort
+import com.buddystudy.backend.study.application.port.outbound.NoopStudyLearningProgressSignalPort
+import com.buddystudy.backend.study.application.port.outbound.StudyLearningProgressSignalPort
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -20,6 +22,7 @@ import java.time.ZoneOffset
 @Repository
 class QuestionGenerationSagaRepository(
     private val databaseClient: DatabaseClient,
+    private val progressSignals: StudyLearningProgressSignalPort = NoopStudyLearningProgressSignalPort,
 ) : QuestionGenerationSagaPort {
     override suspend fun insert(saga: QuestionGenerationSaga): Boolean = try {
         var statement = databaseClient.sql(
@@ -53,7 +56,7 @@ class QuestionGenerationSagaRepository(
             .bindNullable("errorMessage", saga.errorMessage, String::class.java)
             .bindNullable("completedAt", saga.completedAt?.utcDateTime(), LocalDateTime::class.java)
             .bindNullable("rollbackCompletedAt", saga.rollbackCompletedAt?.utcDateTime(), LocalDateTime::class.java)
-        statement.fetch().rowsUpdated().awaitSingle() == 1L
+        (statement.fetch().rowsUpdated().awaitSingle() == 1L).notifyProgress(saga.correlationId)
     } catch (_: DuplicateKeyException) {
         false
     }
@@ -149,7 +152,7 @@ class QuestionGenerationSagaRepository(
             .bind("updatedAt", now.utcDateTime())
             .bind("correlationId", correlationId)
             .bind("expectedStatus", QuestionGenerationStatus.GENERATING.name)
-            .fetch().rowsUpdated().awaitSingle() > 0
+            .fetch().rowsUpdated().awaitSingle().let { it > 0 }.notifyProgress(correlationId)
 
     override suspend fun markCompleted(correlationId: String, now: Instant): Boolean =
         databaseClient.sql(
@@ -169,7 +172,7 @@ class QuestionGenerationSagaRepository(
             .bind("updatedAt", now.utcDateTime())
             .bind("correlationId", correlationId)
             .bind("expectedStatus", QuestionGenerationStatus.TRANSLATING.name)
-            .fetch().rowsUpdated().awaitSingle() > 0
+            .fetch().rowsUpdated().awaitSingle().let { it > 0 }.notifyProgress(correlationId)
 
     override suspend fun markFailed(
         correlationId: String,
@@ -199,7 +202,7 @@ class QuestionGenerationSagaRepository(
             .bind("updatedAt", now.utcDateTime())
             .bind("correlationId", correlationId)
         statement = statement.bindNullable("refundedAt", refundedAt?.utcDateTime(), LocalDateTime::class.java)
-        return statement.fetch().rowsUpdated().awaitSingle() > 0
+        return (statement.fetch().rowsUpdated().awaitSingle() > 0).notifyProgress(correlationId)
     }
 
     override suspend fun markRollbackCompleted(correlationId: String, now: Instant): Boolean =
@@ -216,7 +219,7 @@ class QuestionGenerationSagaRepository(
         )
             .bind("completedAt", now.utcDateTime())
             .bind("correlationId", correlationId)
-            .fetch().rowsUpdated().awaitSingle() == 1L
+            .fetch().rowsUpdated().awaitSingle().let { it == 1L }.notifyProgress(correlationId)
 
     private suspend fun select(whereClause: String, value: String): QuestionGenerationSaga? =
         databaseClient.sql(
@@ -251,7 +254,12 @@ class QuestionGenerationSagaRepository(
             .bind("updatedAt", now.utcDateTime())
             .bind("correlationId", correlationId)
             .bind("expectedStatus", expectedStatus.name)
-            .fetch().rowsUpdated().awaitSingle() > 0
+            .fetch().rowsUpdated().awaitSingle().let { it > 0 }.notifyProgress(correlationId)
+
+    private suspend fun Boolean.notifyProgress(correlationId: String): Boolean {
+        if (this) progressSignals.changed(correlationId)
+        return this
+    }
 
     private fun Row.toSaga(): QuestionGenerationSaga =
         QuestionGenerationSaga(

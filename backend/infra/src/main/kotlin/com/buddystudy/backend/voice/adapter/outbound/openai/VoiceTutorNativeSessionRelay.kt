@@ -174,7 +174,8 @@ internal fun nativeVoiceTutorToolRelay(
                     withTimeout(15_000) {
                         if (args == null || !controller.toolCanExecute(call.callId)) null
                         else mcp.prepareStudyTopicUserInput(context.copy(realtimeModelTools = true,
-                            initialLessonRevision = controller.toolRevision(call.callId), dialogueBoundary = controller.toolBoundary(call.callId)),
+                            initialLessonRevision = controller.toolRevision(call.callId), dialogueBoundary = controller.toolBoundary(call.callId),
+                        operationStillCurrent = { controller.toolCanExecute(call.callId) }),
                             args.parentStudyId, args.topics, args.difficultyLevel)
                     }
                 } catch (_: TimeoutCancellationException) { null }
@@ -239,8 +240,12 @@ internal fun nativeVoiceTutorUserInputRelay(controller: VoiceTutorNativeConversa
         if (!controller.userInputCanExecute(submission.id)) return@mono
         val result = try {
             withTimeout(15_000) {
-                mcp.submitStudyTopicUserInput(context.copy(realtimeModelTools = true, initialLessonRevision = submission.revision),
-                    submission.proposalId, submission.selectedIndices)
+                val current = context.copy(realtimeModelTools = true, initialLessonRevision = submission.revision,
+                    dialogueBoundary = submission.boundary ?: context.dialogueBoundary,
+                    operationStillCurrent = { controller.userInputCanExecute(submission.id) })
+                if (submission.curriculum) mcp.submitCurriculumUserInput(current, submission.proposalId,
+                    submission.selectedIndices.singleOrNull(), submission.text)
+                else mcp.submitStudyTopicUserInput(current, submission.proposalId, submission.selectedIndices)
             }
         } catch (_: TimeoutCancellationException) { nativeToolError("ACTION_FAILED", "Read saved topics before retrying the same selection.") }
         catch (error: CancellationException) { throw error }
@@ -248,41 +253,29 @@ internal fun nativeVoiceTutorUserInputRelay(controller: VoiceTutorNativeConversa
         controller.completeUserInputMutation(submission.id, result)
     }.then() }.then()
 
-/** Bounded, read-only observation continues even when the model does not request another poll. */
+/** One cancellable event subscription per accepted operation; no synthetic MCP polling turns. */
 internal fun nativeVoiceTutorLearningProgressRelay(
     controller: VoiceTutorNativeConversationController,
     context: VoiceTutorWebRtcControlContext,
     mcp: VoiceTutorMcpToolPort,
-    timeoutMillis: Long = Duration.between(Instant.now(), context.session.hardEndsAt).toMillis().coerceIn(1, 3_600_000),
-    intervalMillis: Long = 3_000,
+    timeoutMillis: Long = Duration.between(Instant.now(), context.session.hardEndsAt).toMillis().coerceIn(1, 120_000),
 ): Mono<Void> = controller.learningPollEvents().switchMap { command ->
     val watch = command.watch ?: return@switchMap Mono.empty<Void>()
     mono {
         try {
             withTimeout(timeoutMillis) {
-                while (controller.learningWatchIsCurrent(watch)) {
-                    val operationId = controller.beginLearningOperation(watch) ?: break
-                    var failed = true
-                    val result = try {
-                        withTimeout(10_000) {
-                            mcp.pollLearningProgress(context.copy(realtimeModelTools = true,
-                                initialLessonRevision = watch.revision), watch.progress)
-                        }.also { failed = it.isError }
-                    } catch (_: TimeoutCancellationException) { null }
-                    catch (error: CancellationException) { throw error }
-                    catch (_: Exception) { null }
-                    finally { controller.completeOperation(operationId, failed) }
-                    if (result != null) {
-                        if (result.isError && JsonMapperProvider.mapper.readTree(result.output).path("error").path("code").asText() == "QUESTION_CONTEXT_UNAVAILABLE") {
-                            controller.cancelLearningPoll(watch)
-                        } else controller.completeLearningPoll(watch, result)
-                    }
-                    if (controller.learningWatchIsCurrent(watch)) delay(intervalMillis)
+                mcp.observeLearningProgress(context.copy(realtimeModelTools = true,
+                    initialLessonRevision = watch.revision, dialogueBoundary = watch.boundary), watch.progress).collect { result ->
+                    if (result.isError) controller.failLearningWatch(watch)
+                    else controller.completeLearningPoll(watch, result)
                 }
+                // An unexpectedly completed stream is not a completed generation.
+                controller.failLearningWatch(watch)
             }
         } catch (_: TimeoutCancellationException) {
-            controller.cancelLearningPoll(watch)
-        }
+            controller.failLearningWatch(watch)
+        } catch (error: CancellationException) { throw error }
+        catch (_: Exception) { controller.failLearningWatch(watch) }
     }.then()
 }.then()
 

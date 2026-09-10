@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.reactive.asFlow
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -540,6 +541,41 @@ class VoiceTutorNativeSessionRelayTest {
     }
 
     @Test
+    fun `one clear start selects requests and reads a completed event without another agreement or polling tool`() {
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generation-event")
+        val updates = Sinks.many().unicast().onBackpressureBuffer<VoiceTutorMcpToolResult>()
+        var step = 0
+        val tools = FakeTools {
+            step++
+            VoiceTutorMcpToolResult("{}", false, learningProgress = progress.takeIf { step == 3 })
+        }.apply { progressEvents = updates.asFlux().asFlow() }
+        Fixture(tools = tools).use { f ->
+            f.opening(); f.learner(1, "clear-start"); f.transcript("clear-start", "그럼 이걸로 시작해보자.")
+            for ((index, name) in listOf("select_voice_study", "list_pending_questions", "request_question").withIndex()) {
+                f.toolResponse("step-$index", "call-$index", name)
+                f.await("one accepted step") { f.outputs().size == index + 1 }
+                f.ack(f.outputs().last())
+                if (index < 2) f.await("next real tool response") { f.responses().size == index + 3 }
+            }
+            val beforeReady = f.responses().size
+            repeat(4) { updates.tryEmitNext(VoiceTutorMcpToolResult("{}", false, learningProgress = progress)) }
+            updates.tryEmitNext(VoiceTutorMcpToolResult("{}", false,
+                learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42"),
+                questionReadback = VoiceTutorQuestionReadback(7, "42", "저장된 문제를 설명하세요.")))
+            f.await("completion event starts exact readback") { f.responses().size == beforeReady + 1 }
+            assertThat(f.responses().last().path("response").path("instructions").asText()).contains("저장된 문제를 설명하세요.")
+            f.completeAudioResponse("generated-readback", "generated-question")
+            f.await("canonical answer card opens") { f.answerStates().lastOrNull()?.path("phase")?.asText() == "listening" }
+            assertThat(tools.invocations.map { it.name }).containsExactly("select_voice_study", "list_pending_questions", "request_question")
+            assertThat(tools.polled).isEmpty()
+            val generation = f.ui.filter { it.path("type").asText() == Contract.OPERATION_EVENT && it.path("name").asText() == "question_generation" }
+            assertThat(generation.map { it.path("phase").asText() }).containsExactly("started", "completed")
+            assertThat(generation.map { it.path("operationId").asText() }.distinct()).hasSize(1)
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
     fun `server observer reports saved grading completion while learner speaks without another model poll`() {
         val release = CompletableDeferred<Unit>()
         val tools = FakeTools { VoiceTutorMcpToolResult("{}", false,
@@ -556,20 +592,23 @@ class VoiceTutorNativeSessionRelayTest {
             f.await("explicit submit creates its server call") { f.serverCalls().size == 1 }
             f.ack(f.serverCalls().single())
             f.await("server observation starts independently") { tools.polled.size == 1 }
-            f.await("actual grading lookup is visible while suspended") {
+            f.await("one accepted grading operation is visible while suspended") {
                 f.ui.any { it.path("type").asText() == Contract.OPERATION_EVENT &&
-                    it.path("name").asText() == "get_record" && it.path("phase").asText() == "started" }
+                    it.path("name").asText() == "answer_grading" && it.path("phase").asText() == "started" }
             }
             assertThat(f.ui.any { it.path("type").asText() == Contract.OPERATION_EVENT &&
-                it.path("name").asText() == "get_record" && it.path("phase").asText() == "completed" }).isFalse()
+                it.path("name").asText() == "answer_grading" && it.path("phase").asText() == "completed" }).isFalse()
             f.controls.tryEmitNext(json(mapOf("type" to Contract.SPEECH_STARTED_EVENT, "sequence" to 2)))
             val responseCount = f.responses().size
             release.complete(Unit)
             f.await("saved grade is displayed during newer speech") {
                 f.ui.lastOrNull { it.path("type").asText() == Contract.SESSION_STATE_EVENT }?.path("phase")?.asText() == "graded"
             }
+            f.await("the same background operation completes") { f.ui.any {
+                it.path("type").asText() == Contract.OPERATION_EVENT && it.path("name").asText() == "answer_grading" &&
+                    it.path("phase").asText() == "completed" } }
             val operationEvents = f.ui.filter { it.path("type").asText() == Contract.OPERATION_EVENT }
-            val lookup = operationEvents.filter { it.path("name").asText() == "get_record" }
+            val lookup = operationEvents.filter { it.path("name").asText() == "answer_grading" }
             assertThat(lookup.map { it.path("phase").asText() }).containsExactly("started", "completed")
             assertThat(lookup.map { it.path("operationId").asText() }.distinct()).hasSize(1)
             val submissionId = f.serverCalls().single().path("item").path("call_id").asText()
@@ -1381,6 +1420,9 @@ class VoiceTutorNativeSessionRelayTest {
         }
         val invocations = CopyOnWriteArrayList<Invocation>()
         val polled = CopyOnWriteArrayList<VoiceTutorLearningProgress>()
+        var progressEvents: Flow<VoiceTutorMcpToolResult>? = null
+        override fun observeLearningProgress(context: VoiceTutorWebRtcControlContext, progress: VoiceTutorLearningProgress): Flow<VoiceTutorMcpToolResult> =
+            progressEvents ?: super.observeLearningProgress(context, progress)
         var reviewedProgress: VoiceTutorLearningProgress? = null
         var pollResponse: suspend (VoiceTutorLearningProgress) -> VoiceTutorMcpToolResult = { progress -> VoiceTutorMcpToolResult("{}", false, learningProgress = progress) }
         override suspend fun pollLearningProgress(context: VoiceTutorWebRtcControlContext, progress: VoiceTutorLearningProgress): VoiceTutorMcpToolResult {

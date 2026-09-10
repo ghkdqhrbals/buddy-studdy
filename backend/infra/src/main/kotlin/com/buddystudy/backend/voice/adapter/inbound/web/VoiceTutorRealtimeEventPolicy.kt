@@ -115,6 +115,15 @@ internal class VoiceTutorRealtimeEventPolicy(
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
+            VoiceTutorRealtimeContract.RESPONSE_RECOVERING_EVENT -> {
+                val sequence = node.path("sequence")
+                if (transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
+                    validProviderResponseId(node.path("responseId")) && sequence.isIntegralNumber &&
+                    sequence.canConvertToLong() && sequence.longValue() >= 0) {
+                    ProviderEventDecision(mapper.writeValueAsString(mapOf("type" to type,
+                        "responseId" to node.path("responseId").asText(), "sequence" to sequence.longValue())))
+                } else ProviderEventDecision(payload = null)
+            }
             VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT -> if (
                 transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
                 validProviderResponseId(node.path("responseId"))
@@ -201,6 +210,10 @@ internal class VoiceTutorRealtimeEventPolicy(
                     val request = VoiceTutorUserInputContract.request(node) ?: return ProviderEventDecision(payload = null)
                     payload["title"] = request.title
                     payload["questions"] = request.questions
+                    node.get("operationId")?.let { id ->
+                        if (!validProviderResponseId(id)) return ProviderEventDecision(payload = null)
+                        payload["operationId"] = id.asText()
+                    }
                 } else {
                     val phase = node.path("phase").asText()
                     if (phase !in setOf("pending", "submitted", "cancelled")) return ProviderEventDecision(payload = null)

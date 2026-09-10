@@ -242,6 +242,32 @@ class SettingsServiceTest {
         assertThat(response.intervalMinutes).isEqualTo(47)
     }
 
+    @Test
+    fun `legacy schedule sync and per-study settings preserve omitted curriculum terminal metadata`(): Unit = runBlocking {
+        users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
+        val terminalRoot = StudyEntity(id = 11, userId = 7, topic = "Leaf root", curriculumTerminal = true)
+        val unexpandedRoot = StudyEntity(id = 12, userId = 7, topic = "Unexpanded")
+        val terminalChild = StudyEntity(id = 13, userId = 7, parentStudyId = 12, topic = "Leaf child", curriculumTerminal = true)
+        studies.rows += listOf(terminalRoot, unexpandedRoot, terminalChild)
+
+        service.upsertSchedule(principal, ScheduleCommand(
+            intervalMinutes = 45,
+            schedules = listOf(ScheduleItemCommand("Leaf root", 8), ScheduleItemCommand("Unexpanded", 6)),
+        ))
+        service.upsertStudySettings(principal, 13, ScheduleCommand(
+            topic = "Renamed leaf child", difficultyLevel = 7, intervalMinutes = 60, customPrompt = "Updated settings",
+        ))
+
+        assertThat(studies.saved.map { it.id }).containsExactly(11L, 12L, 13L)
+        assertThat(studies.saved.map { it.curriculumTerminal }).containsExactly(true, false, true)
+        assertThat(terminalRoot.difficultyLevel).isEqualTo(8)
+        assertThat(terminalChild.difficultyLevel).isEqualTo(7)
+        assertThat(terminalChild.topic).isEqualTo("Renamed leaf child")
+        assertThat(terminalChild.parentStudyId).isEqualTo(12L)
+        assertThat(terminalChild.curriculumTerminal).isTrue()
+        assertThat(studies.rows).hasSize(3)
+    }
+
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
         val saved = mutableListOf<StudyEntity>()

@@ -32,4 +32,7 @@ class StudyEntity(
     /** Prevents a stale full-row settings or scheduler save from undoing a newer metadata patch. */
     @Version
     var version: Long = 0,
+    /** Explicit curriculum leaf; an unexpanded topic is not necessarily terminal. */
+    @Column("curriculum_terminal")
+    var curriculumTerminal: Boolean = false,
 )

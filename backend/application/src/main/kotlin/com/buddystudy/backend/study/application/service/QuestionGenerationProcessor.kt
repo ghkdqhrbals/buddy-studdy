@@ -25,6 +25,7 @@ import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.StudyRoom
 import com.buddystudy.study.domain.entity.StudyEntity
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
@@ -78,6 +79,8 @@ class QuestionGenerationProcessor(
                 questionKey = questionKey,
             )
             writer.complete(event, prepared, Instant.now())
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
             val message = error.message ?: error.javaClass.simpleName
             if (claimed.inbox.attempt < MAX_ATTEMPTS) {
@@ -277,13 +280,23 @@ class QuestionGenerationProcessor(
         rootStudy: StudyEntity,
     ): QuestionCoverageSelection? {
         questionCoverage.selectNext(topicStudy.id)?.let { return it }
-        val blueprint = openAI.generateQuestionCoverageBlueprint(
-            apiKey = apiKey,
-            model = rootStudy.openaiModel.ifBlank { properties.openai.model },
-            topic = topicStudy.topic,
-            level = topicStudy.difficultyLevel,
-            customPrompt = rootStudy.customPrompt,
-        ).map { concept ->
+        val generatedBlueprint = try {
+            openAI.generateQuestionCoverageBlueprint(
+                apiKey = apiKey,
+                model = rootStudy.openaiModel.ifBlank { properties.openai.model },
+                topic = topicStudy.topic,
+                level = topicStudy.difficultyLevel,
+                customPrompt = rootStudy.customPrompt,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // This optional guide must not retry the whole reserved question job. The actual
+            // question and its rubric still use the regular generation and failure path.
+            log.warn("question_coverage_fallback studyId={} errorType={}", topicStudy.id, error.javaClass.simpleName)
+            emptyList()
+        }
+        val blueprint = generatedBlueprint.map { concept ->
             QuestionCoveragePort.CoverageConceptBlueprint(
                 key = concept.key,
                 name = concept.name,

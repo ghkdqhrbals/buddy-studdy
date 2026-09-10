@@ -195,6 +195,7 @@ class BuddyStudyMcpAdapter(
                         sortOrder = args.int("sort_order", 0),
                         difficultyLevel = args.int("difficulty_level", 5),
                         activeForQuestions = args.boolean("active_for_questions", true),
+                        inheritRootDifficulty = args.boolean(BuddyStudyMcpPort.VOICE_INHERIT_ROOT_DIFFICULTY_ARGUMENT, false),
                     ),
                 )
             },
@@ -248,6 +249,8 @@ class BuddyStudyMcpAdapter(
                         topics = args.optionalStringList("topics") ?: throw McpArgumentException("topics is required."),
                         difficultyLevel = args.int("difficulty_level", 5),
                         expectedParent = args.voiceStudyMetadataExpectation(),
+                        inheritRootDifficulty = args.boolean(BuddyStudyMcpPort.VOICE_INHERIT_ROOT_DIFFICULTY_ARGUMENT, false),
+                        curriculumTerminalByTopic = args.curriculumTerminals(),
                     ),
                 )
             },
@@ -740,6 +743,14 @@ class BuddyStudyMcpAdapter(
     }
 
     private class Arguments(private val values: Map<String, Any>) {
+        fun curriculumTerminals(): Map<String, Boolean> {
+            val raw = values[BuddyStudyMcpPort.VOICE_CURRICULUM_TERMINALS_ARGUMENT] ?: return emptyMap()
+            val entries = raw as? Map<*, *> ?: throw McpArgumentException("Invalid internal curriculum metadata.")
+            if (entries.size > 10 || entries.any { (key, value) -> key !is String || key.isBlank() || key.length > 255 || value !is Boolean })
+                throw McpArgumentException("Invalid internal curriculum metadata.")
+            return entries.entries.associate { it.key as String to it.value as Boolean }
+        }
+
         fun voiceStudyMetadataExpectation(): ExpectedStudyMetadata? {
             val names = setOf(
                 BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT,

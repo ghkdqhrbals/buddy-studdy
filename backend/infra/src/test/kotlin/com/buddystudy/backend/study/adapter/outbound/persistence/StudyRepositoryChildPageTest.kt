@@ -53,6 +53,7 @@ class StudyRepositoryChildPageTest {
                 interval_minutes integer not null default 15,
                 enabled boolean not null default false,
                 active_for_questions boolean not null default true,
+                curriculum_terminal boolean not null default false,
                 notification_sound varchar(100),
                 custom_prompt text not null default '',
                 openai_model varchar(100) not null default 'fixture-model',

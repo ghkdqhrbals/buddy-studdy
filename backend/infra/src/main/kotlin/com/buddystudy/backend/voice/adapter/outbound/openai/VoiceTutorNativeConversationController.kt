@@ -13,6 +13,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolR
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCurriculumUserInput
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import reactor.core.publisher.Flux
@@ -48,6 +49,8 @@ internal class VoiceTutorNativeConversationController(
     private val lifecycle = sink<String>()
     private val learningPolls = sink<LearningPollCommand>()
     private var learningWatch: LearningWatch? = null
+    private var pendingLearningNotice: String? = null
+    private var timedOutLearningWatch: LearningWatch? = null
     private var completedLearning: VoiceTutorLearningProgress? = null
     private var displayOperationId: String? = null
     private val failure = Sinks.one<Throwable>()
@@ -160,7 +163,7 @@ internal class VoiceTutorNativeConversationController(
         }
         when (type) {
             // Only our completed response state can settle or abandon the app's pending input.
-            Contract.INPUT_SETTLED_EVENT, Contract.INPUT_RETRY_EVENT, Contract.RESPONSE_INTERRUPTED_EVENT -> return false
+            Contract.INPUT_SETTLED_EVENT, Contract.INPUT_RETRY_EVENT, Contract.RESPONSE_INTERRUPTED_EVENT, Contract.RESPONSE_RECOVERING_EVENT -> return false
             Contract.QUESTION_CHANGED_EVENT, Contract.SESSION_STATE_EVENT -> return false
             Contract.ANSWER_STATE_EVENT, Contract.ANSWER_TRANSCRIPT_EVENT -> return false
             Contract.OPERATION_EVENT, Contract.OPERATION_CONTEXT_EVENT -> return false
@@ -255,6 +258,7 @@ internal class VoiceTutorNativeConversationController(
             }
             "output_audio_buffer.started" -> {
                 val response = matchingResponse(node) ?: return false
+                if (response.archiveFrozen && !response.superseded) return false
                 response.audioStarted = true
                 response.audioStopped = false
                 if (response.superseded) { clearInterruptedOutput(response); return false }
@@ -273,8 +277,21 @@ internal class VoiceTutorNativeConversationController(
                 response.failed = true
                 response.audioStopped = true
                 response.outputCleared = true
-                // A cleared playout is not evidence of a completed question or confirmation.
-                if (!response.superseded && response.readbackClearStartedAt == null) publish(client, json(mapOf("type" to Contract.INPUT_RETRY_EVENT, "abandonedResponseId" to response.id)))
+                // Retire the exact interrupted playout without asking for another
+                // utterance. A silent/tool-only retry may never announce a replacement.
+                if (!response.superseded && response.readbackClearStartedAt == null) {
+                    response.archiveFrozen = true // Discard failed source and all later audio/transcript deltas.
+                    if (response.announced && !response.recoveryAnnounced && retryCount == 0 &&
+                        !draining && !quotaRequested && response.revision == revision) {
+                        response.recoveryAnnounced = true
+                        val recoveringSequence = response.clientSequence ?: if (response.opening) 0L else null
+                        publish(client, json(if (recoveringSequence == null)
+                            mapOf("type" to Contract.RESPONSE_INTERRUPTED_EVENT, "responseId" to response.id)
+                        else mapOf("type" to Contract.RESPONSE_RECOVERING_EVENT,
+                            "responseId" to response.id, "sequence" to recoveringSequence)))
+                    }
+                }
+                // Only exhausted recovery may ask for repetition, scoped to this input.
                 finishResponseIfReady()
                 return false
             }
@@ -322,7 +339,7 @@ internal class VoiceTutorNativeConversationController(
                 // A prepared confirmation is actionable output, never a noise-only turn.
                 // Retry an empty model response once through the existing response budget.
                 if (response.mutationConfirmation != null && !response.expectsAudio) response.failed = true
-                if (response.cancellationNotice && (!response.expectsAudio || output.any {
+                if ((response.cancellationNotice || response.learningNotice != null) && (!response.expectsAudio || output.any {
                     it.path("type").asText() == "function_call"
                 })) response.failed = true
                 if (response.failed && !response.superseded) discardUnansweredFailedReadback(response)
@@ -333,6 +350,7 @@ internal class VoiceTutorNativeConversationController(
             }
             "response.output_audio.delta", "response.output_audio.done" -> {
                 val response = matchingResponse(node) ?: return false
+                if (response.archiveFrozen && !response.superseded) return false
                 if (response.readbackClearStartedAt != null) return false
                 // Conservatively preserve output if a provider emits audio frames before its
                 // WebRTC playout-start event. Generated audio is already output evidence.
@@ -388,6 +406,7 @@ internal class VoiceTutorNativeConversationController(
                         sessionState.update("conversation", revision, recordId = null, answerId = null)
                     }
                     pendingChoiceCancellationNotice = false
+                    pendingLearningNotice = null
                     clientSpeechSequence = seq
                     speaking = true
                     quietSince = nanoTime()
@@ -421,6 +440,7 @@ internal class VoiceTutorNativeConversationController(
                         response.questionReadback?.let { pendingQuestionReadback = it }
                         response.mutationConfirmation?.let { pendingMutationConfirmation = it }
                         if (response.cancellationNotice) pendingChoiceCancellationNotice = true
+                        response.learningNotice?.let { pendingLearningNotice = it }
                         interruptResponse(response)
                     }
                 }
@@ -645,7 +665,39 @@ internal class VoiceTutorNativeConversationController(
         pendingUserInput = pending
         userInputLastClearAt = nanoTime()
         publish(client, json(userInputEnvelope(Contract.USER_INPUT_REQUEST_EVENT, pending.id) +
-            mapOf("title" to request.title, "questions" to request.questions)))
+            mapOf("title" to request.title, "questions" to request.questions, "operationId" to pending.callId)))
+    }
+
+    private fun requestCurriculumInput(callId: String, result: VoiceTutorMcpToolResult) {
+        val curriculum = result.curriculumInput ?: return
+        publishCurriculumChanges(result)
+        if (!userInputEnabled || !toolCanExecute(callId) || toolCoordinator.pendingCount != 1 || pendingUserInput != null) {
+            completeTool(callId, result.copy(curriculumInput = null, isError = true,
+                output = nativeToolError("USER_INPUT_UNAVAILABLE", "The current saved curriculum choice is unavailable; no lesson was started.").output))
+            return
+        }
+        showCurriculumInput(callId, curriculum)
+    }
+
+    private fun publishCurriculumChanges(result: VoiceTutorMcpToolResult) {
+        if (result.studyTreeChanged) (listOfNotNull(result.changedStudyId) + result.changedStudyIds)
+            .filter { it > 0 }.distinct().take(10).forEach { changed -> publish(client, json(mapOf(
+                "type" to Contract.STUDY_TREE_CHANGED_EVENT, "studyId" to changed,
+                "change" to result.changeKind?.name?.lowercase(), "deletedStudyIds" to result.deletedStudyIds))) }
+    }
+
+    private fun showCurriculumInput(callId: String, curriculum: VoiceTutorCurriculumUserInput) {
+        val request = VoiceTutorUserInputContract.request(mapper.valueToTree(VoiceTutorUserInputContract.curriculumRequest(curriculum)))
+        if (request == null) {
+            completeTool(callId, nativeToolError("USER_INPUT_UNAVAILABLE", "The saved curriculum could not be displayed; no focus was started."))
+            return
+        }
+        val pending = UserInput(UUID.randomUUID().toString(), callId, revision, request, curriculum = curriculum)
+        pendingUserInput = pending
+        userInputLastClearAt = nanoTime()
+        sessionState.update("conversation", revision, answerId = null)
+        publish(client, json(userInputEnvelope(Contract.USER_INPUT_REQUEST_EVENT, pending.id) +
+            mapOf("title" to request.title, "questions" to request.questions, "operationId" to callId)))
     }
 
     private fun resolveUserInput(node: JsonNode, cancelled: Boolean) {
@@ -724,12 +776,27 @@ internal class VoiceTutorNativeConversationController(
             }
             if (transcripts[pending.evidence?.id]?.persisted != true) return
         }
+        if (notifyClient && pending.curriculum != null && pending.phase == "submitted" && !result.isError && !pending.mutationCompleted) {
+            if (!pending.executing) {
+                pending.executing = true
+                val answer = pending.answers.single()
+                val evidence = requireNotNull(pending.evidence)
+                val source = pendingTools[pending.callId]?.boundary ?: return
+                val boundary = source.copy(latestAcceptedLearnerProviderItemId = evidence.id,
+                    latestAcceptedLearnerLessonRevision = evidence.revision,
+                    latestAcceptedLearnerSpeechStartedOrder = latestSpeechStartedOrder)
+                publish(userInputSubmissions, UserInputSubmission(pending.id, pending.revision, pending.curriculum.proposalId,
+                    answer.selectedOptionIds.map { it.removePrefix("topic_").toInt() }, curriculum = true,
+                    text = answer.text, boundary = boundary))
+            }
+            return
+        }
         pendingUserInput = null
         completedUserInputs[pending.id] = pending.phase
         while (completedUserInputs.size > 8) completedUserInputs.remove(completedUserInputs.keys.first())
         if (notifyClient) publishUserInputState(pending.id, pending.phase)
         if (notifyClient) acknowledgedUserInputBoundaries[pending.callId] = UserInputBoundary(
-            pending.evidence.takeIf { pending.phase == "submitted" && !result.isError }, latestSpeechStartedOrder, revision)
+            pending.evidence.takeIf { pending.phase == "submitted" && !result.isError }, latestSpeechStartedOrder, result.lessonRevision ?: revision)
         completeTool(pending.callId, result.copy(userInputCompleted = notifyClient))
     }
 
@@ -742,9 +809,18 @@ internal class VoiceTutorNativeConversationController(
         if (!userInputCanExecute(id)) return
         val pending = pendingUserInput ?: return
         pending.executing = false
+        if (!result.isError && pending.curriculum != null && result.curriculumInput != null) {
+            completedUserInputs[pending.id] = "submitted"
+            while (completedUserInputs.size > 8) completedUserInputs.remove(completedUserInputs.keys.first())
+            publishUserInputState(pending.id, "submitted")
+            pendingUserInput = null
+            publishCurriculumChanges(result)
+            showCurriculumInput(pending.callId, requireNotNull(result.curriculumInput))
+            return
+        }
         if (result.isError) {
             val code = runCatching { mapper.readTree(result.output).path("error").path("code").asText() }.getOrNull()
-            if (code in setOf("PROPOSAL_EXPIRED", "MUTATION_TARGET_STALE", "PROPOSAL_ALREADY_SUBMITTED",
+            if (pending.curriculum != null || code in setOf("PROPOSAL_EXPIRED", "MUTATION_TARGET_STALE", "PROPOSAL_ALREADY_SUBMITTED",
                     "STUDY_TREE_CHANGED", "VALIDATION_ERROR")) {
                 pending.phase = "cancelled"
                 pending.result = result
@@ -759,7 +835,7 @@ internal class VoiceTutorNativeConversationController(
         }
         pending.mutationCompleted = true
         val answerOutput = mapper.readTree(requireNotNull(pending.result).output) as ObjectNode
-        answerOutput.set<JsonNode>("studyTopics", mapper.readTree(result.output))
+        answerOutput.set<JsonNode>(if (pending.curriculum != null) "curriculum" else "studyTopics", mapper.readTree(result.output))
         pending.result = result.copy(output = json(answerOutput))
         finishUserInput()
     }
@@ -786,6 +862,8 @@ internal class VoiceTutorNativeConversationController(
     @Synchronized
     fun completeTool(callId: String, result: VoiceTutorMcpToolResult) {
         if (closed) return
+        if (!result.isError && result.curriculumInput != null) { requestCurriculumInput(callId, result); return }
+        if (result.isError && result.studyTreeChanged) publishCurriculumChanges(result)
         val call = pendingTools[callId]
         val studyFollowupSuperseded = !result.isError && call?.name in setOf("select_voice_study", "advance_voice_study", "list_pending_questions") &&
             call != null && (call.boundary.latestAcceptedLearnerProviderItemId != latestLearner?.id ||
@@ -850,7 +928,7 @@ internal class VoiceTutorNativeConversationController(
             }
             if (!studyFollowupSuperseded && currentRevision && call != null && (result.lessonRevision ?: call.revision) == revision &&
                 !closed && !draining && !quotaRequested && !endingAfterResponse) {
-                result.learningProgress?.let { applyLearningProgress(it, call.operationContext, allowConversation = stateIsCurrent) }
+                result.learningProgress?.let { applyLearningProgress(it, call.operationContext, allowConversation = stateIsCurrent, requestedBoundary = call.boundary) }
                 questionReadback?.takeIf { answerCapture == null && it.studyId > 0 &&
                     (sessionState.current.studyId == null || sessionState.current.studyId == it.studyId) &&
                     (sessionState.current.recordId == null || sessionState.current.recordId == it.recordId)
@@ -961,11 +1039,18 @@ internal class VoiceTutorNativeConversationController(
             return
         }
         val quota = quotaRequested
+        // A process subscription owns completion. Do not ask the model to issue
+        // repeated progress reads; fresh learner speech still opens an ordinary turn.
+        if (!quota && learningWatch?.let(::learningContinuationIsCurrent) == true && !queuedInput &&
+            pendingQuestionReadback == null && pendingMutationConfirmation == null &&
+            !pendingChoiceCancellationNotice && pendingLearningNotice == null) return
         if (!quota && (answerCapture != null || speaking || pendingSpeech != null || commits.isNotEmpty() || pause.blocksResponses || (!opening && !queuedInput && !toolCoordinator.continuationReady))) return
         if (!quota && nanoTime() - quietSince < RESPONSE_QUIET_PERIOD.toNanos()) return
         if (toolCoordinator.continuationReady) toolCoordinator.consumeContinuation() else toolCoordinator.beginLearnerTurn()
         val isOpening = opening && latestLearner == null
         val cancellationNotice = pendingChoiceCancellationNotice && !quota && !endingAfterResponse
+        val learningNotice = pendingLearningNotice.takeIf { !quota && !endingAfterResponse }
+        pendingLearningNotice = null
         pendingChoiceCancellationNotice = false
         opening = false
         queuedInput = false
@@ -978,7 +1063,7 @@ internal class VoiceTutorNativeConversationController(
         val confirmation = pendingMutationConfirmation.takeIf { !quota && !endingAfterResponse && !isOpening && readback == null }
         pendingMutationConfirmation = null
         val response = Response(token, ++generation, revision, nanoTime(), quota, isOpening, boundary(learner),
-            if (isOpening) 0L else learner?.clientSequence, readback, confirmation, cancellationNotice)
+            if (isOpening) 0L else learner?.clientSequence, readback, confirmation, cancellationNotice, learningNotice)
         active = response
         readback?.let { sessionState.update("question_ready", revision, it.value.studyId, it.value.recordId, answerId = null) }
         responseRequests.add(response.createEventId)
@@ -999,6 +1084,7 @@ internal class VoiceTutorNativeConversationController(
                 "ja" -> "どんなテーマについて話しましょうか？"
                 else -> "어떤 주제로 이야기해 볼까요?"
             }
+            learningNotice != null -> "Say exactly this short status notice once, then listen. No question, tool, retry or claim that saved work was cancelled: " + json(learningNotice)
             cancellationNotice -> VoiceTutorLearningCancellation.noticeInstructions(language)
             readback != null -> "Read only the exact saved question below naturally aloud, then wait for the learner's answer. " +
                 "Preserve the original question and all its requirements; pronounce Markdown or code naturally without inventing or replacing a quiz. " +
@@ -1012,7 +1098,7 @@ internal class VoiceTutorNativeConversationController(
             else -> null
         }
         val options = linkedMapOf<String, Any>(
-            "output_modalities" to listOf("audio"), "tool_choice" to if (quota || endingAfterResponse || isOpening || cancellationNotice || readback != null || confirmation != null) "none" else toolCoordinator.toolChoice,
+            "output_modalities" to listOf("audio"), "tool_choice" to if (quota || endingAfterResponse || isOpening || cancellationNotice || learningNotice != null || readback != null || confirmation != null) "none" else toolCoordinator.toolChoice,
             // Realtime response metadata accepts string values only, including boolean flags.
             "metadata" to mapOf(Contract.RESPONSE_TOKEN_METADATA_KEY to token, Contract.QUOTA_NOTICE_METADATA_KEY to quota.toString()),
         )
@@ -1083,6 +1169,7 @@ internal class VoiceTutorNativeConversationController(
             else -> VoiceTutorProviderTurnFailureAction.TURN_ABANDONED
         }
         reportFailure(VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR, action, eventId, node)
+        response.failureReported = true
         response.done = true
         response.failed = true
         finishResponseIfReady()
@@ -1171,12 +1258,18 @@ internal class VoiceTutorNativeConversationController(
             (response.revision == revision && response.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
                 response.boundary.latestAcceptedLearnerSpeechStartedOrder == latestSpeechStartedOrder &&
                 response.questionReadback?.let { it.revision == revision && it.epoch == questionReadbackEpoch } != false)
-        if (response.missingRequestedAudio || response.unexpectedReadbackTools) reportFailure(
-            if (response.unexpectedReadbackTools) VoiceTutorProviderTurnFailureKind.RESPONSE_UNEXPECTED_TOOL
-            else VoiceTutorProviderTurnFailureKind.RESPONSE_MISSING_AUDIO,
+        if (response.failed && !response.failureReported) reportFailure(
+            when {
+                response.unexpectedReadbackTools -> VoiceTutorProviderTurnFailureKind.RESPONSE_UNEXPECTED_TOOL
+                response.missingRequestedAudio -> VoiceTutorProviderTurnFailureKind.RESPONSE_MISSING_AUDIO
+                response.outputCleared -> VoiceTutorProviderTurnFailureKind.OUTPUT_BUFFER_CLEARED
+                response.body?.path("status")?.asText() == "cancelled" -> VoiceTutorProviderTurnFailureKind.RESPONSE_CANCELLED
+                response.body?.path("status")?.asText() == "incomplete" -> VoiceTutorProviderTurnFailureKind.RESPONSE_INCOMPLETE
+                else -> VoiceTutorProviderTurnFailureKind.RESPONSE_FAILED
+            },
             if (!draining && !quotaRequested && mayRetryRequiredOutput && retryCount == 0)
                 VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED else VoiceTutorProviderTurnFailureAction.TURN_ABANDONED,
-            response.createEventId)
+            response.createEventId, response.body?.path("status_details"))
         active = null
         if (response.quota) { quotaDone.tryEmitEmpty(); return }
         if (endingAfterResponse && !response.failed) {
@@ -1209,6 +1302,7 @@ internal class VoiceTutorNativeConversationController(
             }
         } else if (!draining && !quotaRequested && mayRetryRequiredOutput && retryCount++ == 0) {
             pendingChoiceCancellationNotice = response.cancellationNotice
+            pendingLearningNotice = response.learningNotice
             opening = response.opening && !response.audioStarted
             response.questionReadback?.takeIf { it.revision == revision && it.epoch == questionReadbackEpoch }
                 ?.let { pendingQuestionReadback = it }
@@ -1559,15 +1653,27 @@ internal class VoiceTutorNativeConversationController(
 
     /** UI completion follows owned canonical identity, independently of the learner's next speech turn. */
     private fun applyLearningProgress(progress: VoiceTutorLearningProgress, operationContext: OperationContext,
-        allowConversation: Boolean = true) {
+        allowConversation: Boolean = true, requestedBoundary: VoiceTutorDialogueBoundary = boundary(latestLearner)) {
+        val watchRecovery = allowConversation && timedOutLearningWatch?.let { timedOut ->
+            timedOut.revision == revision && timedOut.progress == progress &&
+                requestedBoundary.latestAcceptedLearnerProviderItemId != null &&
+                requestedBoundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
+                requestedBoundary.latestAcceptedLearnerProviderItemId != timedOut.boundary.latestAcceptedLearnerProviderItemId &&
+                requestedBoundary.latestAcceptedLearnerSpeechStartedOrder == latestSpeechStartedOrder
+        } == true
+        val gradingRecovery = allowConversation && sessionState.current.phase == "conversation" &&
+            progress.phase in setOf(VoiceTutorLearningPhase.GRADED, VoiceTutorLearningPhase.GRADING_FAILED) &&
+            completedLearning?.let { it.phase == VoiceTutorLearningPhase.GRADING_FAILED &&
+                it.studyId == progress.studyId && it.recordId == progress.recordId && it.correlationId == progress.correlationId } == true
         if (closed || draining || quotaRequested || endingAfterResponse || answerCapture != null ||
             (sessionState.current.studyId != null && sessionState.current.studyId != progress.studyId) ||
             (sessionState.current.recordId != null && progress.recordId != null && sessionState.current.recordId != progress.recordId) ||
             (progress.phase == VoiceTutorLearningPhase.CONVERSATION && !allowConversation) ||
             (progress.phase in setOf(VoiceTutorLearningPhase.GRADING, VoiceTutorLearningPhase.GRADED, VoiceTutorLearningPhase.GRADING_FAILED) &&
-                (sessionState.current.recordId != progress.recordId || sessionState.current.phase !in setOf("grading", "graded", "grading_failed")))) return
+                (sessionState.current.recordId != progress.recordId || (sessionState.current.phase !in setOf("grading", "graded", "grading_failed") && !gradingRecovery && !watchRecovery)))) return
+        if (watchRecovery) { completedLearning = null; timedOutLearningWatch = null }
         val completed = completedLearning
-        if (completed != null && completed.correlationId == progress.correlationId && completed.studyId == progress.studyId &&
+        if (!gradingRecovery && completed != null && completed.correlationId == progress.correlationId && completed.studyId == progress.studyId &&
             (completed.recordId == progress.recordId || progress.recordId == null) &&
             progress.phase in setOf(VoiceTutorLearningPhase.QUESTION_GENERATING, VoiceTutorLearningPhase.QUESTION_FAILED,
                 VoiceTutorLearningPhase.GRADING, VoiceTutorLearningPhase.GRADING_FAILED)) return
@@ -1581,12 +1687,18 @@ internal class VoiceTutorNativeConversationController(
             // A later model read may refine the same process snapshot. Its
             // polling history still belongs to the original requesting turn.
             val next = LearningWatch(UUID.randomUUID().toString(), revision, progress,
-                watch?.takeIf { it.revision == revision }?.operationContext ?: operationContext)
+                watch?.takeIf { it.revision == revision }?.operationContext ?: operationContext,
+                watch?.takeIf { it.revision == revision }?.boundary ?: requestedBoundary, questionReadbackEpoch,
+                watch?.takeIf { it.revision == revision }?.operationId ?: "learning_${UUID.randomUUID()}")
             learningWatch = next
+            beginLearningOperation(next)
             publish(learningPolls, LearningPollCommand(next))
         } else {
             if (progress.phase in setOf(VoiceTutorLearningPhase.QUESTION_READY, VoiceTutorLearningPhase.QUESTION_FAILED,
-                    VoiceTutorLearningPhase.GRADED, VoiceTutorLearningPhase.GRADING_FAILED)) completedLearning = progress
+                    VoiceTutorLearningPhase.GRADED, VoiceTutorLearningPhase.GRADING_FAILED)) {
+                completedLearning = progress
+                timedOutLearningWatch = null
+            }
             cancelLearningWatch()
         }
     }
@@ -1600,8 +1712,8 @@ internal class VoiceTutorNativeConversationController(
     @Synchronized
     fun beginLearningOperation(watch: LearningWatch): String? {
         if (!learningWatchIsCurrent(watch)) return null
-        val id = "poll_${UUID.randomUUID()}"
-        beginOperation(id, if (watch.progress.phase == VoiceTutorLearningPhase.GRADING) "get_record" else "get_question_process",
+        val id = watch.operationId
+        beginOperation(id, if (watch.progress.phase == VoiceTutorLearningPhase.GRADING) "answer_grading" else "question_generation",
             watch.operationContext)
         return id
     }
@@ -1646,7 +1758,55 @@ internal class VoiceTutorNativeConversationController(
         result.questionChange?.takeIf { it.studyId == progress.studyId && it.recordId == progress.recordId }?.let {
             publish(client, json(mapOf("type" to Contract.QUESTION_CHANGED_EVENT, "studyId" to it.studyId, "recordId" to it.recordId)))
         }
+        val canContinue = learningContinuationIsCurrent(watch)
+        val readback = (result.questionReadback ?: result.questionReadbackRecovery)?.takeIf {
+            progress.phase == VoiceTutorLearningPhase.QUESTION_READY && it.studyId == progress.studyId &&
+                it.recordId == progress.recordId && it.recordId.matches(Regex("[1-9][0-9]{0,18}")) &&
+                it.recordId.toLongOrNull() != null && it.question.isNotBlank() && it.question.length <= 8_000
+        }
+        // Remember an exact undelivered result for a later explicit saved-question
+        // lookup, even when fresh learner speech cancelled automatic continuation.
+        if (readback != null && !canContinue) failedQuestionReadback = QuestionReadback(readback, revision, questionReadbackEpoch)
         applyLearningProgress(progress, watch.operationContext)
+        if (canContinue && readback != null) {
+            pendingQuestionReadback = QuestionReadback(readback, revision, questionReadbackEpoch)
+            queuedInput = true
+            scheduleResponse()
+        } else if (canContinue && progress.phase in setOf(VoiceTutorLearningPhase.QUESTION_FAILED, VoiceTutorLearningPhase.GRADING_FAILED)) {
+            queueLearningNotice(failed = true)
+        }
+    }
+
+    private fun learningContinuationIsCurrent(watch: LearningWatch): Boolean = watch.revision == revision &&
+        watch.readbackEpoch == questionReadbackEpoch && watch.boundary.latestAcceptedLearnerProviderItemId != null &&
+        watch.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
+        watch.boundary.latestAcceptedLearnerSpeechStartedOrder == latestSpeechStartedOrder &&
+        !speaking && pendingSpeech == null && commits.isEmpty() && pendingUserInput == null
+
+    @Synchronized
+    fun failLearningWatch(watch: LearningWatch) {
+        if (!learningWatchIsCurrent(watch)) return
+        val canContinue = learningContinuationIsCurrent(watch)
+        completeOperation(watch.operationId, true)
+        timedOutLearningWatch = watch
+        completedLearning = watch.progress.copy(phase = if (watch.progress.phase == VoiceTutorLearningPhase.GRADING)
+            VoiceTutorLearningPhase.GRADING_FAILED else VoiceTutorLearningPhase.QUESTION_FAILED)
+        cancelLearningWatch()
+        sessionState.update("conversation", revision, watch.progress.studyId, watch.progress.recordId, answerId = null)
+        if (canContinue) queueLearningNotice(failed = false)
+    }
+
+    private fun queueLearningNotice(failed: Boolean) {
+        pendingLearningNotice = when (language) {
+            "en" -> if (failed) "The study task could not finish. We can try again or talk about something else." else
+                "The saved request is taking longer to confirm. You can check it again later or talk about something else."
+            "ja" -> if (failed) "学習の処理を完了できませんでした。もう一度試すか、別の話をしましょう。" else
+                "保存したリクエストの確認に時間がかかっています。後で確認するか、別の話ができます。"
+            else -> if (failed) "학습 작업을 완료하지 못했어요. 다시 시도하거나 다른 이야기를 할 수 있어요." else
+                "저장된 요청의 상태 확인이 늦어지고 있어요. 나중에 다시 확인하거나 다른 이야기를 할 수 있어요."
+        }
+        queuedInput = true
+        scheduleResponse()
     }
 
     @Synchronized
@@ -1655,8 +1815,9 @@ internal class VoiceTutorNativeConversationController(
     }
 
     private fun cancelLearningWatch(clearCompletion: Boolean = false) {
-        if (clearCompletion) completedLearning = null
-        if (learningWatch == null) return
+        if (clearCompletion) { completedLearning = null; pendingLearningNotice = null; timedOutLearningWatch = null }
+        val previous = learningWatch ?: return
+        completeOperation(previous.operationId, sessionState.current.phase !in setOf("question_ready", "graded"))
         learningWatch = null
         publish(learningPolls, LearningPollCommand(null))
     }
@@ -1690,16 +1851,18 @@ internal class VoiceTutorNativeConversationController(
     data class OperationContext(val responseId: String? = null, val learnerItemId: String? = null,
         val tutorItemId: String? = null, val answerId: String? = null)
     data class LearningWatch(val id: String, val revision: Long, val progress: VoiceTutorLearningProgress,
-        val operationContext: OperationContext)
+        val operationContext: OperationContext, val boundary: VoiceTutorDialogueBoundary, val readbackEpoch: Long, val operationId: String)
     data class LearningPollCommand(val watch: LearningWatch?)
     data class NativeTranscript(val itemId: String, val raw: String)
-    data class UserInputSubmission(val id: String, val revision: Long, val proposalId: String, val selectedIndices: List<Int>)
+    data class UserInputSubmission(val id: String, val revision: Long, val proposalId: String, val selectedIndices: List<Int>,
+        val curriculum: Boolean = false, val text: String = "", val boundary: VoiceTutorDialogueBoundary? = null)
     private data class UserInput(val id: String, val callId: String, val revision: Long,
         val request: VoiceTutorUserInputContract.Request, val proposal: VoiceTutorStudyTopicUserInput? = null,
         var phase: String = "pending", var result: VoiceTutorMcpToolResult? = null,
         var answers: List<VoiceTutorUserInputContract.Answer> = emptyList(),
         var executing: Boolean = false, var mutationCompleted: Boolean = false,
-        var acceptedAt: Instant? = null, var evidence: Input? = null, val afterAnswerCancellation: Boolean = false)
+        var acceptedAt: Instant? = null, var evidence: Input? = null, val afterAnswerCancellation: Boolean = false,
+        val curriculum: VoiceTutorCurriculumUserInput? = null)
     private data class UserInputBoundary(val input: Input?, val speechStartedOrder: Long, val revision: Long)
     private class TranscriptState(val text: String, var complete: Boolean = false, var persisted: Boolean = false)
     private data class Tutor(val id: String, val stoppedOrder: Long, val generation: Long)
@@ -1731,7 +1894,9 @@ internal class VoiceTutorNativeConversationController(
     }
     private class Response(val token: String, val generation: Long, val revision: Long, val startedAt: Long,
         val quota: Boolean, val opening: Boolean, val boundary: VoiceTutorDialogueBoundary, val clientSequence: Long?,
-        val questionReadback: QuestionReadback?, val mutationConfirmation: String?, val cancellationNotice: Boolean = false) {
+        val questionReadback: QuestionReadback?, val mutationConfirmation: String?, val cancellationNotice: Boolean = false, val learningNotice: String? = null) {
+        var failureReported = false
+        var recoveryAnnounced = false
         val createEventId = "buddystudy-internal-native-response-${UUID.randomUUID()}"
         var id: String? = null
         var createdRaw: String? = null

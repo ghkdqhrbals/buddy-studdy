@@ -1330,6 +1330,150 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
+    func testResponseRecoveringWireRequiresExactResponseAndAcousticSequence() throws {
+        let type = "buddystudy.voice.response.recovering"
+        for sequence in [0, 7] {
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(text:
+                #"{"type":"buddystudy.voice.response.recovering","responseId":"r1_failed","sequence":\#(sequence)}"#),
+                .responseRecovering(responseID: "r1_failed", sequence: sequence))
+        }
+        let invalidSequences: [Any] = [-1, true, 1.5, "7", NSNull()]
+        for sequence in invalidSequences {
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(data: JSONSerialization.data(withJSONObject:
+                ["type": type, "responseId": "r1_failed", "sequence": sequence])), .ignored(type: type))
+        }
+        for responseID in ["", "r1 failed", String(repeating: "r", count: 192)] {
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(data: JSONSerialization.data(withJSONObject:
+                ["type": type, "responseId": responseID, "sequence": 7])), .ignored(type: type))
+        }
+        XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(text:
+            #"{"type":"buddystudy.voice.response.recovering","responseId":"r1_failed"}"#), .ignored(type: type))
+        XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(text:
+            #"{"type":"buddystudy.voice.response.recovering","responseId":"r1_failed","sequence":7,"extra":true}"#), .ignored(type: type))
+    }
+
+    func testProviderAudioRecoveryRetainsPartialAndAllowsSilentReplacementSettlement() throws {
+        for sequence in [0, 7] {
+            var duplex = VoiceTutorDuplexPlaybackState()
+            var response = VoiceTutorWebRTCResponseState()
+            var transcript = VoiceTutorAssistantTranscriptState()
+            let earlier = VoiceTutorCaption(speaker: .tutor, text: "이전에 끝난 대화", responseID: "earlier")
+            var captions = [earlier]
+            if sequence == 0 { duplex.awaitInitialResponse() }
+            else {
+                duplex.userSpeechStarted(sequence: sequence)
+                duplex.userSpeechStopped(sequence: sequence)
+            }
+            XCTAssertTrue(duplex.responseStarted(responseID: "r1", isTutorIntervention: false))
+            response.responseStarted("r1")
+            response.markOutputBufferStarted("r1")
+            XCTAssertTrue(duplex.assistantAudioBegan(responseID: "r1"))
+            transcript.beginResponse("r1")
+            transcript.append(delta: "끊기기 전에 보이던 내용")
+            let event = try VoiceTutorRealtimeEventParser.parse(text:
+                #"{"type":"buddystudy.voice.response.recovering","responseId":"r1","sequence":\#(sequence)}"#)
+            guard case .responseRecovering(let responseID, let inputSequence) = event else { return XCTFail("Expected scoped recovery") }
+            // Mirror the VM's synchronous handoff: retain visible text, fence
+            // this playout, and restore only its already-consumed input wait.
+            XCTAssertTrue(duplex.recoverResponse(responseID: responseID, sequence: inputSequence))
+            XCTAssertTrue(transcript.retainInterruptedCaption(responseID: responseID, providerItemID: "r1_text", in: &captions))
+            XCTAssertTrue(response.abandonResponse(responseID))
+            XCTAssertFalse(duplex.assistantResponseActive)
+            XCTAssertFalse(response.mayIndicateSpeaking)
+            XCTAssertFalse(duplex.inputNeedsRepeat)
+            XCTAssertTrue(duplex.isAwaitingTutorResponse)
+            XCTAssertEqual(captions.first, earlier)
+            let retained = try XCTUnwrap(captions.last)
+            XCTAssertEqual(retained.text, "끊기기 전에 보이던 내용")
+            XCTAssertTrue(retained.isInterrupted)
+            XCTAssertEqual(retained.responseID, "r1")
+            XCTAssertFalse(duplex.recoverResponse(responseID: "r1", sequence: sequence), "A duplicate cannot restart recovery")
+
+            // r2 succeeds without audio, so it has no response.created event.
+            let settled = try VoiceTutorRealtimeEventParser.parse(text:
+                #"{"type":"buddystudy.voice.input.settled","sequence":\#(sequence)}"#)
+            guard case .inputSettled(let settledSequence) = settled else { return XCTFail("Expected silent settlement") }
+            XCTAssertTrue(duplex.inputSettled(sequence: settledSequence))
+            XCTAssertFalse(duplex.isAwaitingTutorResponse)
+            XCTAssertFalse(duplex.inputNeedsRepeat)
+            duplex.awaitInitialResponse()
+            XCTAssertFalse(duplex.isAwaitingTutorResponse, "A delayed ready event cannot reopen a settled recovery")
+            XCTAssertFalse(duplex.inputSettled(sequence: settledSequence))
+            XCTAssertFalse(duplex.responseStarted(responseID: "r1", isTutorIntervention: false))
+            XCTAssertFalse(duplex.assistantAudioBegan(responseID: "r1"))
+            XCTAssertFalse(duplex.responseFinished(responseID: "r1"))
+            XCTAssertNil(response.markResponseDone("r1"))
+            XCTAssertNil(response.markOutputBufferStopped("r1"))
+            XCTAssertFalse(transcript.matchesResponse("r1"), "Late transcript frames cannot promote or replace the retained partial")
+            XCTAssertEqual(captions, [earlier, retained])
+            let presentation = VoiceTutorCallPresentation(phase: .listening, inputNeedsRepeat: duplex.inputNeedsRepeat,
+                isAwaitingTutorResponse: duplex.isAwaitingTutorResponse)
+            XCTAssertEqual(presentation.statusText(AppStrings(language: .korean)), AppStrings(language: .korean).voiceTutorCallListening)
+        }
+    }
+
+    func testProviderRecoveryAllowsUnannouncedRetryExhaustionIncludingOpening() throws {
+        for sequence in [0, 7] {
+            var state = VoiceTutorDuplexPlaybackState()
+            if sequence == 0 { state.awaitInitialResponse() }
+            else {
+                state.userSpeechStarted(sequence: sequence)
+                state.userSpeechStopped(sequence: sequence)
+            }
+            XCTAssertTrue(state.responseStarted(responseID: "r1", isTutorIntervention: false))
+            XCTAssertTrue(state.assistantAudioBegan(responseID: "r1"))
+            XCTAssertTrue(state.recoverResponse(responseID: "r1", sequence: sequence))
+            let event = try VoiceTutorRealtimeEventParser.parse(text:
+                #"{"type":"buddystudy.voice.input.retry","sequence":\#(sequence),"abandonedResponseId":"r2_unannounced"}"#)
+            guard case .inputRetryScoped(let inputSequence, let responseID) = event else { return XCTFail("Expected exhausted retry") }
+            XCTAssertTrue(state.acceptInputRetry(sequence: inputSequence, responseID: responseID))
+            XCTAssertTrue(state.inputNeedsRepeat)
+            XCTAssertFalse(state.isAwaitingTutorResponse)
+            XCTAssertFalse(state.assistantResponseActive)
+            XCTAssertFalse(state.acceptInputRetry(sequence: inputSequence, responseID: responseID))
+            state.learnerTranscriptReceived(usesWebRTC: true)
+            XCTAssertTrue(state.inputNeedsRepeat)
+            state.userSpeechStarted(sequence: sequence + 1)
+            XCTAssertFalse(state.inputNeedsRepeat)
+            state.userSpeechStopped(sequence: sequence + 1)
+            XCTAssertTrue(state.isAwaitingTutorResponse)
+            XCTAssertFalse(state.recoverResponse(responseID: "r1", sequence: sequence))
+            XCTAssertFalse(state.inputSettled(sequence: sequence))
+            XCTAssertTrue(state.isAwaitingTutorResponse)
+        }
+    }
+
+    func testProviderRecoveryRejectsOldGenerationsDuplicateEventsAndNewSpeech() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.userSpeechStarted(sequence: 3)
+        state.userSpeechStopped(sequence: 3)
+        XCTAssertTrue(state.responseStarted(responseID: "r1", isTutorIntervention: false))
+        let active = state
+        XCTAssertFalse(state.recoverResponse(responseID: "r1", sequence: 0))
+        XCTAssertFalse(state.recoverResponse(responseID: "r1", sequence: 2))
+        XCTAssertFalse(state.recoverResponse(responseID: "r1", sequence: 4))
+        XCTAssertFalse(state.recoverResponse(responseID: "unknown", sequence: 3))
+        XCTAssertEqual(state, active)
+        XCTAssertTrue(state.recoverResponse(responseID: "r1", sequence: 3))
+        XCTAssertTrue(state.responseStarted(responseID: "r2", isTutorIntervention: false))
+        let replacement = state
+        XCTAssertFalse(state.recoverResponse(responseID: "r1", sequence: 3), "Same sequence cannot authorize an old generation")
+        XCTAssertEqual(state, replacement)
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "r2"))
+        XCTAssertTrue(state.responseFinished(responseID: "r2"))
+        XCTAssertFalse(state.recoverResponse(responseID: "r2", sequence: 3))
+        XCTAssertFalse(state.acceptInputRetry(sequence: 3, responseID: "r2"), "Successful playout cannot become an unannounced retry")
+        state.userSpeechStarted(sequence: 4)
+        let speaking = state
+        XCTAssertFalse(state.recoverResponse(responseID: "r1", sequence: 3))
+        XCTAssertEqual(state, speaking)
+        state.userSpeechStopped(sequence: 4)
+        let waiting = state
+        XCTAssertFalse(state.recoverResponse(responseID: "r1", sequence: 3))
+        XCTAssertEqual(state, waiting)
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+    }
+
     func testTutorCanTakeTheFloorWhileLearnerIsSpeaking() {
         var state = VoiceTutorDuplexPlaybackState()
         state.userSpeechStarted()
@@ -1596,6 +1740,61 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(state.inputNeedsRepeat)
         state.setInputNeedsRepeat(true)
         state.reset()
+        XCTAssertFalse(state.inputNeedsRepeat)
+    }
+
+    func testAutomaticReplacementClearsRetryHintOnlyWhenItsExactAudioBegins() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.userSpeechStarted(sequence: 7)
+        state.userSpeechStopped(sequence: 7)
+        XCTAssertTrue(state.responseStarted(responseID: "failed", isTutorIntervention: false))
+        XCTAssertTrue(state.abandonResponse(responseID: "failed"))
+        state.setInputNeedsRepeat(true) // Compatibility path for a forwarded output clear.
+        state.learnerTranscriptReceived(usesWebRTC: true)
+        XCTAssertTrue(state.inputNeedsRepeat)
+        XCTAssertTrue(state.responseStarted(responseID: "retry", isTutorIntervention: false))
+        XCTAssertTrue(state.inputNeedsRepeat, "Generation intent alone cannot claim recovery")
+        XCTAssertFalse(state.assistantAudioBegan(responseID: "failed"))
+        XCTAssertTrue(state.inputNeedsRepeat)
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "retry"))
+        XCTAssertFalse(state.inputNeedsRepeat)
+        XCTAssertTrue(state.responseFinished(responseID: "retry"))
+        XCTAssertFalse(state.inputNeedsRepeat, "A recovered answer must not leave a stale repeat label after playout")
+    }
+
+    func testRetryHintIsNotClearedByExistingOrRejectedResponseAudio() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.userSpeechStarted(sequence: 1)
+        state.userSpeechStopped(sequence: 1)
+        XCTAssertTrue(state.responseStarted(responseID: "existing", isTutorIntervention: false))
+        state.setInputNeedsRepeat(true)
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "existing"))
+        XCTAssertTrue(state.inputNeedsRepeat, "Audio already in progress before an unscoped retry is not a replacement")
+        XCTAssertTrue(state.abandonResponse(responseID: "existing"))
+        XCTAssertTrue(state.responseStarted(responseID: "existing", isTutorIntervention: false))
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "existing"))
+        XCTAssertTrue(state.inputNeedsRepeat, "A failed generation's delayed frames cannot claim successful recovery")
+        XCTAssertTrue(state.responseStarted(responseID: "new", isTutorIntervention: false))
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "new"))
+        XCTAssertFalse(state.inputNeedsRepeat)
+    }
+
+    func testNewSpeechAndItsRetryCannotBeOverwrittenByOldReplacementAudio() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.userSpeechStarted(sequence: 4)
+        state.userSpeechStopped(sequence: 4)
+        XCTAssertTrue(state.acceptInputRetry(sequence: 4, responseID: "failed_old"))
+        XCTAssertTrue(state.responseStarted(responseID: "old_replacement", isTutorIntervention: false))
+        state.userSpeechStarted(sequence: 5)
+        XCTAssertFalse(state.inputNeedsRepeat)
+        state.userSpeechStopped(sequence: 5)
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        XCTAssertTrue(state.acceptInputRetry(sequence: 5, responseID: "failed_new"))
+        XCTAssertFalse(state.responseStarted(responseID: "old_replacement", isTutorIntervention: false))
+        XCTAssertFalse(state.assistantAudioBegan(responseID: "old_replacement"))
+        XCTAssertTrue(state.inputNeedsRepeat)
+        XCTAssertTrue(state.responseStarted(responseID: "current_replacement", isTutorIntervention: false))
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "current_replacement"))
         XCTAssertFalse(state.inputNeedsRepeat)
     }
 
@@ -4949,34 +5148,35 @@ final class VoiceTutorContractTests: XCTestCase {
         withExtendedLifetime((capture, render, other, module)) {}
     }
 
-    func testVoiceEchoCancellationReadinessRequiresAnActiveUnbypassedProcessingPath() {
+    func testVoiceEchoCancellationReadinessRequiresSoftwareAECWithoutAParallelPlatformPath() {
         let permits = VoiceTutorEchoCancellationPolicy.canOpenMicrophone
-        XCTAssertFalse(permits(true, true, false, false, false, false, false))
-        XCTAssertFalse(permits(true, true, true, false, false, false, false), "Requested/resolved AEC alone is not active processing")
-        XCTAssertFalse(permits(true, true, true, false, true, false, false), "Platform processing requires the live voice I/O graph")
-        XCTAssertFalse(permits(true, true, true, false, true, true, true), "A bypassed platform echo path cannot admit learner capture")
-        XCTAssertFalse(permits(true, true, false, true, true, true, false))
-        XCTAssertFalse(permits(false, true, true, false, true, true, false),
-                       "The iPhone may retain active VPIO flags after the actual audio engine stops")
-        XCTAssertFalse(permits(true, false, true, false, true, true, false), "An idle capture device cannot admit learner input")
-        XCTAssertTrue(permits(true, true, true, false, true, true, false))
-        XCTAssertTrue(permits(true, true, true, true, false, false, true), "Software AEC remains valid when platform processing is unavailable")
+        XCTAssertFalse(permits(true, true, false, true, false, false))
+        XCTAssertFalse(permits(true, true, true, false, false, false), "Requested/resolved AEC alone is not active processing")
+        XCTAssertFalse(permits(true, true, true, false, true, true), "An automatic return to platform AEC does not satisfy the chosen processing path")
+        XCTAssertFalse(permits(true, true, true, true, true, true), "Do not stack two echo cancellers")
+        XCTAssertFalse(permits(true, true, true, true, false, true), "Remove the VPIO graph rather than accepting a bypassed platform path")
+        XCTAssertFalse(permits(false, true, true, true, false, false), "Processing flags cannot stand in for a running engine")
+        XCTAssertFalse(permits(true, false, true, true, false, false), "An idle capture device cannot admit learner input")
+        XCTAssertTrue(permits(true, true, true, true, false, false))
     }
 
-    func testVoiceCommunicationProcessingOptionsKeepLocalTrackEnabledAndUseAutomaticAEC() throws {
+    func testVoiceCommunicationProcessingOptionsKeepLocalTrackEnabledAndUseSoftwareAEC() throws {
         let options = VoiceTutorEchoCancellationPolicy.communicationOptions()
         XCTAssertTrue(options.echoCancellation)
-        XCTAssertTrue(options.noiseSuppression, "Apple couples platform AEC and noise suppression")
+        XCTAssertTrue(options.noiseSuppression)
         XCTAssertTrue(options.autoGainControl)
         XCTAssertTrue(options.highPassFilter)
-        XCTAssertEqual(options.echoCancellationMode, .automatic)
-        XCTAssertEqual(options.noiseSuppressionMode, .automatic)
-        XCTAssertEqual(options.autoGainControlMode, .automatic)
+        XCTAssertEqual(options.echoCancellationMode, .software)
+        XCTAssertEqual(options.noiseSuppressionMode, .software, "The coupled AEC/NS platform path must move together")
+        XCTAssertEqual(options.autoGainControlMode, .software)
+        XCTAssertEqual(options.highPassFilterMode, .software)
         let capture = VoiceTutorContractNativeAudioDelegate()
         let module = try VoiceTutorAudioProcessingModuleFactory.make(captureDelegate: capture)
         let factory = LKRTCPeerConnectionFactory(audioDeviceModuleType: .audioEngine,
             bypassVoiceProcessing: false, encoderFactory: nil, decoderFactory: nil,
             audioProcessingModule: module)
+        try VoiceTutorEchoCancellationPolicy.prepareDevice(factory.audioDeviceModule)
+        XCTAssertFalse(factory.audioDeviceModule.isPlatformVoiceProcessingAllowed)
         let source = factory.audioSource(with: nil)
         let track = factory.audioTrack(with: source, trackId: "synthetic-echo-policy")
         XCTAssertTrue(track.isEnabled)
@@ -4986,6 +5186,46 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(track.isEnabled, "Echo control cannot remove the learner's ability to interrupt the tutor")
         XCTAssertFalse(factory.audioDeviceModule.isRecording)
         withExtendedLifetime((capture, module, factory, source, track)) {}
+    }
+
+    func testVoiceSoftwareAECIsResolvedByMediaEngineBeforeMutedInputOrSDP() throws {
+        let capture = VoiceTutorContractNativeAudioDelegate()
+        let module = try VoiceTutorAudioProcessingModuleFactory.make(captureDelegate: capture)
+        let factory = LKRTCPeerConnectionFactory(audioDeviceModuleType: .audioEngine,
+            bypassVoiceProcessing: false, encoderFactory: nil, decoderFactory: nil,
+            audioProcessingModule: module)
+        try VoiceTutorEchoCancellationPolicy.prepareDevice(factory.audioDeviceModule)
+        let track = factory.audioTrack(with: factory.audioSource(with: nil), trackId: "synthetic-software-aec")
+        try VoiceTutorEchoCancellationPolicy.configure(track)
+        track.isEnabled = false
+        let configuration = LKRTCConfiguration()
+        configuration.sdpSemantics = .unifiedPlan
+        configuration.iceServers = []
+        configuration.iceTransportPolicy = .none
+        let constraints = LKRTCMediaConstraints(
+            mandatoryConstraints: ["OfferToReceiveAudio": "false", "OfferToReceiveVideo": "false"],
+            optionalConstraints: nil)
+        let peer = try XCTUnwrap(factory.peerConnection(with: configuration, constraints: constraints, delegate: nil))
+        defer {
+            peer.close()
+            withExtendedLifetime((capture, module, factory, track, peer)) {}
+        }
+        // Media-engine default options must already resolve against our device
+        // policy. This is the same pre-SDP ordering used by a real muted call;
+        // it cannot rely on enabling the microphone to apply stored track options.
+        let processing = factory.audioProcessingState
+        XCTAssertTrue(processing.echoCancellation.isSoftwareResolved)
+        XCTAssertTrue(processing.echoCancellation.isSoftwareActive)
+        XCTAssertFalse(module.config.isEchoCancellationMobileMode, "The render-reference path must use AEC3, not legacy AECM")
+        XCTAssertTrue(processing.noiseSuppression.isSoftwareActive)
+        XCTAssertFalse(processing.echoCancellation.isPlatformActive)
+        XCTAssertFalse(factory.audioDeviceModule.platformAudioProcessingState.isVoiceProcessingEnabledActive)
+        XCTAssertFalse(factory.audioDeviceModule.isRecording)
+        XCTAssertFalse(track.isEnabled)
+        XCTAssertFalse(VoiceTutorEchoCancellationPolicy.isActive(factory: factory), "Configuring AEC is not media readiness")
+        XCTAssertNil(peer.localDescription)
+        XCTAssertNil(peer.remoteDescription)
+        XCTAssertEqual(peer.iceGatheringState, .new)
     }
 
     func testNativeVoiceCaptureDiagnosticsAreBoundedAndClosedTapsCannotRevive() {
@@ -6049,6 +6289,7 @@ final class VoiceTutorContractTests: XCTestCase {
             audioProcessingModule: module
         )
         let device = factory.audioDeviceModule
+        try VoiceTutorEchoCancellationPolicy.prepareDevice(device)
         preflight.append(nativeVoiceCapturePreflight(phase: "factory_created", device: device))
         let source = factory.audioSource(with: nil)
         let track = factory.audioTrack(with: source, trackId: "synthetic-native-capture-probe")
@@ -6132,19 +6373,19 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(VoiceTutorEchoCancellationPolicy.isActive(factory: factory),
                       "Real processed input frames must have an active echo canceller before media-ready can open capture")
         XCTAssertFalse(device.isMicrophoneMuted, "AEC must not rely on muting the native microphone")
-        // This deliberately sender-less probe seeds the ADM directly. Its
-        // requested/resolved factory values belong to VoiceEngine defaults;
-        // they cannot verify track option application without an SDP sender.
-        // Validate the actual Apple path seeded by initAndStartRecording.
-        XCTAssertTrue(platform.echoCancellation.isRequested)
-        XCTAssertTrue(platform.echoCancellation.isActive)
-        XCTAssertTrue(platform.isVoiceProcessingEnabledRequested)
-        XCTAssertFalse(platform.isVoiceProcessingBypassedRequested)
-        XCTAssertTrue(platform.isVoiceProcessingEnabledActive)
-        XCTAssertFalse(platform.isVoiceProcessingBypassedActive)
-        XCTAssertTrue(processing.echoCancellation.isPlatformActive)
-        XCTAssertFalse(processing.echoCancellation.isSoftwareActive,
-                       "The native Apple probe must not stack software AEC over the platform path")
+        // This sender-less probe exercises production's pre-engine device
+        // policy plus real processed capture. It cannot verify the connected
+        // SDP guard or measure residual acoustic echo without remote playout.
+        XCTAssertFalse(device.isPlatformVoiceProcessingAllowed)
+        XCTAssertFalse(platform.echoCancellation.isRequested)
+        XCTAssertFalse(platform.echoCancellation.isActive)
+        XCTAssertFalse(platform.isVoiceProcessingEnabledRequested)
+        XCTAssertFalse(platform.isVoiceProcessingEnabledActive)
+        XCTAssertFalse(processing.echoCancellation.isPlatformActive)
+        XCTAssertTrue(processing.echoCancellation.isSoftwareResolved)
+        XCTAssertTrue(processing.echoCancellation.isSoftwareActive,
+                      "Actual captured frames must pass through the selected render-reference software echo canceller")
+        XCTAssertFalse(module.config.isEchoCancellationMobileMode)
         XCTAssertNil(peer.localDescription)
         XCTAssertNil(peer.remoteDescription)
         XCTAssertTrue(peer.senders.isEmpty)

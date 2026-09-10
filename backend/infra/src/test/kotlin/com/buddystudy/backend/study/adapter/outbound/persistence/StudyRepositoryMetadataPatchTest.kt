@@ -6,6 +6,7 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicsCommand
 import com.buddystudy.backend.study.application.port.inbound.ExpectedStudyMetadata
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
@@ -100,6 +101,7 @@ class StudyRepositoryMetadataPatchTest {
                 created_at timestamp(6) not null default current_timestamp,
                 updated_at timestamp(6) not null default current_timestamp,
                 version bigint not null default 0,
+                curriculum_terminal boolean not null default false,
                 foreign key (user_id) references users(id),
                 foreign key (parent_study_id) references studies(id) on delete cascade
             )
@@ -127,7 +129,8 @@ class StudyRepositoryMetadataPatchTest {
             update studies set sort_order = 8, difficulty_level = 3, interval_minutes = 47,
                 enabled = true, active_for_questions = false, notification_sound = 'bell.caf',
                 custom_prompt = 'Keep this preference', openai_model = 'chosen-model', max_history_count = 231,
-                next_due_at = :due, schedule_claimed_until = :claim, last_sent_at = :sent, last_error = 'Existing error'
+                next_due_at = :due, schedule_claimed_until = :claim, last_sent_at = :sent, last_error = 'Existing error',
+                curriculum_terminal = true
             where id = 11
             """.trimIndent(),
         ).bind("due", now.utc()).bind("claim", now.plusSeconds(35).utc()).bind("sent", now.minusSeconds(600).utc())
@@ -136,6 +139,7 @@ class StudyRepositoryMetadataPatchTest {
         val renamed = transaction { service.updateStudy(principal, 11, UpdateStudyCommand(topic = " Redis Streams ")) }
         assertThat(renamed.topic).isEqualTo("Redis Streams")
         assertThat(renamed.difficultyLevel).isEqualTo(3)
+        assertThat(renamed.curriculumTerminal).isTrue()
         val changed = transaction { service.updateStudy(principal, 11, UpdateStudyCommand(difficultyLevel = 7)) }
         val after = requireNotNull(repository.findByIdAndUserId(11, 7))
 
@@ -147,6 +151,7 @@ class StudyRepositoryMetadataPatchTest {
             .isEqualTo(before)
         assertThat(after.topic).isEqualTo("Redis Streams")
         assertThat(after.difficultyLevel).isEqualTo(7)
+        assertThat(changed.curriculumTerminal).isTrue()
         Mockito.verifyNoInteractions(questions, stats, localizations)
     }
 
@@ -180,6 +185,60 @@ class StudyRepositoryMetadataPatchTest {
             .map { row, _ -> row.get(0, java.lang.Long::class.java)!!.toLong() }
             .one().awaitSingle()
         assertThat(rowCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `curriculum metadata round trips new and legacy rows without being reset by ordinary saves`(): Unit = runBlocking {
+        insertStudy(11, "Root")
+        assertThat(repository.findByIdAndUserId(11, 7)?.curriculumTerminal).isFalse()
+        val created = transaction { service.createStudyTopics(principal, 11, CreateStudyTopicsCommand(
+            listOf("Terminal child", "Unexpanded child"),
+            curriculumTerminalByTopic = mapOf("Terminal child" to true),
+        )) }
+        val terminalId = created.topics.first().id
+        assertThat(created.topics.map { it.curriculumTerminal }).containsExactly(true, false)
+        val saved = requireNotNull(repository.findByIdAndUserId(terminalId, 7))
+        assertThat(saved.curriculumTerminal).isTrue()
+        saved.intervalMinutes = 90
+        saved.customPrompt = "Ordinary settings save"
+        transaction { repository.save(saved) }
+
+        val replay = transaction { service.createStudyTopicWithOutcome(principal, 11,
+            CreateStudyTopicCommand("Terminal child", difficultyLevel = 2)) }
+        val patched = transaction { service.updateStudy(principal, terminalId, UpdateStudyCommand(topic = "Renamed terminal")) }
+        val reread = requireNotNull(repository.findByIdAndUserId(terminalId, 7))
+        assertThat(replay.created).isFalse()
+        assertThat(replay.curriculumTerminal).isTrue()
+        assertThat(patched.curriculumTerminal).isTrue()
+        assertThat(reread.curriculumTerminal).isTrue()
+        assertThat(reread.intervalMinutes).isEqualTo(90)
+        assertThat(reread.customPrompt).isEqualTo("Ordinary settings save")
+        assertThat(repository.findByIdAndUserId(created.topics.last().id, 7)?.curriculumTerminal).isFalse()
+        Mockito.verifyNoInteractions(questions, stats, localizations)
+    }
+
+    @Test
+    fun `explicit refinement and parent terminal change roll back together and retry is idempotent`(): Unit = runBlocking {
+        insertStudy(11, "Terminal parent")
+        execute("update studies set curriculum_terminal = true where id = 11")
+        val failure = runCatching {
+            transaction {
+                service.createStudyTopicWithOutcome(principal, 11, CreateStudyTopicCommand("New child"))
+                error("Fixture transaction rollback")
+            }
+        }.exceptionOrNull()
+        assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+        assertThat(repository.findByIdAndUserId(11, 7)?.curriculumTerminal).isTrue()
+        assertThat(repository.findAllByUserId(7).map { it.topic }).containsExactly("Terminal parent")
+
+        val created = transaction { service.createStudyTopicWithOutcome(principal, 11, CreateStudyTopicCommand("New child")) }
+        val parent = requireNotNull(repository.findByIdAndUserId(11, 7))
+        assertThat(created.created).isTrue()
+        assertThat(parent.curriculumTerminal).isFalse()
+        val replay = transaction { service.createStudyTopicWithOutcome(principal, 11, CreateStudyTopicCommand("New child")) }
+        assertThat(replay.created).isFalse()
+        assertThat(repository.findByIdAndUserId(11, 7)).usingRecursiveComparison().isEqualTo(parent)
+        Mockito.verifyNoInteractions(questions, stats, localizations)
     }
 
     @Test

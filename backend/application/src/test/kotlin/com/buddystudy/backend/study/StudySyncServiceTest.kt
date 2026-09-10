@@ -431,6 +431,8 @@ class StudySyncServiceTest {
         assertThat(fourth.created).isTrue()
         assertThat(fourth.parentStudyId).isEqualTo(14)
         assertThat(fourth.difficultyLevel).isEqualTo(8)
+        assertThat(fourth.curriculumTerminal).isTrue()
+        assertThat(studies.rows.last().curriculumTerminal).isTrue()
         assertThat(failure).isInstanceOf(ApiException::class.java)
         assertThat((failure as ApiException).status).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)
         assertThat(studies.rows).hasSize(5)
@@ -524,8 +526,11 @@ class StudySyncServiceTest {
     fun `batch allows depth four and retains legacy deeper topics without adding a fifth level`(): Unit = runBlocking {
         studies.rows += study(11, "Root")
         (12L..16L).forEach { id -> studies.rows += study(id, "Level ${id - 11}").apply { parentStudyId = id - 1 } }
-        val fourth = service.createStudyTopics(principal, 14, CreateStudyTopicsCommand(listOf("Selected fourth")))
+        val fourth = service.createStudyTopics(principal, 14, CreateStudyTopicsCommand(
+            listOf("Selected fourth"), curriculumTerminalByTopic = mapOf("Selected fourth" to false),
+        ))
         assertThat(fourth.topics.single().created).isTrue()
+        assertThat(fourth.topics.single().curriculumTerminal).isTrue()
         val saved = studies.saveCalls
 
         val legacy = service.createStudyTopics(principal, 15, CreateStudyTopicsCommand(listOf("Level 5")))
@@ -843,12 +848,125 @@ class StudySyncServiceTest {
         row.maxHistoryCount, row.nextDueAt, row.scheduleClaimedUntil, row.lastSentAt, row.lastError, row.createdAt,
     )
 
+    @Test
+    fun `curriculum batch inherits original root level and stores explicit leaves only on new nodes`(): Unit = runBlocking {
+        val root = study(11, "Root").apply { difficultyLevel = 8 }
+        val parent = study(12, "Selected branch").apply { parentStudyId = 11; difficultyLevel = 3 }
+        val existing = study(13, "Existing leaf").apply {
+            parentStudyId = 12; difficultyLevel = 2; curriculumTerminal = true
+        }
+        studies.rows += listOf(root, parent, existing)
+        val beforeExisting = completeStudyState(existing)
+        val command = CreateStudyTopicsCommand(
+            topics = listOf("Existing leaf", " New leaf ", "Open branch", "Unexpanded"),
+            difficultyLevel = 5,
+            curriculumTerminalByTopic = mapOf("Existing leaf" to false, " new   leaf " to true, "Open branch" to false),
+            inheritRootDifficulty = true,
+        )
+
+        val response = service.createStudyTopics(principal, parent.id, command)
+        val replay = service.createStudyTopics(principal, parent.id, command.copy(
+            curriculumTerminalByTopic = mapOf("New leaf" to false, "Unexpanded" to true),
+        ))
+
+        assertThat(response.topics.map { it.difficultyLevel }).containsExactly(2, 8, 8, 8)
+        assertThat(response.topics.map { it.curriculumTerminal }).containsExactly(true, true, false, false)
+        assertThat(replay.topics.map { it.curriculumTerminal }).containsExactly(true, true, false, false)
+        assertThat(replay.topics.map { it.created }).containsOnly(false)
+        assertThat(completeStudyState(existing)).isEqualTo(beforeExisting)
+        assertThat(studies.saveCalls).isEqualTo(3)
+        assertThat(questions.pendingRows).isEmpty()
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
+        assertThat(service.study(principal, response.topics[1].id, "ko").curriculumTerminal).isTrue()
+    }
+
+    @Test
+    fun `single voice child inherits original root difficulty while ordinary creation retains its explicit level`(): Unit = runBlocking {
+        studies.rows += study(11, "Root").apply { difficultyLevel = 8 }
+        studies.rows += study(12, "Branch").apply { parentStudyId = 11; difficultyLevel = 3 }
+
+        val voice = service.createStudyTopicWithOutcome(principal, 12,
+            CreateStudyTopicCommand("Voice child", difficultyLevel = 5, inheritRootDifficulty = true))
+        val ordinary = service.createStudyTopicWithOutcome(principal, 12,
+            CreateStudyTopicCommand("App child", difficultyLevel = 6))
+
+        assertThat(voice.difficultyLevel).isEqualTo(8)
+        assertThat(ordinary.difficultyLevel).isEqualTo(6)
+        assertThat(voice.curriculumTerminal).isFalse()
+        assertThat(ordinary.curriculumTerminal).isFalse()
+        assertThat(studies.rows.single { it.id == 12L }.difficultyLevel).isEqualTo(3)
+    }
+
+    @Test
+    fun `explicit child creation refines terminal parent only after a new child succeeds`(): Unit = runBlocking {
+        val parent = study(11, "Terminal").apply { curriculumTerminal = true }
+        studies.rows += parent
+        val existing = study(12, "Legacy child").apply { parentStudyId = 11; curriculumTerminal = true }
+        studies.rows += existing
+        studies.rows += study(13, "Conflicting root")
+        val beforeParent = completeStudyState(parent)
+        val before = completeStudyState(existing)
+
+        val replay = service.createStudyTopics(principal, 11, CreateStudyTopicsCommand(listOf("Legacy child")))
+        val batchFailure = runCatching {
+            service.createStudyTopics(principal, 11, CreateStudyTopicsCommand(listOf("New child", "Conflicting root")))
+        }.exceptionOrNull() as ApiException
+
+        assertThat(replay.topics.single().created).isFalse()
+        assertThat(replay.topics.single().curriculumTerminal).isTrue()
+        assertThat(completeStudyState(existing)).isEqualTo(before)
+        assertThat(batchFailure.status).isEqualTo(HttpStatus.CONFLICT)
+        assertThat(studies.saveCalls).isZero()
+        assertThat(completeStudyState(parent)).isEqualTo(beforeParent)
+        val added = service.createStudyTopicWithOutcome(principal, 11, CreateStudyTopicCommand("New child"))
+        assertThat(added.created).isTrue()
+        assertThat(parent.curriculumTerminal).isFalse()
+        assertThat(studies.saveCalls).isEqualTo(2) // The child plus its explicitly refined parent.
+        val afterParent = completeStudyState(parent)
+        service.createStudyTopicWithOutcome(principal, 11, CreateStudyTopicCommand("New child"))
+        assertThat(completeStudyState(parent)).isEqualTo(afterParent)
+        assertThat(studies.saveCalls).isEqualTo(2)
+        assertThat(service.updateStudy(principal, 12, UpdateStudyCommand(topic = "Renamed leaf")).curriculumTerminal).isTrue()
+        assertThat(studies.rows).hasSize(4)
+    }
+
+    @Test
+    fun `ordinary root upsert and create-only replay preserve terminal metadata omitted from app requests`(): Unit = runBlocking {
+        studies.rows += study(11, "Known leaf").apply { curriculumTerminal = true }
+        val upserted = service.createStudy(principal, CreateStudyCommand("Known leaf", difficultyLevel = 9))
+        val replay = service.createRootStudy(principal, CreateRootStudyCommand("Known leaf", difficultyLevel = 2))
+        val newRoot = service.createRootStudy(principal, CreateRootStudyCommand("Unexpanded root"))
+
+        assertThat(upserted.curriculumTerminal).isTrue()
+        assertThat(upserted.difficultyLevel).isEqualTo(9)
+        assertThat(replay.curriculumTerminal).isTrue()
+        assertThat(replay.difficultyLevel).isEqualTo(9)
+        assertThat(replay.created).isFalse()
+        assertThat(newRoot.curriculumTerminal).isFalse()
+        assertThat(studies.rows.single { it.id == 11L }.curriculumTerminal).isTrue()
+    }
+
+    @Test
+    fun `ambiguous normalized curriculum metadata rejects a whole batch before mutation`(): Unit = runBlocking {
+        studies.rows += study(11, "Root")
+        listOf(mapOf("Leaf" to true, " leaf " to false), mapOf("Unselected leaf" to true)).forEach { metadata ->
+            val failure = runCatching {
+                service.createStudyTopics(principal, 11, CreateStudyTopicsCommand(
+                    listOf("Leaf"), curriculumTerminalByTopic = metadata,
+                ))
+            }.exceptionOrNull() as ApiException
+            assertThat(failure.status).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)
+        }
+        assertThat(studies.events).isEmpty()
+        assertThat(studies.saveCalls).isZero()
+    }
+
     private fun completeStudyState(row: StudyEntity): List<Any?> = listOf(
         row.id, row.deviceId, row.userId, row.parentStudyId, row.sortOrder, row.topic,
         row.difficultyLevel, row.intervalMinutes, row.enabled, row.activeForQuestions,
         row.notificationSound, row.customPrompt, row.openaiModel, row.maxHistoryCount,
         row.nextDueAt, row.scheduleClaimedUntil, row.lastSentAt, row.lastError,
-        row.createdAt, row.updatedAt,
+        row.createdAt, row.updatedAt, row.curriculumTerminal,
     )
 
     private fun study(id: Long, topic: String) = StudyEntity(

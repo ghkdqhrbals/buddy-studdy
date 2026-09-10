@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice
 
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCurriculumUserInput
 import com.fasterxml.jackson.databind.JsonNode
 
 /** Bounded presentation and learner answers; neither grants study mutation authority. */
@@ -30,6 +31,17 @@ internal object VoiceTutorUserInputContract {
     fun studyTopicRequest(proposal: VoiceTutorStudyTopicUserInput): Request = Request(proposal.title,
         listOf(Question("study_topics", proposal.prompt, "multiple",
             proposal.topics.mapIndexed { index, topic -> Option("topic_$index", topic) }, false)))
+
+    fun curriculumRequest(proposal: VoiceTutorCurriculumUserInput): Request = Request(displayText(proposal.title, 200),
+        listOf(Question("curriculum", displayText(proposal.prompt, 500), "single",
+            proposal.topics.mapIndexed { index, topic -> Option("topic_$index", displayText(topic, 200)) }, true)))
+
+    private fun displayText(value: String, limit: Int): String {
+        val clean = value.map { if (it.isISOControl() && it !in "\n\r\t") ' ' else it }.joinToString("")
+        if (clean.length <= limit) return clean
+        val prefix = clean.take(limit - 1).let { if (it.lastOrNull()?.isHighSurrogate() == true) it.dropLast(1) else it }
+        return prefix + "…"
+    }
 
     fun validCorrelation(node: JsonNode): Boolean = listOf("requestId", "sessionId", "attemptId")
         .all { node.path(it).isTextual && uuidPattern.matches(node.path(it).asText()) }

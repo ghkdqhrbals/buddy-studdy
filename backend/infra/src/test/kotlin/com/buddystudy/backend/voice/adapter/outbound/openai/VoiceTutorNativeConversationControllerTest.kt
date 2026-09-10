@@ -10,6 +10,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolR
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionChange
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCurriculumUserInput
 import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.fasterxml.jackson.databind.JsonNode
@@ -47,6 +48,105 @@ class VoiceTutorNativeConversationControllerTest {
         }
         controller.learningPollEvents().subscribe { it.watch?.let { watch -> watches += watch } }
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["select_voice_study", "advance_voice_study", "list_pending_questions", "request_question"])
+    fun `server curriculum gate presents an actual single and free text card and holds the original tool`(tool: String) {
+        val request = curriculumForm(tool)
+        assertThat(request.path("operationId").asText()).isEqualTo("curriculum-call")
+        assertThat(request.path("questions")[0].path("selectionMode").asText()).isEqualTo("single")
+        assertThat(request.path("questions")[0].path("allowFreeText").asBoolean()).isTrue()
+        assertThat(outbound.none { it.path("type").asText() == "conversation.item.create" }).isTrue()
+        assertThat(responses()).hasSize(2)
+        time += Duration.ofSeconds(30).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(2)
+        assertThat(ui.filter { it.path("type").asText() == Contract.STUDY_TREE_CHANGED_EVENT }
+            .map { it.path("studyId").asLong() }).containsExactly(201L)
+    }
+
+    @Test
+    fun `curriculum choice is durable before focus and intermediate branches retain separate cards under one call`() {
+        persistStructuredInput = false
+        val submissions = mutableListOf<VoiceTutorNativeConversationController.UserInputSubmission>()
+        controller.userInputActions().subscribe { submissions += it }
+        val first = curriculumForm()
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, first, curriculumAnswers())
+        event("input_audio_buffer.cleared", "event_id" to "first-choice-clear")
+        assertThat(submissions).isEmpty()
+        val firstEvidence = stored.last()
+        controller.transcriptCompleted(firstEvidence.itemId)
+        assertThat(submissions.single().curriculum).isTrue()
+        assertThat(submissions.single().boundary?.latestAcceptedLearnerProviderItemId).isEqualTo(firstEvidence.itemId)
+        controller.completeUserInputMutation(submissions.single().id, VoiceTutorMcpToolResult("{}", false,
+            curriculumInput = VoiceTutorCurriculumUserInput("next-proposal", "다음 가지", "선택 주제: 서비스 통신", listOf("이벤트 전달 · 8"))))
+        assertThat(userInputStates().single().path("phase").asText()).isEqualTo("submitted")
+        val second = ui.last { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+        assertThat(second.path("requestId").asText()).isNotEqualTo(first.path("requestId").asText())
+        assertThat(second.path("operationId").asText()).isEqualTo(first.path("operationId").asText())
+        assertThat(outbound.none { it.path("type").asText() == "conversation.item.create" }).isTrue()
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, second, curriculumAnswers())
+        event("input_audio_buffer.cleared", "event_id" to "second-choice-clear")
+        val secondEvidence = stored.last()
+        controller.transcriptCompleted(secondEvidence.itemId)
+        assertThat(submissions).hasSize(2)
+        controller.completeUserInputMutation(submissions.last().id, VoiceTutorMcpToolResult("{\"selected\":true}", false, lessonRevision = 1))
+        assertThat(userInputStates().map { it.path("phase").asText() }).containsExactly("submitted", "submitted")
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        created("after-curriculum"); toolDone("after-curriculum", "question-lookup", "list_pending_questions")
+        assertThat(controller.beginTool("question-lookup")).isTrue()
+        assertThat(controller.toolBoundary("question-lookup")?.latestAcceptedLearnerProviderItemId).isEqualTo(secondEvidence.itemId)
+        assertThat(controller.toolRevision("question-lookup")).isEqualTo(1)
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `curriculum cancellation or typed preference releases the held tool without choosing a saved topic`(freeText: Boolean) {
+        val submissions = mutableListOf<VoiceTutorNativeConversationController.UserInputSubmission>()
+        controller.userInputActions().subscribe { submissions += it }
+        val request = curriculumForm()
+        inputControl(if (freeText) Contract.USER_INPUT_SUBMIT_EVENT else Contract.USER_INPUT_CANCEL_EVENT, request,
+            curriculumAnswers(if (freeText) "다른 주제를 생각하고 싶어요" else ""))
+        event("input_audio_buffer.cleared", "event_id" to "choice-clear")
+        if (freeText) {
+            assertThat(submissions.single().text).isEqualTo("다른 주제를 생각하고 싶어요")
+            assertThat(submissions.single().selectedIndices).isEmpty()
+            controller.completeUserInputMutation(submissions.single().id, VoiceTutorMcpToolResult("{\"selected\":false}", false))
+        } else assertThat(submissions).isEmpty()
+        val output = outbound.last { it.path("type").asText() == "conversation.item.create" }
+        assertThat(mapper.readTree(output.path("item").path("output").asText()).path("cancelled").asBoolean()).isEqualTo(!freeText)
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        assertThat(sessionStates().last().path("lessonRevision").asLong()).isEqualTo(0)
+    }
+
+    @Test
+    fun `failed curriculum action finishes the form and does not replay uncertain writes or leave it waiting`() {
+        val submissions = mutableListOf<VoiceTutorNativeConversationController.UserInputSubmission>()
+        controller.userInputActions().subscribe { submissions += it }
+        val request = curriculumForm()
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, curriculumAnswers())
+        event("input_audio_buffer.cleared", "event_id" to "choice-clear")
+        controller.completeUserInputMutation(submissions.single().id,
+            VoiceTutorMcpToolResult("{\"error\":{\"code\":\"ACTION_FAILED\"}}", true))
+        assertThat(userInputStates().last().path("phase").asText()).isEqualTo("cancelled")
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, curriculumAnswers())
+        assertThat(submissions).hasSize(1)
+    }
+
+    private fun curriculumForm(tool: String = "select_voice_study"): JsonNode {
+        opening(); speech(1); committed("curriculum-user"); created("curriculum-response")
+        toolDone("curriculum-response", "curriculum-call", tool)
+        assertThat(controller.beginTool("curriculum-call")).isTrue()
+        controller.completeTool("curriculum-call", VoiceTutorMcpToolResult("{}", false,
+            studyTreeChanged = true, changedStudyIds = listOf(201),
+            curriculumInput = VoiceTutorCurriculumUserInput("prepared-curriculum", "커리큘럼", "메인: MSA · 8\n선택: 서비스 통신", listOf("이벤트 전달 · 8"))))
+        return ui.last { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+    }
+    private fun curriculumAnswers(text: String = "") = listOf(mapOf("questionId" to "curriculum",
+        "selectedOptionIds" to (if (text.isEmpty()) listOf("topic_0") else emptyList<String>()), "text" to text))
 
     @Test
     fun `two submitted GUI choices provide distinct durable focus boundaries without synthetic ASR or repeated speech`() {
@@ -424,38 +524,31 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
-    fun `repeated learning polls retain the original operation context across later learner input`() {
+    fun `one learning operation retains its original context when the same process snapshot is refined`() {
         opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
         controller.beginTool("request")
         val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generate-1")
         controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
-        val original = ui.single { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
-        speech(2); committed("u2")
         val watch = watches.single()
-        repeat(2) {
-            val poll = controller.beginLearningOperation(watch)!!
-            val context = ui.last { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
-            assertThat(context.path("operationId").asText()).isEqualTo(poll)
-            for (field in listOf("responseId", "learnerItemId", "tutorItemId")) {
-                assertThat(context.path(field)).isEqualTo(original.path(field))
-            }
-            controller.completeOperation(poll, false)
-        }
-        assertThat(ui.count { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }).isEqualTo(3)
-        // A later response can refine that same generation process. Replacing
-        // its watch must not reassign historical/background polling to u2/r2.
+        val original = ui.single { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT && it.path("operationId").asText() == watch.operationId }
+        speech(2); committed("u2")
+        repeat(3) { controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false, learningProgress = progress)) }
         ackToolOutput(); created("r2"); toolDone("r2", "read-progress", "get_question_process")
         controller.beginTool("read-progress")
         controller.completeTool("read-progress", VoiceTutorMcpToolResult("{}", false,
             learningProgress = progress.copy(recordId = "42")))
         val refreshed = watches.last()
         assertThat(refreshed.id).isNotEqualTo(watch.id)
+        assertThat(refreshed.operationId).isEqualTo(watch.operationId)
         assertThat(refreshed.operationContext).isEqualTo(watch.operationContext)
-        val poll = controller.beginLearningOperation(refreshed)!!
-        val context = ui.last { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
-        assertThat(context.path("operationId").asText()).isEqualTo(poll)
-        assertThat(context.path("responseId").asText()).isEqualTo("r1")
-        assertThat(context.path("learnerItemId").asText()).isEqualTo("u1")
+        assertThat(original.path("responseId").asText()).isEqualTo("r1")
+        assertThat(original.path("learnerItemId").asText()).isEqualTo("u1")
+        val starts = ui.filter { it.path("type").asText() == Contract.OPERATION_EVENT && it.path("operationId").asText() == watch.operationId }
+        assertThat(starts.map { it.path("phase").asText() }).containsExactly("started")
+        controller.completeLearningPoll(refreshed, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
+        val finished = ui.filter { it.path("type").asText() == Contract.OPERATION_EVENT && it.path("operationId").asText() == watch.operationId }
+        assertThat(finished.map { it.path("phase").asText() }).containsExactly("started", "completed")
     }
 
     @Test
@@ -607,6 +700,140 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
+    fun `generation event waits for exact request output acknowledgement then reads once without polling`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "event-1")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single()
+        val count = responses().size
+        repeat(4) { controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false, learningProgress = progress)) }
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            questionReadback = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION),
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
+        assertThat(responses()).hasSize(count)
+        ackToolOutput()
+        assertThat(responses()).hasSize(count + 1)
+        assertThat(responses().last().path("response").path("instructions").asText()).contains(SAVED_QUESTION)
+        val operations = ui.filter { it.path("type").asText() == Contract.OPERATION_EVENT && it.path("name").asText() == "question_generation" }
+        assertThat(operations.map { it.path("phase").asText() }).containsExactly("started", "completed")
+        assertThat(calls.map { it.name }).containsExactly("request_question")
+    }
+
+    @Test
+    fun `observer timeout leaves saved request intact and cannot resurrect from late pending snapshots`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "event-1")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single()
+        ackToolOutput()
+        assertThat(responses()).hasSize(2)
+        controller.failLearningWatch(watch)
+        settleQuiet()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
+        assertThat(responses().last().path("response").path("instructions").asText()).contains("저장된 요청", "No question, tool, retry")
+        assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        assertThat(controller.learningWatchIsCurrent(watch)).isFalse()
+        assertThat(calls.map { it.name }).containsExactly("request_question")
+    }
+
+    @Test
+    fun `fresh pending status after observation timeout resubscribes the same job without requesting another question`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "event-1")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        ackToolOutput()
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        controller.failLearningWatch(watches.single())
+        client(Contract.SPEECH_STOPPED_EVENT, 2); committed("check-status")
+        created("status-response"); toolDone("status-response", "status", "get_question_process")
+        controller.beginTool("status")
+        controller.completeTool("status", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        assertThat(watches).hasSize(2)
+        assertThat(watches.last().id).isNotEqualTo(watches.first().id)
+        assertThat(watches.last().progress.correlationId).isEqualTo("event-1")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_generating")
+        assertThat(calls.map { it.name }).containsExactly("request_question", "get_question_process")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["GRADED", "GRADING_FAILED", "WRONG"])
+    fun `a fresh exact grading lookup recovers an observation timeout without accepting another process`(terminal: String) {
+        val matches = terminal != "WRONG"
+        val phase = if (terminal == "GRADING_FAILED") VoiceTutorLearningPhase.GRADING_FAILED else VoiceTutorLearningPhase.GRADED
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "검토한 답변")
+        val callId = serverQuestionCall().path("item").path("call_id").asText()
+        ackToolOutput(); controller.beginTool(callId)
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.GRADING, 7, "42", "grade-recover")
+        controller.completeTool(callId, VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        ackToolOutput()
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        controller.failLearningWatch(watches.single())
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
+        client(Contract.SPEECH_STOPPED_EVENT, 2); committed("check-grade")
+        created("check-grade-response"); toolDone("check-grade-response", "grade-status", "get_grading_process")
+        controller.beginTool("grade-status")
+        controller.completeTool("grade-status", VoiceTutorMcpToolResult("{}", false,
+            learningProgress = progress.copy(phase = phase,
+                correlationId = if (matches) progress.correlationId else "wrong-process")))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo(if (matches) phase.name.lowercase() else "conversation")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["silent", "tool"])
+    fun `cleared audible response is retired exactly once even when its retry never announces audio`(retry: String) {
+        opening(); speech(1); committed("clear-start"); created("first"); audio("first", "partial")
+        repeat(2) { event("output_audio_buffer.cleared", "response_id" to "first") }
+        val interruptions = ui.filter { it.path("type").asText() == Contract.RESPONSE_RECOVERING_EVENT }
+        assertThat(interruptions).hasSize(1)
+        assertThat(interruptions.single().path("responseId").asText()).isEqualTo("first")
+        assertThat(interruptions.single().path("sequence").asLong()).isEqualTo(1)
+        assertThat(event("output_audio_buffer.started", "response_id" to "first")).isFalse()
+        done("first", "partial"); settleQuiet()
+        created("second")
+        if (retry == "silent") event("response.done", "response" to mapOf("id" to "second", "status" to "completed", "output" to emptyList<Any>()))
+        else toolDone("second", "list", "list_studies")
+        assertThat(ui.none { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isTrue()
+        assertThat(stored.none { it.itemId == "partial" }).isTrue()
+        assertThat(answerStates()).isEmpty()
+        assertThat(calls.size).isEqualTo(if (retry == "silent") 0 else 1)
+    }
+
+    @Test
+    fun `new learner speech still cancels provider generation after an exact recovering notice`() {
+        opening(); speech(1); committed("u1"); created("first"); audio("first", "partial")
+        event("output_audio_buffer.cleared", "response_id" to "first")
+        assertThat(ui.count { it.path("type").asText() == Contract.RESPONSE_RECOVERING_EVENT }).isEqualTo(1)
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        assertThat(outbound.any { it.path("type").asText() == "response.cancel" && it.path("response_id").asText() == "first" }).isTrue()
+    }
+
+    @Test
+    fun `cleared first response retries silently and only exhausted recovery asks the exact learner to repeat`() {
+        opening(); speech(1); committed("clear-start"); transcript("clear-start", "그럼 이걸로 시작해보자.")
+        created("first"); audio("first", "partial")
+        event("output_audio_buffer.cleared", "response_id" to "first")
+        assertThat(ui.none { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isTrue()
+        done("first", "partial")
+        settleQuiet()
+        assertThat(responses()).hasSize(3)
+        assertThat(failures.last().kind).isEqualTo(VoiceTutorProviderTurnFailureKind.OUTPUT_BUFFER_CLEARED)
+        assertThat(failures.last().action).isEqualTo(VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED)
+        created("second")
+        event("response.done", "response" to mapOf("id" to "second", "status" to "failed", "output" to emptyList<Any>()))
+        val retry = ui.filter { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }.single()
+        assertThat(retry.path("sequence").asLong()).isEqualTo(1)
+        assertThat(failures.last().kind).isEqualTo(VoiceTutorProviderTurnFailureKind.RESPONSE_FAILED)
+        assertThat(failures.last().action).isEqualTo(VoiceTutorProviderTurnFailureAction.TURN_ABANDONED)
+        assertThat(calls).isEmpty()
+    }
+
+    @Test
     fun `server progress completes generation during new speech without any model call readback or answer capture`() {
         opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
         controller.beginTool("request")
@@ -640,7 +867,7 @@ class VoiceTutorNativeConversationControllerTest {
         val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.GRADING, 7, "42", "grade-1")
         controller.completeTool(callId, VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
         val watch = watches.single()
-        ackToolOutput(); created("poll-response"); toolDone("poll-response", "poll", "get_grading_process")
+        ackToolOutput(); speech(2); committed("status-input"); created("poll-response"); toolDone("poll-response", "poll", "get_grading_process")
         controller.beginTool("poll")
         client(Contract.SPEECH_STARTED_EVENT, 2)
         val providerEventsBefore = outbound.size
@@ -705,7 +932,7 @@ class VoiceTutorNativeConversationControllerTest {
         val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generate-1")
         controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
         val watch = watches.single()
-        ackToolOutput(); created("mutation-response"); toolDone("mutation-response", "mutation", "confirm_voice_study_mutation")
+        ackToolOutput(); speech(2); committed("change-input"); created("mutation-response"); toolDone("mutation-response", "mutation", "confirm_voice_study_mutation")
         controller.beginTool("mutation")
         controller.completeTool("mutation", VoiceTutorMcpToolResult("{}", false, lessonRevision = 1))
         assertThat(controller.learningWatchIsCurrent(watch)).isFalse()
@@ -724,7 +951,7 @@ class VoiceTutorNativeConversationControllerTest {
         val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generate-1")
         controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
         val watch = watches.single()
-        ackToolOutput(); created("poll-response"); toolDone("poll-response", "poll", "get_question_process")
+        ackToolOutput(); speech(2); committed("status-input"); created("poll-response"); toolDone("poll-response", "poll", "get_question_process")
         controller.beginTool("poll")
         controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
             learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
@@ -740,7 +967,7 @@ class VoiceTutorNativeConversationControllerTest {
         val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generate-1")
         controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
         val watch = watches.single()
-        ackToolOutput(); created("poll-response"); toolDone("poll-response", "poll", "get_question_process")
+        ackToolOutput(); speech(2); committed("status-input"); created("poll-response"); toolDone("poll-response", "poll", "get_question_process")
         controller.beginTool("poll")
         controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
             learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_FAILED)))
@@ -1535,7 +1762,7 @@ class VoiceTutorNativeConversationControllerTest {
         done("r0", "t0")
         assertThat(stored).isEmpty()
         assertThat(responses()).hasSize(2)
-        assertThat(ui.map { it.path("type").asText() }).contains(Contract.INPUT_RETRY_EVENT)
+        assertThat(ui.map { it.path("type").asText() }).doesNotContain(Contract.INPUT_RETRY_EVENT)
     }
 
     @Test
@@ -2804,7 +3031,9 @@ class VoiceTutorNativeConversationControllerTest {
         toolDone("r1", "form", "request_user_input", mapper.writeValueAsString(form))
         assertThat(controller.beginTool("form")).isTrue()
         controller.requestUserInput(calls.single(), proposal)
-        return ui.single { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+        return ui.single { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }.also {
+            assertThat(it.path("operationId").asText()).isEqualTo("form")
+        }
     }
     @ParameterizedTest
     @ValueSource(strings = ["listening", "finalizing", "review"])

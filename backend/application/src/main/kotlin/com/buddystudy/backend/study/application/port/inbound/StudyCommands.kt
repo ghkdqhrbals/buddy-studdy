@@ -22,6 +22,8 @@ data class CreateStudyTopicCommand(
     val sortOrder: Int = 0,
     val difficultyLevel: Int = 5,
     val activeForQuestions: Boolean = true,
+    /** Server-owned curriculum creation; ordinary app requests retain their supplied level. */
+    val inheritRootDifficulty: Boolean = false,
 )
 
 /** Explicitly selected direct children; this never expands their descendants. */
@@ -29,6 +31,9 @@ data class CreateStudyTopicsCommand(
     val topics: List<String>,
     val difficultyLevel: Int = 5,
     val expectedParent: ExpectedStudyMetadata? = null,
+    /** Server-owned candidate metadata, never inferred from whether a node has children. */
+    val curriculumTerminalByTopic: Map<String, Boolean> = emptyMap(),
+    val inheritRootDifficulty: Boolean = false,
 )
 
 data class UpdateStudyTopicActivationCommand(

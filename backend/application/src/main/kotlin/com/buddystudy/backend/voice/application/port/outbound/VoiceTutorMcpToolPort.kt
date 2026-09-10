@@ -1,5 +1,9 @@
 package com.buddystudy.backend.voice.application.port.outbound
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.awaitCancellation
+
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorStudyTargetCandidate
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
@@ -56,7 +60,12 @@ data class VoiceTutorMcpToolResult(
      * readback for this exact question and lesson revision.
      */
     val questionReadbackRecovery: VoiceTutorQuestionReadback? = null,
+    /** Server-owned saved direct-child choice. No provider form can invent its focus targets. */
+    val curriculumInput: VoiceTutorCurriculumUserInput? = null,
 )
+
+data class VoiceTutorCurriculumUserInput(val proposalId: String, val title: String, val prompt: String,
+    val topics: List<String>)
 
 /** A server-prepared immutable write proposal; model-authored form text cannot change it. */
 data class VoiceTutorStudyTopicUserInput(
@@ -185,6 +194,17 @@ interface VoiceTutorMcpToolPort {
     /** Called only for an exact authenticated GUI submission, never a provider tool invocation. */
     suspend fun submitStudyTopicUserInput(context: VoiceTutorWebRtcControlContext,
         proposalId: String, selectedIndices: List<Int>): VoiceTutorMcpToolResult = VoiceTutorMcpToolResult("{}", true)
+
+    /** Exact GUI choice, after its private structured transcript has been persisted. */
+    suspend fun submitCurriculumUserInput(context: VoiceTutorWebRtcControlContext, proposalId: String,
+        selectedIndex: Int?, text: String): VoiceTutorMcpToolResult = VoiceTutorMcpToolResult("{}", true)
+
+    /** Authoritative snapshots after process-change signals; cancelling collection releases its subscription. */
+    fun observeLearningProgress(context: VoiceTutorWebRtcControlContext,
+        progress: VoiceTutorLearningProgress): Flow<VoiceTutorMcpToolResult> = flow {
+        emit(pollLearningProgress(context, progress))
+        awaitCancellation()
+    }
 
     /** Read-only progress check for a previously accepted canonical operation. No model tool or speech. */
     suspend fun pollLearningProgress(

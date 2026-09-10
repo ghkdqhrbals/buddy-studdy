@@ -191,8 +191,9 @@ class OpenAIRequestExecutor(
     ): List<OpenAIPort.QuestionCoverageConcept> {
         val prompt = """
             Split this study topic into a practical learning concept tree.
-            Concepts may contain recursive children with no fixed maximum depth.
-            Put 3 to 5 question angles on leaf concepts.
+            This is a compact question-diversity guide, not the learner's saved study tree.
+            Use at most 8 concepts in total, with at most 4 levels including the root concepts.
+            Put 2 to 3 short question angles on each leaf. Keep keys and names concise.
             Topic: ${topic.ifBlank { "general study" }}
             Level: ${level.coerceIn(1, 10)}/10
             Extra tutor prompt: ${customPrompt.ifBlank { "None" }}
@@ -221,7 +222,11 @@ class OpenAIRequestExecutor(
         return parseQuestionCoverageConcepts(text)
     }
 
-    fun suggestStudyTopics(
+    fun suggestStudyTopics(apiKey: String, model: String, rootTopic: String, parentTopic: String,
+        existingTopics: Collection<String>, language: String, count: Int): List<String> =
+        suggestStudyCurriculumTopics(apiKey, model, rootTopic, parentTopic, existingTopics, language, count).map { it.topic }
+
+    fun suggestStudyCurriculumTopics(
         apiKey: String,
         model: String,
         rootTopic: String,
@@ -229,18 +234,23 @@ class OpenAIRequestExecutor(
         existingTopics: Collection<String>,
         language: String,
         count: Int,
-    ): List<String> {
+        rootDifficulty: Int = 5,
+    ): List<com.buddystudy.backend.study.application.port.outbound.StudyCurriculumTopic> {
         val outputLanguage = outputLanguageName(language)
         val prompt = """
             Recommend distinct child study topics for a learning tree.
             Root topic: $rootTopic
             Parent topic: $parentTopic
+            Original root study difficulty: ${rootDifficulty.coerceIn(1, 10)} / 10. All newly created descendants inherit this level.
+            Recommend concrete units suitable for this root difficulty, even if the selected parent has another level.
             Existing topics that must not be repeated: ${existingTopics.joinToString(", ")}
             Output language: $outputLanguage
             Return exactly ${count.coerceIn(1, 8)} concise, concrete topics.
             Do not repeat, rename, pluralize, or closely paraphrase an existing topic.
+            Classify each child with curriculumTerminal=true only when it is a concrete learning unit suitable for studying questions directly.
+            Broad branches that still need subdivision use curriculumTerminal=false. This is curriculum structure, not question-coverage concepts.
             Return JSON only:
-            {"topics":["topic 1","topic 2"]}
+            {"topics":[{"topic":"topic 1","curriculumTerminal":true},{"topic":"topic 2","curriculumTerminal":false}]}
         """.trimIndent()
         val text = chatText(
             operation = "suggest-study-topics",
@@ -252,7 +262,13 @@ class OpenAIRequestExecutor(
         val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
         return (parsed["topics"] as? List<*>)
             .orEmpty()
-            .mapNotNull { it?.toString()?.trim()?.takeIf(String::isNotEmpty) }
+            .mapNotNull { entry ->
+                val node = entry as? Map<*, *> ?: return@mapNotNull null
+                val topic = (node["topic"] as? String)?.trim()?.takeIf { it.isNotEmpty() && it.length <= 200 }
+                    ?: return@mapNotNull null
+                val terminal = node["curriculumTerminal"] as? Boolean ?: return@mapNotNull null
+                com.buddystudy.backend.study.application.port.outbound.StudyCurriculumTopic(topic, terminal)
+            }.take(count.coerceIn(1, 8))
     }
 
     suspend fun grade(
@@ -632,6 +648,7 @@ class OpenAIRequestExecutor(
             system?.let { add(SystemMessage(it)) }
             add(UserMessage(user))
         }
+        val requestOptions = options(apiKey, model, json, maxCompletionTokens, operation)
         val requestBody = linkedMapOf<String, Any?>(
             "model" to model,
             "responseFormat" to if (json) "json_object" else "text",
@@ -639,7 +656,7 @@ class OpenAIRequestExecutor(
                 system?.let { add(mapOf("role" to "system", "content" to it)) }
                 add(mapOf("role" to "user", "content" to user))
             },
-            "maxCompletionTokens" to maxCompletionTokens,
+            "maxCompletionTokens" to requestOptions.maxCompletionTokens,
         )
         return history.recordBlocking(
             ExternalApiRequest(
@@ -651,8 +668,8 @@ class OpenAIRequestExecutor(
                 body = history.json(requestBody),
             ),
         ) {
-            val response = chatModel(apiKey, model, json).call(
-                Prompt(messages, options(apiKey, model, json, maxCompletionTokens)),
+            val response = OpenAiChatModel.builder().options(requestOptions).build().call(
+                Prompt(messages, requestOptions),
             )
             val text = response.result?.output?.text ?: "{}"
             val responseBody = runCatching { history.json(response) }.getOrNull()
@@ -687,27 +704,31 @@ class OpenAIRequestExecutor(
         }
     }
 
-    private fun chatModel(apiKey: String, model: String, json: Boolean): OpenAiChatModel =
-        OpenAiChatModel.builder()
-            .options(options(apiKey, model, json))
-            .build()
-
     internal fun options(
         apiKey: String,
         model: String,
         json: Boolean,
         maxCompletionTokens: Int? = null,
+        operation: String? = null,
     ): OpenAiChatOptions {
+        // Planning has a deterministic fallback and must not hold a conversation
+        // through transport retries. Actual question/rubric generation keeps its
+        // normal budget and validation.
+        val isBoundedPlanning = operation in setOf("generate-coverage-blueprint", "suggest-study-topics")
+        val configuredTimeout = properties.openai.requestTimeoutSeconds.coerceIn(5, 180)
+        val tokenLimit = if (isBoundedPlanning) {
+            (maxCompletionTokens ?: 2_000).coerceAtMost(2_000)
+        } else maxCompletionTokens
         val builder = OpenAiChatOptions.builder()
             .apiKey(apiKey)
             .model(model)
-            .timeout(Duration.ofSeconds(properties.openai.requestTimeoutSeconds.coerceIn(5, 180)))
-            .maxRetries(properties.openai.requestMaxRetries.coerceIn(0, 3))
+            .timeout(Duration.ofSeconds(if (isBoundedPlanning) configuredTimeout.coerceAtMost(20) else configuredTimeout))
+            .maxRetries(if (isBoundedPlanning) 0 else properties.openai.requestMaxRetries.coerceIn(0, 3))
         if (json) {
             builder.responseFormat(jsonResponseFormat)
         }
-        if (maxCompletionTokens != null) {
-            builder.maxCompletionTokens(maxCompletionTokens)
+        if (tokenLimit != null) {
+            builder.maxCompletionTokens(tokenLimit)
         }
         return builder.build()
     }

@@ -421,19 +421,30 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
     private var currentLearnerSpeechSequence: Int?
     private var pendingLearnerSpeechSequence: Int?
     private var latestLearnerSpeechSequence: Int?
+    private var activeResponseInputSequence: Int?
     private var interruptedResponseIDs: [String] = []
+    private var acousticEpoch: UInt64 = 0
+    private var repeatRecoveryEpoch: UInt64?
+    private var repeatRejectedResponseID: String?
+    private var repeatReplacementResponseID: String?
+    private var lastAbandonedResponseID: String?
 
     var isAwaitingTutorResponse: Bool {
         !isUserSpeaking && !inputNeedsRepeat
             && (isAwaitingInitialResponse || hasPendingLearnerTurn || isAwaitingActiveResponseAudio)
     }
 
-    mutating func setInputNeedsRepeat(_ value: Bool) { inputNeedsRepeat = value }
+    mutating func setInputNeedsRepeat(_ value: Bool) {
+        inputNeedsRepeat = value
+        repeatRecoveryEpoch = value ? acousticEpoch : nil
+        repeatRejectedResponseID = value ? activeResponseID ?? lastAbandonedResponseID : nil
+        repeatReplacementResponseID = nil
+    }
 
     mutating func learnerTranscriptReceived(usesWebRTC: Bool) {
         // Native transcription can arrive after the same turn has failed. Only
         // the next acoustic start is evidence that the learner tried again.
-        if !usesWebRTC { inputNeedsRepeat = false }
+        if !usesWebRTC { setInputNeedsRepeat(false) }
     }
 
     mutating func awaitInitialResponse() {
@@ -456,6 +467,12 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
             return false
         }
         guard !matchesActiveResponse(responseID: responseID) else { return true }
+        // A replacement may recover an older server's provisional retry hint.
+        // Merely starting it is not evidence of audible recovery: retain the
+        // hint until that exact response produces audio in this acoustic turn.
+        repeatReplacementResponseID = inputNeedsRepeat && !isUserSpeaking
+            && repeatRecoveryEpoch == acousticEpoch && responseID != repeatRejectedResponseID ? responseID : nil
+        activeResponseInputSequence = pendingLearnerSpeechSequence ?? latestLearnerSpeechSequence ?? 0
         assistantResponseActive = true
         hasObservedTutorResponse = true
         isAwaitingInitialResponse = false
@@ -484,13 +501,18 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
         }
         assistantResponseActive = true
         isAwaitingActiveResponseAudio = false
+        if inputNeedsRepeat, !isUserSpeaking, repeatRecoveryEpoch == acousticEpoch,
+           responseID == repeatReplacementResponseID {
+            setInputNeedsRepeat(false)
+        }
         return true
     }
 
     @discardableResult
     mutating func userSpeechStarted(sequence: Int? = nil, interruptsTutor: Bool = true) -> String? {
         if let sequence, sequence <= 0 { return nil }
-        inputNeedsRepeat = false
+        acousticEpoch &+= 1
+        setInputNeedsRepeat(false)
         if let sequence { latestLearnerSpeechSequence = sequence }
         isUserSpeaking = true
         currentLearnerSpeechSequence = sequence
@@ -511,12 +533,12 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
 
     @discardableResult
     mutating func inputSettled(sequence: Int) -> Bool {
-        if sequence == 0 {
+        if sequence == 0, !(hasPendingLearnerTurn && pendingLearnerSpeechSequence == 0) {
             // Only the server's silent opening uses zero. It cannot consume a
             // real learner turn or restart waiting when ready arrives later.
             return stopWaitingForInitialResponse()
         }
-        guard sequence > 0, hasPendingLearnerTurn,
+        guard sequence >= 0, hasPendingLearnerTurn,
               pendingLearnerSpeechSequence == sequence else { return false }
         // The opening can yield to learner input without ever being announced.
         // An exact settled learner turn consumes that initial expectation too,
@@ -529,6 +551,21 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
         return true
     }
 
+    /// A server recovery is distinct from a pause or learner interruption. Only
+    /// the current generation may restore its already-consumed input wait;
+    /// duplicate/late recovery cannot acquire the next utterance or response.
+    @discardableResult
+    mutating func recoverResponse(responseID: String, sequence: Int) -> Bool {
+        guard sequence >= 0, !isUserSpeaking, !hasPendingLearnerTurn,
+              matchesActiveResponse(responseID: responseID), activeResponseInputSequence == sequence,
+              (sequence == 0 ? latestLearnerSpeechSequence == nil : latestLearnerSpeechSequence == sequence) else { return false }
+        interruptResponse(responseID: responseID)
+        setInputNeedsRepeat(false)
+        hasPendingLearnerTurn = true
+        pendingLearnerSpeechSequence = sequence
+        return true
+    }
+
     /// Retry exhaustion may precede any announced response. Match the acoustic
     /// input independently, while a known active response still requires its ID
     /// so an older failed generation cannot abandon a replacement. The caller
@@ -537,7 +574,8 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
     mutating func acceptInputRetry(sequence: Int, responseID: String?) -> Bool {
         guard sequence >= 0, !isUserSpeaking else { return false }
         if sequence == 0 {
-            guard latestLearnerSpeechSequence == nil, !hasPendingLearnerTurn else { return false }
+            guard latestLearnerSpeechSequence == nil,
+                  !hasPendingLearnerTurn || pendingLearnerSpeechSequence == 0 else { return false }
         } else {
             guard latestLearnerSpeechSequence == sequence else { return false }
         }
@@ -546,7 +584,8 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
         } else {
             guard inputSettled(sequence: sequence) else { return false }
         }
-        inputNeedsRepeat = true
+        setInputNeedsRepeat(true)
+        repeatRejectedResponseID = responseID
         return true
     }
 
@@ -555,6 +594,7 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
         assistantResponseActive = false
         isAwaitingActiveResponseAudio = false
         activeResponseID = nil
+        activeResponseInputSequence = nil
         tutorInterventionActive = false
         return true
     }
@@ -576,9 +616,12 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
     @discardableResult
     mutating func abandonResponse(responseID: String?) -> Bool {
         guard matchesActiveResponse(responseID: responseID) else { return false }
+        lastAbandonedResponseID = responseID
+        repeatReplacementResponseID = nil
         assistantResponseActive = false
         isAwaitingActiveResponseAudio = false
         activeResponseID = nil
+        activeResponseInputSequence = nil
         tutorInterventionActive = false
         return true
     }
@@ -1743,7 +1786,10 @@ final class VoiceTutorViewModel: ObservableObject {
         switch event {
         case .userInputRequest(let request):
             guard usesWebRTC, phase.isLive, !isFinalizing, let sessionID,
-                  userInputState.apply(request, sessionID: sessionID) else { break }
+                  userInputState.apply(request, sessionID: sessionID,
+                    operation: operationState.visibleEntries(at: 0).first { $0.id == request.operationId },
+                    afterCaptionID: presentationCaptions.last?.id,
+                    responseID: assistantTranscriptDraft.isEmpty ? nil : assistantTranscriptResponseID) else { break }
             // Transfer the cancel-to-next-step hold to the accepted request;
             // cancelled exercise audio must never become a new learner turn.
             answerDraftState.didReceiveCancellationChoices()
@@ -1757,9 +1803,12 @@ final class VoiceTutorViewModel: ObservableObject {
             _ = operationState.applyContext(context)
         case .operation(let event):
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
-            _ = operationState.apply(event, at: ProcessInfo.processInfo.systemUptime,
+            guard operationState.apply(event, at: ProcessInfo.processInfo.systemUptime,
                 afterCaptionID: presentationCaptions.last?.id,
-                responseID: assistantTranscriptDraft.isEmpty ? nil : assistantTranscriptResponseID)
+                responseID: assistantTranscriptDraft.isEmpty ? nil : assistantTranscriptResponseID) else { break }
+            if let operation = operationState.visibleEntries(at: 0).first(where: { $0.id == event.operationID }) {
+                userInputState.bindOperation(operation)
+            }
         case .sessionState(let event):
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
             // Only the current authenticated control receive loop reaches this
@@ -1896,6 +1945,19 @@ final class VoiceTutorViewModel: ObservableObject {
             abandonProviderTurn(responseID: responseID)
         case .responseInterrupted(let responseID):
             interruptTutorResponse(responseID: responseID)
+        case .responseRecovering(let responseID, let sequence):
+            guard usesWebRTC, phase.isLive, !isFinalizing,
+                  VoiceTutorServerEndReasonPolicy.permitsInputRetry(reason: serverEndReason, isFinalizing: isFinalizing) else { break }
+            let accepted = duplexPlaybackState.recoverResponse(responseID: responseID, sequence: sequence)
+            logDiagnostic("event=response_recovering sequence=\(sequence) responseId=\(diagnosticResponseID(responseID)) accepted=\(accepted ? 1 : 0)")
+            guard accepted else { break }
+            preserveInterruptedAssistantTranscript(responseID: responseID)
+            assistantTranscriptState.discard()
+            cancelTerminalPlayoutDrain()
+            pendingSpokenEndPlayoutTail = nil
+            _ = webRTCResponseState.abandonResponse(responseID)
+            _ = webRTCTransport?.interruptLocalPlayoutResponse(responseID: responseID)
+            phase = .listening
         case .studyFocused(let focus):
             guard phase.isLive, !isFinalizing else { break }
             if studyFocus.apply(focus, attemptID: attemptID), answerDraftState.isActive,

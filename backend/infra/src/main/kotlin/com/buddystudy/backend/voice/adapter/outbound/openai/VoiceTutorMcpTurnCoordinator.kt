@@ -302,7 +302,9 @@ internal class VoiceTutorMcpTurnCoordinator(
         )
         if (mapper.writeValueAsBytes(event).size > MAX_PROVIDER_EVENT_BYTES) throw VoiceTutorMcpProtocolException()
         call.expectedOutput = output
-        call.resetsHumanRoundBudget = call.toolName == VoiceTutorUserInputContract.TOOL && result.userInputCompleted
+        // A server curriculum form can complete a select/question tool. Only this typed
+        // exact GUI receipt, never provider JSON or a tool name, starts a new human budget.
+        call.resetsHumanRoundBudget = result.userInputCompleted
         call.acknowledgementDeadline = nowNanos + acknowledgementTimeout.toNanos()
         return event
     }

@@ -29,6 +29,8 @@ struct VoiceTutorUserInputRequest: Codable, Equatable, Sendable, Identifiable {
     let sequence: Int64
     let title: String
     let questions: [VoiceTutorUserInputQuestion]
+    /// Display-only link to the operation that produced this card.
+    var operationId: String? = nil
     var id: String { requestId }
 
     var isValid: Bool {
@@ -36,6 +38,7 @@ struct VoiceTutorUserInputRequest: Codable, Equatable, Sendable, Identifiable {
             && sequence > 0 && !title.isEmpty && title.utf16.count <= 200
             && (1...5).contains(questions.count) && questions.allSatisfy(\.isValid)
             && Set(questions.map(\.id)).count == questions.count
+            && (operationId.map { VoiceTutorOperationEvent.isSafeIdentifier($0, maximumLength: 191) } ?? true)
     }
 
     static func isIdentifier(_ value: String) -> Bool {
@@ -89,9 +92,25 @@ struct VoiceTutorUserInputState: Equatable, Sendable {
         var status: Status = .pending
         var hasError = false
         var actionFailed = false
+        let fallbackAnchor: VoiceTutorOperationState.Entry
+        private(set) var originOperation: VoiceTutorOperationState.Entry? = nil
+        private(set) var submittedAnswers: [VoiceTutorUserInputAnswer]? = nil
+        fileprivate var sendingAnswers: [VoiceTutorUserInputAnswer]? = nil
         var id: String { request.id }
         var isWaiting: Bool { status == .pending || status == .submitting }
         var canSubmit: Bool { status == .pending && VoiceTutorUserInputState.validAnswers(answers, for: request) }
+
+        fileprivate mutating func bindOrigin(_ operation: VoiceTutorOperationState.Entry?) {
+            // Any authenticated operation may request a server-owned form,
+            // including curriculum gates inside selection/question tools.
+            // Its exact ID, not the displayed function name, fixes the origin.
+            guard originOperation == nil, let operation, operation.id == request.operationId else { return }
+            originOperation = operation
+        }
+
+        fileprivate mutating func acknowledgeSubmission() {
+            submittedAnswers = sendingAnswers
+        }
     }
     private(set) var entries: [Entry] = []
     private(set) var latestSequence: Int64 = 0
@@ -100,13 +119,29 @@ struct VoiceTutorUserInputState: Equatable, Sendable {
     var holdsMicrophone: Bool { pending != nil }
 
     @discardableResult
-    mutating func apply(_ request: VoiceTutorUserInputRequest, sessionID: String) -> Bool {
+    mutating func apply(_ request: VoiceTutorUserInputRequest, sessionID: String,
+                        operation: VoiceTutorOperationState.Entry? = nil,
+                        afterCaptionID: UUID? = nil, responseID: String? = nil) -> Bool {
         guard !isClosed, request.isValid, request.sessionId == sessionID,
               request.sequence > latestSequence, !entries.contains(where: { $0.id == request.id }), pending == nil else { return false }
         latestSequence = request.sequence
-        entries.append(Entry(request: request, answers: request.questions.map { .init(questionId: $0.id) }))
+        let fallback = VoiceTutorOperationState.Entry(
+            event: .init(sequence: request.sequence, operationID: request.id, name: "request_user_input",
+                         phase: .started, elapsedMilliseconds: 0),
+            receivedAt: 0, startedSequence: request.sequence, context: nil,
+            afterCaptionID: afterCaptionID, fallbackResponseID: responseID)
+        var entry = Entry(request: request, answers: request.questions.map { .init(questionId: $0.id) }, fallbackAnchor: fallback)
+        entry.bindOrigin(operation)
+        entries.append(entry)
         if entries.count > 64 { entries.removeFirst(entries.count - 64) }
         return true
+    }
+
+    /// The first exact operation wins, including when its event arrives after
+    /// the card. Completion and later transcripts never replace its origin.
+    mutating func bindOperation(_ operation: VoiceTutorOperationState.Entry) {
+        guard let index = entries.firstIndex(where: { $0.request.operationId == operation.id }) else { return }
+        entries[index].bindOrigin(operation)
     }
 
     @discardableResult
@@ -118,8 +153,12 @@ struct VoiceTutorUserInputState: Equatable, Sendable {
               event.errorCode == nil || (event.phase == .pending && ["INVALID_ANSWERS", "ACTION_FAILED"].contains(event.errorCode)) else { return false }
         latestSequence = event.sequence
         switch event.phase {
-        case .pending: entries[index].status = .pending
-        case .submitted: entries[index].status = .submitted
+        case .pending:
+            entries[index].status = .pending
+            entries[index].sendingAnswers = nil
+        case .submitted:
+            entries[index].status = .submitted
+            entries[index].acknowledgeSubmission()
         case .cancelled: entries[index].status = .cancelled
         }
         entries[index].hasError = event.errorCode != nil
@@ -140,6 +179,7 @@ struct VoiceTutorUserInputState: Equatable, Sendable {
         guard !isClosed, let index = entries.firstIndex(where: { $0.id == requestID && $0.status == .pending }),
               cancel || entries[index].canSubmit else { return nil }
         let control = VoiceTutorUserInputControl(request: entries[index].request, answers: cancel ? nil : entries[index].answers)
+        entries[index].sendingAnswers = control.answers
         entries[index].status = .submitting
         return control
     }
@@ -159,6 +199,55 @@ struct VoiceTutorUserInputState: Equatable, Sendable {
             let text = answer.text.trimmingCharacters(in: .whitespacesAndNewlines)
             return (question.allowFreeText || text.isEmpty)
                 && (!answer.selectedOptionIds.isEmpty || !text.isEmpty)
+        }
+    }
+}
+
+/// Cards use the same causal source resolution as MCP rows. A card answering
+/// an earlier card inherits that card's location, so successive forms remain
+/// with their originating conversation rather than collecting at the bottom.
+struct VoiceTutorUserInputTranscriptLayout {
+    private enum Placement {
+        case beforeCaptions, caption(UUID), assistantDraft, answerDraft
+    }
+    private(set) var beforeCaptions: [VoiceTutorUserInputState.Entry] = []
+    private(set) var byCaptionID: [UUID: [VoiceTutorUserInputState.Entry]] = [:]
+    private(set) var afterAssistantDraft: [VoiceTutorUserInputState.Entry] = []
+    private(set) var afterAnswerDraft: [VoiceTutorUserInputState.Entry] = []
+    private(set) var unresolvedWaiting: [VoiceTutorUserInputState.Entry] = []
+
+    init(entries: [VoiceTutorUserInputState.Entry], captions: [VoiceTutorCaption],
+         assistantResponseID: String?, hasAssistantDraft: Bool, answerDraftID: String? = nil) {
+        var placements: [String: Placement] = [:]
+        var earlierInputIDs = Set<String>()
+        for entry in entries {
+            defer { earlierInputIDs.insert(entry.id) }
+            // An explicit operation ID must never fall back to receipt timing.
+            guard let origin = entry.request.operationId == nil ? entry.fallbackAnchor : entry.originOperation else {
+                if entry.isWaiting { unresolvedWaiting.append(entry) }
+                continue
+            }
+            let source = VoiceTutorOperationTranscriptLayout(entries: [origin], captions: captions,
+                assistantResponseID: assistantResponseID, hasAssistantDraft: hasAssistantDraft,
+                userInputIDs: earlierInputIDs, answerDraftID: answerDraftID)
+            let placement: Placement?
+            if !source.beforeCaptions.isEmpty { placement = .beforeCaptions }
+            else if let id = source.byCaptionID.keys.first { placement = .caption(id) }
+            else if !source.afterAssistantDraft.isEmpty { placement = .assistantDraft }
+            else if !source.afterAnswerDraft.isEmpty { placement = .answerDraft }
+            else if let id = source.byUserInputID.keys.first { placement = placements[id] }
+            else { placement = nil }
+            guard let placement else {
+                if entry.isWaiting { unresolvedWaiting.append(entry) }
+                continue
+            }
+            placements[entry.id] = placement
+            switch placement {
+            case .beforeCaptions: beforeCaptions.append(entry)
+            case .caption(let id): byCaptionID[id, default: []].append(entry)
+            case .assistantDraft: afterAssistantDraft.append(entry)
+            case .answerDraft: afterAnswerDraft.append(entry)
+            }
         }
     }
 }

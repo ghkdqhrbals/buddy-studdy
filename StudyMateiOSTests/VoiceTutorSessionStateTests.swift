@@ -641,10 +641,126 @@ final class VoiceTutorOperationTranscriptPresentationTests: XCTestCase {
 }
 
 @MainActor
+final class VoiceTutorUserInputTranscriptPresentationTests: XCTestCase {
+    func testCompletedCardsRenderBelowTheirOriginalConversationInLightAndDarkOnEveryDevice() async throws {
+        let first = VoiceTutorCaption(speaker: .tutor, text: "먼저 주제를 골라 주세요.", responseID: "form_origin_first")
+        let second = VoiceTutorCaption(speaker: .tutor, text: "이번에는 학습 방식을 골라 주세요.", responseID: "form_origin_second")
+        let later = VoiceTutorCaption(speaker: .tutor, text: "제출한 방식으로 이어갈게요.", responseID: "form_later")
+        let captions = [first, second, later]
+        let sessionID = "11111111-1111-4111-a111-111111111111"
+        let attemptID = "22222222-2222-4222-a222-222222222222"
+        let cancelled = VoiceTutorUserInputRequest(requestId: "33333333-3333-4333-a333-333333333333",
+            sessionId: sessionID, attemptId: attemptID, sequence: 1, title: "처음 제안",
+            questions: [.init(id: "topic", prompt: "주제를 선택해 주세요.", selectionMode: .single,
+                options: [.init(id: "redis", label: "Redis")], allowFreeText: true)], operationId: "call_form_first")
+        let submitted = VoiceTutorUserInputRequest(requestId: "44444444-4444-4444-a444-444444444444",
+            sessionId: sessionID, attemptId: attemptID, sequence: 3, title: "학습 방식",
+            questions: [.init(id: "style", prompt: "원하는 설명을 모두 골라 주세요.", selectionMode: .multiple,
+                options: [.init(id: "concept", label: "개념 정리"), .init(id: "example", label: "실제 예시"),
+                    .init(id: "practice", label: "연습 문제")], allowFreeText: true)], operationId: "call_form_second")
+        let answer = VoiceTutorUserInputAnswer(questionId: "style", selectedOptionIds: ["concept", "example"],
+            text: "서비스 경계 예시를 보여 주세요.\n한글 입력도 그대로 남아요.")
+        var operations = VoiceTutorOperationState()
+        var inputs = VoiceTutorUserInputState()
+        XCTAssertTrue(operations.applyContext(.init(operationID: "call_form_first", responseID: first.responseID)))
+        XCTAssertTrue(operations.apply(.init(sequence: 1, operationID: "call_form_first", name: "request_user_input",
+            phase: .started, elapsedMilliseconds: 0), at: 1))
+        XCTAssertTrue(inputs.apply(cancelled, sessionID: sessionID, operation: operations.active.first,
+            afterCaptionID: later.id, responseID: later.responseID))
+        XCTAssertNotNil(inputs.submit(requestID: cancelled.id, cancel: true))
+        XCTAssertTrue(inputs.apply(.init(requestId: cancelled.id, sessionId: sessionID, attemptId: attemptID,
+            sequence: 2, phase: .cancelled, errorCode: nil)))
+        XCTAssertTrue(operations.apply(.init(sequence: 2, operationID: "call_form_first", name: "request_user_input",
+            phase: .completed, elapsedMilliseconds: 1_000), at: 2, afterCaptionID: later.id))
+        XCTAssertTrue(operations.applyContext(.init(operationID: "call_form_second", responseID: second.responseID)))
+        XCTAssertTrue(operations.apply(.init(sequence: 3, operationID: "call_form_second", name: "request_user_input",
+            phase: .started, elapsedMilliseconds: 0), at: 3))
+        XCTAssertTrue(inputs.apply(submitted, sessionID: sessionID, operation: operations.active.first,
+            afterCaptionID: later.id, responseID: later.responseID))
+        inputs.update(requestID: submitted.id, answer: answer)
+        XCTAssertEqual(inputs.submit(requestID: submitted.id, cancel: false)?.answers, [answer])
+        XCTAssertTrue(inputs.apply(.init(requestId: submitted.id, sessionId: sessionID, attemptId: attemptID,
+            sequence: 4, phase: .submitted, errorCode: nil)))
+        XCTAssertTrue(operations.apply(.init(sequence: 4, operationID: "call_form_second", name: "request_user_input",
+            phase: .completed, elapsedMilliseconds: 2_000), at: 5, afterCaptionID: later.id))
+        let placement = VoiceTutorUserInputTranscriptLayout(entries: inputs.entries, captions: captions,
+            assistantResponseID: nil, hasAssistantDraft: false)
+        XCTAssertEqual(placement.byCaptionID[first.id]?.map(\.id), [cancelled.id])
+        XCTAssertEqual(placement.byCaptionID[second.id]?.map(\.id), [submitted.id])
+        XCTAssertNil(placement.byCaptionID[later.id])
+        XCTAssertNil(inputs.entries.first?.submittedAnswers)
+        XCTAssertEqual(inputs.entries.last?.submittedAnswers, [answer])
+
+        for appearance in [UIUserInterfaceStyle.light, .dark] {
+            let style = appearance == .light ? "light" : "dark"
+            let harness = try OperationTranscriptHarness(captions: captions, operations: operations,
+                userInputs: inputs, appearance: appearance)
+            defer { harness.close() }
+            try await harness.settle()
+            // Mount already-final cards, then let the full screen's initial
+            // scroll/appearance settle before collecting either theme image.
+            try await Task.sleep(for: .milliseconds(500))
+            try await harness.scrollTranscript(toBottom: false)
+            #if targetEnvironment(simulator)
+            try assertNativeOrder([first.text, cancelled.title, second.text], in: harness)
+            XCTAssertFalse(harness.semanticTextElements().contains { $0.accessibilityLabel == "Redis" },
+                "A blank cancelled form cannot look like a selected answer")
+            #endif
+            attach(harness, name: "voice-input-transcript-\(style)-cancelled-origin")
+            try await harness.scrollTranscript(toBottom: true)
+            #if targetEnvironment(simulator)
+            try assertNativeOrder([second.text, submitted.title, AppStrings(language: .korean).voiceTutorInputSubmittedAnswers,
+                submitted.questions[0].prompt, "개념 정리 · 실제 예시", answer.text, later.text], in: harness)
+            XCTAssertFalse(harness.semanticTextElements().contains { $0.accessibilityLabel == "연습 문제" },
+                "Read-only results omit the option that was never submitted")
+            #endif
+            attach(harness, name: "voice-input-transcript-\(style)-submitted-origin")
+        }
+    }
+
+    private func assertNativeOrder(_ texts: [String], in harness: OperationTranscriptHarness) throws {
+        let nodes = harness.semanticTextElements()
+        let description = nodes.map { "\($0.accessibilityLabel ?? "nil") frame=\($0.accessibilityFrame)" }.joined(separator: "\n")
+        var previousIndex: Int?
+        var previousFrame: CGRect?
+        for text in texts {
+            let matches = nodes.indices.filter { nodes[$0].accessibilityLabel == text }
+            XCTAssertEqual(matches.count, 1, "Each original caption and result must render once: \(text)\n\(description)")
+            let index = try XCTUnwrap(matches.first, description)
+            let frame = nodes[index].accessibilityFrame
+            XCTAssertGreaterThan(frame.height, 0, description)
+            if let previousIndex { XCTAssertLessThan(previousIndex, index, "Native reading order must match the originating conversation\n\(description)") }
+            if let previousFrame { XCTAssertLessThanOrEqual(previousFrame.maxY, frame.minY + 1,
+                "The card and submitted answers must be below their origin and above the later conversation\n\(description)") }
+            previousIndex = index
+            previousFrame = frame
+        }
+    }
+
+    private func attach(_ harness: OperationTranscriptHarness, name: String) {
+        harness.layout()
+        let image = UIGraphicsImageRenderer(bounds: harness.window.bounds).image { _ in
+            XCTAssertTrue(harness.window.drawHierarchy(in: harness.window.bounds, afterScreenUpdates: true))
+        }
+        XCTAssertGreaterThan(image.pngData()?.count ?? 0, 1_024)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
+@MainActor
 private final class OperationTranscriptProbe: ObservableObject {
     @Published var captions: [VoiceTutorCaption]
-    @Published var operations = VoiceTutorOperationState()
-    init(captions: [VoiceTutorCaption]) { self.captions = captions }
+    @Published var operations: VoiceTutorOperationState
+    @Published var userInputs: VoiceTutorUserInputState
+    init(captions: [VoiceTutorCaption], operations: VoiceTutorOperationState = .init(),
+         userInputs: VoiceTutorUserInputState = .init()) {
+        self.captions = captions
+        self.operations = operations
+        self.userInputs = userInputs
+    }
 }
 
 private struct OperationTranscriptTestParent: View {
@@ -652,7 +768,8 @@ private struct OperationTranscriptTestParent: View {
     var body: some View {
         VoiceTutorCallScreen(topic: "스프링", presentation: VoiceTutorCallPresentation(phase: .listening),
             strings: AppStrings(language: .korean), operationState: probe.operations,
-            captions: probe.captions, showsTranscript: .constant(true), showsSummary: .constant(false))
+            userInputState: probe.userInputs, captions: probe.captions,
+            showsTranscript: .constant(true), showsSummary: .constant(false))
             .environment(\.locale, Locale(identifier: "ko_KR"))
             .environment(\.scenePhase, .active)
     }
@@ -664,14 +781,15 @@ private final class OperationTranscriptHarness {
     let window: UIWindow
     private let previousKeyWindow: UIWindow?
 
-    init(captions: [VoiceTutorCaption]) throws {
+    init(captions: [VoiceTutorCaption], operations: VoiceTutorOperationState = .init(),
+         userInputs: VoiceTutorUserInputState = .init(), appearance: UIUserInterfaceStyle = .dark) throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try XCTUnwrap(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
         previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
-        probe = OperationTranscriptProbe(captions: captions)
+        probe = OperationTranscriptProbe(captions: captions, operations: operations, userInputs: userInputs)
         window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
-        window.overrideUserInterfaceStyle = .dark
+        window.overrideUserInterfaceStyle = appearance
         window.rootViewController = UIHostingController(rootView: OperationTranscriptTestParent(probe: probe))
         window.makeKeyAndVisible()
         layout()
@@ -687,6 +805,16 @@ private final class OperationTranscriptHarness {
         window.setNeedsLayout()
         window.layoutIfNeeded()
         window.rootViewController?.view.layoutIfNeeded()
+    }
+
+    func scrollTranscript(toBottom: Bool) async throws {
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        let scroll = try XCTUnwrap(descendants(window).compactMap { $0 as? UIScrollView }
+            .max { $0.contentSize.height < $1.contentSize.height }, "The actual CallScreen must contain its native transcript scroll view")
+        let top = -scroll.adjustedContentInset.top
+        let bottom = max(top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+        scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: toBottom ? bottom : top), animated: false)
+        try await settle()
     }
 
     func semanticTextElements() -> [NSObject] {

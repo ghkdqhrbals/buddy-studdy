@@ -9,6 +9,7 @@ import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
 import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalogCandidate
 import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalogPort
+import com.buddystudy.backend.study.application.port.outbound.StudyCurriculumTopic
 import com.buddystudy.backend.study.application.service.StudyTreeService
 import com.buddystudy.study.domain.entity.StudyEntity
 import kotlinx.coroutines.CancellationException
@@ -27,6 +28,44 @@ class StudyTreeServiceTest {
     private val catalog = FakeSystemTopicCatalogPort()
     private val service = StudyTreeService(studies, NoopUserPort(), suggestions, catalog)
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
+
+    @Test
+    fun `curriculum recommendation keeps original root level and provider terminal classification for selected descendants`(): Unit = runBlocking {
+        studies.rows += study(1, null, "MSA").apply { difficultyLevel = 8 }
+        studies.rows += study(2, 1, "Service communication").apply { difficultyLevel = 2 }
+        suggestions.curriculum = listOf(StudyCurriculumTopic("Event delivery", true), StudyCurriculumTopic("Service protocols", false))
+        val response = service.suggestTopics(principal, 2, 2)
+        assertThat(suggestions.rootDifficulty).isEqualTo(8)
+        assertThat(suggestions.rootName).isEqualTo("MSA")
+        assertThat(suggestions.parentName).isEqualTo("Service communication")
+        assertThat(response.topicDetails.map { it.curriculumTerminal }).containsExactly(true, false)
+        assertThat(catalog.savedCurriculum).isEqualTo(suggestions.curriculum)
+        assertThat(studies.saved).isEmpty()
+    }
+
+    @Test
+    fun `empty or unusable provider curriculum uses bounded fallback instead of treating unexpanded topic as terminal`(): Unit = runBlocking {
+        studies.rows += study(1, null, "Redis")
+        for (topics in listOf(emptyList(), listOf(StudyCurriculumTopic("Redis", true)), listOf(StudyCurriculumTopic("", false)))) {
+            suggestions.curriculum = topics
+            val response = service.suggestTopics(principal, 1, 3)
+            assertThat(response.source).isEqualTo("FALLBACK")
+            assertThat(response.suggestions).hasSize(3)
+            assertThat(response.topicDetails).allMatch { it.curriculumTerminal }
+        }
+        assertThat(studies.saved).isEmpty()
+    }
+
+    @Test
+    fun `bounded fallback recommendations are terminal learning units and retain their parent scope`(): Unit = runBlocking {
+        studies.rows += study(1, null, "Redis")
+        suggestions.failure = IllegalStateException("unavailable")
+        val response = service.suggestTopics(principal, 1, 3)
+        assertThat(response.suggestions).allMatch { it.startsWith("Redis · ") }
+        assertThat(response.topicDetails).hasSize(3)
+        assertThat(response.topicDetails).allMatch { it.curriculumTerminal }
+        assertThat(studies.saved).isEmpty()
+    }
 
     @Test
     fun `activating a descendant resumes its root schedule`(): Unit = runBlocking {
@@ -186,6 +225,7 @@ class StudyTreeServiceTest {
 
         val response = service.suggestTopics(principal, parentStudyId = 4, count = 2)
 
+        assertThat(response.topicDetails).allMatch { it.curriculumTerminal }
         assertThat(response.depth).isEqualTo(4)
         assertThat(response.suggestions).containsExactly("Selected branch candidate", "Another candidate")
         assertThat(catalog.savedDepth).isEqualTo(4)
@@ -260,8 +300,18 @@ class StudyTreeServiceTest {
 
     private class FakeSuggestionPort : StudyTopicSuggestionPort {
         var next: List<String> = emptyList()
+        var curriculum: List<StudyCurriculumTopic>? = null
+        var rootDifficulty: Int? = null
+        var rootName: String? = null
+        var parentName: String? = null
         var failure: RuntimeException? = null
         var calls = 0
+
+        override suspend fun suggestCurriculumTopics(rootTopic: String, parentTopic: String, existingTopics: Collection<String>,
+            language: String, count: Int, rootDifficulty: Int): List<StudyCurriculumTopic> {
+            this.rootDifficulty = rootDifficulty; rootName = rootTopic; parentName = parentTopic
+            return curriculum ?: suggestTopics(rootTopic, parentTopic, existingTopics, language, count).map { StudyCurriculumTopic(it) }
+        }
 
         override suspend fun suggestTopics(
             rootTopic: String,
@@ -280,6 +330,7 @@ class StudyTreeServiceTest {
         val rows = mutableListOf<SystemTopicCatalogCandidate>()
         var savedTopics: List<String> = emptyList()
         var savedDepth: Int? = null
+        var savedCurriculum: List<StudyCurriculumTopic> = emptyList()
 
         override suspend fun findChildren(
             rootTopicKey: String,
@@ -288,6 +339,12 @@ class StudyTreeServiceTest {
             depth: Int,
             limit: Int,
         ): List<SystemTopicCatalogCandidate> = rows.take(limit)
+
+        override suspend fun saveCurriculumChildren(rootTopicKey: String, parentPathKey: String, language: String, depth: Int,
+            topics: List<StudyCurriculumTopic>, now: Instant) {
+            savedCurriculum = topics
+            saveChildren(rootTopicKey, parentPathKey, language, depth, topics.map { it.topic }, now)
+        }
 
         override suspend fun saveChildren(
             rootTopicKey: String,

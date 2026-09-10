@@ -11,7 +11,6 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewed
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import kotlinx.coroutines.delay
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -33,6 +32,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         var readLearnerTurn = 0L
         var checked = false
         @Volatile var generation: JsonNode? = null
+        @Volatile var completedGeneration: String? = null
         val gradings = linkedMapOf<String, Submitted>()
     }
     private data class Submitted(val record: JsonNode, val answer: String)
@@ -70,13 +70,22 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
                 if (body.path("correlationId").asText() != correlationId) return invalidResult()
                 if (!body.path("terminal").asBoolean()) return output(emptyMap<String, Any>()).copy(learningProgress = requested)
                 val record = body.path("question")
-                if (record.isNull || record.isMissingNode) return output(emptyMap<String, Any>()).copy(
-                    learningProgress = requested.copy(phase = VoiceTutorLearningPhase.QUESTION_FAILED))
+                if (record.isNull || record.isMissingNode) {
+                    completeGeneration(state, correlationId)
+                    return output(emptyMap<String, Any>()).copy(
+                        learningProgress = requested.copy(phase = VoiceTutorLearningPhase.QUESTION_FAILED))
+                }
                 if (id(record.path("studyId")) != state.scope.study || recordId(record) == null ||
                     record.path("questionStatus").asText() != "UNGRADED" || !readableQuestion(record)) return invalidResult()
-                // Do not bind, clear the generation, acquire readback permission or
-                // speak. The existing model tool can still retrieve this same result.
+                // This is the accepted generation's exact durable result. Binding does not
+                // authorize speech: the native controller fences delivery to its original
+                // learner/lesson boundary. A later explicit lookup can recover an undelivered question.
+                val newlyBound = bind(context, state, record)
+                if (!current(context, state)) return unavailable()
+                completeGeneration(state, correlationId)
                 output(emptyMap<String, Any>()).copy(questionChange = change(state, record),
+                    questionReadback = if (newlyBound) readback(state, record) else null,
+                    questionReadbackRecovery = if (!newlyBound) readback(state, record) else null,
                     learningProgress = requested.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = recordId(record).toString()))
             }
             VoiceTutorLearningPhase.GRADING -> {
@@ -211,7 +220,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
     private suspend fun request(context: VoiceTutorWebRtcControlContext, state: State): VoiceTutorMcpToolResult {
         if (learnerTurn(context, state.scope.revision) == null) return persistencePending()
         if (!current(context, state)) return unavailable()
-        state.generation?.let { return output(mapOf("generation" to it, "notice" to "This generation is already requested. Continue get_question_process with its correlationId; do not request another question."))
+        state.generation?.let { return output(mapOf("generation" to it, "notice" to "This generation is already requested. The server subscribes to its completion and will deliver the saved question; do not poll, request another question or ask the learner to start again."))
             .copy(learningProgress = progress(state, VoiceTutorLearningPhase.QUESTION_GENERATING)) }
         val checked = pending(context, state)
         if (checked.isError) return checked
@@ -225,13 +234,15 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         if (result.isError || !current(context, state)) return if (result.isError) result else unavailable()
         val body = mapper.readTree(result.output)
         if (id(body.path("topicId")) != state.scope.study || !correlation(body.path("correlationId"))) return invalidResult()
+        state.completedGeneration = null
         state.generation = body
-        return output(mapOf("generation" to body, "notice" to "Generation was requested through the normal question allowance. Call get_question_process with this correlationId; read only the saved question when it completes."))
+        return output(mapOf("generation" to body, "notice" to "Generation was requested through the normal question allowance. The server subscribes to completion and delivers the saved question. Do not poll or ask the learner to repeat the start request."))
             .copy(learningProgress = progress(state, VoiceTutorLearningPhase.QUESTION_GENERATING))
     }
 
     private suspend fun generation(context: VoiceTutorWebRtcControlContext, state: State, correlationId: String): VoiceTutorMcpToolResult {
-        if (state.generation?.path("correlationId")?.asText() != correlationId) return unavailable()
+        if (state.generation?.path("correlationId")?.asText() != correlationId &&
+            !(state.generation == null && state.completedGeneration == correlationId)) return unavailable()
         val result = awaitProcess(context, state, "get_question_process", correlationId)
         if (result.isError) return result
         val body = mapper.readTree(result.output)
@@ -240,14 +251,14 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
             if (id(record.path("studyId")) != state.scope.study || recordId(record) == null || record.path("questionStatus").asText() != "UNGRADED" || !readableQuestion(record)) return invalidResult()
             val newlyBound = bind(context, state, record)
             if (!current(context, state)) return unavailable()
-            state.generation = null
+            completeGeneration(state, correlationId)
             return output(mapOf("terminal" to true, "pendingQuestion" to state.question,
                 "notice" to if (newlyBound) "Read this saved question faithfully, then wait for an actual answer. Do not invent a score or reveal the answer hint." else SAME_QUESTION_NOTICE))
                 .copy(questionChange = if (newlyBound) change(state, record) else null,
                     questionReadback = if (newlyBound) readback(state, record) else null,
                     questionReadbackRecovery = if (!newlyBound) readback(state, record) else null)
         }
-        if (body.path("terminal").asBoolean()) state.generation = null
+        if (body.path("terminal").asBoolean()) completeGeneration(state, correlationId)
         return result.copy(learningProgress = progress(state, if (body.path("terminal").asBoolean())
             VoiceTutorLearningPhase.QUESTION_FAILED else VoiceTutorLearningPhase.QUESTION_GENERATING).copy(correlationId = correlationId))
     }
@@ -338,18 +349,20 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         return progress(state, phase, record)
     }
 
-    private suspend fun awaitProcess(context: VoiceTutorWebRtcControlContext, state: State, name: String, correlationId: String): VoiceTutorMcpToolResult {
-        // One bounded tool round waits for normal async work without a rapid model polling loop.
-        repeat(18) { attempt ->
-            if (!current(context, state)) return unavailable()
-            val result = invoke(context, name, mapOf("correlation_id" to correlationId))
-            if (result.isError || !current(context, state)) return if (result.isError) result else unavailable()
-            val node = mapper.readTree(result.output)
-            if (node.path("correlationId").asText() != correlationId) return invalidResult()
-            if (node.path("terminal").asBoolean() || attempt == 17) return result
-            delay(500)
+    private fun completeGeneration(state: State, correlationId: String) = synchronized(state) {
+        if (state.generation?.path("correlationId")?.asText() == correlationId) {
+            state.generation = null
+            state.completedGeneration = correlationId
         }
-        return unavailable()
+    }
+
+    private suspend fun awaitProcess(context: VoiceTutorWebRtcControlContext, state: State, name: String, correlationId: String): VoiceTutorMcpToolResult {
+        // Explicit status/recovery reads take one snapshot; event subscriptions own waiting.
+        if (!current(context, state)) return unavailable()
+        val result = invoke(context, name, mapOf("correlation_id" to correlationId))
+        if (result.isError || !current(context, state)) return if (result.isError) result else unavailable()
+        if (mapper.readTree(result.output).path("correlationId").asText() != correlationId) return invalidResult()
+        return result
     }
 
     private suspend fun bind(context: VoiceTutorWebRtcControlContext, state: State, record: JsonNode): Boolean {

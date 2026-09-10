@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalogCandidate
 import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalogPort
+import com.buddystudy.backend.study.application.port.outbound.StudyCurriculumTopic
 import kotlinx.coroutines.reactive.awaitSingle
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Component
@@ -22,7 +23,7 @@ class SystemTopicCatalogPersistenceAdapter(
     ): List<SystemTopicCatalogCandidate> =
         client.sql(
             """
-            select topic, sort_order
+            select topic, sort_order, curriculum_terminal
             from system_topic_catalog
             where root_topic_hash = :rootTopicHash
               and parent_path_hash = :parentPathHash
@@ -41,6 +42,7 @@ class SystemTopicCatalogPersistenceAdapter(
                 SystemTopicCatalogCandidate(
                     topic = row.get("topic", String::class.java)!!,
                     sortOrder = row.get("sort_order", java.lang.Integer::class.java)!!.toInt(),
+                    curriculumTerminal = row.get("curriculum_terminal", java.lang.Boolean::class.java)?.booleanValue() ?: false,
                 )
             }
             .all()
@@ -55,21 +57,26 @@ class SystemTopicCatalogPersistenceAdapter(
         depth: Int,
         topics: List<String>,
         now: Instant,
-    ) {
+    ) = saveCurriculumChildren(rootTopicKey, parentPathKey, language, depth, topics.map { StudyCurriculumTopic(it) }, now)
+
+    @Transactional
+    override suspend fun saveCurriculumChildren(rootTopicKey: String, parentPathKey: String, language: String,
+        depth: Int, topics: List<StudyCurriculumTopic>, now: Instant) {
         topics.take(10).forEachIndexed { index, topic ->
             client.sql(
                 """
                 insert into system_topic_catalog (
                     root_topic_key, root_topic_hash, parent_path_key, parent_path_hash,
                     topic_key, language, depth,
-                    topic, sort_order, created_at, updated_at
+                    topic, sort_order, curriculum_terminal, created_at, updated_at
                 ) values (
                     :rootTopicKey, :rootTopicHash, :parentPathKey, :parentPathHash,
                     :topicKey, :language, :depth,
-                    :topic, :sortOrder, :now, :now
+                    :topic, :sortOrder, :curriculumTerminal, :now, :now
                 )
                 on duplicate key update
                     topic = values(topic),
+                    curriculum_terminal = curriculum_terminal or values(curriculum_terminal),
                     sort_order = least(sort_order, values(sort_order)),
                     updated_at = values(updated_at)
                 """.trimIndent(),
@@ -78,10 +85,11 @@ class SystemTopicCatalogPersistenceAdapter(
                 .bind("rootTopicHash", rootTopicKey.sha256())
                 .bind("parentPathKey", parentPathKey)
                 .bind("parentPathHash", parentPathKey.sha256())
-                .bind("topicKey", topic.normalizedCatalogTopicKey())
+                .bind("topicKey", topic.topic.normalizedCatalogTopicKey())
                 .bind("language", language)
                 .bind("depth", depth)
-                .bind("topic", topic)
+                .bind("topic", topic.topic)
+                .bind("curriculumTerminal", topic.curriculumTerminal)
                 .bind("sortOrder", index)
                 .bind("now", now)
                 .fetch()

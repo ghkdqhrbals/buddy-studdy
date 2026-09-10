@@ -82,6 +82,7 @@ data class StudyRoomResponse(
     val latestQuestion: StudyRecordResponse? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val curriculumTerminal: Boolean = false,
 )
 
 /**
@@ -96,6 +97,7 @@ data class RootStudyCreationResponse(
     val difficultyLevel: Int,
     val enabled: Boolean,
     val activeForQuestions: Boolean,
+    val curriculumTerminal: Boolean = false,
 )
 
 /** Owner-lock-protected outcome for idempotent child creation. */
@@ -107,7 +109,10 @@ data class StudyTopicCreationResponse(
     val difficultyLevel: Int,
     val enabled: Boolean,
     val activeForQuestions: Boolean,
+    val curriculumTerminal: Boolean = false,
 )
+
+data class StudyTopicSuggestionDetail(val topic: String, val curriculumTerminal: Boolean)
 
 data class StudyTopicSuggestionsResponse(
     val parentStudyId: Long,
@@ -116,6 +121,7 @@ data class StudyTopicSuggestionsResponse(
     val depth: Int = 1,
     val maxDepth: Int = com.buddystudy.study.domain.StudyTreePolicy.MAX_DESCENDANT_DEPTH,
     val childLimit: Int = com.buddystudy.study.domain.StudyTreePolicy.MAX_TOPIC_SUGGESTIONS,
+    val topicDetails: List<StudyTopicSuggestionDetail> = emptyList(),
 )
 
 data class StudyTopicsCreationResponse(
