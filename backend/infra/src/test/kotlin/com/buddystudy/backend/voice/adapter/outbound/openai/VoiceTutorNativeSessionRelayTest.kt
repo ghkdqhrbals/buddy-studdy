@@ -652,6 +652,46 @@ class VoiceTutorNativeSessionRelayTest {
     }
 
     @Test
+    fun `cancelling a captured answer delivers a real app form and returns to dialogue without any answer writer`() {
+        val tools = FakeTools { VoiceTutorMcpToolResult("{}", false,
+            questionReadback = VoiceTutorQuestionReadback(7, "42", "저장된 문제를 설명하세요.")) }
+        Fixture(tools = tools, userInputEnabled = true).use { f ->
+            val answer = f.manualQuestion()
+            f.capturedLearner(2, "partial-answer")
+            f.transcript("partial-answer", "아직 끝내지 않은 답변")
+            f.await("private canonical answer source retained") {
+                f.stored.any { it.path("item_id").asText() == "partial-answer" }
+            }
+            assertThat(f.stored.single { it.path("item_id").asText() == "partial-answer" }
+                .path(Metadata.POST_CALL_EVIDENCE).asBoolean()).isFalse()
+            f.answerControl(Contract.ANSWER_CANCEL_EVENT, answer)
+            f.await("authenticated cancellation schedules exact form call") { f.serverCalls().size == 1 }
+            f.ack(f.serverCalls().single())
+            f.await("native tool worker publishes the next-action form") { f.inputRequests().size == 1 }
+            val form = f.inputRequests().single()
+            assertThat(f.answerStates().last().path("code").asText()).isEqualTo("ANSWER_CANCELLED")
+            assertThat(form.path("questions")[0].path("options").map { it.path("id").asText() })
+                .containsExactly("another_topic", "free_conversation", "later")
+            assertThat(tools.reviewed).isEmpty()
+            assertThat(tools.skipped).isEmpty()
+            assertThat(tools.invocations.map { it.name }).containsExactly("list_studies")
+            assertThat(f.responses()).hasSize(3)
+            f.control(mapOf("type" to Contract.USER_INPUT_CANCEL_EVENT,
+                "requestId" to form.path("requestId").asText(), "sessionId" to form.path("sessionId").asText(),
+                "attemptId" to form.path("attemptId").asText()))
+            f.await("cancelled choice requests clean input buffer") {
+                f.outgoing.any { it.path("type").asText() == "input_audio_buffer.clear" }
+            }
+            f.provider("input_audio_buffer.cleared", "event_id" to "choice-clear")
+            f.await("cancelled form result is final") { f.outputs().size == 2 }
+            f.ack(f.outputs().last())
+            f.await("one safe cancellation acknowledgement") { f.responses().size == 4 }
+            assertThat(f.responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
     fun `model authored submit is rejected without invoking any canonical answer writer`() {
         Fixture().use { f ->
             f.opening(); f.learner(1, "learner-1")

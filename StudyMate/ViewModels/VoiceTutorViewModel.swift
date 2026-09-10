@@ -807,6 +807,10 @@ final class VoiceTutorViewModel: ObservableObject {
     var isAnswerSubmitting: Bool { answerDraftState.phase == .submitting }
     var canSubmitReviewedAnswer: Bool { canControlAnswer && answerDraftState.canSubmit }
     var canSkipReviewedQuestion: Bool { canControlAnswer && answerDraftState.canSkip }
+    var canCancelLearning: Bool {
+        usesWebRTC && phase.isLive && !isFinalizing && !userInputState.holdsMicrophone
+            && activeConnection?.isCurrent() == true && answerDraftState.canCancel
+    }
     var presentationCaptions: [VoiceTutorCaption] {
         let hidden = Set(answerSourceItemIDs.compactMap { learnerCaptionIDsByItemID[$0] }).union(heldAnswerCaptionIDs)
         return captions.filter { !hidden.contains($0.id) }
@@ -1134,6 +1138,19 @@ final class VoiceTutorViewModel: ObservableObject {
         guard canSkipReviewedQuestion, let controls = localSpeechEvents,
               let command = answerDraftState.requestSkip() else { return }
         persistVoiceAnswerDraft(force: answerDraftState.hasUserEdited)
+        guard webRTCTransport?.setMuted(true) == true else {
+            await failAnswerControl()
+            return
+        }
+        controls.yield(command)
+    }
+
+    func cancelLearning() async {
+        guard canCancelLearning, let controls = localSpeechEvents,
+              let command = answerDraftState.requestCancel() else { return }
+        // This abandons only the current voice exercise. Keep its unsubmitted
+        // draft; the server must neither submit nor skip the saved question.
+        persistVoiceAnswerDraft(force: true)
         guard webRTCTransport?.setMuted(true) == true else {
             await failAnswerControl()
             return
@@ -1727,6 +1744,9 @@ final class VoiceTutorViewModel: ObservableObject {
         case .userInputRequest(let request):
             guard usesWebRTC, phase.isLive, !isFinalizing, let sessionID,
                   userInputState.apply(request, sessionID: sessionID) else { break }
+            // Transfer the cancel-to-next-step hold to the accepted request;
+            // cancelled exercise audio must never become a new learner turn.
+            answerDraftState.didReceiveCancellationChoices()
             guard webRTCTransport?.setMuted(true) == true else { await failAnswerControl(); break }
         case .userInputState(let event):
             guard usesWebRTC, phase.isLive, !isFinalizing, userInputState.apply(event) else { break }
@@ -1904,6 +1924,12 @@ final class VoiceTutorViewModel: ObservableObject {
         case .answerState(let event):
             guard usesWebRTC, phase.isLive, !isFinalizing,
                   connectionAttemptFence.isCurrent(attemptID), connection.isCurrent() else { break }
+            if answerDraftState.isCancelling, event.code == "ANSWER_CANCEL_UNAVAILABLE",
+               event.answerID == answerDraftState.answerID, event.recordID == answerDraftState.recordID,
+               event.studyID == answerDraftState.studyID, event.revision == answerDraftState.revision {
+                await failAnswerControl()
+                break
+            }
             let isNewAnswer = answerDraftState.answerID != event.answerID
             let cancelledDraft = event.phase == .cancelled
                 ? VoiceTutorUnsubmittedAnswerSnapshot(answerDraftState) : nil

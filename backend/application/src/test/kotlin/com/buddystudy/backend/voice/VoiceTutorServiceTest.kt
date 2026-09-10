@@ -279,6 +279,9 @@ class VoiceTutorServiceTest {
             .contains("do not append the next substantive question")
             .contains("wait without repeated readiness prompts or pressure")
             .contains("A pause, greeting or microphone check never means the call or lesson has ended")
+            .contains("Cancel Learning (학습 취소)", "preserves its draft and saved unanswered question")
+            .contains("Choosing free conversation or learning later keeps the lesson stopped and the call open")
+            .contains("partial answer speech retained in the transcript is not that new request")
     }
 
     @Test
@@ -1370,6 +1373,52 @@ class VoiceTutorServiceTest {
     }
 
     @Test
+    fun `canonical answer sources retain exact private history without post call learning`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val summaries = FakeSummary()
+        val service = service(persistence, summaries = summaries)
+        for (role in VoiceTutorTranscriptRole.entries) {
+            val original = "  ${role.name} 원음성 기록\n취소해도 보존할 내용  "
+            assertThat(service.appendTranscript(principal, persistence.session.id, "canonical-${role.name}", role,
+                original, now, lessonRevision = 3, canonicalAnswerSource = true, conversationSequence = 12)).isTrue()
+            assertThat(persistence.lastCanonicalAnswerSource).isTrue()
+            assertThat(persistence.lastPostCallEvidence).isFalse()
+            assertThat(persistence.lastInterrupted).isFalse()
+            assertThat(persistence.lastTranscript).isEqualTo(original)
+            assertThat(persistence.lastConversationSequence).isEqualTo(12)
+            assertThat(persistence.lastStudyQuestionProviderItemId).isNull()
+            assertThat(persistence.lastAskedStudyQuestion).isFalse()
+        }
+        assertThat(summaries.calls).isZero()
+    }
+
+    @Test
+    fun `canonical answer source cannot combine semantic authority post call eligibility or missing order`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val service = service(persistence)
+        suspend fun append(postCall: Boolean = false, interrupted: Boolean = false, sequence: Long? = 4,
+            revision: Long = 2, question: String? = null, answer: String? = null, asks: Boolean = false,
+            isQuestion: Boolean = false, parts: List<String> = emptyList(), text: String = "원문") =
+            service.appendTranscript(principal, persistence.session.id, "invalid-canonical", VoiceTutorTranscriptRole.TUTOR,
+                text, now, lessonRevision = revision, studyQuestionProviderItemId = question,
+                studyAnswerProviderItemId = answer, askedStudyQuestion = asks, isStudyQuestion = isQuestion,
+                studyAnswerProviderItemIds = parts, postCallEvidence = postCall, conversationSequence = sequence,
+                interrupted = interrupted, canonicalAnswerSource = true)
+        assertThat(append(postCall = true)).isFalse()
+        assertThat(append(interrupted = true)).isFalse()
+        assertThat(append(sequence = null)).isFalse()
+        assertThat(append(sequence = 0)).isFalse()
+        assertThat(append(revision = -1)).isFalse()
+        assertThat(append(question = "question")).isFalse()
+        assertThat(append(answer = "answer")).isFalse()
+        assertThat(append(asks = true)).isFalse()
+        assertThat(append(isQuestion = true)).isFalse()
+        assertThat(append(parts = listOf("part"))).isFalse()
+        assertThat(append(text = "가".repeat(20_001))).isFalse()
+        assertThat(persistence.transcriptAppendCalls).isZero()
+    }
+
+    @Test
     fun `interrupted tutor archive preserves original text and never accepts live learning metadata`() = runBlocking<Unit> {
         val persistence = FakePersistence(now)
         val service = service(persistence)
@@ -1629,6 +1678,7 @@ class VoiceTutorServiceTest {
         var postCallLearningCandidates = false
         var lastPostCallEvidence = false
         var lastInterrupted = false
+        var lastCanonicalAnswerSource = false
         var lastTranscript: String? = null
         var lastConversationSequence: Long? = null
         var reserveOverride: ReserveVoiceTutorSessionResult? = null
@@ -1811,6 +1861,7 @@ class VoiceTutorServiceTest {
             postCallEvidence: Boolean,
             conversationSequence: Long?,
             interrupted: Boolean,
+            canonicalAnswerSource: Boolean,
         ): Boolean {
             transcriptAppendCalls += 1
             lastTranscriptLessonRevision = lessonRevision
@@ -1818,6 +1869,7 @@ class VoiceTutorServiceTest {
             lastAskedStudyQuestion = askedStudyQuestion
             lastPostCallEvidence = postCallEvidence
             lastInterrupted = interrupted
+            lastCanonicalAnswerSource = canonicalAnswerSource
             lastTranscript = transcript
             lastConversationSequence = conversationSequence
             return transcriptAppendResult

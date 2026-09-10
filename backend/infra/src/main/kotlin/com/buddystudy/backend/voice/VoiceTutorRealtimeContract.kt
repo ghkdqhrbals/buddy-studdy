@@ -38,6 +38,7 @@ internal object VoiceTutorRealtimeContract {
     const val ANSWER_TRANSCRIPT_EVENT = "buddystudy.voice.answer.transcript"
     const val ANSWER_FINISH_EVENT = "buddystudy.voice.answer.finish"
     const val ANSWER_SUBMIT_EVENT = "buddystudy.voice.answer.submit"
+    const val ANSWER_CANCEL_EVENT = "buddystudy.voice.answer.cancel"
     const val ANSWER_SKIP_EVENT = "buddystudy.voice.answer.skip"
     const val STUDY_FOCUSED_EVENT = "buddystudy.voice.study.focused"
     const val TURN_PROTOCOL_HEADER = "X-Voice-Turn-Protocol"

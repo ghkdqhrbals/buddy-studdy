@@ -251,7 +251,8 @@ enum VoiceTutorRealtimeEventParser {
                   let rawPhase = string("phase", in: object), let phase = VoiceTutorAnswerDraftState.Phase(rawValue: rawPhase), phase != .inactive,
                   object["text"] == nil || (object["text"] as? String).map({ $0.utf16.count <= VoiceTutorAnswerDraftState.maximumTextLength }) == true,
                   object["code"] == nil || (object["code"] as? String).map({
-                      ["ANSWER_TRANSCRIPT_INCOMPLETE", "ANSWER_SUBMISSION_FAILED", "ANSWER_TOO_LONG"].contains($0)
+                      ["ANSWER_TRANSCRIPT_INCOMPLETE", "ANSWER_SUBMISSION_FAILED", "ANSWER_TOO_LONG",
+                       "ANSWER_CANCELLED", "ANSWER_CANCEL_UNAVAILABLE"].contains($0)
                   }) == true else { return .ignored(type: type) }
             return .answerState(VoiceTutorAnswerStateEvent(answerID: answerID, studyID: studyID, recordID: recordID,
                 revision: revision, phase: phase, text: string("text", in: object), code: string("code", in: object)))

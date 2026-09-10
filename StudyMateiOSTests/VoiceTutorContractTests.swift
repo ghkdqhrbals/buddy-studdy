@@ -4388,6 +4388,8 @@ final class VoiceTutorContractTests: XCTestCase {
         paused.isSupported = true
         let pauseRequest = try XCTUnwrap(paused.requestPause())
         _ = paused.acknowledge(sequence: pauseRequest.sequence, paused: true)
+        var cancelling = makeState(.review, text: text)
+        XCTAssertNotNil(cancelling.requestCancel())
         let fixtures: [VoiceTutorCompactCallSnapshot] = [
             .init(name: "answer-started-empty", phase: .listening, topic: "스프링",
                   answerDraftState: makeState(.listening, text: "")),
@@ -4408,6 +4410,8 @@ final class VoiceTutorContractTests: XCTestCase {
                   answerDraftState: makeState(.review, text: "")),
             .init(name: "answer-submitting", phase: .listening, showsTranscript: true, topic: "스프링",
                   answerDraftState: makeState(.submitting, text: text)),
+            .init(name: "answer-cancelling", phase: .listening, showsTranscript: true, topic: "스프링",
+                  answerDraftState: cancelling),
             .init(name: "answer-retry-accessibility", phase: .listening, showsTranscript: true,
                   language: .english, topic: "Spring", size: CGSize(width: 320, height: 696), dynamicType: .accessibility3,
                   answerDraftState: makeState(.failed, text: "B. Spring supplies the core framework. Spring Boot simplifies configuration.")),
@@ -4943,6 +4947,45 @@ final class VoiceTutorContractTests: XCTestCase {
             module, captureDelegate: capture, renderDelegate: render
         ))
         withExtendedLifetime((capture, render, other, module)) {}
+    }
+
+    func testVoiceEchoCancellationReadinessRequiresAnActiveUnbypassedProcessingPath() {
+        let permits = VoiceTutorEchoCancellationPolicy.canOpenMicrophone
+        XCTAssertFalse(permits(true, true, false, false, false, false, false))
+        XCTAssertFalse(permits(true, true, true, false, false, false, false), "Requested/resolved AEC alone is not active processing")
+        XCTAssertFalse(permits(true, true, true, false, true, false, false), "Platform processing requires the live voice I/O graph")
+        XCTAssertFalse(permits(true, true, true, false, true, true, true), "A bypassed platform echo path cannot admit learner capture")
+        XCTAssertFalse(permits(true, true, false, true, true, true, false))
+        XCTAssertFalse(permits(false, true, true, false, true, true, false),
+                       "The iPhone may retain active VPIO flags after the actual audio engine stops")
+        XCTAssertFalse(permits(true, false, true, false, true, true, false), "An idle capture device cannot admit learner input")
+        XCTAssertTrue(permits(true, true, true, false, true, true, false))
+        XCTAssertTrue(permits(true, true, true, true, false, false, true), "Software AEC remains valid when platform processing is unavailable")
+    }
+
+    func testVoiceCommunicationProcessingOptionsKeepLocalTrackEnabledAndUseAutomaticAEC() throws {
+        let options = VoiceTutorEchoCancellationPolicy.communicationOptions()
+        XCTAssertTrue(options.echoCancellation)
+        XCTAssertTrue(options.noiseSuppression, "Apple couples platform AEC and noise suppression")
+        XCTAssertTrue(options.autoGainControl)
+        XCTAssertTrue(options.highPassFilter)
+        XCTAssertEqual(options.echoCancellationMode, .automatic)
+        XCTAssertEqual(options.noiseSuppressionMode, .automatic)
+        XCTAssertEqual(options.autoGainControlMode, .automatic)
+        let capture = VoiceTutorContractNativeAudioDelegate()
+        let module = try VoiceTutorAudioProcessingModuleFactory.make(captureDelegate: capture)
+        let factory = LKRTCPeerConnectionFactory(audioDeviceModuleType: .audioEngine,
+            bypassVoiceProcessing: false, encoderFactory: nil, decoderFactory: nil,
+            audioProcessingModule: module)
+        let source = factory.audioSource(with: nil)
+        let track = factory.audioTrack(with: source, trackId: "synthetic-echo-policy")
+        XCTAssertTrue(track.isEnabled)
+        let result = try VoiceTutorEchoCancellationPolicy.configure(track)
+        XCTAssertTrue(result.isSuccess)
+        XCTAssertEqual(result.code, .stored, "No sender or audio I/O is started by this policy test")
+        XCTAssertTrue(track.isEnabled, "Echo control cannot remove the learner's ability to interrupt the tutor")
+        XCTAssertFalse(factory.audioDeviceModule.isRecording)
+        withExtendedLifetime((capture, module, factory, source, track)) {}
     }
 
     func testNativeVoiceCaptureDiagnosticsAreBoundedAndClosedTapsCannotRevive() {
@@ -6009,6 +6052,7 @@ final class VoiceTutorContractTests: XCTestCase {
         preflight.append(nativeVoiceCapturePreflight(phase: "factory_created", device: device))
         let source = factory.audioSource(with: nil)
         let track = factory.audioTrack(with: source, trackId: "synthetic-native-capture-probe")
+        XCTAssertTrue(try VoiceTutorEchoCancellationPolicy.configure(track).isSuccess)
         var capturePeer: LKRTCPeerConnection?
         defer {
             tap.close()
@@ -6037,17 +6081,20 @@ final class VoiceTutorContractTests: XCTestCase {
         // The peer is retained only for native initialization: no sender, SDP,
         // ICE gathering, remote candidate, provider, recorder, or playout.
         preflight.append(nativeVoiceCapturePreflight(phase: "before_native_start", device: device))
-        let startStatus = device.initAndStartRecording()
+        let startStatus = device.initAndStartRecording(audioProcessingOptions: VoiceTutorEchoCancellationPolicy.communicationOptions())
         preflight.append(nativeVoiceCapturePreflight(phase: "after_native_start", device: device, startStatus: startStatus))
         XCTAssertEqual(startStatus, 0, "The native microphone device failed to start")
         guard startStatus == 0 else { return }
         let deadline = ProcessInfo.processInfo.systemUptime + 3
-        while tap.snapshot().validInputBufferCount < 5 && ProcessInfo.processInfo.systemUptime < deadline {
+        while (tap.snapshot().validInputBufferCount < 5 || !VoiceTutorEchoCancellationPolicy.isActive(factory: factory))
+                && ProcessInfo.processInfo.systemUptime < deadline {
             try await Task.sleep(for: .milliseconds(50))
         }
         preflight.append(nativeVoiceCapturePreflight(phase: "capture_complete", device: device, startStatus: startStatus))
         let snapshot = tap.snapshot()
         let observed = diagnostics.snapshot()
+        let processing = factory.audioProcessingState
+        let platform = device.platformAudioProcessingState
         let attachment = XCTAttachment(string: """
         initializationCount=\(snapshot.initializationCount)
         processedBufferCount=\(snapshot.processedBufferCount)
@@ -6057,6 +6104,17 @@ final class VoiceTutorContractTests: XCTestCase {
         gateEnabled=\(snapshot.gateEnabled)
         initializedDiagnosticCount=\(observed.initializationEvents)
         firstValidInputDiagnosticCount=\(observed.firstInputEvents)
+        aecRequested=\(processing.echoCancellation.requested?.isEnabled == true)
+        aecSoftwareResolved=\(processing.echoCancellation.isSoftwareResolved)
+        aecSoftwareActive=\(processing.echoCancellation.isSoftwareActive)
+        aecPlatformResolved=\(processing.echoCancellation.isPlatformResolved)
+        aecPlatformActive=\(processing.echoCancellation.isPlatformActive)
+        platformAECRequested=\(platform.echoCancellation.isRequested)
+        platformAECActive=\(platform.echoCancellation.isActive)
+        voiceProcessingEnabledRequested=\(platform.isVoiceProcessingEnabledRequested)
+        voiceProcessingBypassedRequested=\(platform.isVoiceProcessingBypassedRequested)
+        voiceProcessingEnabledActive=\(platform.isVoiceProcessingEnabledActive)
+        voiceProcessingBypassedActive=\(platform.isVoiceProcessingBypassedActive)
         """)
         attachment.name = "native-voice-capture-metadata-only"
         attachment.lifetime = .keepAlways
@@ -6071,6 +6129,22 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(observed.firstInputEvents, 1)
         XCTAssertEqual(observed.activityEvents, 0)
         XCTAssertFalse(observed.firstInput?.gateEnabled ?? true)
+        XCTAssertTrue(VoiceTutorEchoCancellationPolicy.isActive(factory: factory),
+                      "Real processed input frames must have an active echo canceller before media-ready can open capture")
+        XCTAssertFalse(device.isMicrophoneMuted, "AEC must not rely on muting the native microphone")
+        // This deliberately sender-less probe seeds the ADM directly. Its
+        // requested/resolved factory values belong to VoiceEngine defaults;
+        // they cannot verify track option application without an SDP sender.
+        // Validate the actual Apple path seeded by initAndStartRecording.
+        XCTAssertTrue(platform.echoCancellation.isRequested)
+        XCTAssertTrue(platform.echoCancellation.isActive)
+        XCTAssertTrue(platform.isVoiceProcessingEnabledRequested)
+        XCTAssertFalse(platform.isVoiceProcessingBypassedRequested)
+        XCTAssertTrue(platform.isVoiceProcessingEnabledActive)
+        XCTAssertFalse(platform.isVoiceProcessingBypassedActive)
+        XCTAssertTrue(processing.echoCancellation.isPlatformActive)
+        XCTAssertFalse(processing.echoCancellation.isSoftwareActive,
+                       "The native Apple probe must not stack software AEC over the platform path")
         XCTAssertNil(peer.localDescription)
         XCTAssertNil(peer.remoteDescription)
         XCTAssertTrue(peer.senders.isEmpty)
@@ -6107,6 +6181,60 @@ final class VoiceTutorContractTests: XCTestCase {
     }
 
     @MainActor
+    func testOptInLegacyVoiceProcessingConfiguresAnUnbypassedDuplexGraph() throws {
+        guard ProcessInfo.processInfo.environment["BUDDYSTUDY_NATIVE_VOICE_CAPTURE_TEST"] == "1" else {
+            throw XCTSkip("Native voice-processing probe requires BUDDYSTUDY_NATIVE_VOICE_CAPTURE_TEST=1.")
+        }
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Apple Voice Processing I/O must be verified on a physical iPhone.")
+        #else
+        guard AVAudioApplication.shared.recordPermission == .granted,
+              UIApplication.shared.applicationState == .active else {
+            throw XCTSkip("Voice-processing probe needs an active test host with microphone permission already granted.")
+        }
+        let session = AVAudioSession.sharedInstance()
+        let previousCategory = session.category
+        let previousMode = session.mode
+        let previousOptions = session.categoryOptions
+        let engine = AVAudioEngine()
+        defer {
+            engine.stop()
+            try? engine.inputNode.setVoiceProcessingEnabled(false)
+            try? session.setActive(false, options: [.notifyOthersOnDeactivation])
+            try? session.setCategory(previousCategory, mode: previousMode, options: previousOptions)
+        }
+        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        try session.setActive(true)
+        guard session.isInputAvailable else {
+            throw XCTSkip("No microphone route is available for Voice Processing I/O.")
+        }
+
+        try VoiceTutorPCMVoiceProcessing.configure(engine)
+        XCTAssertTrue(engine.inputNode.isVoiceProcessingEnabled)
+        XCTAssertTrue(engine.outputNode.isVoiceProcessingEnabled,
+                      "Input capture and tutor playout must use the same native duplex processing graph")
+        XCTAssertFalse(engine.inputNode.isVoiceProcessingBypassed)
+        XCTAssertTrue(engine.inputNode.isVoiceProcessingAGCEnabled)
+        engine.inputNode.isVoiceProcessingBypassed = true
+        try VoiceTutorPCMVoiceProcessing.configure(engine)
+        XCTAssertFalse(engine.inputNode.isVoiceProcessingBypassed,
+                       "A reused graph must not retain a previous bypass state")
+        XCTAssertFalse(engine.isRunning, "This configuration probe never captures or plays audio")
+        let attachment = XCTAttachment(string: """
+        \(nativeVoiceCapturePreflight(phase: "legacy_vpio_configured"))
+        inputVoiceProcessing=\(engine.inputNode.isVoiceProcessingEnabled)
+        outputVoiceProcessing=\(engine.outputNode.isVoiceProcessingEnabled)
+        voiceProcessingBypassed=\(engine.inputNode.isVoiceProcessingBypassed)
+        voiceProcessingAGC=\(engine.inputNode.isVoiceProcessingAGCEnabled)
+        engineRunning=\(engine.isRunning)
+        """)
+        attachment.name = "legacy-voice-processing-configuration-metadata-only"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        #endif
+    }
+
+    @MainActor
     private func nativeVoiceCapturePreflight(
         phase: String,
         device: LKRTCAudioDeviceModule? = nil,
@@ -6123,6 +6251,8 @@ final class VoiceTutorContractTests: XCTestCase {
             "outputChannelCount=\(session.outputNumberOfChannels)",
             "inputRouteCount=\(session.currentRoute.inputs.count)",
             "outputRouteCount=\(session.currentRoute.outputs.count)",
+            "inputPorts=\(session.currentRoute.inputs.map { $0.portType.rawValue }.joined(separator: ","))",
+            "outputPorts=\(session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))",
             "category=\(session.category.rawValue)",
             "mode=\(session.mode.rawValue)",
             "categoryOptions=\(session.categoryOptions.rawValue)",
@@ -6238,7 +6368,9 @@ final class VoiceTutorContractTests: XCTestCase {
                 onFinishAnswer: { XCTFail("A visual fixture must never finish microphone capture") },
                 onSubmitAnswer: { XCTFail("A visual fixture must never submit an answer") },
                 canSkipAnswer: fixture.answerDraftState.canSkip,
-                onSkipAnswer: { XCTFail("A visual fixture must never skip a saved question") }
+                onSkipAnswer: { XCTFail("A visual fixture must never skip a saved question") },
+                canCancelLearning: fixture.answerDraftState.canCancel,
+                onCancelLearning: { XCTFail("A visual fixture must never cancel a saved question") }
             )
             .navigationTitle(strings.voiceTutorCallTitle)
             .navigationBarTitleDisplayMode(.inline)

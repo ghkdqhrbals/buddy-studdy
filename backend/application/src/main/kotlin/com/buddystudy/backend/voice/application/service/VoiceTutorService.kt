@@ -422,23 +422,28 @@ class VoiceTutorService(
         postCallEvidence: Boolean,
         conversationSequence: Long?,
         interrupted: Boolean,
+        canonicalAnswerSource: Boolean,
     ): Boolean {
         val registered = registered(principal)
         require(lessonRevision >= -1) { "Voice Tutor lesson revision was invalid." }
-        val source = if (interrupted) transcript else transcript.trim()
+        val source = if (interrupted || canonicalAnswerSource) transcript else transcript.trim()
         // A native final turn must not become a deceptively complete clipped answer.
-        if ((postCallEvidence || interrupted) && source.length > MAX_TURN_CHARACTERS) return false
+        if ((postCallEvidence || interrupted || canonicalAnswerSource) && source.length > MAX_TURN_CHARACTERS) return false
         val normalized = source.take(MAX_TURN_CHARACTERS)
         if (normalized.isBlank()) return false
         if (interrupted && (role != VoiceTutorTranscriptRole.TUTOR || postCallEvidence ||
                 conversationSequence == null || conversationSequence <= 0 || lessonRevision < 0 ||
                 studyQuestionProviderItemId != null || studyAnswerProviderItemId != null ||
                 askedStudyQuestion || isStudyQuestion || studyAnswerProviderItemIds.isNotEmpty())) return false
+        if (canonicalAnswerSource && (postCallEvidence || interrupted || conversationSequence == null ||
+                conversationSequence <= 0 || lessonRevision < 0 ||
+                studyQuestionProviderItemId != null || studyAnswerProviderItemId != null ||
+                askedStudyQuestion || isStudyQuestion || studyAnswerProviderItemIds.isNotEmpty())) return false
         if (postCallEvidence && (conversationSequence == null || conversationSequence <= 0 ||
                 studyQuestionProviderItemId != null || studyAnswerProviderItemId != null ||
                 askedStudyQuestion || isStudyQuestion || studyAnswerProviderItemIds.isNotEmpty())
         ) return false
-        if (!postCallEvidence && !interrupted && conversationSequence != null) return false
+        if (!postCallEvidence && !interrupted && !canonicalAnswerSource && conversationSequence != null) return false
         val itemId = providerItemId.trim().take(191).ifEmpty { "${role.name.lowercase()}-${occurredAt.toEpochMilli()}" }
         return persistence.appendTranscript(
             registered.userId,
@@ -466,6 +471,7 @@ class VoiceTutorService(
             postCallEvidence = postCallEvidence,
             conversationSequence = conversationSequence,
             interrupted = interrupted,
+            canonicalAnswerSource = canonicalAnswerSource,
         )
     }
 
@@ -720,6 +726,7 @@ class VoiceTutorService(
         appendLine("Select an exact saved topic with select_voice_study when the learner chooses it or wants to start learning it. Selection is separate from mutation and needs no additional confirmation or special wording. Only its successful voiceLessonFocus establishes the current topic, immutable level and revision. A read or creation alone never selects a topic. For a broad subject, navigate its real saved tree conversationally; do not quiz on an unrelated branch or invent saved children.")
         appendLine("A contextual agreement to your offer to start, such as '그렇게 하자', means continue that exact agreed action now: call select_voice_study for the known saved ID, then use its actual saved question or request_question as needed. Do not answer only with a promise to prepare, demand the same agreement again, or remain silent while imagining work was started. A function_call_output is the final result of that invocation, including errors; an error is not a still-running selection. Selection has no background job to wait for. Never claim a selection or change is processing without an actual outstanding call. Only question-generation/grading results that explicitly return a pending process may require further progress checks. An uncertain write must be checked against saved state, never automatically repeated; it does not prevent the learner from choosing another topic.")
         appendLine("The learner can cancel a proposed study direction or change topics at any time in ordinary conversation. For '그거 취소해', '그거 말고 다른 학습으로 먼저 시작하자', or equivalent intent, stop the previous topic's automatic question/lesson continuation and follow the latest request. Do not require waiting for the old selection, reject switching because a prior call failed, or claim that cancellation is unavailable. If the new exact topic is clear, select it; if unspecified, ask one short question or show a choice among actual saved topics. A selection that already committed remains a real saved focus until another selection succeeds: do not claim to have undone it, delete a topic, erase a draft, undo a completed setting change or resubmit an answer. A successful selection result with voiceQuestion.lookupRequired=true needs a separate list_pending_questions call only if that direction is still wanted. A late result marked followupCancelled reports saved state only and must not restart the abandoned lesson; address the latest learner input instead. Previously submitted question-generation/grading jobs keep their records independently and never prevent choosing a different study.")
+        appendLine("Cancelling learning, cancelling a choice, skipping one question and ending the call are distinct actions. An explicit app Cancel Learning (학습 취소) stops only the current unsubmitted answer capture, preserves its draft and saved unanswered question, and shows a server-owned next-action form. Never describe that as answer submission, skipping, deleting, undoing a saved setting or hanging up. Do not resume the old question automatically. A choice-form cancelled=true result grants no permission: acknowledge cancellation briefly once, then listen in free conversation without repeating that form or making a new selection. Choosing free conversation or learning later keeps the lesson stopped and the call open; do not generate a question, request another preference form or call end_voice_conversation. Choosing another topic means resolve an actual saved topic choice before teaching. Follow a new exact learner request or free-text choice normally; partial answer speech retained in the transcript is not that new request and must never be submitted or used to restart the cancelled lesson.")
         appendLine("Except for the exact server-owned studyTopicProposal form described above, to create a root, create a child, rename, change level or delete, call prepare_voice_study_mutation with the requested exact action and only its relevant fields. Read owned target/parent IDs first. Natural first-person new-study intent is sufficient to prepare; literal create/save words are unnecessary. A new node defaults to level 5 unless the learner specified 1-10; creating a node is separate from question generation and uses no question quota.")
         appendLine("Preparation makes NO change. Ask its returned confirmation_question once, naming the target, parent and new name/level as applicable; for deletion explicitly include descendants. If the learner also wants to study the changed/new node immediately, include that start in the same natural question. Wait until the question finishes playing and the learner replies; then interpret their natural yes/no yourself and call confirm_voice_study_mutation with the exact proposal_id and confirm=true or false. Do not repeat the original command or ask a second confirmation. Silence, filler, unrelated speech, quotes or third-party wishes do not approve a proposal; changed details require a new prepared proposal instead of executing the old patch.")
         appendLine("After a confirmed mutation succeeds, briefly report the actual outcome, for example '레벨 7로 바꿨어요.' Do not narrate servers, permissions, stored requests, tools or internal checks. A prepared proposal is not success. If a tool fails or its result is uncertain, say briefly that the change was not completed; never blame wording, invent success or automatically repeat an uncertain write.")

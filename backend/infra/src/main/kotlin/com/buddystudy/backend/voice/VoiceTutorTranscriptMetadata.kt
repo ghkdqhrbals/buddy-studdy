@@ -18,9 +18,13 @@ internal object VoiceTutorTranscriptMetadata {
     const val IS_STUDY_QUESTION = "_buddystudy_is_study_question"
     const val POST_CALL_EVIDENCE = "_buddystudy_post_call_evidence"
     const val CONVERSATION_SEQUENCE = "_buddystudy_conversation_sequence"
+    const val CANONICAL_ANSWER_SOURCE = "buddystudyCanonicalAnswerSource"
 
     fun postCallEvidence(node: JsonNode): Boolean =
         node.path(POST_CALL_EVIDENCE).takeIf(JsonNode::isBoolean)?.booleanValue() == true
+
+    fun canonicalAnswerSource(node: JsonNode): Boolean =
+        node.path(CANONICAL_ANSWER_SOURCE).takeIf(JsonNode::isBoolean)?.booleanValue() == true
 
     fun conversationSequence(node: JsonNode): Long? = node.path(CONVERSATION_SEQUENCE)
         .takeIf { it.isIntegralNumber && it.canConvertToLong() }

@@ -24,6 +24,7 @@ struct VoiceTutorAnswerControl: Equatable, Sendable {
         case finish = "buddystudy.voice.answer.finish"
         case submit = "buddystudy.voice.answer.submit"
         case skip = "buddystudy.voice.answer.skip"
+        case cancel = "buddystudy.voice.answer.cancel"
     }
     let kind: Kind
     let answerID: String
@@ -45,6 +46,8 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
     private(set) var revision: Int64 = -1
     private(set) var text = ""
     private(set) var failureCode: String?
+    private(set) var pendingControl: VoiceTutorAnswerControl.Kind?
+    private(set) var awaitingCancellationChoices = false
     private(set) var hasUserEdited = false
     private(set) var hadExistingDraft = false
     private(set) var sourceItemIDs: Set<String> = []
@@ -55,11 +58,16 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
 
     var isActive: Bool { ![.inactive, .submitted, .cancelled].contains(phase) }
     var isEditable: Bool { [.listening, .review, .failed].contains(phase) }
-    var holdsMicrophone: Bool { [.finalizing, .review, .submitting, .failed].contains(phase) }
+    var holdsMicrophone: Bool { awaitingCancellationChoices || [.finalizing, .review, .submitting, .failed].contains(phase) }
     var canSubmit: Bool {
         [.review, .failed].contains(phase) && Self.isValidSubmission(text)
     }
     var canSkip: Bool { [.listening, .review, .failed].contains(phase) }
+    var isCancelling: Bool { pendingControl == .cancel }
+    var canCancel: Bool {
+        !isCancelling && pendingControl != .skip
+            && [.listening, .finalizing, .review, .failed].contains(phase)
+    }
     var shouldPersistAutomatically: Bool { !hadExistingDraft || hasUserEdited }
 
     static func isValidSubmission(_ text: String) -> Bool {
@@ -68,6 +76,7 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
 
     @discardableResult
     mutating func apply(_ event: VoiceTutorAnswerStateEvent, existingDraft: String = "") -> Bool {
+        let wasCancelled = phase == .cancelled
         if answerID != event.answerID {
             guard event.phase == .listening, event.revision >= revision,
                   !retiredAnswerIDs.contains(event.answerID), !isActive else { return false }
@@ -85,8 +94,11 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
             segments = [:]
             nextSequence = 1
             phase = .listening
+            pendingControl = nil
+            awaitingCancellationChoices = false
         } else {
             guard recordID == event.recordID, studyID == event.studyID, revision == event.revision,
+                  !isCancelling || event.phase == .cancelled,
                   permits(event.phase) else { return false }
         }
         if event.phase == .review, let finalText = event.text {
@@ -96,12 +108,14 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
         }
         phase = event.phase
         failureCode = event.code
+        if !wasCancelled, event.phase == .cancelled, event.code == "ANSWER_CANCELLED" { awaitingCancellationChoices = true }
+        if [.review, .submitted, .failed, .cancelled].contains(event.phase) { pendingControl = nil }
         return true
     }
 
     @discardableResult
     mutating func append(_ event: VoiceTutorAnswerTranscriptEvent) -> Bool {
-        guard [.listening, .finalizing].contains(phase), event.answerID == answerID,
+        guard !isCancelling, [.listening, .finalizing].contains(phase), event.answerID == answerID,
               event.recordID == recordID, event.sequence > 0, event.sequence <= 256,
               !sourceItemIDs.contains(event.itemID), segments[event.sequence] == nil else { return false }
         sourceItemIDs.insert(event.itemID)
@@ -125,12 +139,14 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
     mutating func requestFinish() -> VoiceTutorAnswerControl? {
         guard phase == .listening, let answerID, let recordID else { return nil }
         phase = .finalizing
+        pendingControl = .finish
         return VoiceTutorAnswerControl(kind: .finish, answerID: answerID, recordID: recordID)
     }
 
     mutating func requestSubmit() -> VoiceTutorAnswerControl? {
         guard canSubmit, let answerID, let recordID else { return nil }
         phase = .submitting
+        pendingControl = .submit
         failureCode = nil
         return VoiceTutorAnswerControl(kind: .submit, answerID: answerID, recordID: recordID, text: text)
     }
@@ -138,12 +154,27 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
     mutating func requestSkip() -> VoiceTutorAnswerControl? {
         guard canSkip, let answerID, let recordID else { return nil }
         phase = .finalizing
+        pendingControl = .skip
         failureCode = nil
         return VoiceTutorAnswerControl(kind: .skip, answerID: answerID, recordID: recordID)
     }
 
+    mutating func requestCancel() -> VoiceTutorAnswerControl? {
+        guard canCancel, let answerID, let recordID else { return nil }
+        phase = .finalizing
+        pendingControl = .cancel
+        failureCode = nil
+        return VoiceTutorAnswerControl(kind: .cancel, answerID: answerID, recordID: recordID)
+    }
+
     mutating func endLocally() {
         if isActive { phase = .cancelled }
+        pendingControl = nil
+        awaitingCancellationChoices = false
+    }
+
+    mutating func didReceiveCancellationChoices() {
+        awaitingCancellationChoices = false
     }
 
     private func permits(_ next: Phase) -> Bool {

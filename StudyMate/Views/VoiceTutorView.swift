@@ -638,7 +638,9 @@ struct VoiceTutorSessionView: View {
             onFinishAnswer: { Task { await viewModel.finishAnswerCapture() } },
             onSubmitAnswer: { Task { await viewModel.submitReviewedAnswer() } },
             canSkipAnswer: viewModel.canSkipReviewedQuestion,
-            onSkipAnswer: { Task { await viewModel.skipReviewedQuestion() } }
+            onSkipAnswer: { Task { await viewModel.skipReviewedQuestion() } },
+            canCancelLearning: viewModel.canCancelLearning,
+            onCancelLearning: { Task { await viewModel.cancelLearning() } }
         )
         .navigationTitle(strings.voiceTutorCallTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -913,7 +915,7 @@ struct VoiceTutorCallPresentation {
             if canDisplayActiveAnswer {
                 switch answerDraftState.phase {
                 case .listening: return strings.voiceTutorAnswerListening
-                case .finalizing: return strings.voiceTutorAnswerFinalizing
+                case .finalizing: return answerDraftState.isCancelling ? strings.voiceTutorLearningCancelling : strings.voiceTutorAnswerFinalizing
                 case .review: return strings.voiceTutorAnswerReview
                 case .submitting: return strings.voiceTutorAnswerSubmitting
                 case .failed: return strings.voiceTutorAnswerFailed
@@ -1219,6 +1221,8 @@ struct VoiceTutorCallScreen: View {
     var onSubmitAnswer: () -> Void = {}
     var canSkipAnswer = false
     var onSkipAnswer: () -> Void = {}
+    var canCancelLearning = false
+    var onCancelLearning: () -> Void = {}
 
     private var usesAccessibilityChrome: Bool {
         VoiceTutorCallAdaptiveLayout.usesAccessibilityChrome(for: dynamicTypeSize)
@@ -1392,7 +1396,12 @@ struct VoiceTutorCallScreen: View {
                 VStack(spacing: 28) {
                     answerOrbPlaceholder(.call, diameter: compactOrbDiameter(in: geometry))
                     callNotices
-                    if hasAnswerDraft { answerDraftPreview }
+                    if hasAnswerDraft {
+                        VStack(spacing: 8) {
+                            answerDraftPreview
+                            if canCancelLearning { cancelLearningButton }
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 Spacer(minLength: 44)
@@ -1879,7 +1888,7 @@ struct VoiceTutorCallScreen: View {
     private var answerDraftStatus: String {
         switch answerDraftState.phase {
         case .listening: return strings.voiceTutorAnswerListening
-        case .finalizing: return strings.voiceTutorAnswerFinalizing
+        case .finalizing: return answerDraftState.isCancelling ? strings.voiceTutorLearningCancelling : strings.voiceTutorAnswerFinalizing
         case .review: return strings.voiceTutorAnswerReview
         case .submitting: return strings.voiceTutorAnswerSubmitting
         case .failed: return strings.voiceTutorAnswerFailed
@@ -1961,7 +1970,7 @@ struct VoiceTutorCallScreen: View {
             .accessibilityLabel(strings.voiceTutorAnswerEdit)
             .accessibilityValue(answerDraftText.wrappedValue)
             .accessibilityIdentifier("voiceCall.answerEdit")
-            if answerDraftState.phase != .listening {
+            if answerDraftState.phase != .listening && !answerDraftState.isCancelling {
                 Text(strings.voiceTutorAnswerReviewHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -2009,15 +2018,22 @@ struct VoiceTutorCallScreen: View {
                 }
                 .foregroundStyle(.secondary)
             }
-            if canSkipAnswer {
-                Button(strings.voiceTutorAnswerSkip) {
-                    answerEditorSession = nil
-                    onSkipAnswer()
+            if canSkipAnswer || canCancelLearning {
+                HStack(spacing: 20) {
+                    if canSkipAnswer {
+                        Button(strings.voiceTutorAnswerSkip) {
+                            answerEditorSession = nil
+                            onSkipAnswer()
+                        }
+                        .accessibilityIdentifier("voiceCall.answerSkip")
+                    }
+                    Spacer(minLength: 0)
+                    if canCancelLearning { cancelLearningButton }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
                 .frame(minHeight: 44)
-                .accessibilityIdentifier("voiceCall.answerSkip")
             }
         }
         .padding(16)
@@ -2025,6 +2041,22 @@ struct VoiceTutorCallScreen: View {
         .background(Color.secondary.opacity(0.065), in: RoundedRectangle(cornerRadius: 16))
         .id("voiceCall.answerDraft")
         .accessibilityIdentifier("voiceCall.answerCard")
+    }
+
+    private var cancelLearningButton: some View {
+        Button(strings.voiceTutorLearningCancel) {
+            guard canCancelLearning, !didRequestEnd else { return }
+            answerEditorSession = nil
+            onCancelLearning()
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
+        .buttonStyle(.plain)
+        .disabled(!canCancelLearning || didRequestEnd)
+        .accessibilityHint(strings.voiceTutorLearningCancelHint)
+        .accessibilityIdentifier("voiceCall.learningCancel")
     }
 
     @ViewBuilder

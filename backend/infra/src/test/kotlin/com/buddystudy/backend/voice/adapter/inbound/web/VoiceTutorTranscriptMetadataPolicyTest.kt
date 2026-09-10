@@ -107,6 +107,14 @@ class VoiceTutorTranscriptMetadataPolicyTest {
 
     @Test
     fun `missing malformed and unassigned metadata never silently fall back to the initial level`(): Unit {
+        for (value in listOf("null", "false", "0", "1", "\"true\"", "{}", "[]")) {
+            assertThat(VoiceTutorTranscriptMetadata.canonicalAnswerSource(mapper.readTree(
+                """{"${VoiceTutorTranscriptMetadata.CANONICAL_ANSWER_SOURCE}":$value}""",
+            ))).isFalse()
+        }
+        assertThat(VoiceTutorTranscriptMetadata.canonicalAnswerSource(mapper.readTree(
+            """{"${VoiceTutorTranscriptMetadata.CANONICAL_ANSWER_SOURCE}":true}""",
+        ))).isTrue()
         listOf("null", "0", "-1", "1.5", "\"1\"", "9223372036854775808").forEach { value ->
             assertThat(VoiceTutorTranscriptMetadata.conversationSequence(mapper.readTree(
                 """{"${VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE}":$value}""",

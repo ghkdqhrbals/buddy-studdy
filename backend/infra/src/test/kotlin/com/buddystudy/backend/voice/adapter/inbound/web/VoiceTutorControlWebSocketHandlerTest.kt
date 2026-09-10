@@ -52,6 +52,27 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceTutorControlWebSocketHandlerTest {
     @Test
+    fun `canonical source metadata reaches internal append without promoting raw question or answer`() {
+        for ((eventType, role) in listOf(
+            "conversation.item.input_audio_transcription.completed" to com.buddystudy.voice.domain.VoiceTutorTranscriptRole.USER,
+            "response.output_audio_transcript.done" to com.buddystudy.voice.domain.VoiceTutorTranscriptRole.TUTOR,
+        )) {
+            val raw = """{"type":"$eventType","response_id":"canonical-response","item_id":"canonical-source","transcript":"  저장할 원문\n  ","${VoiceTutorTranscriptMetadata.CANONICAL_ANSWER_SOURCE}":true,"${VoiceTutorTranscriptMetadata.POST_CALL_EVIDENCE}":false,"${VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE}":12,"${VoiceTutorTranscriptMetadata.LESSON_REVISION}":2,"${VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS}":${Instant.now().toEpochMilli()}}"""
+            val result = runControlScenario(privateEvidenceEvent = raw, provider = { _, _ -> })
+            val arguments = result.transcriptWrites.single()
+            assertThat(arguments[2]).isEqualTo("canonical-source")
+            assertThat(arguments[3]).isEqualTo(role)
+            assertThat(arguments[4]).isEqualTo("  저장할 원문\n  ")
+            assertThat(arguments[9]).isEqualTo(false) // askedStudyQuestion
+            assertThat(arguments[10]).isEqualTo(false) // isStudyQuestion
+            assertThat(arguments[13]).isEqualTo(false) // postCallEvidence
+            assertThat(arguments[14]).isEqualTo(12L) // original conversation sequence
+            assertThat(arguments[15]).isEqualTo(false) // interrupted
+            assertThat(arguments[16]).isEqualTo(true) // internal canonicalAnswerSource
+        }
+    }
+
+    @Test
     fun `interrupted tutor archives persist only through the private worker and are never completed provider events`() {
         val raw = """{"type":"${VoiceTutorTranscriptMetadata.INTERRUPTED_TUTOR_EVENT}","item_id":"partial-tutor","transcript":"  중단된 설명입니다.\n","${VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE}":12,"${VoiceTutorTranscriptMetadata.LESSON_REVISION}":2,"${VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS}":${Instant.now().toEpochMilli()},"${VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION}":true}"""
         val result = runControlScenario(privateEvidenceEvent = raw, providerEventBeforeCompletion = raw,
@@ -115,13 +136,13 @@ class VoiceTutorControlWebSocketHandlerTest {
         val received = mutableListOf<String>()
         val id = "00112233-4455-6677-8899-aabbccddeeff"
         val types = listOf(VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT, VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT,
-            VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT)
+            VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT, VoiceTutorRealtimeContract.ANSWER_CANCEL_EVENT)
         val result = runControlScenario(
             clientAfterReady = types.map { """{"type":"$it","answerId":"$id","recordId":"42","text":"수정 답변","private":"discard"}""" },
-            provider = { events, _ -> received += events.take(3).toList() },
+            provider = { events, _ -> received += events.take(types.size).toList() },
         )
         assertThat(result.failed).isFalse()
-        assertThat(received).hasSize(3)
+        assertThat(received).hasSize(types.size)
         received.zip(types).forEach { (raw, type) ->
             val node = com.buddystudy.backend.common.application.json.JsonMapperProvider.mapper.readTree(raw)
             assertThat(node.path("type").asText()).isEqualTo(type)

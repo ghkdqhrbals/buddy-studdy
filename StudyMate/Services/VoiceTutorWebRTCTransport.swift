@@ -77,6 +77,7 @@ enum VoiceTutorWebRTCError: Error {
     case mediaConnectionTimedOut
     case speechActivityUnavailable
     case audioProcessingDelegateInstallationFailed
+    case echoCancellationUnavailable
 }
 
 enum VoiceTutorWebRTCMediaReadiness: Equatable {
@@ -238,6 +239,44 @@ struct VoiceTutorLocalSpeechDetector {
 
 private struct VoiceTutorUncheckedSendable<Value>: @unchecked Sendable {
     var value: Value
+}
+
+enum VoiceTutorEchoCancellationPolicy {
+    static func communicationOptions() -> LKRTCAudioProcessingOptions {
+        // Automatic mode chooses Apple's coupled AEC/NS path when available,
+        // with software fallback. Do not independently enable a second APM AEC.
+        LKRTCAudioProcessingOptions(echoCancellation: true, noiseSuppression: true,
+                                   autoGainControl: true, highPassFilter: true)
+    }
+
+    @discardableResult
+    static func configure(_ track: LKRTCAudioTrack) throws -> LKRTCAudioProcessingOptionsResult {
+        let result = track.setAudioProcessingOptions(communicationOptions())
+        guard result.isSuccess else { throw VoiceTutorWebRTCError.echoCancellationUnavailable }
+        return result
+    }
+
+    static func canOpenMicrophone(engineRunning: Bool, recording: Bool,
+                                  hasAudioProcessingModule: Bool, softwareActive: Bool,
+                                  platformActive: Bool, voiceProcessingEnabled: Bool,
+                                  voiceProcessingBypassed: Bool) -> Bool {
+        engineRunning && recording && hasAudioProcessingModule && (softwareActive ||
+            (platformActive && voiceProcessingEnabled && !voiceProcessingBypassed))
+    }
+
+    static func isActive(factory: LKRTCPeerConnectionFactory) -> Bool {
+        let processing = factory.audioProcessingState
+        let device = factory.audioDeviceModule
+        let platform = device.platformAudioProcessingState
+        // VPIO properties can stay true after Core Audio has stopped the
+        // engine. They only describe usable processing while I/O is running.
+        return canOpenMicrophone(engineRunning: device.isEngineRunning, recording: device.isRecording,
+            hasAudioProcessingModule: processing.hasAudioProcessingModule,
+            softwareActive: processing.echoCancellation.isSoftwareActive,
+            platformActive: processing.echoCancellation.isPlatformActive,
+            voiceProcessingEnabled: platform.isVoiceProcessingEnabledActive,
+            voiceProcessingBypassed: platform.isVoiceProcessingBypassedActive)
+    }
 }
 
 enum VoiceTutorAudioProcessingModuleFactory {
@@ -873,6 +912,8 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private var localPlayoutInterruptionState = VoiceTutorLocalPlayoutInterruptionState()
     private var interruptionBoundaryState = VoiceTutorInterruptionBoundaryState()
     private var interruptionObserver: NSObjectProtocol?
+    private var audioConfigurationObservers: [NSObjectProtocol] = []
+    private var audioConfigurationDiagnosticCount = 0
     private let stateLock = NSLock()
     private var isClosed = false
     private var sessionMediaReady = false
@@ -918,10 +959,13 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         stateLock.lock()
         let observer = interruptionObserver
         interruptionObserver = nil
+        let configurationObservers = audioConfigurationObservers
+        audioConfigurationObservers = []
         stateLock.unlock()
         if let observer {
             NotificationCenter.default.removeObserver(observer)
         }
+        configurationObservers.forEach(NotificationCenter.default.removeObserver)
     }
 
     func connect(
@@ -944,6 +988,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         emitMediaDiagnostic("speech_model_ready_silero_v6")
         try configureAudioSession()
         try installInterruptionObserver()
+        try installAudioConfigurationObservers()
         _ = LKRTCInitializeSSL()
         try ensureOpen()
 
@@ -998,6 +1043,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
 
         let source = factory.audioSource(with: nil)
         let localTrack = factory.audioTrack(with: source, trackId: "buddystudy-microphone")
+        try VoiceTutorEchoCancellationPolicy.configure(localTrack)
         guard peer.add(localTrack, streamIds: ["buddystudy-voice"]) != nil else {
             throw VoiceTutorWebRTCError.localTrackCreationFailed
         }
@@ -1028,7 +1074,39 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         // socket only after ICE + DTLS are connected so its opening tutor turn
         // cannot run ahead of the iPhone's media path.
         try await waitForMediaConnection(peer: peer)
+        try await waitForEchoCancellation(factory: factory, track: localTrack)
         emitMediaDiagnostic("media_connected")
+    }
+
+    private func waitForEchoCancellation(factory: LKRTCPeerConnectionFactory, track: LKRTCAudioTrack) async throws {
+        try ensureOpen()
+        // This SDK starts ADM for the negotiated sending stream even while
+        // track.isEnabled is false; that flag mutes samples rather than closing
+        // Voice Processing I/O. We can therefore validate before session-ready.
+        if !VoiceTutorEchoCancellationPolicy.isActive(factory: factory) {
+            // Restore the platform processing policy before retrying the
+            // automatic request. Capture stays gated until a live readback
+            // confirms an AEC implementation, including software fallback.
+            let device = factory.audioDeviceModule
+            _ = device.setPlatformVoiceProcessingAllowed(true)
+            device.isVoiceProcessingBypassed = false
+            try VoiceTutorEchoCancellationPolicy.configure(track)
+            emitMediaDiagnostic("echo_cancellation_reapplying")
+        }
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        while true {
+            try ensureOpen()
+            if VoiceTutorEchoCancellationPolicy.isActive(factory: factory) {
+                emitMediaDiagnostic("echo_cancellation_active")
+                return
+            }
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                closeMicrophoneInput()
+                emitMediaDiagnostic("echo_cancellation_unavailable")
+                throw VoiceTutorWebRTCError.echoCancellationUnavailable
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
     }
 
     private func takePreparedSpeechScorer() -> VoiceTutorSileroSpeechScorer? {
@@ -1231,6 +1309,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         let nextCaptureTap: VoiceTutorLocalSpeechCaptureTap?
         let nextRenderTap: VoiceTutorAudioProcessingTap?
         let observer: NSObjectProtocol?
+        let configurationObservers: [NSObjectProtocol]
         let shouldDeactivateAudioSession: Bool
 
         diagnosticLock.lock()
@@ -1266,6 +1345,8 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         renderTap = nil
         observer = interruptionObserver
         interruptionObserver = nil
+        configurationObservers = audioConfigurationObservers
+        audioConfigurationObservers = []
         stateLock.unlock()
         if shouldDeactivateAudioSession {
             try? AVAudioSession.sharedInstance().setActive(
@@ -1285,6 +1366,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         if let observer {
             NotificationCenter.default.removeObserver(observer)
         }
+        configurationObservers.forEach(NotificationCenter.default.removeObserver)
     }
 
     private func configureAudioSession() throws {
@@ -1328,6 +1410,43 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         stateLock.unlock()
         if let previousObserver {
             NotificationCenter.default.removeObserver(previousObserver)
+        }
+    }
+
+    private func installAudioConfigurationObservers() throws {
+        let changes: [(Notification.Name, String)] = [
+            (AVAudioSession.routeChangeNotification, "audio_route_changed"),
+            (.AVAudioEngineConfigurationChange, "audio_engine_configuration_changed")
+        ]
+        let observers = changes.map { name, event in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                self?.recordAudioConfigurationChange(event)
+            }
+        }
+        stateLock.lock()
+        guard !isClosed else {
+            stateLock.unlock()
+            observers.forEach(NotificationCenter.default.removeObserver)
+            throw CancellationError()
+        }
+        let previous = audioConfigurationObservers
+        audioConfigurationObservers = observers
+        stateLock.unlock()
+        previous.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    private func recordAudioConfigurationChange(_ event: String) {
+        stateLock.lock()
+        guard !isClosed, audioConfigurationDiagnosticCount < 32 else {
+            stateLock.unlock()
+            return
+        }
+        audioConfigurationDiagnosticCount += 1
+        stateLock.unlock()
+        // Route/engine notifications can fire mid-transition. Read back after
+        // the graph settles, off the audio thread, and bound per-call metadata.
+        diagnosticQueue.asyncAfter(deadline: .now() + .milliseconds(500)) { [weak self] in
+            self?.emitMediaDiagnostic(event)
         }
     }
 
@@ -1593,12 +1712,15 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         let category = session.category.rawValue
         let mode = session.mode.rawValue
         let ports = session.currentRoute.outputs.map { $0.portType.rawValue }.sorted().joined(separator: ",")
+        let inputPorts = session.currentRoute.inputs.map { $0.portType.rawValue }.sorted().joined(separator: ",")
         let zeroVolume = session.outputVolume == 0
         // ADM getters synchronously visit WebRTC's worker thread. Never call
         // them from its realtime render callback or while holding stateLock.
         diagnosticQueue.async {
             let snapshot = context.value
             let device = snapshot.factory?.audioDeviceModule
+            let processing = snapshot.factory?.audioProcessingState
+            let platform = device?.platformAudioProcessingState
             func flag(_ value: Bool?) -> String { value.map { $0 ? "1" : "0" } ?? "unknown" }
             var fields = [
                 "event=\(event)", "elapsedMs=\(elapsedMs)",
@@ -1607,7 +1729,15 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
                 "playing=\(flag(device?.isPlaying))", "engineRunning=\(flag(device?.isEngineRunning))",
                 "remoteEnabled=\(flag(snapshot.track?.isEnabled))",
                 "category=\(category)", "mode=\(mode)",
-                "ports=\(ports.isEmpty ? "none" : ports)", "zeroVolume=\(zeroVolume ? 1 : 0)"
+                "ports=\(ports.isEmpty ? "none" : ports)", "inputPorts=\(inputPorts.isEmpty ? "none" : inputPorts)",
+                "zeroVolume=\(zeroVolume ? 1 : 0)",
+                "aecRequested=\(flag(processing?.echoCancellation.requested?.isEnabled))",
+                "aecSoftwareResolved=\(flag(processing?.echoCancellation.isSoftwareResolved))",
+                "aecSoftwareActive=\(flag(processing?.echoCancellation.isSoftwareActive))",
+                "aecPlatformResolved=\(flag(processing?.echoCancellation.isPlatformResolved))",
+                "aecPlatformActive=\(flag(processing?.echoCancellation.isPlatformActive))",
+                "voiceProcessingEnabled=\(flag(platform?.isVoiceProcessingEnabledActive))",
+                "voiceProcessingBypassed=\(flag(platform?.isVoiceProcessingBypassedActive))"
             ]
             if let capture = snapshot.capture {
                 fields += [

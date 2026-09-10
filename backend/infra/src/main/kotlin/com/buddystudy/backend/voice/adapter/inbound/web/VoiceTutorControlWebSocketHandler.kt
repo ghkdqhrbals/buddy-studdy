@@ -363,7 +363,8 @@ class VoiceTutorControlWebSocketHandler(
                     }
                     VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT,
                     VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT,
-                    VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT -> {
+                    VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT,
+                    VoiceTutorRealtimeContract.ANSWER_CANCEL_EVENT -> {
                         val text = node.path("text")
                         if (!sidebandReady.get() || (type == VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT &&
                             (!text.isTextual || text.asText().isBlank() || text.asText().length > 8_000))) {
@@ -681,6 +682,7 @@ class VoiceTutorControlWebSocketHandler(
                 acceptedAt = VoiceTutorTranscriptMetadata.acceptedAt(node),
                 postCallEvidence = VoiceTutorTranscriptMetadata.postCallEvidence(node),
                 conversationSequence = VoiceTutorTranscriptMetadata.conversationSequence(node),
+                canonicalAnswerSource = VoiceTutorTranscriptMetadata.canonicalAnswerSource(node),
             )
             "response.output_audio_transcript.done" -> appendTranscript(
                 principal,
@@ -694,6 +696,7 @@ class VoiceTutorControlWebSocketHandler(
                 acceptedAt = VoiceTutorTranscriptMetadata.acceptedAt(node),
                 postCallEvidence = VoiceTutorTranscriptMetadata.postCallEvidence(node),
                 conversationSequence = VoiceTutorTranscriptMetadata.conversationSequence(node),
+                canonicalAnswerSource = VoiceTutorTranscriptMetadata.canonicalAnswerSource(node),
             )
             else -> Mono.just(false)
         }
@@ -716,6 +719,7 @@ class VoiceTutorControlWebSocketHandler(
         conversationSequence: Long? = null,
         structuredInput: Boolean = false,
         interrupted: Boolean = false,
+        canonicalAnswerSource: Boolean = false,
     ): Mono<Boolean> = if (transcript.isBlank() ||
         (providerItemId.startsWith(VoiceTutorTranscriptMetadata.STRUCTURED_ITEM_PREFIX) && !structuredInput)) {
         Mono.just(false)
@@ -738,6 +742,7 @@ class VoiceTutorControlWebSocketHandler(
                 postCallEvidence = postCallEvidence,
                 conversationSequence = conversationSequence,
                 interrupted = interrupted,
+                canonicalAnswerSource = canonicalAnswerSource,
             )
         }
     }

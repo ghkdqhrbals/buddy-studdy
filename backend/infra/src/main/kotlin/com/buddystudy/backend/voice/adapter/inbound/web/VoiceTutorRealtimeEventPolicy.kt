@@ -373,7 +373,8 @@ internal class VoiceTutorRealtimeEventPolicy(
             !node.has(VoiceTutorTranscriptMetadata.ASKED_STUDY_QUESTION) &&
             !node.has(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION) &&
             !node.has(VoiceTutorTranscriptMetadata.POST_CALL_EVIDENCE) &&
-            !node.has(VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE)
+            !node.has(VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE) &&
+            !node.has(VoiceTutorTranscriptMetadata.CANONICAL_ANSWER_SOURCE)
         ) return raw
         val publicNode = node.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
         publicNode.remove(VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS)
@@ -385,6 +386,7 @@ internal class VoiceTutorRealtimeEventPolicy(
         publicNode.remove(VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION)
         publicNode.remove(VoiceTutorTranscriptMetadata.POST_CALL_EVIDENCE)
         publicNode.remove(VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE)
+        publicNode.remove(VoiceTutorTranscriptMetadata.CANONICAL_ANSWER_SOURCE)
         return mapper.writeValueAsString(publicNode)
     }
 
@@ -507,11 +509,11 @@ internal class VoiceTutorRealtimeEventPolicy(
         private val PROVIDER_ID_PATTERN = Regex("[A-Za-z0-9_-]{1,191}")
         private val ANSWER_ID_PATTERN = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         private val ANSWER_CLIENT_EVENTS = setOf(VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT,
-            VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT, VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT)
+            VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT, VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT, VoiceTutorRealtimeContract.ANSWER_CANCEL_EVENT)
         private val USER_INPUT_CLIENT_EVENTS = setOf(VoiceTutorRealtimeContract.USER_INPUT_SUBMIT_EVENT,
             VoiceTutorRealtimeContract.USER_INPUT_CANCEL_EVENT)
         private val ANSWER_PHASES = setOf("listening", "finalizing", "review", "submitting", "submitted", "failed", "cancelled")
-        private val ANSWER_CODES = setOf("ANSWER_TRANSCRIPT_INCOMPLETE", "ANSWER_SUBMISSION_FAILED", "ANSWER_TOO_LONG")
+        private val ANSWER_CODES = setOf("ANSWER_TRANSCRIPT_INCOMPLETE", "ANSWER_SUBMISSION_FAILED", "ANSWER_TOO_LONG", "ANSWER_CANCELLED", "ANSWER_CANCEL_UNAVAILABLE")
         private val ALLOWED_CLIENT_EVENTS = setOf(
             "input_audio_buffer.append",
             "input_audio_buffer.commit",
@@ -529,6 +531,7 @@ internal class VoiceTutorRealtimeEventPolicy(
             VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT,
             VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT,
             VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_CANCEL_EVENT,
             VoiceTutorRealtimeContract.USER_INPUT_SUBMIT_EVENT,
             VoiceTutorRealtimeContract.USER_INPUT_CANCEL_EVENT,
         )
@@ -648,6 +651,7 @@ internal class VoiceTutorClientTrafficGuard(
             VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT,
             VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT,
             VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_CANCEL_EVENT,
             VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT,
             VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT,
             VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT,

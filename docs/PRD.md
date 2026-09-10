@@ -113,6 +113,16 @@ spoken answers. Successive choices can change the learning direction without
 requiring an extra spoken reply; preference selections must not be graded as
 answers to study questions.
 
+Cancelling a choice abandons only that proposal and returns to conversation;
+it must not pick a default, immediately reopen the same form or start learning.
+During a saved-question exercise, Cancel exercise is separate from Skip this
+question and End conversation. It stops capture without submitting, grading,
+skipping or deleting the saved question, and preserves the unsubmitted draft.
+After acknowledgement, keep input held until a selectable next-step card offers
+a different topic, free conversation or continuing later, with custom input.
+An existing pause remains in effect. Already submitted answers and in-flight
+Skip operations are not presented as reversible exercise cancellations.
+
 When a learner wants to study a topic, suggest its actual child topics and offer
 an explicit selection card for creating the chosen children. A server-owned,
 immutable topic proposal makes clear that submission adds the selected topics;
@@ -123,6 +133,14 @@ and selected branches materialize lazily instead of eagerly generating an
 exponential tree.
 
 #### Current conversation contract — `realtime-native-v1`
+
+Speaker output must not become learner input. The iOS transport explicitly
+requests communication audio processing and verifies an active echo canceller
+before opening capture. Keep genuine learner barge-in available during tutor
+playback; do not replace echo cancellation with playback-wide microphone mute
+or transcript similarity filtering. The PCM audio graph also uses actual Voice
+Processing I/O. Diagnostics report processing state and audio routes, without
+recording audio or speech content.
 
 The conversation shows small gray MCP execution entries directly beneath the message that invoked them, retaining completed and failed entries at that position. Server-owned response and input item identities associate delayed transcripts and asynchronous completion with the original turn; calls made without spoken tutor text attach to their originating learner message or submitted choice card. New messages never move old entries to the bottom. The actual function name and running/completed/failed state accompany a compact seconds/minutes duration. Only authenticated backend operation metadata drives this display; arguments, results and provider error bodies are excluded. Concurrent operations retain separate timers and stale events cannot reset them. The compact call surface shows only active operations; retained history belongs to the transcript's bounded visible turns. UI labels call the experience a conversation.
 

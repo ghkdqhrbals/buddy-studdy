@@ -3131,6 +3131,13 @@ struct AppStrings {
     var voiceTutorAnswerFinish: String { text("답변 종료", "Finish answer", "回答を終える") }
     var voiceTutorAnswerSubmit: String { text("제출", "Submit", "送信") }
     var voiceTutorAnswerSkip: String { text("이 질문 건너뛰기", "Skip this question", "この問題をスキップ") }
+    var voiceTutorLearningCancel: String { text("학습 취소", "Cancel exercise", "学習をキャンセル") }
+    var voiceTutorLearningCancelling: String { text("학습 취소 중", "Cancelling exercise", "学習をキャンセル中") }
+    var voiceTutorLearningCancelHint: String {
+        text("답변은 초안으로 남기고 현재 학습을 중단합니다. 대화는 유지됩니다.",
+             "Keep your answer as a draft and stop this exercise. The conversation stays open.",
+             "回答を下書きとして残し、今の学習を中断します。対話は続けられます。")
+    }
     var voiceTutorAnswerListening: String { text("답변 기록 중", "Capturing your answer", "回答を記録中") }
     var voiceTutorAnswerFinalizing: String { text("마지막 말을 받아쓰는 중", "Finishing the transcript", "最後の言葉を書き起こしています") }
     var voiceTutorAnswerReview: String { text("답변을 확인해 주세요", "Review your answer", "回答を確認してください") }

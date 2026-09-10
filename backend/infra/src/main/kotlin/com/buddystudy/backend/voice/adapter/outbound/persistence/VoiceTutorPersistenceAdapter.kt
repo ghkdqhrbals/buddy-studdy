@@ -559,17 +559,22 @@ class VoiceTutorPersistenceAdapter(
         postCallEvidence: Boolean,
         conversationSequence: Long?,
         interrupted: Boolean,
+        canonicalAnswerSource: Boolean,
     ): Boolean {
         require(lessonRevision >= -1) { "Voice Tutor lesson revision was invalid." }
         if (interrupted && (role != VoiceTutorTranscriptRole.TUTOR || postCallEvidence ||
                 conversationSequence == null || conversationSequence <= 0 || lessonRevision < 0 ||
                 studyQuestionProviderItemId != null || studyAnswerProviderItemId != null ||
                 askedStudyQuestion || isStudyQuestion || studyAnswerProviderItemIds.isNotEmpty())) return false
+        if (canonicalAnswerSource && (postCallEvidence || interrupted || conversationSequence == null ||
+                conversationSequence <= 0 || lessonRevision < 0 ||
+                studyQuestionProviderItemId != null || studyAnswerProviderItemId != null ||
+                askedStudyQuestion || isStudyQuestion || studyAnswerProviderItemIds.isNotEmpty())) return false
         if (postCallEvidence && (conversationSequence == null || conversationSequence <= 0 ||
                 studyQuestionProviderItemId != null || studyAnswerProviderItemId != null ||
                 askedStudyQuestion || isStudyQuestion || studyAnswerProviderItemIds.isNotEmpty())
         ) return false
-        if (!postCallEvidence && !interrupted && conversationSequence != null) return false
+        if (!postCallEvidence && !interrupted && !canonicalAnswerSource && conversationSequence != null) return false
         val owned = database.sql(
             "select status, end_reason, provider_session_id, created_at, connected_at, hard_ends_at " +
                 "from voice_tutor_sessions where id = :sessionId and user_id = :userId for update",
@@ -586,7 +591,7 @@ class VoiceTutorPersistenceAdapter(
             }.one().awaitSingleOrNull() ?: return false
         val acceptedWithinSessionBoundary = !occurredAt.isBefore(owned.connectedAt ?: owned.createdAt) &&
             !occurredAt.isAfter(owned.hardEndsAt)
-        if (interrupted && !acceptedWithinSessionBoundary) return false
+        if ((interrupted || canonicalAnswerSource) && !acceptedWithinSessionBoundary) return false
         val acceptedStatus = when (role) {
             VoiceTutorTranscriptRole.TUTOR -> owned.status == VoiceTutorSessionStatus.ACTIVE ||
                 owned.status == VoiceTutorSessionStatus.ENDING

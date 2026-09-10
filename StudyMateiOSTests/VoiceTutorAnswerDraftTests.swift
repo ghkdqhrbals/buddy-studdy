@@ -169,6 +169,71 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
         XCTAssertEqual(state.text, "현재 초안")
     }
 
+    func testCancelExercisePreservesDraftAndHoldsInputUntilNextActionCard() throws {
+        for target in [VoiceTutorAnswerDraftState.Phase.listening, .finalizing, .review, .failed] {
+            var state = listening(existing: "기존 초안")
+            _ = state.edit("직접 수정한 답변\n미제출 상태")
+            if target != .listening { _ = state.requestFinish() }
+            if [.review, .failed].contains(target) { _ = state.apply(event(target)) }
+            let command = try XCTUnwrap(state.requestCancel())
+            XCTAssertEqual(command.kind, .cancel)
+            XCTAssertNil(command.text)
+            XCTAssertEqual(state.phase, .finalizing)
+            XCTAssertTrue(state.isCancelling)
+            XCTAssertTrue(state.holdsMicrophone)
+            XCTAssertNil(state.requestCancel(), "A second tap cannot enqueue another cancellation")
+            XCTAssertFalse(state.append(segment(1, "늦은 인식 결과")))
+            XCTAssertFalse(state.apply(event(.review, text: "늦게 온 검토 답변")))
+            XCTAssertFalse(state.edit("취소 요청 후 입력"))
+            XCTAssertTrue(state.apply(event(.cancelled, code: "ANSWER_CANCELLED")))
+            XCTAssertFalse(state.isActive)
+            XCTAssertTrue(state.holdsMicrophone, "Keep the cancelled answer tail out of ordinary input until the next-step card owns the hold")
+            XCTAssertTrue(state.awaitingCancellationChoices)
+            XCTAssertEqual(state.text, "직접 수정한 답변\n미제출 상태")
+            XCTAssertFalse(state.append(segment(2, "취소 이후 음성")))
+            state.didReceiveCancellationChoices()
+            XCTAssertFalse(state.holdsMicrophone)
+            XCTAssertFalse(state.awaitingCancellationChoices)
+            XCTAssertTrue(state.apply(event(.cancelled, code: "ANSWER_CANCELLED")))
+            XCTAssertFalse(state.holdsMicrophone, "A replayed cancellation ACK must not acquire a new hold after the choice card")
+            XCTAssertEqual(state.text, "직접 수정한 답변\n미제출 상태")
+        }
+    }
+
+    func testCancellationNeverClaimsToUndoSubmittedOrAlreadySkippingQuestions() {
+        var submitting = listening(existing: "최종 답변")
+        _ = submitting.requestFinish()
+        _ = submitting.apply(event(.review))
+        _ = submitting.requestSubmit()
+        XCTAssertNil(submitting.requestCancel())
+        _ = submitting.apply(event(.submitted))
+        XCTAssertNil(submitting.requestCancel())
+        var skipping = listening()
+        _ = skipping.requestSkip()
+        XCTAssertNil(skipping.requestCancel())
+        var ending = listening(existing: "보존할 답변")
+        _ = ending.requestCancel()
+        _ = ending.apply(event(.cancelled, code: "ANSWER_CANCELLED"))
+        ending.endLocally()
+        XCTAssertFalse(ending.holdsMicrophone)
+        XCTAssertEqual(ending.text, "보존할 답변")
+    }
+
+    func testCancelControlUsesExactAnswerIdentityWithoutTextOrSkipMutation() throws {
+        let command = VoiceTutorAnswerControl(kind: .cancel, answerID: answerID, recordID: "101")
+        let payload = try VoiceTutorTurnProtocol.payload(for: .answer(command))
+        XCTAssertEqual(Set(payload.keys), ["type", "answerId", "recordId"])
+        XCTAssertEqual(payload["type"] as? String, "buddystudy.voice.answer.cancel")
+        XCTAssertEqual(payload["answerId"] as? String, answerID)
+        XCTAssertEqual(payload["recordId"] as? String, "101")
+        XCTAssertThrowsError(try VoiceTutorTurnProtocol.payload(for: .answer(VoiceTutorAnswerControl(
+            kind: .cancel, answerID: answerID, recordID: "101", text: "제출하면 안 되는 초안"))))
+        var fields = fields()
+        fields["phase"] = "cancelled"
+        fields["code"] = "ANSWER_CANCELLED"
+        XCTAssertEqual(try parse(fields), .answerState(event(.cancelled, code: "ANSWER_CANCELLED")))
+    }
+
     func testAnswerControlsPreserveExactUserTextAndRejectInvalidOrOversizedSubmission() throws {
         let typed = "  수정한 답변\n공백도 유지  "
         let control = VoiceTutorAnswerControl(kind: .submit, answerID: answerID, recordID: "101", text: typed)
@@ -358,6 +423,172 @@ final class VoiceTutorAnswerEditorTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+}
+
+/// Hosts the production call surface without a microphone, account, or network.
+@MainActor
+final class VoiceTutorLearningCancelPresentationTests: XCTestCase {
+    func testLearningCancelNativeActionPreservesDraftWhilePendingInActiveAndPausedCalls() async throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Native SwiftUI accessibility-node activation is verified on simulator; physical call rendering is covered separately")
+        #endif
+        for showsTranscript in [false, true] {
+            for paused in [false, true] {
+                let harness = try VoiceTutorLearningCancelHarness(transcript: showsTranscript, paused: paused)
+                defer { harness.close() }
+                try await harness.settle()
+                let buttons = harness.cancelButtons()
+                XCTAssertEqual(buttons.count, 1, "Only the visible compact or transcript surface may expose the learning-cancel action")
+                let button = try XCTUnwrap(buttons.first)
+                XCTAssertFalse(button.accessibilityTraits.contains(.notEnabled), "Learning cancellation remains available while the conversation is paused")
+                XCTAssertGreaterThan(button.accessibilityFrame.height, 0)
+                XCTAssertTrue(button.accessibilityActivate(), "Activate the production SwiftUI button, rather than invoking its callback directly")
+                try await harness.settle()
+
+                let probe = harness.probe
+                XCTAssertEqual(probe.cancelCallbackCount, 1)
+                XCTAssertEqual(probe.commands, [VoiceTutorAnswerControl(kind: .cancel,
+                    answerID: VoiceTutorLearningCancelProbe.answerID, recordID: "101")])
+                XCTAssertEqual(probe.draft.phase, .finalizing)
+                XCTAssertTrue(probe.draft.isCancelling)
+                XCTAssertTrue(probe.draft.holdsMicrophone)
+                XCTAssertFalse(probe.draft.canCancel)
+                XCTAssertEqual(probe.draft.text, VoiceTutorLearningCancelProbe.originalText)
+                XCTAssertEqual(probe.pause.holdsMicrophone, paused, "Cancelling an exercise must not resume or pause the conversation")
+                XCTAssertEqual(probe.otherActionCount, 0, "Cancel must not finish, submit, skip, pause, or end the call")
+                XCTAssertTrue(harness.cancelButtons().isEmpty, "A pending cancellation must remove the repeat-tap action")
+
+                XCTAssertTrue(probe.acknowledgeCancellation())
+                try await harness.settle()
+                XCTAssertEqual(probe.draft.phase, .cancelled)
+                XCTAssertFalse(probe.draft.isActive)
+                XCTAssertTrue(probe.draft.awaitingCancellationChoices)
+                XCTAssertTrue(probe.draft.holdsMicrophone, "The next-step card must take ownership before ordinary listening resumes")
+                XCTAssertEqual(probe.draft.text, VoiceTutorLearningCancelProbe.originalText)
+                XCTAssertTrue(harness.cancelButtons().isEmpty)
+                XCTAssertEqual(probe.cancelCallbackCount, 1)
+                XCTAssertEqual(probe.otherActionCount, 0)
+            }
+        }
+    }
+}
+
+@MainActor
+private final class VoiceTutorLearningCancelProbe: ObservableObject {
+    static let answerID = "11111111-2222-3333-4444-555555555555"
+    static let originalText = "  작성 중인 답변입니다.\n다른 학습을 해도 이 초안은 보존합니다.  "
+    @Published var draft = VoiceTutorAnswerDraftState()
+    @Published var pause = VoiceTutorCallPauseState()
+    @Published var session = VoiceTutorSessionState()
+    @Published var showsTranscript: Bool
+    @Published var showsSummary = false
+    private(set) var cancelCallbackCount = 0
+    private(set) var otherActionCount = 0
+    private(set) var commands: [VoiceTutorAnswerControl] = []
+
+    init(transcript: Bool, paused: Bool) {
+        showsTranscript = transcript
+        pause.isSupported = true
+        if paused, let command = pause.requestPause() {
+            _ = pause.acknowledge(sequence: command.sequence, paused: true)
+        }
+        _ = draft.apply(.init(answerID: Self.answerID, studyID: 42, recordID: "101", revision: 7,
+            phase: .listening, text: nil, code: nil), existingDraft: Self.originalText)
+        _ = session.apply(.init(sequence: 1, phase: .answering, paused: paused,
+            revision: 7, studyID: 42, recordID: "101", answerID: Self.answerID))
+    }
+
+    func cancelLearning() {
+        cancelCallbackCount += 1
+        if let command = draft.requestCancel() { commands.append(command) }
+    }
+
+    func otherAction() { otherActionCount += 1 }
+
+    func acknowledgeCancellation() -> Bool {
+        draft.apply(.init(answerID: Self.answerID, studyID: 42, recordID: "101", revision: 7,
+            phase: .cancelled, text: nil, code: "ANSWER_CANCELLED"))
+    }
+}
+
+private struct VoiceTutorLearningCancelTestParent: View {
+    @ObservedObject var probe: VoiceTutorLearningCancelProbe
+
+    var body: some View {
+        VoiceTutorCallScreen(topic: "스프링",
+            presentation: VoiceTutorCallPresentation(phase: .listening, pauseState: probe.pause,
+                sessionState: probe.session, sessionSecondsRemaining: 3_000),
+            strings: AppStrings(language: .korean), errorMessage: nil,
+            showsTranscript: $probe.showsTranscript, showsSummary: $probe.showsSummary,
+            onPause: { probe.otherAction() }, onEnd: { probe.otherAction() },
+            answerDraftState: probe.draft,
+            answerDraftText: Binding(get: { probe.draft.text }, set: { _ = probe.draft.edit($0) }),
+            canSubmitAnswer: !probe.pause.holdsMicrophone && probe.draft.canSubmit,
+            onFinishAnswer: { probe.otherAction() }, onSubmitAnswer: { probe.otherAction() },
+            canSkipAnswer: !probe.pause.holdsMicrophone && probe.draft.canSkip,
+            onSkipAnswer: { probe.otherAction() }, canCancelLearning: probe.draft.canCancel,
+            onCancelLearning: { probe.cancelLearning() })
+            .dynamicTypeSize(.large)
+            .environment(\.locale, Locale(identifier: "ko_KR"))
+            .environment(\.scenePhase, .active)
+    }
+}
+
+@MainActor
+private final class VoiceTutorLearningCancelHarness {
+    let probe: VoiceTutorLearningCancelProbe
+    let window: UIWindow
+    private let previousKeyWindow: UIWindow?
+
+    init(transcript: Bool, paused: Bool) throws {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = try XCTUnwrap(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
+        previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
+        probe = VoiceTutorLearningCancelProbe(transcript: transcript, paused: paused)
+        window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.overrideUserInterfaceStyle = .dark
+        window.rootViewController = UIHostingController(rootView: VoiceTutorLearningCancelTestParent(probe: probe))
+        window.makeKeyAndVisible()
+    }
+
+    func settle() async throws {
+        await Task.yield()
+        try await Task.sleep(for: .milliseconds(400))
+        window.setNeedsLayout()
+        window.layoutIfNeeded()
+        window.rootViewController?.view.layoutIfNeeded()
+    }
+
+    func cancelButtons() -> [NSObject] {
+        var visited = Set<ObjectIdentifier>()
+        var result: [NSObject] = []
+        let label = AppStrings(language: .korean).voiceTutorLearningCancel
+        func visit(_ object: NSObject) {
+            guard visited.insert(ObjectIdentifier(object)).inserted else { return }
+            if object.accessibilityLabel == label && object.accessibilityTraits.contains(.button) { result.append(object) }
+            if #available(iOS 17.0, *) {
+                for child in (object.automationElements ?? []).compactMap({ $0 as? NSObject }) { visit(child) }
+            }
+            for child in (object.accessibilityElements ?? []).compactMap({ $0 as? NSObject }) { visit(child) }
+            let count = object.accessibilityElementCount()
+            if count > 0, count < 512 {
+                for index in 0..<count {
+                    if let child = object.accessibilityElement(at: index) as? NSObject { visit(child) }
+                }
+            }
+            for child in (object as? UIView)?.subviews ?? [] { visit(child) }
+        }
+        visit(window)
+        return result
+    }
+
+    func close() {
+        window.endEditing(true)
+        window.isHidden = true
+        window.rootViewController = nil
+        previousKeyWindow?.makeKey()
     }
 }
 

@@ -14,6 +14,18 @@ enum VoiceTutorAudioSessionInterruption {
     }
 }
 
+enum VoiceTutorPCMVoiceProcessing {
+    static func configure(_ engine: AVAudioEngine) throws {
+        // A voiceChat audio session alone does not turn an AVAudioEngine's
+        // input/output graph into Voice Processing I/O. Enable the coupled
+        // path before reading formats, installing taps or starting playback.
+        let input = engine.inputNode
+        try input.setVoiceProcessingEnabled(true)
+        input.isVoiceProcessingBypassed = false
+        input.isVoiceProcessingAGCEnabled = true
+    }
+}
+
 private final class VoiceTutorCaptureGate: @unchecked Sendable {
     private let lock = NSLock()
     private var muted = false
@@ -221,6 +233,12 @@ final class VoiceTutorAudioEngine {
         }
 
         let inputNode = engine.inputNode
+        do {
+            try VoiceTutorPCMVoiceProcessing.configure(engine)
+        } catch {
+            stop()
+            throw error
+        }
         let inputFormat = inputNode.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0,
               inputFormat.channelCount > 0,

@@ -138,7 +138,7 @@ class VoiceTutorRealtimeEventPolicyTest {
     @Test
     fun `manual answer controls stay local and strictly validate bound identity and edited text`() {
         val identity = mapOf("answerId" to "00112233-4455-6677-8899-aabbccddeeff", "recordId" to "42")
-        for (type in listOf(VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT, VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT,
+        for (type in listOf(VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT, VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT, VoiceTutorRealtimeContract.ANSWER_CANCEL_EVENT,
             VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT)) {
             assertThat(policy.shouldForwardClientEvent(mapper.writeValueAsString(identity + mapOf("type" to type, "text" to "수정본")))).isFalse()
         }
@@ -165,6 +165,22 @@ class VoiceTutorRealtimeEventPolicyTest {
         assertThat(payload.path("text").asText()).isEqualTo("검토 답변")
         assertThat(policy.providerDecision(raw, "s1", Instant.EPOCH).payload).isNull()
         assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+    }
+
+    @Test
+    fun `answer cancellation receipt survives public filtering and private capture provenance does not leak`() {
+        for (code in listOf("ANSWER_CANCELLED", "ANSWER_CANCEL_UNAVAILABLE")) {
+            val raw = mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.ANSWER_STATE_EVENT,
+                "answerId" to "00112233-4455-6677-8899-aabbccddeeff", "recordId" to "42", "studyId" to 7,
+                "revision" to 0, "phase" to if (code == "ANSWER_CANCELLED") "cancelled" else "review",
+                "text" to "유지할 초안", "code" to code))
+            val payload = policy.providerDecision(raw, "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload
+            assertThat(mapper.readTree(payload).path("code").asText()).isEqualTo(code)
+        }
+        val source = """{"type":"response.output_audio_transcript.done","response_id":"response-1","item_id":"question-1","transcript":"저장된 문제","buddystudyCanonicalAnswerSource":true}"""
+        val payload = policy.providerDecision(source, "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload
+        assertThat(mapper.readTree(payload).path("transcript").asText()).isEqualTo("저장된 문제")
+        assertThat(mapper.readTree(payload).has("buddystudyCanonicalAnswerSource")).isFalse()
     }
 
     @Test

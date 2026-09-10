@@ -662,6 +662,52 @@ class VoiceTutorLessonRevisionPersistenceTest {
     }
 
     @Test
+    fun `private canonical question and late answer keep ordering without becoming post call candidates`() = runBlocking<Unit> {
+        execute("insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 2, 42, current_timestamp)")
+        assertThat(adapter.appendTranscript(7, "owned", "cancelled-answer", VoiceTutorTranscriptRole.USER,
+            "  취소한 미제출 답변\n마지막 인식 결과  ", now, 4000, 20, lessonRevision = 2,
+            canonicalAnswerSource = true, conversationSequence = 12)).isTrue()
+        assertThat(adapter.appendTranscript(7, "owned", "canonical-question", VoiceTutorTranscriptRole.TUTOR,
+            "  저장된 문제의 원문입니다.  ", now, 4000, 20, lessonRevision = 2,
+            canonicalAnswerSource = true, conversationSequence = 11)).isTrue()
+        val rows = adapter.transcript(7, "owned", 4000)
+        assertThat(rows.map { it.providerItemId }).containsExactly("canonical-question", "cancelled-answer")
+        assertThat(rows.map { it.sequenceNumber }).containsExactly(11L, 12L)
+        assertThat(rows.map { it.transcript }).containsExactly("  저장된 문제의 원문입니다.  ", "  취소한 미제출 답변\n마지막 인식 결과  ")
+        assertThat(rows.all { !it.postCallEvidence && !it.interrupted && !it.isStudyQuestion &&
+            !it.askedStudyQuestion && it.studyQuestionTurnId == null && it.studyAnswerTurnId == null }).isTrue()
+        assertThat(adapter.hasPostCallLearningCandidates(7, "owned")).isFalse()
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isFalse()
+        // The exact source is still available if the learner deliberately submits
+        // a reviewed answer; the existing canonical exclusion is idempotent.
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "cancelled-answer", "canonical-question", 2))
+            .containsExactlyElementsOf(rows)
+        assertThat(adapter.excludeCanonicalQuestionTurns(7, "owned", listOf("canonical-question", "cancelled-answer"))).isTrue()
+        assertThat(adapter.transcript(7, "owned", 4000)).containsExactlyElementsOf(rows)
+    }
+
+    @Test
+    fun `private canonical source rejects unowned unordered and semantically attested inserts`() = runBlocking<Unit> {
+        suspend fun append(userId: Long = 7, sequence: Long? = 1, revision: Long = 0,
+            postCall: Boolean = false, interrupted: Boolean = false, question: String? = null,
+            isQuestion: Boolean = false, acceptedAt: Instant = now) = adapter.appendTranscript(
+                userId, "owned", "invalid-private", VoiceTutorTranscriptRole.TUTOR, "보존할 원문", acceptedAt,
+                4000, 20, lessonRevision = revision, studyQuestionProviderItemId = question,
+                isStudyQuestion = isQuestion, postCallEvidence = postCall, conversationSequence = sequence,
+                interrupted = interrupted, canonicalAnswerSource = true)
+        assertThat(append(userId = 8)).isFalse()
+        assertThat(append(sequence = null)).isFalse()
+        assertThat(append(sequence = 0)).isFalse()
+        assertThat(append(revision = -1)).isFalse()
+        assertThat(append(postCall = true)).isFalse()
+        assertThat(append(interrupted = true)).isFalse()
+        assertThat(append(question = "question")).isFalse()
+        assertThat(append(isQuestion = true)).isFalse()
+        assertThat(append(acceptedAt = now.minusSeconds(1))).isFalse()
+        assertThat(adapter.transcript(7, "owned", 4000)).isEmpty()
+    }
+
+    @Test
     fun `canonical answer lookup returns the complete latest run beyond a clipped history prefix`() = runBlocking<Unit> {
         native("old", VoiceTutorTranscriptRole.TUTOR, 1, text = "오래된 대화".repeat(500))
         native("question", VoiceTutorTranscriptRole.TUTOR, 100, text = "원래 도착한 문제입니다.")

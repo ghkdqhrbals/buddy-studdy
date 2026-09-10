@@ -98,6 +98,7 @@ interface VoiceTutorRelayUseCase {
         postCallEvidence: Boolean = false,
         conversationSequence: Long? = null,
         interrupted: Boolean = false,
+        canonicalAnswerSource: Boolean = false,
     ): Boolean
 
     suspend fun finish(

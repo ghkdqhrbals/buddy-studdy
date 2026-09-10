@@ -2806,6 +2806,169 @@ class VoiceTutorNativeConversationControllerTest {
         controller.requestUserInput(calls.single(), proposal)
         return ui.single { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
     }
+    @ParameterizedTest
+    @ValueSource(strings = ["listening", "finalizing", "review"])
+    fun `answer cancellation retains draft and offers exact server choices without submitting or skipping`(phase: String) {
+        val lifecycle = mutableListOf<JsonNode>()
+        controller.lifecycleEvents().subscribe { lifecycle.add(mapper.readTree(it)) }
+        val answer = manualAnswer()
+        speech(2)
+        if (phase != "finalizing") {
+            committed("partial-answer"); transcript("partial-answer", "아직 제출하지 않은 답변입니다.")
+            controller.transcriptCompleted("partial-answer")
+        }
+        if (phase != "listening") answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo(phase)
+        val responseCount = responses().size
+        answerControl(Contract.ANSWER_CANCEL_EVENT, answer)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("cancelled")
+        assertThat(answerStates().last().path("code").asText()).isEqualTo("ANSWER_CANCELLED")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
+        if (phase == "finalizing") {
+            assertThat(outbound.none { it.path("item").path("name").asText() == "request_user_input" }).isTrue()
+            committed("late-partial"); transcript("late-partial", "취소 뒤 도착한 원래 답변")
+            controller.transcriptCompleted("late-partial")
+            assertThat(stored.map { it.itemId }).contains("late-partial")
+        } else assertThat(answerStates().last().path("text").asText()).contains("아직 제출하지 않은 답변")
+        stored.filter { it.itemId in setOf("saved-question", "partial-answer", "late-partial") }.forEach {
+            val source = mapper.readTree(it.raw)
+            assertThat(source.path(Metadata.CANONICAL_ANSWER_SOURCE).asBoolean()).isTrue()
+            assertThat(source.path(Metadata.POST_CALL_EVIDENCE).asBoolean()).isFalse()
+        }
+        val call = serverQuestionCall()
+        assertThat(call.path("item").path("name").asText()).isEqualTo("request_user_input")
+        answerControl(Contract.ANSWER_CANCEL_EVENT, answer)
+        assertThat(outbound.count { it.path("item").path("name").asText() == "request_user_input" }).isEqualTo(1)
+        ackToolOutput()
+        val dispatched = calls.last()
+        controller.beginTool(dispatched.callId); controller.requestUserInput(dispatched)
+        val form = ui.last { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+        assertThat(form.path("questions")[0].path("options").map { it.path("id").asText() })
+            .containsExactly("another_topic", "free_conversation", "later")
+        assertThat(form.path("questions")[0].path("allowFreeText").asBoolean()).isTrue()
+        assertThat(calls.none { it.name in setOf("submit_answer", "skip_question", "request_question") }).isTrue()
+        assertThat(responses()).hasSize(responseCount)
+        assertThat(lifecycle).isEmpty()
+    }
+
+    @Test
+    fun `submitted answer cannot be withdrawn by a late cancel control`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "검토 후 제출한 답변")
+        val scheduled = serverQuestionCall()
+        answerControl(Contract.ANSWER_CANCEL_EVENT, answer)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("submitting")
+        assertThat(serverQuestionCall()).isEqualTo(scheduled)
+        assertThat(outbound.none { it.path("item").path("name").asText() == "request_user_input" }).isTrue()
+    }
+
+    @Test
+    fun `failed submission can leave capture without retrying it or claiming the previous write was undone`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "검토한 답변")
+        val submit = serverQuestionCall().path("item").path("call_id").asText()
+        ackToolOutput(); controller.beginTool(submit)
+        controller.completeTool(submit, VoiceTutorMcpToolResult("{}", true)); ackToolOutput()
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("failed")
+        answerControl(Contract.ANSWER_CANCEL_EVENT, answer)
+        assertThat(answerStates().last().path("code").asText()).isEqualTo("ANSWER_CANCELLED")
+        assertThat(outbound.count { it.path("item").path("name").asText() == "submit_answer" }).isEqualTo(1)
+        val choices = mapper.readTree(serverQuestionCall().path("item").path("arguments").asText())
+        assertThat(choices.path("questions")[0].path("prompt").asText()).contains("문제와 작성한 내용은 유지")
+    }
+
+    @Test
+    fun `answer cancellation while paused shows choices without resuming speech`() {
+        val answer = manualAnswer()
+        client(Contract.PAUSE_REQUEST_EVENT, 1); client(Contract.PAUSE_INPUT_QUIESCED_EVENT, 1)
+        event("input_audio_buffer.cleared", "event_id" to "pause-clear")
+        assertThat(sessionStates().last().path("paused").asBoolean()).isTrue()
+        answerControl(Contract.ANSWER_CANCEL_EVENT, answer)
+        ackToolOutput()
+        val dispatched = calls.last()
+        controller.beginTool(dispatched.callId); controller.requestUserInput(dispatched)
+        assertThat(ui.count { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }).isEqualTo(1)
+        assertThat(sessionStates().last().path("paused").asBoolean()).isTrue()
+    }
+
+    @Test
+    fun `cancelled choice gives one bounded acknowledgement then listens without repeating a form`() {
+        val lifecycle = mutableListOf<JsonNode>()
+        controller.lifecycleEvents().subscribe { lifecycle.add(mapper.readTree(it)) }
+        val form = userInput()
+        inputControl(Contract.USER_INPUT_CANCEL_EVENT, form)
+        event("input_audio_buffer.cleared", "event_id" to "cancel-clear")
+        ackToolOutput()
+        assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
+        assertThat(responses().last().path("response").path("instructions").asText()).contains("취소했어요", "Do not ask a question")
+        created("cancelled-choice"); audio("cancelled-choice", "acknowledgement"); done("cancelled-choice", "acknowledgement")
+        event("output_audio_buffer.stopped", "response_id" to "cancelled-choice")
+        val count = responses().size
+        time += Duration.ofSeconds(10).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(count)
+        assertThat(ui.count { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }).isEqualTo(1)
+        assertThat(lifecycle).isEmpty()
+    }
+
+    @Test
+    fun `missing exact cancellation form acknowledgement fails finitely instead of leaving a microphone hold`() {
+        val answer = manualAnswer()
+        var failure: Throwable? = null
+        controller.failure().subscribe({}, { failure = it })
+        answerControl(Contract.ANSWER_CANCEL_EVENT, answer)
+        time += Duration.ofSeconds(15).toNanos(); controller.tick()
+        assertThat(failure).isInstanceOf(VoiceTutorMcpProtocolException::class.java)
+        assertThat(ui.none { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }).isTrue()
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["free_conversation", "later"])
+    fun `free conversation and later choices never automatically resume a cancelled saved question`(choice: String) {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_CANCEL_EVENT, answer)
+        ackToolOutput()
+        val dispatched = calls.last()
+        controller.beginTool(dispatched.callId); controller.requestUserInput(dispatched)
+        val form = ui.last { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, form, listOf(mapOf("questionId" to "after_cancelled_answer",
+            "selectedOptionIds" to listOf(choice), "text" to "")))
+        event("input_audio_buffer.cleared", "event_id" to "choice-clear")
+        ackToolOutput()
+        assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
+        created("ack-choice"); audio("ack-choice", "choice-ack"); done("ack-choice", "choice-ack")
+        event("output_audio_buffer.stopped", "response_id" to "ack-choice")
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("cancelled")
+        val count = responses().size
+        controller.tick()
+        assertThat(responses()).hasSize(count)
+        // A new explicit utterance and its exact current lookup can resume that same saved question.
+        speech(3); committed("resume-request"); created("resume-lookup")
+        toolDone("resume-lookup", "resume-question", "list_pending_questions")
+        controller.beginTool("resume-question")
+        controller.completeTool("resume-question", VoiceTutorMcpToolResult("{}", false,
+            questionReadbackRecovery = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION)))
+        ackToolOutput()
+        assertThat(responses().last().path("response").path("instructions").asText()).contains(SAVED_QUESTION)
+    }
+
+    @Test
+    fun `pause preserves a cancelled choice acknowledgement across resume without reopening model tools`() {
+        val form = userInput()
+        inputControl(Contract.USER_INPUT_CANCEL_EVENT, form)
+        event("input_audio_buffer.cleared", "event_id" to "cancel-clear"); ackToolOutput()
+        val beforePause = responses().size
+        created("ack")
+        client(Contract.PAUSE_REQUEST_EVENT, 1); client(Contract.PAUSE_INPUT_QUIESCED_EVENT, 1)
+        cancelled("ack"); event("input_audio_buffer.cleared", "event_id" to "paused-clear")
+        client(Contract.RESUME_REQUEST_EVENT, 2); event("input_audio_buffer.cleared", "event_id" to "resumed-clear")
+        settleQuiet()
+        assertThat(responses()).hasSize(beforePause + 1)
+        assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
+        assertThat(responses().last().path("response").path("instructions").asText()).contains("취소했어요")
+    }
+
     private fun validFormAnswers() = listOf(
         mapOf("questionId" to "single", "selectedOptionIds" to listOf("a"), "text" to "추가 선호"),
         mapOf("questionId" to "multiple", "selectedOptionIds" to listOf("c", "d"), "text" to ""),

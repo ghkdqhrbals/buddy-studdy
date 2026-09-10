@@ -165,6 +165,8 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
         conversationSequence: Long? = null,
         /** Private incomplete TUTOR archive; never source authority or proof of heard/completed speech. */
         interrupted: Boolean = false,
+        /** Private saved-question/answer source; only an explicit canonical submission may use it. */
+        canonicalAnswerSource: Boolean = false,
     ): Boolean
 
     suspend fun transcript(userId: Long, sessionId: String, maxCharacters: Int): List<VoiceTutorTranscriptTurn>
