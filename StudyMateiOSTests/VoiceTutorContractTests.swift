@@ -2701,7 +2701,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(transcript.contains("Color(uiColor: .systemBackground)"))
         XCTAssertFalse(transcript.contains("UnevenRoundedRectangle"))
         XCTAssertFalse(transcript.contains("shadow("))
-        XCTAssertTrue(transcript.contains("orbPlaceholder(.transcript, diameter: hasAnswerDraft ? 64 : (usesAccessibilityChrome ? 56 : 48))"))
+        XCTAssertTrue(transcript.contains("orbPlaceholder(.transcript, diameter: hasAnswerDraft ? (usesAccessibilityChrome ? 96 : 64) : (usesAccessibilityChrome ? 56 : 48))"))
         XCTAssertTrue(source.contains("interactionDock"))
         XCTAssertTrue(source.contains("stableCallControls"))
         XCTAssertFalse(source.contains("Button(action: onPause)"), "The circle owns taps, swipes and holds through one recognizer")
@@ -3058,19 +3058,32 @@ final class VoiceTutorContractTests: XCTestCase {
             return state
         }
         let text = "B입니다. 스프링 프레임워크는 핵심 기반을 제공하고, 스프링 부트는 설정을 단순화합니다."
+        var paused = VoiceTutorCallPauseState()
+        paused.isSupported = true
+        let pauseRequest = try XCTUnwrap(paused.requestPause())
+        _ = paused.acknowledge(sequence: pauseRequest.sequence, paused: true)
         let fixtures: [VoiceTutorCompactCallSnapshot] = [
-            .init(name: "answer-listening-orb", phase: .listening,
+            .init(name: "answer-started-empty", phase: .listening, topic: "스프링",
+                  answerDraftState: makeState(.listening, text: "")),
+            .init(name: "answer-capture-light", phase: .listening, topic: "스프링", colorScheme: .light,
                   answerDraftState: makeState(.listening, text: text)),
-            .init(name: "answer-listening-editor", phase: .listening, showsTranscript: true,
+            .init(name: "answer-capture-paused", phase: .listening, pauseState: paused, topic: "스프링",
                   answerDraftState: makeState(.listening, text: text)),
-            .init(name: "answer-review-corrected", phase: .listening, showsTranscript: true,
+            .init(name: "answer-capture-accessibility", phase: .listening, language: .english,
+                  topic: "Spring", size: CGSize(width: 320, height: 696), dynamicType: .accessibility3,
+                  answerDraftState: makeState(.listening, text: "I would choose B.")),
+            .init(name: "answer-listening-orb", phase: .listening, topic: "스프링",
+                  answerDraftState: makeState(.listening, text: text)),
+            .init(name: "answer-listening-editor", phase: .listening, showsTranscript: true, topic: "스프링",
+                  answerDraftState: makeState(.listening, text: text)),
+            .init(name: "answer-review-corrected", phase: .listening, showsTranscript: true, topic: "스프링",
                   answerDraftState: makeState(.review, text: text + " 스프링 데이터는 데이터 접근을 돕습니다.")),
-            .init(name: "answer-review-empty", phase: .listening, showsTranscript: true,
+            .init(name: "answer-review-empty", phase: .listening, showsTranscript: true, topic: "스프링",
                   answerDraftState: makeState(.review, text: "")),
-            .init(name: "answer-submitting", phase: .listening, showsTranscript: true,
+            .init(name: "answer-submitting", phase: .listening, showsTranscript: true, topic: "스프링",
                   answerDraftState: makeState(.submitting, text: text)),
             .init(name: "answer-retry-accessibility", phase: .listening, showsTranscript: true,
-                  language: .english, size: CGSize(width: 320, height: 696), dynamicType: .accessibility3,
+                  language: .english, topic: "Spring", size: CGSize(width: 320, height: 696), dynamicType: .accessibility3,
                   answerDraftState: makeState(.failed, text: "B. Spring supplies the core framework. Spring Boot simplifies configuration.")),
         ]
         var captures = Set<Data>()

@@ -3123,7 +3123,7 @@ struct AppStrings {
     var voiceTutorAnswerFinish: String { text("답변 종료", "Finish answer", "回答を終える") }
     var voiceTutorAnswerSubmit: String { text("제출", "Submit", "送信") }
     var voiceTutorAnswerSkip: String { text("이 질문 건너뛰기", "Skip this question", "この問題をスキップ") }
-    var voiceTutorAnswerListening: String { text("답변을 듣고 있어요", "Listening to your answer", "回答を聞いています") }
+    var voiceTutorAnswerListening: String { text("답변 기록 중", "Capturing your answer", "回答を記録中") }
     var voiceTutorAnswerFinalizing: String { text("마지막 말을 받아쓰는 중", "Finishing the transcript", "最後の言葉を書き起こしています") }
     var voiceTutorAnswerReview: String { text("답변을 확인해 주세요", "Review your answer", "回答を確認してください") }
     var voiceTutorAnswerSubmitting: String { text("답변 제출 중", "Submitting your answer", "回答を送信中") }
@@ -3134,7 +3134,7 @@ struct AppStrings {
         text("말한 내용이 여기에 모여요. 직접 입력해도 돼요.", "Your words appear here. You can type, too.", "話した内容がここに表示されます。直接入力もできます。")
     }
     var voiceTutorAnswerCaptureHelp: String {
-        text("다 말했으면 원을 눌러 답변을 확인하세요.", "Tap the circle when you're ready to review.", "話し終えたら円をタップして回答を確認してください。")
+        text("잠시 멈춰도 괜찮아요. 답변 종료를 누를 때까지 들어요.", "Take your time. I'll keep listening until you tap Finish answer.", "途中で休んでも大丈夫です。「回答を終える」をタップするまで聞いています。")
     }
     var voiceTutorAnswerReviewHelp: String {
         text("잘못 받아쓴 말은 고쳐 주세요. 제출한 내용으로만 채점해요.", "Correct any transcription errors. Only your submitted answer will be graded.", "書き起こしの誤りを直してください。送信した内容だけを採点します。")

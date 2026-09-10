@@ -1048,6 +1048,7 @@ struct VoiceTutorCallScreen: View {
         }
         .onChange(of: answerDraftState.phase) { _, phase in
             cancelOrbInteraction()
+            updateOrbAnimation()
             if phase == .review {
                 setTranscriptExpanded(true)
             }
@@ -1171,7 +1172,7 @@ struct VoiceTutorCallScreen: View {
                     }
                 }
                 Spacer(minLength: 0)
-                orbPlaceholder(.transcript, diameter: hasAnswerDraft ? 64 : (usesAccessibilityChrome ? 56 : 48))
+                orbPlaceholder(.transcript, diameter: hasAnswerDraft ? (usesAccessibilityChrome ? 96 : 64) : (usesAccessibilityChrome ? 56 : 48))
             }
             if usesAccessibilityChrome {
                 Text(strings.voiceTutorCallConversationAction)
@@ -1182,6 +1183,9 @@ struct VoiceTutorCallScreen: View {
             HStack(spacing: 12) {
                 callTime
                 if presentation.isRecording { recordingIndicator }
+            }
+            if answerCaptureIsListening, orbInteraction.stage == .idle {
+                answerCaptureHelp
             }
             if orbInteraction.stage == .warning {
                 Text(strings.voiceTutorOrbReleaseCancels)
@@ -1218,7 +1222,7 @@ struct VoiceTutorCallScreen: View {
     private var transcriptStatus: some View {
         Text(orbStatusText)
             .font(.caption)
-            .foregroundStyle(orbInteraction.stage == .warning ? Color.red : Color.secondary)
+            .foregroundStyle(orbStatusColor)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("voiceCall.status")
     }
@@ -1268,7 +1272,11 @@ struct VoiceTutorCallScreen: View {
                 )
             )
             .overlay {
-                if orbInteraction.stage == .warning || orbInteraction.stage == .committed {
+                if answerCaptureIsListening, orbInteraction.stage == .idle {
+                    Circle()
+                        .stroke(answerCaptureAccent.opacity(0.5), lineWidth: 1.5)
+                        .padding(-8)
+                } else if orbInteraction.stage == .warning || orbInteraction.stage == .committed {
                     Circle()
                         .trim(from: 0, to: orbInteraction.progress)
                         .stroke(Color.red, style: StrokeStyle(lineWidth: 3, lineCap: .round))
@@ -1282,13 +1290,17 @@ struct VoiceTutorCallScreen: View {
                         ProgressView()
                             .tint(Color.black.opacity(0.75))
                     } else if let label = answerOrbLabel {
-                        Text(label)
-                            .font(diameter < 80 ? .caption2.weight(.semibold) : .headline)
-                            .foregroundStyle(Color.black.opacity(0.8))
-                            .opacity(answerDraftState.phase == .listening || canSubmitAnswer ? 1 : 0.45)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, diameter < 80 ? 7 : 20)
+                        VStack(spacing: diameter < 112 ? 3 : 10) {
+                            Image(systemName: answerCaptureIsListening ? "mic.fill" : "mic.slash.fill")
+                                .font(diameter < 112 ? .caption2 : .title3)
+                            Text(label)
+                                .font(diameter < 112 ? .caption2.weight(.semibold) : .headline)
+                                .opacity(answerDraftState.phase == .listening || canSubmitAnswer ? 1 : 0.45)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .foregroundStyle(Color.black.opacity(0.8))
+                        .padding(.horizontal, diameter < 112 ? 7 : 20)
                     }
                 }
             }
@@ -1307,6 +1319,11 @@ struct VoiceTutorCallScreen: View {
         if presentation.orbState == .paused || presentation.orbState == .pausing {
             return Color.secondary.opacity(colorScheme == .dark ? 0.45 : 0.22)
         }
+        if answerCaptureIsListening {
+            return colorScheme == .dark
+                ? Color(red: 0.94, green: 0.73, blue: 0.39)
+                : Color(red: 0.90, green: 0.68, blue: 0.33)
+        }
         return colorScheme == .dark
             ? Color(red: 0.77, green: 0.86, blue: 0.84)
             : Color(red: 0.65, green: 0.78, blue: 0.75)
@@ -1317,7 +1334,7 @@ struct VoiceTutorCallScreen: View {
         case .anticipating: return reduceMotion ? 1 : 0.97
         case .warning, .committed: return reduceMotion ? 1 : 0.92
         case .idle:
-            guard presentation.orbAnimates, !reduceMotion else { return 1 }
+            guard !hasAnswerDraft, presentation.orbAnimates, !reduceMotion else { return 1 }
             return orbPulseExpanded ? (presentation.orbState == .speaking ? 1.04 : 1.015) : 1
         }
     }
@@ -1330,14 +1347,38 @@ struct VoiceTutorCallScreen: View {
         return presentation.statusText(strings, errorMessage: errorMessage)
     }
 
+    private var orbStatusColor: Color {
+        if orbInteraction.stage == .warning { return .red }
+        return answerCaptureIsListening ? answerCaptureAccent : .secondary
+    }
+
+    private var answerCaptureAccent: Color {
+        colorScheme == .dark
+            ? Color(red: 0.94, green: 0.73, blue: 0.39)
+            : Color(red: 0.52, green: 0.31, blue: 0.08)
+    }
+
+    private var answerCaptureHelp: some View {
+        Text(strings.voiceTutorAnswerCaptureHelp)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("voiceCall.answerCaptureHelp")
+    }
+
     private var callNotices: some View {
         VStack(spacing: 12) {
             Text(orbStatusText)
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(orbInteraction.stage == .warning ? Color.red : Color.secondary)
+                .foregroundStyle(orbStatusColor)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("voiceCall.status")
+
+            if answerCaptureIsListening, orbInteraction.stage == .idle {
+                answerCaptureHelp
+                    .multilineTextAlignment(.center)
+            }
 
             if orbInteraction.stage == .warning {
                 Text(strings.voiceTutorOrbReleaseCancels)
@@ -1378,6 +1419,11 @@ struct VoiceTutorCallScreen: View {
         case .listening, .finalizing, .review, .submitting, .failed: return true
         case .inactive, .submitted, .cancelled: return false
         }
+    }
+
+    private var answerCaptureIsListening: Bool {
+        presentation.phase.isLive && presentation.pauseState.mode == .active
+            && answerDraftState.phase == .listening
     }
 
     private var answerDraftIsEditable: Bool {
@@ -1474,11 +1520,12 @@ struct VoiceTutorCallScreen: View {
                     .accessibilityHint(strings.voiceTutorAnswerReviewHelp)
                     .accessibilityIdentifier("voiceCall.answerEditor")
             }
-            Text(answerDraftState.phase == .listening
-                 ? strings.voiceTutorAnswerCaptureHelp : strings.voiceTutorAnswerReviewHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if answerDraftState.phase != .listening {
+                Text(strings.voiceTutorAnswerReviewHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if answerDraftState.phase == .failed {
                 Text(answerDraftState.failureCode == "ANSWER_TOO_LONG"
                      ? strings.voiceTutorAnswerTooLong : strings.voiceTutorAnswerFailedHelp)
@@ -2101,6 +2148,7 @@ struct VoiceTutorCallScreen: View {
         case nil: break
         }
         if presentation.isRecording { parts.append(strings.voiceTutorCallRecording) }
+        if hasAnswerDraft, answerDraftState.holdsMicrophone { parts.append(strings.voiceTutorCallMuted) }
         return parts.joined(separator: ", ")
     }
 
@@ -2110,7 +2158,7 @@ struct VoiceTutorCallScreen: View {
         withTransaction(transaction) {
             orbPulseExpanded = false
         }
-        guard presentation.orbAnimates, !reduceMotion else { return }
+        guard !hasAnswerDraft, presentation.orbAnimates, !reduceMotion else { return }
         let duration = presentation.orbState == .speaking ? 0.72 : 1.35
         withAnimation(.easeInOut(duration: duration).repeatForever(autoreverses: true)) {
             orbPulseExpanded = true

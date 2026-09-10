@@ -553,6 +553,47 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
+    fun `minutes of thinking silence preserve every valid sized answer part until one explicit reviewed submission`() {
+        val answer = manualAnswer()
+        var failure: Throwable? = null
+        controller.failure().subscribe({}, { failure = it })
+        val parts = listOf("첫 부분: " + "가".repeat(2_500), "중간 부분: " + "나".repeat(2_600),
+            "마지막 부분: " + "다".repeat(2_700))
+        val original = parts.joinToString("\n")
+        assertThat(original.length).isLessThanOrEqualTo(8_000)
+
+        // Silence before the first word must outlive both the response watchdog and
+        // the answer-finalization timeout without becoming an implicit finish.
+        time += Duration.ofMinutes(3).toNanos(); controller.tick()
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("listening")
+        assertThat(responses()).hasSize(3)
+        parts.forEachIndexed { index, part ->
+            val itemId = "multipart-$index"
+            speech(index + 2L); committed(itemId); transcript(itemId, part); controller.transcriptCompleted(itemId)
+            time += Duration.ofMinutes(2).toNanos(); controller.tick()
+            assertThat(responses()).hasSize(3)
+            assertThat(answerStates().last().path("phase").asText()).isEqualTo("listening")
+            assertThat(outbound.none { it.path("item").path("type").asText() == "function_call" }).isTrue()
+        }
+        assertThat(answerSegments().map { it.path("text").asText() }).containsExactlyElementsOf(parts)
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("review")
+        assertThat(answerStates().last().path("text").asText()).isEqualTo(original)
+        time += Duration.ofMinutes(1).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(3)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("review")
+
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, original)
+        val request = serverQuestionCall()
+        val reviewed = controller.reviewedAnswer(request.path("item").path("call_id").asText())!!
+        assertThat(reviewed.text).isEqualTo(original)
+        assertThat(reviewed.learnerProviderItemIds).containsExactly("multipart-0", "multipart-1", "multipart-2")
+        assertThat(outbound.count { it.path("item").path("type").asText() == "function_call" }).isEqualTo(1)
+        assertThat(responses()).hasSize(3)
+        assertThat(failure).isNull()
+    }
+
+    @Test
     fun `finish waits for exact final ASR and persistence and emits ordered deduplicated segments before review`() {
         val answer = manualAnswer()
         speech(2); committed("a1"); speech(3); committed("a2")
