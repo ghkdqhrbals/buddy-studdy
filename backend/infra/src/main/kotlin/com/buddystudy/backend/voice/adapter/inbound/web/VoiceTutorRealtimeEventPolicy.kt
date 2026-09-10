@@ -128,9 +128,14 @@ internal class VoiceTutorRealtimeEventPolicy(
             VoiceTutorRealtimeContract.INPUT_RETRY_EVENT -> if (
                 transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND
             ) {
+                val sequence = node.path("sequence")
+                if (node.has("sequence") && (!sequence.isIntegralNumber || !sequence.canConvertToLong() || sequence.longValue() < 0)) {
+                    return ProviderEventDecision(payload = null)
+                }
                 // A safe server-owned hint, not a provider failure or call end.
                 // Never forward provider bodies/classifier text to the UI.
                 val payload = linkedMapOf<String, Any>("type" to VoiceTutorRealtimeContract.INPUT_RETRY_EVENT)
+                if (node.has("sequence")) payload["sequence"] = sequence.longValue()
                 node.path(VoiceTutorRealtimeContract.ABANDONED_RESPONSE_ID_FIELD)
                     .takeIf(::validProviderResponseId)
                     ?.asText()

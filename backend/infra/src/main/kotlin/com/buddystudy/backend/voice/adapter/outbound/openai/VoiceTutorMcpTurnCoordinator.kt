@@ -34,6 +34,11 @@ internal data class VoiceTutorRejectedServerCall(
     val newlyTombstoned: Boolean,
 )
 
+internal enum class VoiceTutorDiscardedResponseReason {
+    TURN_SUPERSEDED,
+    RESPONSE_FAILED,
+}
+
 /**
  * All transitions run under VoiceTutorDuplexTurnController's lock. Only a
  * correlated, successfully completed response can enqueue work. Tool execution
@@ -49,6 +54,7 @@ internal class VoiceTutorMcpTurnCoordinator(
     private var roundCount = 0
     private var closed = false
     private var continuationSuperseded = false
+    private var continuationAcknowledged = false
     var continuationReady: Boolean = false
         private set
 
@@ -60,17 +66,20 @@ internal class VoiceTutorMcpTurnCoordinator(
         check(!hasPending && !continuationReady)
         roundCount = 0
         continuationSuperseded = false
+        continuationAcknowledged = false
     }
 
     /** Keep accepted tool results, but never speak a stale continuation after barge-in. */
     fun supersedeContinuation() {
         continuationReady = false
         continuationSuperseded = true
+        continuationAcknowledged = false
     }
 
     fun consumeContinuation() {
         check(!hasPending && continuationReady)
         continuationReady = false
+        continuationAcknowledged = false
     }
 
     fun completedResponse(response: JsonNode): List<VoiceTutorMcpCall> {
@@ -109,6 +118,50 @@ internal class VoiceTutorMcpTurnCoordinator(
     }
 
     /**
+     * Close provider-visible function items from a discarded response without ever
+     * executing them. A cancelled/failed response may contain completed or partial
+     * function items even though it never qualified for [completedResponse].
+     * Existing IDs belong to their original execution/output and are never changed.
+     * These outputs use the normal exact ACK fence but confer no new continuation.
+     */
+    fun closeUnexecutedResponseCalls(
+        response: JsonNode,
+        reason: VoiceTutorDiscardedResponseReason,
+        nowNanos: Long,
+    ): List<Map<String, Any?>> {
+        if (closed || !response.path("output").isArray) return emptyList()
+        val items = response.path("output").filter { it.path("type").asText() == "function_call" }
+        if (items.size > MAX_CALLS_PER_RESPONSE) throw VoiceTutorMcpProtocolException()
+        val calls = linkedMapOf<String, String>()
+        items.forEach { item ->
+            val id = item.path("call_id").takeIf(JsonNode::isTextual)?.textValue()
+                ?.takeIf(PROVIDER_ID::matches) ?: return@forEach
+            if (id !in seenCallIds && id !in pending) {
+                // Partial function items may not yet have a name or arguments. Only
+                // the actual provider call ID is needed to close them, never their data.
+                calls.putIfAbsent(id, item.path("name").takeIf(JsonNode::isTextual)?.textValue()
+                    ?.takeIf(TOOL_NAME::matches) ?: "unexecuted_tool")
+            }
+        }
+        if (seenCallIds.size + calls.size > MAX_CALLS_PER_SESSION) throw VoiceTutorMcpProtocolException()
+        if (calls.isEmpty()) return emptyList()
+        val result = VoiceTutorMcpToolResult(mapper.writeValueAsString(mapOf("error" to mapOf(
+            "code" to reason.name,
+            "executed" to false,
+            "message" to "This function call belonged to a discarded response and was not executed. No operation is running for this call. Follow the latest learner request; never treat an earlier promise or this discarded call as work in progress.",
+        ))), true)
+        continuationReady = false
+        return calls.map { (callId, name) ->
+            seenCallIds.add(callId)
+            pending[callId] = Pending(
+                outputItemId = "vtmcp_${UUID.randomUUID().toString().replace("-", "").take(26)}",
+                toolName = name, started = true, discardedResponse = true,
+            )
+            requireNotNull(complete(callId, result, nowNanos))
+        }
+    }
+
+    /**
      * Registers a server-owned call whose arguments came from durable, assessed
      * learner input rather than a model response. The synthetic function item
      * must be acknowledged into provider conversation context before execution,
@@ -143,6 +196,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         roundCount = 0
         continuationSuperseded = false
         continuationReady = false
+        continuationAcknowledged = false
         pending[callId] = Pending(
             outputItemId = outputItemId,
             toolName = name,
@@ -267,7 +321,8 @@ internal class VoiceTutorMcpTurnCoordinator(
         if (item.has("status") && item.path("status").asText() != "completed") return false
         pending.remove(callId)
         if (call.resetsHumanRoundBudget) roundCount = 0
-        if (pending.isEmpty() && !continuationSuperseded) continuationReady = true
+        if (!call.discardedResponse) continuationAcknowledged = true
+        if (pending.isEmpty() && !continuationSuperseded && continuationAcknowledged) continuationReady = true
         return true
     }
 
@@ -287,6 +342,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         seenCallIds.clear()
         rejectedServerCallsByEventId.clear()
         continuationReady = false
+        continuationAcknowledged = false
     }
 
     private fun parseArguments(node: JsonNode, maximumBytes: Int = MAX_ARGUMENT_BYTES): Map<String, Any>? {
@@ -320,6 +376,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         var expectedOutput: String? = null,
         var acknowledgementDeadline: Long? = null,
         var resetsHumanRoundBudget: Boolean = false,
+        val discardedResponse: Boolean = false,
     )
 
     private data class RejectedServerCall(

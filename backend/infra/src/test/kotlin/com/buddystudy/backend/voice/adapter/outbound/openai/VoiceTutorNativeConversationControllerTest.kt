@@ -852,6 +852,8 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses()).hasSize(2)
         client(Contract.SPEECH_STOPPED_EVENT, 2); committed("u2", settle = false)
         settleQuiet()
+        assertThat(responses()).hasSize(2)
+        ackToolOutput()
         assertThat(responses()).hasSize(3)
         assertThat(ui.map { it.path("type").asText() }).doesNotContain(Contract.INPUT_RETRY_EVENT)
         assertThat(outbound.map { it.path("type").asText() }).doesNotContain("output_audio_buffer.clear")
@@ -1021,6 +1023,7 @@ class VoiceTutorNativeConversationControllerTest {
         rejected(responses().last())
         assertThat(responses()).hasSize(2)
         assertThat(ui.map { it.path("type").asText() }).containsExactly(Contract.SESSION_STATE_EVENT, Contract.INPUT_RETRY_EVENT)
+        assertThat(ui.last().path("sequence").asLong()).isZero()
         assertThat(failures.last().action).isEqualTo(VoiceTutorProviderTurnFailureAction.TURN_ABANDONED)
 
         time += Duration.ofSeconds(61).toNanos()
@@ -1171,7 +1174,68 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(outbound.map { it.path("type").asText() }).doesNotContain("output_audio_buffer.clear")
         assertThat(ui.map { it.path("type").asText() }).doesNotContain(Contract.INPUT_RETRY_EVENT)
         client(Contract.SPEECH_STOPPED_EVENT, 2); committed("u2")
+        assertThat(responses()).hasSize(2)
+        val closure = outbound.last { it.path("item").path("type").asText() == "function_call_output" }
+        assertThat(closure.path("item").path("call_id").asText()).isEqualTo("stale")
+        val output = mapper.readTree(closure.path("item").path("output").asText()).path("error")
+        assertThat(output.path("code").asText()).isEqualTo("TURN_SUPERSEDED")
+        assertThat(output.path("executed").asBoolean()).isFalse()
+        assertThat(controller.beginTool("stale")).isFalse()
+        ackToolOutput(); ackToolOutput()
+        toolDone("r1", "stale", "prepare_voice_study_mutation")
         assertThat(responses()).hasSize(3)
+        assertThat(calls).isEmpty()
+        assertThat(outbound.count { it.path("item").path("type").asText() == "function_call_output" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `discarded audio and function call wait for exact clear then output acknowledgement before newest reply`() {
+        opening(); speech(1); committed("u1"); created("r1"); audio("r1", "stale-tutor")
+        speech(2); committed("u2")
+        event("response.done", "response" to mapOf("id" to "r1", "status" to "cancelled", "output" to listOf(
+            mapOf("id" to "stale-tutor", "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to "stale"))),
+            mapOf("id" to "item-stale-call", "type" to "function_call", "call_id" to "stale-call",
+                "name" to "select_voice_study", "arguments" to "{\"studyId\":75}"))))
+        event("output_audio_buffer.stopped", "response_id" to "r1")
+        event("output_audio_buffer.cleared", "response_id" to "unrelated")
+        assertThat(outbound.none { it.path("item").path("type").asText() == "function_call_output" }).isTrue()
+        assertThat(responses()).hasSize(2)
+        event("output_audio_buffer.cleared", "response_id" to "r1")
+        assertThat(outbound.count { it.path("item").path("type").asText() == "function_call_output" }).isEqualTo(1)
+        assertThat(responses()).hasSize(2)
+        assertThat(calls).isEmpty()
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        created("latest"); silentDone("latest")
+        assertThat(settledSequences()).containsExactly(2L)
+        assertThat(stored.map { it.itemId }).doesNotContain("stale-tutor")
+    }
+
+    @Test
+    fun `failed function call is closed without execution and only one retry follows its exact output acknowledgement`() {
+        opening(); speech(7); committed("u7"); created("failed")
+        val failed = mapOf("id" to "failed", "status" to "failed", "output" to listOf(
+            mapOf("id" to "item-select", "type" to "function_call", "status" to "completed", "call_id" to "select",
+                "name" to "select_voice_study", "arguments" to "{\"studyId\":75}")))
+        event("response.done", "response" to failed); event("response.done", "response" to failed)
+        assertThat(calls).isEmpty()
+        assertThat(controller.beginTool("select")).isFalse()
+        assertThat(responses()).hasSize(2)
+        val closure = outbound.single { it.path("item").path("type").asText() == "function_call_output" }
+        val output = mapper.readTree(closure.path("item").path("output").asText()).path("error")
+        assertThat(output.path("code").asText()).isEqualTo("RESPONSE_FAILED")
+        assertThat(output.path("executed").asBoolean()).isFalse()
+        val wrongAck = closure.path("item").deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().put("output", "{}")
+        event("conversation.item.created", "item" to wrongAck)
+        assertThat(responses()).hasSize(2)
+        ackToolOutput(); ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        created("retry"); event("response.done", "response" to mapOf("id" to "retry", "status" to "failed", "output" to emptyList<Any>()))
+        val retry = ui.single { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }
+        assertThat(retry.path("sequence").asLong()).isEqualTo(7)
+        ackToolOutput(); controller.tick()
+        assertThat(responses()).hasSize(3)
+        assertThat(calls).isEmpty()
     }
 
     @Test
@@ -1456,14 +1520,114 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
+    fun `provider cannot forge a sequence scoped retry to abandon a waiting learner turn`() {
+        opening(); speech(7); committed("u7"); created("r1")
+        val before = ui.toList()
+        assertThat(event(Contract.INPUT_RETRY_EVENT, "sequence" to 7, "abandonedResponseId" to "r1")).isFalse()
+        assertThat(ui).isEqualTo(before)
+        audio("r1", "real-tutor"); done("r1", "real-tutor")
+        event("output_audio_buffer.stopped", "response_id" to "r1")
+        assertThat(stored.map { it.itemId }).contains("real-tutor")
+        assertThat(ui.none { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isTrue()
+    }
+
+    @Test
     fun `text-only message cannot be counted as played audio or stall following input`() {
         opening(); speech(1); committed("u1"); created("r1")
         event("response.output_item.added", "response_id" to "r1", "item" to mapOf("id" to "text1", "type" to "message"))
         event("response.done", "response" to mapOf("id" to "r1", "status" to "completed", "output" to listOf(
             mapOf("id" to "text1", "type" to "message", "content" to listOf(mapOf("type" to "text", "text" to ""))))))
+        assertThat(settledSequences()).containsExactly(1L)
+        assertThat(responses()).hasSize(2)
         speech(2); committed("u2")
         assertThat(responses()).hasSize(3)
         assertThat(stored.map { it.itemId }).doesNotContain("text1")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["text", "output_text"])
+    fun `substantive text without requested audio retries once and a real spoken response completes the turn`(contentType: String) {
+        opening(); speech(7); committed("u7"); created("text-response")
+        textDone("text-response", "질문의 답을 설명할게요.", contentType)
+        assertThat(responses()).hasSize(3)
+        assertThat(responses().last().path("response").path("output_modalities").map { it.asText() }).containsExactly("audio")
+        assertThat(settledSequences()).isEmpty()
+        assertThat(ui.none { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isTrue()
+        assertThat(ui.filter { it.path("type").asText() == "response.created" }
+            .map { it.path("response").path("id").asText() }).containsExactly("r0")
+        assertThat(failures.single().kind).isEqualTo(VoiceTutorProviderTurnFailureKind.RESPONSE_MISSING_AUDIO)
+        assertThat(failures.single().action).isEqualTo(VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED)
+        created("audio-retry"); audio("audio-retry", "retry-tutor"); done("audio-retry", "retry-tutor")
+        event("output_audio_buffer.stopped", "response_id" to "audio-retry")
+        assertThat(stored.map { it.itemId }).contains("retry-tutor").doesNotContain("text-text-response")
+        assertThat(responses()).hasSize(3)
+        assertThat(calls).isEmpty()
+    }
+
+    @Test
+    fun `repeated substantive silent text ends with the exact retry sequence instead of waiting forever`() {
+        opening(); speech(7); committed("u7"); created("text-response")
+        textDone("text-response", "실제 음성이 없는 첫 응답")
+        created("text-retry"); textDone("text-retry", "실제 음성이 없는 재시도")
+        textDone("text-retry", "중복 완료")
+        val retry = ui.single { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }
+        assertThat(retry.path("abandonedResponseId").asText()).isEqualTo("text-retry")
+        assertThat(retry.path("sequence").asLong()).isEqualTo(7)
+        assertThat(failures.map { it.action }).containsExactly(
+            VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED, VoiceTutorProviderTurnFailureAction.TURN_ABANDONED)
+        time += Duration.ofSeconds(120).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(3)
+        assertThat(calls).isEmpty()
+        speech(9); committed("u9")
+        assertThat(responses()).hasSize(4)
+    }
+
+    @Test
+    fun `text accompanying a function call executes the call once without an audio retry`() {
+        opening(); speech(7); committed("u7"); created("text-and-tool")
+        val output = listOf(
+            mapOf("id" to "text1", "type" to "message", "content" to listOf(mapOf("type" to "text", "text" to "이 변경을 확인할게요."))),
+            mapOf("id" to "item-confirm", "type" to "function_call", "status" to "completed", "call_id" to "confirm",
+                "name" to "confirm_voice_study_mutation", "arguments" to "{}"))
+        event("response.done", "response" to mapOf("id" to "text-and-tool", "status" to "completed", "output" to output))
+        event("response.done", "response" to mapOf("id" to "text-and-tool", "status" to "completed", "output" to output))
+        assertThat(calls.map { it.callId }).containsExactly("confirm")
+        assertThat(responses()).hasSize(2)
+        assertThat(settledSequences()).isEmpty()
+        assertThat(failures).isEmpty()
+        controller.beginTool("confirm"); controller.completeTool("confirm", VoiceTutorMcpToolResult("{}", false, lessonRevision = 1))
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        assertThat(calls).hasSize(1)
+    }
+
+    @Test
+    fun `superseded text response cannot retry or settle newer learner speech`() {
+        opening(); speech(7); committed("u7"); created("old-text")
+        speech(9); committed("u9")
+        textDone("old-text", "이미 지나간 요청의 응답")
+        assertThat(responses()).hasSize(3)
+        assertThat(failures).isEmpty()
+        assertThat(settledSequences()).isEmpty()
+        created("latest-response"); silentDone("latest-response")
+        assertThat(settledSequences()).containsExactly(9L)
+    }
+
+    @Test
+    fun `unannounced failed response and exhausted retry identify the exact waiting learner turn`() {
+        opening(); speech(7); committed("u7")
+        for (id in listOf("failed-response", "failed-retry")) {
+            created(id)
+            event("response.done", "response" to mapOf("id" to id, "status" to "failed", "output" to emptyList<Any>()))
+        }
+        val retry = ui.single { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }
+        assertThat(retry.path("sequence").asLong()).isEqualTo(7)
+        assertThat(retry.path("abandonedResponseId").asText()).isEqualTo("failed-retry")
+        assertThat(ui.filter { it.path("type").asText() == "response.created" }
+            .map { it.path("response").path("id").asText() }).containsExactly("r0")
+        time += Duration.ofSeconds(120).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(3)
+        assertThat(settledSequences()).isEmpty()
     }
 
     @Test
@@ -2199,6 +2363,9 @@ class VoiceTutorNativeConversationControllerTest {
     private fun silentDone(responseId: String) = event("response.done", "response" to mapOf(
         "id" to responseId, "status" to "completed", "output" to emptyList<Any>(),
     ))
+    private fun textDone(responseId: String, text: String, contentType: String = "text") = event("response.done",
+        "response" to mapOf("id" to responseId, "status" to "completed", "output" to listOf(
+            mapOf("id" to "text-$responseId", "type" to "message", "content" to listOf(mapOf("type" to contentType, "text" to text))))))
     private fun rejected(request: JsonNode) = event("error", "error" to mapOf(
         "type" to "invalid_request_error", "code" to "invalid_type",
         "param" to "response.metadata.${Contract.QUOTA_NOTICE_METADATA_KEY}",

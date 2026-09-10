@@ -139,6 +139,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case userSpeechStarted
     case userSpeechStopped
     case inputRetry
+    case inputRetryScoped(sequence: Int, abandonedResponseID: String?)
     case inputSettled(sequence: Int)
     case providerTurnAbandoned(responseID: String)
     case responseInterrupted(responseID: String)
@@ -318,6 +319,13 @@ enum VoiceTutorRealtimeEventParser {
         case "buddystudy.voice.heartbeat.ack":
             return .heartbeatAcknowledged
         case "buddystudy.voice.input.retry":
+            if object["sequence"] != nil {
+                guard let sequence = exactInteger("sequence", in: object).flatMap({ Int(exactly: $0) }),
+                      sequence >= 0 else { return .ignored(type: type) }
+                let responseID = providerResponseID("abandonedResponseId", in: object)
+                guard object["abandonedResponseId"] == nil || responseID != nil else { return .ignored(type: type) }
+                return .inputRetryScoped(sequence: sequence, abandonedResponseID: responseID)
+            }
             if let responseID = providerResponseID("abandonedResponseId", in: object) {
                 return .providerTurnAbandoned(responseID: responseID)
             }

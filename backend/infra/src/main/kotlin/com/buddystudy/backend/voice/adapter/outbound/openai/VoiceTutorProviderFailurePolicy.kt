@@ -16,6 +16,7 @@ internal enum class VoiceTutorProviderTurnFailureKind(val diagnosticValue: Strin
     RESPONSE_TIMEOUT("response-timeout"),
     RESPONSE_CANCELLED("response-cancelled"),
     RESPONSE_INCOMPLETE("response-incomplete"),
+    RESPONSE_MISSING_AUDIO("response-missing-audio"),
     RESPONSE_FAILED("response-failed"),
     OUTPUT_BUFFER_CLEARED("output-buffer-cleared"),
 }

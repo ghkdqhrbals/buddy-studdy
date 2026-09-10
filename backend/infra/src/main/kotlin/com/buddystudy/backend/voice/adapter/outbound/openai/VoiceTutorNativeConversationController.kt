@@ -152,8 +152,8 @@ internal class VoiceTutorNativeConversationController(
             return false
         }
         when (type) {
-            // Only our completed response state can settle the app's pending input.
-            Contract.INPUT_SETTLED_EVENT, Contract.RESPONSE_INTERRUPTED_EVENT -> return false
+            // Only our completed response state can settle or abandon the app's pending input.
+            Contract.INPUT_SETTLED_EVENT, Contract.INPUT_RETRY_EVENT, Contract.RESPONSE_INTERRUPTED_EVENT -> return false
             Contract.QUESTION_CHANGED_EVENT, Contract.SESSION_STATE_EVENT -> return false
             Contract.ANSWER_STATE_EVENT, Contract.ANSWER_TRANSCRIPT_EVENT -> return false
             Contract.OPERATION_EVENT, Contract.OPERATION_CONTEXT_EVENT -> return false
@@ -287,6 +287,18 @@ internal class VoiceTutorNativeConversationController(
                 response.expectsAudio = response.audioStarted || ((!response.superseded || body.path("status").asText() == "completed") && body.path("output").any { item ->
                     item.path("content").any { it.path("type").asText() in setOf("audio", "output_audio") }
                 })
+                // We requested audio. Substantive text without audio or a tool
+                // is a recoverable modality failure, not a noise-only turn.
+                // A response containing function calls must never be replayed.
+                val output = body.path("output")
+                response.missingRequestedAudio = !response.expectsAudio && !response.superseded &&
+                    body.path("status").asText() == "completed" && output.isArray &&
+                    output.none { it.path("type").asText() == "function_call" } &&
+                    output.any { item -> item.path("type").asText() == "message" && item.path("content").any {
+                        it.path("type").asText() in setOf("text", "output_text") &&
+                            it.path("text").isTextual && it.path("text").asText().isNotBlank()
+                    } }
+                if (response.missingRequestedAudio) response.failed = true
                 // A prepared confirmation is actionable output, never a noise-only turn.
                 // Retry an empty model response once through the existing response budget.
                 if (response.mutationConfirmation != null && !response.expectsAudio) response.failed = true
@@ -983,6 +995,10 @@ internal class VoiceTutorNativeConversationController(
         if (response.superseded) {
             // A global clear must settle before another response may produce audio.
             if (response.outputClearRequested && !response.outputCleared) return
+            response.body?.let { body ->
+                toolCoordinator.closeUnexecutedResponseCalls(body,
+                    VoiceTutorDiscardedResponseReason.TURN_SUPERSEDED, nanoTime()).forEach(::emit)
+            }
             active = null
             retryCount = 0
             // A learner may answer a saved question before its readback finishes.
@@ -996,6 +1012,10 @@ internal class VoiceTutorNativeConversationController(
             advancePause()
             scheduleResponse()
             return
+        }
+        if (response.failed) response.body?.let { body ->
+            toolCoordinator.closeUnexecutedResponseCalls(body,
+                VoiceTutorDiscardedResponseReason.RESPONSE_FAILED, nanoTime()).forEach(::emit)
         }
         if (response.quota && (!response.expectsAudio || response.failed)) {
             if (quotaRetryCount++ == 0) { active = null; scheduleResponse() }
@@ -1022,6 +1042,13 @@ internal class VoiceTutorNativeConversationController(
         } else if (response.failed && answerCapture?.responseToken == response.token) {
             cancelAnswerCapture()
         }
+        val mayRetryMissingAudio = !response.missingRequestedAudio ||
+            (response.revision == revision && response.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
+                response.boundary.latestAcceptedLearnerSpeechStartedOrder == latestSpeechStartedOrder)
+        if (response.missingRequestedAudio) reportFailure(VoiceTutorProviderTurnFailureKind.RESPONSE_MISSING_AUDIO,
+            if (!draining && !quotaRequested && mayRetryMissingAudio && retryCount == 0)
+                VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED else VoiceTutorProviderTurnFailureAction.TURN_ABANDONED,
+            response.createEventId)
         active = null
         if (response.quota) { quotaDone.tryEmitEmpty(); return }
         if (endingAfterResponse && !response.failed) {
@@ -1041,16 +1068,18 @@ internal class VoiceTutorNativeConversationController(
                 )
                 publish(tools, call)
             }
-            if (!draining && !response.expectsAudio && body.path("output").isArray && body.path("output").isEmpty &&
+            if (!draining && !response.expectsAudio && body.path("output").isArray &&
                 !toolCoordinator.hasPending && !toolCoordinator.continuationReady
             ) {
-                // Tool-only output keeps waiting for continuation. Empty successful output has no
-                // audible event to clear waiting; settle only the acoustic input frozen at creation.
+                // Blank text and other silent output have no spoken event to
+                // settle the UI, just like an empty/noise response. Tools keep
+                // their continuation gate. Settle only the frozen acoustic turn;
+                // never force speech or replay a completed tool for silent output.
                 response.clientSequence?.let { settled -> publish(client, json(mapOf(
                     "type" to Contract.INPUT_SETTLED_EVENT, "sequence" to settled,
                 ))) }
             }
-        } else if (!draining && !quotaRequested && retryCount++ == 0) {
+        } else if (!draining && !quotaRequested && mayRetryMissingAudio && retryCount++ == 0) {
             opening = response.opening && !response.audioStarted
             response.questionReadback?.takeIf { it.revision == revision && it.epoch == questionReadbackEpoch }
                 ?.let { pendingQuestionReadback = it }
@@ -1063,7 +1092,13 @@ internal class VoiceTutorNativeConversationController(
             publish(lifecycle, json(mapOf("type" to Contract.SPOKEN_LESSON_END_EVENT)))
             return
         } else {
-            publish(client, json(mapOf("type" to Contract.INPUT_RETRY_EVENT, "abandonedResponseId" to response.id)))
+            val retry = linkedMapOf<String, Any?>("type" to Contract.INPUT_RETRY_EVENT,
+                "abandonedResponseId" to response.id)
+            // A failed tool-only response may never have been announced to the
+            // app. Its exact acoustic sequence can settle that pending learner
+            // turn without abandoning a newer response that the app has seen.
+            response.clientSequence?.let { retry["sequence"] = it }
+            publish(client, json(retry))
         }
         advancePause()
         scheduleResponse()
@@ -1498,6 +1533,7 @@ internal class VoiceTutorNativeConversationController(
         var body: JsonNode? = null
         var done = false
         var failed = false
+        var missingRequestedAudio = false
         var audioStarted = false
         var audioStopped = false
         var expectsAudio = false

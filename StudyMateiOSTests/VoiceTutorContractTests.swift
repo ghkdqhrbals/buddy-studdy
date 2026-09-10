@@ -1216,6 +1216,27 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
+    func testScopedInputRetryRequiresExactSequenceAndSafeOptionalResponseID() throws {
+        for sequence in [0, 1, 123] {
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(
+                text: #"{"type":"buddystudy.voice.input.retry","sequence":\#(sequence),"abandonedResponseId":"resp_failed-1"}"#
+            ), .inputRetryScoped(sequence: sequence, abandonedResponseID: "resp_failed-1"))
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(
+                text: #"{"type":"buddystudy.voice.input.retry","sequence":\#(sequence)}"#
+            ), .inputRetryScoped(sequence: sequence, abandonedResponseID: nil))
+        }
+        for value in ["-1", "1.5", "true", #""1""#, "null", "9223372036854775808"] {
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(
+                text: #"{"type":"buddystudy.voice.input.retry","sequence":\#(value),"abandonedResponseId":"resp_failed"}"#
+            ), .ignored(type: "buddystudy.voice.input.retry"))
+        }
+        for value in [#""""#, #""unsafe response""#, #""unsafe/path""#, "null", "12", "true"] {
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(
+                text: #"{"type":"buddystudy.voice.input.retry","sequence":7,"abandonedResponseId":\#(value)}"#
+            ), .ignored(type: "buddystudy.voice.input.retry"))
+        }
+    }
+
     func testProviderTurnAbandonmentCarriesOnlyTheExactBoundedResponseID() throws {
         let abandoned = try VoiceTutorRealtimeEventParser.parse(
             text: #"{"type":"buddystudy.voice.input.retry","abandonedResponseId":"resp_1-a"}"#
@@ -1467,6 +1488,115 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(state.assistantResponseActive)
         XCTAssertFalse(state.isUserSpeaking)
         XCTAssertFalse(state.inputSettled(sequence: sequence), "The settlement is idempotent")
+    }
+
+    func testUnannouncedResponseRetrySettlesOnlyItsInputAndLateNativeTranscriptKeepsRetryHint() throws {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.awaitInitialResponse()
+        state.userSpeechStarted(sequence: 7)
+        state.userSpeechStopped(sequence: 7)
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        let event = try VoiceTutorRealtimeEventParser.parse(
+            text: #"{"type":"buddystudy.voice.input.retry","sequence":7,"abandonedResponseId":"never_announced"}"#)
+        guard case .inputRetryScoped(let sequence, let responseID) = event else { return XCTFail("Expected scoped retry") }
+        XCTAssertTrue(state.acceptInputRetry(sequence: sequence, responseID: responseID))
+        XCTAssertFalse(state.assistantResponseActive)
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        XCTAssertTrue(state.inputNeedsRepeat)
+        XCTAssertFalse(state.acceptInputRetry(sequence: sequence, responseID: responseID), "Duplicate retry must not revive an old input")
+        state.learnerTranscriptReceived(usesWebRTC: true)
+        state.awaitInitialResponse()
+        XCTAssertTrue(state.inputNeedsRepeat, "The failed utterance's delayed ASR is not a new attempt")
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        let presentation = VoiceTutorCallPresentation(phase: .listening,
+            inputNeedsRepeat: state.inputNeedsRepeat, isAwaitingTutorResponse: state.isAwaitingTutorResponse)
+        XCTAssertEqual(presentation.statusText(AppStrings(language: .korean)), AppStrings(language: .korean).voiceTutorInputRepeat)
+        state.userSpeechStarted(sequence: 8)
+        XCTAssertFalse(state.inputNeedsRepeat)
+        state.userSpeechStopped(sequence: 8)
+        XCTAssertTrue(state.isAwaitingTutorResponse, "The next actual utterance starts its own response wait")
+        XCTAssertFalse(state.inputSettled(sequence: 7))
+        XCTAssertTrue(state.inputSettled(sequence: 8))
+    }
+
+    func testScopedRetryCannotConsumeNewerLiveOrStoppedSpeech() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.userSpeechStarted(sequence: 1)
+        state.userSpeechStopped(sequence: 1)
+        state.userSpeechStarted(sequence: 2)
+        let speaking = state
+        XCTAssertFalse(state.acceptInputRetry(sequence: 1, responseID: "failed_old"))
+        XCTAssertFalse(state.acceptInputRetry(sequence: 2, responseID: "premature"))
+        XCTAssertEqual(state, speaking)
+        state.userSpeechStopped(sequence: 2)
+        let waiting = state
+        XCTAssertFalse(state.acceptInputRetry(sequence: 1, responseID: "failed_old"))
+        XCTAssertFalse(state.acceptInputRetry(sequence: 3, responseID: "unseen"))
+        XCTAssertEqual(state, waiting)
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        XCTAssertFalse(state.inputNeedsRepeat)
+        XCTAssertTrue(state.acceptInputRetry(sequence: 2, responseID: "failed_current"))
+    }
+
+    func testScopedRetryAbandonsOnlyTheMatchingActiveResponseAndPreservesItsReplacement() {
+        var state = VoiceTutorDuplexPlaybackState()
+        var response = VoiceTutorWebRTCResponseState()
+        state.userSpeechStarted(sequence: 7)
+        state.userSpeechStopped(sequence: 7)
+        state.responseStarted(responseID: "first", isTutorIntervention: false)
+        response.responseStarted("first")
+        state.responseStarted(responseID: "replacement", isTutorIntervention: false)
+        response.responseStarted("replacement")
+        let awaitingReplacement = state
+        XCTAssertFalse(state.acceptInputRetry(sequence: 7, responseID: "first"))
+        XCTAssertFalse(state.acceptInputRetry(sequence: 7, responseID: nil))
+        XCTAssertEqual(state, awaitingReplacement)
+        XCTAssertTrue(state.acceptInputRetry(sequence: 7, responseID: "replacement"))
+        // Mirror the two model operations performed synchronously by the VM:
+        // accepting input failure and abandoning only its local audio response.
+        XCTAssertTrue(state.abandonResponse(responseID: "replacement"))
+        XCTAssertTrue(response.abandonResponse("replacement"))
+        XCTAssertTrue(state.inputNeedsRepeat)
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        XCTAssertFalse(state.assistantAudioBegan(responseID: "replacement"))
+        XCTAssertNil(response.markResponseDone("replacement"))
+        XCTAssertFalse(state.acceptInputRetry(sequence: 7, responseID: "replacement"))
+        state.learnerTranscriptReceived(usesWebRTC: true)
+        XCTAssertTrue(state.inputNeedsRepeat)
+    }
+
+    func testScopedOpeningRetryCannotConsumeLearnerInputOrAnotherAttempt() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.awaitInitialResponse()
+        XCTAssertTrue(state.acceptInputRetry(sequence: 0, responseID: "unannounced_opening"))
+        XCTAssertTrue(state.inputNeedsRepeat)
+        state.userSpeechStarted(sequence: 1)
+        state.userSpeechStopped(sequence: 1)
+        let learnerWait = state
+        XCTAssertFalse(state.acceptInputRetry(sequence: 0, responseID: "unannounced_opening"))
+        XCTAssertEqual(state, learnerWait)
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        state.reset()
+        state.awaitInitialResponse()
+        let newAttempt = state
+        XCTAssertFalse(state.acceptInputRetry(sequence: 1, responseID: "old_attempt"))
+        XCTAssertEqual(state, newAttempt)
+        state.responseStarted(responseID: "announced_opening", isTutorIntervention: false)
+        XCTAssertTrue(state.acceptInputRetry(sequence: 0, responseID: "announced_opening"))
+        XCTAssertTrue(state.abandonResponse(responseID: "announced_opening"))
+        XCTAssertTrue(state.inputNeedsRepeat)
+    }
+
+    func testGenericNativeRetryAlsoSurvivesLateASRWhileLegacyPCMBehaviorIsPreserved() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.setInputNeedsRepeat(true)
+        state.learnerTranscriptReceived(usesWebRTC: true)
+        XCTAssertTrue(state.inputNeedsRepeat)
+        state.learnerTranscriptReceived(usesWebRTC: false)
+        XCTAssertFalse(state.inputNeedsRepeat)
+        state.setInputNeedsRepeat(true)
+        state.reset()
+        XCTAssertFalse(state.inputNeedsRepeat)
     }
 
     func testSilentInputSettlementCannotConsumeNewerSpeechOrAnActiveTutorResponse() {
@@ -3308,7 +3438,7 @@ final class VoiceTutorContractTests: XCTestCase {
         let compact = String(source[compactStart.lowerBound..<transcriptStart.lowerBound])
         let transcript = String(source[transcriptStart.lowerBound..<orbStart.lowerBound])
 
-        XCTAssertTrue(compact.contains("orbPlaceholder(.call, diameter:"))
+        XCTAssertTrue(compact.contains("answerOrbPlaceholder(.call, diameter:"))
         XCTAssertTrue(compact.contains("Text(displayTopic)"))
         XCTAssertTrue(compact.contains("callTime"))
         XCTAssertFalse(compact.contains("transcriptPanel"))
@@ -3322,13 +3452,20 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(transcript.contains("Color(uiColor: .systemBackground)"))
         XCTAssertFalse(transcript.contains("UnevenRoundedRectangle"))
         XCTAssertFalse(transcript.contains("shadow("))
-        XCTAssertTrue(transcript.contains("orbPlaceholder(.transcript, diameter: hasAnswerDraft ? (usesAccessibilityChrome ? 96 : 64) : (usesAccessibilityChrome ? 56 : 48))"))
+        XCTAssertTrue(transcript.contains("answerOrbPlaceholder(.transcript, diameter: hasAnswerDraft ? (usesAccessibilityChrome ? 96 : 64) : (usesAccessibilityChrome ? 56 : 48))"))
+        let placeholderStart = try XCTUnwrap(source.range(of: "private func answerOrbPlaceholder("))
+        let placeholderEnd = try XCTUnwrap(source.range(of: "private var showsAnswerPauseControl", range: placeholderStart.upperBound..<source.endIndex))
+        let placeholder = String(source[placeholderStart.lowerBound..<placeholderEnd.lowerBound])
+        XCTAssertTrue(placeholder.contains("orbPlaceholder(placement, diameter: diameter)"),
+                      "Both layouts must still publish their orb anchor through the shared answer controls helper")
+        XCTAssertTrue(placeholder.contains("placement == .call ? .callPause : .transcriptPause"),
+                      "The optional answer-pause companion must move with the same two layout anchors")
         XCTAssertTrue(source.contains("interactionDock"))
         XCTAssertTrue(source.contains("stableCallControls"))
         XCTAssertFalse(source.contains("Button(action: onPause)"), "The circle owns taps, swipes and holds through one recognizer")
         XCTAssertTrue(source.contains("DragGesture(minimumDistance: 0, coordinateSpace: .global)"))
         XCTAssertTrue(source.contains("orbInteraction.release(at:"))
-        XCTAssertTrue(source.contains("case .end, .wait: EmptyView()"), "Live calls keep the circle as the single control")
+        XCTAssertTrue(source.contains("case .end, .wait: EmptyView()"), "The stable dock must not duplicate the live orb and answer-pause controls")
         XCTAssertTrue(source.contains("VoiceTutorOrbGestureRouting.expansion"))
         XCTAssertTrue(source.contains("VoiceTutorOrbGestureRouting.settlesExpanded"))
         XCTAssertTrue(source.contains(".highPriorityGesture(orbTranscriptGesture("))
@@ -3362,7 +3499,18 @@ final class VoiceTutorContractTests: XCTestCase {
             source.range(of: "private struct VoiceTutorCaptionBubble", range: callScreenStart.upperBound..<source.endIndex)
         )
         let callScreenSource = String(source[callScreenStart.lowerBound..<callScreenEnd.lowerBound])
-        XCTAssertFalse(callScreenSource.contains(".transition("), "Disclosure must not destroy and recreate the scroll view")
+        // Pause icons, hints and the optional companion may crossfade. Only the
+        // disclosure surfaces must remain mounted to preserve transcript scroll.
+        XCTAssertFalse(transcript.contains(".transition("), "The transcript surface must not be replaced during disclosure")
+        let surfaceStart = try XCTUnwrap(callScreenSource.range(of: "ZStack {"))
+        let surfaceEnd = try XCTUnwrap(callScreenSource.range(of: ".overlayPreferenceValue(", range: surfaceStart.upperBound..<callScreenSource.endIndex))
+        let surfaces = String(callScreenSource[surfaceStart.lowerBound..<surfaceEnd.lowerBound])
+        XCTAssertTrue(surfaces.contains("compactCall(in: geometry)"))
+        XCTAssertTrue(surfaces.contains("fullScreenTranscript"))
+        XCTAssertFalse(surfaces.contains("if showsTranscript"), "Disclosure must keep the transcript mounted in the same ZStack slot")
+        XCTAssertFalse(surfaces.contains("if !showsTranscript"), "Both disclosure surfaces must remain mounted")
+        XCTAssertFalse(surfaces.contains(".transition("))
+        XCTAssertFalse(surfaces.contains(".id("), "Disclosure must not reset a surface's SwiftUI identity")
         XCTAssertEqual(callScreenSource.components(separatedBy: "callOrb(diameter:").count - 1, 2,
                        "One orb call site plus its definition; compact and transcript layouts only provide anchors")
         let disclosureStart = try XCTUnwrap(callScreenSource.range(of: "private func setTranscriptExpanded"))

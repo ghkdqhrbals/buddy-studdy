@@ -6,6 +6,7 @@ import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata as Metadata
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
@@ -14,6 +15,8 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewed
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
+import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.fasterxml.jackson.databind.JsonNode
@@ -41,6 +44,57 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
+    @Test
+    fun `agreement after a level change selects the updated topic and reaches saved question readback without repeating the write`() {
+        val topic = "메모리 관리와 만료 정책"
+        val question = "메모리 만료 정책의 동작을 설명해 주세요."
+        val results = ArrayDeque(listOf(
+            VoiceTutorMcpToolResult("{\"prepared\":true}", false,
+                mutationConfirmationQuestion = "$topic 주제를 레벨 8로 바꿀까요?"),
+            VoiceTutorMcpToolResult("{\"id\":75,\"difficultyLevel\":8,\"voiceLessonContextReady\":false}", false,
+                lessonRevision = 1),
+            VoiceTutorMcpToolResult("{\"selected\":true}", false, lessonRevision = 2,
+                lessonFocus = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(75, 2),
+                    VoiceTutorStudySnapshot(75, 74, topic, 8, 2)),
+                questionReadback = VoiceTutorQuestionReadback(75, "42", question)),
+        ))
+        val tools = FakeTools { results.removeFirst() }
+        Fixture(tools = tools).use { f ->
+            f.opening()
+            f.learner(1, "level-request"); f.transcript("level-request", "레벨 8 정도 적당할 듯.")
+            f.toolResponse("prepare-response", "prepare", "prepare_voice_study_mutation")
+            f.await("proposal result") { f.outputs().size == 1 }
+            f.ack(f.outputs().last())
+            f.await("one exact confirmation") { f.responses().size == 3 }
+            f.completeAudioResponse("confirmation", "confirmation-item", "$topic 주제를 레벨 8로 바꿀까요?")
+            f.learner(2, "change-agreement"); f.transcript("change-agreement", "어 그거 바꿔줘.")
+            f.toolResponse("confirm-response", "confirm", "confirm_voice_study_mutation")
+            f.await("write result") { f.outputs().size == 2 }
+            f.ack(f.outputs().last())
+            f.await("updated level response") { f.responses().size == 5 }
+            f.completeAudioResponse("changed", "changed-item", "레벨 8로 바꿨어요. 바로 이 주제로 공부할까요?")
+            f.learner(3, "start-agreement"); f.transcript("start-agreement", "그렇게 하자.")
+            f.toolResponse("selection-response", "select", "select_voice_study", "{\"study_id\":75}")
+            f.await("selection finishes") { f.outputs().size == 3 }
+            f.ack(f.outputs().last())
+            f.await("saved question is ready for audio") { f.responses().size == 7 }
+            assertThat(f.responses().last().path("response").path("instructions").asText()).contains(question)
+            f.completeAudioResponse("question", "question-item", question)
+            f.await("answer capture starts instead of staying in response preparation") {
+                f.answerStates().lastOrNull()?.path("phase")?.asText() == "listening"
+            }
+            assertThat(tools.invocations.map { it.name }).containsExactly(
+                "prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study")
+            val selection = tools.invocations.last().context
+            assertThat(selection.initialLessonRevision).isEqualTo(1)
+            assertThat(selection.dialogueBoundary?.latestAcceptedLearnerProviderItemId).isEqualTo("start-agreement")
+            assertThat(selection.dialogueBoundary?.precedingTutorProviderItemId).isEqualTo("changed-item")
+            assertThat(f.answerStates().last().path("studyId").asLong()).isEqualTo(75)
+            assertThat(f.answerStates().last().path("recordId").asText()).isEqualTo("42")
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
     @Test
     fun `old native clients never receive structured interaction tools or wait for unsupported input`() {
         assertThat(nativeVoiceTutorDefinitions(FakeTools()).map { it.name }).doesNotContain("request_user_input")
@@ -785,16 +839,16 @@ class VoiceTutorNativeSessionRelayTest {
             await("opening native response") { responses().size == 1 }
         }
 
-        fun completeAudioResponse(responseId: String, itemId: String) {
+        fun completeAudioResponse(responseId: String, itemId: String, text: String = "어떤 주제로 이야기할까요?") {
             created(responseId)
             provider("response.output_item.added", "response_id" to responseId,
                 "item" to mapOf("id" to itemId, "type" to "message"))
             provider("output_audio_buffer.started", "response_id" to responseId)
             provider("response.output_audio_transcript.done", "response_id" to responseId,
-                "item_id" to itemId, "transcript" to "어떤 주제로 이야기할까요?")
+                "item_id" to itemId, "transcript" to text)
             provider("response.done", "response" to mapOf("id" to responseId, "status" to "completed",
                 "output" to listOf(mapOf("id" to itemId, "type" to "message", "content" to listOf(
-                    mapOf("type" to "audio", "transcript" to "어떤 주제로 이야기할까요?"))))))
+                    mapOf("type" to "audio", "transcript" to text))))))
             provider("output_audio_buffer.stopped", "response_id" to responseId)
         }
 
@@ -811,8 +865,8 @@ class VoiceTutorNativeSessionRelayTest {
             await("native reply released without a text assessor") { responses().size == previousResponses + 1 }
         }
 
-        fun transcript(id: String) = provider("conversation.item.input_audio_transcription.completed",
-            "item_id" to id, "transcript" to "Redis를 공부하고 싶어요.")
+        fun transcript(id: String, text: String = "Redis를 공부하고 싶어요.") = provider("conversation.item.input_audio_transcription.completed",
+            "item_id" to id, "transcript" to text)
 
         fun manualQuestion(): JsonNode {
             opening(); learner(1, "learner-1"); transcript("learner-1")
@@ -899,7 +953,7 @@ class VoiceTutorNativeSessionRelayTest {
         val reviewed = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
         val skipped = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
         override fun definitions(): List<VoiceTutorMcpToolDefinition> = error("The legacy classified tool catalog must not be used")
-        override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation", "request_question", "select_voice_study").map { name ->
+        override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation", "confirm_voice_study_mutation", "request_question", "select_voice_study").map { name ->
             VoiceTutorMcpToolDefinition(name, "Synthetic native tool", mapOf("type" to "object",
                 "properties" to emptyMap<String, Any>(), "additionalProperties" to false))
         }

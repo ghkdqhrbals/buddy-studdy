@@ -250,6 +250,29 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
+    fun `retry hint preserves an optional exact acoustic sequence without exposing provider payloads`() {
+        for (sequence in listOf(0L, 7L, Long.MAX_VALUE)) {
+            val raw = mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.INPUT_RETRY_EVENT,
+                "abandonedResponseId" to "unannounced-response", "sequence" to sequence,
+                "text" to "private", "error" to mapOf("message" to "private")))
+            val decision = policy.providerDecision(raw, "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+            assertThat(decision.terminate).isFalse()
+            val value = mapper.readTree(decision.payload)
+            assertThat(value.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "abandonedResponseId", "sequence")
+            assertThat(value.path("sequence").longValue()).isEqualTo(sequence)
+            assertThat(value.path("abandonedResponseId").asText()).isEqualTo("unannounced-response")
+            assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+            assertThat(policy.providerDecision(raw, "s1", Instant.EPOCH).payload).isNull()
+        }
+        for (sequence in listOf("null", "-1", "1.0", "true", "\"1\"", "[]", "{}", "9223372036854775808")) {
+            val raw = """{"type":"${VoiceTutorRealtimeContract.INPUT_RETRY_EVENT}","abandonedResponseId":"r1","sequence":$sequence}"""
+            val decision = policy.providerDecision(raw, "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+            assertThat(decision.payload).isNull()
+            assertThat(decision.terminate).isFalse()
+        }
+    }
+
+    @Test
     fun `silent input settlement exposes only its exact sequence and cannot be forged by a client`() {
         for (sequence in listOf(0L, 1L, Long.MAX_VALUE)) {
             val raw = """{"type":"${VoiceTutorRealtimeContract.INPUT_SETTLED_EVENT}","sequence":$sequence,"transcript":"private","response":{"metadata":"private"}}"""

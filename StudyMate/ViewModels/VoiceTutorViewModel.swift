@@ -343,6 +343,7 @@ struct VoiceTutorAssistantTranscriptState: Equatable {
 }
 
 struct VoiceTutorDuplexPlaybackState: Equatable {
+    private(set) var inputNeedsRepeat = false
     private(set) var isUserSpeaking = false
     private(set) var assistantResponseActive = false
     private(set) var activeResponseID: String?
@@ -353,10 +354,20 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
     private var hasPendingLearnerTurn = false
     private var currentLearnerSpeechSequence: Int?
     private var pendingLearnerSpeechSequence: Int?
+    private var latestLearnerSpeechSequence: Int?
     private var interruptedResponseIDs: [String] = []
 
     var isAwaitingTutorResponse: Bool {
-        !isUserSpeaking && (isAwaitingInitialResponse || hasPendingLearnerTurn || isAwaitingActiveResponseAudio)
+        !isUserSpeaking && !inputNeedsRepeat
+            && (isAwaitingInitialResponse || hasPendingLearnerTurn || isAwaitingActiveResponseAudio)
+    }
+
+    mutating func setInputNeedsRepeat(_ value: Bool) { inputNeedsRepeat = value }
+
+    mutating func learnerTranscriptReceived(usesWebRTC: Bool) {
+        // Native transcription can arrive after the same turn has failed. Only
+        // the next acoustic start is evidence that the learner tried again.
+        if !usesWebRTC { inputNeedsRepeat = false }
     }
 
     mutating func awaitInitialResponse() {
@@ -413,6 +424,8 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
     @discardableResult
     mutating func userSpeechStarted(sequence: Int? = nil, interruptsTutor: Bool = true) -> String? {
         if let sequence, sequence <= 0 { return nil }
+        inputNeedsRepeat = false
+        if let sequence { latestLearnerSpeechSequence = sequence }
         isUserSpeaking = true
         currentLearnerSpeechSequence = sequence
         guard interruptsTutor, let responseID = activeResponseID else { return nil }
@@ -447,6 +460,27 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
         // newer live speech and any independently active tutor audio.
         hasPendingLearnerTurn = false
         pendingLearnerSpeechSequence = nil
+        return true
+    }
+
+    /// Retry exhaustion may precede any announced response. Match the acoustic
+    /// input independently, while a known active response still requires its ID
+    /// so an older failed generation cannot abandon a replacement. The caller
+    /// owns discarding that exact response's transcript and native audio.
+    @discardableResult
+    mutating func acceptInputRetry(sequence: Int, responseID: String?) -> Bool {
+        guard sequence >= 0, !isUserSpeaking else { return false }
+        if sequence == 0 {
+            guard latestLearnerSpeechSequence == nil, !hasPendingLearnerTurn else { return false }
+        } else {
+            guard latestLearnerSpeechSequence == sequence else { return false }
+        }
+        if assistantResponseActive {
+            guard matchesActiveResponse(responseID: responseID) else { return false }
+        } else {
+            guard inputSettled(sequence: sequence) else { return false }
+        }
+        inputNeedsRepeat = true
         return true
     }
 
@@ -680,7 +714,10 @@ final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var isMuted = false
     @Published private(set) var pauseState = VoiceTutorCallPauseState()
     @Published private(set) var isRecording = false
-    @Published private(set) var inputNeedsRepeat = false
+    private(set) var inputNeedsRepeat: Bool {
+        get { duplexPlaybackState.inputNeedsRepeat }
+        set { duplexPlaybackState.setInputNeedsRepeat(newValue) }
+    }
     @Published private(set) var serverEndReason: String?
     @Published private(set) var answerDraftState = VoiceTutorAnswerDraftState()
     @Published private(set) var sessionState = VoiceTutorSessionState()
@@ -1187,6 +1224,11 @@ final class VoiceTutorViewModel: ObservableObject {
             "sessionId=\(sessionID ?? "none") phase=\(phase) \(message)",
             isWarning: isWarning
         )
+    }
+
+    private func diagnosticResponseID(_ responseID: String?) -> String {
+        guard let responseID else { return "none" }
+        return VoiceTutorOperationEvent.isSafeIdentifier(responseID, maximumLength: 191) ? responseID : "invalid"
     }
 
     private func stop(
@@ -1737,11 +1779,21 @@ final class VoiceTutorViewModel: ObservableObject {
             // must never consume a newer learner turn's independent wait.
             duplexPlaybackState.stopWaitingForInitialResponse()
             inputNeedsRepeat = true
+        case .inputRetryScoped(let sequence, let responseID):
+            guard usesWebRTC, phase.isLive, !isFinalizing,
+                  VoiceTutorServerEndReasonPolicy.permitsInputRetry(
+                    reason: serverEndReason, isFinalizing: isFinalizing
+                  ) else { break }
+            let accepted = duplexPlaybackState.acceptInputRetry(sequence: sequence, responseID: responseID)
+            logDiagnostic("event=input_retry sequence=\(sequence) responseId=\(diagnosticResponseID(responseID)) accepted=\(accepted ? 1 : 0)")
+            guard accepted else { break }
+            if let responseID, duplexPlaybackState.matchesActiveResponse(responseID: responseID) {
+                abandonProviderTurn(responseID: responseID)
+            }
         case .inputSettled(let sequence):
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
-            if duplexPlaybackState.inputSettled(sequence: sequence) {
-                logDiagnostic("event=input_settled sequence=\(sequence)")
-            }
+            let accepted = duplexPlaybackState.inputSettled(sequence: sequence)
+            logDiagnostic("event=input_settled sequence=\(sequence) accepted=\(accepted ? 1 : 0)")
         case .providerTurnAbandoned(let responseID):
             abandonProviderTurn(responseID: responseID)
         case .responseInterrupted(let responseID):
@@ -1883,7 +1935,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 transcript: transcript, itemID: itemID,
                 attemptID: attemptID, requiresItemID: usesWebRTC
             ) else { break }
-            inputNeedsRepeat = false
+            duplexPlaybackState.learnerTranscriptReceived(usesWebRTC: usesWebRTC)
             if let captionID = appendCaption(speaker: .learner, text: transcript, providerItemID: itemID) {
                 if answerDraftState.isActive { heldAnswerCaptionIDs.insert(captionID) }
                 if let itemID { learnerCaptionIDsByItemID[itemID] = captionID }
@@ -1934,13 +1986,14 @@ final class VoiceTutorViewModel: ObservableObject {
                     webRTCResponseState.responseStarted(responseID)
                     webRTCTransport?.beginLocalPlayoutResponse(responseID: responseID)
                 }
+                logDiagnostic("event=response_started responseId=\(diagnosticResponseID(responseID))")
             }
         case .responseFinished(let responseID):
             guard duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
                 break
             }
             if usesWebRTC {
-                logDiagnostic("event=response_done")
+                logDiagnostic("event=response_done responseId=\(diagnosticResponseID(responseID))")
                 finishWebRTCResponseIfReady(webRTCResponseState.markResponseDone(responseID))
             } else if let responseID {
                 commitAssistantTranscript(responseID: responseID)
@@ -1954,10 +2007,10 @@ final class VoiceTutorViewModel: ObservableObject {
             // Provider generation is not proof that the iPhone rendered audio.
             // The first nonzero local render changes the speaking indication.
             webRTCResponseState.markOutputBufferStarted(responseID)
-            logDiagnostic("event=provider_output_started")
+            logDiagnostic("event=provider_output_started responseId=\(diagnosticResponseID(responseID))")
         case .outputAudioBufferStopped(let responseID):
             guard usesWebRTC else { break }
-            logDiagnostic("event=provider_output_stopped")
+            logDiagnostic("event=provider_output_stopped responseId=\(diagnosticResponseID(responseID))")
             finishWebRTCResponseIfReady(webRTCResponseState.markOutputBufferStopped(responseID))
         case .outputAudioBufferCleared(let responseID):
             guard usesWebRTC else { break }
@@ -2018,7 +2071,7 @@ final class VoiceTutorViewModel: ObservableObject {
         // This ends only the UI's server-streaming state. Never stop/mute/clear
         // the remote track: its remaining RTP samples play before the next
         // response on the same continuous stream, even after these controls.
-        logDiagnostic("event=provider_response_stream_finished")
+        logDiagnostic("event=provider_response_stream_finished responseId=\(diagnosticResponseID(responseID))")
         scheduleTerminalPlayoutDrainIfReady()
         if phase.isLive { phase = .listening }
     }
@@ -2049,7 +2102,7 @@ final class VoiceTutorViewModel: ObservableObject {
         _ = webRTCResponseState.abandonResponse(responseID)
         inputNeedsRepeat = false
         phase = .listening
-        logDiagnostic("event=tutor_response_interrupted")
+        logDiagnostic("event=tutor_response_interrupted responseId=\(diagnosticResponseID(responseID))")
     }
 
     private func abandonProviderTurn(responseID: String?) {
@@ -2088,7 +2141,7 @@ final class VoiceTutorViewModel: ObservableObject {
         errorMessage = nil
         failureCause = nil
         phase = .listening
-        logDiagnostic("event=provider_turn_abandoned")
+        logDiagnostic("event=provider_turn_abandoned responseId=\(diagnosticResponseID(responseID))")
     }
 
     private func scheduleTerminalPlayoutDrainIfReady() {
