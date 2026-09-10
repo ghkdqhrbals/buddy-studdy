@@ -394,6 +394,12 @@ Public community feed
 
 ## Pro Voice Tutor
 
+- During manual answer capture, a separate pause/continue control sits directly
+  below the Finish Answer orb. It invokes the existing `pause-v1` path, never
+  answer finish/submit. Pending acknowledgments disable repeated actions; the
+  existing answer ID, recognized tail and edited draft survive the break. One
+  rendered control follows compact/transcript anchor interpolation alongside
+  the orb, with coordinated color/content transitions and Reduce Motion support.
 - `request_user_input` is an asynchronous, server-owned provider-tool continuation.
   Only a control connection advertising `X-Voice-User-Input-Protocol: user-input-v1`
   can enable it; old native clients retain the prior catalog and cannot enter

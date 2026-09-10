@@ -1090,7 +1090,7 @@ private struct VoiceTutorTranscriptViewportHeightPreferenceKey: PreferenceKey {
 }
 
 private enum VoiceTutorOrbPlacement: Hashable {
-    case call, transcript
+    case call, transcript, callPause, transcriptPause
 }
 
 private struct VoiceTutorOrbAnchorPreferenceKey: PreferenceKey {
@@ -1248,6 +1248,16 @@ struct VoiceTutorCallScreen: View {
                                 ))
                                 .position(x: frame.midX, y: frame.midY)
                         }
+                        if showsAnswerPauseControl,
+                           let compact = anchors[.callPause], let transcript = anchors[.transcriptPause] {
+                            let frame = VoiceTutorOrbGestureRouting.orbFrame(
+                                from: orbGeometry[compact], to: orbGeometry[transcript], expansion: expansion
+                            )
+                            answerPauseControl
+                                .frame(width: frame.width, height: frame.height)
+                                .position(x: frame.midX, y: frame.midY)
+                                .transition(.opacity)
+                        }
                     }
                 }
                 .clipped()
@@ -1258,6 +1268,7 @@ struct VoiceTutorCallScreen: View {
             .clipped()
         }
         .background(Color(uiColor: .systemBackground))
+        .animation(answerControlAnimation, value: showsAnswerPauseControl)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             updateOrbAnimation()
@@ -1366,7 +1377,7 @@ struct VoiceTutorCallScreen: View {
 
                 Spacer(minLength: 44)
                 VStack(spacing: 28) {
-                    orbPlaceholder(.call, diameter: compactOrbDiameter(in: geometry))
+                    answerOrbPlaceholder(.call, diameter: compactOrbDiameter(in: geometry))
                     callNotices
                     if hasAnswerDraft { answerDraftPreview }
                 }
@@ -1421,7 +1432,7 @@ struct VoiceTutorCallScreen: View {
                     }
                 }
                 Spacer(minLength: 0)
-                orbPlaceholder(.transcript, diameter: hasAnswerDraft ? (usesAccessibilityChrome ? 96 : 64) : (usesAccessibilityChrome ? 56 : 48))
+                answerOrbPlaceholder(.transcript, diameter: hasAnswerDraft ? (usesAccessibilityChrome ? 96 : 64) : (usesAccessibilityChrome ? 56 : 48))
             }
             if usesAccessibilityChrome {
                 Text(strings.voiceTutorCallConversationAction)
@@ -1433,7 +1444,9 @@ struct VoiceTutorCallScreen: View {
                 callTime
                 if presentation.isRecording { recordingIndicator }
             }
-            if answerCaptureIsListening, orbInteraction.stage == .idle {
+            if showsAnswerPauseControl, presentation.pauseState.holdsMicrophone, orbInteraction.stage == .idle {
+                answerPauseHelp
+            } else if answerCaptureIsListening, orbInteraction.stage == .idle {
                 answerCaptureHelp
             }
             if orbInteraction.stage == .warning {
@@ -1510,6 +1523,69 @@ struct VoiceTutorCallScreen: View {
             .accessibilityHidden(true)
     }
 
+    private func answerOrbPlaceholder(_ placement: VoiceTutorOrbPlacement, diameter: CGFloat) -> some View {
+        VStack(spacing: 12) {
+            orbPlaceholder(placement, diameter: diameter)
+            if showsAnswerPauseControl {
+                Color.clear
+                    .frame(width: usesAccessibilityChrome ? 240 : 132, height: usesAccessibilityChrome ? 72 : 44)
+                    .anchorPreference(key: VoiceTutorOrbAnchorPreferenceKey.self, value: .bounds) {
+                        [placement == .call ? .callPause : .transcriptPause: $0]
+                    }
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private var showsAnswerPauseControl: Bool {
+        answerDraftState.phase == .listening && presentation.showsPauseControl
+            && (presentation.phase == .listening || presentation.phase == .speaking)
+            && !userInputState.holdsMicrophone
+            && presentation.lessonPhase != .ending && presentation.lessonPhase != .ended
+            && presentation.lessonPhase != .failed
+    }
+
+    private var answerControlAnimation: Animation? {
+        reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.88)
+    }
+
+    private var answerPauseControl: some View {
+        Button {
+            guard showsAnswerPauseControl, presentation.canChangePause,
+                  !didRequestEnd, orbInteraction.stage == .idle else { return }
+            answerEditorSession = nil
+            onPause()
+        } label: {
+            HStack(spacing: 8) {
+                ZStack {
+                    if presentation.pauseState.isAwaitingAcknowledgement {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: orbRepresentsResume ? "play.fill" : "pause.fill")
+                            .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
+                    }
+                }
+                .frame(width: 20)
+                Text(orbRepresentsResume ? strings.voiceTutorResumeLesson : strings.voiceTutorTakeBreak)
+                    .contentTransition(.opacity)
+            }
+            .font(.subheadline.weight(.medium))
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .foregroundStyle(orbRepresentsResume ? voiceAccent : .primary)
+            .background(orbRepresentsResume ? voiceAccent.opacity(0.14) : Color.secondary.opacity(0.09), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!presentation.canChangePause || didRequestEnd || orbInteraction.stage != .idle || orbDragIsActive)
+        .accessibilityLabel(orbRepresentsResume ? strings.voiceTutorResumeLesson : strings.voiceTutorTakeBreak)
+        .accessibilityValue(presentation.pauseState.holdsMicrophone ? orbStatusText : strings.voiceTutorAnswerListening)
+        .accessibilityHint(orbRepresentsResume ? strings.voiceTutorOrbResumeHint : strings.voiceTutorAnswerPauseHint)
+        .accessibilityIdentifier("voiceCall.answerPause")
+        .animation(answerControlAnimation, value: presentation.pauseState.mode)
+    }
+
     private func orbVisual(diameter: CGFloat) -> some View {
         Circle()
             .fill(
@@ -1551,6 +1627,23 @@ struct VoiceTutorCallScreen: View {
                         .foregroundStyle(Color.black.opacity(0.8))
                         .padding(.horizontal, diameter < 112 ? 7 : 20)
                     }
+                } else if showsAnswerPauseControl, presentation.pauseState.holdsMicrophone, orbInteraction.stage == .idle {
+                    VStack(spacing: diameter < 112 ? 3 : 10) {
+                        if presentation.pauseState.isAwaitingAcknowledgement {
+                            ProgressView().tint(pausedAnswerForeground)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(diameter < 112 ? .caption2 : .title3)
+                        }
+                        if !presentation.pauseState.isAwaitingAcknowledgement {
+                            Text(strings.voiceTutorAnswerResume)
+                                .font(diameter < 112 ? .caption2.weight(.semibold) : .headline)
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                    .foregroundStyle(pausedAnswerForeground)
+                    .padding(.horizontal, diameter < 112 ? 7 : 20)
+                    .transition(.opacity)
                 } else if orbInteraction.stage == .idle, let symbol = presentation.lessonSymbolName {
                     Image(systemName: symbol)
                         .font(diameter < 112 ? .caption : .title2.weight(.medium))
@@ -1561,7 +1654,12 @@ struct VoiceTutorCallScreen: View {
             .frame(width: diameter, height: diameter)
             .scaleEffect(orbScale)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: orbInteraction.stage)
+            .animation(answerControlAnimation, value: presentation.pauseState.mode)
             .contentShape(Circle())
+    }
+
+    private var pausedAnswerForeground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.9) : Color.black.opacity(0.8)
     }
 
     private var orbSurfaceColor: Color {
@@ -1570,7 +1668,7 @@ struct VoiceTutorCallScreen: View {
                 ? Color(red: 0.77, green: 0.51, blue: 0.49)
                 : Color(red: 0.78, green: 0.51, blue: 0.49)
         }
-        if presentation.orbState == .paused || presentation.orbState == .pausing {
+        if presentation.orbState == .paused || presentation.orbState == .pausing || presentation.orbState == .resuming {
             return Color.secondary.opacity(colorScheme == .dark ? 0.45 : 0.22)
         }
         if answerCaptureIsListening {
@@ -1636,6 +1734,15 @@ struct VoiceTutorCallScreen: View {
             .accessibilityIdentifier("voiceCall.answerCaptureHelp")
     }
 
+    private var answerPauseHelp: some View {
+        Text(strings.voiceTutorAnswerPauseHelp)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .transition(.opacity)
+            .accessibilityIdentifier("voiceCall.answerPauseHelp")
+    }
+
     private var callNotices: some View {
         VStack(spacing: 12) {
             Text(orbStatusText)
@@ -1646,7 +1753,9 @@ struct VoiceTutorCallScreen: View {
                 .accessibilityIdentifier("voiceCall.status")
 
 
-            if answerCaptureIsListening, orbInteraction.stage == .idle {
+            if showsAnswerPauseControl, presentation.pauseState.holdsMicrophone, orbInteraction.stage == .idle {
+                answerPauseHelp.multilineTextAlignment(.center)
+            } else if answerCaptureIsListening, orbInteraction.stage == .idle {
                 answerCaptureHelp
                     .multilineTextAlignment(.center)
             }
@@ -1676,6 +1785,7 @@ struct VoiceTutorCallScreen: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .animation(answerControlAnimation, value: presentation.pauseState.mode)
     }
 
     @ViewBuilder

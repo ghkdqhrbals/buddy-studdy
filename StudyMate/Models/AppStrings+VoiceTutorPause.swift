@@ -52,7 +52,7 @@ extension AppStrings {
     var voiceTutorTakeBreak: String { voiceTutorPauseText("일시정지", "Pause", "一時停止") }
     var voiceTutorResumeLesson: String { voiceTutorPauseText("계속하기", "Continue", "続ける") }
     var voiceTutorPausing: String {
-        voiceTutorPauseText("문장을 마친 뒤 일시정지", "Pausing after this sentence", "この文の後に一時停止")
+        voiceTutorPauseText("일시정지하는 중", "Pausing", "一時停止しています")
     }
     var voiceTutorPaused: String { voiceTutorPauseText("일시정지됨", "Paused", "一時停止中") }
     var voiceTutorResuming: String { voiceTutorPauseText("계속할 준비 중", "Getting ready to continue", "再開の準備中") }
@@ -72,9 +72,26 @@ extension AppStrings {
     }
     var voiceTutorOrbPauseHint: String {
         voiceTutorPauseText(
-            "탭하면 선생님이 현재 문장을 마친 뒤 쉬어요.",
-            "Tap to pause after the tutor finishes the current sentence.",
-            "タップすると、チューターが今の文を話し終えてから休憩します。"
+            "탭하면 대화를 잠시 멈춰요.",
+            "Tap to pause the conversation.",
+            "タップすると対話を一時停止します。"
+        )
+    }
+    var voiceTutorAnswerResume: String {
+        voiceTutorPauseText("답변 계속", "Continue answer", "回答を続ける")
+    }
+    var voiceTutorAnswerPauseHelp: String {
+        voiceTutorPauseText(
+            "천천히 생각하세요. 지금까지의 답변은 그대로 남아 있어요.",
+            "Take your time. Your answer so far is kept.",
+            "ゆっくり考えてください。これまでの回答はそのまま残っています。"
+        )
+    }
+    var voiceTutorAnswerPauseHint: String {
+        voiceTutorPauseText(
+            "답변을 끝내지 않고 마이크를 잠시 멈춰요. 계속하기를 누르면 이어서 답변할 수 있어요.",
+            "Pause the microphone without finishing your answer. Continue when you are ready.",
+            "回答を終了せず、マイクを一時停止します。準備ができたら続けられます。"
         )
     }
     var voiceTutorOrbResumeHint: String {
