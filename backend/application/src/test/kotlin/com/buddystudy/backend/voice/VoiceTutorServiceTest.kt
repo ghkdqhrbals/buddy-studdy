@@ -239,18 +239,19 @@ class VoiceTutorServiceTest {
         assertThat(relations).containsEntry(42L, "SELECTED").containsEntry(44L, "DESCENDANT").containsEntry(7L, "ANCESTOR")
     }
     @Test
-    fun `lesson policy grades real pending answers and leaves exploration ungraded`() = runBlocking<Unit> {
+    fun `lesson policy reads pending questions and uses canonical grades for actual answers`() = runBlocking<Unit> {
         val persistence = FakePersistence(now)
         val instructions = service(persistence).connect(principal, persistence.session.id).instructions
         assertThat(instructions)
-            .contains("Only assess an actual answer to the pending substantive question")
-            .contains("integer score out of 100", "one specific thing done well", "one concrete gap or improvement")
-            .contains("Do not penalize hesitation, accent, answer length or disfluency")
-            .contains("ungraded exploration, not answers")
-            .contains("never claim an unanswered question was assessed")
+            .contains("list_pending_questions for that exact study_id")
+            .contains("read its question text faithfully", "Keep that question's saved topic and difficulty")
+            .contains("submit_answer with its exact record_id only", "original persisted learner speech")
+            .contains("Wait for get_grading_process and its saved gradingResult", "Never invent a score")
+            .contains("For a hint or clarification, explain without submitting or grading")
             .contains("a 1-to-10 scale", "never authorize raising it")
-            .contains("Topic discovery, creation, editing, deletion, connection checks, greetings and readiness are NOT learning")
-            .contains("post-call processing attaches genuine Q&A to the existing learning record path")
+            .contains("Silence, filler, topic selection, a skip/new-question command or a request for clarification is not an answer")
+            .contains("call skip_question", "request_question uses the ordinary question allowance separately")
+            .contains("never a duplicate voice grade")
     }
 
     @Test
@@ -682,7 +683,7 @@ class VoiceTutorServiceTest {
                 .contains("do not introduce or name yourself or describe your role unless directly asked")
                 .contains("Selection is separate from mutation and needs no additional confirmation")
                 .contains("when the learner chooses it or wants to start learning it")
-                .contains("briefly indicate the lesson is starting")
+                .contains("If an arrived unanswered question exists, read its question text faithfully and wait for the answer")
                 .contains("Use $languageName throughout")
                 .doesNotContain("AI 선생님이에요", "server independently assesses", "wait for one new learner confirmation")
         }

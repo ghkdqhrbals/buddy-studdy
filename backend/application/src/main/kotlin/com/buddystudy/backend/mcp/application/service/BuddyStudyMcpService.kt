@@ -141,6 +141,19 @@ class BuddyStudyMcpService(
             nonNegativeOffset(offset),
         )
 
+    @RequirePermission(Permissions.RECORD_READ)
+    override suspend fun listPendingQuestions(principal: Principal, limit: Int, offset: Int, studyId: Long) =
+        records.pending(
+            registered(principal),
+            boundedLimit(limit, MAX_RECORD_PAGE_SIZE),
+            nonNegativeOffset(offset),
+            positiveId(studyId, "study_id"),
+        )
+
+    @RequirePermission(Permissions.RECORD_UPDATE)
+    override suspend fun skipQuestion(principal: Principal, recordId: Long) =
+        studyAnswers.skip(registered(principal), positiveId(recordId, "record_id"))
+
     @RequirePermission(Permissions.QUESTION_CREATE)
     override suspend fun requestQuestion(principal: Principal, studyId: Long, idempotencyKey: String) =
         questionRequests.request(

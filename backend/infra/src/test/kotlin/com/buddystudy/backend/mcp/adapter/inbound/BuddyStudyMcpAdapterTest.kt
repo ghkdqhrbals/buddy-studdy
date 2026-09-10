@@ -9,6 +9,9 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
 import com.buddystudy.backend.mcp.application.model.McpDeletionResponse
 import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
+import com.buddystudy.backend.study.application.model.RecordsPageResponse
+import com.buddystudy.backend.study.application.model.StudyRecordResponse
+import com.buddystudy.backend.study.application.model.QuestionItemResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
@@ -17,6 +20,7 @@ import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
@@ -45,7 +49,7 @@ class BuddyStudyMcpAdapterTest {
 
         assertThat(tools.map { it.tool().name() })
             .containsExactlyElementsOf(expected.map(ToolContract::name))
-        assertThat(tools).hasSize(22)
+        assertThat(tools).hasSize(23)
 
         tools.zip(expected).forEach { (specification, contract) ->
             val tool = specification.tool()
@@ -67,6 +71,84 @@ class BuddyStudyMcpAdapterTest {
                 .describedAs("openWorldHint for ${contract.name}")
                 .isEqualTo(contract.openWorld)
         }
+    }
+
+    @Test
+    fun `pending question handler dispatches exact topic overload only when a topic is supplied`() {
+        val calls = mutableListOf<List<Any?>>()
+        val adapter = adapter(proxyUseCase { name, arguments ->
+            assertThat(name).isEqualTo("listPendingQuestions")
+            calls += arguments.dropLast(1)
+            RecordsPageResponse(emptyList(), 0, 30, 0)
+        })
+
+        assertThat(call(adapter, "list_pending_questions", emptyMap(), authenticatedContext).isError()).isFalse()
+        assertThat(call(adapter, "list_pending_questions", mapOf("study_id" to 42L, "limit" to 3, "offset" to 1), authenticatedContext).isError()).isFalse()
+
+        assertThat(calls).containsExactly(listOf(principal, 30, 0), listOf(principal, 3, 1, 42L))
+    }
+
+    @Test
+    fun `skip question returns the exact canonical skipped record without invoking generation`() {
+        val calls = mutableListOf<Pair<String, List<Any?>>>()
+        val record = StudyRecordResponse(
+            id = "91", question = QuestionItemResponse("의존성 주입은 무엇인가요?", createdAt = Instant.EPOCH),
+            answer = null, gradingResult = null, topic = "DI", difficulty = 3, answeredAt = null,
+            isPublic = false, studyId = 42L, questionStatus = QuestionStatus.SKIPPED,
+        )
+        val adapter = adapter(proxyUseCase { name, arguments ->
+            calls += name to arguments.dropLast(1)
+            record
+        })
+
+        val result = call(adapter, "skip_question", mapOf("record_id" to 91L), authenticatedContext)
+
+        assertThat(result.isError()).isFalse()
+        assertThat(calls).containsExactly("skipQuestion" to listOf(principal, 91L))
+        val payload = jacksonObjectMapper().valueToTree<com.fasterxml.jackson.databind.JsonNode>(result.structuredContent())
+        assertThat(payload.path("id").asText()).isEqualTo("91")
+        assertThat(payload.path("studyId").asLong()).isEqualTo(42L)
+        assertThat(payload.path("questionStatus").asText().lowercase()).isEqualTo("skipped")
+    }
+
+    @Test
+    fun `question lifecycle rejects fractional and overflowing ids or pagination without rounding to another record`() {
+        var called = false
+        val adapter = adapter(proxyUseCase { _, _ -> called = true; error("Invalid arguments must not reach a use case") })
+        val invalidCalls = listOf(
+            "skip_question" to emptyMap<String, Any>(),
+            "skip_question" to mapOf("record_id" to 91.5),
+            "skip_question" to mapOf("record_id" to java.math.BigInteger("9223372036854775808")),
+            "skip_question" to mapOf("record_id" to "91"),
+            "list_pending_questions" to mapOf("study_id" to 42.5),
+            "list_pending_questions" to mapOf("study_id" to Double.NaN),
+            "list_pending_questions" to mapOf("limit" to 2.5),
+            "list_pending_questions" to mapOf("offset" to 4_294_967_296L),
+        )
+        for ((name, arguments) in invalidCalls) {
+            val result = call(adapter, name, arguments, authenticatedContext)
+            assertThat(result.isError()).isTrue()
+            assertThat(errorDetails(result)["code"]).isEqualTo("VALIDATION_ERROR")
+        }
+        assertThat(called).isFalse()
+    }
+
+    @Test
+    fun `skip preserves canonical status conflict and requires an authenticated caller`() {
+        var calls = 0
+        val adapter = adapter(proxyUseCase { name, _ ->
+            assertThat(name).isEqualTo("skipQuestion")
+            calls++
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR,
+                "Only an unanswered, ungraded question can be skipped.")
+        })
+
+        val missingPrincipal = call(adapter, "skip_question", mapOf("record_id" to 91L), McpTransportContext.EMPTY)
+        assertThat(errorDetails(missingPrincipal)["code"]).isEqualTo("PERMISSION_DENIED")
+        assertThat(calls).isZero()
+        val conflict = call(adapter, "skip_question", mapOf("record_id" to 91L), authenticatedContext)
+        assertThat(errorDetails(conflict)["code"]).isEqualTo("VALIDATION_ERROR")
+        assertThat(calls).isEqualTo(1)
     }
 
     @Test
@@ -654,8 +736,21 @@ class BuddyStudyMcpAdapterTest {
         ),
         ToolContract(
             name = "list_pending_questions",
-            schema = pagedSchema(maximum = 100, defaultLimit = 30),
+            schema = pagedSchema(
+                additional = linkedMapOf("study_id" to idProperty("Optional exact owned study topic filter, excluding descendants.")),
+                maximum = 100, defaultLimit = 30,
+            ),
             readOnly = true,
+        ),
+        ToolContract(
+            name = "skip_question",
+            schema = objectSchema(
+                properties = linkedMapOf("record_id" to idProperty("Exact owned unanswered question record ID to skip.")),
+                required = listOf("record_id"),
+            ),
+            readOnly = false,
+            destructive = true,
+            idempotent = true,
         ),
         ToolContract(
             name = "request_question",

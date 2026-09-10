@@ -660,6 +660,126 @@ class VoiceTutorLessonRevisionPersistenceTest {
         assertThat(adapter.transcript(7, "owned", 4000)).isEmpty()
     }
 
+    @Test
+    fun `canonical answer lookup returns the complete latest run beyond a clipped history prefix`() = runBlocking<Unit> {
+        native("old", VoiceTutorTranscriptRole.TUTOR, 1, text = "오래된 대화".repeat(500))
+        native("question", VoiceTutorTranscriptRole.TUTOR, 100, text = "원래 도착한 문제입니다.")
+        native("part-1", VoiceTutorTranscriptRole.USER, 101, text = "  첫 설명입니다.\n")
+        native("part-2", VoiceTutorTranscriptRole.USER, 102, text = "마지막 설명입니다.  ")
+
+        assertThat(adapter.transcript(7, "owned", 1000).map { it.providerItemId }).doesNotContain("part-2")
+        val rows = adapter.canonicalAnswerTurns(7, "owned", "part-2", "question", 2)
+        assertThat(rows.map { it.providerItemId }).containsExactly("question", "part-1", "part-2")
+        assertThat(rows.map { it.sequenceNumber }).containsExactly(100L, 101L, 102L)
+        assertThat(rows.map { it.transcript }).containsExactly("원래 도착한 문제입니다.", "  첫 설명입니다.\n", "마지막 설명입니다.  ")
+    }
+
+    @Test
+    fun `canonical answer lookup rejects wrong owner missing anchors and terminal sessions`() = runBlocking<Unit> {
+        native("question", VoiceTutorTranscriptRole.TUTOR, 1)
+        native("answer", VoiceTutorTranscriptRole.USER, 2)
+        assertThat(adapter.canonicalAnswerTurns(8, "owned", "answer", "question", 2)).isEmpty()
+        assertThat(adapter.canonicalAnswerTurns(7, "foreign", "answer", "question", 2)).isEmpty()
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "missing", "question", 2)).isEmpty()
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "answer", "missing", 2)).isEmpty()
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "question", "answer", 2)).isEmpty()
+        assertThat(adapter.excludeCanonicalQuestionTurns(8, "owned", listOf("question", "answer"))).isFalse()
+        for (status in listOf("ENDING", "COMPLETED", "FAILED")) {
+            database.sql("update voice_tutor_sessions set status = :status where id = 'owned'")
+                .bind("status", status).fetch().rowsUpdated().awaitSingle()
+            assertThat(adapter.canonicalAnswerTurns(7, "owned", "answer", "question", 2)).isEmpty()
+            assertThat(adapter.excludeCanonicalQuestionTurns(7, "owned", listOf("question", "answer"))).isFalse()
+        }
+        assertThat(adapter.transcript(7, "owned", 4000).all { it.postCallEvidence }).isTrue()
+    }
+
+    @Test
+    fun `canonical answer lookup and exclusion reject mixed revisions and intervening tutor output`() = runBlocking<Unit> {
+        native("question", VoiceTutorTranscriptRole.TUTOR, 1)
+        native("part-1", VoiceTutorTranscriptRole.USER, 2)
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "part-1", "question", 3)).isEmpty()
+        native("part-2", VoiceTutorTranscriptRole.USER, 4, revision = 3)
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "part-2", "question", 2)).isEmpty()
+        assertThat(adapter.excludeCanonicalQuestionTurns(7, "owned", listOf("question", "part-1", "part-2"))).isFalse()
+        execute("update voice_tutor_transcript_turns set lesson_revision = 2 where provider_item_id = 'part-2'")
+        native("intervening", VoiceTutorTranscriptRole.TUTOR, 3)
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "part-2", "question", 2)).isEmpty()
+        assertThat(adapter.excludeCanonicalQuestionTurns(7, "owned", listOf("question", "part-1", "part-2"))).isFalse()
+        assertThat(adapter.transcript(7, "owned", 4000).all { it.postCallEvidence }).isTrue()
+    }
+
+    @Test
+    fun `newer learner input invalidates both a previously read answer and its exclusion`() = runBlocking<Unit> {
+        native("question", VoiceTutorTranscriptRole.TUTOR, 1)
+        native("answer", VoiceTutorTranscriptRole.USER, 2)
+        val original = adapter.canonicalAnswerTurns(7, "owned", "answer", "question", 2)
+        assertThat(original).hasSize(2)
+        native("newer", VoiceTutorTranscriptRole.USER, 3)
+
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "answer", "question", 2)).isEmpty()
+        assertThat(adapter.excludeCanonicalQuestionTurns(7, "owned", original.map { it.providerItemId })).isFalse()
+        assertThat(adapter.transcript(7, "owned", 4000).all { it.postCallEvidence }).isTrue()
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "newer", "question", 2).map { it.providerItemId })
+            .containsExactly("question", "answer", "newer")
+    }
+
+    @Test
+    fun `canonical answer permits thirty two learner parts but never truncates a longer run`() = runBlocking<Unit> {
+        native("question", VoiceTutorTranscriptRole.TUTOR, 1)
+        for (part in 1..32) native("part-$part", VoiceTutorTranscriptRole.USER, part.toLong() + 1)
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "part-32", "question", 2)).hasSize(33)
+        native("part-33", VoiceTutorTranscriptRole.USER, 34)
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "part-33", "question", 2)).isEmpty()
+        assertThat(adapter.excludeCanonicalQuestionTurns(7, "owned", listOf("question") + (1..33).map { "part-$it" })).isFalse()
+        assertThat(adapter.transcript(7, "owned", 40_000).all { it.postCallEvidence }).isTrue()
+    }
+
+    @Test
+    fun `canonical exclusion validates every identity and the complete ordered run before changing any row`() = runBlocking<Unit> {
+        native("question", VoiceTutorTranscriptRole.TUTOR, 1)
+        native("part-1", VoiceTutorTranscriptRole.USER, 2)
+        native("part-2", VoiceTutorTranscriptRole.USER, 3)
+        for (ids in listOf(
+            emptyList(), listOf("question"), listOf("question", "missing"),
+            listOf("question", "part-2"), listOf("question", "part-1"),
+            listOf("question", "part-2", "part-1"), listOf("question", "part-1", "part-1"),
+            listOf("part-1", "part-2"), listOf("", "part-2"), listOf("x".repeat(192), "part-2"),
+        )) {
+            assertThat(adapter.excludeCanonicalQuestionTurns(7, "owned", ids)).isFalse()
+            assertThat(adapter.transcript(7, "owned", 4000).all { it.postCallEvidence }).isTrue()
+        }
+    }
+
+    @Test
+    fun `canonical exclusion is idempotent retains source history and cannot be undone by a late native replay`() = runBlocking<Unit> {
+        native("old", VoiceTutorTranscriptRole.TUTOR, 1)
+        native("question", VoiceTutorTranscriptRole.TUTOR, 2)
+        native("answer", VoiceTutorTranscriptRole.USER, 3, text = "  원래 답변입니다.\n")
+        val before = adapter.transcript(7, "owned", 4000)
+        val ids = listOf("question", "answer")
+        assertThat(adapter.excludeCanonicalQuestionTurns(7, "owned", ids)).isTrue()
+        assertThat(adapter.excludeCanonicalQuestionTurns(7, "owned", ids)).isTrue()
+        val after = adapter.transcript(7, "owned", 4000)
+        assertThat(after.map { it.copy(postCallEvidence = true) }).containsExactlyElementsOf(before)
+        assertThat(after.map { it.postCallEvidence }).containsExactly(true, false, false)
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "answer", "question", 2).map { it.providerItemId })
+            .containsExactlyElementsOf(ids)
+        assertThat(adapter.appendTranscript(7, "owned", "answer", VoiceTutorTranscriptRole.USER, "  원래 답변입니다.\n", now,
+            40_000, 2000, lessonRevision = 2, postCallEvidence = true, conversationSequence = 3)).isFalse()
+        assertThat(adapter.transcript(7, "owned", 4000)).containsExactlyElementsOf(after)
+    }
+
+    private suspend fun native(
+        id: String,
+        role: VoiceTutorTranscriptRole,
+        sequence: Long,
+        revision: Long = 2,
+        text: String = "원문 $id",
+    ) {
+        assertThat(adapter.appendTranscript(7, "owned", id, role, text, now, 1_000_000, 2000,
+            lessonRevision = revision, postCallEvidence = true, conversationSequence = sequence)).isTrue()
+    }
+
     private suspend fun append(
         id: String,
         role: VoiceTutorTranscriptRole,

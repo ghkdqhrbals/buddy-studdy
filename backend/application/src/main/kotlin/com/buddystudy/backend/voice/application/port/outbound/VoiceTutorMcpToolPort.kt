@@ -38,7 +38,14 @@ data class VoiceTutorMcpToolResult(
     val updatedStudySnapshot: VoiceTutorStudySnapshot? = null,
     /** Exact owned node returned by a verified mutation, not extracted from provider JSON. */
     val savedMutationTarget: VoiceTutorStudyTargetCandidate? = null,
+    /** Canonical question changed/read by an authenticated tool; never parsed from provider JSON. */
+    val questionChange: VoiceTutorQuestionChange? = null,
+    /** Exact saved question for a response-scoped native readback, not a model-authored prompt. */
+    val questionReadback: VoiceTutorQuestionReadback? = null,
 )
+
+data class VoiceTutorQuestionChange(val studyId: Long, val recordId: String)
+data class VoiceTutorQuestionReadback(val studyId: Long, val recordId: String, val question: String)
 
 enum class VoiceTutorCandidateReadKind { LIST_STUDIES, GET_STUDY }
 

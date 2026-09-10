@@ -998,6 +998,8 @@ final class AppState: ObservableObject {
     private var didReceiveCloudStateWhileEditing = false
     private var locallyDeletedStudyIDs = Set<Int>()
     private var voiceTutorStudyMetadataFence = VoiceTutorStudyMetadataFence()
+    private var voiceTutorQuestionRequestIDs: [String: UUID] = [:]
+    private var voiceTutorQuestionRoomRequestIDs: [Int: UUID] = [:]
     private var locallyDeletedStudyTopicKeys = Set<String>()
 
     private struct PendingAnswerDraft {
@@ -1851,7 +1853,7 @@ final class AppState: ObservableObject {
             return currentQuestion != nil
         }
 
-        return currentRecord.gradingResult == nil
+        return StudyAnswerPresentationPolicy.shouldShowEditor(for: currentRecord)
     }
 
     var appLogPageCount: Int {
@@ -7986,6 +7988,8 @@ final class AppState: ObservableObject {
 
     private func resetVoiceTutorState() {
         voiceTutorStudyMetadataFence = VoiceTutorStudyMetadataFence()
+        voiceTutorQuestionRequestIDs = [:]
+        voiceTutorQuestionRoomRequestIDs = [:]
         studyRoomState.resetVoiceDeletionFence()
         #if os(iOS)
         localStudyRecordUseCase.clearLearningRecordsPages()
@@ -8273,6 +8277,66 @@ final class AppState: ObservableObject {
             return nil
         } catch {
             return nil
+        }
+    }
+
+    /// Reconcile only the canonical question confirmed by a voice tool. Stored
+    /// drafts and the learner's selected question remain owned by the learner.
+    func refreshVoiceTutorQuestion(
+        _ change: VoiceTutorQuestionChange,
+        validity: @escaping @MainActor @Sendable () -> Bool
+    ) async {
+        guard !Task.isCancelled, validity(),
+              let context = try? makeVoiceTutorRequestContext(),
+              !voiceTutorStudyMetadataFence.isDeleted(studyID: change.studyID) else { return }
+        let requestID = UUID()
+        voiceTutorQuestionRequestIDs[change.recordID] = requestID
+        voiceTutorQuestionRoomRequestIDs[change.studyID] = requestID
+        defer {
+            if voiceTutorQuestionRequestIDs[change.recordID] == requestID {
+                voiceTutorQuestionRequestIDs.removeValue(forKey: change.recordID)
+            }
+            if voiceTutorQuestionRoomRequestIDs[change.studyID] == requestID {
+                voiceTutorQuestionRoomRequestIDs.removeValue(forKey: change.studyID)
+            }
+        }
+        let isCurrent: @MainActor @Sendable () -> Bool = { [weak self] in
+            context.isCurrent() && validity() &&
+                self?.voiceTutorQuestionRequestIDs[change.recordID] == requestID &&
+                self?.voiceTutorStudyMetadataFence.isDeleted(studyID: change.studyID) == false
+        }
+        let guardedContext = VoiceTutorRequestContext(
+            registration: context.registration, identityFence: context.identityFence, isCurrent: isCurrent
+        )
+        let useCase = recordsUseCase
+        let language = settings.appLanguage
+        do {
+            let registration = try await prepareVoiceTutorRegistration(
+                context: guardedContext, reason: "voice-tutor-question-changed"
+            )
+            let record = try await performWithBackendIdentityRecovery(
+                registration: registration, reason: "voice-tutor-question-changed",
+                syncSettingsAfterRegistration: false, validity: isCurrent,
+                operation: { registration in
+                    try await useCase.fetchRecord(
+                        registration: registration, recordID: change.recordID,
+                        language: language, view: .localized
+                    )
+                }
+            )
+            guard !Task.isCancelled, isCurrent(), record.isQuestion,
+                  record.id == change.recordID, record.studyID == change.studyID else { return }
+            localStudyRecordUseCase.replaceRecords(mergeBackendRecord(record, into: studyRecords))
+            reloadStudyRecordsFromStore()
+            // An older GET for a previous question can update its own record,
+            // but must not replace a newer question in the same study room.
+            if voiceTutorQuestionRoomRequestIDs[change.studyID] == requestID {
+                _ = studyRoomState.applyIncomingRecord(record)
+            }
+            invalidateStudyLearningRecordPages()
+        } catch {
+            guard !Self.isCancellationLikeError(error), !Task.isCancelled, isCurrent() else { return }
+            log(.warning, "음성 통화에서 변경한 문제 상태를 가져오지 못했습니다.")
         }
     }
 
@@ -9436,7 +9500,8 @@ final class AppState: ObservableObject {
             onSuccess: { updatedRecord in
                 applyStudyRoomRecord(
                     updatedRecord,
-                    answer: updatedRecord.answer ?? queuedRecord.answer ?? ""
+                    answer: updatedRecord.answer ?? queuedRecord.answer ?? "",
+                    preserveDraft: true
                 )
             },
             onFailure: { error in
@@ -10486,7 +10551,7 @@ final class AppState: ObservableObject {
         }
 
         if let record = studyRecord(matching: currentQuestion) {
-            return record.gradingResult == nil
+            return record.isPendingQuestion
         }
 
         return gradingResult == nil
@@ -10674,8 +10739,10 @@ final class AppState: ObservableObject {
         log(.info, "백엔드에서 답변을 채점했습니다. score=\(record.gradingResult?.score ?? 0)")
     }
 
-    private func applyStudyRoomRecord(_ record: StudyRecord, answer: String) {
-        localStudyRecordUseCase.deleteAnswerDraft(recordID: record.id)
+    private func applyStudyRoomRecord(_ record: StudyRecord, answer: String, preserveDraft: Bool = false) {
+        if !preserveDraft {
+            localStudyRecordUseCase.deleteAnswerDraft(recordID: record.id)
+        }
         localStudyRecordUseCase.replaceRecords(mergeBackendRecord(record, into: studyRecords))
         reloadStudyRecordsFromStore()
         studyRoomState.applyAnsweredRecord(record)

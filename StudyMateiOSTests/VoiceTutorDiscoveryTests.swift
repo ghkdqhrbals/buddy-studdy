@@ -366,6 +366,193 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
         fixture.assertDraftsUnchanged()
     }
 
+    func testQuestionChangeRequiresExactCanonicalIdentifiersAndNoExtraPayload() throws {
+        let type = "buddystudy.voice.question.changed"
+        let valid: [String: Any] = ["type": type, "studyId": 99, "recordId": "901"]
+        let change = try XCTUnwrap(VoiceTutorQuestionChange(studyID: 99, recordID: "901"))
+        XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(data: JSONSerialization.data(withJSONObject: valid)),
+                       .questionChanged(change))
+        var invalid: [[String: Any]] = []
+        for studyID in [0, -1, true, "99", 99.5] as [Any] {
+            var object = valid; object["studyId"] = studyID; invalid.append(object)
+        }
+        for recordID in [901, true, "", "0", "-1", "01", "+1", " 1", "1.0", "1e3", "9223372036854775808"] as [Any] {
+            var object = valid; object["recordId"] = recordID; invalid.append(object)
+        }
+        var extra = valid; extra["answer"] = "untrusted tool text"; invalid.append(extra)
+        var missing = valid; missing.removeValue(forKey: "recordId"); invalid.append(missing)
+        for object in invalid {
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(data: JSONSerialization.data(withJSONObject: object)),
+                           .ignored(type: type))
+        }
+    }
+
+    func testVoiceQuestionRefreshPreservesDraftsAndReconcilesSkipGradingAndCompletion() async throws {
+        let fixture = try VoiceDiscoveryAppFixture()
+        defer { fixture.close() }
+        await fixture.appState.refreshVoiceTutorCreatedStudy(studyID: 99, validity: { true })
+        var record = questionRecord(id: "901", status: .ungraded)
+        let change = try XCTUnwrap(VoiceTutorQuestionChange(studyID: 99, recordID: record.id))
+        fixture.recordResponses[record.id] = record
+        fixture.store.saveAnswerDraft("음성 통화 전에 작성한 초안", recordID: record.id)
+        await fixture.appState.refreshVoiceTutorQuestion(change, validity: { true })
+        XCTAssertEqual(fixture.appState.backendStudyRoom(id: 99)?.pendingQuestion?.id, record.id)
+        fixture.assertDraftsUnchanged()
+
+        record.questionStatus = .skipped
+        fixture.recordResponses[record.id] = record
+        await fixture.appState.refreshVoiceTutorQuestion(change, validity: { true })
+        let skipped = try XCTUnwrap(fixture.appState.studyRecords.first { $0.id == record.id })
+        XCTAssertFalse(skipped.isPendingQuestion)
+        XCTAssertEqual(StudyAnswerPresentationPolicy.state(for: skipped), .completed)
+        XCTAssertFalse(StudyAnswerPresentationPolicy.shouldShowEditor(for: skipped))
+        XCTAssertNil(fixture.appState.backendStudyRoom(id: 99)?.pendingQuestion)
+        XCTAssertEqual(fixture.appState.backendStudyRoom(id: 99)?.latestQuestion?.id, skipped.id)
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: record.id), "음성 통화 전에 작성한 초안")
+        fixture.assertDraftsUnchanged()
+
+        var next = questionRecord(id: "902", status: .ungraded)
+        let nextChange = try XCTUnwrap(VoiceTutorQuestionChange(studyID: 99, recordID: next.id))
+        fixture.recordResponses[next.id] = next
+        fixture.store.saveAnswerDraft("두 번째 문제의 키보드 초안", recordID: next.id)
+        await fixture.appState.refreshVoiceTutorQuestion(nextChange, validity: { true })
+        XCTAssertEqual(fixture.appState.backendStudyRoom(id: 99)?.pendingQuestion?.id, next.id)
+        fixture.assertDraftsUnchanged()
+
+        next.questionStatus = .grading
+        next.answer = "음성으로 제출하여 서버가 수락한 답변"
+        next.gradingStatus = .queued
+        next.gradingRequestID = "synthetic-grading-request"
+        fixture.recordResponses[next.id] = next
+        await fixture.appState.refreshVoiceTutorQuestion(nextChange, validity: { true })
+        let grading = try XCTUnwrap(fixture.appState.studyRecords.first { $0.id == next.id })
+        XCTAssertTrue(grading.isPendingQuestion)
+        XCTAssertTrue(fixture.appState.isAnswerGradingInProgress(for: grading))
+        XCTAssertEqual(fixture.appState.answerDraft(for: grading), next.answer)
+        XCTAssertFalse(StudyAnswerPresentationPolicy.shouldShowEditor(for: grading))
+        fixture.assertDraftsUnchanged()
+
+        next.questionStatus = .graded
+        next.gradingStatus = .completed
+        next.gradingResult = GradingResult(score: 85, isCorrect: true, feedback: "합성 피드백", explanation: "합성 설명")
+        fixture.recordResponses[next.id] = next
+        // The end-of-call repeat GET must observe the canonical grading result.
+        await fixture.appState.refreshVoiceTutorQuestion(nextChange, validity: { true })
+        let graded = try XCTUnwrap(fixture.appState.studyRecords.first { $0.id == next.id })
+        XCTAssertEqual(graded.gradingResult?.score, 85)
+        XCTAssertFalse(fixture.appState.isAnswerGradingInProgress(for: graded))
+        XCTAssertNil(fixture.appState.backendStudyRoom(id: 99)?.pendingQuestion)
+        XCTAssertEqual(fixture.appState.backendStudyRoom(id: 99)?.latestQuestion?.id, next.id)
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: next.id), "두 번째 문제의 키보드 초안")
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: record.id), "음성 통화 전에 작성한 초안")
+        XCTAssertEqual(fixture.requests.filter { $0.url?.path.hasPrefix("/api/v1/records/") == true }.count, 5)
+        fixture.assertDraftsUnchanged()
+    }
+
+    func testVoiceQuestionRefreshRejectsDifferentRecordStudyAndExpiredAttempt() async throws {
+        let fixture = try VoiceDiscoveryAppFixture()
+        defer { fixture.close() }
+        let change = try XCTUnwrap(VoiceTutorQuestionChange(studyID: 99, recordID: "901"))
+        fixture.recordResponses["901"] = questionRecord(id: "903", status: .ungraded)
+        await fixture.appState.refreshVoiceTutorQuestion(change, validity: { true })
+        XCTAssertTrue(fixture.appState.studyRecords.isEmpty)
+
+        var otherStudy = questionRecord(id: "901", status: .ungraded)
+        otherStudy.studyID = 100
+        fixture.recordResponses["901"] = otherStudy
+        await fixture.appState.refreshVoiceTutorQuestion(change, validity: { true })
+        XCTAssertTrue(fixture.appState.studyRecords.isEmpty)
+
+        fixture.recordResponses["901"] = questionRecord(id: "901", status: .ungraded)
+        fixture.beforeRecordResponse = { fixture.acceptQuestionRefresh = false }
+        await fixture.appState.refreshVoiceTutorQuestion(change, validity: { fixture.acceptQuestionRefresh })
+        XCTAssertTrue(fixture.appState.studyRecords.isEmpty, "A response from an ended attempt cannot publish a question")
+        let requestCount = fixture.requests.count
+        await fixture.appState.refreshVoiceTutorQuestion(change, validity: { false })
+        XCTAssertEqual(fixture.requests.count, requestCount)
+        fixture.assertDraftsUnchanged()
+    }
+
+    func testVoiceGradingRefreshThenResumedPollingPreservesTheOriginalKeyboardDraft() async throws {
+        let fixture = try VoiceDiscoveryAppFixture()
+        defer { fixture.close() }
+        await fixture.appState.refreshVoiceTutorCreatedStudy(studyID: 99, validity: { true })
+        var record = questionRecord(id: "901", status: .grading)
+        record.answer = "음성으로 제출한 합성 답변"
+        record.gradingRequestID = "voice-grading-fixture"
+        record.gradingStatus = .queued
+        fixture.store.saveAnswerDraft("아직 보존할 키보드 초안", recordID: record.id)
+        fixture.recordResponses[record.id] = record
+        let change = try XCTUnwrap(VoiceTutorQuestionChange(studyID: 99, recordID: record.id))
+        await fixture.appState.refreshVoiceTutorQuestion(change, validity: { true })
+        fixture.assertDraftsUnchanged()
+
+        record.questionStatus = .graded
+        record.gradingStatus = .completed
+        record.gradingResult = GradingResult(score: 92, isCorrect: true, feedback: "합성 피드백", explanation: "합성 설명")
+        fixture.recordResponses[record.id] = record
+        fixture.gradingProcessResponses["voice-grading-fixture"] = #"""
+        {"correlationId":"voice-grading-fixture","recordId":"901","status":"COMPLETED",
+         "questionStatus":"GRADED","terminal":true,"events":[],"updatedAt":"2026-09-10T00:00:00Z"}
+        """#
+        // Reopening the selected study is explicit. Resume reads the canonical
+        // grading process without resubmitting or treating the typed draft as speech.
+        await fixture.appState.prepareStudyRoom(categoryID: "99", gradingPollingOwnerID: "voice-resume-fixture",
+                                               shouldRefreshDetail: false)
+        let completed = try XCTUnwrap(fixture.appState.studyRecords.first { $0.id == record.id })
+        XCTAssertEqual(completed.gradingResult?.score, 92)
+        XCTAssertEqual(completed.answer, "음성으로 제출한 합성 답변")
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: record.id), "아직 보존할 키보드 초안")
+        XCTAssertFalse(StudyAnswerPresentationPolicy.shouldShowEditor(for: completed))
+        XCTAssertEqual(fixture.requests.filter { $0.url?.path == "/api/v1/answer-processes/voice-grading-fixture" }.count, 1)
+        XCTAssertTrue(fixture.requests.allSatisfy { $0.httpMethod == "GET" }, "Resuming must never submit another answer")
+    }
+
+    func testCanonicalTerminalQuestionStatusesNeverRemainPendingOrEditable() {
+        for status in [QuestionStatus.skipped, .graded, .completed] {
+            let record = questionRecord(id: "901", status: status)
+            XCTAssertFalse(record.isPendingQuestion)
+            XCTAssertEqual(StudyAnswerPresentationPolicy.state(for: record), .completed)
+            XCTAssertFalse(StudyAnswerPresentationPolicy.shouldShowEditor(for: record))
+        }
+        for status in [QuestionStatus.ungraded, .grading, .failed] {
+            XCTAssertTrue(questionRecord(id: "901", status: status).isPendingQuestion)
+        }
+    }
+
+    func testVoiceTerminalRefreshKeepsTheSelectedQuestionAndDraftWithoutInventingAnotherPendingRecord() async throws {
+        for status in [QuestionStatus.skipped, .graded, .completed] {
+            let fixture = try VoiceDiscoveryAppFixture()
+            defer { fixture.close() }
+            let record = questionRecord(id: "901", status: status)
+            fixture.appState.currentQuestion = record.question
+            fixture.appState.lastAnswer = "동일 문제의 보존할 키보드 초안"
+            fixture.store.saveQuestion(record.question)
+            fixture.store.saveLastAnswer(fixture.appState.lastAnswer)
+            fixture.store.saveAnswerDraft(fixture.appState.lastAnswer, recordID: record.id)
+            fixture.recordResponses[record.id] = record
+            let change = try XCTUnwrap(VoiceTutorQuestionChange(studyID: 99, recordID: record.id))
+
+            await fixture.appState.refreshVoiceTutorQuestion(change, validity: { true })
+
+            XCTAssertEqual(fixture.appState.currentQuestion, record.question)
+            XCTAssertEqual(fixture.store.loadQuestion(), record.question)
+            XCTAssertEqual(fixture.appState.lastAnswer, "동일 문제의 보존할 키보드 초안")
+            XCTAssertEqual(fixture.store.loadLastAnswer(), "동일 문제의 보존할 키보드 초안")
+            XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: record.id), "동일 문제의 보존할 키보드 초안")
+            XCTAssertTrue(fixture.appState.pendingStudyRecords.isEmpty,
+                          "Preserving the selected question cannot recreate a terminal question as an ungraded draft")
+            XCTAssertFalse(fixture.appState.canSkipCurrentQuestion)
+        }
+    }
+
+    private func questionRecord(id: String, status: QuestionStatus) -> StudyRecord {
+        StudyRecord(id: id, studyID: 99,
+                    question: QuestionItem(question: "합성 음성 문제 \(id)", expectedAnswerHint: nil,
+                                           createdAt: Date(timeIntervalSince1970: 200)),
+                    topic: "새 음성 루트 주제", difficulty: .level4, questionStatus: status)
+    }
+
     private let focusEventType = "buddystudy.voice.study.focused"
 
     private func focus(id: Int = 42, parent: Int? = nil, topic: String = "합성 주제",
@@ -406,6 +593,10 @@ private final class VoiceDiscoveryAppFixture {
     var requests: [URLRequest] = []
     var creationBodies: [[String: Any]] = []
     var expireFirstCreate = false
+    var recordResponses: [String: StudyRecord] = [:]
+    var gradingProcessResponses: [String: String] = [:]
+    var beforeRecordResponse: (() -> Void)?
+    var acceptQuestionRefresh = true
     private let suiteName = "VoiceTutorDiscoveryTests-\(UUID().uuidString)"
     private let defaults: UserDefaults
     private let session: URLSession
@@ -487,6 +678,7 @@ private final class VoiceDiscoveryAppFixture {
     }
 
     func close() {
+        beforeRecordResponse = nil
         session.invalidateAndCancel()
         VoiceDiscoveryURLProtocol.remove(host: host)
         // Delete only this fixture's random namespace, never standard defaults or recordings.
@@ -498,6 +690,15 @@ private final class VoiceDiscoveryAppFixture {
         let body: String
         var status = 200
         switch (request.httpMethod, request.url?.path) {
+        case ("GET", let path) where path?.hasPrefix("/api/v1/answer-processes/") == true:
+            body = try XCTUnwrap(gradingProcessResponses[try XCTUnwrap(request.url?.lastPathComponent)])
+        case ("GET", let path) where path?.hasPrefix("/api/v1/records/") == true:
+            let recordID = try XCTUnwrap(request.url?.lastPathComponent)
+            let record = try XCTUnwrap(recordResponses[recordID])
+            beforeRecordResponse?()
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            body = String(decoding: try encoder.encode(record), as: UTF8.self)
         case ("GET", "/api/v1/studies"):
             body = Self.serverStudyTreeResponse
         case ("GET", "/api/v1/studies/99"):

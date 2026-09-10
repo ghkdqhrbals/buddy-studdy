@@ -148,7 +148,7 @@ internal fun nativeVoiceTutorToolRelay(
 ): Mono<Void> = controller.toolActions().concatMap { call ->
     mono {
         if (!controller.beginTool(call.callId)) return@mono
-        val mutating = call.name in setOf("prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study", "advance_voice_study")
+        val mutating = call.name in setOf("prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study", "advance_voice_study", "request_question", "skip_question", "submit_answer")
         val result = try {
             withTimeout(15_000) {
                 if (mutating) {

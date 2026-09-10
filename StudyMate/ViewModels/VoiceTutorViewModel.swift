@@ -663,6 +663,7 @@ final class VoiceTutorViewModel: ObservableObject {
     private var connectionAttemptFence = VoiceTutorConnectionAttemptFence()
     private var summaryRequestID = UUID()
     private var summaryContextValidity: (@MainActor @Sendable () -> Bool)?
+    private var changedQuestions: [VoiceTutorQuestionChange] = []
 
     init(
         appState: AppState,
@@ -687,6 +688,7 @@ final class VoiceTutorViewModel: ObservableObject {
         summaryRequestID = UUID()
         summaryContextValidity = nil
         summaryRefreshState = .idle
+        changedQuestions = []
         stopLocalSpeechEventPump()
         cancelTerminalPlayoutDrain()
         sessionID = nil
@@ -1383,7 +1385,7 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         if isFinalizing {
             switch event {
-            case .sessionEnded, .quotaUpdated:
+            case .sessionEnded, .quotaUpdated, .questionChanged:
                 break
             default:
                 return
@@ -1528,6 +1530,18 @@ final class VoiceTutorViewModel: ObservableObject {
                 )
                 // The server emits a new focus epoch for a focused-node edit.
                 // This potentially delayed GET must not overwrite that snapshot.
+            }
+        case .questionChanged(let change):
+            guard connectionAttemptFence.isCurrent(attemptID), connection.isCurrent() else { break }
+            // Keep the latest event order for the final refresh: an older
+            // question must not become the study's new pending question.
+            changedQuestions.removeAll { $0.recordID == change.recordID }
+            changedQuestions.append(change)
+            Task { [weak self] in
+                guard let self else { return }
+                await self.appState.refreshVoiceTutorQuestion(change, validity: { [weak self] in
+                    self?.connectionAttemptFence.isCurrent(attemptID) == true && connection.isCurrent()
+                })
             }
         case .studyTreeDeleted(let studyIDs):
             guard phase.isLive, connectionAttemptFence.isCurrent(attemptID),
@@ -1947,6 +1961,14 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         if activeConnection?.isCurrent() == true {
             await appState.loadVoiceTutorSessions(reset: true)
+        }
+        if let connection = activeConnection, connection.isCurrent() {
+            for change in changedQuestions {
+                guard connectionAttemptFence.isCurrent(attemptID), connection.isCurrent() else { break }
+                await appState.refreshVoiceTutorQuestion(change, validity: { [weak self] in
+                    self?.connectionAttemptFence.isCurrent(attemptID) == true && connection.isCurrent()
+                })
+            }
         }
         if activeConnection?.isCurrent() != true {
             detail = nil

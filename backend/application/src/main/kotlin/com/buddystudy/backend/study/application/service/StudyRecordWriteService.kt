@@ -46,11 +46,10 @@ class StudyRecordWriteService(
         now: Instant,
     ): QuestionWriteResult {
         val question = lockGeneratedQuestion(recordId, userId)
-        if (question.gradingRequestId != null ||
+        if (question.status != QuestionStatus.UNGRADED || question.skippedAt != null ||
+            question.gradingRequestId != null ||
             question.gradingStatus != null ||
-            question.score != null ||
-            question.status == QuestionStatus.GRADING ||
-            question.status == QuestionStatus.GRADED
+            question.score != null
         ) {
             throw ApiException(
                 HttpStatus.CONFLICT,
@@ -101,6 +100,20 @@ class StudyRecordWriteService(
     @Transactional
     override suspend fun skip(userId: Long, recordId: Long): QuestionEntity {
         val question = lockGeneratedQuestion(recordId, userId)
+        // Repeated tools/requests observe the same result without changing its history.
+        if (question.status == QuestionStatus.SKIPPED) return question
+        if (question.status != QuestionStatus.UNGRADED || !question.answer.isNullOrBlank() ||
+            question.answeredAt != null || question.score != null || question.gradedAt != null ||
+            question.gradingRequestId != null || question.gradingStatus != null ||
+            question.gradingRequestedAt != null || question.gradingStartedAt != null ||
+            question.gradingLastEventId != null || question.skippedAt != null
+        ) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Only an unanswered, ungraded question can be skipped.",
+            )
+        }
         question.apply(question.toStudyRecord().skip())
         return questions.save(question)
     }
@@ -136,12 +149,11 @@ class StudyRecordWriteService(
         val question = lockGeneratedQuestion(recordId, userId)
         val normalizedAnswer = answer.trim()
         val persistedAnswer = question.answer?.trim()?.takeIf { it.isNotEmpty() }
-        if ((persistedAnswer != null && persistedAnswer != normalizedAnswer) ||
+        if (question.status != QuestionStatus.UNGRADED || question.skippedAt != null ||
+            (persistedAnswer != null && persistedAnswer != normalizedAnswer) ||
             question.gradingRequestId != null ||
             question.gradingStatus != null ||
-            question.score != null ||
-            question.status == QuestionStatus.GRADING ||
-            question.status == QuestionStatus.GRADED
+            question.score != null
         ) {
             throw ApiException(
                 HttpStatus.CONFLICT,

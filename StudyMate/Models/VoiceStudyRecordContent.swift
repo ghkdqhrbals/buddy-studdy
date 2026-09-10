@@ -56,7 +56,10 @@ extension StudyRecord {
     var isDetachedLocalQuestion: Bool { isQuestion && id.hasPrefix("local-draft:") }
 
     /// Pending questions keep their existing workflow; voice is never a draft.
-    var isPendingQuestion: Bool { isQuestion && !isDetachedLocalQuestion && gradingResult == nil }
+    var isPendingQuestion: Bool {
+        isQuestion && !isDetachedLocalQuestion && gradingResult == nil &&
+            questionStatus != .skipped && questionStatus != .graded && questionStatus != .completed
+    }
 
     var isCompletedRecord: Bool {
         isVoiceRecord

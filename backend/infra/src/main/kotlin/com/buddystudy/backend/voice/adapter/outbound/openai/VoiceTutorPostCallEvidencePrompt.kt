@@ -34,6 +34,8 @@ internal object VoiceTutorPostCallEvidencePrompt {
             transcripts or topic names. Return only exact source turn IDs; do not rewrite, summarize, grade,
             repair, fabricate missing speech, create topics or assume a lesson happened.
             Raw turns have no live semantic flags. Judge their actual conversational meaning after the call.
+            Only turns with nativeSource=true may enter exchanges or learnerQuestions. A false source may
+            already belong to a canonical saved question/answer; never create another learning record for it.
             A tutor exchange requires a substantive educational question about its saved focus AND a real
             learner answer to that exact question, not merely alternating TUTOR and USER roles. Require both.
             Setup, greetings, topic discovery/recommendations/selection, lesson readiness or consent,

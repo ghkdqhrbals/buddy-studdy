@@ -154,6 +154,16 @@ internal class VoiceTutorRealtimeEventPolicy(
                     ProviderEventDecision(payload = null)
                 }
             }
+            VoiceTutorRealtimeContract.QUESTION_CHANGED_EVENT -> {
+                val studyId = node.path("studyId")
+                val recordId = node.path("recordId")
+                if (transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
+                    studyId.isIntegralNumber && studyId.canConvertToLong() && studyId.longValue() > 0 &&
+                    recordId.isTextual && recordId.asText().matches(Regex("[1-9][0-9]{0,18}")) && recordId.asText().toLongOrNull() != null
+                ) ProviderEventDecision(mapper.writeValueAsString(mapOf(
+                    "type" to type, "studyId" to studyId.longValue(), "recordId" to recordId.asText(),
+                ))) else ProviderEventDecision(payload = null)
+            }
             VoiceTutorRealtimeContract.STUDY_FOCUSED_EVENT -> {
                 val focus = node.path("focus")
                 val parent = focus.path("parentStudyId")

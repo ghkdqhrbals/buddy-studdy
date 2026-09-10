@@ -844,6 +844,94 @@ class VoiceTutorPersistenceAdapter(
         return completeVoiceTutorTranscriptPrefix(turns, maxCharacters)
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    override suspend fun canonicalAnswerTurns(
+        userId: Long,
+        sessionId: String,
+        latestLearnerProviderItemId: String,
+        precedingTutorProviderItemId: String,
+        lessonRevision: Long,
+    ): List<VoiceTutorTranscriptTurn> {
+        if (lessonRevision < 0 || !validCanonicalItemIds(listOf(precedingTutorProviderItemId, latestLearnerProviderItemId))) {
+            return emptyList()
+        }
+        if (!lockActiveCanonicalSession(userId, sessionId)) return emptyList()
+        return canonicalAnswerWindow(sessionId, latestLearnerProviderItemId, precedingTutorProviderItemId)
+            .takeIf { rows -> rows.isNotEmpty() && rows.all { it.lessonRevision == lessonRevision } }.orEmpty()
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    override suspend fun excludeCanonicalQuestionTurns(
+        userId: Long,
+        sessionId: String,
+        providerItemIds: List<String>,
+    ): Boolean {
+        if (!validCanonicalItemIds(providerItemIds) || !lockActiveCanonicalSession(userId, sessionId)) return false
+        val rows = canonicalAnswerWindow(sessionId, providerItemIds.last(), providerItemIds.first())
+        // Validate the entire contiguous run before changing anything; subsets and stale answers fail.
+        if (rows.isEmpty() || rows.map { it.providerItemId } != providerItemIds) return false
+        val eligible = rows.filter { it.postCallEvidence }
+        if (eligible.isEmpty()) return true
+        val updated = database.sql(
+            """
+            update voice_tutor_transcript_turns
+            set post_call_evidence = false
+            where session_id = :sessionId and id in (:turnIds) and post_call_evidence = true
+            """.trimIndent(),
+        ).bind("sessionId", sessionId).bind("turnIds", eligible.map { it.id })
+            .fetch().rowsUpdated().awaitSingle()
+        // A mismatch must roll back the whole exclusion rather than commit a partially marked answer.
+        check(updated == eligible.size.toLong()) { "Canonical voice answer source changed while holding the session lock." }
+        return true
+    }
+
+    private fun validCanonicalItemIds(ids: List<String>): Boolean = ids.size in 2..33 &&
+        ids.all { it.isNotBlank() && it.length <= 191 } && ids.distinct().size == ids.size
+
+    private suspend fun lockActiveCanonicalSession(userId: Long, sessionId: String): Boolean = database.sql(
+        "select id from voice_tutor_sessions where id = :sessionId and user_id = :userId and status = 'ACTIVE' for update",
+    ).bind("sessionId", sessionId).bind("userId", userId)
+        .map { row, _ -> row.string("id") }.one().awaitSingleOrNull() != null
+
+    /** Caller holds the ACTIVE owned session lock shared with transcript insertion and call ending. */
+    private suspend fun canonicalAnswerWindow(
+        sessionId: String,
+        latestLearnerProviderItemId: String,
+        precedingTutorProviderItemId: String,
+    ): List<VoiceTutorTranscriptTurn> {
+        val rows = database.sql(
+            """
+            select candidate.*
+            from voice_tutor_transcript_turns candidate
+            join voice_tutor_transcript_turns question
+              on question.session_id = :sessionId and question.provider_item_id = :questionItemId
+             and question.role = 'TUTOR'
+            join voice_tutor_transcript_turns latest
+              on latest.session_id = question.session_id and latest.provider_item_id = :learnerItemId
+             and latest.role = 'USER' and latest.sequence_number > question.sequence_number
+            where candidate.session_id = question.session_id
+              and candidate.sequence_number between question.sequence_number and latest.sequence_number
+              and not exists (
+                  select 1 from voice_tutor_transcript_turns newer
+                  where newer.session_id = question.session_id and newer.role = 'USER'
+                    and newer.sequence_number > latest.sequence_number
+              )
+            order by candidate.sequence_number, candidate.id
+            limit 34
+            """.trimIndent(),
+        ).bind("sessionId", sessionId).bind("questionItemId", precedingTutorProviderItemId)
+            .bind("learnerItemId", latestLearnerProviderItemId)
+            .map { row, _ -> row.turn() }.all().collectList().awaitSingle()
+        if (rows.size !in 2..33 || rows.first().providerItemId != precedingTutorProviderItemId ||
+            rows.last().providerItemId != latestLearnerProviderItemId ||
+            rows.first().role != VoiceTutorTranscriptRole.TUTOR || rows.first().lessonRevision < 0 ||
+            rows.drop(1).any { it.role != VoiceTutorTranscriptRole.USER } ||
+            rows.any { it.lessonRevision != rows.first().lessonRevision || it.transcript.isBlank() } ||
+            rows.map { it.providerItemId }.distinct().size != rows.size
+        ) return emptyList()
+        return rows
+    }
+
     override suspend fun hasVerifiedLearningExchange(userId: Long, sessionId: String): Boolean = database.sql(
         """
         select count(*) as verified_count from (

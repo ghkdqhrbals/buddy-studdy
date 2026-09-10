@@ -14,6 +14,40 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
+    fun `question changes expose only exact record identity through the server sideband`() {
+        val raw = """{"type":"${VoiceTutorRealtimeContract.QUESTION_CHANGED_EVENT}","studyId":42,"recordId":"101","answer":"private","question":"private","score":70}"""
+        val decision = policy.providerDecision(raw, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+        val payload = mapper.readTree(decision.payload)
+        assertThat(decision.terminate).isFalse()
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "studyId", "recordId")
+        assertThat(payload.path("studyId").asLong()).isEqualTo(42)
+        assertThat(payload.path("recordId").asText()).isEqualTo("101")
+        assertThat(policy.providerDecision(raw, "voice-1", Instant.EPOCH).payload).isNull()
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+    }
+
+    @Test
+    fun `malformed question identities are dropped without ending the call`() {
+        val invalid = listOf(
+            """"studyId":42,"recordId":101""",
+            """"studyId":42,"recordId":"0"""",
+            """"studyId":42,"recordId":"01"""",
+            """"studyId":42,"recordId":"9223372036854775808"""",
+            """"studyId":42,"recordId":"1.5"""",
+            """"studyId":42,"recordId":null""",
+            """"studyId":0,"recordId":"101"""",
+            """"studyId":1.5,"recordId":"101"""",
+            """"studyId":"42","recordId":"101"""",
+        )
+        for (identity in invalid) {
+            val decision = policy.providerDecision("""{"type":"${VoiceTutorRealtimeContract.QUESTION_CHANGED_EVENT}",$identity}""",
+                "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+            assertThat(decision.payload).isNull()
+            assertThat(decision.terminate).isFalse()
+        }
+    }
+
+    @Test
     fun `successful MCP metadata event contains only a positive exact id and cannot be forged by the client`() {
         val raw = """{"type":"${VoiceTutorRealtimeContract.STUDY_TREE_CHANGED_EVENT}","studyId":42,"arguments":{"secret":"discard"},"output":"discard"}"""
         val result = policy.providerDecision(raw, "synthetic-session", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)

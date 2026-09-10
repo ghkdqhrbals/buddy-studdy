@@ -63,10 +63,23 @@ class McpVoiceTutorToolAdapter(
     private val validator by lazy { McpJsonSchemaValidatorProvider.create() }
     private val realtimeProposals = LinkedHashMap<String, RealtimeMutation>()
     private val specifications by lazy {
-        mcp.tools().filter { it.tool().name() in ALLOWED_TOOLS }.associateBy { it.tool().name() }
+        mcp.tools().filter { it.tool().name() in ALLOWED_TOOLS + VoiceTutorCanonicalQuestionCoordinator.TOOLS }.associateBy { it.tool().name() }
+    }
+    private val canonicalQuestions by lazy {
+        VoiceTutorCanonicalQuestionCoordinator(objectMapper, clock, persistence,
+            authorized = ::isAuthorized,
+            currentFocus = { context -> currentStudyAnchor(context)?.let { it to studyContexts.currentRevision(context.session.userId, context.session.id) } },
+            learnerTurn = ::realtimeLearnerTurn,
+            invoke = { context, name, args ->
+                val spec = specifications[name]
+                if (spec == null) failure("MCP_UNAVAILABLE", "The canonical question tool is unavailable.")
+                else if (!isAuthorized(context)) inactiveCall()
+                else if (!validator.validate(spec.tool().inputSchema(), args).valid()) failure("INVALID_ARGUMENTS", "Use the documented question tool arguments.")
+                else boundedResult(invoke(context.principal!!, spec, args), name)
+            })
     }
 
-    override fun definitions(): List<VoiceTutorMcpToolDefinition> = specifications.values.map { specification ->
+    override fun definitions(): List<VoiceTutorMcpToolDefinition> = specifications.values.filter { it.tool().name() in ALLOWED_TOOLS }.map { specification ->
         val tool = specification.tool()
         VoiceTutorMcpToolDefinition(
             name = tool.name(),
@@ -113,10 +126,28 @@ class McpVoiceTutorToolAdapter(
 
     override fun realtimeDefinitions(): List<VoiceTutorMcpToolDefinition> =
         specifications.values.filter { it.tool().name() !in setOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY) }
-            .map { VoiceTutorMcpToolDefinition(it.tool().name(), it.tool().description().orEmpty(), it.tool().inputSchema().toMap()) } +
+            .map { specification ->
+                val tool = specification.tool()
+                val schema = when (tool.name()) {
+                    "list_pending_questions" -> focusParameters("Exact selected topic. The server pages its arrived questions and returns the current saved question.")
+                    "request_question" -> focusParameters("Exact selected topic. Reuses an arrived pending question before spending quota; skip an unwanted question separately on the learner's request.")
+                    "submit_answer" -> mapOf("type" to "object", "additionalProperties" to false,
+                        "properties" to mapOf("record_id" to mapOf("type" to "integer", "minimum" to 1)), "required" to listOf("record_id"))
+                    else -> tool.inputSchema().toMap()
+                }
+                val description = when (tool.name()) {
+                    "list_pending_questions" -> "Read arrived pending questions for the exact selected study_id before teaching. Read the returned saved question faithfully and preserve its original level. Do not invent a replacement. Grading questions already have submitted answers and must not be asked again."
+                    "request_question" -> "Request a new saved question for the selected topic only when the learner wants one and no ready pending question remains. Existing pending questions are returned first. For an unwanted question call skip_question on an explicit skip/change request, then request again. Normal question allowance applies; the server owns retry identity. Poll get_question_process and speak only its saved question."
+                    "submit_answer" -> "Submit the learner's actual answer to the saved question just read. Pass only its record_id: the server loads the complete original persisted learner speech, never model-written answer text. Do not call for silence, filler, a hint, clarification, skip, generation request or other non-answer. Wait for get_grading_process and use only the returned saved grade; never make up a score."
+                    "skip_question" -> "Skip only the current arrived unanswered question when the learner explicitly asks to skip or replace it. Pass its exact record_id. Do not grade it, erase drafts, skip a submitted answer, or generate a new question implicitly; check remaining pending questions next."
+                    "get_question_process", "get_grading_process" -> tool.description().orEmpty() + " In voice, use only the correlation ID returned in this selected-topic call. Each read waits briefly for progress; if still pending wait/recheck without inventing completion, scores or questions."
+                    else -> tool.description().orEmpty()
+                }
+                VoiceTutorMcpToolDefinition(tool.name(), description, schema)
+            } +
             listOf(
                 VoiceTutorMcpToolDefinition(SELECT_STUDY,
-                    "Select the learner's chosen exact owned saved topic and freeze its real level and parent path for this call. Resolve ordinary contextual choices yourself; no special phrase, separate classifier or extra confirmation is required. Read the saved identity first; do not choose a different topic or create a node. Successful focus permits questions at its returned level when the learner wants to study.",
+                    "Select the learner's chosen exact owned saved topic and freeze its real level and parent path for this call. Resolve ordinary contextual choices yourself without extra confirmation. The result includes voiceQuestion with any arrived pending question: read that saved question first and await an answer, preserving its original level. If none is ready and the learner wants to start, request_question through MCP. Never invent an instant quiz or choose another topic.",
                     focusParameters("Exact owned saved study ID chosen in the conversation.")),
                 VoiceTutorMcpToolDefinition(ADVANCE_STUDY,
                     "Move the lesson to one real direct child of the current focus after feedback and the learner's conversational choice to continue there. Read actual children first; never invent edges, skip a level or switch because of silence. This changes only call focus and requires no mutation confirmation.",
@@ -306,10 +337,12 @@ class McpVoiceTutorToolAdapter(
         if (selected.studyId != candidate.studyId || selected.snapshot.parentStudyId != candidate.parentStudyId ||
             selected.topic != candidate.topic || selected.difficulty != candidate.difficulty) return failure("LESSON_FOCUS_UNCONFIRMED", "The exact saved focus result could not be verified.")
         val focus = focusMetadata(selected)
+        val pending = canonicalQuestions.selected(context.copy(initialLessonRevision = selected.revision))
         return VoiceTutorMcpToolResult(objectMapper.writeValueAsString(mapOf("selected" to true,
             "voiceLessonContextReady" to true, "voiceLessonFocus" to focus, "voiceLessonTopics" to listOf(focus),
-            "notice" to "This exact saved topic is selected; use its returned level for new questions. No further selection confirmation is needed.")),
-            false, lessonRevision = selected.revision, lessonFocus = selected)
+            "voiceQuestion" to objectMapper.readTree(pending.output),
+            "notice" to "This exact topic is selected. Read its returned pending question first; its saved difficulty is immutable. If the question lookup failed, retry list_pending_questions before teaching. If none is ready, use request_question when the learner wants a question. Never invent a question or a grade. No further selection confirmation is needed.")),
+            false, lessonRevision = selected.revision, lessonFocus = selected, questionChange = pending.questionChange, questionReadback = pending.questionReadback)
     }
 
     private fun persistencePending() = failure("INPUT_PERSISTENCE_PENDING", "The current dialogue boundary is still being saved; retry this same tool internally, without asking the learner to repeat anything.")
@@ -323,7 +356,7 @@ class McpVoiceTutorToolAdapter(
         toolName: String,
         arguments: Map<String, Any>,
     ): VoiceTutorMcpToolResult {
-        if (toolName !in ALLOWED_TOOLS && !(context.realtimeModelTools && toolName in REALTIME_MUTATION_TOOLS)) {
+        if (toolName !in ALLOWED_TOOLS && !(context.realtimeModelTools && toolName in REALTIME_MUTATION_TOOLS + VoiceTutorCanonicalQuestionCoordinator.TOOLS)) {
             return failure("TOOL_NOT_ALLOWED", "This tool is not available in voice calls.")
         }
         try {
@@ -331,6 +364,7 @@ class McpVoiceTutorToolAdapter(
                 return failure("INVALID_ARGUMENTS", "Tool arguments are too large.")
             }
             if (context.realtimeModelTools) {
+                if (toolName in VoiceTutorCanonicalQuestionCoordinator.TOOLS) return canonicalQuestions.execute(context, toolName, arguments)
                 if (toolName == PREPARE_MUTATION) return prepareRealtimeMutation(context, arguments)
                 if (toolName == CONFIRM_MUTATION) return confirmRealtimeMutation(context, arguments)
                 if (toolName in setOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY)) {

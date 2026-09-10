@@ -65,6 +65,8 @@ interface BrowseRecordsUseCase {
         view: String = "localized",
     ): RecordsPageResponse
     suspend fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
+    suspend fun pending(principal: Principal, limit: Int, offset: Int, studyId: Long): RecordsPageResponse =
+        throw UnsupportedOperationException("Exact study pending-question lookup is not implemented.")
     suspend fun record(
         principal: Principal,
         id: Long,

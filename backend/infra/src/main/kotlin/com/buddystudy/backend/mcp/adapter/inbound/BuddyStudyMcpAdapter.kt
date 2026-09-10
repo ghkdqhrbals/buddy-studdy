@@ -220,16 +220,35 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "list_pending_questions",
                 title = "List pending questions",
-                description = "Return a bounded page of the authenticated user's active unanswered or grading questions.",
-                schema = pagedSchema(maximum = 100, defaultLimit = 30),
+                description = "Return a bounded page of the authenticated user's active unanswered or grading questions. Set study_id to return only that exact owned topic, not its descendants. Reuse an existing unanswered question before requesting a new one; never replace an answer draft.",
+                schema = pagedSchema(
+                    additional = linkedMapOf("study_id" to idProperty("Optional exact owned study topic filter, excluding descendants.")),
+                    maximum = 100, defaultLimit = 30,
+                ),
                 readOnly = true,
             ) { principal, args ->
-                buddyStudy.listPendingQuestions(principal, args.int("limit", 30), args.int("offset", 0))
+                val studyId = args.optionalLong("study_id")
+                if (studyId == null) buddyStudy.listPendingQuestions(principal, args.int("limit", 30), args.int("offset", 0))
+                else buddyStudy.listPendingQuestions(principal, args.int("limit", 30), args.int("offset", 0), studyId)
+            },
+            tool(
+                name = "skip_question",
+                title = "Skip an unanswered question",
+                description = "Skip the exact owned unanswered question only when the user asks to skip it. Does not generate another question, consume question quota, or erase an answer draft. Submitted, grading and completed questions cannot be skipped. Repeating a successful skip is safe; request_question is a separate explicit action.",
+                schema = objectSchema(
+                    properties = linkedMapOf("record_id" to idProperty("Exact owned unanswered question record ID to skip.")),
+                    required = listOf("record_id"),
+                ),
+                readOnly = false,
+                destructive = true,
+                idempotent = true,
+            ) { principal, args ->
+                buddyStudy.skipQuestion(principal, args.long("record_id"))
             },
             tool(
                 name = "request_question",
                 title = "Request a study question",
-                description = "Queue question generation for one owned study topic. Returns a correlation ID immediately; poll get_question_process until terminal=true.",
+                description = "Queue question generation for one owned study topic only when the user requests a new question. Read list_pending_questions for that exact study_id first and reuse its unanswered question unless the user explicitly skips it. Uses the existing question quota and never replaces an answer draft. Returns a correlation ID immediately; poll get_question_process until terminal=true.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "study_id" to idProperty("Study topic ID."),
@@ -666,7 +685,7 @@ class BuddyStudyMcpAdapter(
             else -> throw McpArgumentException("$name must be a string.")
         }
 
-        fun int(name: String, default: Int): Int = optionalNumber(name)?.toInt() ?: default
+        fun int(name: String, default: Int): Int = optionalInt(name) ?: default
 
         fun optionalInt(name: String): Int? = optionalNumber(name)?.let { value ->
             try {
@@ -679,11 +698,19 @@ class BuddyStudyMcpAdapter(
         }
 
         fun long(name: String): Long =
-            optionalNumber(name)?.toLong() ?: throw McpArgumentException("$name is required.")
+            optionalLong(name) ?: throw McpArgumentException("$name is required.")
 
-        fun long(name: String, default: Long): Long = optionalNumber(name)?.toLong() ?: default
+        fun long(name: String, default: Long): Long = optionalLong(name) ?: default
 
-        fun optionalLong(name: String): Long? = optionalNumber(name)?.toLong()
+        fun optionalLong(name: String): Long? = optionalNumber(name)?.let { value ->
+            try {
+                java.math.BigDecimal(value.toString()).longValueExact()
+            } catch (_: IllegalArgumentException) {
+                throw McpArgumentException("$name must be an integer.")
+            } catch (_: ArithmeticException) {
+                throw McpArgumentException("$name must be an integer.")
+            }
+        }
 
         fun boolean(name: String): Boolean =
             optionalBoolean(name) ?: throw McpArgumentException("$name is required.")

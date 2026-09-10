@@ -68,6 +68,8 @@ interface BuddyStudyMcpUseCase {
         expectedStudyIds: List<Long>? = null,
     ): McpDeletionResponse
     suspend fun listPendingQuestions(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
+    suspend fun listPendingQuestions(principal: Principal, limit: Int, offset: Int, studyId: Long): RecordsPageResponse
+    suspend fun skipQuestion(principal: Principal, recordId: Long): StudyRecordResponse
     suspend fun requestQuestion(
         principal: Principal,
         studyId: Long,

@@ -11,6 +11,9 @@ import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyGrowthUseCase
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
+import com.buddystudy.backend.study.application.model.RecordsPageResponse
+import com.buddystudy.backend.study.application.model.StudyRecordResponse
+import com.buddystudy.backend.study.application.model.QuestionItemResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
@@ -26,6 +29,7 @@ import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
+import com.buddystudy.study.domain.entity.QuestionStatus
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -63,6 +67,95 @@ class BuddyStudyMcpServiceTest {
         learningRecords,
     )
     private val principal = Principal(7, "device-7", 70, anonymous = false)
+
+    @Test
+    fun `pending lookup delegates exact topic filtering before pagination while preserving the legacy overload`(): Unit = runBlocking {
+        val filtered = RecordsPageResponse(listOf(questionRecord()), 1, 3, 0)
+        val all = RecordsPageResponse(emptyList(), 0, 30, 0)
+        Mockito.`when`(records.pending(principal, 3, 0, 42L)).thenReturn(filtered)
+        Mockito.`when`(records.pending(principal, 30, 0)).thenReturn(all)
+
+        assertThat(service.listPendingQuestions(principal, 3, 0, 42L)).isSameAs(filtered)
+        assertThat(service.listPendingQuestions(principal, 30, 0)).isSameAs(all)
+
+        Mockito.verify(records).pending(principal, 3, 0, 42L)
+        Mockito.verify(records).pending(principal, 30, 0)
+        Mockito.verifyNoMoreInteractions(records)
+        Mockito.verifyNoInteractions(answers, questionRequests, studies, voiceTutor)
+    }
+
+    @Test
+    fun `skip delegates only the canonical owned question mutation and keeps the returned identity`(): Unit = runBlocking {
+        val skipped = questionRecord().copy(questionStatus = QuestionStatus.SKIPPED)
+        Mockito.`when`(answers.skip(principal, 91L)).thenReturn(skipped)
+
+        assertThat(service.skipQuestion(principal, 91L)).isSameAs(skipped)
+        assertThat(service.skipQuestion(principal, 91L)).isSameAs(skipped)
+
+        Mockito.verify(answers, Mockito.times(2)).skip(principal, 91L)
+        Mockito.verifyNoMoreInteractions(answers)
+        Mockito.verifyNoInteractions(questionRequests, records, studies, voiceTutor)
+    }
+
+    @Test
+    fun `question tools reject invalid boundaries and anonymous callers before mutation or lookup`(): Unit = runBlocking {
+        for (request in listOf<suspend () -> Any>(
+            { service.listPendingQuestions(principal, 3, 0, 0L) },
+            { service.listPendingQuestions(principal, 0, 0, 42L) },
+            { service.listPendingQuestions(principal, 101, 0, 42L) },
+            { service.listPendingQuestions(principal, 3, -1, 42L) },
+            { service.skipQuestion(principal, -1L) },
+        )) {
+            val failure = runCatching { request() }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(ApiException::class.java)
+            assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        }
+        for (request in listOf<suspend () -> Any>(
+            { service.listPendingQuestions(principal.copy(anonymous = true), 3, 0, 42L) },
+            { service.skipQuestion(principal.copy(anonymous = true), 91L) },
+        )) {
+            val failure = runCatching { request() }.exceptionOrNull()
+            assertThat((failure as ApiException).code).isEqualTo(ApiErrorCode.ACCOUNT_FORBIDDEN)
+        }
+        Mockito.verifyNoInteractions(records, answers, questionRequests, studies)
+    }
+
+    @Test
+    fun `skip preserves canonical owner and submitted state errors without requesting a replacement`(): Unit = runBlocking {
+        for (failure in listOf(
+            ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found."),
+            ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Only an unanswered, ungraded question can be skipped."),
+        )) {
+            Mockito.doThrow(failure).`when`(answers).skip(principal, 91L)
+            assertThat(runCatching { service.skipQuestion(principal, 91L) }.exceptionOrNull()).isSameAs(failure)
+        }
+        Mockito.verifyNoInteractions(questionRequests, records, studies, voiceTutor)
+    }
+
+    @Test
+    fun `existing answer submission preserves original user text and queues canonical grading only`(): Unit = runBlocking {
+        val answer = "  생성자로 의존성을 받아요.\n테스트에서는 대체할 수 있어요.  "
+        val submitted = questionRecord().copy(answer = answer)
+        Mockito.`when`(answers.answer(principal, 91L, answer, "ko", true)).thenReturn(submitted)
+
+        assertThat(service.submitAnswer(principal, 91L, answer, "ko")).isSameAs(submitted)
+
+        Mockito.verify(answers).answer(principal, 91L, answer, "ko", true)
+        Mockito.verifyNoMoreInteractions(answers)
+        Mockito.verifyNoInteractions(records, questionRequests, voiceTutor)
+    }
+
+    @Test
+    fun `new question request reuses canonical idempotency and preserves pending question conflict without skipping`(): Unit = runBlocking {
+        val conflict = ApiException(HttpStatus.CONFLICT, ApiErrorCode.STUDY_PENDING_QUESTION_EXISTS, "A pending question already exists for this study.")
+        Mockito.`when`(questionRequests.request(principal, 42L, "same-request")).thenThrow(conflict)
+
+        assertThat(runCatching { service.requestQuestion(principal, 42L, " same-request ") }.exceptionOrNull()).isSameAs(conflict)
+
+        Mockito.verify(questionRequests).request(principal, 42L, "same-request")
+        Mockito.verifyNoMoreInteractions(questionRequests)
+        Mockito.verifyNoInteractions(answers, records, studies, voiceTutor)
+    }
 
     @Test
     fun `node learning history delegates cursor scope and original view without ordinary record mutations`(): Unit = runBlocking {
@@ -304,6 +397,10 @@ class BuddyStudyMcpServiceTest {
         assertThat(operations.getValue("updateStudy")).containsExactly(Permissions.STUDY_UPDATE)
         assertThat(operations.getValue("createRootStudy")).containsExactly(Permissions.STUDY_CREATE)
         assertThat(operations.getValue("submitAnswer")).containsExactly(Permissions.RECORD_UPDATE)
+        assertThat(operations.getValue("skipQuestion")).containsExactly(Permissions.RECORD_UPDATE)
+        assertThat(methods.filter { it.name == "listPendingQuestions" }).hasSize(2).allSatisfy { function ->
+            assertThat(function.findAnnotation<RequirePermission>()?.value?.toSet()).containsExactly(Permissions.RECORD_READ)
+        }
         assertThat(operations.getValue("getMyContext")).containsExactly(Permissions.PROFILE_READ)
         assertThat(operations.getValue("listStudyLearningRecords"))
             .containsExactlyInAnyOrder(Permissions.STUDY_READ, Permissions.RECORD_READ, Permissions.VOICE_TUTOR_READ)
@@ -318,6 +415,11 @@ class BuddyStudyMcpServiceTest {
     }
 
     private companion object {
+        fun questionRecord() = StudyRecordResponse(
+            id = "91", question = QuestionItemResponse("의존성 주입은 무엇인가요?", createdAt = Instant.EPOCH),
+            answer = null, gradingResult = null, topic = "DI", difficulty = 3,
+            answeredAt = null, isPublic = false, studyId = 42L,
+        )
         fun studyRoom() = StudyRoomResponse(
             id = 42L, parentStudyId = 40L, sortOrder = 2, topic = "Redis Streams", difficultyLevel = 3,
             intervalMinutes = 30, enabled = false, activeForQuestions = true, notificationSound = "bell.caf",
@@ -346,6 +448,7 @@ class BuddyStudyMcpServiceTest {
             "createStudyTopic",
             "deleteStudy",
             "listPendingQuestions",
+            "skipQuestion",
             "requestQuestion",
             "getQuestionProcess",
             "submitAnswer",

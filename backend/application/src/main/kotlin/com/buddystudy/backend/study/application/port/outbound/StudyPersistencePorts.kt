@@ -137,6 +137,8 @@ interface QuestionPort {
     suspend fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity>
     suspend fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity>
     suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
+    suspend fun findPendingByUserAndStudyId(userId: Long, studyId: Long, pageable: Pageable): Page<QuestionEntity> =
+        throw UnsupportedOperationException("Exact owned study pending-question lookup is not implemented.")
     suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity>
     suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity>
     suspend fun findLatestPendingByStudyIdsAndLanguage(studyIds: Collection<Long>, language: String): List<QuestionEntity> =

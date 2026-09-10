@@ -1,0 +1,579 @@
+package com.buddystudy.backend.voice.adapter.outbound.mcp
+
+import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
+import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
+import com.buddystudy.voice.domain.VoiceTutorResultStatus
+import com.buddystudy.voice.domain.VoiceTutorSession
+import com.buddystudy.voice.domain.VoiceTutorSessionStatus
+import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
+import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import java.lang.reflect.Proxy
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
+
+class VoiceTutorCanonicalQuestionCoordinatorTest {
+    @Test
+    fun `selection reuses the oldest saved pending question at its original level without revealing hints`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.records = listOf(
+            fixture.record(102, createdAt = "2026-09-10T01:00:00Z"),
+            fixture.record(101, difficulty = 3, createdAt = "2026-09-09T01:00:00Z"),
+            fixture.record(103, status = "GRADING", answer = "Already submitted"),
+        )
+
+        val result = fixture.coordinator.selected(fixture.context())
+
+        assertThat(result.isError).isFalse()
+        val body = fixture.json(result)
+        assertThat(body.path("pendingQuestion").path("id").asText()).isEqualTo("101")
+        assertThat(body.path("pendingQuestion").path("difficulty").asInt()).isEqualTo(3)
+        assertThat(body.path("pendingQuestion").path("topic").asText()).isEqualTo("Dependency injection")
+        assertThat(body.path("pendingQuestion").path("question").path("question").asText()).isEqualTo(PROMPT)
+        assertThat(body.path("gradingQuestions").map { it.path("id").asText() }).containsExactly("103")
+        assertThat(result.output).doesNotContain("SECRET_HINT", "SECRET_RUBRIC", "Already submitted")
+        assertThat(body.path("gradingQuestions").first().fieldNames().asSequence().toSet())
+            .containsExactlyInAnyOrder("id", "questionStatus")
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_pending_questions")
+        assertThat(fixture.calls.single().arguments).isEqualTo(mapOf("study_id" to STUDY, "limit" to 10, "offset" to 0))
+    }
+
+    @Test
+    fun `requesting a question rechecks pending and never spends quota over an existing question`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = 11
+
+        val result = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
+
+        assertThat(result.isError).isFalse()
+        assertThat(fixture.json(result).path("pendingQuestion").path("id").asText()).isEqualTo("101")
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_pending_questions", "list_pending_questions")
+    }
+
+    @Test
+    fun `refreshing the same question preserves the already spoken question and current original answer`(): Unit = runBlocking {
+        val fixture = Fixture()
+        assertThat(fixture.coordinator.selected(fixture.context()).questionReadback).isNotNull()
+        fixture.learner = 12
+
+        val refreshed = fixture.coordinator.execute(fixture.answerContext(), "list_pending_questions", mapOf("study_id" to STUDY))
+        assertThat(refreshed.isError).isFalse()
+        assertThat(refreshed.questionReadback).isNull()
+        assertThat(refreshed.questionChange).isNull()
+        assertThat(fixture.json(refreshed).path("notice").asText()).contains("handle the learner's present answer")
+
+        val submitted = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+        assertThat(submitted.isError).isFalse()
+        assertThat(fixture.calls.last().arguments["answer"]).isEqualTo(ANSWER)
+        assertThat(fixture.excluded).containsExactly("question-read", "answer-1", "answer-2")
+    }
+
+    @Test
+    fun `request returning the same pending question still allows the current explicit replacement request to skip it`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = 12
+
+        val existing = fixture.coordinator.execute(fixture.answerContext(), "request_question", mapOf("study_id" to STUDY))
+        assertThat(existing.isError).isFalse()
+        assertThat(existing.questionReadback).isNull()
+        assertThat(existing.questionChange).isNull()
+        val skipped = fixture.coordinator.execute(fixture.answerContext(), "skip_question", mapOf("record_id" to 101L))
+        assertThat(skipped.isError).isFalse()
+        assertThat(skipped.questionChange?.recordId).isEqualTo("101")
+        assertThat(fixture.calls.none { it.name == "request_question" || it.name == "submit_answer" }).isTrue()
+
+        fixture.records = emptyList()
+        val next = fixture.coordinator.execute(fixture.answerContext(), "request_question", mapOf("study_id" to STUDY))
+        assertThat(next.isError).isFalse()
+        assertThat(fixture.calls.count { it.name == "request_question" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `a changed question identity original text or saved level requires its own readback and fresh answer`(): Unit = runBlocking {
+        for (change in 0..2) {
+            val fixture = Fixture()
+            fixture.coordinator.selected(fixture.context())
+            fixture.learner = 12
+            val id = if (change == 0) 102L else 101L
+            fixture.records = listOf(fixture.record(id, difficulty = if (change == 1) 4 else 3,
+                questionText = if (change == 2) "의존성 주입의 장점은 무엇인가요?" else PROMPT))
+            val refreshed = fixture.coordinator.execute(fixture.answerContext(), "list_pending_questions", mapOf("study_id" to STUDY))
+            assertThat(refreshed.isError).isFalse()
+            assertThat(refreshed.questionReadback?.recordId).isEqualTo(id.toString())
+            assertThat(refreshed.questionChange?.recordId).isEqualTo(id.toString())
+            assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to id)), "QUESTION_ANSWER_REQUIRED")
+            assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
+        }
+    }
+
+    @Test
+    fun `oversized pending output reads bounded single record pages and preserves the oldest original question`(): Unit = runBlocking {
+        val fixture = Fixture().apply {
+            pendingPageTooLarge = true
+            records = listOf(record(103, status = "GRADING", answer = "Submitted"),
+                record(102, createdAt = "2026-09-10T01:00:00Z"), record(101))
+        }
+        val selected = fixture.coordinator.selected(fixture.context())
+        assertThat(selected.isError).isFalse()
+        assertThat(selected.questionReadback?.recordId).isEqualTo("101")
+        assertThat(fixture.json(selected).path("gradingQuestions").map { it.path("id").asText() }).containsExactly("103")
+        assertThat(fixture.calls.map { call -> call.arguments.mapValues { (_, value) -> (value as Number).toLong() } }).containsExactly(
+            mapOf("study_id" to STUDY, "limit" to 10L, "offset" to 0L),
+            mapOf("study_id" to STUDY, "limit" to 1L, "offset" to 0L),
+            mapOf("study_id" to STUDY, "limit" to 1L, "offset" to 1L),
+            mapOf("study_id" to STUDY, "limit" to 1L, "offset" to 2L))
+        assertThat(selected.output).doesNotContain("SECRET_HINT", "SECRET_RUBRIC")
+    }
+
+    @Test
+    fun `changing or excessive pending page totals cannot authorize question generation`(): Unit = runBlocking {
+        for (excessive in listOf(false, true)) {
+            val fixture = Fixture().apply {
+                pendingPageTooLarge = true
+                records = listOf(record(102, status = "GRADING", answer = "Submitted"), record(101))
+                if (excessive) totalCount = 11
+            }
+            if (!excessive) fixture.afterInvoke = { name ->
+                if (name == "list_pending_questions" && fixture.calls.last().arguments["limit"] == 1) fixture.totalCount = 3
+            }
+            val result = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
+            assertCode(fixture, result, "PENDING_PAGE_INCOMPLETE")
+            assertThat(result.questionReadback).isNull()
+            assertThat(fixture.calls.none { it.name == "request_question" }).isTrue()
+            assertThat(fixture.calls.size).isLessThanOrEqualTo(11)
+        }
+    }
+
+    @Test
+    fun `model pagination arguments cannot change the canonical pending scope`(): Unit = runBlocking {
+        val fixture = Fixture()
+        assertCode(fixture, fixture.coordinator.execute(fixture.context(), "list_pending_questions",
+            mapOf("study_id" to STUDY, "limit" to 1, "offset" to 1)), "QUESTION_SCOPE_MISMATCH")
+        assertThat(fixture.calls).isEmpty()
+    }
+
+    @Test
+    fun `an unread pending page or missing learner source cannot authorize generation`(): Unit = runBlocking {
+        val fixture = Fixture().apply { records = emptyList(); totalCount = 11 }
+        assertCode(fixture, fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY)), "PENDING_PAGE_INCOMPLETE")
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_pending_questions")
+        fixture.calls.clear()
+        fixture.learner = null
+        assertCode(fixture, fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY)), "INPUT_PERSISTENCE_PENDING")
+        assertThat(fixture.calls).isEmpty()
+    }
+
+    @Test
+    fun `generation keys are server derived stable per learner and process IDs cannot cross requests`(): Unit = runBlocking {
+        val fixture = Fixture().apply { records = emptyList(); generationRecord = null }
+        val first = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
+        val firstCorrelation = fixture.json(first).path("generation").path("correlationId").asText()
+        fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
+        assertThat(fixture.calls.count { it.name == "request_question" }).isEqualTo(1)
+        assertCode(fixture, fixture.coordinator.execute(fixture.context(), "get_question_process", mapOf("correlation_id" to "other-call")), "QUESTION_CONTEXT_UNAVAILABLE")
+        assertThat(fixture.calls.none { it.name == "get_question_process" }).isTrue()
+
+        fixture.coordinator.execute(fixture.context(), "get_question_process", mapOf("correlation_id" to firstCorrelation))
+        val second = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
+        val secondCorrelation = fixture.json(second).path("generation").path("correlationId").asText()
+        fixture.coordinator.execute(fixture.context(), "get_question_process", mapOf("correlation_id" to secondCorrelation))
+        fixture.learner = 11
+        fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
+
+        val requests = fixture.calls.filter { it.name == "request_question" }
+        assertThat(requests).hasSize(3)
+        assertThat(requests[0].arguments["idempotency_key"]).isEqualTo(requests[1].arguments["idempotency_key"])
+        assertThat(requests[2].arguments["idempotency_key"]).isNotEqualTo(requests[0].arguments["idempotency_key"])
+        assertThat(requests).allMatch { it.arguments.keys == setOf("study_id", "idempotency_key") && it.arguments["study_id"] == STUDY }
+        assertCode(fixture, fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY, "idempotency_key" to "model-key")), "QUESTION_SCOPE_MISMATCH")
+    }
+
+    @Test
+    fun `generation binds only the exact canonical saved result and reports its change`(): Unit = runBlocking {
+        val fixture = Fixture().apply { records = emptyList(); generationRecord = record(201, difficulty = 4) }
+        val request = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
+        val correlation = fixture.json(request).path("generation").path("correlationId").asText()
+
+        val result = fixture.coordinator.execute(fixture.context(), "get_question_process", mapOf("correlation_id" to correlation))
+
+        assertThat(result.isError).isFalse()
+        assertThat(fixture.json(result).path("pendingQuestion").path("id").asText()).isEqualTo("201")
+        assertThat(result.questionChange?.recordId).isEqualTo("201")
+        assertThat(result.questionChange?.studyId).isEqualTo(STUDY)
+        assertThat(result.output).doesNotContain("SECRET_HINT")
+    }
+
+    @Test
+    fun `wrong provider correlation and cross-topic generation result are rejected`(): Unit = runBlocking {
+        for (wrongCorrelation in listOf(true, false)) {
+            val fixture = Fixture().apply { records = emptyList(); generationRecord = record(201, study = STUDY + 1) }
+            val request = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
+            val correlation = fixture.json(request).path("generation").path("correlationId").asText()
+            fixture.processCorrelationOverride = if (wrongCorrelation) "another-request" else null
+            val result = fixture.coordinator.execute(fixture.context(), "get_question_process", mapOf("correlation_id" to correlation))
+            assertCode(fixture, result, "INVALID_QUESTION_RESULT")
+            assertThat(result.questionChange).isNull()
+        }
+    }
+
+    @Test
+    fun `skip requires a fresh learner turn and exact selected question without generating another`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        assertCode(fixture, fixture.coordinator.execute(fixture.context(), "skip_question", mapOf("record_id" to 101L)), "FRESH_LEARNER_REQUEST_REQUIRED")
+        fixture.learner = 11
+        assertCode(fixture, fixture.coordinator.execute(fixture.context(), "skip_question", mapOf("record_id" to 999L)), "QUESTION_SCOPE_MISMATCH")
+        assertCode(fixture, fixture.coordinator.execute(fixture.context(), "list_pending_questions", mapOf("study_id" to STUDY + 1)), "QUESTION_SCOPE_MISMATCH")
+
+        val result = fixture.coordinator.execute(fixture.context(), "skip_question", mapOf("record_id" to 101L))
+
+        assertThat(result.isError).isFalse()
+        assertThat(fixture.json(result).path("skipped").asBoolean()).isTrue()
+        assertThat(result.questionChange?.recordId).isEqualTo("101")
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_pending_questions", "skip_question")
+        assertThat(fixture.calls.last().arguments).isEqualTo(mapOf("record_id" to 101L))
+    }
+
+    @Test
+    fun `model supplied answer text and an unknown record never reach canonical submission`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = 12
+        for (args in listOf(
+            mapOf("record_id" to 101L, "answer" to "Invented model answer"),
+            mapOf("record_id" to 101L, "source_language" to "en"),
+            mapOf("record_id" to 999L),
+        )) {
+            assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "submit_answer", args), "QUESTION_SCOPE_MISMATCH")
+        }
+        assertThat(fixture.persistenceCalls).isEmpty()
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_pending_questions")
+    }
+
+    @Test
+    fun `a selection input before the actual saved question read cannot become its answer`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = 12
+        val beforeRead = fixture.answerContext().let { it.copy(dialogueBoundary = it.dialogueBoundary!!.copy(precedingSpokenResponseGeneration = 5)) }
+
+        assertCode(fixture, fixture.coordinator.execute(beforeRead, "submit_answer", mapOf("record_id" to 101L)), "QUESTION_ANSWER_REQUIRED")
+        assertThat(fixture.persistenceCalls).isEmpty()
+        assertThat(fixture.excluded).isEmpty()
+        assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
+    }
+
+    @Test
+    fun `missing or empty original learner speech never supplies an invented answer`(): Unit = runBlocking {
+        for (missing in listOf(true, false)) {
+            val fixture = Fixture()
+            fixture.coordinator.selected(fixture.context())
+            fixture.learner = 12
+            fixture.source = if (missing) emptyList() else fixture.source.map {
+                if (it.role == VoiceTutorTranscriptRole.USER) it.copy(transcript = "  ") else it
+            }
+            assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L)),
+                if (missing) "INPUT_PERSISTENCE_PENDING" else "ANSWER_UNAVAILABLE")
+            assertThat(fixture.excluded).isEmpty()
+            assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
+        }
+    }
+
+    @Test
+    fun `submission joins exact server transcript and excludes its source before the canonical write`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = 12
+        fixture.events.clear()
+
+        val result = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+
+        assertThat(result.isError).isFalse()
+        assertThat(fixture.events).containsExactly("read-source", "exclude-source", "submit_answer")
+        assertThat(fixture.persistenceCalls.first()).isEqualTo(listOf(7L, SESSION, "answer-2", "question-read", REVISION))
+        assertThat(fixture.excluded).containsExactly("question-read", "answer-1", "answer-2")
+        assertThat(fixture.calls.last().arguments).isEqualTo(mapOf(
+            "record_id" to 101L, "answer" to ANSWER, "source_language" to "ko",
+        ))
+        assertThat(fixture.json(result).path("record").path("answer").asText()).isEqualTo(ANSWER)
+        assertThat(result.questionChange?.recordId).isEqualTo("101")
+    }
+
+    @Test
+    fun `failed source exclusion blocks writes and failed canonical submission cannot undo source exclusion`(): Unit = runBlocking {
+        for (excludeSucceeds in listOf(false, true)) {
+            val fixture = Fixture().apply { exclusionAccepted = excludeSucceeds; submissionFails = true }
+            fixture.coordinator.selected(fixture.context())
+            fixture.learner = 12
+            fixture.events.clear()
+            val result = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+            assertThat(result.isError).isTrue()
+            if (excludeSucceeds) {
+                assertThat(fixture.events).containsExactly("read-source", "exclude-source", "submit_answer")
+                assertThat(fixture.excluded).containsExactly("question-read", "answer-1", "answer-2")
+            } else {
+                assertThat(fixture.events).containsExactly("read-source", "exclude-source")
+                assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
+            }
+        }
+    }
+
+    @Test
+    fun `grading uses the submitted canonical correlation and original saved grade rather than poll content`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = 12
+        fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+        assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "get_grading_process", mapOf("correlation_id" to "someone-elses-grade")), "QUESTION_CONTEXT_UNAVAILABLE")
+
+        val result = fixture.coordinator.execute(fixture.answerContext(), "get_grading_process", mapOf("correlation_id" to "grade-1"))
+
+        assertThat(result.isError).isFalse()
+        assertThat(fixture.json(result).path("record").path("gradingResult").path("score").asInt()).isEqualTo(91)
+        assertThat(fixture.json(result).path("record").path("gradingResult").path("feedback").asText()).isEqualTo("Canonical feedback")
+        assertThat(fixture.calls.takeLast(2).map { it.name }).containsExactly("get_grading_process", "get_record")
+        assertThat(fixture.calls.last().arguments).isEqualTo(mapOf("record_id" to 101L, "language" to "ko", "view" to "original"))
+        assertThat(result.output).doesNotContain("Wrong poll feedback", "SECRET_HINT")
+    }
+
+    @Test
+    fun `accepted submission with a lost result recovers the exact saved answer and retry never submits twice`(): Unit = runBlocking {
+        val fixture = Fixture().apply { submissionResultLost = true }
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = 12
+
+        val recovered = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+        assertThat(recovered.isError).isFalse()
+        assertThat(recovered.questionChange?.recordId).isEqualTo("101")
+        assertThat(fixture.json(recovered).path("record").path("answer").asText()).isEqualTo(ANSWER)
+        assertThat(fixture.calls.takeLast(2).map { it.name }).containsExactly("submit_answer", "get_record")
+
+        val retried = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+        assertThat(retried.isError).isFalse()
+        assertThat(fixture.calls.count { it.name == "submit_answer" }).isEqualTo(1)
+        assertThat(fixture.calls.last().name).isEqualTo("get_record")
+
+        fixture.records = listOf(fixture.record(101, status = "GRADING", answer = ANSWER, gradingId = "grade-1"))
+        val pending = fixture.coordinator.execute(fixture.answerContext(), "list_pending_questions", mapOf("study_id" to STUDY))
+        assertThat(fixture.json(pending).path("pendingQuestion").isNull).isTrue()
+        assertThat(pending.questionReadback).isNull()
+        val graded = fixture.coordinator.execute(fixture.answerContext(), "get_grading_process", mapOf("correlation_id" to "grade-1"))
+        assertThat(graded.isError).isFalse()
+        assertThat(graded.questionChange?.recordId).isEqualTo("101")
+        assertThat(fixture.json(graded).path("record").path("gradingResult").path("score").asInt()).isEqualTo(91)
+        assertThat(fixture.calls.count { it.name == "submit_answer" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `owner loss or focus change while pending read returns no late question`(): Unit = runBlocking {
+        for (loseOwner in listOf(true, false)) {
+            val fixture = Fixture()
+            fixture.afterInvoke = { name -> if (name == "list_pending_questions") {
+                if (loseOwner) fixture.isAuthorized = false else fixture.focus = (STUDY + 1) to (REVISION + 1)
+            } }
+            val result = fixture.coordinator.selected(fixture.context())
+            assertCode(fixture, result, "QUESTION_CONTEXT_UNAVAILABLE")
+            assertThat(result.questionChange).isNull()
+        }
+    }
+
+    @Test
+    fun `focus changing during the learner source await cannot publish a newly bound pending question`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.onLearnerRead = { fixture.focus = (STUDY + 1) to (REVISION + 1) }
+
+        val result = fixture.coordinator.selected(fixture.context())
+
+        assertCode(fixture, result, "QUESTION_CONTEXT_UNAVAILABLE")
+        assertThat(result.questionChange).isNull()
+    }
+
+    @Test
+    fun `stale scope after source read or exclusion never reaches canonical submission`(): Unit = runBlocking {
+        for (loseScopeDuringExclusion in listOf(false, true)) {
+            val fixture = Fixture()
+            fixture.coordinator.selected(fixture.context())
+            fixture.learner = 12
+            if (loseScopeDuringExclusion) fixture.onExclude = { fixture.isAuthorized = false }
+            else fixture.onSourceRead = { fixture.focus = (STUDY + 1) to (REVISION + 1) }
+
+            val result = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+
+            assertCode(fixture, result, "QUESTION_CONTEXT_UNAVAILABLE")
+            assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
+            assertThat(result.questionChange).isNull()
+        }
+    }
+
+    @Test
+    fun `authorization lost during canonical submission suppresses the late result without inventing rollback`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = 12
+        fixture.afterInvoke = { name -> if (name == "submit_answer") fixture.isAuthorized = false }
+
+        val result = fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to 101L))
+
+        assertCode(fixture, result, "QUESTION_CONTEXT_UNAVAILABLE")
+        assertThat(result.questionChange).isNull()
+        assertThat(fixture.calls.count { it.name == "submit_answer" }).isEqualTo(1)
+        assertThat(fixture.excluded).containsExactly("question-read", "answer-1", "answer-2")
+    }
+
+    private fun assertCode(fixture: Fixture, result: VoiceTutorMcpToolResult, code: String) {
+        assertThat(result.isError).isTrue()
+        assertThat(fixture.json(result).path("error").path("code").asText()).isEqualTo(code)
+    }
+
+    private data class Call(val name: String, val arguments: Map<String, Any>)
+
+    private class Fixture {
+        val mapper = jacksonObjectMapper()
+        val now: Instant = Instant.parse("2026-09-10T04:00:00Z")
+        val principal = Principal(7, "device", 9, false)
+        val calls = mutableListOf<Call>()
+        val events = mutableListOf<String>()
+        val persistenceCalls = mutableListOf<List<Any?>>()
+        val excluded = mutableListOf<String>()
+        var records: List<JsonNode> = listOf(record(101))
+        var totalCount: Int? = null
+        var learner: Long? = 10
+        var focus: Pair<Long, Long>? = STUDY to REVISION
+        var isAuthorized = true
+        var exclusionAccepted = true
+        var submissionFails = false
+        var submissionResultLost = false
+        var pendingPageTooLarge = false
+        var generationRecord: JsonNode? = record(201)
+        var processCorrelationOverride: String? = null
+        var afterInvoke: (String) -> Unit = {}
+        var onLearnerRead: () -> Unit = {}
+        var onSourceRead: () -> Unit = {}
+        var onExclude: () -> Unit = {}
+        var source = listOf(
+            turn(1, "question-read", VoiceTutorTranscriptRole.TUTOR, "좋아요. $PROMPT"),
+            turn(2, "answer-1", VoiceTutorTranscriptRole.USER, "필요한 객체를  밖에서 받고"),
+            turn(3, "answer-2", VoiceTutorTranscriptRole.USER, "직접 생성하지 않습니다."),
+        )
+        private var generationCount = 0
+        private var savedAnswer: String? = null
+        private var gradeReady = false
+        private val persistence = Proxy.newProxyInstance(
+            VoiceTutorPersistencePort::class.java.classLoader,
+            arrayOf(VoiceTutorPersistencePort::class.java),
+        ) { _, method, args ->
+            when (method.name) {
+                "canonicalAnswerTurns" -> {
+                    persistenceCalls += args!!.dropLast(1)
+                    events += "read-source"
+                    onSourceRead()
+                    source
+                }
+                "excludeCanonicalQuestionTurns" -> {
+                    persistenceCalls += args!!.dropLast(1)
+                    events += "exclude-source"
+                    onExclude()
+                    if (exclusionAccepted) excluded += (args[2] as List<*>).map { it as String }
+                    exclusionAccepted
+                }
+                "toString" -> "CanonicalQuestionTestPersistence"
+                else -> error("Unexpected persistence call ${method.name}")
+            }
+        } as VoiceTutorPersistencePort
+        val coordinator = VoiceTutorCanonicalQuestionCoordinator(
+            mapper, Clock.fixed(now, ZoneOffset.UTC), persistence,
+            authorized = { isAuthorized && it.principal == principal },
+            currentFocus = { focus },
+            learnerTurn = { _, _ -> onLearnerRead(); learner },
+            invoke = { _, name, args ->
+                calls += Call(name, args.toMap())
+                val result = when (name) {
+                    "list_pending_questions" -> {
+                        val limit = (args.getValue("limit") as Number).toInt()
+                        val offset = (args.getValue("offset") as Number).toInt()
+                        if (pendingPageTooLarge && limit > 1) VoiceTutorMcpToolResult("{\"error\":{\"code\":\"RESULT_TOO_LARGE\"}}", true)
+                        else success(mapOf("records" to records.drop(offset).take(limit), "totalCount" to (totalCount ?: records.size)))
+                    }
+                    "request_question" -> success(mapOf("topicId" to STUDY, "correlationId" to "generation-${++generationCount}"))
+                    "get_question_process" -> success(mapOf("correlationId" to (processCorrelationOverride ?: args["correlation_id"]), "terminal" to true, "question" to generationRecord))
+                    "skip_question" -> success(record((args.getValue("record_id") as Number).toLong(), status = "SKIPPED"))
+                    "submit_answer" -> {
+                        events += "submit_answer"
+                        if (submissionFails) VoiceTutorMcpToolResult("{\"error\":{\"code\":\"CANONICAL_WRITE_FAILED\"}}", true)
+                        else {
+                            savedAnswer = args.getValue("answer") as String
+                            if (submissionResultLost) VoiceTutorMcpToolResult("{\"error\":{\"code\":\"RESULT_UNCONFIRMED\"}}", true)
+                            else success(record((args.getValue("record_id") as Number).toLong(), status = "GRADING", answer = savedAnswer, gradingId = "grade-1"))
+                        }
+                    }
+                    "get_grading_process" -> {
+                        gradeReady = true
+                        success(mapOf("correlationId" to args["correlation_id"], "terminal" to true,
+                            "gradingResult" to mapOf("score" to 17, "feedback" to "Wrong poll feedback")))
+                    }
+                    "get_record" -> success(record((args.getValue("record_id") as Number).toLong(),
+                        status = if (savedAnswer == null) "UNGRADED" else if (gradeReady) "GRADED" else "GRADING", answer = savedAnswer,
+                        gradingId = if (savedAnswer != null) "grade-1" else null,
+                        grade = if (gradeReady) mapOf("score" to 91, "feedback" to "Canonical feedback") else null))
+                    else -> error("Unexpected canonical call $name")
+                }
+                afterInvoke(name)
+                result
+            },
+        )
+
+        fun context() = VoiceTutorWebRtcControlContext(
+            session(), "call", principal, initialLessonRevision = REVISION, realtimeModelTools = true,
+            dialogueBoundary = VoiceTutorDialogueBoundary(5, 100, 90, 4, "prior-tutor", "selection", REVISION),
+        )
+
+        fun answerContext() = context().copy(dialogueBoundary = VoiceTutorDialogueBoundary(
+            7, 130, 120, 6, "question-read", "answer-2", REVISION,
+        ))
+
+        fun record(
+            id: Long, study: Long = STUDY, status: String = "UNGRADED", answer: String? = null,
+            difficulty: Int = 3, createdAt: String = "2026-09-09T01:00:00Z", gradingId: String? = null,
+            grade: Map<String, Any>? = null, questionText: String = PROMPT,
+        ): JsonNode = mapper.valueToTree(mapOf(
+            "id" to id.toString(), "studyId" to study, "topic" to "Dependency injection", "difficulty" to difficulty,
+            "questionStatus" to status, "answer" to answer, "gradingRequestId" to gradingId, "gradingResult" to grade,
+            "question" to mapOf("question" to questionText, "createdAt" to createdAt, "expectedAnswerHint" to "SECRET_HINT"),
+            "expectedAnswerHint" to "SECRET_HINT", "gradingRubric" to "SECRET_RUBRIC",
+        ))
+
+        fun json(result: VoiceTutorMcpToolResult): JsonNode = mapper.readTree(result.output)
+        private fun success(value: Any) = VoiceTutorMcpToolResult(mapper.writeValueAsString(value), false)
+        private fun turn(id: Long, providerId: String, role: VoiceTutorTranscriptRole, text: String) = VoiceTutorTranscriptTurn(
+            id, SESSION, providerId, role, text, id, now, lessonRevision = REVISION, postCallEvidence = true,
+        )
+
+        private fun session() = VoiceTutorSession(
+            id = SESSION, userId = 7, studyId = STUDY, idempotencyKey = "reserved", providerSessionId = "provider",
+            status = VoiceTutorSessionStatus.ACTIVE, resultStatus = VoiceTutorResultStatus.PENDING,
+            language = "ko", model = "realtime", voice = "marin", topic = "Dependency injection", difficulty = 9,
+            periodStartedAt = now, periodEndsAt = now.plusSeconds(86_400), reservedSeconds = 600, chargedSeconds = 0,
+            maxSessionSeconds = 600, hardEndsAt = now.plusSeconds(600), connectedAt = now, relayHeartbeatAt = now,
+            acceptedAudioBytes = 0, endedAt = null, finalizedAt = null, endReason = null, failureCode = null,
+            failureMessage = null, createdAt = now, updatedAt = now,
+        )
+    }
+
+    private companion object {
+        const val STUDY = 41L
+        const val REVISION = 3L
+        const val SESSION = "canonical-voice-session"
+        const val PROMPT = "의존성 주입이 무엇인가요?"
+        const val ANSWER = "필요한 객체를  밖에서 받고\n직접 생성하지 않습니다."
+    }
+}

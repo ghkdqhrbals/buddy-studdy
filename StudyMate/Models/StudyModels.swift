@@ -2217,7 +2217,8 @@ enum StudyAnswerPresentationPolicy {
             return .awaitingAnswer
         }
         guard record.isQuestion else { return .completed }
-        if record.questionStatus == .graded ||
+        if record.questionStatus == .skipped || record.questionStatus == .completed ||
+            record.questionStatus == .graded ||
             record.gradingResult != nil ||
             record.gradingStatus == .completed {
             return .completed
@@ -4258,6 +4259,9 @@ struct AppStrings {
     }
     var noQuestion: String { text("질문 없음", "No Question") }
     var noQuestionDescription: String { text("설정을 저장한 뒤 새 질문을 생성하세요.", "Save settings, then create a new question.") }
+    var questionSkippedStatus: String { text("건너뛴 문제입니다.", "This question was skipped.", "スキップした問題です。") }
+    var questionCompletedStatus: String { text("완료한 문제입니다.", "This question is complete.", "完了した問題です。") }
+
     var duplicateQuestionSkipped: String {
         text(
             "기존 질문과 너무 비슷한 질문이 반복되어 생성하지 않았습니다.",

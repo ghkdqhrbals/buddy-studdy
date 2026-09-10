@@ -88,6 +88,18 @@ struct VoiceTutorRealtimeAudioDelta: Equatable, Sendable {
     var contentIndex: Int
 }
 
+struct VoiceTutorQuestionChange: Equatable, Hashable, Sendable {
+    let studyID: Int
+    let recordID: String
+
+    init?(studyID: Int, recordID: String) {
+        guard studyID > 0, let number = Int64(recordID), number > 0,
+              String(number) == recordID else { return nil }
+        self.studyID = studyID
+        self.recordID = recordID
+    }
+}
+
 enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case sessionReady(
         hardEndsAt: Date?, quotaRemainingSeconds: Int?, pauseProtocol: String? = nil,
@@ -113,6 +125,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case studyTreeChanged(studyID: Int)
     case studyTreeUpdated(studyID: Int)
     case studyTreeDeleted(studyIDs: Set<Int>)
+    case questionChanged(VoiceTutorQuestionChange)
     case responseStarted(
         responseID: String?,
         isTutorIntervention: Bool,
@@ -150,6 +163,14 @@ enum VoiceTutorRealtimeEventParser {
         }
 
         switch type {
+        case "buddystudy.voice.question.changed":
+            guard Set(object.keys) == ["type", "studyId", "recordId"],
+                  let studyID = exactInteger("studyId", in: object).flatMap({ Int(exactly: $0) }),
+                  let recordID = object["recordId"] as? String,
+                  let change = VoiceTutorQuestionChange(studyID: studyID, recordID: recordID) else {
+                return .ignored(type: type)
+            }
+            return .questionChanged(change)
         case "buddystudy.voice.session.ready":
             return .sessionReady(
                 hardEndsAt: date("hardEndsAt", in: object),

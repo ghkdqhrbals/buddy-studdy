@@ -19,6 +19,7 @@ internal object VoiceTutorRealtimeContract {
     // Server-only lifecycle request. It is never accepted from or forwarded to the client/provider.
     const val SPOKEN_LESSON_END_EVENT = "buddystudy-internal-voice-session-end"
     const val STUDY_TREE_CHANGED_EVENT = "buddystudy.voice.study.changed"
+    const val QUESTION_CHANGED_EVENT = "buddystudy.voice.question.changed"
     const val STUDY_FOCUSED_EVENT = "buddystudy.voice.study.focused"
     const val TURN_PROTOCOL_HEADER = "X-Voice-Turn-Protocol"
     const val LOCAL_VAD_TURN_PROTOCOL = "local-vad-v1"

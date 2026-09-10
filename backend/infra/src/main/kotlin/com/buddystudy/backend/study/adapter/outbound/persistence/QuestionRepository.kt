@@ -199,6 +199,9 @@ class QuestionRepository(
     override suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> =
         page(pendingCriteria().and("user_id").`is`(userId), pageable)
 
+    override suspend fun findPendingByUserAndStudyId(userId: Long, studyId: Long, pageable: Pageable): Page<QuestionEntity> =
+        page(pendingCriteria().and("user_id").`is`(userId).and("study_id").`is`(studyId), pageable)
+
     override suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> =
         page(pendingCriteria().and("study_id").`is`(studyId), pageable)
 
@@ -573,8 +576,8 @@ class QuestionRepository(
         Criteria.where("deleted_at").isNull
             .and("record_type").`is`(StudyRecordType.QUESTION.name)
             .and("skipped_at").isNull
-            .and("status").notIn(
-                (QuestionStatus.COMPLETED_STATUSES + QuestionStatus.SKIPPED).map(QuestionStatus::databaseValue),
+            .and("status").`in`(
+                listOf(QuestionStatus.UNGRADED, QuestionStatus.GRADING).map(QuestionStatus::databaseValue),
             )
 
     /** Completed voice exchanges may legitimately have no numeric assessment. */

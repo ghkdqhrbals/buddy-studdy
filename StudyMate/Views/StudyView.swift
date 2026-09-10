@@ -64,6 +64,11 @@ struct StudyView: View {
                             isResolvingAnswerState: isResolvingInitialAnswerState,
                             gradingStatusMessage: appState.gradingPresentationMessage(for: record),
                             canSubmitAnswer: canSubmitAnswer,
+                            allowsAnswerEditing: StudyAnswerPresentationPolicy.shouldShowEditor(for: record),
+                            terminalStatusMessage: record.questionStatus == .skipped
+                                ? strings.questionSkippedStatus
+                                : ((record.questionStatus == .completed || record.questionStatus == .graded)
+                                    && record.gradingResult == nil ? strings.questionCompletedStatus : nil),
                             strings: strings,
                             answerEditor: {
                                 answerEditor()
@@ -627,6 +632,8 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
     var isResolvingAnswerState: Bool
     var gradingStatusMessage: String?
     var canSubmitAnswer: Bool
+    var allowsAnswerEditing: Bool
+    var terminalStatusMessage: String?
     var strings: AppStrings
     @ViewBuilder var answerEditor: () -> AnswerEditorContent
     var onSubmit: () -> Void
@@ -644,7 +651,7 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                             .textSelection(.enabled)
 
                         ZStack {
-                            if submittedAnswer == nil &&
+                            if allowsAnswerEditing && submittedAnswer == nil &&
                                 gradingResult == nil &&
                                 !isGradingAnswer &&
                                 !isResolvingAnswerState {
@@ -681,7 +688,7 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                         .padding(.horizontal, 13)
                         .background(Color.green.opacity(0.92), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
-            } else if !isResolvingAnswerState &&
+            } else if allowsAnswerEditing && !isResolvingAnswerState &&
                         gradingResult == nil &&
                         !isGradingAnswer {
                 StudyChatBubble(role: .learnerInput) {
@@ -693,6 +700,12 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                         onSubmit: onSubmit
                     )
                 }
+            }
+
+            if !isResolvingAnswerState, let terminalStatusMessage {
+                Text(terminalStatusMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
 
             if !isResolvingAnswerState,

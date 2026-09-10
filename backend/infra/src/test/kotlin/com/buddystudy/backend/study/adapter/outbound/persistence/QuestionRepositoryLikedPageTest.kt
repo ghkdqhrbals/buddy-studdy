@@ -16,6 +16,7 @@ import org.springframework.core.convert.converter.Converter
 import org.springframework.data.convert.ReadingConverter
 import org.springframework.data.convert.WritingConverter
 import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Pageable
 import org.springframework.data.r2dbc.convert.MappingR2dbcConverter
 import org.springframework.data.r2dbc.convert.R2dbcCustomConversions
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
@@ -267,6 +268,49 @@ class QuestionRepositoryLikedPageTest {
         assertThat(repository.findLatestPendingByStudyIds(listOf(501)).map { it.id }).containsExactly(211L)
         assertThat(repository.findPendingByStudyId(501, PageRequest.of(0, 20)).content.map { it.id }).containsExactly(211L)
         assertThat(repository.findLatestCompletedByStudyIdAndUserId(501, 10)?.id).isEqualTo(210L)
+    }
+
+    @Test
+    fun `owned pending topic filter precedes counting and pagination and excludes completed or voice records`(): Unit = runBlocking {
+        for (id in 271L..273L) {
+            insertQuestion(id, 10, "Shared topic name", if (id == 272L) "grading" else "ungraded", "", true)
+            execute("update questions set study_id = 501, score = null where id = $id")
+        }
+        insertQuestion(274, 11, "Shared topic name", "ungraded", "", true)
+        execute("update questions set study_id = 501, score = null where id = 274")
+        insertQuestion(275, 10, "Shared topic name", "ungraded", "", true)
+        execute("update questions set study_id = 502, score = null where id = 275")
+        insertQuestion(276, 10, "Shared topic name", "ungraded", "", true, deleted = true)
+        execute("update questions set study_id = 501, score = null where id = 276")
+        insertQuestion(277, 10, "Shared topic name", "ungraded", "", true)
+        execute("update questions set study_id = 501, score = null, skipped_at = updated_at where id = 277")
+        for ((index, status) in listOf("skipped", "graded", "failed", "completed").withIndex()) {
+            val id = 278L + index
+            insertQuestion(id, 10, "Shared topic name", status, "", true)
+            execute("update questions set study_id = 501, score = null where id = $id")
+        }
+        insertVoice(282, studyId = 501, status = "ungraded")
+
+        val first = repository.findPendingByUserAndStudyId(10, 501, PageRequest.of(0, 1))
+        val second = repository.findPendingByUserAndStudyId(10, 501, PageRequest.of(1, 1))
+        val last = repository.findPendingByUserAndStudyId(10, 501, PageRequest.of(2, 1))
+        val exhausted = repository.findPendingByUserAndStudyId(10, 501, PageRequest.of(3, 1))
+        val exactOffset = object : Pageable by PageRequest.of(0, 2) {
+            override fun getOffset(): Long = 1
+        }
+
+        assertThat(first.content.map { it.id }).containsExactly(273L)
+        assertThat(second.content.map { it.id }).containsExactly(272L)
+        assertThat(last.content.map { it.id }).containsExactly(271L)
+        assertThat(listOf(first, second, last, exhausted).map { it.totalElements }).containsOnly(3L)
+        assertThat(exhausted.content).isEmpty()
+        assertThat(repository.findPendingByUserAndStudyId(10, 501, exactOffset).content.map { it.id })
+            .containsExactly(272L, 271L)
+        assertThat(repository.findPendingByUserAndStudyId(10, 999, PageRequest.of(0, 20)).totalElements).isZero()
+        // The unscoped overload also retains this owner's shared pending fixture (108).
+        val allOwned = repository.findPendingByUser(10, PageRequest.of(0, 20))
+        assertThat(allOwned.content.map { it.id }).containsExactly(275L, 273L, 272L, 271L, 108L)
+        assertThat(allOwned.totalElements).isEqualTo(5L)
     }
 
     @Test

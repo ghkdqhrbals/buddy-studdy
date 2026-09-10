@@ -8,6 +8,7 @@ import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
@@ -112,8 +113,11 @@ class StudyServiceTest {
             assertThat(transaction).describedAs("transaction for %s", name).isNotNull()
             assertThat(transaction!!.isReadOnly).describedAs("translation repair for %s", name).isFalse()
         }
-        val pending = StudyService::class.java.methods.single { it.name == "pending" }
-        assertThat(attributes.getTransactionAttribute(pending, StudyService::class.java)!!.isReadOnly).isTrue()
+        val pending = StudyService::class.java.methods.filter { it.name == "pending" }
+        assertThat(pending).hasSize(2)
+        pending.forEach {
+            assertThat(attributes.getTransactionAttribute(it, StudyService::class.java)!!.isReadOnly).isTrue()
+        }
     }
 
     @Test
@@ -160,6 +164,33 @@ class StudyServiceTest {
         assertThat(questions.visibleRows.single().deletedAt).isNotNull()
         assertThat(runCatching { service.record(principal, 900, "ko", "original") }.exceptionOrNull())
             .isInstanceOf(com.buddystudy.backend.common.application.error.ApiException::class.java)
+    }
+
+    @Test
+    fun `exact owned record read reconciles a skip while foreign deleted and missing reads stay not found`(): Unit = runBlocking {
+        val question = pendingQuestion(902, "Redis").apply {
+            studyId = 90
+            status = QuestionStatus.SKIPPED
+            skippedAt = createdAt.plusSeconds(60)
+        }
+        questions.visibleRows += question
+
+        val skipped = service.record(principal, 902, "ko", "original")
+
+        assertThat(skipped.id).isEqualTo("902")
+        assertThat(skipped.studyId).isEqualTo(90L)
+        assertThat(skipped.questionStatus).isEqualTo(QuestionStatus.SKIPPED)
+        assertThat(skipped.answer).isNull()
+        val denied: List<suspend () -> Unit> = listOf(
+            { service.record(principal.copy(userId = 8), 902, "ko", "original"); Unit },
+            { service.record(principal, 999, "ko", "original"); Unit },
+            { question.deletedAt = question.createdAt.plusSeconds(120); service.record(principal, 902, "ko", "original"); Unit },
+        )
+        denied.forEach { read ->
+            val error = runCatching { read() }.exceptionOrNull()
+            assertThat(error).isInstanceOf(ApiException::class.java)
+            assertThat((error as ApiException).code).isEqualTo(ApiErrorCode.RECORD_NOT_FOUND)
+        }
     }
 
     @Test
@@ -210,6 +241,28 @@ class StudyServiceTest {
         assertThat(response.records.map { it.viewCount }).containsExactly(6, 7)
         assertThat(questionStats.findByIdCalls).isZero()
         assertThat(questionStats.findAllByIdsCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `topic pending lookup uses the owned topic page and preserves its total`(): Unit = runBlocking {
+        questions.pendingRows += pendingQuestion(211, "Redis").apply { studyId = 91 }
+        questions.pendingRows += pendingQuestion(212, "Redis").apply { studyId = 90; userId = 8 }
+        questions.pendingRows += pendingQuestion(213, "Redis").apply { studyId = 90 }
+        questions.pendingRows += pendingQuestion(214, "Redis").apply { studyId = 90 }
+        questions.pendingRows += pendingQuestion(215, "Redis").apply { studyId = 90 }
+        questions.pendingRows += pendingQuestion(216, "Redis").apply { studyId = 90 }
+        questionStats.rows += QuestionStatsEntity(questionId = 214, viewCount = 9)
+
+        val response = service.pending(principal, limit = 2, offset = 1, studyId = 90)
+
+        assertThat(response.records.map { it.id }).containsExactly("214", "215")
+        assertThat(response.records.first().viewCount).isEqualTo(9)
+        assertThat(response.totalCount).isEqualTo(4)
+        assertThat(response.limit).isEqualTo(2)
+        assertThat(response.offset).isEqualTo(1)
+        assertThat(questions.findPendingByUserCalls).isZero()
+        assertThat(questions.findPendingByUserAndStudyIdCalls).isEqualTo(1)
+        assertThat(service.pending(principal, 20, 0, studyId = 92).records).isEmpty()
     }
 
     @Test
@@ -463,6 +516,8 @@ class StudyServiceTest {
     private class FakeQuestionPort : QuestionPort {
         val visibleRows = mutableListOf<QuestionEntity>()
         val pendingRows = mutableListOf<QuestionEntity>()
+        var findPendingByUserCalls = 0
+        var findPendingByUserAndStudyIdCalls = 0
         override suspend fun save(entity: QuestionEntity): QuestionEntity {
             if (entity.id == 0L) {
                 entity.id = ((visibleRows + pendingRows).maxOfOrNull { it.id } ?: 0L) + 1
@@ -478,7 +533,15 @@ class StudyServiceTest {
         override suspend fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override suspend fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity> = emptyList()
         override suspend fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = PageImpl(pendingRows, pageable, pendingRows.size.toLong())
+        override suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> {
+            findPendingByUserCalls += 1
+            return PageImpl(pendingRows, pageable, pendingRows.size.toLong())
+        }
+        override suspend fun findPendingByUserAndStudyId(userId: Long, studyId: Long, pageable: Pageable): Page<QuestionEntity> {
+            findPendingByUserAndStudyIdCalls += 1
+            val matches = pendingRows.filter { it.userId == userId && it.studyId == studyId }
+            return PageImpl(matches.drop(pageable.offset.toInt()).take(pageable.pageSize), pageable, matches.size.toLong())
+        }
         override suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = pendingRows.filter { it.studyId in studyIds }
         override suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows, pageable, visibleRows.size.toLong())

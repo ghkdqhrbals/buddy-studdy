@@ -35,6 +35,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Pageable
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -153,8 +154,23 @@ class StudyService(
 
     @Transactional(readOnly = true)
     override suspend fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse {
-        val page = questions.findPendingByUser(principal.userId, PageRequest.of(offset / limit, limit))
+        val page = questions.findPendingByUser(principal.userId, pendingPageRequest(limit, offset))
         return RecordsPageResponse(page.content.toRecordResponses(), page.totalElements, limit, offset)
+    }
+
+    @Transactional(readOnly = true)
+    override suspend fun pending(principal: Principal, limit: Int, offset: Int, studyId: Long): RecordsPageResponse {
+        val page = questions.findPendingByUserAndStudyId(principal.userId, studyId, pendingPageRequest(limit, offset))
+        return RecordsPageResponse(page.content.toRecordResponses(), page.totalElements, limit, offset)
+    }
+
+    private fun pendingPageRequest(limit: Int, offset: Int): Pageable {
+        require(limit > 0 && offset >= 0)
+        val exactOffset = offset.toLong()
+        // The public cursor is an item offset, including offsets between page boundaries.
+        return object : Pageable by PageRequest.of(offset / limit, limit) {
+            override fun getOffset(): Long = exactOffset
+        }
     }
 
     @Transactional
@@ -163,9 +179,7 @@ class StudyService(
         val viewMode = translationViewMode(view)
         val question = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        if (question.skippedAt != null) {
-            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        }
+        // Exact owner reads reconcile a completed skip; browse/pending pages still hide it.
         return recordResponse(question, questionStats.findById(id), normalizedLanguage, viewMode)
     }
 

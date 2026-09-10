@@ -230,6 +230,15 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         )
         assertThat(schedule.statusCode()).isEqualTo(200)
 
+        // Settings synchronization no longer creates a root study. Exercise the
+        // explicit creation boundary before checking record/page reconciliation.
+        assertThat(studies.findAll()).isEmpty()
+        postJson(
+            "/api/v1/studies",
+            """{"topic":"Redis","difficultyLevel":2,"intervalMinutes":15,"customPrompt":"짧게 질문하세요.","openaiModel":"gpt-5.4","maxHistoryCount":100}""",
+            accessToken, deviceId, clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }
+
         val study = studies.findAll().single()
         val swiftTopic = "SwiftUI-${Instant.now().toEpochMilli()}"
         val swiftStudy = studies.save(
@@ -380,8 +389,10 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(recordDetail["id"].asText()).isEqualTo(graded.id.toString())
-        getJson("/api/v1/records/${skipped.id}", accessToken, deviceId, clientSecret)
-            .also { assertThat(it.statusCode()).isEqualTo(404) }
+        val skippedDetail = getJson("/api/v1/records/${skipped.id}", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(skippedDetail["id"].asText()).isEqualTo(skipped.id.toString())
+        assertThat(skippedDetail["questionStatus"].asText()).isEqualTo("SKIPPED")
 
         val settings = getJson("/api/v1/settings", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }

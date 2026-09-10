@@ -97,7 +97,7 @@ struct RecordsStateStore {
 
         if let currentQuestion,
            gradingResult == nil,
-           !records.contains(where: { $0.isDetachedLocalQuestion && matches($0, currentQuestion) }),
+           !records.contains(where: { !$0.isPendingQuestion && matches($0, currentQuestion) }),
            !pending.contains(where: { matches($0, currentQuestion) }) {
             pending.append(
                 StudyRecord(

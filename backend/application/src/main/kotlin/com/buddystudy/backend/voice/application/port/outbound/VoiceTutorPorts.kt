@@ -166,6 +166,24 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
     ): Boolean
 
     suspend fun transcript(userId: Long, sessionId: String, maxCharacters: Int): List<VoiceTutorTranscriptTurn>
+    /** Exact persisted question and its complete following learner run; never a clipped history prefix. */
+    suspend fun canonicalAnswerTurns(
+        userId: Long,
+        sessionId: String,
+        latestLearnerProviderItemId: String,
+        precedingTutorProviderItemId: String,
+        lessonRevision: Long,
+    ): List<VoiceTutorTranscriptTurn> = emptyList()
+
+    /**
+     * Before submitting a canonical QUESTION answer, exclude its exact question and learner source
+     * from native post-call learning eligibility. Text, roles, sequence and private history survive.
+     */
+    suspend fun excludeCanonicalQuestionTurns(
+        userId: Long,
+        sessionId: String,
+        providerItemIds: List<String>,
+    ): Boolean = false
     suspend fun hasVerifiedLearningExchange(userId: Long, sessionId: String): Boolean
     /** Unclassified native dialogue in a saved focus; never itself proves learning. */
     suspend fun hasPostCallLearningCandidates(userId: Long, sessionId: String): Boolean = false
