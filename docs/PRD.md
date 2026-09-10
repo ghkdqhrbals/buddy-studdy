@@ -85,6 +85,11 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 Home provides a phone button immediately to the left of Search in the upper-right toolbar. One deliberate tap opens Voice Tutor and starts a call once a fresh server status permits it, without opening Profile or waiting for RevenueCat, recordings or history preparation. If login has been restored but the authenticated profile is not loaded yet, fetch only that profile before checking Voice Tutor status. Guests enter sign-in first. An unavailable, exhausted or already-active status keeps the existing Voice Tutor explanation and controls visible. Returning after a call or refreshing the page must not start another call automatically. Quick calls start without recording consent; recording remains an explicit per-call choice.
 
+Once a call ends normally and its final audio, recording and server settlement
+have finished, return automatically to the previous screen without requiring
+Done. If it ends while the app is inactive, return on the next foreground entry.
+A failed call keeps its error and retry controls visible.
+
 #### Current conversation contract — `realtime-native-v1`
 
 Both the compact call and expanded transcript show a small gray operation status with the actual function name, running/completed/failed state and elapsed milliseconds. Only authenticated backend operation metadata drives this display; arguments, results and provider error bodies are excluded. Concurrent operations retain separate timers, stale events cannot reset them, and call end clears them.

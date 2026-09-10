@@ -394,6 +394,12 @@ Public community feed
 
 ## Pro Voice Tutor
 
+`VoiceTutorSessionView` automatically dismisses after the view model reaches
+`.ended`, once final playout, recording and server settlement work has completed.
+`VoiceTutorCallCompletionNavigation` defers this navigation while the scene is
+inactive and applies it when the app becomes active. `.ending` keeps ownership
+of in-flight cleanup, and `.failed` retains its visible error/retry controls.
+
 ### Active realtime-native conversation path
 
 `realtime-native-v1` is the current iOS SDP/control capability. Its native sideband controller keeps OpenAI's realtime conversation as the conversational authority: that model interprets context, replies, chooses saved topics, and calls the native tool catalog. It does not run `VoiceTutorInputTurnCoordinator`, live meaningful-input/intent/consent classifiers, or separate question/feedback assessments. The legacy classifier/lease implementation described later in this section remains compatibility-only for `local-vad-v1`/PCM; it must not silently become a gate on a native reply.

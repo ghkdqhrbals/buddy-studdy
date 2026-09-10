@@ -639,6 +639,7 @@ struct VoiceTutorSessionView: View {
         .navigationTitle(strings.voiceTutorCallTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
+        .modifier(VoiceTutorCallCompletionNavigation(phase: viewModel.phase))
         .task {
             disclosureState.resetForNewAttempt()
             onRecordingConsentConsumed()
@@ -660,6 +661,22 @@ struct VoiceTutorSessionView: View {
             guard scenePhase == .active else { return }
             Task {
                 await viewModel.stopForDismissal()
+            }
+        }
+    }
+}
+
+/// Return only after final audio, recording and server settlement have finished.
+/// A call that ends while the app is inactive returns when it becomes active.
+struct VoiceTutorCallCompletionNavigation: ViewModifier {
+    let phase: VoiceTutorSessionPhase
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
+
+    func body(content: Content) -> some View {
+        content.onChange(of: phase == .ended && scenePhase == .active, initial: true) { _, shouldDismiss in
+            if shouldDismiss {
+                dismiss()
             }
         }
     }

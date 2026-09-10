@@ -3554,6 +3554,74 @@ final class VoiceTutorContractTests: XCTestCase {
     }
 
     @MainActor
+    func testCompletedCallPopsRenderedNavigationWhileEndingAndFailureStayPresented() async throws {
+        let fixture = VoiceTutorCompletionNavigationFixture()
+        defer { fixture.close() }
+        let rootReady = try await waitForCompletionNavigation { fixture.probe.isRootReady }
+        XCTAssertTrue(rootReady)
+        fixture.probe.path = [1]
+        let callReady = try await waitForCompletionNavigation { fixture.probe.destinationAppearCount == 1 }
+        XCTAssertTrue(callReady)
+
+        // The failure screen remains available for retry. A later successful
+        // attempt returns only after its finalization reaches ended.
+        for phase in [VoiceTutorSessionPhase.ending, .failed, .listening, .ending] {
+            fixture.probe.phase = phase
+            let rendered = try await waitForCompletionNavigation {
+                fixture.probe.renderedState == .init(phase: phase, scenePhase: .active)
+            }
+            XCTAssertTrue(rendered)
+            try await Task.sleep(for: .milliseconds(150))
+            XCTAssertEqual(fixture.probe.path, [1], "\(phase) must preserve the call destination.")
+        }
+
+        fixture.probe.phase = .ended
+        let popped = try await waitForCompletionNavigation { fixture.probe.path.isEmpty }
+        XCTAssertTrue(popped, "The production modifier must dismiss through NavigationStack's actual path binding.")
+        XCTAssertEqual(fixture.probe.destinationAppearCount, 1, "Completing a call must not present another call.")
+    }
+
+    @MainActor
+    func testCallCompletedOutsideActiveScenePopsRenderedNavigationOnlyAfterForegroundReturn() async throws {
+        for suspendedScene in [ScenePhase.background, .inactive] {
+            let fixture = VoiceTutorCompletionNavigationFixture()
+            defer { fixture.close() }
+            let rootReady = try await waitForCompletionNavigation { fixture.probe.isRootReady }
+            XCTAssertTrue(rootReady)
+            fixture.probe.path = [1]
+            let callReady = try await waitForCompletionNavigation { fixture.probe.destinationAppearCount == 1 }
+            XCTAssertTrue(callReady)
+
+            fixture.probe.scenePhase = suspendedScene
+            let suspended = try await waitForCompletionNavigation {
+                fixture.probe.renderedState == .init(phase: .listening, scenePhase: suspendedScene)
+            }
+            XCTAssertTrue(suspended)
+            fixture.probe.phase = .ended
+            let completionRendered = try await waitForCompletionNavigation {
+                fixture.probe.renderedState == .init(phase: .ended, scenePhase: suspendedScene)
+            }
+            XCTAssertTrue(completionRendered)
+            try await Task.sleep(for: .milliseconds(150))
+            XCTAssertEqual(fixture.probe.path, [1], "\(suspendedScene) must defer navigation until the app is active.")
+
+            fixture.probe.scenePhase = .active
+            let popped = try await waitForCompletionNavigation { fixture.probe.path.isEmpty }
+            XCTAssertTrue(popped, "An ended call must return on foreground entry without another phase update.")
+            XCTAssertEqual(fixture.probe.destinationAppearCount, 1)
+        }
+    }
+
+    @MainActor
+    private func waitForCompletionNavigation(_ condition: () -> Bool) async throws -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        while !condition(), ProcessInfo.processInfo.systemUptime < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        return condition()
+    }
+
+    @MainActor
     func testVoiceOrbTapAndConversationActionsOnPresentedSyntheticCall() async throws {
         guard ProcessInfo.processInfo.environment["BUDDYSTUDY_VOICE_INTERACTION_SMOKE"] == "1" else {
             throw XCTSkip("Opt-in computer-use smoke test; the fixture has no microphone or network session.")
@@ -5783,6 +5851,76 @@ private final class VoiceTutorContractCaptureDiagnostics: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return counts
+    }
+}
+
+private struct VoiceTutorCompletionNavigationRenderState: Equatable {
+    let phase: VoiceTutorSessionPhase
+    let scenePhase: ScenePhase
+}
+
+@MainActor
+private final class VoiceTutorCompletionNavigationProbe: ObservableObject {
+    @Published var path: [Int] = []
+    @Published var phase: VoiceTutorSessionPhase = .listening
+    @Published var scenePhase: ScenePhase = .active
+    var isRootReady = false
+    var destinationAppearCount = 0
+    var renderedState: VoiceTutorCompletionNavigationRenderState?
+}
+
+@MainActor
+private struct VoiceTutorCompletionNavigationRoot: View {
+    @ObservedObject var probe: VoiceTutorCompletionNavigationProbe
+
+    var body: some View {
+        NavigationStack(path: $probe.path) {
+            Text("Synthetic call entry")
+                .onAppear { probe.isRootReady = true }
+                .navigationDestination(for: Int.self) { _ in
+                    Text("Synthetic call")
+                        .modifier(VoiceTutorCallCompletionNavigation(phase: probe.phase))
+                        .onAppear { probe.destinationAppearCount += 1 }
+                        .onChange(of: VoiceTutorCompletionNavigationRenderState(
+                            phase: probe.phase, scenePhase: probe.scenePhase
+                        ), initial: true) { _, state in
+                            probe.renderedState = state
+                        }
+                }
+        }
+        // Inject lifecycle transitions without backgrounding the XCTest runner.
+        // Dismissal itself remains SwiftUI's real navigation environment action.
+        .environment(\.scenePhase, probe.scenePhase)
+        .transaction { $0.disablesAnimations = true }
+    }
+}
+
+@MainActor
+private final class VoiceTutorCompletionNavigationFixture {
+    let probe = VoiceTutorCompletionNavigationProbe()
+    private let window: UIWindow
+    private let previousKeyWindow: UIWindow?
+
+    init() {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        previousKeyWindow = scene?.windows.first { $0.isKeyWindow }
+        if let scene {
+            window = UIWindow(windowScene: scene)
+        } else {
+            window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        }
+        let controller = UIHostingController(rootView: VoiceTutorCompletionNavigationRoot(probe: probe))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.loadViewIfNeeded()
+        window.layoutIfNeeded()
+    }
+
+    func close() {
+        window.isHidden = true
+        window.rootViewController = nil
+        previousKeyWindow?.makeKey()
     }
 }
 
