@@ -14,6 +14,23 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
+    fun `intentional interruption exposes only its exact response id and cannot be forged as client control`() {
+        val raw = mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT,
+            "responseId" to "r1", "transcript" to "private", "error" to "private"))
+        val result = policy.providerDecision(raw, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+        assertThat(result.terminate).isFalse()
+        val payload = mapper.readTree(result.payload)
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "responseId")
+        assertThat(payload.path("responseId").asText()).isEqualTo("r1")
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        assertThat(policy.providerDecision(raw, "voice-1", Instant.EPOCH).payload).isNull()
+        for (id in listOf("", "../r1", "r".repeat(192))) {
+            val invalid = mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT, "responseId" to id))
+            assertThat(policy.providerDecision(invalid, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
+    }
+
+    @Test
     fun `session state is a strict server only snapshot without private or model authored fields`() {
         val fields = mapOf("type" to VoiceTutorRealtimeContract.SESSION_STATE_EVENT, "sequence" to 1,
             "phase" to "answering", "paused" to false, "revision" to 2, "studyId" to 7,

@@ -47,6 +47,7 @@ internal class VoiceTutorMcpTurnCoordinator(
     private val rejectedServerCallsByEventId = linkedMapOf<String, RejectedServerCall>()
     private var roundCount = 0
     private var closed = false
+    private var continuationSuperseded = false
     var continuationReady: Boolean = false
         private set
 
@@ -56,6 +57,13 @@ internal class VoiceTutorMcpTurnCoordinator(
     fun beginLearnerTurn() {
         check(!hasPending && !continuationReady)
         roundCount = 0
+        continuationSuperseded = false
+    }
+
+    /** Keep accepted tool results, but never speak a stale continuation after barge-in. */
+    fun supersedeContinuation() {
+        continuationReady = false
+        continuationSuperseded = true
     }
 
     fun consumeContinuation() {
@@ -130,6 +138,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         // This is the first tool round for the newly persisted learner turn.
         // Fold any already-ACKed prior result into the eventual continuation.
         roundCount = 0
+        continuationSuperseded = false
         continuationReady = false
         pending[callId] = Pending(
             outputItemId = outputItemId,
@@ -252,7 +261,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         ) return false
         if (item.has("status") && item.path("status").asText() != "completed") return false
         pending.remove(callId)
-        if (pending.isEmpty()) continuationReady = true
+        if (pending.isEmpty() && !continuationSuperseded) continuationReady = true
         return true
     }
 

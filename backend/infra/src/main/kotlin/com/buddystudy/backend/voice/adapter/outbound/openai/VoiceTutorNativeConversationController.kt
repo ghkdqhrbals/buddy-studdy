@@ -58,6 +58,7 @@ internal class VoiceTutorNativeConversationController(
     private var queuedInput = false
     private var sequence = 0L
     private var eventOrder = 0L
+    private var latestSpeechStartedOrder = 0L
     private var generation = 0L
     private var revision = initialLessonRevision
     private var active: Response? = null
@@ -127,7 +128,7 @@ internal class VoiceTutorNativeConversationController(
         }
         when (type) {
             // Only our completed response state can settle the app's pending input.
-            Contract.INPUT_SETTLED_EVENT -> return false
+            Contract.INPUT_SETTLED_EVENT, Contract.RESPONSE_INTERRUPTED_EVENT -> return false
             Contract.QUESTION_CHANGED_EVENT, Contract.SESSION_STATE_EVENT -> return false
             Contract.ANSWER_STATE_EVENT, Contract.ANSWER_TRANSCRIPT_EVENT -> return false
             // Provider VAD is disabled. Unexpected VAD edges cannot acquire turn authority.
@@ -145,7 +146,7 @@ internal class VoiceTutorNativeConversationController(
                 }
                 // This boundary was authorized before the commit was sent. A pause
                 // may delay its ACK, but must preserve the reply for resume.
-                if (!draining && !quotaRequested) {
+                if (!draining && !quotaRequested && input.startedOrder == latestSpeechStartedOrder) {
                     latestLearner = input
                     queuedInput = true
                     if (active == null) retryCount = 0
@@ -185,7 +186,7 @@ internal class VoiceTutorNativeConversationController(
                 response.createdRaw = raw
                 seenResponses.add(id)
                 trim(seenResponses, 1024)
-                if (response.superseded) cancelResponse(response)
+                if (response.superseded) interruptResponse(response)
                 // Tool-only and silent/noise reasoning is not presented as audible tutor speech.
                 return false
             }
@@ -212,7 +213,7 @@ internal class VoiceTutorNativeConversationController(
                 val response = matchingResponse(node) ?: return false
                 response.audioStarted = true
                 response.audioStopped = false
-                if (response.superseded) return false
+                if (response.superseded) { clearInterruptedOutput(response); return false }
                 armAnswerCapture(response)
                 announceResponse(response)
             }
@@ -226,6 +227,7 @@ internal class VoiceTutorNativeConversationController(
                 val response = matchingResponse(node) ?: return false
                 response.failed = true
                 response.audioStopped = true
+                response.outputCleared = true
                 // A cleared playout is not evidence of a completed question or confirmation.
                 if (!response.superseded) publish(client, json(mapOf("type" to Contract.INPUT_RETRY_EVENT, "abandonedResponseId" to response.id)))
                 finishResponseIfReady()
@@ -254,10 +256,11 @@ internal class VoiceTutorNativeConversationController(
                 // Tool-only and empty/noise responses have no playout boundary to wait for.
                 // Cancellation can leave an empty/partial audio item without ever opening a
                 // playout buffer. Only observed audio requires draining a superseded response.
-                response.expectsAudio = response.audioStarted || (!response.superseded && body.path("output").any { item ->
+                response.expectsAudio = response.audioStarted || ((!response.superseded || body.path("status").asText() == "completed") && body.path("output").any { item ->
                     item.path("content").any { it.path("type").asText() in setOf("audio", "output_audio") }
                 })
                 if (response.expectsAudio && !response.superseded) announceResponse(response)
+                if (response.superseded && response.expectsAudio) clearInterruptedOutput(response)
                 finishResponseIfReady()
                 if (!response.expectsAudio || response.superseded) return false
             }
@@ -267,7 +270,7 @@ internal class VoiceTutorNativeConversationController(
                 // WebRTC playout-start event. Generated audio is already output evidence.
                 if (type == "response.output_audio.delta" && node.path("delta").asText().isNotEmpty()) {
                     response.audioStarted = true
-                    if (!response.superseded) armAnswerCapture(response)
+                    if (!response.superseded) armAnswerCapture(response) else clearInterruptedOutput(response)
                 }
                 if (response.superseded) return false
             }
@@ -310,7 +313,11 @@ internal class VoiceTutorNativeConversationController(
                     if (pendingSpeech == null) pendingSpeech = SpeechBoundary(++sequence, seq, revision, ++eventOrder, wallClock(),
                         latestTutor.takeIf { active == null }, nanoTime(), answerId = answerCapture?.id)
                     else pendingSpeech?.clientSequence = seq
-                    supersedeUnstartedResponse()
+                    latestSpeechStartedOrder = pendingSpeech?.startedOrder ?: latestSpeechStartedOrder
+                    queuedInput = false
+                    endingAfterResponse = false
+                    toolCoordinator.supersedeContinuation()
+                    active?.let(::interruptResponse)
                 }
             }
             Contract.SPEECH_STOPPED_EVENT -> {
@@ -358,6 +365,14 @@ internal class VoiceTutorNativeConversationController(
                 fail(VoiceTutorProviderInputCommitTimeoutException())
             }
             active?.let { response ->
+                if (response.superseded) {
+                    if (nanoTime() - response.interruptedAt >= Duration.ofSeconds(5).toNanos()) {
+                        reportFailure(VoiceTutorProviderTurnFailureKind.RESPONSE_TIMEOUT,
+                            VoiceTutorProviderTurnFailureAction.SESSION_FATAL, response.createEventId)
+                        fail(VoiceTutorProviderResponseTimeoutException())
+                    }
+                    return@let
+                }
                 if (response.quota && !response.audioStarted && !response.done && !response.cancellationRequested &&
                     nanoTime() - response.startedAt >= Duration.ofSeconds(3).toNanos()
                 ) {
@@ -431,6 +446,7 @@ internal class VoiceTutorNativeConversationController(
         if (answerCapture != null) return false
         if (closed || draining || quotaRequested || speaking || pendingSpeech != null || commits.isNotEmpty()) return false
         return call.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
+            call.boundary.latestAcceptedLearnerSpeechStartedOrder == latestSpeechStartedOrder &&
             call.revision == revision
     }
 
@@ -474,7 +490,8 @@ internal class VoiceTutorNativeConversationController(
             !draining && !quotaRequested && !endingAfterResponse && answerCapture == null
         if (displayOperationId == callId) displayOperationId = null
         val stateIsCurrent = call != null && call.revision == revision &&
-            (reviewedAnswer != null || call.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id) &&
+            (reviewedAnswer != null || (call.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
+                call.boundary.latestAcceptedLearnerSpeechStartedOrder == latestSpeechStartedOrder)) &&
             !draining && !quotaRequested && !endingAfterResponse &&
             !speaking && pendingSpeech == null && commits.isEmpty()
         if (reviewedAnswer != null) {
@@ -532,6 +549,7 @@ internal class VoiceTutorNativeConversationController(
                 currentRevision && call != null &&
                     call.boundary.latestAcceptedLearnerProviderItemId != null &&
                     call.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
+                    call.boundary.latestAcceptedLearnerSpeechStartedOrder == latestSpeechStartedOrder &&
                     !speaking && pendingSpeech == null && commits.isEmpty() &&
                     !draining && !quotaRequested && !endingAfterResponse &&
                     it.studyId > 0 && it.recordId.matches(Regex("[1-9][0-9]{0,18}")) &&
@@ -634,21 +652,33 @@ internal class VoiceTutorNativeConversationController(
         emit(mapOf("type" to "response.create", "event_id" to response.createEventId, "response" to options))
     }
 
-    private fun supersedeUnstartedResponse() {
-        val response = active ?: return
-        if (response.quota || response.done || response.audioStarted || response.announced || response.superseded) return
+    private fun interruptResponse(response: Response) {
+        if (response.quota) return
+        if (!response.superseded) {
+            response.interruptedAt = nanoTime()
+            latestTutor = null
+        }
         response.superseded = true
         response.failed = true
-        // If creation is still in flight, its exact token-correlated response.created will
-        // provide the ID to cancel. Never issue an unscoped cancellation or clear RTP output.
-        cancelResponse(response)
+        val id = response.id ?: return // Cancel the exact response when its creation ACK arrives.
+        if (response.interruptionAnnounced) return
+        response.interruptionAnnounced = true
+        publish(client, json(mapOf("type" to Contract.RESPONSE_INTERRUPTED_EVENT, "responseId" to id)))
+        if (!response.done && !response.cancellationRequested) {
+            response.cancellationRequested = true
+            emit(mapOf("type" to "response.cancel", "response_id" to id))
+        }
+        if (response.audioStarted || response.expectsAudio) clearInterruptedOutput(response)
     }
 
-    private fun cancelResponse(response: Response) {
-        val id = response.id ?: return
-        if (response.cancellationRequested) return
-        response.cancellationRequested = true
-        emit(mapOf("type" to "response.cancel", "response_id" to id))
+    private fun clearInterruptedOutput(response: Response) {
+        if (response.outputClearRequested) return
+        response.outputClearRequested = true
+        response.outputCleared = false
+        // WebRTC owns buffered audio. Clear immediately once audio is known;
+        // an early cancellation with definitively no audio needs no clear, whose
+        // response identity could otherwise belong to the preceding tutor turn.
+        emit(mapOf("type" to "output_audio_buffer.clear"))
     }
 
     private fun observeProviderError(node: JsonNode) {
@@ -713,11 +743,18 @@ internal class VoiceTutorNativeConversationController(
         val response = active ?: return
         if (!response.done || (response.expectsAudio && !response.audioStopped)) return
         if (response.superseded) {
+            // A global clear must settle before another response may produce audio.
+            if (response.outputClearRequested && !response.outputCleared) return
             active = null
             retryCount = 0
-            // Renewed learner speech owns the next response. Do not restore a superseded
-            // opening instruction, consume retry budget, settle input, persist speech or run tools.
-            if (!draining && !quotaRequested) queuedInput = true
+            // A learner may answer a saved question before its readback finishes.
+            // Preserve that manual draft, but never claim the interrupted question
+            // was fully heard or use its unfinished transcript as source evidence.
+            answerCapture?.takeIf { it.responseToken == response.token }?.let { capture ->
+                capture.questionDrained = true
+                publishAnswerState(capture)
+                emitAnswerSegments(capture)
+            }
             advancePause()
             scheduleResponse()
             return
@@ -1150,6 +1187,10 @@ internal class VoiceTutorNativeConversationController(
         var deviceDrained = false
         var cancellationRequested = false
         var superseded = false
+        var interruptionAnnounced = false
+        var interruptedAt = 0L
+        var outputCleared = false
+        var outputClearRequested = false
         val tutors = linkedMapOf<String, TutorTranscript>()
     }
 

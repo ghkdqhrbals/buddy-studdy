@@ -130,11 +130,12 @@ class VoiceTutorControlWebSocketHandlerTest {
     }
 
     @Test
-    fun `queued input retry is not sent after monthly quota terminal begins`() {
+    fun `queued input retry and interruption are not sent after monthly quota terminal begins`() {
         val result = runControlScenario(
             monthlyQuotaExhaustsNow = true,
             providerEventsAfterTerminal = listOf(
                 """{"type":"${VoiceTutorRealtimeContract.INPUT_RETRY_EVENT}"}""",
+                """{"type":"${VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT}","responseId":"interrupted-old"}""",
             ),
             provider = { _, _ -> },
         )
@@ -146,7 +147,7 @@ class VoiceTutorControlWebSocketHandlerTest {
             "sent:buddystudy.voice.session.ended",
         )
         assertThat(result.deliveryOrder)
-            .doesNotContain("sent:${VoiceTutorRealtimeContract.INPUT_RETRY_EVENT}")
+            .doesNotContain("sent:${VoiceTutorRealtimeContract.INPUT_RETRY_EVENT}", "sent:${VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT}")
     }
 
     @Test

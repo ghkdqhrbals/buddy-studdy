@@ -9,6 +9,63 @@ import XCTest
 /// one bounded provider call; this iPhone never creates an app session, local
 /// audio track, microphone capture, recording, or client playout-drain ACK.
 final class VoiceTutorNativeConversationTests: XCTestCase {
+    func testInterruptedNativePlayoutRemainsMutedUntilANewAcceptedResponse() {
+        var state = VoiceTutorLocalPlayoutInterruptionState()
+        XCTAssertTrue(state.responseStarted("wrong-answer"))
+        XCTAssertFalse(state.isMuted)
+
+        XCTAssertTrue(state.interruptResponse("wrong-answer"))
+        XCTAssertTrue(state.isMuted)
+        XCTAssertFalse(state.responseStarted("wrong-answer"), "A delayed duplicate must not restore old audio")
+        XCTAssertTrue(state.isMuted)
+        XCTAssertFalse(state.responseStarted(nil))
+        XCTAssertFalse(state.responseStarted(""))
+        XCTAssertTrue(state.isMuted)
+
+        XCTAssertTrue(state.responseStarted("corrected-answer"))
+        XCTAssertFalse(state.isMuted)
+        XCTAssertEqual(state.activeResponseID, "corrected-answer")
+        XCTAssertFalse(state.responseStarted("wrong-answer"))
+        XCTAssertFalse(state.interruptResponse("wrong-answer"), "A stale interruption must not mute the corrected answer")
+        XCTAssertFalse(state.isMuted)
+        XCTAssertEqual(state.activeResponseID, "corrected-answer")
+    }
+
+    func testNativePlayoutInterruptionFencesAnUnannouncedResponse() {
+        var state = VoiceTutorLocalPlayoutInterruptionState()
+        XCTAssertTrue(state.responseStarted("previous-answer"))
+        XCTAssertTrue(state.interruptResponse("not-yet-announced"))
+        XCTAssertTrue(state.isMuted)
+        XCTAssertFalse(state.responseStarted("not-yet-announced"))
+        XCTAssertFalse(state.responseStarted("previous-answer"), "An older response must not reopen the muted source")
+        XCTAssertFalse(state.interruptResponse("previous-answer"))
+        XCTAssertTrue(state.isMuted)
+
+        XCTAssertTrue(state.responseStarted("fresh-answer"))
+        XCTAssertFalse(state.isMuted)
+        XCTAssertFalse(state.interruptResponse("not-yet-announced"))
+        XCTAssertEqual(state.activeResponseID, "fresh-answer")
+    }
+
+    func testNativePlayoutRepeatedInterruptionsCannotReplayEarlierAnswers() {
+        var state = VoiceTutorLocalPlayoutInterruptionState()
+        for index in 1...3 {
+            let responseID = "answer-\(index)"
+            XCTAssertTrue(state.responseStarted(responseID))
+            XCTAssertTrue(state.interruptResponse(responseID))
+            XCTAssertTrue(state.interruptResponse(responseID), "Duplicate exact interruption is idempotent")
+            XCTAssertTrue(state.isMuted)
+        }
+        for index in 1...3 {
+            XCTAssertFalse(state.responseStarted("answer-\(index)"))
+        }
+        XCTAssertTrue(state.isMuted)
+        XCTAssertFalse(state.interruptResponse(""))
+        XCTAssertTrue(state.isMuted)
+        XCTAssertTrue(state.responseStarted("latest-answer"))
+        XCTAssertFalse(state.isMuted)
+    }
+
     @MainActor
     func testOptInNativeReceiveOnlyConversationContinuesAcrossThreeProviderTurns() async throws {
         guard ProcessInfo.processInfo.environment["BUDDYSTUDY_NATIVE_CONVERSATION_TEST"] == "1" else {
