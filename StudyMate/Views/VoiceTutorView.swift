@@ -2,12 +2,40 @@
 import AVFoundation
 import SwiftUI
 
+/// One explicit Home shortcut tap may admit one call after a fresh status read.
+/// Consume that intent before suspension so a return to this entry, retry, or
+/// cancelled presentation cannot unexpectedly start another call.
+@MainActor
+final class VoiceTutorCallEntryAdmission {
+    private var hasAttemptedStart = false
+
+    func refresh(
+        startCallOnEntry: Bool,
+        isCurrent: () -> Bool,
+        loadStatus: () async -> BackendVoiceTutorStatus?
+    ) async -> Bool {
+        let shouldAttemptStart = startCallOnEntry && !hasAttemptedStart
+        hasAttemptedStart = true
+        let status = await loadStatus()
+        return shouldAttemptStart
+            && !Task.isCancelled
+            && isCurrent()
+            && VoiceTutorCallStartPolicy.canStart(status: status)
+    }
+}
+
 struct VoiceTutorView: View {
+    let startCallOnEntry: Bool
     @EnvironmentObject private var appState: AppState
     @State private var showsMembership = false
     @State private var recordingConsent = false
     @State private var callRecordingConsent = false
     @State private var showsCall = false
+    @State private var callEntryAdmission = VoiceTutorCallEntryAdmission()
+
+    init(startCallOnEntry: Bool = false) {
+        self.startCallOnEntry = startCallOnEntry
+    }
 
     private var strings: AppStrings { appState.strings }
 
@@ -142,8 +170,26 @@ struct VoiceTutorView: View {
         }
         .task {
             recordingConsent = false
+            let identity = appState.commonRecordsIdentity
+            let shouldStart = await callEntryAdmission.refresh(
+                startCallOnEntry: startCallOnEntry,
+                isCurrent: {
+                    appState.isCommunitySessionActive
+                        && appState.commonRecordsIdentity == identity
+                },
+                loadStatus: { await appState.refreshVoiceTutorStatus() }
+            )
+            guard !Task.isCancelled else { return }
+            if shouldStart, !showsCall {
+                // A shortcut starts an unrecorded call. Recording still requires
+                // the separate, explicit consent control for that exact call.
+                recordingConsent = false
+                callRecordingConsent = false
+                showsCall = true
+                return
+            }
+            // History and old recording uploads must not delay quick admission.
             await appState.retryPendingVoiceTutorRecordingUploads()
-            await appState.refreshVoiceTutorStatus()
             await appState.loadVoiceTutorSessions(reset: true)
         }
         .refreshable {

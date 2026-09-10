@@ -126,6 +126,167 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(status.quota.limitSeconds, 18_000)
     }
 
+    @MainActor
+    func testQuickCallEntryWaitsForFreshStatusAndStartsOnlyOncePerEntry() async throws {
+        let status = try quickCallStatus()
+        let admission = VoiceTutorCallEntryAdmission()
+        let statusArrived = expectation(description: "The entry starts a fresh status read")
+        let releaseStatus = VoiceTutorContractResponseGate()
+        var finished = false
+        let firstEntry = Task { @MainActor in
+            let starts = await admission.refresh(
+                startCallOnEntry: true,
+                isCurrent: { true },
+                loadStatus: {
+                    statusArrived.fulfill()
+                    await releaseStatus.wait()
+                    return status
+                }
+            )
+            finished = true
+            return starts
+        }
+        defer {
+            firstEntry.cancel()
+            releaseStatus.open()
+        }
+        let arrived = await XCTWaiter.fulfillment(of: [statusArrived], timeout: 5)
+        XCTAssertEqual(arrived, .completed)
+        XCTAssertFalse(finished, "Cached eligibility cannot open the call while the fresh read is pending.")
+        releaseStatus.open()
+        let starts = await firstEntry.value
+        XCTAssertTrue(starts)
+
+        let returnFromCall = await admission.refresh(
+            startCallOnEntry: true, isCurrent: { true }, loadStatus: { status }
+        )
+        XCTAssertFalse(returnFromCall, "Returning from a completed call must not start another call.")
+        let newShortcutTap = await VoiceTutorCallEntryAdmission().refresh(
+            startCallOnEntry: true, isCurrent: { true }, loadStatus: { status }
+        )
+        XCTAssertTrue(newShortcutTap, "A new navigation entry carries a new explicit user intent.")
+    }
+
+    @MainActor
+    func testQuickCallEntryPreservesServerAdmissionAndExplicitEntryRequirements() async throws {
+        let allowed = try quickCallStatus()
+        let rejectedStatuses: [BackendVoiceTutorStatus?] = [
+            nil,
+            try quickCallStatus(eligible: false),
+            try quickCallStatus(remaining: 0),
+            try quickCallStatus(active: true)
+        ]
+        for rejected in rejectedStatuses {
+            let admission = VoiceTutorCallEntryAdmission()
+            let starts = await admission.refresh(
+                startCallOnEntry: true, isCurrent: { true }, loadStatus: { rejected }
+            )
+            XCTAssertFalse(starts)
+            let laterRefresh = await admission.refresh(
+                startCallOnEntry: true, isCurrent: { true }, loadStatus: { allowed }
+            )
+            XCTAssertFalse(laterRefresh, "An initially blocked entry needs another explicit call action.")
+        }
+
+        let ordinaryEntry = await VoiceTutorCallEntryAdmission().refresh(
+            startCallOnEntry: false, isCurrent: { true }, loadStatus: { allowed }
+        )
+        XCTAssertFalse(ordinaryEntry, "Opening the ordinary history/consent entry must not place a call.")
+        let replacedAccount = await VoiceTutorCallEntryAdmission().refresh(
+            startCallOnEntry: true, isCurrent: { false }, loadStatus: { allowed }
+        )
+        XCTAssertFalse(replacedAccount)
+    }
+
+    @MainActor
+    func testQuickCallEntryCancellationConsumesTheOriginalStartIntent() async throws {
+        let status = try quickCallStatus()
+        let admission = VoiceTutorCallEntryAdmission()
+        let statusArrived = expectation(description: "Status is pending before navigation cancellation")
+        let releaseStatus = VoiceTutorContractResponseGate()
+        let opening = Task { @MainActor in
+            await admission.refresh(
+                startCallOnEntry: true,
+                isCurrent: { true },
+                loadStatus: {
+                    statusArrived.fulfill()
+                    await releaseStatus.wait()
+                    return status
+                }
+            )
+        }
+        defer {
+            opening.cancel()
+            releaseStatus.open()
+        }
+        let arrived = await XCTWaiter.fulfillment(of: [statusArrived], timeout: 5)
+        XCTAssertEqual(arrived, .completed)
+        opening.cancel()
+        releaseStatus.open()
+        let cancelledStart = await opening.value
+        XCTAssertFalse(cancelledStart)
+        let restartedPresentationTask = await admission.refresh(
+            startCallOnEntry: true, isCurrent: { true }, loadStatus: { status }
+        )
+        XCTAssertFalse(restartedPresentationTask)
+    }
+
+    @MainActor
+    func testQuickCallEntryCannotUseCachedEligibilityAfterStatusRefreshFails() async throws {
+        let registration = try VoiceTutorContractAppFixture.registration(ownerUserID: 7, tokenID: "quick-call")
+        var failStatus = false
+        var paths: [String] = []
+        let fixture = try VoiceTutorContractAppFixture(registration: registration) { request in
+            paths.append(request.url?.path ?? "")
+            XCTAssertEqual(request.url?.path, "/api/v1/voice-tutor/status")
+            if failStatus { throw URLError(.notConnectedToInternet) }
+            return VoiceTutorContractAppFixture.response(
+                for: request,
+                body: #"{"eligible":true,"quota":{"limitSeconds":3600,"usedSeconds":0,"reservedSeconds":0,"remainingSeconds":3600}}"#
+            )
+        }
+        defer { fixture.close() }
+        let fresh = await fixture.appState.refreshVoiceTutorStatus()
+        XCTAssertTrue(VoiceTutorCallStartPolicy.canStart(status: fresh))
+        failStatus = true
+
+        let admission = VoiceTutorCallEntryAdmission()
+        let starts = await admission.refresh(
+            startCallOnEntry: true,
+            isCurrent: { fixture.appState.isCommunitySessionActive },
+            loadStatus: { await fixture.appState.refreshVoiceTutorStatus() }
+        )
+        XCTAssertFalse(starts)
+        XCTAssertEqual(fixture.appState.voiceTutorStatus, fresh, "The existing usage display may keep its cache.")
+        XCTAssertNotNil(fixture.appState.voiceTutorErrorMessage)
+        failStatus = false
+        let retryStarts = await admission.refresh(
+            startCallOnEntry: true,
+            isCurrent: { true },
+            loadStatus: { await fixture.appState.refreshVoiceTutorStatus() }
+        )
+        XCTAssertFalse(retryStarts)
+        XCTAssertTrue(paths.allSatisfy { $0 == "/api/v1/voice-tutor/status" },
+            "Admission must not fetch history, retry recording uploads, or create a session on failure.")
+    }
+
+    private func quickCallStatus(
+        eligible: Bool = true,
+        remaining: Int = 3_600,
+        active: Bool = false
+    ) throws -> BackendVoiceTutorStatus {
+        var json: [String: Any] = [
+            "eligible": eligible,
+            "quota": ["limitSeconds": 3_600, "usedSeconds": 0,
+                      "reservedSeconds": 0, "remainingSeconds": remaining]
+        ]
+        if active {
+            json["activeSession"] = ["sessionId": "quick-call-active", "state": "ACTIVE"]
+        }
+        return try decoder.decode(BackendVoiceTutorStatus.self,
+            from: JSONSerialization.data(withJSONObject: json))
+    }
+
     func testVoiceTutorWebRTCAndRecordingContractDecodes() throws {
         let session = try decoder.decode(
             BackendVoiceTutorSessionStart.self,
@@ -4803,9 +4964,10 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(currentSummary?.result?.summaryMarkdown, "B private summary")
         releaseResponses.open()
         await history.value
-        await status.value
+        let staleStatus = await status.value
         let staleSummary = await summary.value
 
+        XCTAssertNil(staleStatus, "An old account's response cannot authorize quick call admission.")
         XCTAssertNil(staleSummary)
         XCTAssertNil(fixture.appState.voiceTutorStatus)
         XCTAssertTrue(fixture.appState.voiceTutorSessions.isEmpty)

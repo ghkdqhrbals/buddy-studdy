@@ -280,7 +280,7 @@ final class AppState: ObservableObject {
     @Published private(set) var isLoadingVoiceTutorSessions = false
     @Published private(set) var voiceTutorErrorMessage: String?
     private var voiceTutorStatusRequestGeneration: UInt64 = 0
-    private var voiceTutorStatusRefresh: (id: UUID, identity: CommonRecordsIdentity, task: Task<Void, Never>)?
+    private var voiceTutorStatusRefresh: (id: UUID, identity: CommonRecordsIdentity, task: Task<BackendVoiceTutorStatus?, Never>)?
     private var communityProfileRefresh: (id: UUID, identity: CommonRecordsIdentity, task: Task<Int?, Never>)?
     private var voiceTutorSessionsRequestGeneration: UInt64 = 0
     private var voiceTutorDetailRequestIDs: [String: UUID] = [:]
@@ -5743,7 +5743,7 @@ final class AppState: ObservableObject {
         }
 
         async let billingRefresh: Void = refreshBilling()
-        async let voiceRefresh: Void = refreshVoiceTutorStatus()
+        async let voiceRefresh = refreshVoiceTutorStatus()
         _ = await (billingRefresh, voiceRefresh)
         return !Task.isCancelled && isCommunitySessionActive &&
             resolvedIdentity == commonRecordsIdentity && communityProfile != nil
@@ -8218,33 +8218,42 @@ final class AppState: ObservableObject {
         voiceTutorDisplayMessage(for: error)
     }
 
-    func refreshVoiceTutorStatus() async {
-        guard !Task.isCancelled else { return }
+    /// Returns only this refresh's verified result; cached eligibility is not
+    /// evidence that a new call may begin after a failed or cancelled read.
+    @discardableResult
+    func refreshVoiceTutorStatus() async -> BackendVoiceTutorStatus? {
+        guard !Task.isCancelled else { return nil }
         let identity = commonRecordsIdentity
+        let context = try? makeVoiceTutorRequestContext()
         if let refresh = voiceTutorStatusRefresh, refresh.identity == identity {
-            await refresh.task.value
-            return
+            let status = await refresh.task.value
+            guard !Task.isCancelled, commonRecordsIdentity == identity,
+                  context?.isCurrent() == true else { return nil }
+            return status
         }
         voiceTutorStatusRefresh?.task.cancel()
         let requestID = UUID()
         let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.performVoiceTutorStatusRefresh()
+            guard let self else { return Optional<BackendVoiceTutorStatus>.none }
+            return await self.performVoiceTutorStatusRefresh()
         }
         voiceTutorStatusRefresh = (requestID, identity, task)
-        await task.value
+        let status = await task.value
         if voiceTutorStatusRefresh?.id == requestID {
             voiceTutorStatusRefresh = nil
         }
+        guard !Task.isCancelled, commonRecordsIdentity == identity,
+              context?.isCurrent() == true else { return nil }
+        return status
     }
 
-    private func performVoiceTutorStatusRefresh() async {
-        guard !Task.isCancelled else { return }
+    private func performVoiceTutorStatusRefresh() async -> BackendVoiceTutorStatus? {
+        guard !Task.isCancelled else { return nil }
         let currentVoiceTutorUseCase = voiceTutorUseCase
         guard let context = try? makeVoiceTutorRequestContext() else {
             voiceTutorStatus = nil
             voiceTutorErrorMessage = nil
-            return
+            return nil
         }
         voiceTutorStatusRequestGeneration &+= 1
         let requestGeneration = voiceTutorStatusRequestGeneration
@@ -8268,18 +8277,20 @@ final class AppState: ObservableObject {
                 }
             )
             guard !Task.isCancelled, context.isCurrent(), requestGeneration == voiceTutorStatusRequestGeneration else {
-                return
+                return nil
             }
             voiceTutorStatus = status
             voiceTutorErrorMessage = nil
+            return status
         } catch where !Self.isCancellationLikeError(error) {
             guard !Task.isCancelled, context.isCurrent(), requestGeneration == voiceTutorStatusRequestGeneration else {
-                return
+                return nil
             }
             voiceTutorErrorMessage = voiceTutorDisplayMessage(for: error)
             log(.warning, "음성 튜터 이용 상태를 동기화하지 못했습니다: \(error.localizedDescription)")
+            return nil
         } catch {
-            return
+            return nil
         }
     }
 

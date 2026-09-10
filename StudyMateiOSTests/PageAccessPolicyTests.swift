@@ -1181,7 +1181,7 @@ final class CommunityQuestionActionPolicyTests: XCTestCase {
         XCTAssertTrue(policy.canBlock)
     }
 
-    func testGuestOnlyGetsTheOpenAction() {
+    func testGuestHasNoQuestionOptions() {
         let policy = CommunityQuestionActionPolicy(isSignedIn: false, isOwner: false)
 
         XCTAssertFalse(policy.canManage)

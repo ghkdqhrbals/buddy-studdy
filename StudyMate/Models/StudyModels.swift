@@ -4740,7 +4740,6 @@ struct AppStrings {
         )
     }
     var report: String { text("신고", "Report") }
-    var openQuestion: String { text("질문 보기", "View question", "質問を見る") }
     var questionActions: String { text("질문 옵션", "Question options", "質問のオプション") }
     var deleteQuestion: String { text("질문 삭제", "Delete question", "質問を削除") }
     var deleteQuestionConfirmation: String {

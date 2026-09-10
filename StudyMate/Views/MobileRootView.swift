@@ -1255,6 +1255,8 @@ private struct MobileHomeView: View {
     @State private var isHomeLoginPagePresented = false
     @State private var isShowingNotifications = false
     @State private var isShowingProfileSettings = false
+    @State private var isShowingVoiceTutor = false
+    @State private var voiceCallEntryID = UUID()
     @State private var isPreparingProfile = false
     @State private var isShowingSettings = false
     @State private var isShowingFeedback = false
@@ -1480,6 +1482,10 @@ private struct MobileHomeView: View {
         .navigationDestination(isPresented: $isShowingFeedback) {
             MobileFeedbackView()
         }
+        .navigationDestination(isPresented: $isShowingVoiceTutor) {
+            VoiceTutorView(startCallOnEntry: true)
+                .id(voiceCallEntryID)
+        }
         .toolbar {
             #if os(iOS)
             if #available(iOS 26.0, *) {
@@ -1512,6 +1518,13 @@ private struct MobileHomeView: View {
                     .sharedBackgroundVisibility(.hidden)
                 }
 
+                if !isHomeSearchActive && !isSelectingStudies {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeVoiceCallToolbarButton
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
+
                 if !isSelectingStudies {
                     ToolbarItem(placement: .topBarTrailing) {
                         homeToolbarSearchControl(strings: strings)
@@ -1528,6 +1541,12 @@ private struct MobileHomeView: View {
                 if shouldShowStudySelectionToolbarButton {
                     ToolbarItem(placement: .topBarTrailing) {
                         homeStudySelectionToolbarButton(strings: strings)
+                    }
+                }
+
+                if !isHomeSearchActive && !isSelectingStudies {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeVoiceCallToolbarButton
                     }
                 }
 
@@ -2302,7 +2321,9 @@ private struct MobileHomeView: View {
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            communityQuestionActionsMenu(question)
+            if communityQuestionActionPolicy(question).hasActions {
+                communityQuestionActionsMenu(question)
+            }
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 10))
         .listRowBackground(Color.clear)
@@ -2330,12 +2351,6 @@ private struct MobileHomeView: View {
 
     @ViewBuilder
     private func communityQuestionActions(_ question: CommunityQuestion) -> some View {
-        Button {
-            openCommunityQuestion(question)
-        } label: {
-            Label(strings.openQuestion, systemImage: "arrow.up.right")
-        }
-
         let policy = communityQuestionActionPolicy(question)
         if policy.canManage {
             Button {
@@ -2560,6 +2575,22 @@ private struct MobileHomeView: View {
             .accessibilityLabel(strings.search)
         }
         .fixedSize()
+    }
+
+    private var homeVoiceCallToolbarButton: some View {
+        Button {
+            if appState.isCommunitySessionActive {
+                voiceCallEntryID = UUID()
+                isShowingVoiceTutor = true
+            } else {
+                isHomeLoginPagePresented = true
+            }
+        } label: {
+            MobileToolbarIconButtonLabel(systemName: "phone.fill")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.voiceTutorCallStart)
+        .accessibilityIdentifier("home.startVoiceCall")
     }
 
     private func homeSearchToolbarButton(strings: AppStrings) -> some View {
