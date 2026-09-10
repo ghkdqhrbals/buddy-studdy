@@ -1031,6 +1031,60 @@ private struct VoiceTutorOrbAnchorPreferenceKey: PreferenceKey {
     }
 }
 
+private struct VoiceTutorAnswerEditorSession: Identifiable {
+    let id: String
+}
+
+/// A single native scrolling editor keeps caret movement and text selection out
+/// of the transcript's drag gestures, clipping and automatic scroll updates.
+struct VoiceTutorAnswerEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var isFocused: Bool
+    let strings: AppStrings
+    @Binding var text: String
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text(strings.voiceTutorAnswerPlaceholder)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                TextEditor(text: $text)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .scrollDismissesKeyboard(.never)
+                    .focused($isFocused)
+                    .accessibilityLabel(strings.voiceTutorAnswerEdit)
+                    .accessibilityHint(strings.voiceTutorAnswerReviewHelp)
+                    .accessibilityIdentifier("voiceCall.answerEditor")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(Color(uiColor: .systemBackground))
+            .navigationTitle(strings.voiceTutorAnswerEdit)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(strings.done) {
+                        isFocused = false
+                        dismiss()
+                    }
+                    .accessibilityIdentifier("voiceCall.answerKeyboardDone")
+                }
+            }
+            .task { isFocused = true }
+        }
+    }
+}
+
 /// The same non-networking surface is rendered by device visual tests.
 struct VoiceTutorCallScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1054,7 +1108,7 @@ struct VoiceTutorCallScreen: View {
     @State private var showsEndConfirmation = false
     @State private var expiredOperationSequence: Int64?
     @GestureState private var orbDragIsActive = false
-    @FocusState private var answerEditorIsFocused: Bool
+    @State private var answerEditorSession: VoiceTutorAnswerEditorSession?
     let topic: String
     var discoveryPrompt: String? = nil
     let presentation: VoiceTutorCallPresentation
@@ -1140,7 +1194,6 @@ struct VoiceTutorCallScreen: View {
             updateOrbAnimation()
         }
         .onChange(of: showsTranscript) { _, isShowingTranscript in
-            if !isShowingTranscript { answerEditorIsFocused = false }
             withAnimation(disclosureAnimation) {
                 transcriptExpansion = isShowingTranscript ? 1 : 0
             }
@@ -1151,7 +1204,22 @@ struct VoiceTutorCallScreen: View {
             if phase == .review {
                 setTranscriptExpanded(true)
             }
-            if !answerDraftIsEditable { answerEditorIsFocused = false }
+            if !answerDraftIsEditable { answerEditorSession = nil }
+        }
+        .onChange(of: answerDraftState.answerID) { _, _ in
+            answerEditorSession = nil
+        }
+        .sheet(item: $answerEditorSession) { session in
+            VoiceTutorAnswerEditor(strings: strings, text: Binding(
+                get: { answerDraftState.answerID == session.id ? answerDraftText.wrappedValue : "" },
+                set: { text in
+                    guard answerDraftState.answerID == session.id, answerDraftIsEditable else { return }
+                    answerDraftText.wrappedValue = text
+                }
+            ))
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationContentInteraction(.scrolls)
         }
         .onChange(of: orbDragIsActive) { _, isTouching in
             guard !isTouching else { return }
@@ -1165,7 +1233,7 @@ struct VoiceTutorCallScreen: View {
         }
         .onChange(of: presentation.phase) { oldPhase, newPhase in
             if !newPhase.isLive {
-                answerEditorIsFocused = false
+                answerEditorSession = nil
                 showsEndConfirmation = false
                 cancelOrbInteraction()
             }
@@ -1611,10 +1679,23 @@ struct VoiceTutorCallScreen: View {
         }
     }
 
+    private func openAnswerEditor() {
+        guard answerDraftIsEditable, let answerID = answerDraftState.answerID else { return }
+        transcriptAutoScrollTask?.cancel()
+        transcriptAutoScrollTask = nil
+        transcriptScrollSettleTask?.cancel()
+        transcriptScrollSettleTask = nil
+        transcriptScrollAnimates = false
+        answerEditorSession = VoiceTutorAnswerEditorSession(id: answerID)
+    }
+
     private var answerDraftPreview: some View {
         Button {
-            setTranscriptExpanded(true)
-            answerEditorIsFocused = answerDraftIsEditable
+            if answerDraftIsEditable {
+                openAnswerEditor()
+            } else {
+                setTranscriptExpanded(true)
+            }
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
@@ -1644,37 +1725,33 @@ struct VoiceTutorCallScreen: View {
 
     private var answerDraftCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(strings.voiceTutorAnswerDraftTitle)
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 0)
-                if answerEditorIsFocused {
-                    Button(strings.done) { answerEditorIsFocused = false }
-                        .font(.subheadline.weight(.medium))
-                        .frame(minWidth: 44, minHeight: 44)
-                        .accessibilityIdentifier("voiceCall.answerKeyboardDone")
-                }
-            }
-            ZStack(alignment: .topLeading) {
-                if answerDraftText.wrappedValue.isEmpty {
-                    Text(strings.voiceTutorAnswerPlaceholder)
+            Button(action: openAnswerEditor) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(strings.voiceTutorAnswerDraftTitle)
+                            .font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 8)
+                        if answerDraftIsEditable {
+                            Label(strings.voiceTutorAnswerEdit, systemImage: "pencil")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(voiceAccent)
+                        }
+                    }
+                    Text(answerDraftText.wrappedValue.isEmpty
+                         ? strings.voiceTutorAnswerPlaceholder : answerDraftText.wrappedValue)
                         .font(.body)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 8)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
+                        .foregroundStyle(answerDraftText.wrappedValue.isEmpty ? .secondary : .primary)
+                        .lineLimit(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                TextEditor(text: answerDraftText)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .focused($answerEditorIsFocused)
-                    .disabled(!answerDraftIsEditable)
-                    .frame(height: usesAccessibilityChrome ? 280 : 180)
-                    .accessibilityLabel(strings.voiceTutorAnswerEdit)
-                    .accessibilityHint(strings.voiceTutorAnswerReviewHelp)
-                    .accessibilityIdentifier("voiceCall.answerEditor")
+                .multilineTextAlignment(.leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .disabled(!answerDraftIsEditable)
+            .accessibilityLabel(strings.voiceTutorAnswerEdit)
+            .accessibilityValue(answerDraftText.wrappedValue)
+            .accessibilityIdentifier("voiceCall.answerEdit")
             if answerDraftState.phase != .listening {
                 Text(strings.voiceTutorAnswerReviewHelp)
                     .font(.caption)
@@ -1709,7 +1786,7 @@ struct VoiceTutorCallScreen: View {
             }
             if canSkipAnswer {
                 Button(strings.voiceTutorAnswerSkip) {
-                    answerEditorIsFocused = false
+                    answerEditorSession = nil
                     onSkipAnswer()
                 }
                 .font(.caption)
@@ -1899,9 +1976,6 @@ struct VoiceTutorCallScreen: View {
             .onChange(of: answerDraftText.wrappedValue) { _, _ in
                 scheduleTranscriptAutoScroll(using: proxy)
             }
-            .onChange(of: answerEditorIsFocused) { _, isFocused in
-                if isFocused { proxy.scrollTo("voiceCall.answerDraft", anchor: .bottom) }
-            }
             .onChange(of: showsTranscript) { _, isShowingTranscript in
                 if isShowingTranscript { scheduleTranscriptAutoScroll(using: proxy) }
             }
@@ -1966,7 +2040,7 @@ struct VoiceTutorCallScreen: View {
     private func scheduleTranscriptAutoScroll(using proxy: ScrollViewProxy, animated: Bool = false) {
         // The mounted, hidden transcript follows too, so the first drag already
         // reveals the latest turn instead of jumping there only after release.
-        guard !answerEditorIsFocused, transcriptFollowState.shouldAutoScrollForContentChange else { return }
+        guard answerEditorSession == nil, transcriptFollowState.shouldAutoScrollForContentChange else { return }
         transcriptScrollAnimates = transcriptScrollAnimates || (animated && showsTranscript)
         transcriptAutoScrollTask?.cancel()
         transcriptAutoScrollTask = Task { @MainActor in
@@ -1974,7 +2048,7 @@ struct VoiceTutorCallScreen: View {
             // the new bottom anchor. Wait one main-actor turn, then re-check the
             // learner's position so a concurrent scroll toward history wins.
             await Task.yield()
-            guard !Task.isCancelled, !answerEditorIsFocused,
+            guard !Task.isCancelled, answerEditorSession == nil,
                   transcriptFollowState.shouldAutoScrollForContentChange else { return }
             let animate = transcriptScrollAnimates && !reduceMotion
             transcriptScrollAnimates = false
@@ -1985,7 +2059,7 @@ struct VoiceTutorCallScreen: View {
     }
 
     private func scheduleTranscriptScrollSettlement(using proxy: ScrollViewProxy) {
-        guard transcriptFollowState.shouldScheduleSettlement(
+        guard answerEditorSession == nil, transcriptFollowState.shouldScheduleSettlement(
             isGestureActive: transcriptDragIsActive
         ) else { return }
         transcriptScrollSettleTask?.cancel()
@@ -1995,7 +2069,7 @@ struct VoiceTutorCallScreen: View {
             } catch {
                 return
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, answerEditorSession == nil else { return }
             guard transcriptFollowState.shouldScheduleSettlement(
                 isGestureActive: transcriptDragIsActive
             ) else {
@@ -2273,11 +2347,11 @@ struct VoiceTutorCallScreen: View {
         if hasAnswerDraft, presentation.pauseState.mode == .active {
             switch answerDraftState.phase {
             case .listening:
-                answerEditorIsFocused = false
+                answerEditorSession = nil
                 onFinishAnswer()
             case .review, .failed:
                 guard canSubmitAnswer else { return }
-                answerEditorIsFocused = false
+                answerEditorSession = nil
                 onSubmitAnswer()
             default: break
             }

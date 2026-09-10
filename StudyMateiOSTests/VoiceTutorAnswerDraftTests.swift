@@ -1,4 +1,7 @@
 import Foundation
+import Combine
+import SwiftUI
+import UIKit
 import XCTest
 @testable import StudyMate
 
@@ -211,5 +214,237 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
     }
     private func parse(_ value: [String: Any]) throws -> VoiceTutorRealtimeEvent {
         try VoiceTutorRealtimeEventParser.parse(data: JSONSerialization.data(withJSONObject: value))
+    }
+}
+
+/// Exercises the real editor's UIKit text-input surface in a presented window.
+/// Programmatic caret/IME operations do not simulate a keyboard trackpad press.
+@MainActor
+final class VoiceTutorAnswerEditorTests: XCTestCase {
+    func testNativeEditorMovesCaretBetweenKoreanLines() async throws {
+        let harness = try VoiceTutorAnswerEditorHarness(text: "첫째 줄 시작\n둘째 줄 가운데\n셋째 줄 끝")
+        defer { harness.close() }
+        let editor = try await harness.presentedEditor()
+        XCTAssertTrue(editor.isScrollEnabled)
+        XCTAssertTrue(editor.isEditable)
+        let start = try XCTUnwrap(editor.position(from: editor.beginningOfDocument, offset: 2))
+        let down = try XCTUnwrap(editor.position(from: start, in: .down, offset: 1))
+        let downOffset = editor.offset(from: editor.beginningOfDocument, to: down)
+        let secondLine = (harness.probe.text as NSString).range(of: "둘째 줄 가운데")
+        XCTAssertTrue(NSLocationInRange(downOffset, secondLine), "Moving down must reach the next visual line")
+        XCTAssertGreaterThan(editor.caretRect(for: down).minY, editor.caretRect(for: start).minY)
+        editor.selectedTextRange = editor.textRange(from: down, to: down)
+        XCTAssertEqual(editor.selectedRange, NSRange(location: downOffset, length: 0))
+
+        let up = try XCTUnwrap(editor.position(from: down, in: .up, offset: 1))
+        XCTAssertLessThan(editor.caretRect(for: up).minY, editor.caretRect(for: down).minY)
+        XCTAssertLessThan(editor.offset(from: editor.beginningOfDocument, to: up), secondLine.location)
+        XCTAssertEqual(harness.probe.text, "첫째 줄 시작\n둘째 줄 가운데\n셋째 줄 끝")
+        attach(harness, name: "voice-answer-editor-regular")
+    }
+
+    func testNativeSelectionAndScrollSurviveUnrelatedParentUpdates() async throws {
+        let text = (1...24).map { "\($0)번째 줄: 스프링의 역할을 설명합니다." }.joined(separator: "\n")
+        let harness = try VoiceTutorAnswerEditorHarness(text: text)
+        defer { harness.close() }
+        let editor = try await harness.presentedEditor()
+        let selection = (text as NSString).range(of: "12번째 줄")
+        XCTAssertNotEqual(selection.location, NSNotFound)
+        editor.selectedRange = selection
+        editor.scrollRangeToVisible(selection)
+        editor.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        let offset = editor.contentOffset
+
+        for _ in 0..<5 {
+            harness.probe.parentRevision += 1
+            await Task.yield()
+            harness.layout()
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let currentEditor = try XCTUnwrap(harness.findEditor())
+        XCTAssertTrue(currentEditor === editor, "A call timer or status update must not replace the text-input view")
+        XCTAssertTrue(editor.isFirstResponder)
+        XCTAssertEqual(editor.selectedRange, selection)
+        XCTAssertEqual(editor.contentOffset.y, offset.y, accuracy: 2)
+        XCTAssertEqual(harness.probe.text, text)
+    }
+
+    func testNativeKoreanAndNewlineEditsUpdateTheExactDraftBinding() async throws {
+        let initial = "  첫째 줄 👩‍💻\n수정 전 답변\n마지막 줄  "
+        let harness = try VoiceTutorAnswerEditorHarness(text: initial)
+        defer { harness.close() }
+        let editor = try await harness.presentedEditor()
+        let replacedRange = (initial as NSString).range(of: "수정 전 답변")
+        let replacement = "수정한 답변\n직접 추가한 문장"
+        editor.selectedRange = replacedRange
+        editor.insertText(replacement)
+        let expected = (initial as NSString).replacingCharacters(in: replacedRange, with: replacement)
+        try await waitForBinding(harness.probe, toEqual: expected)
+        XCTAssertEqual(editor.text, expected)
+        XCTAssertEqual(editor.selectedRange.location, replacedRange.location + replacement.utf16.count)
+        XCTAssertEqual(editor.selectedRange.length, 0)
+
+        editor.insertText("\n추가 설명")
+        let final = (expected as NSString).replacingCharacters(
+            in: NSRange(location: replacedRange.location + replacement.utf16.count, length: 0),
+            with: "\n추가 설명"
+        )
+        try await waitForBinding(harness.probe, toEqual: final)
+        XCTAssertEqual(editor.text, final, "Native editing must preserve surrounding whitespace, emoji, and paragraph breaks")
+    }
+
+    func testMarkedKoreanTextSurvivesAnUnrelatedParentUpdate() async throws {
+        let harness = try VoiceTutorAnswerEditorHarness(text: "답변: ")
+        defer { harness.close() }
+        let editor = try await harness.presentedEditor()
+        editor.selectedRange = NSRange(location: harness.probe.text.utf16.count, length: 0)
+        editor.setMarkedText("ㅎ", selectedRange: NSRange(location: 1, length: 0))
+        editor.setMarkedText("한", selectedRange: NSRange(location: 1, length: 0))
+        let selection = editor.selectedRange
+        let marked = try XCTUnwrap(editor.markedTextRange)
+        XCTAssertEqual(editor.text(in: marked), "한")
+
+        harness.probe.parentRevision += 1
+        await Task.yield()
+        harness.layout()
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertTrue(harness.findEditor() === editor)
+        let preservedMarked = try XCTUnwrap(editor.markedTextRange, "A parent refresh must not commit or discard IME composition")
+        XCTAssertEqual(editor.text(in: preservedMarked), "한")
+        XCTAssertEqual(editor.selectedRange, selection)
+        editor.unmarkText()
+        editor.insertText("글\n다음 줄")
+        try await waitForBinding(harness.probe, toEqual: "답변: 한글\n다음 줄")
+        XCTAssertNil(editor.markedTextRange)
+    }
+
+    func testAccessibilityEditorKeepsScrollableMultilineContent() async throws {
+        let text = (1...12).map { "\($0)번째 문장입니다. 답변을 읽고 수정해 주세요." }.joined(separator: "\n")
+        let harness = try VoiceTutorAnswerEditorHarness(text: text, dynamicType: .accessibility3)
+        defer { harness.close() }
+        let editor = try await harness.presentedEditor()
+        XCTAssertTrue(editor.isScrollEnabled)
+        XCTAssertTrue(editor.isEditable)
+        XCTAssertGreaterThan(editor.bounds.height, 100, "Large text must retain a usable independent editing viewport")
+        XCTAssertGreaterThan(editor.contentSize.height, editor.bounds.height)
+        let end = NSRange(location: text.utf16.count, length: 0)
+        editor.selectedRange = end
+        editor.scrollRangeToVisible(end)
+        editor.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertGreaterThan(editor.contentOffset.y, 0, "The last paragraph must remain reachable with large text")
+        XCTAssertEqual(editor.selectedRange, end)
+        XCTAssertEqual(harness.probe.text, text)
+        attach(harness, name: "voice-answer-editor-accessibility3")
+    }
+
+    private func waitForBinding(_ probe: VoiceTutorAnswerEditorProbe, toEqual expected: String) async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        while probe.text != expected && ProcessInfo.processInfo.systemUptime < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(probe.text, expected)
+    }
+
+    private func attach(_ harness: VoiceTutorAnswerEditorHarness, name: String) {
+        harness.layout()
+        let image = UIGraphicsImageRenderer(bounds: harness.window.bounds).image { _ in
+            harness.window.drawHierarchy(in: harness.window.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
+@MainActor
+private final class VoiceTutorAnswerEditorProbe: ObservableObject {
+    @Published var text: String
+    @Published var parentRevision = 0
+
+    init(text: String) { self.text = text }
+}
+
+private struct VoiceTutorAnswerEditorTestParent: View {
+    @ObservedObject var probe: VoiceTutorAnswerEditorProbe
+    let dynamicType: DynamicTypeSize
+
+    var body: some View {
+        // Consume a call-like update without changing the editor's identity or
+        // geometry, so selection preservation is exercised across body updates.
+        let _ = probe.parentRevision
+        VoiceTutorAnswerEditor(strings: AppStrings(language: .korean), text: $probe.text)
+            .dynamicTypeSize(dynamicType)
+            .environment(\.locale, Locale(identifier: "ko_KR"))
+    }
+}
+
+@MainActor
+private final class VoiceTutorAnswerEditorHarness {
+    let probe: VoiceTutorAnswerEditorProbe
+    let window: UIWindow
+    private let previousKeyWindow: UIWindow?
+
+    init(text: String, dynamicType: DynamicTypeSize = .large) throws {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else {
+            throw XCTSkip("Native editor verification requires an iOS application window scene")
+        }
+        probe = VoiceTutorAnswerEditorProbe(text: text)
+        previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
+        window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        window.overrideUserInterfaceStyle = .dark
+        window.rootViewController = UIHostingController(
+            rootView: VoiceTutorAnswerEditorTestParent(probe: probe, dynamicType: dynamicType)
+        )
+        window.makeKeyAndVisible()
+        layout()
+    }
+
+    func presentedEditor() async throws -> UITextView {
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            layout()
+            if let editor = findEditor(), editor.bounds.height > 0, editor.isFirstResponder {
+                // Let the initial software-keyboard transition finish before
+                // comparing subsequent caret/scroll state or taking a snapshot.
+                try await Task.sleep(for: .milliseconds(350))
+                layout()
+                return editor
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let editor = try XCTUnwrap(findEditor(), "The answer editor must mount a native UITextView")
+        XCTAssertTrue(editor.isFirstResponder, "The newly opened editor should focus its text input once")
+        return editor
+    }
+
+    func findEditor() -> UITextView? {
+        func visit(_ view: UIView) -> UITextView? {
+            if let editor = view as? UITextView, editor.isEditable { return editor }
+            for child in view.subviews {
+                if let editor = visit(child) { return editor }
+            }
+            return nil
+        }
+        return visit(window)
+    }
+
+    func layout() {
+        window.setNeedsLayout()
+        window.layoutIfNeeded()
+        window.rootViewController?.view.layoutIfNeeded()
+    }
+
+    func close() {
+        window.endEditing(true)
+        window.isHidden = true
+        window.rootViewController = nil
+        previousKeyWindow?.makeKey()
     }
 }
