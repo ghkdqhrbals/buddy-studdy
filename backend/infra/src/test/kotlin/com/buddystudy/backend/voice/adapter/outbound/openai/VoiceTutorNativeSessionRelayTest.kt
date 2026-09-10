@@ -37,6 +37,39 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
     @Test
+    fun `barge in clears live provider output before replying to the correction and never relays stale speech`() {
+        Fixture().use { f ->
+            f.opening(); f.learner(1, "learner-1"); f.created("response-1")
+            f.provider("output_audio_buffer.started", "response_id" to "response-1")
+            f.await("old response began playing") { f.ui.any { it.path("response_id").asText() == "response-1" } }
+            for (type in listOf(Contract.SPEECH_STARTED_EVENT, Contract.SPEECH_STOPPED_EVENT)) {
+                assertThat(f.controls.tryEmitNext(JsonMapperProvider.mapper.writeValueAsString(mapOf("type" to type, "sequence" to 2))))
+                    .isEqualTo(Sinks.EmitResult.OK)
+            }
+            f.await("barge in cancellation and new commit reached the provider") {
+                f.outgoing.count { it.path("type").asText() == "input_audio_buffer.commit" } == 2
+            }
+            assertThat(f.outgoing.map { it.path("type").asText() })
+                .containsSubsequence("response.cancel", "output_audio_buffer.clear", "input_audio_buffer.commit")
+            f.provider("input_audio_buffer.committed", "item_id" to "learner-2")
+            f.provider("response.done", "response" to mapOf("id" to "response-1", "status" to "cancelled", "output" to emptyList<Any>()))
+            f.await("intentional interruption relayed") { f.ui.any { it.path("type").asText() == Contract.RESPONSE_INTERRUPTED_EVENT } }
+            assertThat(f.responses()).hasSize(2)
+            f.provider("output_audio_buffer.cleared", "response_id" to "response-1")
+            f.await("latest learner reply begins after clear") { f.responses().size == 3 }
+            f.provider("response.output_audio_transcript.done", "response_id" to "response-1", "item_id" to "stale-tutor", "transcript" to "stale")
+            f.provider("output_audio_buffer.started", "response_id" to "response-1")
+            f.provider("conversation.item.created", "item" to mapOf("id" to "after-stale", "type" to "message"))
+            f.await("late events processed") { f.ui.any { it.path("item").path("id").asText() == "after-stale" } }
+            assertThat(f.ui.any { it.path("item_id").asText() == "stale-tutor" }).isFalse()
+            assertThat(f.stored.any { it.path("item_id").asText() == "stale-tutor" }).isFalse()
+            assertThat(f.ui.count { it.path("type").asText() == "output_audio_buffer.started" && it.path("response_id").asText() == "response-1" }).isEqualTo(1)
+            assertThat(f.ui.any { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isFalse()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
     fun `ordinary native reply proceeds while tutor audit persistence is suspended and learner ASR is absent`() {
         val release = CompletableDeferred<Unit>()
         val entered = AtomicBoolean()

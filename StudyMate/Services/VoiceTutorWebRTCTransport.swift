@@ -763,6 +763,49 @@ struct VoiceTutorLocalPlayoutTailState: Equatable {
     }
 }
 
+/// Stops an interrupted answer at the remote source gain while WebRTC keeps
+/// consuming its RTP queue. Only a different accepted response can reopen it;
+/// delayed events for interrupted responses must never replay their audio.
+struct VoiceTutorLocalPlayoutInterruptionState: Equatable {
+    private(set) var activeResponseID: String?
+    private(set) var isMuted = false
+    private var observedResponseIDs: [String] = []
+    private var interruptedResponseIDs: [String] = []
+
+    @discardableResult
+    mutating func responseStarted(_ responseID: String?) -> Bool {
+        guard let responseID, !responseID.isEmpty,
+              !interruptedResponseIDs.contains(responseID),
+              activeResponseID == responseID || !observedResponseIDs.contains(responseID) else { return false }
+        Self.remember(responseID, in: &observedResponseIDs)
+        activeResponseID = responseID
+        isMuted = false
+        return true
+    }
+
+    @discardableResult
+    mutating func interruptResponse(_ responseID: String) -> Bool {
+        guard !responseID.isEmpty,
+              activeResponseID == nil || activeResponseID == responseID
+                || !observedResponseIDs.contains(responseID) else { return false }
+        // The server can cancel a response before its first audible event has
+        // announced that ID to iOS. Remember that unseen ID as muted too.
+        Self.remember(responseID, in: &observedResponseIDs)
+        Self.remember(responseID, in: &interruptedResponseIDs)
+        activeResponseID = responseID
+        isMuted = true
+        return true
+    }
+
+    private static func remember(_ responseID: String, in responseIDs: inout [String]) {
+        guard !responseIDs.contains(responseID) else { return }
+        responseIDs.append(responseID)
+        if responseIDs.count > 1_024 {
+            responseIDs.removeFirst(responseIDs.count - 1_024)
+        }
+    }
+}
+
 final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     var onRenderedPCM: (@Sendable (TimeInterval) -> Void)? {
         didSet { remoteRenderer.onRenderedPCM = onRenderedPCM }
@@ -789,6 +832,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private var peerConnection: LKRTCPeerConnection?
     private var localAudioTrack: LKRTCAudioTrack?
     private var remoteAudioTrack: LKRTCAudioTrack?
+    private var localPlayoutInterruptionState = VoiceTutorLocalPlayoutInterruptionState()
     private var interruptionObserver: NSObjectProtocol?
     private let stateLock = NSLock()
     private var isClosed = false
@@ -999,11 +1043,38 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     }
 
     /// Binds native renderer evidence to the exact provider response generation.
-    /// These calls never mute, stop, clear, or truncate the continuous RTP track.
+    /// The backend admits this replacement only after clearing interrupted
+    /// output. Restoring source gain keeps the same continuous RTP track alive.
     func beginLocalPlayoutResponse(responseID: String?) {
+        stateLock.lock()
+        guard !isClosed, localPlayoutInterruptionState.responseStarted(responseID) else {
+            stateLock.unlock()
+            return
+        }
+        remoteAudioTrack?.source.volume = 1
         diagnosticLock.lock()
         localPlayoutTailState.responseStarted(responseID)
         diagnosticLock.unlock()
+        stateLock.unlock()
+    }
+
+    /// Silence the old answer immediately without pausing the renderer or its
+    /// queue. Muting a source gain still consumes buffered packets, so resuming
+    /// a later answer cannot replay an audio queue held by a stopped engine.
+    @discardableResult
+    func interruptLocalPlayoutResponse(responseID: String) -> Bool {
+        stateLock.lock()
+        guard !isClosed, localPlayoutInterruptionState.interruptResponse(responseID) else {
+            stateLock.unlock()
+            return false
+        }
+        remoteAudioTrack?.source.volume = 0
+        diagnosticLock.lock()
+        _ = localPlayoutTailState.abandonResponse(responseID)
+        diagnosticLock.unlock()
+        stateLock.unlock()
+        emitMediaDiagnostic("tutor_playout_interrupted")
+        return true
     }
 
     func sealLocalPlayoutResponse(responseID: String) -> VoiceTutorLocalPlayoutTailToken? {
@@ -1342,6 +1413,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         guard !isClosed, remoteAudioTrack !== track else { return }
         remoteAudioTrack?.remove(remoteRenderer)
         remoteAudioTrack = track
+        track.source.volume = localPlayoutInterruptionState.isMuted ? 0 : 1
         track.add(remoteRenderer)
     }
 

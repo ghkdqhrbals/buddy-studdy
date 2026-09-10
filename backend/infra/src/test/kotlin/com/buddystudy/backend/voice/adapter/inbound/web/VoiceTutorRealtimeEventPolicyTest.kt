@@ -14,6 +14,23 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
+    fun `intentional interruption exposes only its exact response id and cannot be forged as client control`() {
+        val raw = mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT,
+            "responseId" to "r1", "transcript" to "private", "error" to "private"))
+        val result = policy.providerDecision(raw, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+        assertThat(result.terminate).isFalse()
+        val payload = mapper.readTree(result.payload)
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "responseId")
+        assertThat(payload.path("responseId").asText()).isEqualTo("r1")
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        assertThat(policy.providerDecision(raw, "voice-1", Instant.EPOCH).payload).isNull()
+        for (id in listOf("", "../r1", "r".repeat(192))) {
+            val invalid = mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT, "responseId" to id))
+            assertThat(policy.providerDecision(invalid, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
+    }
+
+    @Test
     fun `successful MCP metadata event contains only a positive exact id and cannot be forged by the client`() {
         val raw = """{"type":"${VoiceTutorRealtimeContract.STUDY_TREE_CHANGED_EVENT}","studyId":42,"arguments":{"secret":"discard"},"output":"discard"}"""
         val result = policy.providerDecision(raw, "synthetic-session", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)

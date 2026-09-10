@@ -828,22 +828,60 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(AppStrings(language: .english).voiceTutorInputRepeat, "Please say that again")
     }
 
-    func testLearnerOverlapKeepsCurrentTutorSentenceActive() {
+    func testLearnerOverlapImmediatelyInterruptsAndFencesCurrentTutorAnswer() {
         var state = VoiceTutorDuplexPlaybackState()
 
         state.responseStarted(responseID: "response-1", isTutorIntervention: false)
         XCTAssertTrue(state.assistantAudioBegan(responseID: "response-1"))
-        state.userSpeechStarted()
+        XCTAssertEqual(state.userSpeechStarted(), "response-1")
 
         XCTAssertTrue(state.isUserSpeaking)
-        XCTAssertTrue(state.assistantResponseActive)
+        XCTAssertFalse(state.assistantResponseActive)
         XCTAssertFalse(state.tutorInterventionActive)
+        XCTAssertNil(state.activeResponseID)
+        XCTAssertFalse(state.assistantAudioBegan(responseID: "response-1"))
+        XCTAssertFalse(state.responseStarted(responseID: "response-1", isTutorIntervention: false))
+        XCTAssertFalse(state.responseFinished(responseID: "response-1"))
 
         state.userSpeechStopped()
-        XCTAssertTrue(state.assistantResponseActive)
-
-        XCTAssertTrue(state.responseFinished(responseID: "response-1"))
         XCTAssertFalse(state.assistantResponseActive)
+        XCTAssertTrue(state.responseStarted(responseID: "response-2", isTutorIntervention: false))
+        XCTAssertFalse(state.responseFinished(responseID: "response-1"))
+        XCTAssertTrue(state.matchesActiveResponse(responseID: "response-2"))
+        XCTAssertTrue(state.responseFinished(responseID: "response-2"))
+        XCTAssertFalse(state.responseFinished(responseID: "response-2"))
+    }
+
+    func testInterruptionBeforeResponseCreatedRejectsDelayedOutputWithoutAffectingReplacement() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.interruptResponse(responseID: "response-delayed")
+        XCTAssertFalse(state.responseStarted(responseID: "response-delayed", isTutorIntervention: false))
+        XCTAssertFalse(state.matchesActiveResponse(responseID: "response-delayed"))
+        XCTAssertTrue(state.responseStarted(responseID: "response-new", isTutorIntervention: false))
+        state.interruptResponse(responseID: "response-delayed")
+        XCTAssertTrue(state.matchesActiveResponse(responseID: "response-new"))
+        XCTAssertFalse(state.responseFinished(responseID: "response-delayed"))
+    }
+
+    func testLegacyPCMOverlapRetainsItsExistingServerFloorPolicy() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.responseStarted(responseID: "response-pcm", isTutorIntervention: false)
+        XCTAssertNil(state.userSpeechStarted(interruptsTutor: false))
+        XCTAssertTrue(state.isUserSpeaking)
+        XCTAssertTrue(state.matchesActiveResponse(responseID: "response-pcm"))
+    }
+
+    func testIntentionalInterruptionIsDistinctFromInputRetryAndRequiresExactResponseID() throws {
+        XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(
+            text: #"{"type":"buddystudy.voice.response.interrupted","responseId":"resp_123-a"}"#
+        ), .responseInterrupted(responseID: "resp_123-a"))
+        for value in ["", "response with spaces", String(repeating: "r", count: 192)] {
+            let event = try JSONSerialization.data(withJSONObject: [
+                "type": "buddystudy.voice.response.interrupted", "responseId": value
+            ])
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(data: event),
+                           .ignored(type: "buddystudy.voice.response.interrupted"))
+        }
     }
 
     func testTutorCanTakeTheFloorWhileLearnerIsSpeaking() {
@@ -870,8 +908,8 @@ final class VoiceTutorContractTests: XCTestCase {
 
     func testProviderTurnAbandonmentClearsOnlyTheExactResponseAndPreservesLearnerSpeech() {
         var state = VoiceTutorDuplexPlaybackState()
-        state.responseStarted(responseID: "response-current", isTutorIntervention: true)
         state.userSpeechStarted()
+        state.responseStarted(responseID: "response-current", isTutorIntervention: true)
 
         XCTAssertFalse(state.abandonResponse(responseID: "response-stale"))
         XCTAssertTrue(state.assistantResponseActive)
@@ -1466,6 +1504,57 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(fixture.response.markOutputBufferStopped("response-2"), "response-2")
     }
 
+    func testNativeBargeInKeepsBufferedRenderCallbacksFromRevivingInterruptedAnswer() throws {
+        var fixture = VoiceTutorContractRenderFixture()
+        var duplex = VoiceTutorDuplexPlaybackState()
+        var gain = VoiceTutorLocalPlayoutInterruptionState()
+        var transcript = VoiceTutorAssistantTranscriptState()
+        let bufferedAudio = try makeRenderBuffer(Array(repeating: Int16(100), count: 480))
+
+        XCTAssertTrue(duplex.responseStarted(responseID: "wrong-answer", isTutorIntervention: false))
+        XCTAssertTrue(gain.responseStarted("wrong-answer"))
+        fixture.response.responseStarted("wrong-answer")
+        fixture.response.markOutputBufferStarted("wrong-answer")
+        transcript.stageCompletedTranscript("중단되어야 하는 긴 답변")
+        fixture.render(bufferedAudio)
+        XCTAssertEqual(fixture.phase, .speaking)
+        // Generation may already be done while the long output is still queued.
+        XCTAssertNil(fixture.response.markResponseDone("wrong-answer"))
+
+        let interruptedID = try XCTUnwrap(duplex.userSpeechStarted())
+        XCTAssertTrue(gain.interruptResponse(interruptedID))
+        XCTAssertTrue(fixture.response.abandonResponse(interruptedID))
+        transcript.discard()
+        fixture.phase = .listening
+        for _ in 1...50 { fixture.render(bufferedAudio) }
+        XCTAssertEqual(fixture.callbackCount, 51, "The renderer must continue consuming buffered audio")
+        XCTAssertEqual(fixture.phase, .listening)
+        XCTAssertTrue(gain.isMuted)
+        XCTAssertNil(fixture.response.markOutputBufferStopped("wrong-answer"))
+        XCTAssertNil(fixture.response.markResponseDone("wrong-answer"))
+        XCTAssertFalse(duplex.responseFinished(responseID: "wrong-answer"))
+        XCTAssertFalse(duplex.responseStarted(responseID: "wrong-answer", isTutorIntervention: false))
+        XCTAssertFalse(gain.responseStarted("wrong-answer"))
+        XCTAssertNil(transcript.commit())
+
+        duplex.userSpeechStopped()
+        XCTAssertTrue(duplex.responseStarted(responseID: "corrected-answer", isTutorIntervention: false))
+        XCTAssertTrue(gain.responseStarted("corrected-answer"))
+        fixture.response.responseStarted("corrected-answer")
+        fixture.response.markOutputBufferStarted("corrected-answer")
+        transcript.stageCompletedTranscript("새 질문에 맞춘 답변")
+        fixture.render(bufferedAudio)
+        XCTAssertEqual(fixture.phase, .speaking)
+        XCTAssertFalse(gain.isMuted)
+        XCTAssertNil(fixture.response.markOutputBufferStopped("wrong-answer"))
+        XCTAssertNil(fixture.response.markResponseDone("wrong-answer"))
+        XCTAssertTrue(duplex.matchesActiveResponse(responseID: "corrected-answer"))
+        XCTAssertNil(fixture.response.markResponseDone("corrected-answer"))
+        let completedID = try XCTUnwrap(fixture.response.markOutputBufferStopped("corrected-answer"))
+        XCTAssertTrue(duplex.responseFinished(responseID: completedID))
+        XCTAssertEqual(transcript.commit(), "새 질문에 맞춘 답변")
+    }
+
     func testWebRTCResponseCompletionDoesNotModifyLateQuietSamples() throws {
         var fixture = VoiceTutorContractRenderFixture()
         fixture.response.responseStarted("response-1")
@@ -1623,7 +1712,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(fixture.phase, .listening)
     }
 
-    func testLearnerOverlapContractHasNoClientCancelOrTruncationPath() throws {
+    func testLearnerInterruptionKeepsProviderCancellationUnderBackendControl() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -1637,6 +1726,8 @@ final class VoiceTutorContractTests: XCTestCase {
         }.joined(separator: "\n")
 
         XCTAssertFalse(sources.contains("interruptPlayback"))
+        XCTAssertTrue(sources.contains("interruptLocalPlayoutResponse"))
+        XCTAssertTrue(sources.contains("buddystudy.voice.response.interrupted"))
         XCTAssertFalse(sources.contains("sendBargeIn"))
         XCTAssertFalse(sources.contains("buddystudy.voice.barge-in"))
         XCTAssertFalse(sources.contains("conversation.item.truncate"))
@@ -2868,7 +2959,7 @@ final class VoiceTutorContractTests: XCTestCase {
         ])
     }
 
-    func testLocalVoiceActivityKeepsListeningWhileTheTutorFinishesTheCurrentSentence() {
+    func testLocalVoiceActivityInterruptsTutorWithoutClosingLearnerCapture() {
         var detector = VoiceTutorLocalSpeechDetector()
         var playback = VoiceTutorDuplexPlaybackState()
         XCTAssertTrue(playback.responseStarted(responseID: "synthetic-tutor-sentence", isTutorIntervention: false))
@@ -2877,18 +2968,18 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8), [
             VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
         ])
-        playback.userSpeechStarted()
+        XCTAssertEqual(playback.userSpeechStarted(), "synthetic-tutor-sentence")
         XCTAssertTrue(playback.isUserSpeaking)
-        XCTAssertTrue(playback.assistantResponseActive)
-        XCTAssertEqual(playback.activeResponseID, "synthetic-tutor-sentence")
+        XCTAssertFalse(playback.assistantResponseActive)
+        XCTAssertNil(playback.activeResponseID)
         XCTAssertEqual(localSpeechEvents(&detector, rms: 0, frames: 70), [
             VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1)
         ])
         playback.userSpeechStopped()
         XCTAssertFalse(playback.isUserSpeaking)
-        XCTAssertTrue(playback.assistantResponseActive,
-                      "Local speech edges never cancel, clear, or truncate tutor playback")
-        XCTAssertEqual(playback.activeResponseID, "synthetic-tutor-sentence")
+        XCTAssertFalse(playback.assistantResponseActive)
+        XCTAssertFalse(playback.responseStarted(responseID: "synthetic-tutor-sentence", isTutorIntervention: false))
+        XCTAssertTrue(detector.isEnabled, "Interrupting tutor output must leave the microphone active")
     }
 
     func testLocalVoiceActivityMessagesPairEdgesWithPositiveIncreasingUtteranceSequences() {

@@ -286,7 +286,8 @@ final class VoiceTutorPauseTests: XCTestCase {
         playback.userSpeechStarted()
         let state = supportedState()
         XCTAssertFalse(state.holdsMicrophone)
-        XCTAssertTrue(playback.assistantResponseActive)
+        XCTAssertTrue(playback.isUserSpeaking)
+        XCTAssertFalse(playback.assistantResponseActive)
         XCTAssertEqual(VoiceTutorCallPresentation(phase: .speaking).primaryAction, .end)
     }
 

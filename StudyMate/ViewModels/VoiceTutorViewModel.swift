@@ -306,10 +306,11 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
     private(set) var assistantResponseActive = false
     private(set) var activeResponseID: String?
     private(set) var tutorInterventionActive = false
+    private var interruptedResponseIDs: [String] = []
 
     @discardableResult
     mutating func responseStarted(responseID: String?, isTutorIntervention: Bool) -> Bool {
-        guard let responseID, !responseID.isEmpty else {
+        guard let responseID, !responseID.isEmpty, !wasInterrupted(responseID) else {
             return false
         }
         assistantResponseActive = true
@@ -335,8 +336,12 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
         return true
     }
 
-    mutating func userSpeechStarted() {
+    @discardableResult
+    mutating func userSpeechStarted(interruptsTutor: Bool = true) -> String? {
         isUserSpeaking = true
+        guard interruptsTutor, let responseID = activeResponseID else { return nil }
+        interruptResponse(responseID: responseID)
+        return responseID
     }
 
     mutating func userSpeechStopped() {
@@ -344,13 +349,25 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
     }
 
     mutating func responseFinished(responseID: String) -> Bool {
-        if let activeResponseID, activeResponseID != responseID {
-            return false
-        }
+        guard matchesActiveResponse(responseID: responseID) else { return false }
         assistantResponseActive = false
         activeResponseID = nil
         tutorInterventionActive = false
         return true
+    }
+
+    func wasInterrupted(_ responseID: String) -> Bool {
+        interruptedResponseIDs.contains(responseID)
+    }
+
+    /// Remember interruptions even when the control notification beats created.
+    /// Late audio, captions and completion cannot revive a cancelled answer.
+    mutating func interruptResponse(responseID: String) {
+        if !wasInterrupted(responseID) {
+            interruptedResponseIDs.append(responseID)
+            if interruptedResponseIDs.count > 256 { interruptedResponseIDs.removeFirst() }
+        }
+        _ = abandonResponse(responseID: responseID)
     }
 
     @discardableResult
@@ -1056,11 +1073,7 @@ final class VoiceTutorViewModel: ObservableObject {
                     if case .speech(let event) = control {
                         switch event.activity {
                         case .started:
-                            self.inputNeedsRepeat = false
-                            self.duplexPlaybackState.userSpeechStarted()
-                            if !self.duplexPlaybackState.assistantResponseActive {
-                                self.phase = .listening
-                            }
+                            self.handleLearnerSpeechStarted()
                         case .stopped:
                             self.duplexPlaybackState.userSpeechStopped()
                         }
@@ -1432,6 +1445,8 @@ final class VoiceTutorViewModel: ObservableObject {
             inputNeedsRepeat = true
         case .providerTurnAbandoned(let responseID):
             abandonProviderTurn(responseID: responseID)
+        case .responseInterrupted(let responseID):
+            interruptTutorResponse(responseID: responseID)
         case .studyFocused(let focus):
             guard phase.isLive, !isFinalizing else { break }
             studyFocus.apply(focus, attemptID: attemptID)
@@ -1514,11 +1529,7 @@ final class VoiceTutorViewModel: ObservableObject {
             inputNeedsRepeat = false
             appendCaption(speaker: .learner, text: transcript)
         case .userSpeechStarted:
-            inputNeedsRepeat = false
-            duplexPlaybackState.userSpeechStarted()
-            if !duplexPlaybackState.assistantResponseActive {
-                phase = .listening
-            }
+            handleLearnerSpeechStarted()
         case .userSpeechStopped:
             duplexPlaybackState.userSpeechStopped()
         case .responseStarted(
@@ -1526,6 +1537,13 @@ final class VoiceTutorViewModel: ObservableObject {
             let isTutorIntervention,
             let isQuotaExhaustionNotice
         ):
+            guard let responseID, !responseID.isEmpty,
+                  !duplexPlaybackState.wasInterrupted(responseID) else { break }
+            if usesWebRTC, phase.isLive, duplexPlaybackState.isUserSpeaking,
+               !isQuotaExhaustionNotice {
+                interruptTutorResponse(responseID: responseID)
+                break
+            }
             if let acceptedResponseID = VoiceTutorServerEndPlayoutPolicy
                 .acceptedQuotaNoticeResponseID(
                     reason: serverEndReason,
@@ -1590,7 +1608,8 @@ final class VoiceTutorViewModel: ObservableObject {
 
     private func handleTutorPlaybackCompleted(responseID: String, attemptID: UUID) async {
         guard connectionAttemptFence.isCurrent(attemptID), phase.isLive,
-              let connection = activeConnection, connection.isCurrent() else {
+              let connection = activeConnection, connection.isCurrent(),
+              duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
             return
         }
         try? await transport.sendPlaybackCompleted(responseID: responseID)
@@ -1632,6 +1651,34 @@ final class VoiceTutorViewModel: ObservableObject {
         logDiagnostic("event=provider_response_stream_finished")
         scheduleTerminalPlayoutDrainIfReady()
         if phase.isLive { phase = .listening }
+    }
+
+    private func handleLearnerSpeechStarted() {
+        guard phase.isLive, !isFinalizing else { return }
+        inputNeedsRepeat = false
+        if usesWebRTC,
+           let responseID = duplexPlaybackState.activeResponseID ?? pendingSpokenEndPlayoutTail?.responseID {
+            interruptTutorResponse(responseID: responseID)
+        }
+        duplexPlaybackState.userSpeechStarted(interruptsTutor: usesWebRTC)
+        if !duplexPlaybackState.assistantResponseActive { phase = .listening }
+    }
+
+    private func interruptTutorResponse(responseID: String) {
+        guard usesWebRTC, phase.isLive, !isFinalizing else { return }
+        let affectsCurrentResponse = duplexPlaybackState.activeResponseID == responseID
+            || (duplexPlaybackState.activeResponseID == nil && !duplexPlaybackState.wasInterrupted(responseID))
+        duplexPlaybackState.interruptResponse(responseID: responseID)
+        // A delayed interruption for an old answer must not silence its replacement.
+        guard affectsCurrentResponse,
+              webRTCTransport?.interruptLocalPlayoutResponse(responseID: responseID) == true else { return }
+        assistantTranscriptState.discard()
+        cancelTerminalPlayoutDrain()
+        pendingSpokenEndPlayoutTail = nil
+        _ = webRTCResponseState.abandonResponse(responseID)
+        inputNeedsRepeat = false
+        phase = .listening
+        logDiagnostic("event=tutor_response_interrupted")
     }
 
     private func abandonProviderTurn(responseID: String?) {

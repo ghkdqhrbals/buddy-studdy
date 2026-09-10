@@ -105,6 +105,16 @@ internal class VoiceTutorRealtimeEventPolicy(
             } else {
                 providerFailure(sessionId, serverTime, "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR")
             }
+            VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT -> if (
+                transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
+                validProviderResponseId(node.path("responseId"))
+            ) {
+                ProviderEventDecision(mapper.writeValueAsString(mapOf(
+                    "type" to type, "responseId" to node.path("responseId").asText(),
+                )))
+            } else {
+                ProviderEventDecision(payload = null)
+            }
             VoiceTutorRealtimeContract.INPUT_RETRY_EVENT -> if (
                 transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND
             ) {

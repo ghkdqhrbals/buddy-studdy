@@ -138,9 +138,9 @@ class VoiceTutorControlWebSocketHandler(
         fun emitProviderPayload(value: String) {
             synchronized(terminalGate) {
                 val type = runCatching { mapper.readTree(value).path("type").asText() }.getOrDefault("")
-                val terminalInputRetry = relayTerminated.get() && gracefulTerminal.get() &&
-                    type == VoiceTutorRealtimeContract.INPUT_RETRY_EVENT
-                if ((!relayTerminated.get() || gracefulTerminal.get()) && !terminalInputRetry) {
+                val terminalInputHint = relayTerminated.get() && gracefulTerminal.get() &&
+                    type in setOf(VoiceTutorRealtimeContract.INPUT_RETRY_EVENT, VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT)
+                if ((!relayTerminated.get() || gracefulTerminal.get()) && !terminalInputHint) {
                     emitRequired(outgoing, value)
                 }
             }

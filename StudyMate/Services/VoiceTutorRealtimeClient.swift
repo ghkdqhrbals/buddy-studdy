@@ -108,6 +108,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case userSpeechStopped
     case inputRetry
     case providerTurnAbandoned(responseID: String)
+    case responseInterrupted(responseID: String)
     case studyFocused(VoiceTutorStudyFocus?)
     case studyTreeChanged(studyID: Int)
     case studyTreeUpdated(studyID: Int)
@@ -200,6 +201,11 @@ enum VoiceTutorRealtimeEventParser {
                 return .providerTurnAbandoned(responseID: responseID)
             }
             return .inputRetry
+        case "buddystudy.voice.response.interrupted":
+            guard let responseID = providerResponseID("responseId", in: object) else {
+                return .ignored(type: type)
+            }
+            return .responseInterrupted(responseID: responseID)
         case "buddystudy.voice.study.focused":
             // Only an explicit null clears the current topic. Missing or malformed
             // metadata cannot impersonate discovery, a saved node, or a new epoch.
