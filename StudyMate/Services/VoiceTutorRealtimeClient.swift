@@ -107,6 +107,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case userSpeechStarted
     case userSpeechStopped
     case inputRetry
+    case inputSettled(sequence: Int)
     case providerTurnAbandoned(responseID: String)
     case studyFocused(VoiceTutorStudyFocus?)
     case studyTreeChanged(studyID: Int)
@@ -200,6 +201,10 @@ enum VoiceTutorRealtimeEventParser {
                 return .providerTurnAbandoned(responseID: responseID)
             }
             return .inputRetry
+        case "buddystudy.voice.input.settled":
+            guard let sequence = exactInteger("sequence", in: object).flatMap({ Int(exactly: $0) }),
+                  sequence >= 0 else { return .ignored(type: type) }
+            return .inputSettled(sequence: sequence)
         case "buddystudy.voice.study.focused":
             // Only an explicit null clears the current topic. Missing or malformed
             // metadata cannot impersonate discovery, a saved node, or a new epoch.

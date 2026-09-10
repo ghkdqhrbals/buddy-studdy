@@ -36,7 +36,8 @@ internal fun relayVoiceTutorNativeSession(
     onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
 ): Mono<Void> {
     val diagnostics = VoiceTutorSidebandDiagnostics(context.callId)
-    val controller = VoiceTutorNativeConversationController(responseTimeout, context.initialLessonRevision, context.session.language)
+    val controller = VoiceTutorNativeConversationController(responseTimeout, context.initialLessonRevision, context.session.language,
+        onProviderTurnFailure = diagnostics::observeProviderTurnFailure)
     val handshake = VoiceTutorWebRtcSessionHandshake(
         context.callId, connectTimeout,
         expectedTools = voiceTutorRealtimeFunctionTools(nativeVoiceTutorDefinitions(mcp)),

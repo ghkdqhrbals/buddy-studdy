@@ -121,6 +121,16 @@ internal class VoiceTutorRealtimeEventPolicy(
             } else {
                 ProviderEventDecision(payload = null)
             }
+            VoiceTutorRealtimeContract.INPUT_SETTLED_EVENT -> {
+                val sequence = node.path("sequence")
+                if (transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
+                    sequence.isIntegralNumber && sequence.canConvertToLong() && sequence.longValue() >= 0
+                ) {
+                    ProviderEventDecision(mapper.writeValueAsString(mapOf(
+                        "type" to type, "sequence" to sequence.longValue(),
+                    )))
+                } else ProviderEventDecision(payload = null)
+            }
             VoiceTutorRealtimeContract.SIDEBAND_READY_EVENT -> if (
                 transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND
             ) {
@@ -282,8 +292,11 @@ internal class VoiceTutorRealtimeEventPolicy(
         )
         if (type == "response.created") {
             val marker = response.path("metadata").path(VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY)
+            val nativeMarker = node.path(VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD)
             payload[VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD] =
-                marker.isBoolean && marker.booleanValue()
+                if (transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND && nativeMarker.isBoolean) {
+                    nativeMarker.booleanValue()
+                } else marker.isBoolean && marker.booleanValue()
         }
         return ProviderEventDecision(mapper.writeValueAsString(payload))
     }

@@ -37,6 +37,29 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
     @Test
+    fun `a provider rejected opening recovers on the live relay and subsequent learner speech gets a reply`() {
+        Fixture().use { f ->
+            f.connect()
+            val first = f.responses().single()
+            f.provider("error", "error" to mapOf("type" to "invalid_request_error", "code" to "invalid_type",
+                "event_id" to first.path("event_id").asText(), "param" to "response.metadata.buddystudy_quota_notice"))
+            f.await("rejected create releases a bounded opening retry") { f.responses().size == 2 }
+            f.completeAudioResponse("recovered-opening", "tutor-0")
+            f.learner(1, "learner-1")
+            f.completeAudioResponse("learner-reply", "tutor-1")
+            f.await("audible learner reply is forwarded") {
+                f.ui.any { it.path("type").asText() == "output_audio_buffer.stopped" &&
+                    it.path("response_id").asText() == "learner-reply" }
+            }
+
+            assertThat(f.responses()).hasSize(3)
+            assertThat(f.ui.map { it.path("type").asText() }).doesNotContain("error", Contract.INPUT_RETRY_EVENT)
+            assertThat(f.completed.get()).isFalse()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
     fun `ordinary native reply proceeds while tutor audit persistence is suspended and learner ASR is absent`() {
         val release = CompletableDeferred<Unit>()
         val entered = AtomicBoolean()
@@ -370,7 +393,15 @@ class VoiceTutorNativeSessionRelayTest {
                     "receive" -> incoming.asFlux().doOnCancel { receiveCancelled.set(true) }
                     "send" -> Flux.from(arguments!![0] as Publisher<*>)
                         .cast(WebSocketMessage::class.java)
-                        .doOnNext { outgoing.add(mapper.readTree(it.payloadAsText)); changed.release() }.then()
+                        .doOnNext {
+                            val event = mapper.readTree(it.payloadAsText)
+                            if (event.path("type").asText() == "response.create") {
+                                // Emulate the provider's metadata schema, not an unchecked echo fixture.
+                                assertThat(event.path("response").path("metadata").all { value -> value.isTextual })
+                                    .withFailMessage("Realtime response metadata values must be strings").isTrue()
+                            }
+                            outgoing.add(event); changed.release()
+                        }.then()
                     "textMessage" -> message(arguments!![0] as String)
                     "bufferFactory" -> buffers
                     "isOpen" -> true
@@ -404,24 +435,33 @@ class VoiceTutorNativeSessionRelayTest {
         }
 
         fun opening() {
+            connect()
+            completeAudioResponse("response-0", "tutor-0")
+        }
+
+        fun connect() {
             await("server-owned session update") { outgoing.any { it.path("type").asText() == "session.update" } }
             val update = outgoing.first { it.path("type").asText() == "session.update" }
             assertThat(update.path("session").path("audio").path("input").path("turn_detection").isNull).isTrue()
             provider("session.updated", "session" to update.path("session"))
             await("opening native response") { responses().size == 1 }
-            created("response-0")
-            provider("response.output_item.added", "response_id" to "response-0",
-                "item" to mapOf("id" to "tutor-0", "type" to "message"))
-            provider("output_audio_buffer.started", "response_id" to "response-0")
-            provider("response.output_audio_transcript.done", "response_id" to "response-0",
-                "item_id" to "tutor-0", "transcript" to "어떤 주제로 이야기할까요?")
-            provider("response.done", "response" to mapOf("id" to "response-0", "status" to "completed",
-                "output" to listOf(mapOf("id" to "tutor-0", "type" to "message", "content" to listOf(
+        }
+
+        fun completeAudioResponse(responseId: String, itemId: String) {
+            created(responseId)
+            provider("response.output_item.added", "response_id" to responseId,
+                "item" to mapOf("id" to itemId, "type" to "message"))
+            provider("output_audio_buffer.started", "response_id" to responseId)
+            provider("response.output_audio_transcript.done", "response_id" to responseId,
+                "item_id" to itemId, "transcript" to "어떤 주제로 이야기할까요?")
+            provider("response.done", "response" to mapOf("id" to responseId, "status" to "completed",
+                "output" to listOf(mapOf("id" to itemId, "type" to "message", "content" to listOf(
                     mapOf("type" to "audio", "transcript" to "어떤 주제로 이야기할까요?"))))))
-            provider("output_audio_buffer.stopped", "response_id" to "response-0")
+            provider("output_audio_buffer.stopped", "response_id" to responseId)
         }
 
         fun learner(sequence: Long, id: String) {
+            val previousResponses = responses().size
             for (type in listOf(Contract.SPEECH_STARTED_EVENT, Contract.SPEECH_STOPPED_EVENT)) {
                 assertThat(controls.tryEmitNext(json(mapOf("type" to type, "sequence" to sequence))))
                     .isEqualTo(Sinks.EmitResult.OK)
@@ -430,7 +470,7 @@ class VoiceTutorNativeSessionRelayTest {
                 outgoing.count { it.path("type").asText() == "input_audio_buffer.commit" } == sequence.toInt()
             }
             provider("input_audio_buffer.committed", "item_id" to id)
-            await("native reply released without a text assessor") { responses().size == sequence.toInt() + 1 }
+            await("native reply released without a text assessor") { responses().size == previousResponses + 1 }
         }
 
         fun transcript(id: String) = provider("conversation.item.input_audio_transcription.completed",

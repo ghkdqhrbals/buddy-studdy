@@ -105,6 +105,129 @@ extension AppStrings {
         )
     }
 
+    var voiceTutorCallThinking: String {
+        voiceTutorPauseText("응답 준비 중", "Preparing a reply", "返答を準備中")
+    }
+    var voiceTutorCallSessionLabel: String {
+        voiceTutorPauseText("음성 수업", "VOICE LESSON", "音声レッスン")
+    }
+    var voiceTutorCallConnectingHelp: String {
+        voiceTutorPauseText(
+            "마이크와 AI 선생님을 연결하고 있어요.",
+            "Connecting your microphone and AI tutor.",
+            "マイクとAI先生を接続しています。"
+        )
+    }
+    var voiceTutorCallFirstReplyHelp: String {
+        voiceTutorPauseText(
+            "AI 선생님의 첫 응답을 기다리고 있어요.",
+            "Waiting for your tutor’s first reply.",
+            "AI先生の最初の返答を待っています。"
+        )
+    }
+    var voiceTutorCallThinkingHelp: String {
+        voiceTutorPauseText(
+            "답변을 준비하고 있어요. 잠시만 기다려 주세요.",
+            "Your tutor is preparing a reply. One moment.",
+            "返答を準備しています。少々お待ちください。"
+        )
+    }
+    var voiceTutorCallListeningHelp: String {
+        voiceTutorPauseText(
+            "편하게 말해 주세요. 이야기를 듣고 있어요.",
+            "Take your time. Your tutor is listening.",
+            "ゆっくりお話しください。先生が聞いています。"
+        )
+    }
+    var voiceTutorCallSpeakingHelp: String {
+        voiceTutorPauseText(
+            "말이 끝나면 편하게 이어서 이야기해 주세요.",
+            "When your tutor finishes, continue in your own words.",
+            "先生が話し終えたら、続けてお話しください。"
+        )
+    }
+    var voiceTutorCallPausedHelp: String {
+        voiceTutorPauseText(
+            "준비되면 계속하기를 눌러 주세요.",
+            "Tap Continue whenever you’re ready.",
+            "準備ができたら「続ける」をタップしてください。"
+        )
+    }
+    var voiceTutorCallPausingHelp: String {
+        voiceTutorPauseText(
+            "AI 선생님의 말이 끝나면 잠시 쉬어갈게요.",
+            "Your break will begin when your tutor finishes speaking.",
+            "先生が話し終えたら休憩に入ります。"
+        )
+    }
+    var voiceTutorCallResumingHelp: String {
+        voiceTutorPauseText(
+            "대화를 이어갈 준비를 하고 있어요.",
+            "Getting ready to continue your conversation.",
+            "会話を再開する準備をしています。"
+        )
+    }
+    var voiceTutorCallInterruptedHelp: String {
+        voiceTutorPauseText(
+            "대화가 중단됐어요. 다시 연결해 주세요.",
+            "The conversation was interrupted. Try reconnecting.",
+            "会話が中断されました。接続し直してください。"
+        )
+    }
+    var voiceTutorCallNoReplyHelp: String {
+        voiceTutorPauseText(
+            "AI의 응답을 받기 전에 통화가 중단됐어요. 다시 연결해 주세요.",
+            "The call stopped before your tutor replied. Try reconnecting.",
+            "AIの返答が届く前に通話が中断されました。接続し直してください。"
+        )
+    }
+    var voiceTutorCallEndingHelp: String {
+        voiceTutorPauseText("대화를 마무리하고 있어요.", "Finishing your lesson.", "レッスンを終了しています。")
+    }
+    var voiceTutorCallEndedHelp: String {
+        voiceTutorPauseText(
+            "나눈 이야기는 대화 내용에서 다시 볼 수 있어요.",
+            "You can revisit what you discussed in the conversation.",
+            "話した内容は会話画面で振り返れます。"
+        )
+    }
+    var voiceTutorCallEndedWithoutCaptions: String {
+        voiceTutorPauseText(
+            "표시할 대화 내용이 없어요.",
+            "There is no conversation to display.",
+            "表示できる会話はありません。"
+        )
+    }
+    var voiceTutorCallConversationAction: String {
+        voiceTutorPauseText("대화", "Conversation", "会話")
+    }
+    var voiceTutorCallVoiceAction: String {
+        voiceTutorPauseText("음성 화면", "Voice view", "音声画面")
+    }
+    var voiceTutorCallReconnect: String {
+        voiceTutorPauseText("다시 연결", "Reconnect", "再接続")
+    }
+    var voiceTutorCallEmptyConversation: String {
+        voiceTutorPauseText("대화가 여기에 표시돼요", "Your conversation appears here", "会話はここに表示されます")
+    }
+
+    var voiceTutorOrbEndConfirmation: String {
+        voiceTutorPauseText("통화를 종료할까요?", "End this call?", "通話を終了しますか？")
+    }
+    var voiceTutorOrbKeepHoldingToEnd: String {
+        voiceTutorPauseText("계속 누르면 종료", "Keep holding to end", "長押しを続けると終了")
+    }
+    var voiceTutorOrbReleaseCancels: String {
+        voiceTutorPauseText("손을 떼면 취소돼요", "Release to cancel", "指を離すとキャンセル")
+    }
+    var voiceTutorOrbHoldToEndHint: String {
+        voiceTutorPauseText(
+            "길게 누르면 종료 안내가 나타나고, 계속 누르면 통화가 끝납니다. 손을 떼면 취소됩니다.",
+            "Hold to show the end-call prompt, then keep holding to end. Release to cancel.",
+            "長押しで終了の案内が表示され、そのまま押し続けると通話が終了します。指を離すとキャンセルします。"
+        )
+    }
+
     private func voiceTutorPauseText(_ korean: String, _ english: String, _ japanese: String) -> String {
         switch language {
         case .korean: return korean

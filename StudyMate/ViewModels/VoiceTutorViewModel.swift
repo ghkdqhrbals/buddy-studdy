@@ -306,13 +306,45 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
     private(set) var assistantResponseActive = false
     private(set) var activeResponseID: String?
     private(set) var tutorInterventionActive = false
+    private(set) var isAwaitingActiveResponseAudio = false
+    private var isAwaitingInitialResponse = false
+    private var hasObservedTutorResponse = false
+    private var hasPendingLearnerTurn = false
+    private var currentLearnerSpeechSequence: Int?
+    private var pendingLearnerSpeechSequence: Int?
+
+    var isAwaitingTutorResponse: Bool {
+        !isUserSpeaking && (isAwaitingInitialResponse || hasPendingLearnerTurn || isAwaitingActiveResponseAudio)
+    }
+
+    mutating func awaitInitialResponse() {
+        // A delayed ready event must not restart an already observed greeting.
+        guard !hasObservedTutorResponse else { return }
+        isAwaitingInitialResponse = true
+    }
+
+    @discardableResult
+    mutating func stopWaitingForInitialResponse() -> Bool {
+        guard !hasObservedTutorResponse else { return false }
+        hasObservedTutorResponse = true
+        isAwaitingInitialResponse = false
+        return true
+    }
 
     @discardableResult
     mutating func responseStarted(responseID: String?, isTutorIntervention: Bool) -> Bool {
         guard let responseID, !responseID.isEmpty else {
             return false
         }
+        guard !matchesActiveResponse(responseID: responseID) else { return true }
         assistantResponseActive = true
+        hasObservedTutorResponse = true
+        isAwaitingInitialResponse = false
+        isAwaitingActiveResponseAudio = true
+        // Only learner turns stopped before this response began belong to it.
+        // A later overlap must survive completion of the current tutor sentence.
+        hasPendingLearnerTurn = false
+        pendingLearnerSpeechSequence = nil
         activeResponseID = responseID
         tutorInterventionActive = isTutorIntervention
         return true
@@ -332,15 +364,40 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
             return false
         }
         assistantResponseActive = true
+        isAwaitingActiveResponseAudio = false
         return true
     }
 
-    mutating func userSpeechStarted() {
+    mutating func userSpeechStarted(sequence: Int? = nil) {
+        if let sequence, sequence <= 0 { return }
         isUserSpeaking = true
+        currentLearnerSpeechSequence = sequence
     }
 
-    mutating func userSpeechStopped() {
+    mutating func userSpeechStopped(sequence: Int? = nil) {
+        // A duplicate or stale acoustic stop cannot invent a waiting turn.
+        guard isUserSpeaking else { return }
+        if let sequence, sequence != currentLearnerSpeechSequence { return }
+        hasPendingLearnerTurn = true
+        pendingLearnerSpeechSequence = currentLearnerSpeechSequence
+        currentLearnerSpeechSequence = nil
         isUserSpeaking = false
+    }
+
+    @discardableResult
+    mutating func inputSettled(sequence: Int) -> Bool {
+        if sequence == 0 {
+            // Only the server's silent opening uses zero. It cannot consume a
+            // real learner turn or restart waiting when ready arrives later.
+            return stopWaitingForInitialResponse()
+        }
+        guard sequence > 0, hasPendingLearnerTurn,
+              pendingLearnerSpeechSequence == sequence else { return false }
+        // A silent response is complete, not a request to repeat. Preserve any
+        // newer live speech and any independently active tutor audio.
+        hasPendingLearnerTurn = false
+        pendingLearnerSpeechSequence = nil
+        return true
     }
 
     mutating func responseFinished(responseID: String) -> Bool {
@@ -348,6 +405,7 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
             return false
         }
         assistantResponseActive = false
+        isAwaitingActiveResponseAudio = false
         activeResponseID = nil
         tutorInterventionActive = false
         return true
@@ -357,6 +415,7 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
     mutating func abandonResponse(responseID: String?) -> Bool {
         guard matchesActiveResponse(responseID: responseID) else { return false }
         assistantResponseActive = false
+        isAwaitingActiveResponseAudio = false
         activeResponseID = nil
         tutorInterventionActive = false
         return true
@@ -565,6 +624,10 @@ final class VoiceTutorViewModel: ObservableObject {
     var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
     var quotaReservedSeconds: Int { sessionQuota.reservedSeconds }
     var assistantTranscriptDraft: String { assistantTranscriptState.draft }
+    var isAwaitingTutorResponse: Bool {
+        phase == .listening && !pauseState.holdsMicrophone && !inputNeedsRepeat
+            && duplexPlaybackState.isAwaitingTutorResponse
+    }
 
     @Published private(set) var studyFocus = VoiceTutorStudyFocusState()
 
@@ -588,7 +651,7 @@ final class VoiceTutorViewModel: ObservableObject {
     private var sessionID: String?
     private var hardEndsAt: Date?
     private var isFinalizing = false
-    private var duplexPlaybackState = VoiceTutorDuplexPlaybackState()
+    @Published private var duplexPlaybackState = VoiceTutorDuplexPlaybackState()
     private var webRTCResponseState = VoiceTutorWebRTCResponseState()
     private var pendingSpokenEndPlayoutTail: VoiceTutorLocalPlayoutTailToken?
     private var quotaExhaustionNoticeResponseID: String?
@@ -1057,12 +1120,12 @@ final class VoiceTutorViewModel: ObservableObject {
                         switch event.activity {
                         case .started:
                             self.inputNeedsRepeat = false
-                            self.duplexPlaybackState.userSpeechStarted()
+                            self.duplexPlaybackState.userSpeechStarted(sequence: event.sequence)
                             if !self.duplexPlaybackState.assistantResponseActive {
                                 self.phase = .listening
                             }
                         case .stopped:
-                            self.duplexPlaybackState.userSpeechStopped()
+                            self.duplexPlaybackState.userSpeechStopped(sequence: event.sequence)
                         }
                     }
                     // One consumer sends numbered acoustic boundaries and pause
@@ -1343,6 +1406,7 @@ final class VoiceTutorViewModel: ObservableObject {
             }
             updateSessionCountdown()
             pauseState.isSupported = usesWebRTC && pauseProtocol == VoiceTutorCallPauseState.supportedProtocol
+            duplexPlaybackState.awaitInitialResponse()
             phase = .listening
         case .pauseAcknowledged(let sequence, let paused):
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
@@ -1429,7 +1493,16 @@ final class VoiceTutorViewModel: ObservableObject {
                 reason: serverEndReason,
                 isFinalizing: isFinalizing
             ) else { break }
+            // A rejected opening can ask for another utterance before any
+            // response.created. It no longer owes a greeting, but a stale retry
+            // must never consume a newer learner turn's independent wait.
+            duplexPlaybackState.stopWaitingForInitialResponse()
             inputNeedsRepeat = true
+        case .inputSettled(let sequence):
+            guard usesWebRTC, phase.isLive, !isFinalizing else { break }
+            if duplexPlaybackState.inputSettled(sequence: sequence) {
+                logDiagnostic("event=input_settled sequence=\(sequence)")
+            }
         case .providerTurnAbandoned(let responseID):
             abandonProviderTurn(responseID: responseID)
         case .studyFocused(let focus):
@@ -1604,6 +1677,12 @@ final class VoiceTutorViewModel: ObservableObject {
 
     private func handleWebRTCRenderedPCM(at uptime: TimeInterval) {
         guard usesWebRTC, phase.isLive else { return }
+        if webRTCResponseState.mayIndicateSpeaking,
+           duplexPlaybackState.isAwaitingActiveResponseAudio {
+            // A response-created event is only generation intent. Keep the
+            // waiting indication until the native renderer receives audio.
+            _ = duplexPlaybackState.assistantAudioBegan(responseID: webRTCResponseState.responseID)
+        }
         phase = phase.afterRenderedTutorAudio(
             assistantResponseActive: webRTCResponseState.mayIndicateSpeaking
         )

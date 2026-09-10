@@ -47,6 +47,32 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
+    fun `silent input settlement exposes only its exact sequence and cannot be forged by a client`() {
+        for (sequence in listOf(0L, 1L, Long.MAX_VALUE)) {
+            val raw = """{"type":"${VoiceTutorRealtimeContract.INPUT_SETTLED_EVENT}","sequence":$sequence,"transcript":"private","response":{"metadata":"private"}}"""
+            val decision = policy.providerDecision(raw, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+            assertThat(decision.terminate).isFalse()
+            val payload = mapper.readTree(decision.payload)
+            assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "sequence")
+            assertThat(payload.path("sequence").longValue()).isEqualTo(sequence)
+            assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+            assertThat(policy.providerDecision(raw, "voice-1", Instant.EPOCH).payload).isNull()
+        }
+    }
+
+    @Test
+    fun `invalid silent settlement sequences are dropped without failing the call`() {
+        for (sequence in listOf("null", "-1", "1.0", "true", "\"1\"", "[]", "{}", "9223372036854775808")) {
+            val raw = """{"type":"${VoiceTutorRealtimeContract.INPUT_SETTLED_EVENT}","sequence":$sequence}"""
+            val decision = policy.providerDecision(raw, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+            assertThat(decision.payload).isNull()
+            assertThat(decision.terminate).isFalse()
+        }
+        assertThat(policy.providerDecision("""{"type":"${VoiceTutorRealtimeContract.INPUT_SETTLED_EVENT}"}""",
+            "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+    }
+
+    @Test
     fun `turn abandon retry exposes only its bounded exact response id`() {
         val raw = mapper.writeValueAsString(mapOf(
             "type" to VoiceTutorRealtimeContract.INPUT_RETRY_EVENT,
@@ -440,6 +466,25 @@ class VoiceTutorRealtimeEventPolicyTest {
             .path(VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD).asBoolean()).isFalse()
         assertThat(markedPayload.path("response").has("metadata")).isFalse()
         assertThat(markedPayload.toString()).doesNotContain("private-token", "discard-me", "buddystudy_quota_notice")
+    }
+
+    @Test
+    fun `native response announcement retains the controller owned quota boolean across sanitization`() {
+        for (notice in listOf(true, false)) {
+            val raw = mapper.writeValueAsString(mapOf(
+                "type" to "response.created", VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD to notice,
+                "response" to mapOf("id" to "native-response", "status" to "in_progress", "metadata" to mapOf(
+                    VoiceTutorRealtimeContract.QUOTA_NOTICE_METADATA_KEY to notice.toString(),
+                    VoiceTutorRealtimeContract.RESPONSE_TOKEN_METADATA_KEY to "private-token",
+                )),
+            ))
+            val decision = policy.providerDecision(raw, "voice-1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+            val payload = mapper.readTree(decision.payload)
+            assertThat(payload.path(VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD).isBoolean).isTrue()
+            assertThat(payload.path(VoiceTutorRealtimeContract.QUOTA_EXHAUSTION_NOTICE_FIELD).booleanValue()).isEqualTo(notice)
+            assertThat(payload.path("response").has("metadata")).isFalse()
+            assertThat(decision.payload).doesNotContain("private-token")
+        }
     }
 
     @Test

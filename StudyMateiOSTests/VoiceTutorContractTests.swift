@@ -791,6 +791,27 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertNotEqual(event, .serviceError(code: nil, message: "", retryable: true))
     }
 
+    func testSilentInputSettlementRequiresAnExactNonnegativeAcousticSequence() throws {
+        for sequence in [0, 1, 123] {
+            XCTAssertEqual(
+                try VoiceTutorRealtimeEventParser.parse(
+                    text: #"{"type":"buddystudy.voice.input.settled","sequence":\#(sequence)}"#
+                ),
+                .inputSettled(sequence: sequence)
+            )
+        }
+        for fields in ["", #", "sequence": -1"#, #", "sequence": 1.5"#,
+                       #", "sequence": true"#, #", "sequence": "1""#,
+                       #", "sequence": null"#, #", "sequence": 9223372036854775808"#] {
+            XCTAssertEqual(
+                try VoiceTutorRealtimeEventParser.parse(
+                    text: #"{"type":"buddystudy.voice.input.settled"\#(fields)}"#
+                ),
+                .ignored(type: "buddystudy.voice.input.settled")
+            )
+        }
+    }
+
     func testProviderTurnAbandonmentCarriesOnlyTheExactBoundedResponseID() throws {
         let abandoned = try VoiceTutorRealtimeEventParser.parse(
             text: #"{"type":"buddystudy.voice.input.retry","abandonedResponseId":"resp_1-a"}"#
@@ -899,6 +920,170 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(state.tutorInterventionActive)
         XCTAssertFalse(state.assistantAudioBegan(responseID: "response-new"))
         XCTAssertTrue(state.assistantAudioBegan(responseID: "response-next"))
+    }
+
+    func testTutorWaitingIndicationIncludesGreetingUntilMatchingRenderedAudio() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.awaitInitialResponse()
+        XCTAssertTrue(state.isAwaitingTutorResponse, "A connected call has not yet spoken its greeting")
+
+        state.responseStarted(responseID: "greeting", isTutorIntervention: false)
+        XCTAssertTrue(state.isAwaitingTutorResponse, "Provider generation alone must not claim audible speech")
+        XCTAssertFalse(state.assistantAudioBegan(responseID: "stale"))
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "greeting"))
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        state.awaitInitialResponse()
+        XCTAssertFalse(state.isAwaitingTutorResponse, "A late ready event cannot restart the greeting wait")
+        XCTAssertTrue(state.responseFinished(responseID: "greeting"))
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        state.awaitInitialResponse()
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+    }
+
+    func testTutorWaitingIndicationFollowsPairedLearnerSpeechWithoutEndingTutorPlayback() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.userSpeechStopped()
+        XCTAssertFalse(state.isAwaitingTutorResponse, "An unpaired stop must not fabricate a learner turn")
+
+        state.awaitInitialResponse()
+        state.userSpeechStarted()
+        XCTAssertFalse(state.isAwaitingTutorResponse, "The learner is still talking")
+        state.userSpeechStopped()
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        state.responseStarted(responseID: "answer", isTutorIntervention: false)
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "answer"))
+        state.userSpeechStopped()
+        XCTAssertFalse(state.isAwaitingTutorResponse, "A duplicate stop must not reinstate the spinner")
+        state.userSpeechStarted()
+        state.userSpeechStopped()
+        XCTAssertTrue(state.assistantResponseActive, "Waiting presentation never cancels current tutor audio")
+    }
+
+    func testOverlappingLearnerTurnRemainsWaitingAfterCurrentTutorSentenceFinishes() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.responseStarted(responseID: "current", isTutorIntervention: false)
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "current"))
+        state.userSpeechStarted()
+        state.userSpeechStopped()
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "current"))
+        XCTAssertTrue(state.isAwaitingTutorResponse, "More audio from the current sentence is not the next learner reply")
+        XCTAssertTrue(state.responseFinished(responseID: "current"))
+        XCTAssertTrue(state.isAwaitingTutorResponse, "The overlap still needs a tutor reply")
+
+        // Native tool-only provider responses are not announced to the client.
+        // The wait persists through that gap and only the audible continuation
+        // consumes this pending learner turn.
+        state.responseStarted(responseID: "continuation", isTutorIntervention: false)
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        XCTAssertFalse(state.assistantAudioBegan(responseID: "current"))
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "continuation"))
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        XCTAssertTrue(state.responseFinished(responseID: "continuation"))
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+    }
+
+    func testDuplicateResponseStartCannotConsumeLaterOverlappingLearnerTurn() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.responseStarted(responseID: "current", isTutorIntervention: false)
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "current"))
+        state.userSpeechStarted()
+        state.userSpeechStopped()
+        state.responseStarted(responseID: "current", isTutorIntervention: false)
+        XCTAssertFalse(state.isAwaitingActiveResponseAudio)
+        XCTAssertTrue(state.responseFinished(responseID: "current"))
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+    }
+
+    func testTutorWaitingIndicationClearsForExactAbandonmentAndNewAttempt() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.responseStarted(responseID: "current", isTutorIntervention: false)
+        XCTAssertFalse(state.abandonResponse(responseID: "old"))
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        XCTAssertTrue(state.abandonResponse(responseID: "current"))
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        state.userSpeechStarted()
+        state.userSpeechStopped()
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        state.reset()
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+    }
+
+    func testSilentInputSettlementClearsWaitingWithoutInventingTutorPlayback() throws {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.userSpeechStarted(sequence: 7)
+        state.userSpeechStopped(sequence: 7)
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+        let event = try VoiceTutorRealtimeEventParser.parse(
+            text: #"{"type":"buddystudy.voice.input.settled","sequence":7}"#
+        )
+        guard case .inputSettled(let sequence) = event else { return XCTFail("Expected silent settlement") }
+        XCTAssertTrue(state.inputSettled(sequence: sequence))
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        XCTAssertFalse(state.assistantResponseActive)
+        XCTAssertFalse(state.isUserSpeaking)
+        XCTAssertFalse(state.inputSettled(sequence: sequence), "The settlement is idempotent")
+    }
+
+    func testSilentInputSettlementCannotConsumeNewerSpeechOrAnActiveTutorResponse() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.userSpeechStarted(sequence: 1)
+        state.userSpeechStopped(sequence: 1)
+        state.userSpeechStarted(sequence: 2)
+        XCTAssertTrue(state.inputSettled(sequence: 1))
+        XCTAssertTrue(state.isUserSpeaking, "Settling old input never ends the new utterance")
+        state.userSpeechStopped(sequence: 1)
+        XCTAssertTrue(state.isUserSpeaking, "A stale stop cannot seal the new utterance")
+        state.userSpeechStopped(sequence: 2)
+        XCTAssertFalse(state.inputSettled(sequence: 1))
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+
+        state.responseStarted(responseID: "new-reply", isTutorIntervention: false)
+        XCTAssertFalse(state.inputSettled(sequence: 2))
+        XCTAssertTrue(state.isAwaitingActiveResponseAudio)
+        XCTAssertTrue(state.assistantResponseActive)
+        state.userSpeechStarted(sequence: 3)
+        state.userSpeechStopped(sequence: 3)
+        XCTAssertFalse(state.inputSettled(sequence: 2))
+        XCTAssertTrue(state.assistantAudioBegan(responseID: "new-reply"))
+        XCTAssertTrue(state.responseFinished(responseID: "new-reply"))
+        XCTAssertTrue(state.isAwaitingTutorResponse, "The newer overlap still needs a response")
+        XCTAssertTrue(state.inputSettled(sequence: 3))
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+    }
+
+    func testSilentOpeningSettlementPreservesLearnerWaitAndCannotRestartOnLateReady() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.awaitInitialResponse()
+        state.userSpeechStarted(sequence: 1)
+        state.userSpeechStopped(sequence: 1)
+        XCTAssertTrue(state.inputSettled(sequence: 0))
+        XCTAssertTrue(state.isAwaitingTutorResponse, "Only the greeting was settled")
+        XCTAssertTrue(state.inputSettled(sequence: 1))
+        state.awaitInitialResponse()
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        XCTAssertFalse(state.inputSettled(sequence: 0))
+
+        state.reset()
+        state.responseStarted(responseID: "greeting", isTutorIntervention: false)
+        XCTAssertFalse(state.inputSettled(sequence: 0))
+        XCTAssertTrue(state.isAwaitingActiveResponseAudio)
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+    }
+
+    func testRejectedOpeningCannotLeaveGreetingWaitAfterRepeatedInputSettlesSilently() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.awaitInitialResponse()
+        XCTAssertTrue(state.stopWaitingForInitialResponse())
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        state.userSpeechStarted(sequence: 1)
+        state.userSpeechStopped(sequence: 1)
+        XCTAssertFalse(state.stopWaitingForInitialResponse())
+        XCTAssertTrue(state.isAwaitingTutorResponse, "A retry signal cannot discard newer learner input")
+        XCTAssertTrue(state.inputSettled(sequence: 1))
+        state.awaitInitialResponse()
+        XCTAssertFalse(state.isAwaitingTutorResponse)
     }
 
     func testPlaybackCompletionRequiresProviderSealAndLastRenderedBuffer() {
@@ -1308,8 +1493,14 @@ final class VoiceTutorContractTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+        let sourceURL = root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift")
+        #if !targetEnvironment(simulator)
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw XCTSkip("Source-contract check requires the local repository; behavior tests run on iPhone.")
+        }
+        #endif
         let source = try String(
-            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift"),
+            contentsOf: sourceURL,
             encoding: .utf8
         )
         let start = try XCTUnwrap(source.range(of: "private func scheduleTerminalPlayoutDrainIfReady"))
@@ -1330,8 +1521,15 @@ final class VoiceTutorContractTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+        let transportURL = root.appendingPathComponent("StudyMate/Services/VoiceTutorWebRTCTransport.swift")
+        let viewModelURL = root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift")
+        #if !targetEnvironment(simulator)
+        guard [transportURL, viewModelURL].allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
+            throw XCTSkip("Source-contract check requires the local repository; behavior tests run on iPhone.")
+        }
+        #endif
         let transportSource = try String(
-            contentsOf: root.appendingPathComponent("StudyMate/Services/VoiceTutorWebRTCTransport.swift"),
+            contentsOf: transportURL,
             encoding: .utf8
         )
         let closeStart = try XCTUnwrap(transportSource.range(of: "func closeMicrophoneInput()"))
@@ -1344,7 +1542,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(closeMethod.contains("remoteAudioTrack"), "The final tutor sentence must remain audible")
 
         let viewModelSource = try String(
-            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift"),
+            contentsOf: viewModelURL,
             encoding: .utf8
         )
         let endingStart = try XCTUnwrap(viewModelSource.range(of: "case .sessionEnding(let reason"))
@@ -1627,13 +1825,19 @@ final class VoiceTutorContractTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let sources = try [
+        let sourceURLs = [
             "StudyMate/Services/VoiceTutorAudioEngine.swift",
             "StudyMate/Services/VoiceTutorRealtimeClient.swift",
             "StudyMate/Services/VoiceTutorWebRTCTransport.swift",
             "StudyMate/ViewModels/VoiceTutorViewModel.swift"
-        ].map {
-            try String(contentsOf: root.appendingPathComponent($0), encoding: .utf8)
+        ].map { root.appendingPathComponent($0) }
+        #if !targetEnvironment(simulator)
+        guard sourceURLs.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
+            throw XCTSkip("Source-contract check requires the local repository; behavior tests run on iPhone.")
+        }
+        #endif
+        let sources = try sourceURLs.map {
+            try String(contentsOf: $0, encoding: .utf8)
         }.joined(separator: "\n")
 
         XCTAssertFalse(sources.contains("interruptPlayback"))
@@ -2079,6 +2283,96 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertLessThan(reset.lowerBound, start.lowerBound)
     }
 
+    func testOrbHoldShowsPreparationThenWarningBeforeEndingExactlyOnce() {
+        var gesture = VoiceTutorOrbInteractionState()
+        gesture.begin(at: 0)
+        for (time, stage) in [(0.349, VoiceTutorOrbInteractionState.HoldStage.idle),
+                              (0.35, .anticipating), (0.899, .anticipating),
+                              (0.9, .warning), (2.199, .warning)] {
+            XCTAssertFalse(gesture.advance(to: time, canEnd: true))
+            XCTAssertEqual(gesture.stage, stage)
+        }
+        XCTAssertLessThan(gesture.progress, 1)
+        XCTAssertTrue(gesture.advance(to: 2.2, canEnd: true))
+        XCTAssertEqual(gesture.stage, .committed)
+        XCTAssertEqual(gesture.progress, 1)
+        XCTAssertFalse(gesture.advance(to: 5, canEnd: true), "A held finger cannot send a second hangup")
+        XCTAssertFalse(gesture.release(at: 5), "Releasing after hangup must not pause the call")
+    }
+
+    func testOrbQuickTapAllowsSmallJitterButHoldingThenReleasingNeverPauses() {
+        var tap = VoiceTutorOrbInteractionState()
+        tap.begin(at: 0)
+        tap.move(translation: CGSize(width: 3, height: 4))
+        XCTAssertTrue(tap.release(at: 0.349))
+        for release in [0.35, 0.7, 0.9, 1.8, 2.199] {
+            var hold = VoiceTutorOrbInteractionState()
+            hold.begin(at: 0)
+            XCTAssertFalse(hold.advance(to: release, canEnd: true))
+            XCTAssertFalse(hold.release(at: release), "Cancelled hold at \(release) must not become a pause")
+            XCTAssertFalse(hold.isActive)
+            XCTAssertEqual(hold.progress, 0)
+        }
+    }
+
+    func testOrbSwipeCancelsHoldEvenIfTheFingerReturnsToItsStartingPoint() {
+        for translation in [CGSize(width: 12, height: 0), CGSize(width: 0, height: -12),
+                            CGSize(width: 9, height: 9), CGSize(width: 0, height: 100)] {
+            var gesture = VoiceTutorOrbInteractionState()
+            gesture.begin(at: 0)
+            gesture.advance(to: 1, canEnd: true)
+            gesture.move(translation: translation)
+            gesture.move(translation: .zero)
+            XCTAssertTrue(gesture.hasMoved)
+            XCTAssertEqual(gesture.stage, .idle)
+            XCTAssertEqual(gesture.progress, 0)
+            XCTAssertFalse(gesture.advance(to: 10, canEnd: true))
+            XCTAssertFalse(gesture.release(at: 10))
+        }
+    }
+
+    func testOrbSystemCancellationAndUnavailableHangupCannotEndTheCall() {
+        var cancelled = VoiceTutorOrbInteractionState()
+        cancelled.begin(at: 0)
+        cancelled.advance(to: 1, canEnd: true)
+        cancelled.cancel()
+        XCTAssertFalse(cancelled.advance(to: 10, canEnd: true))
+        XCTAssertFalse(cancelled.release(at: 10))
+
+        var unavailable = VoiceTutorOrbInteractionState()
+        unavailable.begin(at: 0)
+        XCTAssertFalse(unavailable.advance(to: 10, canEnd: false))
+        XCTAssertFalse(unavailable.didCommitEnd)
+        unavailable.cancel()
+        XCTAssertFalse(unavailable.advance(to: 11, canEnd: true))
+    }
+
+    func testOrbNewTouchCannotReusePreviousHoldProgressOrRestartAnActiveHold() {
+        var gesture = VoiceTutorOrbInteractionState()
+        gesture.begin(at: 0)
+        gesture.advance(to: 1, canEnd: true)
+        gesture.begin(at: 1)
+        XCTAssertEqual(gesture.startedAt, 0)
+        XCTAssertFalse(gesture.release(at: 1.2))
+        gesture.begin(at: 10)
+        XCTAssertEqual(gesture.stage, .idle)
+        XCTAssertEqual(gesture.progress, 0)
+        XCTAssertFalse(gesture.advance(to: 10.1, canEnd: true))
+        XCTAssertTrue(gesture.release(at: 10.1))
+    }
+
+    func testOrbMalformedClockAndMovementCannotAuthorizeAnEndOrTap() {
+        var gesture = VoiceTutorOrbInteractionState()
+        gesture.begin(at: .nan)
+        XCTAssertFalse(gesture.isActive)
+        gesture.begin(at: 10)
+        XCTAssertFalse(gesture.advance(to: .infinity, canEnd: true))
+        XCTAssertFalse(gesture.advance(to: 9, canEnd: true))
+        gesture.move(translation: CGSize(width: CGFloat.nan, height: 0))
+        XCTAssertFalse(gesture.advance(to: 20, canEnd: true))
+        XCTAssertFalse(gesture.release(at: 10.1))
+    }
+
     func testVoiceCallOrbSwipeRoutingPreservesTapAndHorizontalMovement() {
         typealias Routing = VoiceTutorOrbGestureRouting
 
@@ -2132,6 +2426,27 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(Routing.expansion(
             for: CGSize(width: 0, height: -50), startsExpanded: false, travel: 0
         ), 0)
+    }
+
+    func testOrbCoalescedSwipeUsesItsReleaseLocationWithoutAnIntermediateMove() {
+        typealias Routing = VoiceTutorOrbGestureRouting
+        XCTAssertEqual(Routing.releaseAction(
+            for: CGSize(width: 0, height: -297),
+            predictedTranslation: CGSize(width: 0, height: -297), showsTranscript: false
+        ), .reveal)
+        XCTAssertEqual(Routing.releaseAction(
+            for: CGSize(width: 0, height: 240),
+            predictedTranslation: CGSize(width: 0, height: 240), showsTranscript: true
+        ), .hide)
+        XCTAssertNil(Routing.releaseAction(for: .zero, predictedTranslation: .zero, showsTranscript: false))
+        XCTAssertNil(Routing.releaseAction(
+            for: CGSize(width: 90, height: -30),
+            predictedTranslation: CGSize(width: 100, height: -100), showsTranscript: false
+        ))
+        XCTAssertNil(Routing.releaseAction(
+            for: CGSize(width: CGFloat.nan, height: -90),
+            predictedTranslation: CGSize(width: 0, height: -100), showsTranscript: false
+        ))
     }
 
     func testVoiceCallShortFlickFinishesButTapAndReversedMovementDoNot() {
@@ -2342,7 +2657,7 @@ final class VoiceTutorContractTests: XCTestCase {
         let transcript = String(source[transcriptStart.lowerBound..<orbStart.lowerBound])
 
         XCTAssertTrue(compact.contains("orbPlaceholder(.call, diameter:"))
-        XCTAssertTrue(compact.contains("Text(topic)"))
+        XCTAssertTrue(compact.contains("Text(displayTopic)"))
         XCTAssertTrue(compact.contains("callTime"))
         XCTAssertFalse(compact.contains("transcriptPanel"))
         XCTAssertFalse(compact.contains("voiceCall.liveTranscript"))
@@ -2358,11 +2673,14 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(transcript.contains("orbPlaceholder(.transcript, diameter: usesAccessibilityChrome ? 56 : 48)"))
         XCTAssertTrue(source.contains("interactionDock"))
         XCTAssertTrue(source.contains("stableCallControls"))
-        XCTAssertTrue(source.contains("Button(action: onPause)"))
+        XCTAssertFalse(source.contains("Button(action: onPause)"), "The circle owns taps, swipes and holds through one recognizer")
+        XCTAssertTrue(source.contains("DragGesture(minimumDistance: 0, coordinateSpace: .global)"))
+        XCTAssertTrue(source.contains("orbInteraction.release(at:"))
+        XCTAssertTrue(source.contains("case .end, .wait: EmptyView()"), "Live calls keep the circle as the single control")
         XCTAssertTrue(source.contains("VoiceTutorOrbGestureRouting.expansion"))
         XCTAssertTrue(source.contains("VoiceTutorOrbGestureRouting.settlesExpanded"))
         XCTAssertTrue(source.contains(".highPriorityGesture(orbTranscriptGesture("))
-        XCTAssertFalse(source.contains("voiceCall.openTranscript"))
+        XCTAssertFalse(source.contains("voiceCall.openTranscript"), "A separate live transcript button is unnecessary")
         XCTAssertTrue(source.contains("voiceCall.collapseTranscript"))
         XCTAssertTrue(source.contains(".offset(y: reduceMotion ? 0 : geometry.size.height * (1 - expansion))"))
         XCTAssertTrue(source.contains(".interactiveSpring(response: 0.34, dampingFraction: 1)"))
@@ -2403,7 +2721,7 @@ final class VoiceTutorContractTests: XCTestCase {
             callScreenSource.contains(".dynamicTypeSize("),
             "The call screen must respect AX2-AX5 instead of forcing a smaller text category"
         )
-        XCTAssertTrue(callScreenSource.contains(".accessibilityLabel(title)"))
+        XCTAssertTrue(callScreenSource.contains(".accessibilityAction(named: Text(orbActionLabel))"))
     }
 
     func testCallChromeStacksAtEveryAccessibilityTextCategory() {
@@ -2429,8 +2747,14 @@ final class VoiceTutorContractTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+        let sourceURL = root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift")
+        #if !targetEnvironment(simulator)
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw XCTSkip("Source-contract check requires the local repository; behavior tests run on iPhone.")
+        }
+        #endif
         let source = try String(
-            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift"),
+            contentsOf: sourceURL,
             encoding: .utf8
         )
         let retryStart = try XCTUnwrap(source.range(of: "case .responseStarted("))
@@ -2578,6 +2902,35 @@ final class VoiceTutorContractTests: XCTestCase {
     }
 
     @MainActor
+    func testVoiceOrbTapAndConversationActionsOnPresentedSyntheticCall() async throws {
+        guard ProcessInfo.processInfo.environment["BUDDYSTUDY_VOICE_INTERACTION_SMOKE"] == "1" else {
+            throw XCTSkip("Opt-in computer-use smoke test; the fixture has no microphone or network session.")
+        }
+        let probe = VoiceTutorOrbInteractionProbe()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }.first { $0.activationState == .foregroundActive })
+        let previousKeyWindow = scene.windows.first { $0.isKeyWindow }
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: VoiceTutorInteractiveCallFixture(probe: probe))
+        window.overrideUserInterfaceStyle = .dark
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            previousKeyWindow?.makeKey()
+        }
+        print("VOICE_INTERACTION_READY")
+        let deadline = ProcessInfo.processInfo.systemUptime + 180
+        while !probe.completed && ProcessInfo.processInfo.systemUptime < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(probe.pauseCount, 2, "Tap once to pause and once to continue")
+        XCTAssertTrue(probe.revealed, "Reveal the conversation through the circle's gesture or accessibility action")
+        XCTAssertTrue(probe.collapsed, "Return to the call through the circle's gesture or accessibility action")
+        XCTAssertEqual(probe.endCount, 0, "Taps and disclosure swipes must never end the call")
+    }
+
+    @MainActor
     func testCompactVoiceCallScreensRenderWithoutCreatingARealSession() async throws {
         let pending = try makeCompactCallDetail(resultStatus: "PROCESSING")
         let completed = try makeCompactCallDetail(
@@ -2616,10 +2969,29 @@ final class VoiceTutorContractTests: XCTestCase {
                 showsTranscript: true, language: .english,
                 topic: "Redis caching and concurrent updates",
                 size: CGSize(width: 320, height: 696), dynamicType: .accessibility3
+            ),
+            .init(
+                name: "10-first-response-waiting", phase: .listening,
+                isAwaitingTutorResponse: true, topic: ""
+            ),
+            .init(
+                name: "11-no-tutor-response-failed", phase: .failed,
+                failureCause: .provider, showsTranscript: true,
+                learnerOnly: true, topic: ""
+            ),
+            .init(
+                name: "12-light-conversation-waiting", phase: .listening,
+                isAwaitingTutorResponse: true, showsTranscript: true,
+                learnerOnly: true, colorScheme: .light
             )
         ]
+        // A single-fixture process helps isolate layers that iOS can omit in
+        // consecutive hierarchy captures, without creating any real call.
+        let requestedFixture = ProcessInfo.processInfo.environment["BUDDYSTUDY_VOICE_SNAPSHOT"]
+        let selectedFixtures = requestedFixture.map { name in fixtures.filter { $0.name == name } } ?? fixtures
+        XCTAssertFalse(selectedFixtures.isEmpty, "The requested visual fixture must exist")
         var capturedPNGs = Set<Data>()
-        for fixture in fixtures {
+        for fixture in selectedFixtures {
             let image = try await renderCompactCallSnapshot(fixture)
             XCTAssertEqual(image.size, fixture.size, fixture.name)
             let png = try XCTUnwrap(image.pngData(), fixture.name)
@@ -2632,7 +3004,7 @@ final class VoiceTutorContractTests: XCTestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
         }
-        XCTAssertEqual(capturedPNGs.count, fixtures.count, "Each state must produce a distinct rendered screen")
+        XCTAssertEqual(capturedPNGs.count, selectedFixtures.count, "Each state must produce a distinct rendered screen")
     }
 
     func testLocalVoiceActivitySilenceNeverStartsASpeakingTurn() {
@@ -3670,8 +4042,14 @@ final class VoiceTutorContractTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+        let sourceURL = root.appendingPathComponent("StudyMate/Views/VoiceTutorView.swift")
+        #if !targetEnvironment(simulator)
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw XCTSkip("Source-contract check requires the local repository; behavior tests run on iPhone.")
+        }
+        #endif
         let source = try String(
-            contentsOf: root.appendingPathComponent("StudyMate/Views/VoiceTutorView.swift"),
+            contentsOf: sourceURL,
             encoding: .utf8
         )
 
@@ -3695,7 +4073,7 @@ final class VoiceTutorContractTests: XCTestCase {
         let fixture = try VoiceTutorContractAppFixture(registration: registrationA) { request in
             requests.append(request)
             guard request.url?.path == "/api/v1/auth/token" else {
-                XCTFail("A stale bootstrap must not proceed to session creation")
+                XCTFail("A stale bootstrap must not proceed to an authenticated voice request")
                 throw URLError(.badServerResponse)
             }
             XCTAssertEqual(request.httpMethod, "POST")
@@ -3711,16 +4089,23 @@ final class VoiceTutorContractTests: XCTestCase {
             releaseResponse.open()
             fixture.close()
         }
-        let creation = Task { try await fixture.appState.createVoiceTutorConnection() }
-        defer { creation.cancel() }
+        // Preview and session creation share prepareVoiceTutorRegistration and
+        // its identity fence. Exercise that bootstrap boundary without touching
+        // the process-wide recording lifecycle or the user's recording files.
+        let bootstrapRequest = Task {
+            try await fixture.appState.loadVoiceTutorVoicePreview(voice: .alloy, language: .english)
+        }
+        defer { bootstrapRequest.cancel() }
         let bootstrapWait = await XCTWaiter.fulfillment(of: [bootstrapArrived], timeout: 5)
-        XCTAssertEqual(bootstrapWait, .completed)
+        guard bootstrapWait == .completed else {
+            return XCTFail("Token bootstrap did not reach the fixture; account-replacement assertions require an in-flight request")
+        }
 
         fixture.replaceAccount(ownerUserID: 8, registration: registrationB)
         releaseResponse.open()
         do {
-            _ = try await creation.value
-            XCTFail("A token bootstrap response must not authorize a connection after account replacement")
+            _ = try await bootstrapRequest.value
+            XCTFail("A token bootstrap response must not authorize a voice request after account replacement")
         } catch VoiceTutorPreparationError.missingRegistration {
             // The original account was fenced before its token could be saved.
         } catch is CancellationError {
@@ -4120,11 +4505,15 @@ final class VoiceTutorContractTests: XCTestCase {
     @MainActor
     private func renderCompactCallSnapshot(_ fixture: VoiceTutorCompactCallSnapshot) async throws -> UIImage {
         let strings = AppStrings(language: fixture.language)
-        let captions = fixture.language == .english
+        let conversation = fixture.language == .english
             ? [VoiceTutorCaption(speaker: .learner, text: "How does a cache expire?"),
                VoiceTutorCaption(speaker: .tutor, text: "A time to live lets Redis remove a value when its deadline passes.")]
             : [VoiceTutorCaption(speaker: .learner, text: "Redis에서 캐시 만료는 어떻게 정하나요?"),
                VoiceTutorCaption(speaker: .tutor, text: "데이터가 얼마나 자주 바뀌는지에 맞춰 만료 시간을 정하면 돼요.")]
+        let captions = fixture.learnerOnly
+            ? [VoiceTutorCaption(speaker: .learner, text: fixture.language == .english ? "Can you hear me?" : "어, 들려?"),
+               VoiceTutorCaption(speaker: .learner, text: fixture.language == .english ? "Are you there?" : "들리냐고?")]
+            : conversation
         let root = NavigationStack {
             VoiceTutorCallScreen(
                 topic: fixture.topic,
@@ -4133,6 +4522,7 @@ final class VoiceTutorContractTests: XCTestCase {
                     failureCause: fixture.failureCause,
                     serverEndReason: fixture.serverEndReason,
                     isRecording: fixture.isRecording,
+                    isAwaitingTutorResponse: fixture.isAwaitingTutorResponse,
                     pauseState: fixture.pauseState,
                     sessionSecondsRemaining: fixture.seconds,
                     quotaRemainingSeconds: fixture.quotaRemainingSeconds
@@ -4158,11 +4548,11 @@ final class VoiceTutorContractTests: XCTestCase {
             .navigationBarTitleDisplayMode(.inline)
         }
         .id(fixture.name)
-        .environment(\.colorScheme, .dark)
+        .environment(\.colorScheme, fixture.colorScheme)
         .environment(\.locale, Locale(identifier: fixture.language == .english ? "en_US" : "ko_KR"))
         .dynamicTypeSize(fixture.dynamicType)
         let controller = UIHostingController(rootView: root)
-        controller.overrideUserInterfaceStyle = UIUserInterfaceStyle.dark
+        controller.overrideUserInterfaceStyle = fixture.colorScheme == .dark ? .dark : .light
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
         let previousKeyWindow = scene?.windows.first { $0.isKeyWindow }
@@ -4173,11 +4563,10 @@ final class VoiceTutorContractTests: XCTestCase {
             window = UIWindow(frame: CGRect(origin: .zero, size: fixture.size))
         }
         window.frame = CGRect(origin: .zero, size: fixture.size)
-        window.overrideUserInterfaceStyle = .dark
+        window.overrideUserInterfaceStyle = fixture.colorScheme == .dark ? .dark : .light
         window.rootViewController = controller
-        // Consecutive non-key captures on iOS 26 omitted unchanged title and
-        // control layers. Give this synthetic screen a fully presented window and
-        // capture that entire window, then restore the original key window even
+        // Give this synthetic screen a fully presented window, then restore the
+        // original key window even
         // if the test is cancelled. Never replace the real window's controller.
         defer {
             window.isHidden = true
@@ -4199,8 +4588,7 @@ final class VoiceTutorContractTests: XCTestCase {
         await Task.yield()
         try await Task.sleep(for: .milliseconds(250))
 
-        // Invalidate every presented UIView, not only the latest SwiftUI state
-        // delta. A second committed frame includes shared title/control layers.
+        // Request a fresh committed frame before capturing the synthetic window.
         @MainActor func invalidateDisplay(_ view: UIView) {
             view.setNeedsDisplay()
             for subview in view.subviews { invalidateDisplay(subview) }
@@ -4212,16 +4600,16 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(window.isKeyWindow, "The synthetic snapshot window must be fully presented")
         XCTAssertEqual(window.bounds.size, fixture.size, fixture.name)
         XCTAssertEqual(controller.view.bounds.size, fixture.size, fixture.name)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 2
-        format.opaque = true
-        let image = UIGraphicsImageRenderer(size: fixture.size, format: format).image { _ in
-            // SwiftUI keeps unchanged symbols/buttons in composited surfaces;
-            // layer.render can omit those layers in subsequent fixtures even
-            // though they remain visible. Capture the presented hierarchy.
-            XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
+        // Opt-in time for an external simctl screenshot of the OS composite.
+        // Hosted unit tests cannot use XCUIScreen; drawHierarchy can omit
+        // independently composited SwiftUI layers on iOS 26.
+        if ProcessInfo.processInfo.environment["BUDDYSTUDY_VOICE_CAPTURE_COMPOSITE"] == "1" {
+            print("VOICE_SNAPSHOT_READY:\(fixture.name)")
+            try await Task.sleep(for: .seconds(5))
         }
-        return image
+        return UIGraphicsImageRenderer(size: fixture.size).image { _ in
+            window.drawHierarchy(in: bounds, afterScreenUpdates: true)
+        }
     }
 
     private func makeRenderBuffer(
@@ -4373,12 +4761,75 @@ private final class VoiceTutorContractCaptureDiagnostics: @unchecked Sendable {
     }
 }
 
+@MainActor
+private final class VoiceTutorOrbInteractionProbe {
+    var pauseCount = 0
+    var endCount = 0
+    var revealed = false
+    var collapsed = false
+    var completed: Bool { pauseCount >= 2 && revealed && collapsed }
+}
+
+@MainActor
+private struct VoiceTutorInteractiveCallFixture: View {
+    let probe: VoiceTutorOrbInteractionProbe
+    @State private var pauseState: VoiceTutorCallPauseState = {
+        var state = VoiceTutorCallPauseState()
+        state.isSupported = true
+        return state
+    }()
+    @State private var showsTranscript = false
+    @State private var showsSummary = false
+
+    var body: some View {
+        VoiceTutorCallScreen(
+            topic: "Redis",
+            presentation: VoiceTutorCallPresentation(
+                phase: .listening, pauseState: pauseState,
+                sessionSecondsRemaining: 1_852, quotaRemainingSeconds: 0,
+                quotaReservedSeconds: 3_600, quotaLimitSeconds: 3_600
+            ),
+            strings: AppStrings(language: .korean),
+            captions: [
+                VoiceTutorCaption(speaker: .learner, text: "캐시가 언제 만료되나요?"),
+                VoiceTutorCaption(speaker: .tutor, text: "설정한 만료 시간이 지나면 사라져요.")
+            ],
+            errorMessage: nil,
+            showsTranscript: $showsTranscript,
+            showsSummary: $showsSummary,
+            onPause: {
+                let paused = pauseState.mode == .active
+                let command = paused ? pauseState.requestPause() : pauseState.requestResume()
+                if let command, pauseState.acknowledge(sequence: command.sequence, paused: paused) {
+                    probe.pauseCount += 1
+                    print("VOICE_INTERACTION_PAUSE:\(probe.pauseCount)")
+                }
+            },
+            onEnd: { probe.endCount += 1 }
+        )
+        .environment(\.colorScheme, .dark)
+        // This UIHostingController is outside the app's SwiftUI Scene. Supply
+        // the active scene value that the real call receives from WindowGroup.
+        .environment(\.scenePhase, .active)
+        .onChange(of: showsTranscript) { _, expanded in
+            if expanded { probe.revealed = true }
+            else if probe.revealed { probe.collapsed = true }
+            print("VOICE_INTERACTION_TRANSCRIPT:\(expanded)")
+        }
+    }
+}
+
 private struct VoiceTutorCompactCallSnapshot {
     var name: String
     var phase: VoiceTutorSessionPhase
     var seconds: Int? = 1_852
     var isRecording = false
-    var pauseState = VoiceTutorCallPauseState()
+    var isAwaitingTutorResponse = false
+    var pauseState: VoiceTutorCallPauseState = {
+        var state = VoiceTutorCallPauseState()
+        state.isSupported = true
+        return state
+    }()
     var failureCause: VoiceTutorFailureCause? = nil
     var serverEndReason: String? = nil
     var quotaRemainingSeconds: Int? = nil
@@ -4386,10 +4837,12 @@ private struct VoiceTutorCompactCallSnapshot {
     var detail: BackendVoiceTutorSessionDetail?
     var showsTranscript = false
     var showsPreview = false
+    var learnerOnly = false
     var language: AppLanguage = .korean
     var topic = "Redis"
     var size = CGSize(width: 402, height: 874)
     var dynamicType = DynamicTypeSize.large
+    var colorScheme = ColorScheme.dark
 }
 
 private struct VoiceTutorContractRenderFixture {

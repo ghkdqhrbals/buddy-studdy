@@ -27,6 +27,7 @@ internal class VoiceTutorNativeConversationController(
     private val language: String = "ko",
     private val nanoTime: () -> Long = System::nanoTime,
     private val wallClock: () -> Instant = Instant::now,
+    private val onProviderTurnFailure: (VoiceTutorProviderTurnFailureDiagnostic) -> Unit = {},
 ) {
     private val mapper = JsonMapperProvider.mapper
     private val provider = sink<String>()
@@ -64,6 +65,7 @@ internal class VoiceTutorNativeConversationController(
     private val transcripts = linkedMapOf<String, TranscriptState>()
     private val pendingTools = linkedMapOf<String, ToolBoundary>()
     private val seenResponses = linkedSetOf<String>()
+    private val responseRequests = linkedSetOf<String>()
     private val earlyTranscripts = linkedMapOf<String, String>()
     private var integrityIncomplete = false
     private var integrityRecorded = false
@@ -94,6 +96,8 @@ internal class VoiceTutorNativeConversationController(
             return false
         }
         when (type) {
+            // Only our completed response state can settle the app's pending input.
+            Contract.INPUT_SETTLED_EVENT -> return false
             // Provider VAD is disabled. Unexpected VAD edges cannot acquire turn authority.
             "input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped" -> return false
             "input_audio_buffer.committed" -> {
@@ -111,6 +115,7 @@ internal class VoiceTutorNativeConversationController(
                 if (!draining && !quotaRequested) {
                     latestLearner = input
                     queuedInput = true
+                    if (active == null) retryCount = 0
                     // This is the entire ordinary response path: no transcription, classifier or DB await.
                     scheduleResponse()
                 }
@@ -219,9 +224,8 @@ internal class VoiceTutorNativeConversationController(
                     scheduleResponse()
                     return false
                 }
-                if (classifyRealtimeProviderError(node) == VoiceTutorProviderErrorDisposition.RECOVERABLE) {
-                    return false
-                }
+                observeProviderError(node)
+                return false
             }
         }
         return true
@@ -238,8 +242,9 @@ internal class VoiceTutorNativeConversationController(
                     clientSpeechSequence = seq
                     speaking = true
                     // A rapid restart shares the native buffer with an uncommitted short tail.
-                    if (pendingSpeech == null) pendingSpeech = SpeechBoundary(++sequence, revision, ++eventOrder, wallClock(),
+                    if (pendingSpeech == null) pendingSpeech = SpeechBoundary(++sequence, seq, revision, ++eventOrder, wallClock(),
                         latestTutor.takeIf { active == null }, nanoTime())
+                    else pendingSpeech?.clientSequence = seq
                 }
             }
             Contract.SPEECH_STOPPED_EVENT -> {
@@ -292,6 +297,8 @@ internal class VoiceTutorNativeConversationController(
                 }
                 val allowance = if (response.done) Duration.ofSeconds(120) else responseTimeout
                 if (nanoTime() - response.startedAt > allowance.toNanos()) {
+                    reportFailure(VoiceTutorProviderTurnFailureKind.RESPONSE_TIMEOUT,
+                        VoiceTutorProviderTurnFailureAction.SESSION_FATAL, response.createEventId)
                     fail(VoiceTutorProviderResponseTimeoutException())
                 }
             }
@@ -406,8 +413,11 @@ internal class VoiceTutorNativeConversationController(
         queuedInput = false
         val token = UUID.randomUUID().toString()
         val learner = latestLearner
-        val response = Response(token, ++generation, revision, nanoTime(), quota, boundary(learner))
+        val response = Response(token, ++generation, revision, nanoTime(), quota, isOpening, boundary(learner),
+            if (isOpening) 0L else learner?.clientSequence)
         active = response
+        responseRequests.add(response.createEventId)
+        trim(responseRequests, 1024)
         val instructions = when {
             quota -> "Say exactly this one sentence and nothing else; no question or tool: " + when (language) {
                 "en" -> "This notice uses the last of your monthly voice time, so I'll end the call now."
@@ -428,11 +438,61 @@ internal class VoiceTutorNativeConversationController(
         }
         val options = linkedMapOf<String, Any>(
             "output_modalities" to listOf("audio"), "tool_choice" to if (quota || endingAfterResponse || isOpening) "none" else toolCoordinator.toolChoice,
-            "metadata" to mapOf(Contract.RESPONSE_TOKEN_METADATA_KEY to token, Contract.QUOTA_NOTICE_METADATA_KEY to quota),
+            // Realtime response metadata accepts string values only, including boolean flags.
+            "metadata" to mapOf(Contract.RESPONSE_TOKEN_METADATA_KEY to token, Contract.QUOTA_NOTICE_METADATA_KEY to quota.toString()),
         )
         instructions?.let { options["instructions"] = it }
-        emit(mapOf("type" to "response.create", "response" to options))
+        emit(mapOf("type" to "response.create", "event_id" to response.createEventId, "response" to options))
     }
+
+    private fun observeProviderError(node: JsonNode) {
+        val eventId = safeProviderCausedEventId(node)
+        if (classifyRealtimeProviderError(node) != VoiceTutorProviderErrorDisposition.RECOVERABLE) {
+            reportFailure(VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR,
+                VoiceTutorProviderTurnFailureAction.SESSION_FATAL, eventId, node)
+            fail(VoiceTutorProviderProtocolException())
+            return
+        }
+        val response = active
+        if (response == null || response.createEventId != eventId || response.id != null) {
+            // A stale or unrelated error cannot cancel or replay an accepted response/tool turn.
+            reportFailure(VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR,
+                VoiceTutorProviderTurnFailureAction.IGNORED, eventId, node)
+            return
+        }
+        // An exact rejected response.create has no provider response or audio to drain.
+        // Release it immediately; waiting for response.done here strands all subsequent speech.
+        val action = when {
+            response.quota && quotaRetryCount == 0 -> VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED
+            response.quota -> VoiceTutorProviderTurnFailureAction.SESSION_FATAL
+            !draining && !quotaRequested && retryCount == 0 -> VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED
+            else -> VoiceTutorProviderTurnFailureAction.TURN_ABANDONED
+        }
+        reportFailure(VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR, action, eventId, node)
+        response.done = true
+        response.failed = true
+        finishResponseIfReady()
+    }
+
+    private fun reportFailure(
+        kind: VoiceTutorProviderTurnFailureKind,
+        action: VoiceTutorProviderTurnFailureAction,
+        eventId: String?,
+        node: JsonNode? = null,
+    ) = onProviderTurnFailure(VoiceTutorProviderTurnFailureDiagnostic(
+        kind = kind,
+        providerErrorType = node?.let(::safeProviderErrorType) ?: "none",
+        providerErrorCode = node?.let(::safeProviderErrorCode) ?: "none",
+        eventCorrelation = when {
+            eventId == null -> VoiceTutorProviderEventCorrelation.MISSING
+            eventId == active?.createEventId -> VoiceTutorProviderEventCorrelation.ACTIVE_RESPONSE
+            eventId in responseRequests -> VoiceTutorProviderEventCorrelation.STALE_RESPONSE
+            else -> VoiceTutorProviderEventCorrelation.EXTERNAL_EVENT
+        },
+        causedEventRef = providerEventReference(eventId),
+        attempt = (if (active?.quota == true) quotaRetryCount else retryCount) + 1,
+        action = action,
+    ))
 
     private fun finishResponseIfReady() {
         val response = active ?: return
@@ -462,13 +522,29 @@ internal class VoiceTutorNativeConversationController(
         }
         if (!response.failed) {
             retryCount = 0
-            val calls = toolCoordinator.completedResponse(response.body ?: return)
+            val body = response.body ?: return
+            val calls = toolCoordinator.completedResponse(body)
             calls.forEach { call ->
                 pendingTools[call.callId] = ToolBoundary(response.boundary.copy(responseGeneration = response.generation), response.revision)
                 publish(tools, call)
             }
+            if (!draining && !response.expectsAudio && body.path("output").isArray && body.path("output").isEmpty &&
+                !toolCoordinator.hasPending && !toolCoordinator.continuationReady
+            ) {
+                // Tool-only output keeps waiting for continuation. Empty successful output has no
+                // audible event to clear waiting; settle only the acoustic input frozen at creation.
+                response.clientSequence?.let { settled -> publish(client, json(mapOf(
+                    "type" to Contract.INPUT_SETTLED_EVENT, "sequence" to settled,
+                ))) }
+            }
         } else if (!draining && !quotaRequested && retryCount++ == 0) {
+            opening = response.opening && !response.audioStarted
             queuedInput = true
+        } else if (endingAfterResponse) {
+            // The learner already asked to hang up. A rejected goodbye must not keep the call alive.
+            draining = true
+            publish(lifecycle, json(mapOf("type" to Contract.SPOKEN_LESSON_END_EVENT)))
+            return
         } else {
             publish(client, json(mapOf("type" to Contract.INPUT_RETRY_EVENT, "abandonedResponseId" to response.id)))
         }
@@ -488,7 +564,7 @@ internal class VoiceTutorNativeConversationController(
 
     private fun input(id: String, speech: SpeechBoundary): Input = inputs.getOrPut(id) {
         check(inputs.size < 4096) { "Voice call exceeded bounded transcript capacity." }
-        Input(id, speech.sequence, speech.revision, speech.startedOrder, speech.acceptedAt, speech.precedingTutor)
+        Input(id, speech.sequence, speech.clientSequence, speech.revision, speech.startedOrder, speech.acceptedAt, speech.precedingTutor)
     }
 
     private fun commitSpeech() {
@@ -513,7 +589,12 @@ internal class VoiceTutorNativeConversationController(
 
     private fun announceResponse(response: Response) {
         if (!response.announced) {
-            response.createdRaw?.let { publish(client, it) }
+            response.createdRaw?.let { raw ->
+                // The app flag is a typed, server-owned field, independent of provider metadata.
+                val event = mapper.readTree(raw) as ObjectNode
+                event.put(Contract.QUOTA_EXHAUSTION_NOTICE_FIELD, response.quota)
+                publish(client, mapper.writeValueAsString(event))
+            }
             response.announced = true
         }
     }
@@ -556,15 +637,16 @@ internal class VoiceTutorNativeConversationController(
     data class NativeTranscript(val itemId: String, val raw: String)
     private class TranscriptState(var complete: Boolean = false)
     private data class Tutor(val id: String, val stoppedOrder: Long, val generation: Long)
-    private data class Input(val id: String, val sequence: Long, val revision: Long, val startedOrder: Long,
+    private data class Input(val id: String, val sequence: Long, val clientSequence: Long, val revision: Long, val startedOrder: Long,
         val acceptedAt: Instant, val precedingTutor: Tutor?, var committed: Boolean = false, var transcriptionFailed: Boolean = false)
-    private data class SpeechBoundary(val sequence: Long, val revision: Long, val startedOrder: Long,
+    private data class SpeechBoundary(val sequence: Long, var clientSequence: Long, val revision: Long, val startedOrder: Long,
         val acceptedAt: Instant, val precedingTutor: Tutor?, var committedAt: Long,
         val commitEventId: String = "buddystudy-internal-native-commit-${UUID.randomUUID()}")
     private data class TutorTranscript(val sequence: Long, val acceptedAt: Instant, var raw: String? = null)
     private data class ToolBoundary(val boundary: VoiceTutorDialogueBoundary, val revision: Long)
     private class Response(val token: String, val generation: Long, val revision: Long, val startedAt: Long,
-        val quota: Boolean, val boundary: VoiceTutorDialogueBoundary) {
+        val quota: Boolean, val opening: Boolean, val boundary: VoiceTutorDialogueBoundary, val clientSequence: Long?) {
+        val createEventId = "buddystudy-internal-native-response-${UUID.randomUUID()}"
         var id: String? = null
         var createdRaw: String? = null
         var announced = false
