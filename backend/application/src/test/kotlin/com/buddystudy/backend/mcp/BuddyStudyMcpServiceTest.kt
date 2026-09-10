@@ -16,15 +16,20 @@ import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.QuestionItemResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
+import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsResponse
+import com.buddystudy.backend.study.application.model.StudyTopicsCreationResponse
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.BrowseStudyLearningRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicsCommand
+import com.buddystudy.backend.study.application.port.inbound.ExpectedStudyMetadata
 import com.buddystudy.backend.study.application.port.inbound.GetAnswerGradingProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerationProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
+import com.buddystudy.backend.study.application.port.inbound.StudyTreeUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
@@ -52,6 +57,7 @@ class BuddyStudyMcpServiceTest {
     private val growth = Mockito.mock(GetStudyGrowthUseCase::class.java)
     private val voiceTutor = Mockito.mock(VoiceTutorUseCase::class.java)
     private val learningRecords = Mockito.mock(BrowseStudyLearningRecordsUseCase::class.java)
+    private val studyTree = Mockito.mock(StudyTreeUseCase::class.java)
     private val service = BuddyStudyMcpService(
         profiles,
         learningContexts,
@@ -65,8 +71,50 @@ class BuddyStudyMcpServiceTest {
         growth,
         voiceTutor,
         learningRecords,
+        studyTree,
     )
     private val principal = Principal(7, "device-7", 70, anonymous = false)
+
+    @Test
+    fun `topic recommendations use the same owned catalog without creating studies or reserving quota`(): Unit = runBlocking {
+        val response = StudyTopicSuggestionsResponse(42, listOf("Transactions", "Indexes"), depth = 2)
+        Mockito.`when`(studyTree.suggestTopics(principal, 42, 5)).thenReturn(response)
+
+        assertThat(service.suggestStudyTopics(principal, 42, 5)).isSameAs(response)
+        Mockito.verify(studyTree).suggestTopics(principal, 42, 5)
+        Mockito.verifyNoInteractions(studies, questionRequests, answers, records, voiceTutor)
+    }
+
+    @Test
+    fun `topic recommendations reject anonymous owners invalid parents and unbounded counts`(): Unit = runBlocking {
+        val invalid = listOf(
+            Triple(principal.copy(anonymous = true), 42L, 5),
+            Triple(principal, 0L, 5),
+            Triple(principal, 42L, 0),
+            Triple(principal, 42L, 11),
+        )
+        invalid.forEach { (owner, parent, count) ->
+            assertThat(runCatching { service.suggestStudyTopics(owner, parent, count) }.exceptionOrNull())
+                .isInstanceOf(ApiException::class.java)
+        }
+        Mockito.verifyNoInteractions(studyTree, studies, questionRequests)
+    }
+
+    @Test
+    fun `selected topic batch delegates once preserving the immutable parent fence without quota work`(): Unit = runBlocking {
+        val command = CreateStudyTopicsCommand(listOf("Transactions", "Indexes"), 8, ExpectedStudyMetadata(null, "Database", 5))
+        val response = StudyTopicsCreationResponse(42, emptyList())
+        Mockito.`when`(studies.createStudyTopics(principal, 42, command)).thenReturn(response)
+
+        assertThat(service.createStudyTopics(principal, 42, command)).isSameAs(response)
+        Mockito.verify(studies).createStudyTopics(principal, 42, command)
+        Mockito.verifyNoInteractions(questionRequests, answers, records, voiceTutor, studyTree)
+        assertThat(runCatching { service.createStudyTopics(principal.copy(anonymous = true), 42, command) }.exceptionOrNull())
+            .isInstanceOf(ApiException::class.java)
+        assertThat(runCatching { service.createStudyTopics(principal, 0, command) }.exceptionOrNull())
+            .isInstanceOf(ApiException::class.java)
+        Mockito.verifyNoMoreInteractions(studies)
+    }
 
     @Test
     fun `pending lookup delegates exact topic filtering before pagination while preserving the legacy overload`(): Unit = runBlocking {
@@ -396,6 +444,8 @@ class BuddyStudyMcpServiceTest {
         assertThat(operations.getValue("deleteStudy")).containsExactly(Permissions.STUDY_DELETE)
         assertThat(operations.getValue("updateStudy")).containsExactly(Permissions.STUDY_UPDATE)
         assertThat(operations.getValue("createRootStudy")).containsExactly(Permissions.STUDY_CREATE)
+        assertThat(operations.getValue("suggestStudyTopics")).containsExactly(Permissions.STUDY_CREATE)
+        assertThat(operations.getValue("createStudyTopics")).containsExactly(Permissions.STUDY_CREATE)
         assertThat(operations.getValue("submitAnswer")).containsExactly(Permissions.RECORD_UPDATE)
         assertThat(operations.getValue("skipQuestion")).containsExactly(Permissions.RECORD_UPDATE)
         assertThat(methods.filter { it.name == "listPendingQuestions" }).hasSize(2).allSatisfy { function ->
@@ -446,6 +496,8 @@ class BuddyStudyMcpServiceTest {
             "createStudy",
             "createRootStudy",
             "createStudyTopic",
+            "suggestStudyTopics",
+            "createStudyTopics",
             "deleteStudy",
             "listPendingQuestions",
             "skipQuestion",

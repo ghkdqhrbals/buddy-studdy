@@ -17,6 +17,8 @@ data class VoiceTutorWebRtcControlContext(
     val dialogueBoundary: VoiceTutorDialogueBoundary? = null,
     /** Trusted runtime choice; never accepted from client or provider tool JSON. */
     val realtimeModelTools: Boolean = false,
+    /** Explicit authenticated control-handshake capability; old native clients remain voice-only. */
+    val userInputEnabled: Boolean = false,
 )
 
 /** Tutor boundaries are frozen at the last accepted learner item's speech start, not tool completion. */

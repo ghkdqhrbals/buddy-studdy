@@ -17,10 +17,13 @@ import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageRe
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.StudyTopicCreationResponse
+import com.buddystudy.backend.study.application.model.StudyTopicsCreationResponse
+import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsResponse
 import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordResponse
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicsCommand
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionDetailResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorSessionsPageResponse
@@ -60,6 +63,18 @@ interface BuddyStudyMcpUseCase {
         parentStudyId: Long,
         command: CreateStudyTopicCommand,
     ): StudyTopicCreationResponse
+
+    suspend fun suggestStudyTopics(
+        principal: Principal,
+        parentStudyId: Long,
+        count: Int,
+    ): StudyTopicSuggestionsResponse
+
+    suspend fun createStudyTopics(
+        principal: Principal,
+        parentStudyId: Long,
+        command: CreateStudyTopicsCommand,
+    ): StudyTopicsCreationResponse
 
     suspend fun deleteStudy(
         principal: Principal,

@@ -25,9 +25,9 @@ struct VoiceTutorCallPauseState: Equatable, Sendable {
     var holdsMicrophone: Bool { mode != .active }
     var isAwaitingAcknowledgement: Bool { mode == .pausing || mode == .resuming }
 
-    // Includes the server's configured response timeout (hard-capped at 120s)
-    // plus its clear-ACK grace. Resume has no tutor response to drain.
-    var acknowledgementTimeoutSeconds: UInt64 { mode == .pausing ? 140 : 15 }
+    // Pause cancels at the bounded local acoustic boundary, then waits only
+    // for the server's cancellation/input-clear acknowledgement.
+    var acknowledgementTimeoutSeconds: UInt64 { 15 }
 
     mutating func requestPause() -> VoiceTutorPauseControl? {
         guard isSupported, mode == .active, sequence < .max else { return nil }
@@ -61,6 +61,7 @@ enum VoiceTutorCallControlEvent: Equatable, Sendable {
     case speech(VoiceTutorLocalSpeechEvent)
     case pause(VoiceTutorPauseControl)
     case answer(VoiceTutorAnswerControl)
+    case userInput(VoiceTutorUserInputControl)
 }
 
 /// One bounded sender for speech edges AND hold fences. The capture gate emits
@@ -81,6 +82,7 @@ struct VoiceTutorCallControlEventStream: Sendable {
     func yield(_ event: VoiceTutorLocalSpeechEvent) { yield(.speech(event)) }
     func yield(_ control: VoiceTutorPauseControl) { yield(.pause(control)) }
     func yield(_ control: VoiceTutorAnswerControl) { yield(.answer(control)) }
+    func yield(_ control: VoiceTutorUserInputControl) { yield(.userInput(control)) }
 
     private func yield(_ event: VoiceTutorCallControlEvent) {
         switch continuation.yield(event) {

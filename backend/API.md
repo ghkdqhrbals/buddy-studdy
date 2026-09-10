@@ -789,7 +789,8 @@ The backend first reuses children from the shared system topic catalog for the
 same root, parent path, language, and depth. It calls the topic generator only
 for missing candidates and stores those candidates back in the catalog for
 later users. A parent can expose at most 10 candidates and descendants can be
-created through depth 5. User-owned study nodes are materialized only when the
+created through depth 4 (root depth zero). Existing deeper nodes remain readable
+and editable, but cannot be extended. User-owned study nodes are materialized only when the
 user selects a candidate, and newly created nodes are active for questions by
 default.
 
@@ -801,12 +802,16 @@ Response:
   "suggestions": ["정규화", "인덱스", "트랜잭션"],
   "source": "CATALOG",
   "depth": 2,
-  "maxDepth": 5,
+  "maxDepth": 4,
   "childLimit": 10
 }
 ```
 
-`source` is `CATALOG`, `GENERATED`, `MIXED`, or `DEPTH_LIMIT`.
+`source` is `CATALOG`, `GENERATED`, `MIXED`, `FALLBACK`, `CATALOG_FALLBACK`, or
+`DEPTH_LIMIT`. Reaching the depth limit returns an empty suggestion list; trying
+to create a new child beyond it returns `422 VALIDATION_ERROR`. Replaying an
+existing same-parent child returns it unchanged, including legacy deeper nodes.
+Topic recommendation and creation never generate a question or consume question quota.
 
 ### Pro Voice Tutor
 
@@ -902,6 +907,11 @@ Authorization: Bearer <accessToken>
 Clients must return the cursor unchanged rather than parsing or synthesizing
 it. Detail includes the session, authoritative quota, bounded ordered
 `transcriptTurns`, and the private Tutor Learning Result when available.
+Each transcript turn includes `source`: `AUDIO` for voice transcript turns, or
+`STRUCTURED_INPUT` for explicitly submitted app selections and typed preferences.
+Structured input preserves the submitted text, can establish a new learner turn
+for topic focus, and is excluded from spoken question, answer, feedback, and grade
+evidence. Clients should treat an absent source from an older server as `AUDIO`.
 Detail also returns the unified `recording` metadata object even when no
 recording row exists. Recording states are `PENDING`, `AVAILABLE`, `FAILED`, or
 `DELETED`; clients use the explicit `available` boolean before requesting

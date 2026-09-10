@@ -6,6 +6,7 @@ import com.buddystudy.backend.learningcontext.application.model.LearningContextP
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicsCommand
 import com.buddystudy.backend.study.application.port.inbound.ExpectedStudyMetadata
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -172,7 +173,7 @@ class BuddyStudyMcpAdapter(
             tool(
                 name = "create_study_topic",
                 title = "Create a child study topic",
-                description = "Add a child topic under an owned study node. This is separate from root-study creation and question generation.",
+                description = "Add one selected child topic under an owned study node through descendant depth 4 (root depth zero). Existing deeper topics are preserved. This is separate from root-study creation and question generation, and consumes no question quota.",
                 schema = objectSchema(
                     properties = linkedMapOf(
                         "parent_study_id" to idProperty("Parent study node ID."),
@@ -194,6 +195,59 @@ class BuddyStudyMcpAdapter(
                         sortOrder = args.int("sort_order", 0),
                         difficultyLevel = args.int("difficulty_level", 5),
                         activeForQuestions = args.boolean("active_for_questions", true),
+                    ),
+                )
+            },
+            tool(
+                name = "suggest_study_topics",
+                title = "Recommend child study topics",
+                description = "Recommend a bounded list of child topics under one owned study node, using the shared catalog before generating missing suggestions. Supports four descendant levels below root depth zero and returns depth/maxDepth metadata. This does not create user studies, select the lesson focus, generate questions or consume question quota. Offer the recommendations for explicit learner selection, create only selected topics, then lazily request suggestions for a selected saved child if the learner wants to go deeper.",
+                schema = objectSchema(
+                    properties = linkedMapOf(
+                        "parent_study_id" to idProperty("Owned parent study node ID whose direct children are being planned."),
+                        "count" to integerProperty("Maximum number of topic suggestions.", 1, 10, 5),
+                    ),
+                    required = listOf("parent_study_id"),
+                ),
+                // A missing catalog branch may be generated and cached, while
+                // the learner's saved tree and question quota stay untouched.
+                readOnly = false,
+                destructive = false,
+                idempotent = false,
+            ) { principal, args ->
+                val count = args.int("count", 5)
+                if (count !in 1..10) throw McpArgumentException("count must be between 1 and 10.")
+                buddyStudy.suggestStudyTopics(principal, args.long("parent_study_id"), count)
+            },
+            tool(
+                name = "create_study_topics",
+                title = "Create selected child study topics",
+                description = "Atomically save only the explicitly selected direct child topics under one owned parent. Accepts 1 to 10 distinct topics through descendant depth 4 (root depth zero), rejects the entire selection if any topic conflicts, and returns existing same-parent topics unchanged. Creates no deeper descendants or questions and consumes no question quota.",
+                schema = objectSchema(
+                    properties = linkedMapOf(
+                        "parent_study_id" to idProperty("Owned parent study node ID."),
+                        "topics" to arrayProperty(
+                            "Explicitly selected direct child topics.",
+                            stringProperty(minLength = 1, maxLength = 255),
+                            maxItems = 10,
+                        ).toMutableMap().apply {
+                            put("minItems", 1)
+                            put("uniqueItems", true)
+                        },
+                        "difficulty_level" to integerProperty("Difficulty from 1 to 10.", 1, 10, 5),
+                    ),
+                    required = listOf("parent_study_id", "topics"),
+                ),
+                readOnly = false,
+                idempotent = true,
+            ) { principal, args ->
+                buddyStudy.createStudyTopics(
+                    principal,
+                    args.long("parent_study_id"),
+                    CreateStudyTopicsCommand(
+                        topics = args.optionalStringList("topics") ?: throw McpArgumentException("topics is required."),
+                        difficultyLevel = args.int("difficulty_level", 5),
+                        expectedParent = args.voiceStudyMetadataExpectation(),
                     ),
                 )
             },

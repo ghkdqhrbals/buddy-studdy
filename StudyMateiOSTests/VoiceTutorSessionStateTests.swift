@@ -136,7 +136,9 @@ final class VoiceTutorOperationStateTests: XCTestCase {
         XCTAssertTrue(state.apply(event(3, "call_read_1", .completed, elapsed: 30_050), at: 131))
         XCTAssertTrue(state.active.isEmpty)
         XCTAssertEqual(state.visibleEntries(at: 132).first?.elapsedMilliseconds(at: 132), 30_050)
-        XCTAssertTrue(state.visibleEntries(at: 136).isEmpty)
+        XCTAssertEqual(state.visibleEntries(at: 3_600).map(\.id), ["call_read_1"])
+        state.endLocally()
+        XCTAssertEqual(state.visibleEntries(at: 3_700).map(\.id), ["call_read_1"])
         XCTAssertFalse(state.apply(event(2, "call_read_1", .started), at: 137))
         XCTAssertFalse(state.apply(event(4, "call_read_1", .started), at: 137))
     }
@@ -146,9 +148,9 @@ final class VoiceTutorOperationStateTests: XCTestCase {
         XCTAssertTrue(state.apply(event(1, "one", .started), at: 10))
         XCTAssertTrue(state.apply(event(2, "two", .started), at: 11))
         XCTAssertTrue(state.apply(event(3, "two", .failed, elapsed: 420), at: 12))
-        XCTAssertEqual(state.visibleEntries(at: 12).map(\.id), ["one"])
+        XCTAssertEqual(state.visibleEntries(at: 12).map(\.id), ["one", "two"])
         XCTAssertTrue(state.apply(event(4, "one", .completed, elapsed: 2_300), at: 13))
-        XCTAssertEqual(state.visibleEntries(at: 13).map(\.id), ["one"])
+        XCTAssertEqual(state.visibleEntries(at: 13).map(\.id), ["one", "two"])
         XCTAssertEqual(state.latestFinished?.event.phase, .completed)
     }
 
@@ -173,8 +175,11 @@ final class VoiceTutorOperationStateTests: XCTestCase {
                 strings.voiceTutorOperationStatus(name: "get_grading_process", phase: $0, elapsedMilliseconds: 275)
             }
             XCTAssertEqual(Set(labels).count, 3)
-            XCTAssertTrue(labels.allSatisfy { $0.hasPrefix("get_grading_process · ") && $0.hasSuffix("275 ms") })
+            XCTAssertTrue(labels.allSatisfy { $0.hasPrefix("get_grading_process · ") && !$0.contains("ms") })
         }
+        let strings = AppStrings(language: .korean)
+        XCTAssertTrue(strings.voiceTutorOperationStatus(name: "read_studies", phase: .completed, elapsedMilliseconds: 2_300).hasSuffix("2초"))
+        XCTAssertTrue(strings.voiceTutorOperationStatus(name: "read_studies", phase: .completed, elapsedMilliseconds: 125_000).hasSuffix("2분"))
     }
 
     @MainActor

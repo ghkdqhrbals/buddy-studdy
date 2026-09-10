@@ -3123,8 +3123,8 @@ struct AppStrings {
     var voiceTutorMute: String { text("음소거", "Mute", "ミュート") }
     var voiceTutorUnmute: String { text("음소거 해제", "Unmute", "ミュート解除") }
     var voiceTutorEndSession: String { text("학습 종료", "End session", "学習を終了") }
-    var voiceTutorCallTitle: String { text("음성 통화", "Voice call", "音声通話") }
-    var voiceTutorCallStart: String { text("통화하기", "Call", "通話する") }
+    var voiceTutorCallTitle: String { text("음성 대화", "Conversation", "音声対話") }
+    var voiceTutorCallStart: String { text("대화하기", "Start conversation", "対話する") }
     var voiceTutorCallConnecting: String { text("연결 중", "Connecting", "接続中") }
     var voiceTutorCallListening: String { text("듣는 중", "Listening", "聞いています") }
     var voiceTutorInputRepeat: String { text("다시 말해 주세요", "Please say that again", "もう一度話してください") }
@@ -3167,8 +3167,8 @@ struct AppStrings {
         )
     }
     var voiceTutorCallSpeaking: String { text("답변 중", "Speaking", "応答中") }
-    var voiceTutorCallEnding: String { text("통화 마치는 중", "Ending call", "通話を終了中") }
-    var voiceTutorCallEnded: String { text("통화 종료", "Call ended", "通話終了") }
+    var voiceTutorCallEnding: String { text("대화 마치는 중", "Ending conversation", "対話を終了中") }
+    var voiceTutorCallEnded: String { text("대화 종료", "Conversation ended", "対話終了") }
     var voiceTutorCallQuotaEnded: String {
         text(
             "이번 달 음성 시간 모두 사용",
@@ -3180,9 +3180,9 @@ struct AppStrings {
     var voiceTutorCallFailed: String { text("연결 끊김", "Disconnected", "接続切断") }
     var voiceTutorCallMuted: String { text("마이크 꺼짐", "Mic off", "マイクオフ") }
     var voiceTutorCallTranscript: String { text("대화 내용", "Conversation", "会話内容") }
-    var voiceTutorCallRetry: String { text("다시 통화", "Call again", "かけ直す") }
+    var voiceTutorCallRetry: String { text("다시 대화", "Start again", "もう一度対話") }
     var voiceTutorCallEnd: String { text("종료", "End", "終了") }
-    var voiceTutorCallDetails: String { text("통화 정보", "Call details", "通話情報") }
+    var voiceTutorCallDetails: String { text("대화 정보", "Conversation details", "対話情報") }
     var voiceTutorCallSummaryPending: String { text("학습 정리 중", "Summarizing", "学習を整理中") }
     var voiceTutorCallSummaryReady: String { text("학습 기록 보기", "View learning record", "学習記録を見る") }
     var voiceTutorCallSummaryFailed: String { text("학습 정리 실패", "Summary failed", "学習の整理に失敗") }
@@ -3195,16 +3195,16 @@ struct AppStrings {
     var voiceTutorCallRecording: String { text("녹음 중", "Recording", "録音中") }
     var voiceTutorRecordingConsentTitle: String {
         text(
-            "통화 녹음 및 저장에 동의",
-            "Agree to record and save this call",
-            "通話の録音と保存に同意する"
+            "대화 녹음 및 저장에 동의",
+            "Agree to record and save this conversation",
+            "対話の録音と保存に同意する"
         )
     }
     var voiceTutorRecordingConsentDescription: String {
         text(
-            "나와 선생님의 음성을 학습 복습용으로 저장합니다. 동의하지 않아도 통화할 수 있으며, 저장된 녹음은 언제든 삭제할 수 있습니다.",
-            "Your voice and the tutor's voice are saved for review. You can call without recording and delete a saved recording at any time.",
-            "自分とチューターの音声を復習用に保存します。同意しなくても通話でき、保存した録音はいつでも削除できます。"
+            "나와 선생님의 음성을 학습 복습용으로 저장합니다. 동의하지 않아도 대화할 수 있으며, 저장된 녹음은 언제든 삭제할 수 있습니다.",
+            "Your voice and the tutor's voice are saved for review. You can talk without recording and delete a saved recording at any time.",
+            "自分とチューターの音声を復習用に保存します。同意しなくても対話でき、保存した録音はいつでも削除できます。"
         )
     }
     func voiceTutorRecordingRetention(_ days: Int) -> String {
@@ -3216,15 +3216,15 @@ struct AppStrings {
         )
     }
     var voiceTutorRecordingActive: String { text("REC 녹음 중", "REC Recording", "REC 録音中") }
-    var voiceTutorSavedRecording: String { text("저장된 통화 녹음", "Saved call recording", "保存された通話録音") }
+    var voiceTutorSavedRecording: String { text("저장된 대화 녹음", "Saved conversation recording", "保存された対話録音") }
     var voiceTutorPlayRecording: String { text("녹음 재생", "Play recording", "録音を再生") }
     var voiceTutorPauseRecording: String { text("일시정지", "Pause", "一時停止") }
     var voiceTutorDeleteRecording: String { text("녹음 삭제", "Delete recording", "録音を削除") }
     var voiceTutorDeleteRecordingConfirmation: String {
         text(
-            "이 통화 녹음을 영구적으로 삭제할까요?",
-            "Permanently delete this call recording?",
-            "この通話録音を完全に削除しますか？"
+            "이 대화 녹음을 영구적으로 삭제할까요?",
+            "Permanently delete this conversation recording?",
+            "この対話録音を完全に削除しますか？"
         )
     }
     var voiceTutorRecordingPreparing: String {
@@ -3242,9 +3242,9 @@ struct AppStrings {
     }
     var voiceTutorBackgroundContinuation: String {
         text(
-            "앱을 전환하거나 화면을 잠가도 통화가 계속됩니다. 통화를 마치려면 통화 화면에서 종료해 주세요.",
-            "Your call continues when you switch apps or lock the screen. End it from the call screen when you are finished.",
-            "アプリを切り替えたり画面をロックしたりしても通話は続きます。通話を終えるときは通話画面で終了してください。"
+            "앱을 전환하거나 화면을 잠가도 대화가 계속됩니다. 대화를 마치려면 대화 화면에서 종료해 주세요.",
+            "Your conversation continues when you switch apps or lock the screen. End it from the conversation screen when you are finished.",
+            "アプリを切り替えたり画面をロックしたりしても対話は続きます。対話を終えるときは対話画面で終了してください。"
         )
     }
     var voiceTutorSignInRequired: String {
@@ -3291,9 +3291,9 @@ struct AppStrings {
     }
     var voiceTutorSummaryFailed: String {
         text(
-            "이번 대화의 학습 요약을 만들지 못했습니다. 통화 기록은 그대로 저장되었습니다.",
+            "이번 대화의 학습 요약을 만들지 못했습니다. 대화 기록은 그대로 저장되었습니다.",
             "The learning summary could not be created. Your session record is still saved.",
-            "今回の会話の学習要約を作成できませんでした。通話記録は保存されています。"
+            "今回の会話の学習要約を作成できませんでした。対話記録は保存されています。"
         )
     }
     var voiceTutorSummaryDeferred: String {
@@ -3346,14 +3346,14 @@ struct AppStrings {
     }
     func voiceTutorUnreservedTime(_ seconds: Int) -> String {
         let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: true)
-        return text("추가 통화 가능 \(duration)", "\(duration) available outside this call", "追加通話可能 \(duration)")
+        return text("추가 대화 가능 \(duration)", "\(duration) available outside this conversation", "追加対話可能 \(duration)")
     }
     func voiceTutorReservedTime(_ seconds: Int) -> String {
         let duration = voiceTutorMonthlyMinutes(seconds, roundsUp: true)
         return text(
-            "진행 중인 통화에 \(duration) 예약 중 · 남은 시간은 종료 후 반환됩니다.",
-            "\(duration) reserved for this call. Unused time is released when it ends.",
-            "進行中の通話に\(duration)を確保中。未使用の時間は終了後に戻ります。"
+            "진행 중인 대화에 \(duration) 예약 중 · 남은 시간은 종료 후 반환됩니다.",
+            "\(duration) reserved for this conversation. Unused time is released when it ends.",
+            "進行中の対話に\(duration)を確保中。未使用の時間は終了後に戻ります。"
         )
     }
     func voiceTutorSessionLimit(_ seconds: Int) -> String {
@@ -3362,7 +3362,7 @@ struct AppStrings {
     }
     func voiceTutorSessionRemaining(_ seconds: Int) -> String {
         let duration = voiceTutorDuration(seconds)
-        return text("통화 \(duration) 남음", "Call ends in \(duration)", "通話残り\(duration)")
+        return text("대화 \(duration) 남음", "Conversation ends in \(duration)", "対話残り\(duration)")
     }
     func voiceTutorMonthlyAllowance(_ seconds: Int) -> String {
         if VoiceTutorQuotaPresentation.isUnlimited(limitSeconds: seconds) {

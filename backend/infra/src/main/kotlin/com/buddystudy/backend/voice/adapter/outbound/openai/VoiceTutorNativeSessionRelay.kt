@@ -2,6 +2,7 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
+import com.buddystudy.backend.voice.VoiceTutorUserInputContract
 import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.reactor.asFlux
 import kotlinx.coroutines.reactor.mono
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.springframework.web.reactive.socket.WebSocketMessage
 import org.springframework.web.reactive.socket.WebSocketSession
 import org.slf4j.LoggerFactory
@@ -37,10 +39,11 @@ internal fun relayVoiceTutorNativeSession(
 ): Mono<Void> {
     val diagnostics = VoiceTutorSidebandDiagnostics(context.callId)
     val controller = VoiceTutorNativeConversationController(responseTimeout, context.initialLessonRevision, context.session.language,
-        onProviderTurnFailure = diagnostics::observeProviderTurnFailure, initialStudyId = context.session.studyId)
+        onProviderTurnFailure = diagnostics::observeProviderTurnFailure, initialStudyId = context.session.studyId,
+        sessionId = context.session.id, userInputEnabled = context.userInputEnabled)
     val handshake = VoiceTutorWebRtcSessionHandshake(
         context.callId, connectTimeout,
-        expectedTools = voiceTutorRealtimeFunctionTools(nativeVoiceTutorDefinitions(mcp)),
+        expectedTools = voiceTutorRealtimeFunctionTools(nativeVoiceTutorDefinitions(mcp, context.userInputEnabled)),
         transcriptionLanguage = context.session.language,
         realtimeNative = true,
     )
@@ -90,7 +93,9 @@ internal fun relayVoiceTutorNativeSession(
             // A failed audit write cannot stall speech; mutations separately require exact durable rows.
             var persisted = false
             try {
-                persisted = onProviderEvent(transcript.raw, true, false)
+                persisted = if (transcript.itemId.startsWith(VoiceTutorTranscriptMetadata.STRUCTURED_ITEM_PREFIX)) {
+                    withTimeoutOrNull(5_000) { onProviderEvent(transcript.raw, true, false) } == true
+                } else onProviderEvent(transcript.raw, true, false)
                 if (!persisted) controller.markTranscriptIncomplete()
             }
             catch (error: CancellationException) { throw error }
@@ -106,6 +111,7 @@ internal fun relayVoiceTutorNativeSession(
         }.then()
     }.takeUntilOther(release).then()
     val tools = nativeVoiceTutorToolRelay(controller, context, mcp).takeUntilOther(release)
+    val userInputs = nativeVoiceTutorUserInputRelay(controller, context, mcp).takeUntilOther(release)
     val learningPolls = nativeVoiceTutorLearningProgressRelay(controller, context, mcp).takeUntilOther(release)
     val clientOutput = controller.clientEvents().concatMap { raw -> mono { onProviderEvent(raw, false, true) }.then() }
         .takeUntilOther(release).then()
@@ -129,7 +135,7 @@ internal fun relayVoiceTutorNativeSession(
         receive, release, controller.failure(),
         // A completed control source must not cancel an in-flight transcript/tool write.
         clientControls.then(Mono.never<Void>()), clock.then(Mono.never<Void>()),
-        persistence.then(Mono.never<Void>()), tools.then(Mono.never<Void>()), learningPolls.then(Mono.never<Void>()),
+        persistence.then(Mono.never<Void>()), tools.then(Mono.never<Void>()), userInputs.then(Mono.never<Void>()), learningPolls.then(Mono.never<Void>()),
         clientOutput.then(Mono.never<Void>()), lifecycle.then(Mono.never<Void>()),
     ).doFinally { controller.close() }
     return Mono.`when`(send, ready, work).onErrorMap { error ->
@@ -141,8 +147,9 @@ internal fun relayVoiceTutorNativeSession(
     }.doFinally { controller.close() }
 }
 
-internal fun nativeVoiceTutorDefinitions(mcp: VoiceTutorMcpToolPort) =
-    mcp.realtimeDefinitions() + VoiceTutorNativeConversationController.endCallDefinition
+internal fun nativeVoiceTutorDefinitions(mcp: VoiceTutorMcpToolPort, userInputEnabled: Boolean = false) =
+    mcp.realtimeDefinitions() + VoiceTutorNativeConversationController.endCallDefinition +
+        if (userInputEnabled) listOf(VoiceTutorUserInputContract.definition) else emptyList()
 
 internal fun nativeVoiceTutorToolRelay(
     controller: VoiceTutorNativeConversationController,
@@ -151,6 +158,34 @@ internal fun nativeVoiceTutorToolRelay(
 ): Mono<Void> = controller.toolActions().concatMap { call ->
     mono {
         if (!controller.beginTool(call.callId)) return@mono
+        if (call.name == VoiceTutorUserInputContract.TOOL) {
+            if (!context.userInputEnabled) {
+                controller.completeTool(call.callId, nativeToolError("USER_INPUT_UNSUPPORTED", "This app supports voice only. Ask conversationally instead."))
+                return@mono
+            }
+            // Waiting for a person's explicit action has no 15-second tool deadline.
+            // The controller holds this exact call without blocking the serial worker.
+            val proposalNode = call.arguments?.let { JsonMapperProvider.mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(it) }
+                ?.get("studyTopicProposal")
+            if (proposalNode == null) controller.requestUserInput(call)
+            else {
+                val args = VoiceTutorUserInputContract.studyTopics(proposalNode)
+                val proposal = try {
+                    withTimeout(15_000) {
+                        if (args == null || !controller.toolCanExecute(call.callId)) null
+                        else mcp.prepareStudyTopicUserInput(context.copy(realtimeModelTools = true,
+                            initialLessonRevision = controller.toolRevision(call.callId), dialogueBoundary = controller.toolBoundary(call.callId)),
+                            args.parentStudyId, args.topics, args.difficultyLevel)
+                    }
+                } catch (_: TimeoutCancellationException) { null }
+                catch (error: CancellationException) { throw error }
+                catch (_: Exception) { null }
+                if (proposal == null) controller.completeTool(call.callId, nativeToolError("USER_INPUT_UNAVAILABLE",
+                    "The exact parent and proposed subtopics could not be verified; no topic was created."))
+                else controller.requestUserInput(call, proposal)
+            }
+            return@mono
+        }
         val reviewedAnswer = controller.reviewedAnswer(call.callId)
         val mutating = call.name in setOf("prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study", "advance_voice_study", "request_question", "skip_question", "submit_answer")
         val result = try {
@@ -198,6 +233,21 @@ internal fun nativeVoiceTutorToolRelay(
     }.then()
 }.then()
 
+internal fun nativeVoiceTutorUserInputRelay(controller: VoiceTutorNativeConversationController,
+    context: VoiceTutorWebRtcControlContext, mcp: VoiceTutorMcpToolPort): Mono<Void> =
+    controller.userInputActions().concatMap { submission -> mono {
+        if (!controller.userInputCanExecute(submission.id)) return@mono
+        val result = try {
+            withTimeout(15_000) {
+                mcp.submitStudyTopicUserInput(context.copy(realtimeModelTools = true, initialLessonRevision = submission.revision),
+                    submission.proposalId, submission.selectedIndices)
+            }
+        } catch (_: TimeoutCancellationException) { nativeToolError("ACTION_FAILED", "Read saved topics before retrying the same selection.") }
+        catch (error: CancellationException) { throw error }
+        catch (_: Exception) { nativeToolError("ACTION_FAILED", "The exact selected topics could not be confirmed.") }
+        controller.completeUserInputMutation(submission.id, result)
+    }.then() }.then()
+
 /** Bounded, read-only observation continues even when the model does not request another poll. */
 internal fun nativeVoiceTutorLearningProgressRelay(
     controller: VoiceTutorNativeConversationController,
@@ -236,7 +286,7 @@ internal fun nativeVoiceTutorLearningProgressRelay(
     }.then()
 }.then()
 
-private fun nativeToolError(code: String, message: String) = VoiceTutorMcpToolResult(
+internal fun nativeToolError(code: String, message: String) = VoiceTutorMcpToolResult(
     JsonMapperProvider.mapper.writeValueAsString(mapOf("error" to mapOf("code" to code, "message" to message))), true,
 )
 

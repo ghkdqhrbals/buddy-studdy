@@ -36,6 +36,9 @@ internal object VoiceTutorPostCallEvidencePrompt {
             Raw turns have no live semantic flags. Judge their actual conversational meaning after the call.
             Only turns with nativeSource=true may enter exchanges or learnerQuestions. A false source may
             already belong to a canonical saved question/answer; never create another learning record for it.
+            source=STRUCTURED_INPUT identifies an explicit app preference or topic selection, not microphone
+            speech. Keep that source distinction: these turns must never enter exchanges or learnerQuestions,
+            become spoken answers, feedback or grades, even when their selected text resembles an answer.
             A tutor exchange requires a substantive educational question about its saved focus AND a real
             learner answer to that exact question, not merely alternating TUTOR and USER roles. Require both.
             Setup, greetings, topic discovery/recommendations/selection, lesson readiness or consent,
@@ -80,6 +83,7 @@ internal object VoiceTutorPostCallEvidencePrompt {
                     "knownTopics" to snapshots,
                     "transcriptTurns" to prefix.map { turn -> mapOf(
                         "id" to turn.id, "role" to turn.role.name, "transcript" to turn.transcript,
+                        "source" to turn.source.name,
                         "sequence" to turn.sequenceNumber, "lessonRevision" to turn.lessonRevision,
                         "nativeSource" to turn.postCallEvidence,
                     ) },

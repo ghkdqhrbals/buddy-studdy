@@ -47,7 +47,7 @@ extension AppStrings {
     }
 
     func voiceTutorExplorationScore(_ score: Int) -> String {
-        voiceTutorExplorationText("통화 평가 \(score)점", "Call assessment: \(score)", "通話中の評価：\(score)点")
+        voiceTutorExplorationText("대화 평가 \(score)점", "Conversation assessment: \(score)", "対話中の評価：\(score)点")
     }
 
     private func voiceTutorExplorationText(_ korean: String, _ english: String, _ japanese: String) -> String {

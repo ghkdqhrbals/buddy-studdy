@@ -287,6 +287,10 @@ class VoiceTutorServiceTest {
         val instructions = service(persistence).connect(principal, persistence.session.id).instructions
         assertThat(instructions)
             .contains("You, the realtime model hearing this conversation, decide its meaning")
+            .contains("When request_user_input is available", "If this tool is absent, use the existing spoken interaction")
+            .contains("proactively call suggest_study_topics", "request_user_input with studyTopicProposal")
+            .contains("wait silently for the exact submitted/cancelled result", "explicit Submit creates only selected children")
+            .contains("Except for the exact server-owned studyTopicProposal form", "descendants stop at depth four", "build only chosen branches lazily")
             .contains("There is no separate intent classifier")
             .contains("a contextual yes/no, name, number or short question can be meaningful even as one word")
             .contains("For noise or filler only, remain silent with an empty response and call no tool")

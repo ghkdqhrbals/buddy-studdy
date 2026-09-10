@@ -24,6 +24,13 @@ data class CreateStudyTopicCommand(
     val activeForQuestions: Boolean = true,
 )
 
+/** Explicitly selected direct children; this never expands their descendants. */
+data class CreateStudyTopicsCommand(
+    val topics: List<String>,
+    val difficultyLevel: Int = 5,
+    val expectedParent: ExpectedStudyMetadata? = null,
+)
+
 data class UpdateStudyTopicActivationCommand(
     val active: Boolean,
 )

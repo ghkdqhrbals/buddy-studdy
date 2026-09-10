@@ -90,100 +90,109 @@ arguments or tool results.
 
 ## Voice LLM integration
 
-An enabled MCP HTTP endpoint does not itself teach the voice model its tools.
-For an authenticated WebRTC call, the backend registers the existing
-`list_studies`, `get_study`, `create_root_study`, `create_study_topic`,
-`update_study`, `delete_study`, `list_records`, `get_record`,
-`list_study_learning_records`, `get_voice_learning_record`, `get_topic_stats`,
-and `get_study_growth` definitions as twelve Realtime function tools, plus the
-voice-only `select_voice_study` and `advance_voice_study` focus functions.
-The server's local `McpVoiceTutorToolAdapter` reuses the existing MCP handlers
-for the twelve shared tools, owns the two voice-only focus functions, and returns
-a bounded `function_call_output` with the captured, revalidated principal; the
-model receives neither an app bearer nor a new MCP access token. This local
-bridge does not enable the external HTTP endpoint or change its production
-rollout gate.
+The active iOS runtime is `realtime-native-v1`. An enabled MCP HTTP endpoint
+alone does not register tools with the voice model. The local
+`McpVoiceTutorToolAdapter` reuses owner-scoped MCP handlers for saved studies,
+records, statistics, canonical questions and grading, including the read-only
+`suggest_study_topics` function. Voice focus uses `select_voice_study` and
+`advance_voice_study`. Ordinary writes use `prepare_voice_study_mutation` and
+`confirm_voice_study_mutation`; raw create/update/delete tools and the batch
+`create_study_topics` tool are not advertised or executable by the native model.
+The model receives no app bearer or independent MCP credential. This local
+bridge does not enable the external HTTP MCP endpoint.
 
-- `list_studies` optionally accepts `parent_study_id` to page only the direct
-  children of an owned parent. Missing/foreign parents are indistinguishable
-  404s, the count and page share the owner/parent/query filter, and omitting the
-  argument preserves the existing all-studies behavior. `get_study` returns a
-  single node, not a child-topic list.
-- The two learning-history tools require the requested node and the call's
-  selected node to resolve to the same owned root through their actual current
-  parent chains. Each chain is bounded to 32 nodes; missing nodes, unresolved
-  parents, cycles, malformed identities, or another root fail closed. A shared
-  topic name or a cached lesson snapshot is not proof of ancestry. Single voice
-  detail is checked using its returned study ID, not a model-supplied node ID.
-  Active call/device authorization is rechecked across suspended reads before
-  returning private history. This additional call-tree restriction applies to
-  these two tools; general MCP reads remain owner-scoped.
-- Root creation requires one final, meaningful, durably persisted, semantically
-  clear learner choice to begin one named topic as a new saved study. Natural
-  first-person wording is sufficient without imperative grammar or literal
-  create/save/root words. That statement itself is approval: structured semantic
-  assessment plus an independent semantic attestation extracts the exact
-  learner-spoken topic and requested 1–10 level, or default 5 only when the level
-  was omitted, and binds that tuple to a call-local one-shot write lease. Each
-  decision also independently sets `startLessonAfterCreate` only when that same
-  current persisted turn unambiguously requests immediate learning; both must
-  agree before the server grants that distinct one-shot focus purpose. Neither
-  semantic decision uses regex, keyword lists, utterance length, punctuation or
-  sentence completeness.
-  The tutor calls `create_root_study` immediately and must not add a preview,
-  “만들까요?” prompt, restatement or contextual-yes round. Generic agreement,
-  ordinary interest, a recommendation request, a tutor proposal, checkpoint,
-  mismatched tool arguments, failed persistence and newer speech cannot grant or
-  reuse the lease. The owner-scoped common write is
-  create-only: a normalized exact root duplicate is returned unchanged, while a
-  matching child conflicts. It never generates a question or consumes question
-  quota, and its result alone never selects or starts a lesson. After that result, the
-  server bridge schedules `get_study` for the trusted returned ID and blocks the
-  spoken acknowledgment until both function outputs are acknowledged and the
-  exact root readback succeeds. Failed or mismatched readback cannot claim a
-  saved outcome and never retries the create automatically. A create-only result
-  reports `REQUIRES_SELECTION`; the tutor then speaks the exact read-back root as
-  a separate start offer, receives fresh consent and calls
-  `select_voice_study`. A compound create-and-start result instead reports
-  `AUTO_FOCUS_PENDING`: the model remains silent while the server performs the
-  exact readback and one bound selection. Only a successful
-  `CREATED_ROOT_IMMEDIATE_START` result permits the first substantive question
-  without another confirmation. Failure cannot reuse the old learner turn or
-  replay the mutation.
-- Child creation requires a semantically clear current first-person choice of one
-  exact child and an unambiguous parent inside the call's selected study subtree.
-  It runs once in that turn without requiring imperative grammar, restatement or
-  duplicate confirmation; the same rule applies to an unambiguous learner-chosen
-  name or level update. Mere mentions, examples, recommendations, quotations,
-  third-party wishes and ambiguous targets or outcomes are not write permission.
-  Destructive deletion retains its separate preview plus fresh-confirmation
-  boundary. Schema validation, active identity, parent scope and the existing
-  use-case permissions are all enforced before a write. Question requests,
-  answer submission, profile writes and call/recording control are not voice
-  tools.
-- Function calls are correlated to a completed response and executed serially
-  off the provider receive loop. IDs are registered before execution, output
-  acknowledgement gates the spoken continuation, and timeouts never blindly
-  retry an uncertain mutation. JSON arguments and results are capped at 16 KiB;
-  large reads ask for a smaller page, while large successful creation results
-  retain compact verified study-tree metadata.
-- Live audio frames and binary recordings are not passed through MCP. Persisted
-  transcript-derived questions, answers and feedback are private history tool
-  results, not new learner answers or consent to start a lesson. Topic discovery,
-  root/topic mutation, selection, consent, settings and other setup dialogue never
-  become learning records. A new record requires a server-authorized substantive
-  tutor question and its exact complete learner answer; multipart answer evidence
-  is accepted only as the complete ordered durable set. Optional score/feedback
-  evidence must link the exact final answer part in the same lesson revision with
-  no later linked answer or intervening tutor turn. Successful child metadata
-  refreshes never replace the active question or answer draft. Administrative
-  `mcp_exchange` logs capture bounded, redacted arguments and results at the
-  public voice execution boundary. Diagnostic exception logs still contain only
-  fixed error codes and types, without raw exception messages.
+- Calls are registered from one matching completed provider response before
+  execution, then run serially away from provider receive. An exact
+  `function_call_output` acknowledgement gates continuation. Ordinary arguments
+  and results are bounded to 16 KiB; unknown writes are never retried blindly.
+- `list_studies(parent_study_id: ...)` reads direct saved children of one owned
+  parent. `get_study` reads one node. `suggest_study_topics` recommends a bounded
+  set for an exact saved parent; it neither creates user studies nor spends
+  question quota. A root is depth 0, and a saved tree permits four descendant
+  levels. Expand chosen branches lazily instead of generating every branch.
+- Existing history scope, canonical saved-question/answer grading, active
+  draft preservation and current lesson revision checks remain authoritative.
+  Recognition and model prose never substitute for a reviewed answer or a
+  saved grade. Topic setup never becomes a graded learning record.
+- `prepare_voice_study_mutation` stores an immutable current-turn proposal after
+  reading the owned target. `confirm_voice_study_mutation` requires the learner's
+  reply after the exact prepared confirmation question has played. Changes to
+  the proposed target or patch require a new proposal. Discovery, topic creation
+  and question generation remain separate operations.
 
-See [OpenAI's Realtime tool guidance](https://developers.openai.com/api/docs/guides/realtime-mcp)
-for the distinction between server-owned functions and a provider-hosted remote
-MCP connection.
+### Structured user input
+
+A client advertises `X-Voice-User-Input-Protocol: user-input-v1` on SDP and control
+requests. SDP initially excludes `request_user_input`; only a supported,
+authenticated control handshake adds and verifies its definition. Older native
+clients keep the ordinary voice catalog and cannot be left waiting for a form
+they do not render.
+
+`request_user_input` accepts a title and 1–5 questions. Each question contains an
+ASCII ID, prompt, `single`, `multiple` or `text` selection mode, up to eight
+ID/label options, and `allowFreeText`. Text mode has no options and allows text.
+Mixed selected options and typed text are supported. No defaults are selected,
+and all questions require an explicit answer or cancellation. Titles and labels
+are at most 200 UTF-16 units, prompts 500, IDs 80, and each answer's typed text
+2,000. This tool alone permits 64 KiB arguments/results so five long Korean
+answers fit; the provider event envelope remains bounded to 64 KiB.
+
+The server sends `buddystudy.voice.user_input.request` with UUID `requestId`,
+`sessionId`, `attemptId`, monotonically increasing `sequence`, title and
+questions. The app echoes the three IDs in `.submit` with
+`answers: [{questionId, selectedOptionIds, text}]`, or in `.cancel`. Neither
+speech nor model output submits the form. Pending input holds microphone turns
+and tutor responses independently of explicit call pause. Muted input buffers
+are cleared periodically; submission/cancellation waits for its input-clear
+acknowledgement before the server sends `.state` with `submitted` or `cancelled`
+and completes the exact provider tool. Existing pause/resume clear boundaries
+remain separate. A terminal call clears the server form silently, while actual
+session ending/ended owns client microphone teardown.
+
+Malformed answers retain the form with `.state` phase `pending` and
+`INVALID_ANSWERS`; a recoverable batch failure uses `ACTION_FAILED`. Matching
+repeated submissions resend only their terminal receipt. Stale request,
+account, session and attempt identities cannot act on another form. Only an
+acknowledged explicit human result renews the tool-round budget; the total
+session call-ID cap is unchanged. Form text is not written to diagnostic or MCP
+exchange logs. It is supplied to the provider as the learner's tool result.
+
+A submitted form also appends one new common USER transcript row through a
+private structured-input event. Its reserved `buddystudy-user-input-` item ID
+exposes `STRUCTURED_INPUT` provenance, distinct from audio transcription. The
+row preserves selected labels and exact typed text, including surrounding
+whitespace, using bounded question IDs instead of full prompts so every valid
+form fits the 20,000-character transcript limit. Provider input/tutor items
+cannot claim the reserved prefix. This source cannot become a graded answer or
+learning-evidence answer. Only successful persistence and the exact tool-output
+ACK advance the native human boundary, so successive GUI choices can select
+different saved topics without another spoken turn. Its absent preceding
+spoken tutor prevents a preference form from confirming an ordinary write.
+Cancellation creates no row and clears the old learner authority after ACK.
+A failed or timed-out evidence write closes the form without focus authority;
+any already-completed topic batch is reported and must not be repeated.
+
+For explicit multi-topic creation, the model supplies an optional
+`studyTopicProposal: {parentStudyId, topics, difficultyLevel}` instead of an
+ordinary preference form. The adapter re-reads the exact owned parent and
+freezes 1–8 candidate topics and one level in a private proposal. The server
+constructs all displayed confirmation text and option IDs; model-authored form
+labels cannot change the action. Submitting that immutable form creates only
+selected topics through the internal `create_study_topics` handler. The batch
+holds the owner lock, verifies expected parent metadata and depth, and saves
+atomically. Existing normalized sibling topics are returned with their actual
+unchanged levels. Only verified created IDs emit tree refresh hints, and no
+question is generated or charged.
+
+Write proposals bind owner, authentication session, provider call and lesson
+revision, expire after at most ten minutes, and are bounded to 256 entries.
+Repeating the same selection returns its verified result without another write;
+uncertain results can retry only the same frozen selection. Stale/expired
+proposals, changed selections, and final tree/depth validation failures close
+the form and return an error so the model can prepare a new proposal.
+Typed alternative topics are first collected as
+preferences, then shown in a new immutable write proposal. Ordinary forms never
+implicitly approve a mutation.
 
 ## Transport and connection
 
@@ -222,7 +231,9 @@ receive. Never put it in prompts, logs, repository files, or browser code.
 | `get_study` | Read | `study:read` | Owned node plus pending/latest question |
 | `update_study` | Write | `study:update` | Owner-scoped topic/level patch; omitted metadata stays unchanged |
 | `create_root_study` | Write | `study:create` | Owner-scoped create-only root; default level 5; normalized existing root is returned unchanged; no question quota |
-| `create_study_topic` | Write | `study:create` | Descendant only; consumes no question quota |
+| `create_study_topic` | Write | `study:create` | One selected descendant through depth 4 (root 0); existing deeper nodes preserved; no question quota |
+| `suggest_study_topics` | Catalog write | `study:create` | 1–10 candidates for one owned parent, catalog-first with lazy generation; no saved user nodes or question quota |
+| `create_study_topics` | Write | `study:create` | Atomic batch of 1–10 explicitly selected direct children; all conflicts checked before saving; same-parent replay preserves settings; no question quota |
 | `delete_study` | Destructive | `study:delete` | Requires `confirm=true`; deletes descendants |
 | `list_pending_questions` | Read | `record:read` | Bounded active-question page |
 | `request_question` | Write | `question:create` | Requires stable `idempotency_key`; returns correlation ID |

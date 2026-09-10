@@ -52,6 +52,49 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceTutorControlWebSocketHandlerTest {
     @Test
+    fun `structured evidence persists only through the capable private worker with a distinct non audio identity`() {
+        val id = VoiceTutorTranscriptMetadata.STRUCTURED_ITEM_PREFIX + "00000000-0000-4000-8000-000000000003"
+        val raw = """{"type":"${VoiceTutorTranscriptMetadata.STRUCTURED_USER_INPUT_EVENT}","item_id":"$id","transcript":"[Structured input]\nSelected: Redis","${VoiceTutorTranscriptMetadata.POST_CALL_EVIDENCE}":true,"${VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE}":12,"${VoiceTutorTranscriptMetadata.LESSON_REVISION}":2,"${VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS}":${Instant.now().toEpochMilli()},"${VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION}":true}"""
+        for (enabled in listOf(false, true)) {
+            val result = runControlScenario(userInputEnabled = enabled, privateEvidenceEvent = raw,
+                providerEventBeforeCompletion = raw, serverLifecycleEventBeforeCompletion = raw, provider = { _, _ -> })
+            assertThat(result.transcriptWrites).hasSize(if (enabled) 1 else 0)
+            assertThat(result.deliveryOrder).doesNotContain("sent:${VoiceTutorTranscriptMetadata.STRUCTURED_USER_INPUT_EVENT}")
+            if (enabled) {
+                assertThat(result.transcriptWrites.single()[2]).isEqualTo(id)
+                assertThat(result.transcriptWrites.single()[4]).isEqualTo("[Structured input]\nSelected: Redis")
+            }
+        }
+        val forgedAsr = raw.replace(VoiceTutorTranscriptMetadata.STRUCTURED_USER_INPUT_EVENT, "conversation.item.input_audio_transcription.completed")
+        val forged = runControlScenario(userInputEnabled = true, privateEvidenceEvent = forgedAsr, provider = { _, _ -> })
+        assertThat(forged.transcriptWrites).isEmpty()
+    }
+
+    @Test
+    fun `structured replies reach native control only after explicit capability and never expose extras in diagnostics`() {
+        val mapper = com.buddystudy.backend.common.application.json.JsonMapperProvider.mapper
+        val correlation = mapOf("requestId" to "00000000-0000-4000-8000-000000000002", "sessionId" to SESSION_ID,
+            "attemptId" to "00000000-0000-4000-8000-000000000003")
+        val replies = listOf(VoiceTutorRealtimeContract.USER_INPUT_SUBMIT_EVENT, VoiceTutorRealtimeContract.USER_INPUT_CANCEL_EVENT)
+            .map { type -> mapper.writeValueAsString(correlation + mapOf("type" to type, "private" to "discard-this",
+                "answers" to listOf(mapOf("questionId" to "q", "selectedOptionIds" to emptyList<String>(), "text" to "private typed answer")))) }
+        for (enabled in listOf(false, true)) {
+            val received = mutableListOf<String>()
+            withControlLogs { logs ->
+                val result = runControlScenario(userInputEnabled = enabled,
+                    clientAfterReady = replies + """{"type":"${VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT}","sequence":1}""",
+                    onContext = { assertThat(it.userInputEnabled).isEqualTo(enabled) },
+                    provider = { events, _ -> received += events.take(if (enabled) 3 else 1).toList() })
+                assertThat(result.failed).isFalse()
+                assertThat(received).hasSize(if (enabled) 3 else 1)
+                assertThat(received.none { "discard-this" in it }).isTrue()
+                if (enabled) assertThat(mapper.readTree(received.first()).path("answers")[0].path("text").asText()).isEqualTo("private typed answer")
+                assertThat(logs.list.map { it.formattedMessage }.joinToString("\n")).doesNotContain("private typed answer", "discard-this")
+            }
+        }
+    }
+
+    @Test
     fun `ready manual answer controls reach only the native controller with exact bounded fields`() {
         val received = mutableListOf<String>()
         val id = "00112233-4455-6677-8899-aabbccddeeff"
@@ -506,6 +549,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         sent: MutableList<String>,
         closeStatus: Mono<CloseStatus> = Mono.empty(),
         turnProtocol: String? = VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL,
+        userInputEnabled: Boolean = false,
         onClose: (CloseStatus) -> Unit = {},
         onServerMessage: (String) -> Unit = {},
     ): WebSocketSession {
@@ -515,6 +559,7 @@ class VoiceTutorControlWebSocketHandlerTest {
             URI.create("https://api.example.test/api/v1/voice-tutor/sessions/$SESSION_ID/control"),
             HttpHeaders().apply {
                 if (turnProtocol != null) set(VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER, turnProtocol)
+                if (userInputEnabled) set(VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL_HEADER, VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL)
             },
             Mono.just(authentication),
             VoiceTutorControlWebSocketHandler.CONTROL_PROTOCOL,
@@ -563,6 +608,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         var clientEndAfterErrorSent = false
         val closeObserverDisposed = AtomicBoolean()
         val deliveryOrder = CopyOnWriteArrayList<String>()
+        val transcriptWrites = mutableListOf<List<Any?>>()
     }
 
     private fun runControlScenario(
@@ -571,6 +617,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         closeStatus: Mono<CloseStatus> = Mono.empty(),
         providerEventBeforeCompletion: String? = null,
         serverLifecycleEventBeforeCompletion: String? = null,
+        privateEvidenceEvent: String? = null,
         clientAfterReady: List<String> = emptyList(),
         clientEndsOnProviderError: Boolean = false,
         monthlyQuotaExhaustsNow: Boolean = false,
@@ -579,6 +626,8 @@ class VoiceTutorControlWebSocketHandlerTest {
         providerEventsAfterTerminal: List<String> = emptyList(),
         providerEventsAfterClientWork: List<String> = emptyList(),
         registry: SimpleMeterRegistry = SimpleMeterRegistry(),
+        userInputEnabled: Boolean = false,
+        onContext: (VoiceTutorWebRtcControlContext) -> Unit = {},
         provider: suspend (Flow<String>, Flow<VoiceTutorRelayTermination>) -> Unit,
     ): ControlResult {
         val now = Instant.now()
@@ -614,6 +663,7 @@ class VoiceTutorControlWebSocketHandlerTest {
                 terminalEvents: Flow<VoiceTutorRelayTermination>,
                 onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
             ) {
+                onContext(context)
                 if (clientAfterReady.isNotEmpty()) {
                     onProviderEvent("""{"type":"${VoiceTutorRealtimeContract.SIDEBAND_READY_EVENT}"}""", false, false)
                     clientAfterReady.forEach { raw ->
@@ -635,6 +685,7 @@ class VoiceTutorControlWebSocketHandlerTest {
                 if (serverLifecycleEventBeforeCompletion != null) {
                     result.lifecycleAcknowledged = onProviderEvent(serverLifecycleEventBeforeCompletion, false, false)
                 }
+                privateEvidenceEvent?.let { onProviderEvent(it, true, false) }
                 if (providerEventsAfterTerminal.isNotEmpty()) {
                     terminalEvents.first()
                     providerEventsAfterTerminal.forEach { raw ->
@@ -649,6 +700,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         }
         val relay = proxy<VoiceTutorRelayUseCase> { method, arguments ->
             when (method) {
+                "appendTranscript" -> { result.transcriptWrites += arguments.toList(); true }
                 "markTranscriptIncomplete" -> {
                     result.integrityCalls += 1
                     true
@@ -688,6 +740,7 @@ class VoiceTutorControlWebSocketHandlerTest {
         val socket = webSocket(
             principal, messages, mutableListOf(),
             closeStatus.doFinally { result.closeObserverDisposed.set(true) },
+            userInputEnabled = userInputEnabled,
             onClose = { result.deliveryOrder += "close" },
             onServerMessage = { raw ->
                 result.deliveryOrder += "sent:${JsonType.type(raw)}"

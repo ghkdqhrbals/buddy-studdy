@@ -3,12 +3,28 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
+import com.buddystudy.voice.domain.VoiceTutorTranscriptSource
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 
 class VoiceTutorSummaryTranscriptEvidenceTest {
     private val now = Instant.parse("2026-09-01T00:00:00Z")
+
+    @Test
+    fun `structured preferences cannot enter a summary even with an invalid old answer link`() {
+        val turns = listOf(
+            turn(1, VoiceTutorTranscriptRole.TUTOR, "Choose a direction", isStudyQuestion = true),
+            turn(2, VoiceTutorTranscriptRole.USER, "[Structured input]\nSelected: Redis", studyQuestionTurnId = 1)
+                .copy(providerItemId = VoiceTutorTranscriptSource.STRUCTURED_ITEM_PREFIX + "selection"),
+            turn(3, VoiceTutorTranscriptRole.TUTOR, "Selected Redis", studyAnswerTurnId = 2),
+        )
+
+        assertThat(VoiceTutorSummaryTranscriptEvidence.verified(
+            SESSION, 42, turns, listOf(VoiceTutorLessonFocus(42, 1)),
+        )).isEmpty()
+        assertThat(turns[1].transcript).isEqualTo("[Structured input]\nSelected: Redis")
+    }
 
     @Test
     fun `summary contains exact question answer feedback and excludes checkpoints and setup`() {

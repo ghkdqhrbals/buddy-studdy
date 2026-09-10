@@ -1,10 +1,13 @@
 package com.buddystudy.backend.voice
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.buddystudy.voice.domain.VoiceTutorTranscriptSource
 
 /** Internal relay annotation. Unknown (-1) preserves source but cannot establish a lesson level. */
 internal object VoiceTutorTranscriptMetadata {
     const val INCOMPLETE_EVENT = "buddystudy-internal-voice-transcript-incomplete"
+    const val STRUCTURED_USER_INPUT_EVENT = "buddystudy-internal-voice-structured-user-input"
+    const val STRUCTURED_ITEM_PREFIX = VoiceTutorTranscriptSource.STRUCTURED_ITEM_PREFIX
     const val ACCEPTED_AT_EPOCH_MILLIS = "_buddystudy_accepted_at_epoch_millis"
     const val LESSON_REVISION = "_buddystudy_lesson_revision"
     const val STUDY_QUESTION_PROVIDER_ITEM_ID = "_buddystudy_study_question_provider_item_id"

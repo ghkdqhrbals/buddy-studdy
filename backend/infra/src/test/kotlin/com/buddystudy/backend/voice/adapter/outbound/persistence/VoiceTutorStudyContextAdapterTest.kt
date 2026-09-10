@@ -12,6 +12,7 @@ import com.buddystudy.voice.domain.VoiceTutorSession
 import com.buddystudy.voice.domain.VoiceTutorSessionStatus
 import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.buddystudy.voice.domain.VoiceTutorLessonFocus
+import com.buddystudy.voice.domain.VoiceTutorTranscriptSource
 import io.r2dbc.spi.ConnectionFactories
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -1516,6 +1517,53 @@ class VoiceTutorStudyContextAdapterTest {
         assertThat(focusCount()).isEqualTo(2)
     }
 
+    @Test
+    fun `each persisted structured learner submission authorizes one new focus after an earlier spoken focus`() = runBlocking<Unit> {
+        val discovery = session(studyId = null).copy(topic = "", difficulty = 0)
+        insertSession(discovery)
+        insertStudy(10, topic = "Root", difficulty = 3)
+        insertStudy(11, parentId = 10, topic = "Child", difficulty = 4)
+        insertStudy(12, parentId = 11, topic = "Grandchild", difficulty = 5)
+        insertTranscriptTurn(100, discovery.id, sequenceNumber = 1)
+        val spoken = transaction { requireNotNull(adapter.focusFromRealtimeModel(
+            7, discovery.id, 10, 100, 0,
+            VoiceTutorStudyTargetCandidate(10, null, "Root", 3), commitAuthority(),
+        )) }
+        assertThat(spoken.revision).isEqualTo(1)
+
+        insertTranscriptTurn(101, discovery.id, sequenceNumber = 2,
+            providerItemId = VoiceTutorTranscriptSource.STRUCTURED_ITEM_PREFIX + "first-selection")
+        val firstSelection = transaction { requireNotNull(adapter.focusFromRealtimeModel(
+            7, discovery.id, 11, 101, 1,
+            VoiceTutorStudyTargetCandidate(11, 10, "Child", 4), commitAuthority(),
+            expectedParentStudyId = 10,
+        )) }
+        assertThat(firstSelection.revision).isEqualTo(2)
+        transaction {
+            assertThat(adapter.focusFromRealtimeModel(
+                7, discovery.id, 12, 101, 2,
+                VoiceTutorStudyTargetCandidate(12, 11, "Grandchild", 5), commitAuthority(),
+                expectedParentStudyId = 11,
+            )).isNull()
+        }
+
+        insertTranscriptTurn(102, discovery.id, sequenceNumber = 3,
+            providerItemId = VoiceTutorTranscriptSource.STRUCTURED_ITEM_PREFIX + "second-selection")
+        val secondSelection = transaction { requireNotNull(adapter.focusFromRealtimeModel(
+            7, discovery.id, 12, 102, 2,
+            VoiceTutorStudyTargetCandidate(12, 11, "Grandchild", 5), commitAuthority(),
+            expectedParentStudyId = 11,
+        )) }
+        assertThat(secondSelection.revision).isEqualTo(3)
+        assertThat(focusCount()).isEqualTo(3)
+        assertThat(focusHeader()).containsExactly(12L, null, "Grandchild", 5)
+        val learnerTurns = database.sql(
+            "select learner_turn_id from voice_tutor_lesson_focuses order by revision",
+        ).map { row, _ -> (row.get("learner_turn_id") as Number).toLong() }
+            .all().collectList().awaitSingle()
+        assertThat(learnerTurns).containsExactly(100L, 101L, 102L)
+    }
+
     private suspend fun focusCount(): Long = database.sql("select count(*) as count from voice_tutor_lesson_focuses")
         .map { row, _ -> (row.get("count") as Number).toLong() }.one().awaitSingle()
 
@@ -1597,13 +1645,14 @@ class VoiceTutorStudyContextAdapterTest {
         sessionId: String,
         role: String = "USER",
         sequenceNumber: Long = id,
+        providerItemId: String = "item-$id",
     ) {
         database.sql(
             """
             insert into voice_tutor_transcript_turns(id, session_id, provider_item_id, role, sequence_number)
             values (:id, :sessionId, :providerItemId, :role, :sequenceNumber)
             """.trimIndent(),
-        ).bind("id", id).bind("sessionId", sessionId).bind("providerItemId", "item-$id")
+        ).bind("id", id).bind("sessionId", sessionId).bind("providerItemId", providerItemId)
             .bind("role", role).bind("sequenceNumber", sequenceNumber)
             .fetch().rowsUpdated().awaitSingle()
     }

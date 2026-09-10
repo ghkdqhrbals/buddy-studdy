@@ -30,6 +30,8 @@ class VoiceTutorWebRtcController(
         authentication: Authentication,
         @RequestHeader(name = VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER, required = false)
         turnProtocol: String?,
+        @RequestHeader(name = VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL_HEADER, required = false)
+        userInputProtocol: String? = null,
     ): ResponseEntity<String> {
         // Refuse a client without the native meaning/tool and ready-handshake contract before billing.
         if (turnProtocol != VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL) {
@@ -39,10 +41,13 @@ class VoiceTutorWebRtcController(
                 .build()
         }
         val answer = voiceTutor.negotiate(sessionId, offerSdp, authentication)
-        return ResponseEntity.ok()
+        val response = ResponseEntity.ok()
             .contentType(MediaType.parseMediaType("application/sdp"))
             .header("Cache-Control", "no-store")
             .header(VoiceTutorRealtimeContract.TURN_PROTOCOL_HEADER, VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL)
-            .body(answer.answerSdp)
+        if (userInputProtocol == VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL) {
+            response.header(VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL_HEADER, VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL)
+        }
+        return response.body(answer.answerSdp)
     }
 }

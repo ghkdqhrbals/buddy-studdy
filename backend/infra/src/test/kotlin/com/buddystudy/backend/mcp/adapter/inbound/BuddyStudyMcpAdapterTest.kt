@@ -15,7 +15,10 @@ import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.QuestionItemResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
+import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsResponse
+import com.buddystudy.backend.study.application.model.StudyTopicsCreationResponse
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicsCommand
 import com.buddystudy.backend.study.application.port.inbound.ExpectedStudyMetadata
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.model.StudyLearningRecordsPageResponse
@@ -58,7 +61,7 @@ class BuddyStudyMcpAdapterTest {
 
         assertThat(tools.map { it.tool().name() })
             .containsExactlyElementsOf(expected.map(ToolContract::name))
-        assertThat(tools).hasSize(23)
+        assertThat(tools).hasSize(25)
 
         tools.zip(expected).forEach { (specification, contract) ->
             val tool = specification.tool()
@@ -95,6 +98,67 @@ class BuddyStudyMcpAdapterTest {
         assertThat(call(adapter, "list_pending_questions", mapOf("study_id" to 42L, "limit" to 3, "offset" to 1), authenticatedContext).isError()).isFalse()
 
         assertThat(calls).containsExactly(listOf(principal, 30, 0), listOf(principal, 3, 1, 42L))
+    }
+
+    @Test
+    fun `suggestions tool passes exact parent and bounded count without saving selected topics`() {
+        val calls = mutableListOf<List<Any?>>()
+        val adapter = adapter(proxyUseCase { method, args ->
+            assertThat(method).isEqualTo("suggestStudyTopics")
+            calls += args.dropLast(1)
+            StudyTopicSuggestionsResponse(42, listOf("Transactions", "Indexes"), depth = 4)
+        })
+
+        val result = call(adapter, "suggest_study_topics", mapOf("parent_study_id" to 42L), authenticatedContext)
+        assertThat(result.isError()).isFalse()
+        val payload = jacksonObjectMapper().valueToTree<com.fasterxml.jackson.databind.JsonNode>(result.structuredContent())
+        assertThat(payload.path("maxDepth").asInt()).isEqualTo(4)
+        assertThat(payload.path("depth").asInt()).isEqualTo(4)
+        assertThat(payload.path("suggestions").map { it.asText() }).containsExactly("Transactions", "Indexes")
+        assertThat(call(adapter, "suggest_study_topics", mapOf("parent_study_id" to 42L, "count" to 2), authenticatedContext).isError()).isFalse()
+        assertThat(calls).containsExactly(listOf(principal, 42L, 5), listOf(principal, 42L, 2))
+
+        listOf(emptyMap(), mapOf("parent_study_id" to 42.5), mapOf("parent_study_id" to 42L, "count" to 11),
+            mapOf("parent_study_id" to 42L, "count" to 0)).forEach { args ->
+            assertThat(call(adapter, "suggest_study_topics", args, authenticatedContext).isError()).isTrue()
+        }
+        assertThat(calls).hasSize(2)
+    }
+
+    @Test
+    fun `selected topics tool sends one batch with the internal immutable parent fence`() {
+        val calls = mutableListOf<List<Any?>>()
+        val adapter = adapter(proxyUseCase { method, args ->
+            assertThat(method).isEqualTo("createStudyTopics")
+            calls += args.dropLast(1)
+            StudyTopicsCreationResponse(42, emptyList())
+        })
+        val arguments = mapOf<String, Any>(
+            "parent_study_id" to 42L,
+            "topics" to listOf("Transactions", "Indexes"),
+            "difficulty_level" to 8,
+            BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT to "Databases",
+            BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT to 5,
+            BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT to 0L,
+        )
+
+        assertThat(call(adapter, "create_study_topics", arguments, authenticatedContext).isError()).isFalse()
+        assertThat(calls).containsExactly(listOf(
+            principal, 42L,
+            CreateStudyTopicsCommand(listOf("Transactions", "Indexes"), 8, ExpectedStudyMetadata(null, "Databases", 5)),
+        ))
+        val publicSchema = jacksonObjectMapper().valueToTree<com.fasterxml.jackson.databind.JsonNode>(
+            adapter.tools().single { it.tool().name() == "create_study_topics" }.tool().inputSchema(),
+        )
+        assertThat(publicSchema.path("properties").has(BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT)).isFalse()
+        listOf(
+            arguments - BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT,
+            arguments + ("topics" to listOf("Valid", 12)),
+            arguments - "topics",
+        ).forEach { invalid ->
+            assertThat(call(adapter, "create_study_topics", invalid, authenticatedContext).isError()).isTrue()
+        }
+        assertThat(calls).hasSize(1)
     }
 
     @Test
@@ -887,6 +951,38 @@ class BuddyStudyMcpAdapterTest {
                     "active_for_questions" to booleanProperty("Whether this topic participates in question generation.", true),
                 ),
                 required = listOf("parent_study_id", "topic"),
+            ),
+            readOnly = false,
+            idempotent = true,
+        ),
+        ToolContract(
+            name = "suggest_study_topics",
+            schema = objectSchema(
+                properties = linkedMapOf(
+                    "parent_study_id" to idProperty("Owned parent study node ID whose direct children are being planned."),
+                    "count" to integerProperty("Maximum number of topic suggestions.", 1, 10, 5),
+                ),
+                required = listOf("parent_study_id"),
+            ),
+            readOnly = false,
+            idempotent = false,
+        ),
+        ToolContract(
+            name = "create_study_topics",
+            schema = objectSchema(
+                properties = linkedMapOf(
+                    "parent_study_id" to idProperty("Owned parent study node ID."),
+                    "topics" to arrayProperty(
+                        "Explicitly selected direct child topics.",
+                        stringProperty(minLength = 1, maxLength = 255),
+                        maxItems = 10,
+                    ).toMutableMap().apply {
+                        put("minItems", 1)
+                        put("uniqueItems", true)
+                    },
+                    "difficulty_level" to integerProperty("Difficulty from 1 to 10.", 1, 10, 5),
+                ),
+                required = listOf("parent_study_id", "topics"),
             ),
             readOnly = false,
             idempotent = true,

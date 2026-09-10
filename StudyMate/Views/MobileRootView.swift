@@ -3559,6 +3559,22 @@ private struct StudyTopicAddOutcome {
     var failedTopics: [String]
 }
 
+enum StudyTopicDepthPolicy {
+    static let maximumDepth = 4
+    static func canAddChild(studyID: Int, parents: [Int: Int], knownIDs: Set<Int>) -> Bool {
+        var current = studyID
+        var seen = Set<Int>()
+        var depth = 0
+        while knownIDs.contains(current), seen.insert(current).inserted {
+            guard depth < maximumDepth else { return false }
+            guard let parent = parents[current] else { return true }
+            current = parent
+            depth += 1
+        }
+        return false
+    }
+}
+
 struct MobileStudyTreeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var addRequest: StudyTopicAddRequest?
@@ -3616,6 +3632,10 @@ struct MobileStudyTreeView: View {
     }
 
     var body: some View {
+        let parents = Dictionary(uniqueKeysWithValues: appState.backendStudyRooms.compactMap { room in
+            room.parentStudyId.map { (room.id, $0) }
+        })
+        let knownIDs = Set(appState.backendStudyRooms.map(\.id))
         VStack(spacing: 0) {
             if isSelectionMode {
                 HStack(spacing: 10) {
@@ -3676,6 +3696,7 @@ struct MobileStudyTreeView: View {
                                         StudyTreeNode(
                                             room: placement.room,
                                             strings: strings,
+                                            canAddChild: StudyTopicDepthPolicy.canAddChild(studyID: placement.room.id, parents: parents, knownIDs: knownIDs),
                                             hasPendingQuestion:
                                                 appState.pendingQuestionCount(
                                                     categoryID: String(placement.room.id)
@@ -4564,6 +4585,7 @@ private extension UIView {
 private struct StudyTreeNode: View {
     var room: BackendStudyRoom
     var strings: AppStrings
+    var canAddChild: Bool
     var hasPendingQuestion: Bool
     var isSelectionMode: Bool
     var isSelected: Bool
@@ -4675,7 +4697,7 @@ private struct StudyTreeNode: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if !isSelectionMode {
+            if !isSelectionMode && canAddChild {
                 Menu {
                     Button(action: onAddRecommendedChild) {
                         Label(strings.recommendSubstudy, systemImage: "sparkles")

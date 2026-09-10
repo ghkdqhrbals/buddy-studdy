@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract as Contract
 import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata as Metadata
+import com.buddystudy.backend.voice.VoiceTutorUserInputContract
 import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
 import com.buddystudy.backend.voice.application.model.VoiceTutorLanguagePolicy
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase
@@ -11,6 +12,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolD
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import reactor.core.publisher.Flux
@@ -34,12 +36,15 @@ internal class VoiceTutorNativeConversationController(
     private val wallClock: () -> Instant = Instant::now,
     private val onProviderTurnFailure: (VoiceTutorProviderTurnFailureDiagnostic) -> Unit = {},
     initialStudyId: Long? = null,
+    private val sessionId: String = UUID.randomUUID().toString(),
+    private val userInputEnabled: Boolean = false,
 ) {
     private val mapper = JsonMapperProvider.mapper
     private val provider = sink<String>()
     private val client = sink<String>()
     private val persistence = sink<NativeTranscript>()
     private val tools = sink<VoiceTutorMcpCall>()
+    private val userInputSubmissions = sink<UserInputSubmission>()
     private val lifecycle = sink<String>()
     private val learningPolls = sink<LearningPollCommand>()
     private var learningWatch: LearningWatch? = null
@@ -74,6 +79,14 @@ internal class VoiceTutorNativeConversationController(
     private var questionReadbackEpoch = 0L
     private var answerCapture: AnswerCapture? = null
     private val reviewedAnswerCalls = linkedMapOf<String, VoiceTutorReviewedAnswer>()
+    private val userInputAttemptId = UUID.randomUUID().toString()
+    private var userInputSequence = 0L
+    private var pendingUserInput: UserInput? = null
+    private val acknowledgedUserInputBoundaries = linkedMapOf<String, UserInputBoundary>()
+    private var userInputClearStartedAt: Long? = null
+    private var userInputLastClearAt = nanoTime()
+    private val completedUserInputs = linkedMapOf<String, String>()
+    private val seenInputClearAcks = linkedSetOf<String>()
     private var retryCount = 0
     private var quotaRetryCount = 0
     private var clientSpeechSequence = 0L
@@ -94,6 +107,7 @@ internal class VoiceTutorNativeConversationController(
     fun clientEvents(): Flux<String> = client.asFlux()
     fun persistenceEvents(): Flux<NativeTranscript> = persistence.asFlux()
     fun toolActions(): Flux<VoiceTutorMcpCall> = tools.asFlux()
+    fun userInputActions(): Flux<UserInputSubmission> = userInputSubmissions.asFlux()
     fun lifecycleEvents(): Flux<String> = lifecycle.asFlux()
     fun learningPollEvents(): Flux<LearningPollCommand> = learningPolls.asFlux()
     fun failure(): Mono<Void> = failure.asMono().flatMap { Mono.error(it) }
@@ -125,6 +139,14 @@ internal class VoiceTutorNativeConversationController(
             }
         }
         if (type in VoiceTutorMcpTurnCoordinator.OUTPUT_ACK_EVENTS && toolCoordinator.acknowledge(node, nanoTime())) {
+            acknowledgedUserInputBoundaries.remove(node.path("item").path("call_id").asText())?.let { accepted ->
+                if (!draining && !quotaRequested && !endingAfterResponse && accepted.revision == revision &&
+                    accepted.speechStartedOrder == latestSpeechStartedOrder && !speaking && pendingSpeech == null && commits.isEmpty()) {
+                    latestLearner = accepted.input
+                    latestTutor = null
+                    pendingMutationConfirmation = null
+                }
+            }
             answerCapture?.let(::dispatchReviewedAnswer)
             scheduleResponse()
             return false
@@ -135,6 +157,8 @@ internal class VoiceTutorNativeConversationController(
             Contract.QUESTION_CHANGED_EVENT, Contract.SESSION_STATE_EVENT -> return false
             Contract.ANSWER_STATE_EVENT, Contract.ANSWER_TRANSCRIPT_EVENT -> return false
             Contract.OPERATION_EVENT -> return false
+            Contract.USER_INPUT_REQUEST_EVENT, Contract.USER_INPUT_STATE_EVENT -> return false
+            Metadata.STRUCTURED_USER_INPUT_EVENT -> return false
             // Provider VAD is disabled. Unexpected VAD edges cannot acquire turn authority.
             "input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped" -> return false
             "input_audio_buffer.committed" -> {
@@ -282,7 +306,15 @@ internal class VoiceTutorNativeConversationController(
                 if (response.superseded) return false
             }
             "input_audio_buffer.cleared" -> {
-                applyPause(pause.acknowledgeClear(node.path("event_id").asText(), nanoTime()))
+                val ackId = node.path("event_id").asText()
+                if (!validId(ackId) || !seenInputClearAcks.add(ackId)) return false
+                trim(seenInputClearAcks, 256)
+                if (userInputClearStartedAt != null) {
+                    userInputClearStartedAt = null
+                    userInputLastClearAt = nanoTime()
+                    finishUserInput()
+                } else applyPause(pause.acknowledgeClear(ackId, nanoTime()))
+                advancePause()
                 scheduleResponse()
             }
             "error" -> {
@@ -309,7 +341,7 @@ internal class VoiceTutorNativeConversationController(
         val seq = node.path("sequence").asLong()
         when (node.path("type").asText()) {
             Contract.SPEECH_STARTED_EVENT -> {
-                if (seq > clientSpeechSequence && !draining && !quotaRequested && pause.acceptsSpeechEdges &&
+                if (seq > clientSpeechSequence && !draining && !quotaRequested && pendingUserInput == null && pause.acceptsSpeechEdges &&
                     (answerCapture == null || answerCapture?.phase == "listening")) {
                     invalidateQuestionReadback()
                     if (answerCapture == null && sessionState.current.phase in setOf("graded", "question_reading", "question_loading", "question_failed", "grading_failed")) {
@@ -336,12 +368,28 @@ internal class VoiceTutorNativeConversationController(
                     commitSpeech()
                 }
             }
-            Contract.PAUSE_REQUEST_EVENT -> applyPause(pause.requestPause(seq, nanoTime()))
+            Contract.PAUSE_REQUEST_EVENT -> {
+                val previous = pause.phase
+                applyPause(pause.requestPause(seq, nanoTime()))
+                if (previous == VoiceTutorPauseCoordinator.Phase.ACTIVE && pause.phase == VoiceTutorPauseCoordinator.Phase.PAUSING) {
+                    // iOS has already waited briefly for a local audio gap before this explicit hold.
+                    // Do not keep the pause spinner waiting for the rest of a long response.
+                    active?.takeIf { !it.quota }?.let { response ->
+                        queuedInput = true
+                        opening = response.opening
+                        response.questionReadback?.let { pendingQuestionReadback = it }
+                        response.mutationConfirmation?.let { pendingMutationConfirmation = it }
+                        interruptResponse(response)
+                    }
+                }
+            }
             Contract.PAUSE_INPUT_QUIESCED_EVENT -> { pause.confirmInputQuiesced(seq); speaking = false }
             Contract.RESUME_REQUEST_EVENT -> applyPause(pause.requestResume(seq, nanoTime()))
             Contract.ANSWER_FINISH_EVENT -> finishAnswer(node, skip = false)
             Contract.ANSWER_SKIP_EVENT -> finishAnswer(node, skip = true)
             Contract.ANSWER_SUBMIT_EVENT -> submitAnswer(node)
+            Contract.USER_INPUT_SUBMIT_EVENT -> resolveUserInput(node, cancelled = false)
+            Contract.USER_INPUT_CANCEL_EVENT -> resolveUserInput(node, cancelled = true)
             Contract.PLAYOUT_DRAINED_EVENT -> {
                 val response = active
                 if (response != null && response.id == node.path("responseId").asText()) {
@@ -360,6 +408,15 @@ internal class VoiceTutorNativeConversationController(
         if (closed) return
         try {
             toolCoordinator.expire(nanoTime())
+            if (userInputClearStartedAt?.let { nanoTime() - it >= Duration.ofSeconds(5).toNanos() } == true) {
+                throw VoiceTutorPauseAcknowledgementTimeoutException()
+            }
+            if (pendingUserInput != null && userInputClearStartedAt == null && pause.phase == VoiceTutorPauseCoordinator.Phase.ACTIVE &&
+                nanoTime() - userInputLastClearAt >= Duration.ofSeconds(30).toNanos()) {
+                // Muted WebRTC still carries silence. Bound that provider buffer while the
+                // learner edits a form, without a tool timeout or implied submission.
+                clearUserInputBuffer()
+            }
             advancePause()
             pendingSpeech?.let { speech ->
                 if (!speaking) commitSpeech()
@@ -408,6 +465,7 @@ internal class VoiceTutorNativeConversationController(
         if (closed || quotaRequested) return
         quotaRequested = true
         sessionState.update("ending")
+        cancelUserInputForTermination()
         cancelLearningWatch()
         cancelAnswerCapture()
         invalidateQuestionReadback()
@@ -421,6 +479,7 @@ internal class VoiceTutorNativeConversationController(
     fun beginDrain(cancelActive: Boolean) {
         draining = true
         sessionState.update("ending")
+        cancelUserInputForTermination()
         cancelLearningWatch()
         cancelAnswerCapture()
         invalidateQuestionReadback()
@@ -495,6 +554,148 @@ internal class VoiceTutorNativeConversationController(
     fun reviewedAnswer(callId: String): VoiceTutorReviewedAnswer? = reviewedAnswerCalls[callId]
 
     @Synchronized
+    fun requestUserInput(call: VoiceTutorMcpCall, proposal: VoiceTutorStudyTopicUserInput? = null) {
+        if (closed || toolCoordinator.startedToolName(call.callId) != VoiceTutorUserInputContract.TOOL) return
+        val request = if (proposal != null) VoiceTutorUserInputContract.studyTopicRequest(proposal)
+            else call.arguments?.let { VoiceTutorUserInputContract.request(mapper.valueToTree(it)) }
+        if (!userInputEnabled || !toolCanExecute(call.callId) || toolCoordinator.pendingCount != 1 || pendingUserInput != null || request == null) {
+            completeTool(call.callId, nativeToolError("USER_INPUT_UNAVAILABLE",
+                "Request one valid user-input form alone, only for the current learner turn; no selection was made."))
+            return
+        }
+        val pending = UserInput(UUID.randomUUID().toString(), call.callId, revision, request, proposal)
+        pendingUserInput = pending
+        userInputLastClearAt = nanoTime()
+        publish(client, json(userInputEnvelope(Contract.USER_INPUT_REQUEST_EVENT, pending.id) +
+            mapOf("title" to request.title, "questions" to request.questions)))
+    }
+
+    private fun resolveUserInput(node: JsonNode, cancelled: Boolean) {
+        if (closed || draining || quotaRequested || !VoiceTutorUserInputContract.validCorrelation(node) ||
+            node.path("sessionId").asText() != sessionId || node.path("attemptId").asText() != userInputAttemptId) return
+        val id = node.path("requestId").asText()
+        completedUserInputs[id]?.let { phase -> publishUserInputState(id, phase); return }
+        val pending = pendingUserInput?.takeIf { it.id == id && it.revision == revision } ?: return
+        if (pending.result != null) return
+        val answers = if (cancelled) emptyList() else VoiceTutorUserInputContract.answers(node.path("answers"), pending.request)
+        if (answers == null) {
+            publishUserInputState(id, "pending", "INVALID_ANSWERS")
+            return
+        }
+        pending.phase = if (cancelled) "cancelled" else "submitted"
+        pending.answers = answers
+        pending.acceptedAt = wallClock()
+        pending.result = VoiceTutorMcpToolResult(json(mapOf("requestId" to id, "cancelled" to cancelled,
+            "answers" to answers)), false)
+        if (pause.phase == VoiceTutorPauseCoordinator.Phase.ACTIVE) {
+            // Discard muted RTP/tail audio before reopening the microphone. Serialize this
+            // clear with explicit pause/resume, whose own clear supplies the fence when held.
+            if (userInputClearStartedAt == null) clearUserInputBuffer()
+        } else finishUserInput()
+    }
+
+    private fun clearUserInputBuffer() {
+        userInputClearStartedAt = nanoTime()
+        emit(mapOf("type" to "input_audio_buffer.clear"))
+    }
+
+    private fun finishUserInput(notifyClient: Boolean = true) {
+        val pending = pendingUserInput ?: return
+        val result = pending.result ?: return
+        if (pending.proposal != null && pending.phase == "submitted" && !pending.mutationCompleted) {
+            if (!pending.executing) {
+                pending.executing = true
+                publish(userInputSubmissions, UserInputSubmission(pending.id, pending.revision, pending.proposal.proposalId,
+                    pending.answers.single().selectedOptionIds.map { it.removePrefix("topic_").toInt() }))
+            }
+            return
+        }
+        if (notifyClient && pending.phase == "submitted" && !result.isError) {
+            if (pending.evidence == null) {
+                val input = Input(Metadata.STRUCTURED_ITEM_PREFIX + pending.id, ++sequence, null, pending.revision,
+                    latestSpeechStartedOrder, pending.acceptedAt ?: wallClock(), precedingTutor = null)
+                pending.evidence = input
+                val transcript = buildString {
+                    append("[Structured input]")
+                    pending.answers.forEach { answer ->
+                        append("\n").append(answer.questionId)
+                        val question = pending.request.questions.single { it.id == answer.questionId }
+                        answer.selectedOptionIds.forEach { selected ->
+                            append("\nSelected: ").append(question.options.single { it.id == selected }.label)
+                        }
+                        if (answer.text.isNotEmpty()) append("\nText: ").append(answer.text)
+                    }
+                    // The common transcript store trims outer whitespace; a closing marker
+                    // preserves the final learner-authored text's exact trailing whitespace.
+                    append("\n[End structured input]")
+                }
+                check(transcript.length <= 20_000)
+                enqueueTranscript(input.id, json(mapOf("type" to Metadata.STRUCTURED_USER_INPUT_EVENT,
+                    "item_id" to input.id, "transcript" to transcript)), input.sequence, input.revision, input.acceptedAt)
+                return
+            }
+            if (transcripts[pending.evidence?.id]?.persisted != true) return
+        }
+        pendingUserInput = null
+        completedUserInputs[pending.id] = pending.phase
+        while (completedUserInputs.size > 8) completedUserInputs.remove(completedUserInputs.keys.first())
+        if (notifyClient) publishUserInputState(pending.id, pending.phase)
+        if (notifyClient) acknowledgedUserInputBoundaries[pending.callId] = UserInputBoundary(
+            pending.evidence.takeIf { pending.phase == "submitted" && !result.isError }, latestSpeechStartedOrder, revision)
+        completeTool(pending.callId, result.copy(userInputCompleted = notifyClient))
+    }
+
+    @Synchronized
+    fun userInputCanExecute(id: String): Boolean = !closed && !draining && !quotaRequested &&
+        pendingUserInput?.let { it.id == id && it.revision == revision && it.executing } == true
+
+    @Synchronized
+    fun completeUserInputMutation(id: String, result: VoiceTutorMcpToolResult) {
+        if (!userInputCanExecute(id)) return
+        val pending = pendingUserInput ?: return
+        pending.executing = false
+        if (result.isError) {
+            val code = runCatching { mapper.readTree(result.output).path("error").path("code").asText() }.getOrNull()
+            if (code in setOf("PROPOSAL_EXPIRED", "MUTATION_TARGET_STALE", "PROPOSAL_ALREADY_SUBMITTED",
+                    "STUDY_TREE_CHANGED", "VALIDATION_ERROR")) {
+                pending.phase = "cancelled"
+                pending.result = result
+                pending.mutationCompleted = true
+                finishUserInput()
+                return
+            }
+            pending.result = null
+            pending.phase = "pending"
+            publishUserInputState(id, "pending", "ACTION_FAILED")
+            return
+        }
+        pending.mutationCompleted = true
+        val answerOutput = mapper.readTree(requireNotNull(pending.result).output) as ObjectNode
+        answerOutput.set<JsonNode>("studyTopics", mapper.readTree(result.output))
+        pending.result = result.copy(output = json(answerOutput))
+        finishUserInput()
+    }
+
+    private fun cancelUserInputForTermination() {
+        val pending = pendingUserInput ?: return
+        pending.phase = "cancelled"
+        pending.result = VoiceTutorMcpToolResult(json(mapOf("requestId" to pending.id, "cancelled" to true,
+            "answers" to emptyList<Any>())), false)
+        // A terminal UI cancellation receipt could briefly unmute a still-live client.
+        // Actual session ending/ended owns its local form cleanup and microphone teardown.
+        finishUserInput(notifyClient = false)
+    }
+
+    private fun publishUserInputState(id: String, phase: String, errorCode: String? = null) {
+        val event = userInputEnvelope(Contract.USER_INPUT_STATE_EVENT, id) + mapOf("phase" to phase)
+        publish(client, json(if (errorCode == null) event else event + mapOf("errorCode" to errorCode)))
+    }
+
+    private fun userInputEnvelope(type: String, id: String): Map<String, Any> = mapOf(
+        "type" to type, "requestId" to id, "sessionId" to sessionId, "attemptId" to userInputAttemptId,
+        "sequence" to ++userInputSequence)
+
+    @Synchronized
     fun completeTool(callId: String, result: VoiceTutorMcpToolResult) {
         if (closed) return
         val output = toolCoordinator.complete(callId, result, nanoTime()) ?: return
@@ -557,10 +758,11 @@ internal class VoiceTutorNativeConversationController(
             result.questionChange?.takeIf { it.studyId > 0 && it.recordId.matches(Regex("[1-9][0-9]{0,18}")) && it.recordId.toLongOrNull() != null }?.let {
                 publish(client, json(mapOf("type" to Contract.QUESTION_CHANGED_EVENT, "studyId" to it.studyId, "recordId" to it.recordId)))
             }
-            if (result.studyTreeChanged && result.changedStudyId != null) publish(client, json(mapOf(
-                "type" to Contract.STUDY_TREE_CHANGED_EVENT, "studyId" to result.changedStudyId,
-                "change" to result.changeKind?.name?.lowercase(), "deletedStudyIds" to result.deletedStudyIds,
-            )))
+            if (result.studyTreeChanged) (listOfNotNull(result.changedStudyId) + result.changedStudyIds)
+                .filter { it > 0 }.distinct().take(10).forEach { changed -> publish(client, json(mapOf(
+                    "type" to Contract.STUDY_TREE_CHANGED_EVENT, "studyId" to changed,
+                    "change" to result.changeKind?.name?.lowercase(), "deletedStudyIds" to result.deletedStudyIds,
+                ))) }
             // This is typed server metadata, not a field in model-authored function output.
             // A slow tool may finish after newer speech; its saved result remains valid, but
             // that older learner turn no longer authorizes starting a question readback.
@@ -590,6 +792,15 @@ internal class VoiceTutorNativeConversationController(
     @Synchronized
     fun transcriptCompleted(itemId: String, successful: Boolean = true) {
         transcripts[itemId]?.let { it.complete = true; it.persisted = successful }
+        pendingUserInput?.takeIf { it.evidence?.id == itemId }?.let { pending ->
+            if (!successful) {
+                pending.phase = "cancelled"
+                pending.result = VoiceTutorMcpToolResult(json(mapOf("error" to mapOf("code" to "INPUT_PERSISTENCE_FAILED",
+                    "message" to "The submitted choice could not be saved as learning-direction evidence. Keep the current focus, explain briefly and listen. Do not repeat any completed topic creation; acceptedResult records its outcome."),
+                    "acceptedResult" to pending.result?.output?.let(mapper::readTree))), true)
+            }
+            finishUserInput()
+        }
         advanceAnswerReview()
     }
 
@@ -610,17 +821,18 @@ internal class VoiceTutorNativeConversationController(
     fun close() {
         if (closed) return
         sessionState.update(if (draining || endingAfterResponse || quotaRequested) "ended" else "failed")
+        cancelUserInputForTermination()
         cancelLearningWatch()
         closed = true
         pause.close()
         toolCoordinator.close()
         operations.clear()
         provider.tryEmitComplete(); client.tryEmitComplete(); persistence.tryEmitComplete()
-        tools.tryEmitComplete(); lifecycle.tryEmitComplete(); learningPolls.tryEmitComplete()
+        tools.tryEmitComplete(); userInputSubmissions.tryEmitComplete(); lifecycle.tryEmitComplete(); learningPolls.tryEmitComplete()
     }
 
     private fun scheduleResponse() {
-        if (!ready || closed || draining || active != null || toolCoordinator.hasPending) return
+        if (!ready || closed || draining || active != null || toolCoordinator.hasPending || pendingUserInput != null || userInputClearStartedAt != null) return
         val quota = quotaRequested
         if (!quota && (answerCapture != null || speaking || pendingSpeech != null || commits.isNotEmpty() || pause.blocksResponses || (!opening && !queuedInput && !toolCoordinator.continuationReady))) return
         if (!quota && nanoTime() - quietSince < RESPONSE_QUIET_PERIOD.toNanos()) return
@@ -1185,7 +1397,9 @@ internal class VoiceTutorNativeConversationController(
         publish(learningPolls, LearningPollCommand(null))
     }
 
-    private fun advancePause() = applyPause(pause.advance(active == null && commits.isEmpty() && pendingSpeech == null, nanoTime()))
+    private fun advancePause() {
+        if (userInputClearStartedAt == null) applyPause(pause.advance(active == null && commits.isEmpty() && pendingSpeech == null, nanoTime()))
+    }
     private fun applyPause(actions: List<VoiceTutorPauseCoordinator.Action>) {
         actions.forEach { action -> when (action) {
             is VoiceTutorPauseCoordinator.Action.ClearInput -> emit(mapOf("type" to "input_audio_buffer.clear", "event_id" to action.eventId))
@@ -1204,16 +1418,24 @@ internal class VoiceTutorNativeConversationController(
     private fun <T : Any> publish(sink: Sinks.Many<T>, value: T) {
         if (sink.tryEmitNext(value).isFailure && !closed) fail(VoiceTutorProviderProtocolException())
     }
-    private fun validId(id: String): Boolean = id.isNotBlank() && id.length <= 191
+    private fun validId(id: String): Boolean = id.isNotBlank() && id.length <= 191 && !id.startsWith(Metadata.STRUCTURED_ITEM_PREFIX)
     private fun trim(set: LinkedHashSet<String>, limit: Int) { while (set.size > limit) set.remove(set.first()) }
     private fun <T : Any> sink(): Sinks.Many<T> = Sinks.many().unicast().onBackpressureBuffer(Queues.get<T>(512).get())
 
     data class LearningWatch(val id: String, val revision: Long, val progress: VoiceTutorLearningProgress)
     data class LearningPollCommand(val watch: LearningWatch?)
     data class NativeTranscript(val itemId: String, val raw: String)
+    data class UserInputSubmission(val id: String, val revision: Long, val proposalId: String, val selectedIndices: List<Int>)
+    private data class UserInput(val id: String, val callId: String, val revision: Long,
+        val request: VoiceTutorUserInputContract.Request, val proposal: VoiceTutorStudyTopicUserInput? = null,
+        var phase: String = "pending", var result: VoiceTutorMcpToolResult? = null,
+        var answers: List<VoiceTutorUserInputContract.Answer> = emptyList(),
+        var executing: Boolean = false, var mutationCompleted: Boolean = false,
+        var acceptedAt: Instant? = null, var evidence: Input? = null)
+    private data class UserInputBoundary(val input: Input?, val speechStartedOrder: Long, val revision: Long)
     private class TranscriptState(val text: String, var complete: Boolean = false, var persisted: Boolean = false)
     private data class Tutor(val id: String, val stoppedOrder: Long, val generation: Long)
-    private data class Input(val id: String, val sequence: Long, val clientSequence: Long, val revision: Long, val startedOrder: Long,
+    private data class Input(val id: String, val sequence: Long, val clientSequence: Long?, val revision: Long, val startedOrder: Long,
         val acceptedAt: Instant, val precedingTutor: Tutor?, var committed: Boolean = false, var transcriptionFailed: Boolean = false,
         var answerId: String? = null)
     private data class SpeechBoundary(val sequence: Long, var clientSequence: Long, val revision: Long, val startedOrder: Long,

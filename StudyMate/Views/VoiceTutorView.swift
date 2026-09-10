@@ -612,6 +612,9 @@ struct VoiceTutorSessionView: View {
             ),
             strings: strings,
             operationState: viewModel.operationState,
+            userInputState: viewModel.userInputState,
+            onUserInputChange: { id, answer in viewModel.updateUserInput(requestID: id, answer: answer) },
+            onUserInputSubmit: { id, cancel in viewModel.submitUserInput(requestID: id, cancel: cancel) },
             captions: viewModel.presentationCaptions,
             assistantTranscriptDraft: viewModel.assistantTranscriptDraft,
             errorMessage: viewModel.errorMessage,
@@ -1176,7 +1179,6 @@ struct VoiceTutorCallScreen: View {
     @State private var orbHoldTask: Task<Void, Never>?
     @State private var didRequestEnd = false
     @State private var showsEndConfirmation = false
-    @State private var expiredOperationSequence: Int64?
     @GestureState private var orbDragIsActive = false
     @State private var answerEditorSession: VoiceTutorAnswerEditorSession?
     let topic: String
@@ -1184,6 +1186,9 @@ struct VoiceTutorCallScreen: View {
     let presentation: VoiceTutorCallPresentation
     let strings: AppStrings
     var operationState = VoiceTutorOperationState()
+    var userInputState = VoiceTutorUserInputState()
+    var onUserInputChange: (String, VoiceTutorUserInputAnswer) -> Void = { _, _ in }
+    var onUserInputSubmit: (String, Bool) -> Void = { _, _ in }
     var captions: [VoiceTutorCaption] = []
     var assistantTranscriptDraft = ""
     var errorMessage: String?
@@ -1266,6 +1271,12 @@ struct VoiceTutorCallScreen: View {
         .onChange(of: showsTranscript) { _, isShowingTranscript in
             withAnimation(disclosureAnimation) {
                 transcriptExpansion = isShowingTranscript ? 1 : 0
+            }
+        }
+        .onChange(of: userInputState.pending?.id) { _, id in
+            if id != nil {
+                answerEditorSession = nil
+                setTranscriptExpanded(true)
             }
         }
         .onChange(of: answerDraftState.phase) { _, phase in
@@ -1362,6 +1373,7 @@ struct VoiceTutorCallScreen: View {
                 .frame(maxWidth: .infinity)
                 Spacer(minLength: 44)
 
+                operationStatus
                 summaryRow
                 if showsSummary && presentation.summaryState == .ready {
                     VoiceTutorResultSections(detail: presentation.detail, strings: strings)
@@ -1421,7 +1433,6 @@ struct VoiceTutorCallScreen: View {
                 callTime
                 if presentation.isRecording { recordingIndicator }
             }
-            operationStatus
             if answerCaptureIsListening, orbInteraction.stage == .idle {
                 answerCaptureHelp
             }
@@ -1598,6 +1609,7 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var orbStatusText: String {
+        if userInputState.holdsMicrophone { return strings.voiceTutorInputStatus }
         if orbInteraction.stage == .warning { return strings.voiceTutorOrbKeepHoldingToEnd }
         if orbInteraction.stage == .committed { return strings.voiceTutorCallEnding }
         return presentation.statusText(
@@ -1633,7 +1645,6 @@ struct VoiceTutorCallScreen: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("voiceCall.status")
 
-            operationStatus
 
             if answerCaptureIsListening, orbInteraction.stage == .idle {
                 answerCaptureHelp
@@ -1669,17 +1680,13 @@ struct VoiceTutorCallScreen: View {
 
     @ViewBuilder
     private var operationStatus: some View {
-        if presentation.phase.isLive,
-           !operationState.active.isEmpty || (operationState.latestFinished != nil
-               && operationState.latestFinished?.event.sequence != expiredOperationSequence) {
-            TimelineView(.animation(minimumInterval: 0.1,
-                                    paused: scenePhase != .active || operationState.active.isEmpty)) { _ in
+        if !operationState.visibleEntries(at: 0).isEmpty {
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
                 let uptime = ProcessInfo.processInfo.systemUptime
-                VStack(alignment: .leading, spacing: 3) {
+                LazyVStack(alignment: .leading, spacing: 8) {
                     ForEach(operationState.visibleEntries(at: uptime)) { entry in
                         Text(strings.voiceTutorOperationStatus(
-                            name: entry.event.name,
-                            phase: entry.event.phase,
+                            name: entry.event.name, phase: entry.event.phase,
                             elapsedMilliseconds: entry.elapsedMilliseconds(at: uptime)
                         ))
                         .font(.caption2.monospacedDigit())
@@ -1689,15 +1696,16 @@ struct VoiceTutorCallScreen: View {
                     }
                 }
             }
-            .task(id: operationState.latestFinished?.event.sequence) {
-                guard let finished = operationState.latestFinished else {
-                    expiredOperationSequence = nil
-                    return
-                }
-                let remaining = max(0, 5 - (ProcessInfo.processInfo.systemUptime - finished.receivedAt))
-                do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
-                expiredOperationSequence = finished.event.sequence
-            }
+        }
+    }
+
+    private var userInputCards: some View {
+        ForEach(userInputState.entries) { entry in
+            VoiceTutorUserInputCard(entry: entry, strings: strings,
+                onChange: { onUserInputChange(entry.id, $0) },
+                onSubmit: { onUserInputSubmit(entry.id, false) },
+                onCancel: { onUserInputSubmit(entry.id, true) })
+                .id("voiceInput.\(entry.id)")
         }
     }
 
@@ -2010,6 +2018,8 @@ struct VoiceTutorCallScreen: View {
                         .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 16))
                         .accessibilityIdentifier("voiceCall.conversationNotice")
                     }
+                    userInputCards
+                    operationStatus
                     Color.clear.frame(height: 1).id("voiceCall.latestCaption")
                 }
                 .padding(.vertical, 24)
@@ -2039,6 +2049,12 @@ struct VoiceTutorCallScreen: View {
             }
             .onChange(of: captions.last?.id) { _, _ in
                 scheduleTranscriptAutoScroll(using: proxy, animated: true)
+            }
+            .task(id: userInputState.pending?.id) {
+                guard let id = userInputState.pending?.id else { return }
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                proxy.scrollTo("voiceInput.\(id)", anchor: .top)
             }
             .onChange(of: assistantTranscriptDraft) { _, _ in
                 scheduleTranscriptAutoScroll(using: proxy)

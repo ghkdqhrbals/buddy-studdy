@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorLessonFocusIndex
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
+import com.buddystudy.voice.domain.VoiceTutorTranscriptSource
 import com.buddystudy.voice.domain.VoiceTutorTranscriptTurn
 
 /**
@@ -38,11 +39,11 @@ internal object VoiceTutorSummaryTranscriptEvidence {
 
         ordered.filter { it.role == VoiceTutorTranscriptRole.TUTOR }.forEach { question ->
             val linked = linkedAnswers[question.id].orEmpty()
-            if (linked.isEmpty() || !question.isStudyQuestion || question.transcript.isBlank() ||
+            if (linked.isEmpty() || !question.isStudyQuestion || question.source != VoiceTutorTranscriptSource.AUDIO || question.transcript.isBlank() ||
                 question.studyQuestionTurnId != null ||
                 question.askedStudyQuestion || focusIndex.at(question.lessonRevision) == null ||
                 linked.any { answer ->
-                    answer.role != VoiceTutorTranscriptRole.USER || answer.transcript.isBlank() ||
+                    answer.role != VoiceTutorTranscriptRole.USER || answer.source != VoiceTutorTranscriptSource.AUDIO || answer.transcript.isBlank() ||
                         answer.lessonRevision != question.lessonRevision ||
                         answer.sequenceNumber <= question.sequenceNumber || answer.askedStudyQuestion ||
                         answer.studyAnswerTurnId != null || hasInterveningTutor(question, answer, ordered)
@@ -60,7 +61,7 @@ internal object VoiceTutorSummaryTranscriptEvidence {
         // bypass the strict persisted TUTOR_QUESTION -> USER-answer eligibility gate.
         if (!hasTutorQuestionExchange) return emptyList()
         ordered.filter { question ->
-            question.role == VoiceTutorTranscriptRole.USER && question.askedStudyQuestion &&
+            question.role == VoiceTutorTranscriptRole.USER && question.source == VoiceTutorTranscriptSource.AUDIO && question.askedStudyQuestion &&
                 question.studyQuestionTurnId == null && question.transcript.isNotBlank() &&
                 focusIndex.at(question.lessonRevision) != null
         }.forEach { question ->
@@ -149,7 +150,7 @@ internal object VoiceTutorSummaryTranscriptEvidence {
             first.lessonRevision != source.lessonRevision || first.transcript.isBlank()
         ) return emptyList()
         val run = following.takeWhile {
-            it.role == VoiceTutorTranscriptRole.TUTOR && it.lessonRevision == source.lessonRevision &&
+            it.role == VoiceTutorTranscriptRole.TUTOR && it.source == VoiceTutorTranscriptSource.AUDIO && it.lessonRevision == source.lessonRevision &&
                 it.transcript.isNotBlank()
         }
         return run.takeIf { turns ->
@@ -163,7 +164,7 @@ internal object VoiceTutorSummaryTranscriptEvidence {
         answer: VoiceTutorTranscriptTurn,
         ordered: List<VoiceTutorTranscriptTurn>,
     ): List<VoiceTutorTranscriptTurn> = ordered.filter { feedback ->
-        feedback.role == VoiceTutorTranscriptRole.TUTOR &&
+        feedback.role == VoiceTutorTranscriptRole.TUTOR && feedback.source == VoiceTutorTranscriptSource.AUDIO &&
             feedback.studyAnswerTurnId == answer.id && feedback.transcript.isNotBlank() &&
             feedback.lessonRevision == answer.lessonRevision &&
             feedback.sequenceNumber > answer.sequenceNumber && !feedback.isStudyQuestion &&

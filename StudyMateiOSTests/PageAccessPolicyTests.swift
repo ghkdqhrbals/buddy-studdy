@@ -2290,6 +2290,16 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
 }
 
 final class StudyTreeLayoutPolicyTests: XCTestCase {
+    func testTopicCreationStopsAtFourDescendantLevelsAndKeepsUnknownOrCyclicAncestryClosed() {
+        let parents = [2: 1, 3: 2, 4: 3, 5: 4, 6: 5]
+        let ids = Set(1...6)
+        for id in 1...4 { XCTAssertTrue(StudyTopicDepthPolicy.canAddChild(studyID: id, parents: parents, knownIDs: ids)) }
+        for id in 5...6 { XCTAssertFalse(StudyTopicDepthPolicy.canAddChild(studyID: id, parents: parents, knownIDs: ids)) }
+        XCTAssertFalse(StudyTopicDepthPolicy.canAddChild(studyID: 10, parents: [:], knownIDs: ids))
+        XCTAssertFalse(StudyTopicDepthPolicy.canAddChild(studyID: 1, parents: [1: 2, 2: 1], knownIDs: ids))
+        XCTAssertFalse(StudyTopicDepthPolicy.canAddChild(studyID: 1, parents: [1: 10], knownIDs: ids))
+    }
+
     func testNodeLevelProgressUsesClampedTenPointScale() {
         XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(1), 0.1)
         XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(5), 0.5)

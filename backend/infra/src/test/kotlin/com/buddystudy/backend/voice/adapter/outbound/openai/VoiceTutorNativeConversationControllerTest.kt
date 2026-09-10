@@ -8,9 +8,12 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearning
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionChange
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
 import com.fasterxml.jackson.databind.JsonNode
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.time.Duration
 
 class VoiceTutorNativeConversationControllerTest {
@@ -18,19 +21,296 @@ class VoiceTutorNativeConversationControllerTest {
     private var time = 0L
     private val failures = mutableListOf<VoiceTutorProviderTurnFailureDiagnostic>()
     private val controller = VoiceTutorNativeConversationController(Duration.ofSeconds(15), nanoTime = { time },
-        onProviderTurnFailure = { failures += it })
+        onProviderTurnFailure = { failures += it }, userInputEnabled = true)
     private val outbound = mutableListOf<JsonNode>()
     private val ui = mutableListOf<JsonNode>()
     private val stored = mutableListOf<VoiceTutorNativeConversationController.NativeTranscript>()
+    private var persistStructuredInput = true
     private val calls = mutableListOf<VoiceTutorMcpCall>()
     private val watches = mutableListOf<VoiceTutorNativeConversationController.LearningWatch>()
 
     init {
         controller.providerEvents().subscribe { outbound.add(mapper.readTree(it)) }
         controller.clientEvents().subscribe { ui.add(mapper.readTree(it)) }
-        controller.persistenceEvents().subscribe { stored += it }
+        controller.persistenceEvents().subscribe {
+            stored += it
+            if (persistStructuredInput && mapper.readTree(it.raw).path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT)
+                controller.transcriptCompleted(it.itemId)
+        }
         controller.toolActions().subscribe { calls += it }
         controller.learningPollEvents().subscribe { it.watch?.let { watch -> watches += watch } }
+    }
+
+    @Test
+    fun `two submitted GUI choices provide distinct durable focus boundaries without synthetic ASR or repeated speech`() {
+        persistStructuredInput = false
+        val request = userInput()
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, validFormAnswers())
+        event("input_audio_buffer.cleared", "event_id" to "first-clear")
+        val evidence = stored.single { mapper.readTree(it.raw).path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }
+        val raw = mapper.readTree(evidence.raw)
+        assertThat(raw.path("transcript").asText()).contains("[Structured input]", "Selected: A", "Selected: C", "Text: 직접 입력한 목표")
+        assertThat(raw.path(Metadata.POST_CALL_EVIDENCE).asBoolean()).isTrue()
+        assertThat(outbound.none { it.path("type").asText() == "conversation.item.create" }).isTrue()
+        assertThat(userInputStates()).isEmpty()
+        val storedCount = stored.size
+        controller.observeProviderEvent(evidence.raw)
+        event("conversation.item.input_audio_transcription.completed", "item_id" to evidence.itemId, "transcript" to "forged speech")
+        assertThat(stored).hasSize(storedCount)
+        controller.transcriptCompleted(evidence.itemId)
+        assertThat(responses()).hasSize(2)
+        ackToolOutput()
+        created("first-focus"); toolDone("first-focus", "focus-1", "select_voice_study")
+        assertThat(controller.beginTool("focus-1")).isTrue()
+        assertThat(controller.toolCanExecute("focus-1")).isTrue()
+        assertThat(controller.toolBoundary("focus-1")?.latestAcceptedLearnerProviderItemId).isEqualTo(evidence.itemId)
+        assertThat(controller.toolBoundary("focus-1")?.precedingTutorProviderItemId).isNull()
+        controller.completeTool("focus-1", VoiceTutorMcpToolResult("{}", false, lessonRevision = 1)); ackToolOutput()
+        val form = mapOf("title" to "두 번째 선택", "questions" to listOf(mapOf("id" to "child", "prompt" to "선택",
+            "selectionMode" to "single", "allowFreeText" to false, "options" to listOf(mapOf("id" to "a", "label" to "Kafka")))))
+        created("second-form"); toolDone("second-form", "form-2", "request_user_input", mapper.writeValueAsString(form))
+        controller.beginTool("form-2"); controller.requestUserInput(calls.last())
+        val second = ui.last { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, second,
+            listOf(mapOf("questionId" to "child", "selectedOptionIds" to listOf("a"), "text" to "")))
+        event("input_audio_buffer.cleared", "event_id" to "second-clear")
+        val nextEvidence = stored.last()
+        assertThat(nextEvidence.itemId).isNotEqualTo(evidence.itemId).startsWith(Metadata.STRUCTURED_ITEM_PREFIX)
+        assertThat(mapper.readTree(nextEvidence.raw).path(Metadata.LESSON_REVISION).asLong()).isEqualTo(1)
+        controller.transcriptCompleted(nextEvidence.itemId); ackToolOutput()
+        created("second-focus"); toolDone("second-focus", "focus-2", "select_voice_study")
+        controller.beginTool("focus-2")
+        assertThat(controller.toolCanExecute("focus-2")).isTrue()
+        assertThat(controller.toolBoundary("focus-2")?.latestAcceptedLearnerProviderItemId).isEqualTo(nextEvidence.itemId)
+        assertThat(controller.toolBoundary("focus-2")?.latestAcceptedLearnerLessonRevision).isEqualTo(1)
+        assertThat(stored.count { mapper.readTree(it.raw).path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }).isEqualTo(2)
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `cancelled or unsaved GUI input cannot reuse a prior spoken focus or mutation authority`(storageFailed: Boolean) {
+        persistStructuredInput = false
+        val request = userInput()
+        inputControl(if (storageFailed) Contract.USER_INPUT_SUBMIT_EVENT else Contract.USER_INPUT_CANCEL_EVENT, request, validFormAnswers())
+        event("input_audio_buffer.cleared", "event_id" to "clear")
+        if (storageFailed) {
+            val evidence = stored.last()
+            controller.transcriptCompleted(evidence.itemId, successful = false)
+            controller.transcriptCompleted(evidence.itemId, successful = true) // late completion cannot restore authority
+        }
+        assertThat(userInputStates().last().path("phase").asText()).isEqualTo("cancelled")
+        ackToolOutput()
+        created("after-cancel"); toolDone("after-cancel", "read", "get_study")
+        controller.beginTool("read")
+        assertThat(controller.toolBoundary("read")?.latestAcceptedLearnerProviderItemId).isNull()
+        assertThat(controller.toolBoundary("read")?.precedingTutorProviderItemId).isNull()
+        assertThat(stored.count { mapper.readTree(it.raw).path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT })
+            .isEqualTo(if (storageFailed) 1 else 0)
+    }
+
+    @Test
+    fun `maximum choices and text preserve every original label below the common transcript limit`() {
+        val questions = (0..4).map { q -> mapOf("id" to ("q$q" + "x".repeat(78)), "prompt" to "질".repeat(500),
+            "selectionMode" to "multiple", "allowFreeText" to true,
+            "options" to (0..7).map { mapOf("id" to "o$it", "label" to "$it" + "선".repeat(199)) }) }
+        opening(); speech(1); committed("u1"); created("r1")
+        toolDone("r1", "max-form", "request_user_input", mapper.writeValueAsString(mapOf("title" to "최대 입력", "questions" to questions)))
+        controller.beginTool("max-form"); controller.requestUserInput(calls.single())
+        val request = ui.last { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, questions.map { question ->
+            mapOf("questionId" to question["id"]!!, "selectedOptionIds" to (0..7).map { "o$it" }, "text" to "가".repeat(2_000)) })
+        event("input_audio_buffer.cleared", "event_id" to "max-clear")
+        val text = mapper.readTree(stored.last().raw).path("transcript").asText()
+        assertThat(text.length).isLessThan(20_000)
+        assertThat(text.count { it == '가' }).isEqualTo(10_000)
+        assertThat(text.count { it == '선' }).isEqualTo(5 * 8 * 199)
+        assertThat(userInputStates().last().path("phase").asText()).isEqualTo("submitted")
+    }
+
+    @Test
+    fun `five maximum length Korean answers survive provider output encoding and exact continuation ack`() {
+        val questions = (0..4).map { index -> mapOf("id" to "q$index", "prompt" to "목표", "selectionMode" to "text",
+            "allowFreeText" to true, "options" to emptyList<Any>()) }
+        opening(); speech(1); committed("u1"); created("r1")
+        toolDone("r1", "long-form", "request_user_input", mapper.writeValueAsString(mapOf("title" to "다섯 목표", "questions" to questions)))
+        controller.beginTool("long-form"); controller.requestUserInput(calls.single())
+        val request = ui.last { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+        val text = " \n" + "가".repeat(1_996) + "\n "
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, (0..4).map { index ->
+            mapOf("questionId" to "q$index", "selectedOptionIds" to emptyList<String>(), "text" to text) })
+        event("input_audio_buffer.cleared", "event_id" to "long-form-clear")
+        val output = outbound.last { it.path("type").asText() == "conversation.item.create" }
+        val result = mapper.readTree(output.path("item").path("output").asText())
+        assertThat(result.path("answers").size()).isEqualTo(5)
+        assertThat(result.path("answers").map { it.path("text").asText() }).containsOnly(text)
+        assertThat(mapper.readTree(stored.last().raw).path("transcript").asText())
+            .contains("Text: $text\n[End structured input]")
+        assertThat(mapper.writeValueAsBytes(output).size).isLessThan(65_536)
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+    }
+
+    @Test
+    fun `four explicit GUI selections each refresh the human round budget after their exact output acknowledgement`() {
+        opening(); speech(1); committed("u1")
+        repeat(4) { depth ->
+            repeat(2) { read ->
+                val id = "read-$depth-$read"
+                created(id); toolDone(id, id, "list_studies"); controller.beginTool(id)
+                controller.completeTool(id, VoiceTutorMcpToolResult("{}", false)); ackToolOutput()
+            }
+            val id = "choice-$depth"
+            val form = mapOf("title" to "다음 하위 주제", "questions" to listOf(mapOf("id" to "topic", "prompt" to "선택",
+                "selectionMode" to "single", "allowFreeText" to false, "options" to listOf(mapOf("id" to "a", "label" to "A")))))
+            created(id); toolDone(id, id, "request_user_input", mapper.writeValueAsString(form))
+            controller.beginTool(id); controller.requestUserInput(calls.last())
+            val request = ui.last { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+            inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request,
+                listOf(mapOf("questionId" to "topic", "selectedOptionIds" to listOf("a"), "text" to "")))
+            event("input_audio_buffer.cleared", "event_id" to "clear-$depth")
+            ackToolOutput()
+            assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("auto")
+        }
+        assertThat(calls).hasSize(12)
+        assertThat(userInputStates().count { it.path("phase").asText() == "submitted" }).isEqualTo(4)
+    }
+
+    @Test
+    fun `structured input holds speech and response until explicit mixed answers clear and exact tool output ack`() {
+        val request = userInput()
+        speech(2)
+        time += Duration.ofMinutes(2).toNanos(); controller.tick()
+        assertThat(outbound.count { it.path("type").asText() == "input_audio_buffer.commit" }).isEqualTo(1)
+        assertThat(responses()).hasSize(2)
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, validFormAnswers())
+        assertThat(userInputStates()).isEmpty()
+        assertThat(outbound.last().path("type").asText()).isEqualTo("input_audio_buffer.clear")
+        event("input_audio_buffer.cleared", "event_id" to "form-clear")
+        assertThat(userInputStates().last().path("phase").asText()).isEqualTo("submitted")
+        val output = outbound.last { it.path("type").asText() == "conversation.item.create" }
+        val result = mapper.readTree(output.path("item").path("output").asText())
+        assertThat(result.path("answers").size()).isEqualTo(3)
+        assertThat(result.path("answers")[1].path("selectedOptionIds").size()).isEqualTo(2)
+        assertThat(result.path("answers")[2].path("text").asText()).isEqualTo("직접 입력한 목표")
+        assertThat(responses()).hasSize(2)
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, validFormAnswers())
+        assertThat(outbound.count { it.path("type").asText() == "conversation.item.create" }).isEqualTo(1)
+        assertThat(userInputStates().last().path("phase").asText()).isEqualTo("submitted")
+    }
+
+    @Test
+    fun `invalid answers preserve current request and stale identity cannot submit or cancel it`() {
+        val request = userInput()
+        for (field in listOf("requestId", "sessionId", "attemptId")) {
+            val stale = request.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
+                .put(field, "00000000-0000-4000-8000-000000000099")
+            inputControl(Contract.USER_INPUT_SUBMIT_EVENT, stale, validFormAnswers())
+            inputControl(Contract.USER_INPUT_CANCEL_EVENT, stale)
+        }
+        assertThat(userInputStates()).isEmpty()
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, listOf(mapOf("questionId" to "unknown", "selectedOptionIds" to listOf("a"), "text" to "")))
+        assertThat(userInputStates().last().path("errorCode").asText()).isEqualTo("INVALID_ANSWERS")
+        assertThat(outbound.none { it.path("type").asText() == "input_audio_buffer.clear" }).isTrue()
+        inputControl(Contract.USER_INPUT_CANCEL_EVENT, request)
+        event("input_audio_buffer.cleared", "event_id" to "cancel-clear")
+        assertThat(userInputStates().last().path("phase").asText()).isEqualTo("cancelled")
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        inputControl(Contract.USER_INPUT_CANCEL_EVENT, request)
+        assertThat(outbound.count { it.path("type").asText() == "conversation.item.create" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `immutable topic proposal ignores model text and waits for exact batch result before acknowledging submit`() {
+        val submissions = mutableListOf<VoiceTutorNativeConversationController.UserInputSubmission>()
+        controller.userInputActions().subscribe { submissions += it }
+        val proposal = VoiceTutorStudyTopicUserInput("prepared-proposal", "서버 제목", "제출하면 선택한 항목을 추가합니다.", listOf("Redis", "Kafka", "MSA"))
+        val request = userInput(proposal)
+        assertThat(request.path("title").asText()).isEqualTo("서버 제목")
+        assertThat(request.path("questions")[0].path("allowFreeText").asBoolean()).isFalse()
+        val answers = listOf(mapOf("questionId" to "study_topics", "selectedOptionIds" to listOf("topic_0", "topic_2"), "text" to ""))
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, answers)
+        event("input_audio_buffer.cleared", "event_id" to "batch-clear")
+        assertThat(submissions.single().proposalId).isEqualTo(proposal.proposalId)
+        assertThat(submissions.single().selectedIndices).containsExactly(0, 2)
+        assertThat(userInputStates()).isEmpty()
+        assertThat(responses()).hasSize(2)
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, answers)
+        assertThat(submissions).hasSize(1)
+        controller.completeUserInputMutation(submissions.single().id, VoiceTutorMcpToolResult("{\"topics\":[]}", false,
+            studyTreeChanged = true, changedStudyIds = listOf(11, 13)))
+        assertThat(userInputStates().last().path("phase").asText()).isEqualTo("submitted")
+        assertThat(ui.filter { it.path("type").asText() == Contract.STUDY_TREE_CHANGED_EVENT }.map { it.path("studyId").asLong() })
+            .containsExactly(11L, 13L)
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        controller.completeUserInputMutation(submissions.single().id, VoiceTutorMcpToolResult("{}", false))
+        assertThat(responses()).hasSize(3)
+    }
+
+    @Test
+    fun `batch failure preserves choices and explicit retry while terminal callback cannot revive it`() {
+        val submissions = mutableListOf<VoiceTutorNativeConversationController.UserInputSubmission>()
+        controller.userInputActions().subscribe { submissions += it }
+        val request = userInput(VoiceTutorStudyTopicUserInput("proposal", "추가", "선택 후 제출", listOf("Redis")))
+        val answers = listOf(mapOf("questionId" to "study_topics", "selectedOptionIds" to listOf("topic_0"), "text" to ""))
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, answers)
+        event("input_audio_buffer.cleared", "event_id" to "batch-1")
+        controller.completeUserInputMutation(submissions.single().id, VoiceTutorMcpToolResult("{}", true))
+        assertThat(userInputStates().last().path("errorCode").asText()).isEqualTo("ACTION_FAILED")
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, answers)
+        event("input_audio_buffer.cleared", "event_id" to "batch-2")
+        assertThat(submissions).hasSize(2)
+        val statesBeforeEnd = userInputStates().size
+        controller.beginDrain(true)
+        assertThat(userInputStates()).hasSize(statesBeforeEnd)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("ending")
+        controller.completeUserInputMutation(submissions.last().id, VoiceTutorMcpToolResult("{}", false))
+        ackToolOutput()
+        assertThat(responses()).hasSize(2)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["PROPOSAL_EXPIRED", "MUTATION_TARGET_STALE", "PROPOSAL_ALREADY_SUBMITTED", "STUDY_TREE_CHANGED", "VALIDATION_ERROR"])
+    fun `permanent proposal failures release the form and resume explanation without replaying the rejected batch`(code: String) {
+        val submissions = mutableListOf<VoiceTutorNativeConversationController.UserInputSubmission>()
+        controller.userInputActions().subscribe { submissions += it }
+        val request = userInput(VoiceTutorStudyTopicUserInput("proposal", "추가", "선택 후 제출", listOf("Redis")))
+        val answers = listOf(mapOf("questionId" to "study_topics", "selectedOptionIds" to listOf("topic_0"), "text" to ""))
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, answers)
+        event("input_audio_buffer.cleared", "event_id" to "batch-clear")
+        controller.completeUserInputMutation(submissions.single().id,
+            VoiceTutorMcpToolResult(mapper.writeValueAsString(mapOf("error" to mapOf("code" to code))), true))
+        assertThat(userInputStates().last().path("phase").asText()).isEqualTo("cancelled")
+        assertThat(userInputStates().none { it.has("errorCode") }).isTrue()
+        val output = outbound.last { it.path("type").asText() == "conversation.item.create" }
+        assertThat(mapper.readTree(output.path("item").path("output").asText()).path("error").path("code").asText()).isEqualTo(code)
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, answers)
+        assertThat(submissions).hasSize(1)
+        assertThat(outbound.count { it.path("type").asText() == "conversation.item.create" }).isEqualTo(1)
+        assertThat(ui.none { it.path("type").asText() == Contract.STUDY_TREE_CHANGED_EVENT }).isTrue()
+    }
+
+    @Test
+    fun `form input clear and explicit pause clear have separate acknowledgements and resume preserves continuation`() {
+        val request = userInput()
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, validFormAnswers())
+        client(Contract.PAUSE_REQUEST_EVENT, 1); client(Contract.PAUSE_INPUT_QUIESCED_EVENT, 1)
+        assertThat(outbound.count { it.path("type").asText() == "input_audio_buffer.clear" }).isEqualTo(1)
+        event("input_audio_buffer.cleared", "event_id" to "form-clear")
+        assertThat(outbound.count { it.path("type").asText() == "input_audio_buffer.clear" }).isEqualTo(2)
+        event("input_audio_buffer.cleared", "event_id" to "form-clear")
+        assertThat(ui.none { it.path("type").asText() == Contract.PAUSE_STATE_EVENT }).isTrue()
+        event("input_audio_buffer.cleared", "event_id" to "pause-clear")
+        ackToolOutput()
+        assertThat(responses()).hasSize(2)
+        client(Contract.RESUME_REQUEST_EVENT, 2)
+        event("input_audio_buffer.cleared", "event_id" to "resume-clear"); settleQuiet()
+        assertThat(responses()).hasSize(3)
     }
 
     @Test
@@ -1584,17 +1864,17 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
-    fun `pause drains tutor then clears only quiesced input and preserves pending learner response for resume`() {
+    fun `pause cancels long tutor output at client boundary then resumes only after both clear acknowledgements`() {
         opening(); speech(1); committed("u1"); created("r1"); audio("r1", "t1")
         client(Contract.PAUSE_REQUEST_EVENT, 1); client(Contract.PAUSE_INPUT_QUIESCED_EVENT, 1)
         assertThat(outbound.map { it.path("type").asText() }).doesNotContain("input_audio_buffer.clear")
-        done("r1", "t1"); event("output_audio_buffer.stopped", "response_id" to "r1")
+        assertThat(cancellations()).hasSize(1)
+        cancelled("r1"); event("output_audio_buffer.cleared", "response_id" to "r1")
         assertThat(outbound.last().path("type").asText()).isEqualTo("input_audio_buffer.clear")
         event("input_audio_buffer.cleared", "event_id" to "clear1")
         assertThat(ui.last().path("paused").asBoolean()).isTrue()
         client(Contract.RESUME_REQUEST_EVENT, 2); event("input_audio_buffer.cleared", "event_id" to "clear2"); settleQuiet()
         assertThat(ui.last().path("paused").asBoolean()).isFalse()
-        speech(2); committed("u2")
         assertThat(responses()).hasSize(3)
     }
 
@@ -1708,6 +1988,29 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     private fun sessionStates() = ui.filter { it.path("type").asText() == Contract.SESSION_STATE_EVENT }
+    private fun userInputStates() = ui.filter { it.path("type").asText() == Contract.USER_INPUT_STATE_EVENT }
+    private fun userInput(proposal: VoiceTutorStudyTopicUserInput? = null): JsonNode {
+        val form = mapOf("title" to "학습 선택", "questions" to listOf(
+            mapOf("id" to "single", "prompt" to "하나 선택", "selectionMode" to "single", "allowFreeText" to true,
+                "options" to listOf(mapOf("id" to "a", "label" to "A"), mapOf("id" to "b", "label" to "B"))),
+            mapOf("id" to "multiple", "prompt" to "여러 개 선택", "selectionMode" to "multiple", "allowFreeText" to false,
+                "options" to listOf(mapOf("id" to "c", "label" to "C"), mapOf("id" to "d", "label" to "D"))),
+            mapOf("id" to "text", "prompt" to "목표 입력", "selectionMode" to "text", "allowFreeText" to true, "options" to emptyList<Any>())))
+        opening(); speech(1); committed("u1"); created("r1")
+        toolDone("r1", "form", "request_user_input", mapper.writeValueAsString(form))
+        assertThat(controller.beginTool("form")).isTrue()
+        controller.requestUserInput(calls.single(), proposal)
+        return ui.single { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+    }
+    private fun validFormAnswers() = listOf(
+        mapOf("questionId" to "single", "selectedOptionIds" to listOf("a"), "text" to "추가 선호"),
+        mapOf("questionId" to "multiple", "selectedOptionIds" to listOf("c", "d"), "text" to ""),
+        mapOf("questionId" to "text", "selectedOptionIds" to emptyList<String>(), "text" to "직접 입력한 목표"))
+    private fun inputControl(type: String, request: JsonNode, answers: List<Map<String, Any>> = emptyList()) {
+        controller.observeClientEvent(mapper.writeValueAsString(mapOf("type" to type,
+            "requestId" to request.path("requestId").asText(), "sessionId" to request.path("sessionId").asText(),
+            "attemptId" to request.path("attemptId").asText(), "answers" to answers)))
+    }
     private fun responses() = outbound.filter { it.path("type").asText() == "response.create" }
     private fun answerStates() = ui.filter { it.path("type").asText() == Contract.ANSWER_STATE_EVENT }
     private fun answerSegments() = ui.filter { it.path("type").asText() == Contract.ANSWER_TRANSCRIPT_EVENT }
@@ -1784,8 +2087,8 @@ class VoiceTutorNativeConversationControllerTest {
     }
     private fun done(r: String, t: String) = event("response.done", "response" to mapOf("id" to r, "status" to "completed", "output" to listOf(
         mapOf("id" to t, "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to "어떤 주제로 이야기할까요?"))))))
-    private fun toolDone(r: String, id: String, name: String) = event("response.done", "response" to mapOf("id" to r, "status" to "completed", "output" to listOf(
-        mapOf("id" to "item-$id", "type" to "function_call", "status" to "completed", "call_id" to id, "name" to name, "arguments" to "{}"))))
+    private fun toolDone(r: String, id: String, name: String, arguments: String = "{}") = event("response.done", "response" to mapOf("id" to r, "status" to "completed", "output" to listOf(
+        mapOf("id" to "item-$id", "type" to "function_call", "status" to "completed", "call_id" to id, "name" to name, "arguments" to arguments))))
     private fun ackToolOutput() {
         val output = outbound.last { it.path("type").asText() == "conversation.item.create" }
         event("conversation.item.created", "item" to output.path("item"))

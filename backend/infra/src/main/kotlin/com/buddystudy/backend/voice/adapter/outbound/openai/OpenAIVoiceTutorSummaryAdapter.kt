@@ -337,6 +337,8 @@ internal object VoiceTutorSummaryPromptProvider {
             "content" to """
                 Summarize the supplied AI tutoring session as a compact factual learning record in $outputLanguage.
                 This is extraction of an actual voice lesson, NOT new question generation or a new grading request.
+                source=STRUCTURED_INPUT denotes explicit app preferences or topic selections, not spoken audio.
+                Never use those turns as learning questions, answers, feedback or grades, or describe them as speech.
                 Keep the overall summary brief and group the genuine learning exchanges into explorations by topic and lesson revision.
                 For a saved topic, use only a matching studyId, topic and difficulty from knownTopics, which are
                 immutable versioned metadata supplied to this session. For EACH questionTurnId, select that study's
@@ -412,6 +414,7 @@ internal object VoiceTutorSummaryPromptProvider {
                         mapOf(
                             "id" to turn.id,
                             "role" to turn.role.name,
+                            "source" to turn.source.name,
                             "transcript" to turn.transcript,
                             "lessonRevision" to turn.lessonRevision,
                             "studyQuestionTurnId" to (turn.studyQuestionTurnId ?: NullNode.instance),

@@ -130,8 +130,10 @@ struct VoiceTutorOperationState: Equatable, Sendable {
     }
 
     static let maximumActiveOperations = 8
+    static let maximumFinishedOperations = 512
     private(set) var active: [Entry] = []
-    private(set) var latestFinished: Entry?
+    private(set) var finished: [Entry] = []
+    var latestFinished: Entry? { finished.last }
     private var latestSequence: Int64 = 0
     private var isClosed = false
 
@@ -143,31 +145,28 @@ struct VoiceTutorOperationState: Equatable, Sendable {
             guard existing.event.name == event.name else { return false }
             // Duplicate starts must not reset the elapsed clock.
             guard event.phase != .started else { return false }
-        } else if latestFinished?.id == event.operationID {
+        } else if finished.contains(where: { $0.id == event.operationID }) {
             return false
         }
-        let entry = Entry(event: event, receivedAt: uptime)
+        let entry = Entry(event: event, receivedAt: active.first(where: { $0.id == event.operationID })?.receivedAt ?? uptime)
         if event.phase == .started {
             guard active.count < Self.maximumActiveOperations else { return false }
             active.append(entry)
-            latestFinished = nil
         } else {
             active.removeAll { $0.id == event.operationID }
-            latestFinished = entry
+            finished.append(entry)
+            if finished.count > Self.maximumFinishedOperations { finished.removeFirst(finished.count - Self.maximumFinishedOperations) }
         }
         return true
     }
 
     func visibleEntries(at uptime: TimeInterval) -> [Entry] {
-        if !active.isEmpty { return active }
-        guard let latestFinished, uptime - latestFinished.receivedAt < 5 else { return [] }
-        return [latestFinished]
+        (finished + active).sorted { $0.receivedAt < $1.receivedAt }
     }
 
     mutating func endLocally() {
         isClosed = true
         active = []
-        latestFinished = nil
     }
 }
 #endif

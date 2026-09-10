@@ -14,6 +14,30 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
+    fun `structured input is bounded session scoped and strips provider extras while client replies stay local`() {
+        val session = "00000000-0000-4000-8000-000000000001"
+        val base = mapOf("requestId" to "00000000-0000-4000-8000-000000000002", "sessionId" to session,
+            "attemptId" to "00000000-0000-4000-8000-000000000003", "sequence" to 1)
+        val form = base + mapOf("type" to VoiceTutorRealtimeContract.USER_INPUT_REQUEST_EVENT, "title" to "선택",
+            "private" to "not forwarded", "questions" to listOf(mapOf("id" to "one", "prompt" to "목표",
+                "selectionMode" to "text", "allowFreeText" to true, "options" to emptyList<Any>())))
+        val payload = mapper.readTree(policy.providerDecision(mapper.writeValueAsString(form), session, Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
+        assertThat(payload.has("private")).isFalse()
+        assertThat(payload.path("questions").size()).isEqualTo(1)
+        assertThat(policy.providerDecision(mapper.writeValueAsString(form), "wrong-session", Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        assertThat(policy.providerDecision(mapper.writeValueAsString(form), session, Instant.EPOCH).payload).isNull()
+        for (type in listOf(VoiceTutorRealtimeContract.USER_INPUT_SUBMIT_EVENT, VoiceTutorRealtimeContract.USER_INPUT_CANCEL_EVENT)) {
+            assertThat(policy.shouldForwardClientEvent(mapper.writeValueAsString(base + mapOf("type" to type)))).isFalse()
+        }
+        assertThatThrownBy { policy.shouldForwardClientEvent(mapper.writeValueAsString(form)) }
+            .isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        assertThat(policy.providerDecision(mapper.writeValueAsString(form + mapOf("questions" to emptyList<Any>())),
+            session, Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+    }
+
+    @Test
     fun `operation telemetry permits bounded server timing only and removes private payloads`() {
         val fields = mapOf("type" to VoiceTutorRealtimeContract.OPERATION_EVENT, "operationId" to "call_1",
             "name" to "get_grading_process", "phase" to "completed", "elapsedMs" to 152,

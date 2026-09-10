@@ -62,7 +62,8 @@ class VoiceTutorControlWebSocketHandler(
                     ?: return@flatMap Mono.error(IllegalStateException("Voice Tutor principal is invalid."))
                 val sessionId = session.handshakeInfo.uri.path.substringBeforeLast("/control").substringAfterLast('/')
                 mono { webRtc.claimControl(principal, sessionId, UUID.randomUUID().toString()) }
-                    .flatMap { context -> bridge(session, principal, context) }
+                    .flatMap { context -> bridge(session, principal, context.copy(userInputEnabled =
+                        session.handshakeInfo.headers.getFirst(VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL_HEADER) == VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL)) }
             }
     }
 
@@ -375,6 +376,17 @@ class VoiceTutorControlWebSocketHandler(
                             Mono.just(mapper.writeValueAsString(event))
                         }
                     }
+                    VoiceTutorRealtimeContract.USER_INPUT_SUBMIT_EVENT,
+                    VoiceTutorRealtimeContract.USER_INPUT_CANCEL_EVENT -> {
+                        if (!sidebandReady.get() || !context.userInputEnabled || node.path("sessionId").asText() != sessionId) Mono.empty()
+                        else {
+                            val event = linkedMapOf<String, Any>("type" to type,
+                                "requestId" to node.path("requestId").asText(), "sessionId" to sessionId,
+                                "attemptId" to node.path("attemptId").asText())
+                            if (type == VoiceTutorRealtimeContract.USER_INPUT_SUBMIT_EVENT) event["answers"] = node.path("answers")
+                            Mono.just(mapper.writeValueAsString(event))
+                        }
+                    }
                     else -> Mono.error(
                         VoiceTutorClientProtocolException("Unsupported Voice Tutor WebRTC control event."),
                     )
@@ -407,6 +419,11 @@ class VoiceTutorControlWebSocketHandler(
                 if (type == VoiceTutorTranscriptMetadata.INCOMPLETE_EVENT) {
                     // Only the private in-process worker can persist this integrity fence.
                     if (persist || forwardToClient) return@relaySideband false
+                    return@relaySideband inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull() == true
+                }
+                if (type == VoiceTutorTranscriptMetadata.STRUCTURED_USER_INPUT_EVENT) {
+                    // Only the authenticated form worker may persist this private source type.
+                    if (!context.userInputEnabled || !persist || forwardToClient) return@relaySideband false
                     return@relaySideband inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull() == true
                 }
                 if (type == VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT) {
@@ -630,6 +647,16 @@ class VoiceTutorControlWebSocketHandler(
             VoiceTutorTranscriptMetadata.INCOMPLETE_EVENT -> mono {
                 relay.markTranscriptIncomplete(principal, sessionId)
             }
+            VoiceTutorTranscriptMetadata.STRUCTURED_USER_INPUT_EVENT -> if (
+                node.path("item_id").asText().startsWith(VoiceTutorTranscriptMetadata.STRUCTURED_ITEM_PREFIX) &&
+                VoiceTutorTranscriptMetadata.postCallEvidence(node)
+            ) appendTranscript(
+                principal, sessionId, node.path("item_id").asText(), VoiceTutorTranscriptRole.USER,
+                node.path("transcript").asText(), VoiceTutorTranscriptMetadata.lessonRevision(node),
+                acceptedAt = VoiceTutorTranscriptMetadata.acceptedAt(node), postCallEvidence = true,
+                conversationSequence = VoiceTutorTranscriptMetadata.conversationSequence(node),
+                structuredInput = true,
+            ) else Mono.just(false)
             "conversation.item.input_audio_transcription.completed" -> appendTranscript(
                 principal,
                 sessionId,
@@ -676,7 +703,9 @@ class VoiceTutorControlWebSocketHandler(
         acceptedAt: Instant? = null,
         postCallEvidence: Boolean = false,
         conversationSequence: Long? = null,
-    ): Mono<Boolean> = if (transcript.isBlank()) {
+        structuredInput: Boolean = false,
+    ): Mono<Boolean> = if (transcript.isBlank() ||
+        (providerItemId.startsWith(VoiceTutorTranscriptMetadata.STRUCTURED_ITEM_PREFIX) && !structuredInput)) {
         Mono.just(false)
     } else {
         mono {

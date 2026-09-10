@@ -12,6 +12,7 @@ import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
 import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalogPort
 import com.buddystudy.study.domain.entity.StudyEntity
+import com.buddystudy.study.domain.StudyTreePolicy
 import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -171,8 +172,8 @@ class StudyTreeService(
     }
 
     private companion object {
-        const val MAX_DEPTH = 5
-        const val MAX_CHILDREN = 10
+        const val MAX_DEPTH = StudyTreePolicy.MAX_DESCENDANT_DEPTH
+        const val MAX_CHILDREN = StudyTreePolicy.MAX_TOPIC_SUGGESTIONS
 
         fun fallbackSuggestions(
             parentTopic: String,

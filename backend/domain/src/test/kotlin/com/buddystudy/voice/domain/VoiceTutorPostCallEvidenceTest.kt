@@ -29,6 +29,42 @@ class VoiceTutorPostCallEvidenceTest {
     }
 
     @Test
+    fun `structured source comes from reserved identity while original text remains unchanged`() {
+        val audio = source[1].copy(transcript = "[Structured input] is only quoted speech here")
+        val selected = audio.copy(providerItemId = VoiceTutorTranscriptSource.STRUCTURED_ITEM_PREFIX + "selection")
+
+        assertEquals(VoiceTutorTranscriptSource.AUDIO, audio.source)
+        assertEquals(VoiceTutorTranscriptSource.STRUCTURED_INPUT, selected.source)
+        assertEquals(audio.transcript, selected.transcript)
+        assertEquals(audio.id, selected.id)
+    }
+
+    @Test
+    fun `structured selection cannot be promoted to a spoken answer even when model cites it`() {
+        val mixed = source.map { if (it.id == 2L) it.copy(
+            providerItemId = VoiceTutorTranscriptSource.STRUCTURED_ITEM_PREFIX + "selection",
+        ) else it }
+
+        assertNull(evidence(mixed, VoiceTutorPostCallExchange(1, listOf(2, 3), 4))
+            .attestedTranscript("session", mixed, focus))
+        val setupOnly = VoiceTutorPostCallEvidence(
+            VoiceTutorPostCallEvidence.sourceHash("session", mixed, focus), emptyList(),
+        )
+        assertEquals(mixed, setupOnly.attestedTranscript("session", mixed, focus))
+        assertTrue(mixed.all { it.studyQuestionTurnId == null })
+
+        val followup = source + listOf(
+            turn(5, VoiceTutorTranscriptRole.USER, "Selected: cache invalidation").copy(
+                providerItemId = VoiceTutorTranscriptSource.STRUCTURED_ITEM_PREFIX + "followup",
+            ),
+            turn(6, VoiceTutorTranscriptRole.TUTOR, "A selection acknowledgement"),
+        )
+        assertNull(evidence(followup, VoiceTutorPostCallExchange(1, listOf(2, 3), 4)).copy(
+            learnerQuestions = listOf(VoiceTutorPostCallLearnerQuestion(5, listOf(6))),
+        ).attestedTranscript("session", followup, focus))
+    }
+
+    @Test
     fun `partial reordered duplicated or foreign answer IDs are rejected`() {
         listOf(listOf(2L), listOf(3L), listOf(3L, 2L), listOf(2L, 2L), listOf(2L, 99L)).forEach {
             assertNull(evidence(source, VoiceTutorPostCallExchange(1, it, 4))

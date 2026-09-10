@@ -112,7 +112,7 @@ class StudyController(
 
     @Operation(
         summary = "Create a child study topic",
-        description = "Adds a topic under an existing study tree node. This operation never creates a question and never consumes monthly question quota.",
+        description = "Adds one selected topic under an existing study tree node, through four descendant levels (root depth zero). Existing deeper nodes are preserved. This operation never creates a question and never consumes monthly question quota.",
     )
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "Study topic created."),
@@ -146,7 +146,7 @@ class StudyController(
         authentication: Authentication,
     ): ResponseEntity<Unit> = study.deleteStudy(studyId, authentication)
 
-    @Operation(summary = "Recommend child study topics", description = "Reuses the system topic catalog first, generates and stores missing suggestions when needed, and supports up to 10 children through depth 5.")
+    @Operation(summary = "Recommend child study topics", description = "Reuses the system topic catalog first and generates missing recommendations for this branch only, up to 10 suggestions through descendant depth 4 (root depth zero). Recommendations do not create user study nodes or consume question quota; create only the topics the learner selects.")
     @PostMapping("/studies/{studyId}/topic-suggestions")
     @RequirePermission(Permissions.STUDY_CREATE)
     suspend fun suggestStudyTopics(

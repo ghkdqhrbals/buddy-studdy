@@ -3241,9 +3241,9 @@ final class VoiceTutorContractTests: XCTestCase {
 
     func testTranscriptNavigationLabelsDescribeFullScreenActions() {
         let expected = [
-            (AppLanguage.korean, "전체 대화 보기", "통화로 돌아가기", "최근 대화"),
-            (AppLanguage.english, "View full conversation", "Return to call", "Latest conversation"),
-            (AppLanguage.japanese, "会話を全画面で見る", "通話に戻る", "最近の会話")
+            (AppLanguage.korean, "전체 대화 보기", "대화로 돌아가기", "최근 대화"),
+            (AppLanguage.english, "View full conversation", "Return to conversation", "Latest conversation"),
+            (AppLanguage.japanese, "会話を全画面で見る", "対話に戻る", "最近の会話")
         ]
         for (language, reveal, collapse, latest) in expected {
             let strings = AppStrings(language: language)
@@ -3254,9 +3254,9 @@ final class VoiceTutorContractTests: XCTestCase {
         }
 
         let gestureHints = [
-            (AppLanguage.korean, "위로 쓸어 전체 대화를 봅니다.", "아래로 쓸어 통화 화면으로 돌아갑니다."),
-            (AppLanguage.english, "Swipe up to view the full conversation.", "Swipe down to return to the call."),
-            (AppLanguage.japanese, "上にスワイプすると会話全体を表示します。", "下にスワイプすると通話画面に戻ります。")
+            (AppLanguage.korean, "위로 쓸어 전체 대화를 봅니다.", "아래로 쓸어 대화 화면으로 돌아갑니다."),
+            (AppLanguage.english, "Swipe up to view the full conversation.", "Swipe down to return to the conversation."),
+            (AppLanguage.japanese, "上にスワイプすると会話全体を表示します。", "下にスワイプすると対話画面に戻ります。")
         ]
         for (language, reveal, hide) in gestureHints {
             let strings = AppStrings(language: language)
@@ -4158,6 +4158,8 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(VoiceTutorTurnProtocol.capabilityHeader, "X-Voice-Turn-Protocol")
         XCTAssertEqual(VoiceTutorTurnProtocol.capabilityValue, "realtime-native-v1")
         XCTAssertEqual(prepared.value(forHTTPHeaderField: "X-Voice-Turn-Protocol"), "realtime-native-v1")
+        XCTAssertEqual(prepared.value(forHTTPHeaderField: "X-Voice-User-Input-Protocol"), "user-input-v1")
+        XCTAssertNil(original.value(forHTTPHeaderField: "X-Voice-User-Input-Protocol"))
         XCTAssertNil(original.value(forHTTPHeaderField: "X-Voice-Turn-Protocol"))
         XCTAssertEqual(prepared.url, original.url)
         XCTAssertEqual(prepared.httpMethod, original.httpMethod)

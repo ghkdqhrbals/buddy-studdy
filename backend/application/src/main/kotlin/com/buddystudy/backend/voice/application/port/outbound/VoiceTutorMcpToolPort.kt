@@ -46,6 +46,18 @@ data class VoiceTutorMcpToolResult(
     val learningProgress: VoiceTutorLearningProgress? = null,
     /** Exact server-prepared question; spoken once after tool acknowledgement, never a write authority. */
     val mutationConfirmationQuestion: String? = null,
+    /** Verified created nodes from one explicitly submitted immutable topic selection. */
+    val changedStudyIds: List<Long> = emptyList(),
+    /** Exact GUI action, never model JSON; its acknowledged output starts a fresh human tool budget. */
+    val userInputCompleted: Boolean = false,
+)
+
+/** A server-prepared immutable write proposal; model-authored form text cannot change it. */
+data class VoiceTutorStudyTopicUserInput(
+    val proposalId: String,
+    val title: String,
+    val prompt: String,
+    val topics: List<String>,
 )
 
 data class VoiceTutorQuestionChange(val studyId: Long, val recordId: String)
@@ -160,6 +172,13 @@ interface VoiceTutorMcpToolPort {
         toolName: String,
         arguments: Map<String, Any>,
     ): VoiceTutorMcpToolResult
+
+    suspend fun prepareStudyTopicUserInput(context: VoiceTutorWebRtcControlContext,
+        parentStudyId: Long, topics: List<String>, difficultyLevel: Int): VoiceTutorStudyTopicUserInput? = null
+
+    /** Called only for an exact authenticated GUI submission, never a provider tool invocation. */
+    suspend fun submitStudyTopicUserInput(context: VoiceTutorWebRtcControlContext,
+        proposalId: String, selectedIndices: List<Int>): VoiceTutorMcpToolResult = VoiceTutorMcpToolResult("{}", true)
 
     /** Read-only progress check for a previously accepted canonical operation. No model tool or speech. */
     suspend fun pollLearningProgress(

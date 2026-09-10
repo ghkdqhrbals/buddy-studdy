@@ -1,6 +1,7 @@
 package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.voice.VoiceTutorUserInputContract
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.JsonNode
@@ -52,6 +53,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         private set
 
     val hasPending: Boolean get() = pending.isNotEmpty()
+    val pendingCount: Int get() = pending.size
     val toolChoice: String get() = if (roundCount >= MAX_TOOL_ROUNDS) "none" else "auto"
 
     fun beginLearnerTurn() {
@@ -86,7 +88,8 @@ internal class VoiceTutorMcpTurnCoordinator(
             }
             val name = item.path("name").takeIf { it.isTextual }?.textValue()
                 ?.takeIf { TOOL_NAME.matches(it) } ?: throw VoiceTutorMcpProtocolException()
-            VoiceTutorMcpCall(callId, name, parseArguments(item.path("arguments")))
+            VoiceTutorMcpCall(callId, name, parseArguments(item.path("arguments"),
+                if (name == VoiceTutorUserInputContract.TOOL) MAX_USER_INPUT_BYTES else MAX_ARGUMENT_BYTES))
         }
         // Register every id BEFORE emitting work. A replay cannot create a
         // duplicate study, including while the first invocation is suspended.
@@ -229,7 +232,8 @@ internal class VoiceTutorMcpTurnCoordinator(
         if (closed || !call.started || call.acknowledgementDeadline != null) return null
         // The bridge returns bounded JSON, but keep this final transport guard
         // for alternate adapters. Never truncate JSON into an invalid output.
-        val validOutput = result.output.toByteArray(Charsets.UTF_8).size <= MAX_OUTPUT_BYTES &&
+        val maximum = if (call.toolName == VoiceTutorUserInputContract.TOOL) MAX_USER_INPUT_BYTES else MAX_OUTPUT_BYTES
+        val validOutput = result.output.toByteArray(Charsets.UTF_8).size <= maximum &&
             runCatching { mapper.readTree(result.output)?.isObject == true }.getOrDefault(false)
         val output = if (validOutput) result.output else INVALID_RESULT_OUTPUT
         val event = linkedMapOf<String, Any?>(
@@ -244,6 +248,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         )
         if (mapper.writeValueAsBytes(event).size > MAX_PROVIDER_EVENT_BYTES) throw VoiceTutorMcpProtocolException()
         call.expectedOutput = output
+        call.resetsHumanRoundBudget = call.toolName == VoiceTutorUserInputContract.TOOL && result.userInputCompleted
         call.acknowledgementDeadline = nowNanos + acknowledgementTimeout.toNanos()
         return event
     }
@@ -261,6 +266,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         ) return false
         if (item.has("status") && item.path("status").asText() != "completed") return false
         pending.remove(callId)
+        if (call.resetsHumanRoundBudget) roundCount = 0
         if (pending.isEmpty() && !continuationSuperseded) continuationReady = true
         return true
     }
@@ -283,8 +289,8 @@ internal class VoiceTutorMcpTurnCoordinator(
         continuationReady = false
     }
 
-    private fun parseArguments(node: JsonNode): Map<String, Any>? {
-        if (!node.isTextual || node.textValue().toByteArray(Charsets.UTF_8).size > MAX_ARGUMENT_BYTES) return null
+    private fun parseArguments(node: JsonNode, maximumBytes: Int = MAX_ARGUMENT_BYTES): Map<String, Any>? {
+        if (!node.isTextual || node.textValue().toByteArray(Charsets.UTF_8).size > maximumBytes) return null
         return runCatching {
             val parsed = mapper.readTree(node.textValue())
             if (parsed?.isObject != true) return null
@@ -313,6 +319,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         var started: Boolean = false,
         var expectedOutput: String? = null,
         var acknowledgementDeadline: Long? = null,
+        var resetsHumanRoundBudget: Boolean = false,
     )
 
     private data class RejectedServerCall(
@@ -329,6 +336,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         const val MAX_TOOL_ROUNDS = 7
         const val MAX_ARGUMENT_BYTES = 16 * 1024
         const val MAX_OUTPUT_BYTES = 16 * 1024
+        private const val MAX_USER_INPUT_BYTES = 64 * 1024
         const val MAX_PROVIDER_EVENT_BYTES = 65_536
         const val MAX_PROVIDER_CALL_ID_LENGTH = 32
         val OUTPUT_ACK_EVENTS = setOf("conversation.item.created", "conversation.item.added", "conversation.item.done")

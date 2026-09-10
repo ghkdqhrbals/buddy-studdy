@@ -8,6 +8,7 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicsCommand
 import com.buddystudy.backend.study.application.port.inbound.ExpectedStudyMetadata
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
@@ -412,6 +413,165 @@ class StudySyncServiceTest {
         assertThat(retried.parentStudyId).isEqualTo(11)
         assertThat(retried.topic).isEqualTo("Redis Streams")
         assertThat(studies.rows.count { it.parentStudyId == 11L }).isEqualTo(1)
+    }
+
+    @Test
+    fun `selected child can be saved at depth four but no fifth level is created`(): Unit = runBlocking {
+        studies.rows += study(11, "Root")
+        studies.rows += study(12, "One").apply { parentStudyId = 11 }
+        studies.rows += study(13, "Two").apply { parentStudyId = 12 }
+        studies.rows += study(14, "Three").apply { parentStudyId = 13 }
+
+        val fourth = service.createStudyTopicWithOutcome(principal, 14, CreateStudyTopicCommand("Four", difficultyLevel = 8))
+        val savedCount = studies.saveCalls
+        val failure = runCatching {
+            service.createStudyTopicWithOutcome(principal, fourth.id, CreateStudyTopicCommand("Five"))
+        }.exceptionOrNull()
+
+        assertThat(fourth.created).isTrue()
+        assertThat(fourth.parentStudyId).isEqualTo(14)
+        assertThat(fourth.difficultyLevel).isEqualTo(8)
+        assertThat(failure).isInstanceOf(ApiException::class.java)
+        assertThat((failure as ApiException).status).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)
+        assertThat(studies.rows).hasSize(5)
+        assertThat(studies.saveCalls).isEqualTo(savedCount)
+        assertThat(questions.pendingRows).isEmpty()
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
+    }
+
+    @Test
+    fun `selected topic batch appends only direct children and replay preserves existing settings`(): Unit = runBlocking {
+        val root = study(11, "Root").apply { customPrompt = "Keep root settings"; intervalMinutes = 90 }
+        val existing = study(12, "Transactions").apply {
+            parentStudyId = 11; sortOrder = 4; difficultyLevel = 2; activeForQuestions = false
+        }
+        studies.rows += listOf(root, existing)
+        val beforeRoot = completeStudyState(root)
+        val beforeExisting = completeStudyState(existing)
+        val command = CreateStudyTopicsCommand(listOf(" transactions ", " Indexes ", "Replication"), difficultyLevel = 8)
+
+        val result = service.createStudyTopics(principal, 11, command)
+        val replay = service.createStudyTopics(principal, 11, command)
+
+        assertThat(result.parentStudyId).isEqualTo(11)
+        assertThat(result.maxDepth).isEqualTo(4)
+        assertThat(result.topics.map { it.created }).containsExactly(false, true, true)
+        assertThat(result.topics.map { it.topic }).containsExactly("Transactions", "Indexes", "Replication")
+        assertThat(result.topics.map { it.parentStudyId }).containsOnly(11L)
+        assertThat(result.topics.drop(1).map { it.difficultyLevel }).containsOnly(8)
+        assertThat(result.topics.drop(1).map { it.enabled }).containsOnly(false)
+        assertThat(replay.topics.map { it.created }).containsOnly(false)
+        assertThat(replay.topics.map { it.id }).containsExactlyElementsOf(result.topics.map { it.id })
+        assertThat(studies.rows).hasSize(4)
+        assertThat(studies.saveCalls).isEqualTo(2)
+        assertThat(completeStudyState(root)).isEqualTo(beforeRoot)
+        assertThat(completeStudyState(existing)).isEqualTo(beforeExisting)
+        assertThat(studies.rows.takeLast(2).map { it.sortOrder }).isSorted().allMatch { it > 4 }
+        assertThat(questions.pendingRows).isEmpty()
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
+    }
+
+    @Test
+    fun `a later conflicting topic rejects the whole selected batch before any save`(): Unit = runBlocking {
+        studies.rows += study(11, "Root")
+        studies.rows += study(12, "Other root")
+        studies.rows += study(13, "Transactions").apply { parentStudyId = 12 }
+
+        val error = runCatching {
+            service.createStudyTopics(principal, 11, CreateStudyTopicsCommand(listOf("New first selection", "transactions")))
+        }.exceptionOrNull() as ApiException
+
+        assertThat(error.status).isEqualTo(HttpStatus.CONFLICT)
+        assertThat(studies.saveCalls).isZero()
+        assertThat(studies.rows).hasSize(3)
+    }
+
+    @Test
+    fun `batch validates size normalized duplicates topic lengths and difficulty before saving`(): Unit = runBlocking {
+        studies.rows += study(11, "Root")
+        listOf(
+            CreateStudyTopicsCommand(emptyList()),
+            CreateStudyTopicsCommand((1..11).map { "Topic $it" }),
+            CreateStudyTopicsCommand(listOf("Transactions", " transactions ")),
+            CreateStudyTopicsCommand(listOf("Valid", "   ")),
+            CreateStudyTopicsCommand(listOf("x".repeat(256))),
+            CreateStudyTopicsCommand(listOf("Valid"), difficultyLevel = 11),
+        ).forEach { command ->
+            val error = runCatching { service.createStudyTopics(principal, 11, command) }.exceptionOrNull() as ApiException
+            assertThat(error.status).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)
+        }
+        assertThat(studies.saveCalls).isZero()
+        assertThat(studies.rows).hasSize(1)
+    }
+
+    @Test
+    fun `batch checks owned parent and immutable parent metadata under the creation lock`(): Unit = runBlocking {
+        studies.rows += study(11, "Root")
+        studies.rows += study(12, "Foreign").apply { userId = 99 }
+        val selection = CreateStudyTopicsCommand(listOf("Transactions"))
+        val foreign = runCatching { service.createStudyTopics(principal, 12, selection) }.exceptionOrNull() as ApiException
+        val changed = runCatching {
+            service.createStudyTopics(principal, 11, selection.copy(expectedParent = ExpectedStudyMetadata(null, "Previous root", 5)))
+        }.exceptionOrNull() as ApiException
+
+        assertThat(foreign.status).isEqualTo(HttpStatus.NOT_FOUND)
+        assertThat(changed.errorCode).isEqualTo(ApiErrorCode.STUDY_TREE_CHANGED)
+        assertThat(studies.saveCalls).isZero()
+        assertThat(studies.events).contains("lock:7")
+    }
+
+    @Test
+    fun `batch allows depth four and retains legacy deeper topics without adding a fifth level`(): Unit = runBlocking {
+        studies.rows += study(11, "Root")
+        (12L..16L).forEach { id -> studies.rows += study(id, "Level ${id - 11}").apply { parentStudyId = id - 1 } }
+        val fourth = service.createStudyTopics(principal, 14, CreateStudyTopicsCommand(listOf("Selected fourth")))
+        assertThat(fourth.topics.single().created).isTrue()
+        val saved = studies.saveCalls
+
+        val legacy = service.createStudyTopics(principal, 15, CreateStudyTopicsCommand(listOf("Level 5")))
+        val failed = runCatching {
+            service.createStudyTopics(principal, 15, CreateStudyTopicsCommand(listOf("Level 5", "New fifth")))
+        }.exceptionOrNull() as ApiException
+
+        assertThat(legacy.topics.single().created).isFalse()
+        assertThat(failed.status).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)
+        assertThat(studies.saveCalls).isEqualTo(saved)
+        assertThat(studies.rows).hasSize(7)
+        assertThat(studies.deleteCalls).isZero()
+    }
+
+    @Test
+    fun `legacy fifth level remains readable editable and idempotently returned without extending it`(): Unit = runBlocking {
+        studies.rows += study(11, "Root")
+        (12L..16L).forEach { id -> studies.rows += study(id, "Level ${id - 11}").apply { parentStudyId = id - 1 } }
+        val legacy = studies.rows.last()
+        val before = completeStudyState(legacy)
+
+        val retry = service.createStudyTopicWithOutcome(principal, 15, CreateStudyTopicCommand("Level 5", difficultyLevel = 9))
+        assertThat(retry.created).isFalse()
+        assertThat(retry.id).isEqualTo(legacy.id)
+        assertThat(completeStudyState(legacy)).isEqualTo(before)
+
+        val edited = service.updateStudy(principal, legacy.id, UpdateStudyCommand(difficultyLevel = 7))
+        assertThat(edited.difficultyLevel).isEqualTo(7)
+        assertThat(edited.parentStudyId).isEqualTo(15)
+        assertThat(studies.rows).hasSize(6)
+        assertThat(studies.deleteCalls).isZero()
+        assertThat(runCatching {
+            service.createStudyTopic(principal, legacy.id, CreateStudyTopicCommand("New sixth level"))
+        }.exceptionOrNull()).isInstanceOf(ApiException::class.java)
+    }
+
+    @Test
+    fun `invalid cyclic parent chain cannot bypass new descendant depth validation`(): Unit = runBlocking {
+        studies.rows += study(11, "One").apply { parentStudyId = 12 }
+        studies.rows += study(12, "Two").apply { parentStudyId = 11 }
+
+        assertThat(runCatching {
+            service.createStudyTopic(principal, 11, CreateStudyTopicCommand("Child"))
+        }.exceptionOrNull()).isInstanceOf(ApiException::class.java)
+        assertThat(studies.saveCalls).isZero()
+        assertThat(studies.rows).hasSize(2)
     }
 
     @Test

@@ -65,6 +65,61 @@ import java.time.ZoneOffset
 
 class McpVoiceTutorToolAdapterTest {
     @Test
+    fun `GUI topic proposal writes only explicitly selected immutable topics and replay never invokes batch again`(): Unit = runBlocking {
+        val fixture = Fixture(studyContexts = ContextStore())
+        fixture.handler = { name, arguments -> when (name) {
+            "get_study" -> success(mapOf("id" to 101L, "parentStudyId" to null, "topic" to "Redis", "difficultyLevel" to 5))
+            "create_study_topics" -> {
+                assertThat(arguments["parent_study_id"]).isEqualTo(101L)
+                assertThat(arguments["topics"]).isEqualTo(listOf("Streams", "Persistence"))
+                assertThat(arguments["difficulty_level"]).isEqualTo(8)
+                assertThat(arguments[BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT]).isEqualTo("Redis")
+                assertThat(arguments[BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT]).isEqualTo(0L)
+                success(mapOf("parentStudyId" to 101L, "topics" to listOf("Streams", "Persistence").mapIndexed { index, topic ->
+                    mapOf("id" to 201L + index, "parentStudyId" to 101L, "topic" to topic, "difficultyLevel" to 8, "created" to true)
+                }))
+            }
+            else -> error("Unexpected tool $name")
+        } }
+        val native = context().copy(realtimeModelTools = true)
+        val proposal = requireNotNull(fixture.adapter.prepareStudyTopicUserInput(native, 101, listOf("Streams", "Cache", "Persistence"), 8))
+        assertThat(proposal.prompt).contains("Redis", "8", "제출")
+        assertThat(fixture.calls.map { it.name }).containsExactly("get_study")
+        assertThat(fixture.adapter.realtimeDefinitions().map { it.name }).doesNotContain("create_study_topics")
+        assertThat(fixture.adapter.execute(native, "create_study_topics", mapOf("parent_study_id" to 101L,
+            "topics" to listOf("Unapproved"), "difficulty_level" to 8)).isError).isTrue()
+        val saved = fixture.adapter.submitStudyTopicUserInput(native, proposal.proposalId, listOf(0, 2))
+        assertThat(saved.isError).isFalse()
+        assertThat(saved.changedStudyIds).containsExactly(201L, 202L)
+        assertThat(fixture.adapter.submitStudyTopicUserInput(native, proposal.proposalId, listOf(2, 0))).isEqualTo(saved)
+        assertThat(fixture.adapter.submitStudyTopicUserInput(native, proposal.proposalId, listOf(1)).isError).isTrue()
+        assertThat(fixture.calls.count { it.name == "create_study_topics" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `GUI topic proposal rejects changed parent revision call and revoked account without any batch write`(): Unit = runBlocking {
+        for (change in listOf("parent", "revision", "call", "authorization")) {
+            val store = ContextStore()
+            val fixture = Fixture(studyContexts = store)
+            var parentTitle = "Redis"
+            fixture.handler = { name, _ ->
+                assertThat(name).isEqualTo("get_study")
+                success(mapOf("id" to 101L, "parentStudyId" to null, "topic" to parentTitle, "difficultyLevel" to 5))
+            }
+            var native = context().copy(realtimeModelTools = true)
+            val proposal = requireNotNull(fixture.adapter.prepareStudyTopicUserInput(native, 101, listOf("Streams"), 8))
+            when (change) {
+                "parent" -> parentTitle = "Changed Redis"
+                "revision" -> store.revision += 1
+                "call" -> native = native.copy(callId = "other-call")
+                "authorization" -> fixture.authorized = false
+            }
+            assertThat(fixture.adapter.submitStudyTopicUserInput(native, proposal.proposalId, listOf(0)).isError).isTrue()
+            assertThat(fixture.calls.none { it.name == "create_study_topics" }).isTrue()
+        }
+    }
+
+    @Test
     fun `voice exchange logs the complete public result once when using the shared MCP handler`(): Unit = runBlocking {
         val useCase = proxy<BuddyStudyMcpUseCase> { method, arguments ->
             assertThat(method).isEqualTo("getStudy")
@@ -773,7 +828,7 @@ class McpVoiceTutorToolAdapterTest {
         val definitions = fixture.adapter.definitions()
 
         assertThat(definitions.map { it.name }).containsExactly(
-            "list_studies", "get_study", "update_study", "create_root_study", "create_study_topic", "delete_study",
+            "list_studies", "get_study", "update_study", "create_root_study", "create_study_topic", "suggest_study_topics", "delete_study",
             "list_records", "get_record", "list_study_learning_records", "get_voice_learning_record",
             "get_topic_stats", "get_study_growth",
             "select_voice_study", "advance_voice_study",

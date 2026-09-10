@@ -114,8 +114,14 @@ data class StudyTopicSuggestionsResponse(
     val suggestions: List<String>,
     val source: String = "CATALOG",
     val depth: Int = 1,
-    val maxDepth: Int = 5,
-    val childLimit: Int = 10,
+    val maxDepth: Int = com.buddystudy.study.domain.StudyTreePolicy.MAX_DESCENDANT_DEPTH,
+    val childLimit: Int = com.buddystudy.study.domain.StudyTreePolicy.MAX_TOPIC_SUGGESTIONS,
+)
+
+data class StudyTopicsCreationResponse(
+    val parentStudyId: Long,
+    val topics: List<StudyTopicCreationResponse>,
+    val maxDepth: Int = com.buddystudy.study.domain.StudyTreePolicy.MAX_DESCENDANT_DEPTH,
 )
 
 data class StudyPageResponse(

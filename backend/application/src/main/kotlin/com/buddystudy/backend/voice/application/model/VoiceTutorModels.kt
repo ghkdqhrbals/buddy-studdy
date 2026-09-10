@@ -75,6 +75,7 @@ data class VoiceTutorTranscriptTurnResponse(
     val role: VoiceTutorTranscriptRole,
     val transcript: String,
     val occurredAt: Instant,
+    val source: com.buddystudy.voice.domain.VoiceTutorTranscriptSource = com.buddystudy.voice.domain.VoiceTutorTranscriptSource.AUDIO,
 )
 
 data class VoiceTutorRecordingUploadResponse(
@@ -265,6 +266,7 @@ fun VoiceTutorTranscriptTurn.toResponse() = VoiceTutorTranscriptTurnResponse(
     role = role,
     transcript = transcript,
     occurredAt = occurredAt,
+    source = source,
 )
 
 fun VoiceTutorResult.toResponse() = VoiceTutorResultResponse(

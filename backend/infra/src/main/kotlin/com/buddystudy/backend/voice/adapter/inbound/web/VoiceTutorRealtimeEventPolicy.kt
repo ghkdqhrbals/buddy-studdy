@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.inbound.web
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata
+import com.buddystudy.backend.voice.VoiceTutorUserInputContract
 import com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorProviderErrorDisposition
 import com.buddystudy.backend.voice.adapter.outbound.openai.classifyRealtimeProviderError
 import com.fasterxml.jackson.databind.JsonNode
@@ -46,6 +47,9 @@ internal class VoiceTutorRealtimeEventPolicy(
                 (type == VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT &&
                     !node.path("text").isTextual)
             ) throw VoiceTutorClientProtocolException("Voice Tutor reviewed answer is invalid.")
+        }
+        if (type in USER_INPUT_CLIENT_EVENTS && !VoiceTutorUserInputContract.validCorrelation(node)) {
+            throw VoiceTutorClientProtocolException("Voice Tutor user input identity is invalid.")
         }
         return type in ALLOWED_CLIENT_EVENTS
     }
@@ -179,6 +183,27 @@ internal class VoiceTutorRealtimeEventPolicy(
                 ) ProviderEventDecision(mapper.writeValueAsString(mapOf(
                     "type" to type, "studyId" to studyId.longValue(), "recordId" to recordId.asText(),
                 ))) else ProviderEventDecision(payload = null)
+            }
+            VoiceTutorRealtimeContract.USER_INPUT_REQUEST_EVENT, VoiceTutorRealtimeContract.USER_INPUT_STATE_EVENT -> {
+                val sequence = node.path("sequence")
+                if (transport != VoiceTutorProviderTransport.WEBRTC_SIDEBAND ||
+                    !VoiceTutorUserInputContract.validCorrelation(node) || node.path("sessionId").asText() != sessionId ||
+                    !sequence.isIntegralNumber || !sequence.canConvertToLong() || sequence.longValue() <= 0)
+                    return ProviderEventDecision(payload = null)
+                val payload = linkedMapOf<String, Any>("type" to type, "requestId" to node.path("requestId").asText(),
+                    "sessionId" to sessionId, "attemptId" to node.path("attemptId").asText(), "sequence" to sequence.longValue())
+                if (type == VoiceTutorRealtimeContract.USER_INPUT_REQUEST_EVENT) {
+                    val request = VoiceTutorUserInputContract.request(node) ?: return ProviderEventDecision(payload = null)
+                    payload["title"] = request.title
+                    payload["questions"] = request.questions
+                } else {
+                    val phase = node.path("phase").asText()
+                    if (phase !in setOf("pending", "submitted", "cancelled")) return ProviderEventDecision(payload = null)
+                    payload["phase"] = phase
+                    node.path("errorCode").asText().takeIf { phase == "pending" && it in setOf("INVALID_ANSWERS", "ACTION_FAILED") }
+                        ?.let { payload["errorCode"] = it }
+                }
+                ProviderEventDecision(mapper.writeValueAsString(payload))
             }
             VoiceTutorRealtimeContract.OPERATION_EVENT -> {
                 val sequence = node.path("sequence")
@@ -466,6 +491,8 @@ internal class VoiceTutorRealtimeEventPolicy(
         private val ANSWER_ID_PATTERN = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         private val ANSWER_CLIENT_EVENTS = setOf(VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT,
             VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT, VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT)
+        private val USER_INPUT_CLIENT_EVENTS = setOf(VoiceTutorRealtimeContract.USER_INPUT_SUBMIT_EVENT,
+            VoiceTutorRealtimeContract.USER_INPUT_CANCEL_EVENT)
         private val ANSWER_PHASES = setOf("listening", "finalizing", "review", "submitting", "submitted", "failed", "cancelled")
         private val ANSWER_CODES = setOf("ANSWER_TRANSCRIPT_INCOMPLETE", "ANSWER_SUBMISSION_FAILED", "ANSWER_TOO_LONG")
         private val ALLOWED_CLIENT_EVENTS = setOf(
@@ -485,6 +512,8 @@ internal class VoiceTutorRealtimeEventPolicy(
             VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT,
             VoiceTutorRealtimeContract.ANSWER_SUBMIT_EVENT,
             VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT,
+            VoiceTutorRealtimeContract.USER_INPUT_SUBMIT_EVENT,
+            VoiceTutorRealtimeContract.USER_INPUT_CANCEL_EVENT,
         )
         private val TUTOR_TRANSCRIPT_DELTA_PROVIDER_EVENTS = setOf(
             "response.output_audio_transcript.delta",

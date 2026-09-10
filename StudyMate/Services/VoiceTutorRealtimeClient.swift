@@ -10,10 +10,13 @@ enum VoiceTutorLocalSpeechDeliveryError: Error, Equatable {
 enum VoiceTutorTurnProtocol {
     static let capabilityHeader = "X-Voice-Turn-Protocol"
     static let capabilityValue = "realtime-native-v1"
+    static let userInputCapabilityHeader = "X-Voice-User-Input-Protocol"
+    static let userInputCapabilityValue = "user-input-v1"
 
     static func addingCapability(to request: URLRequest) -> URLRequest {
         var request = request
         request.setValue(capabilityValue, forHTTPHeaderField: capabilityHeader)
+        request.setValue(userInputCapabilityValue, forHTTPHeaderField: userInputCapabilityHeader)
         return request
     }
 
@@ -25,6 +28,8 @@ enum VoiceTutorTurnProtocol {
     /// audio; the Realtime model interprets meaning and tool intent in context.
     static func payload(for event: VoiceTutorCallControlEvent) throws -> [String: Any] {
         switch event {
+        case .userInput(let command):
+            return try command.payload()
         case .speech(let speech):
             guard speech.sequence > 0 else { throw VoiceTutorLocalSpeechDeliveryError.invalidSequence }
             return ["type": speech.messageType, "sequence": speech.sequence]
@@ -146,6 +151,8 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case answerTranscript(VoiceTutorAnswerTranscriptEvent)
     case sessionState(VoiceTutorSessionStateEvent)
     case operation(VoiceTutorOperationEvent)
+    case userInputRequest(VoiceTutorUserInputRequest)
+    case userInputState(VoiceTutorUserInputStateEvent)
     case responseStarted(
         responseID: String?,
         isTutorIntervention: Bool,
@@ -183,6 +190,17 @@ enum VoiceTutorRealtimeEventParser {
         }
 
         switch type {
+        case "buddystudy.voice.user_input.request":
+            guard let request = try? JSONDecoder().decode(VoiceTutorUserInputRequest.self, from: data), request.isValid else {
+                return .ignored(type: type)
+            }
+            return .userInputRequest(request)
+        case "buddystudy.voice.user_input.state":
+            guard let event = try? JSONDecoder().decode(VoiceTutorUserInputStateEvent.self, from: data),
+                  event.sequence > 0, [event.requestId, event.sessionId, event.attemptId].allSatisfy({ UUID(uuidString: $0) != nil }) else {
+                return .ignored(type: type)
+            }
+            return .userInputState(event)
         case "buddystudy.voice.operation":
             guard Set(object.keys) == ["type", "sequence", "operationId", "name", "phase", "elapsedMs"],
                   let sequence = exactInteger("sequence", in: object),

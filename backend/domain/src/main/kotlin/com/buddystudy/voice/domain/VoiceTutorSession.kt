@@ -94,6 +94,16 @@ data class VoiceTutorRecording(
     val updatedAt: Instant,
 )
 
+/** Source is derived from a server-reserved item identity, never from learner-authored text. */
+enum class VoiceTutorTranscriptSource {
+    AUDIO,
+    STRUCTURED_INPUT;
+
+    companion object {
+        const val STRUCTURED_ITEM_PREFIX = "buddystudy-user-input-"
+    }
+}
+
 data class VoiceTutorTranscriptTurn(
     val id: Long,
     val sessionId: String,
@@ -114,7 +124,12 @@ data class VoiceTutorTranscriptTurn(
     val isStudyQuestion: Boolean = false,
     /** Clean native-realtime source; learning semantics are verified only after the call. */
     val postCallEvidence: Boolean = false,
-)
+) {
+    val source: VoiceTutorTranscriptSource
+        get() = if (providerItemId.startsWith(VoiceTutorTranscriptSource.STRUCTURED_ITEM_PREFIX)) {
+            VoiceTutorTranscriptSource.STRUCTURED_INPUT
+        } else VoiceTutorTranscriptSource.AUDIO
+}
 
 data class VoiceTutorResult(
     val sessionId: String,

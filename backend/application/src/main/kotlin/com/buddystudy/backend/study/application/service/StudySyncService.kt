@@ -7,12 +7,14 @@ import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.StudyTopicCreationResponse
+import com.buddystudy.backend.study.application.model.StudyTopicsCreationResponse
 import com.buddystudy.backend.study.application.model.toRecordResponse
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicsCommand
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
@@ -21,6 +23,7 @@ import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.localization.application.service.applyReadyQuestionLocalization
 import com.buddystudy.study.domain.StudyRoomSettings
+import com.buddystudy.study.domain.StudyTreePolicy
 import com.buddystudy.study.domain.StudyRoomSettingsCommand
 import com.buddystudy.study.domain.StudyRoomSettingsState
 import com.buddystudy.study.domain.StudyRoomSettingsUpdate
@@ -215,7 +218,62 @@ class StudySyncService(
         val allStudies = studies.findAllByUserId(principal.userId)
         val rootStudy = StudyTreeSelector.rootFor(parentStudy, allStudies)
 
-        return saveStudyOutcome(
+        return saveChildStudyOutcome(principal, parentStudy, rootStudy, command)
+    }
+
+    @Transactional
+    @RequirePermission(Permissions.STUDY_CREATE)
+    override suspend fun createStudyTopics(
+        principal: Principal,
+        parentStudyId: Long,
+        command: CreateStudyTopicsCommand,
+    ): StudyTopicsCreationResponse {
+        val topics = command.topics.map(String::trim)
+        val topicKeys = topics.map { it.normalizedStudyTopicKey() }
+        if (parentStudyId <= 0 || topics.size !in 1..StudyTreePolicy.MAX_TOPIC_SUGGESTIONS ||
+            topics.any { it.isEmpty() || it.length > 255 } || topicKeys.distinct().size != topicKeys.size ||
+            command.difficultyLevel !in 1..10
+        ) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR,
+                "Select 1 to 10 distinct child topics with 1 to 255 characters and difficulty between 1 and 10.")
+        }
+        lockStudyOwner(principal.userId)
+        val parent = studies.findByIdAndUserId(parentStudyId, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Parent study not found.")
+        command.expectedParent?.let { expected ->
+            if (parent.parentStudyId != expected.parentStudyId || parent.topic != expected.topic ||
+                parent.difficultyLevel != expected.difficultyLevel
+            ) {
+                throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.STUDY_TREE_CHANGED,
+                    "The parent study changed. Review its current metadata and select topics again.")
+            }
+        }
+        val allStudies = studies.findAllByUserId(principal.userId)
+        val byTopic = allStudies.groupBy { it.topic.normalizedStudyTopicKey() }
+        // Validate every selection before the first save; one conflict rejects the whole batch.
+        if (topicKeys.any { key -> byTopic[key].orEmpty().any { it.parentStudyId != parentStudyId } }) {
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR,
+                "A selected study topic with the same name already exists under another parent.")
+        }
+        if (topicKeys.any { byTopic[it].isNullOrEmpty() }) requireCanAddChild(parent, allStudies)
+        val rootStudy = StudyTreeSelector.rootFor(parent, allStudies)
+        var nextOrder = allStudies.filter { it.parentStudyId == parentStudyId }
+            .maxOfOrNull { it.sortOrder.toLong() }?.plus(1)?.coerceAtLeast(0) ?: 0L
+        val outcomes = topics.map { topic ->
+            saveChildStudyOutcome(
+                principal, parent, rootStudy,
+                CreateStudyTopicCommand(topic, (nextOrder++).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), command.difficultyLevel),
+            ).let { it.study.toStudyTopicCreationResponse(it.created) }
+        }
+        return StudyTopicsCreationResponse(parentStudyId, outcomes)
+    }
+
+    private suspend fun saveChildStudyOutcome(
+        principal: Principal,
+        parentStudy: StudyEntity,
+        rootStudy: StudyEntity,
+        command: CreateStudyTopicCommand,
+    ): SavedStudyOutcome = saveStudyOutcome(
             principal = principal,
             command = CreateStudyCommand(
                 topic = command.topic,
@@ -232,7 +290,6 @@ class StudySyncService(
             activeForQuestions = command.activeForQuestions,
             scheduleEnabled = false,
         )
-    }
 
     @Transactional
     @RequirePermission(Permissions.STUDY_UPDATE)
@@ -352,7 +409,8 @@ class StudySyncService(
         }
 
         val now = Instant.now()
-        val duplicate = studies.findAllByUserId(principal.userId)
+        val allStudies = studies.findAllByUserId(principal.userId)
+        val duplicate = allStudies
             .firstOrNull { it.topic.normalizedStudyTopicKey() == topic.normalizedStudyTopicKey() }
         val duplicateBelongsToRequestedParent = duplicate != null && duplicate.parentStudyId == parentStudy?.id
         if (duplicate != null && !duplicateBelongsToRequestedParent && (parentStudy != null || duplicate.parentStudyId != null)) {
@@ -361,6 +419,7 @@ class StudySyncService(
         if (duplicate != null && parentStudy != null && duplicateBelongsToRequestedParent) {
             return SavedStudyOutcome(duplicate.toStudyRoomResponse(), created = false)
         }
+        if (parentStudy != null) requireCanAddChild(parentStudy, allStudies)
         val study = duplicate ?: StudyEntity(
                 deviceId = principal.deviceId,
                 userId = principal.userId,
@@ -411,6 +470,14 @@ class StudySyncService(
             saved = studies.save(saved)
         }
         return SavedStudyOutcome(saved.toStudyRoomResponse(), created = isNewStudy)
+    }
+
+    private fun requireCanAddChild(parentStudy: StudyEntity, allStudies: List<StudyEntity>) {
+        val parentPath = StudyTreeSelector.pathFromRoot(parentStudy, allStudies)
+        if (parentPath.first().parentStudyId != null || parentPath.size > StudyTreePolicy.MAX_DESCENDANT_DEPTH) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR,
+                "New study topics support at most four descendant levels below the root.")
+        }
     }
 
     @Transactional

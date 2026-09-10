@@ -10,7 +10,11 @@ extension AppStrings {
         case .completed: status = voiceTutorPauseText("완료", "Completed", "完了")
         case .failed: status = voiceTutorPauseText("실패", "Failed", "失敗")
         }
-        return "\(name) · \(status) · \(elapsedMilliseconds) ms"
+        let seconds = max(0, elapsedMilliseconds) / 1_000
+        let duration = seconds < 1 ? voiceTutorPauseText("1초 미만", "<1 sec", "1秒未満")
+            : seconds < 60 ? voiceTutorPauseText("\(seconds)초", "\(seconds) sec", "\(seconds)秒")
+            : voiceTutorPauseText("\(seconds / 60)분", "\(seconds / 60) min", "\(seconds / 60)分")
+        return "\(name) · \(status) · \(duration)"
     }
 
     var voiceTutorProviderCallFailed: String {
@@ -31,17 +35,17 @@ extension AppStrings {
 
     var voiceTutorUpdateRequiredMessage: String {
         voiceTutorPauseText(
-            "앱을 업데이트한 뒤 다시 통화해 주세요.",
-            "Update the app before starting another call.",
-            "アプリをアップデートしてから、もう一度通話してください。"
+            "앱을 업데이트한 뒤 다시 대화해 주세요.",
+            "Update the app before starting another conversation.",
+            "アプリをアップデートしてから、もう一度対話してください。"
         )
     }
 
     var voiceTutorRequestRejected: String {
         voiceTutorPauseText(
-            "통화 요청을 처리할 수 없습니다. 앱을 다시 실행해 주세요.",
-            "The call request couldn't be processed. Reopen the app and try again.",
-            "通話リクエストを処理できません。アプリを開き直してください。"
+            "대화 요청을 처리할 수 없습니다. 앱을 다시 실행해 주세요.",
+            "The conversation request couldn't be processed. Reopen the app and try again.",
+            "対話リクエストを処理できません。アプリを開き直してください。"
         )
     }
 
@@ -54,9 +58,9 @@ extension AppStrings {
     var voiceTutorResuming: String { voiceTutorPauseText("계속할 준비 중", "Getting ready to continue", "再開の準備中") }
     var voiceTutorPauseUsesTime: String {
         voiceTutorPauseText(
-            "일시정지 중에도 통화 시간은 사용돼요.",
-            "Call time continues while paused.",
-            "一時停止中も通話時間を消費します。"
+            "일시정지 중에도 대화 시간은 사용돼요.",
+            "Conversation time continues while paused.",
+            "一時停止中も対話時間を消費します。"
         )
     }
     var voiceTutorPauseFailed: String {
@@ -89,9 +93,9 @@ extension AppStrings {
     }
     var voiceTutorCallCollapseConversation: String {
         voiceTutorPauseText(
-            "통화로 돌아가기",
-            "Return to call",
-            "通話に戻る"
+            "대화로 돌아가기",
+            "Return to conversation",
+            "対話に戻る"
         )
     }
     var voiceTutorCallLatestConversation: String {
@@ -110,9 +114,9 @@ extension AppStrings {
     }
     var voiceTutorOrbHideConversationHint: String {
         voiceTutorPauseText(
-            "아래로 쓸어 통화 화면으로 돌아갑니다.",
-            "Swipe down to return to the call.",
-            "下にスワイプすると通話画面に戻ります。"
+            "아래로 쓸어 대화 화면으로 돌아갑니다.",
+            "Swipe down to return to the conversation.",
+            "下にスワイプすると対話画面に戻ります。"
         )
     }
 
@@ -211,9 +215,9 @@ extension AppStrings {
     }
     var voiceTutorCallNoReplyHelp: String {
         voiceTutorPauseText(
-            "AI의 응답을 받기 전에 통화가 중단됐어요. 다시 연결해 주세요.",
-            "The call stopped before your tutor replied. Try reconnecting.",
-            "AIの返答が届く前に通話が中断されました。接続し直してください。"
+            "AI의 응답을 받기 전에 대화가 중단됐어요. 다시 연결해 주세요.",
+            "The conversation stopped before your tutor replied. Try reconnecting.",
+            "AIの返答が届く前に対話が中断されました。接続し直してください。"
         )
     }
     var voiceTutorCallEndingHelp: String {
@@ -247,7 +251,7 @@ extension AppStrings {
     }
 
     var voiceTutorOrbEndConfirmation: String {
-        voiceTutorPauseText("통화를 종료할까요?", "End this call?", "通話を終了しますか？")
+        voiceTutorPauseText("대화를 종료할까요?", "End this conversation?", "対話を終了しますか？")
     }
     var voiceTutorOrbKeepHoldingToEnd: String {
         voiceTutorPauseText("계속 누르면 종료", "Keep holding to end", "長押しを続けると終了")
@@ -257,9 +261,9 @@ extension AppStrings {
     }
     var voiceTutorOrbHoldToEndHint: String {
         voiceTutorPauseText(
-            "길게 누르면 종료 안내가 나타나고, 계속 누르면 통화가 끝납니다. 손을 떼면 취소됩니다.",
-            "Hold to show the end-call prompt, then keep holding to end. Release to cancel.",
-            "長押しで終了の案内が表示され、そのまま押し続けると通話が終了します。指を離すとキャンセルします。"
+            "길게 누르면 종료 안내가 나타나고, 계속 누르면 대화가 끝납니다. 손을 떼면 취소됩니다.",
+            "Hold to show the end prompt, then keep holding to end. Release to cancel.",
+            "長押しで終了の案内が表示され、そのまま押し続けると対話が終了します。指を離すとキャンセルします。"
         )
     }
 

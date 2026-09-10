@@ -11,6 +11,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolP
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
 import com.buddystudy.voice.domain.VoiceTutorSession
@@ -40,6 +41,78 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
+    @Test
+    fun `old native clients never receive structured interaction tools or wait for unsupported input`() {
+        assertThat(nativeVoiceTutorDefinitions(FakeTools()).map { it.name }).doesNotContain("request_user_input")
+        assertThat(nativeVoiceTutorDefinitions(FakeTools(), true).map { it.name }).contains("request_user_input")
+        Fixture().use { f ->
+            f.opening(); f.learner(1, "learner-1")
+            f.toolResponse("unsupported", "form", "request_user_input")
+            f.await("unsupported tool returns without waiting for a UI") { f.outputs().size == 1 }
+            assertThat(f.outputs().single().path("item").path("output").asText()).contains("USER_INPUT_UNSUPPORTED")
+            assertThat(f.ui.none { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }).isTrue()
+            f.ack(f.outputs().single())
+            f.await("ordinary voice continues") { f.responses().size == 3 }
+        }
+    }
+
+    @Test
+    fun `spoken root focus then selected immutable topics wait for durable GUI evidence before the next child focus`() {
+        val save = CompletableDeferred<VoiceTutorMcpToolResult>()
+        val storedChoice = CompletableDeferred<Unit>()
+        val tools = FakeTools { VoiceTutorMcpToolResult("{}", false, lessonRevision = 1) }.apply { topicResult = { save.await() } }
+        Fixture(tools = tools, userInputEnabled = true, store = { event ->
+            if (event.path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT) storedChoice.await()
+        }).use { f ->
+            f.opening(); f.learner(1, "learner-1"); f.transcript("learner-1")
+            f.toolResponse("root-focus", "select-root", "select_voice_study")
+            f.await("spoken root is focused") { f.outputs().size == 1 }
+            f.ack(f.outputs().single())
+            f.await("root focus continuation") { f.responses().size == 3 }
+            f.toolResponse("choices", "form", "request_user_input", json(mapOf("studyTopicProposal" to mapOf(
+                "parentStudyId" to 7, "topics" to listOf("Redis", "Kafka", "MSA"), "difficultyLevel" to 8))))
+            f.await("verified topic form arrives") { f.ui.any { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT } }
+            val request = f.ui.single { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+            assertThat(tools.topicSubmissions).isEmpty()
+            val submit = json(mapOf("type" to Contract.USER_INPUT_SUBMIT_EVENT,
+                "requestId" to request.path("requestId").asText(), "sessionId" to request.path("sessionId").asText(),
+                "attemptId" to request.path("attemptId").asText(), "answers" to listOf(mapOf("questionId" to "study_topics",
+                    "selectedOptionIds" to listOf("topic_0", "topic_2"), "text" to ""))))
+            assertThat(f.controls.tryEmitNext(submit)).isEqualTo(Sinks.EmitResult.OK)
+            f.await("microphone tail clear is requested") { f.outgoing.any { it.path("type").asText() == "input_audio_buffer.clear" } }
+            f.provider("input_audio_buffer.cleared", "event_id" to "selection-clear")
+            f.await("only selected indices reach the write port") { tools.topicSubmissions.size == 1 }
+            assertThat(tools.topicSubmissions.single()).containsExactly(0, 2)
+            assertThat(f.outputs()).hasSize(1)
+            assertThat(f.responses()).hasSize(3)
+            save.complete(VoiceTutorMcpToolResult("{\"topics\":[{\"id\":11},{\"id\":13}]}", false,
+                studyTreeChanged = true, changedStudyIds = listOf(11, 13)))
+            f.await("exact GUI evidence is being saved") { f.stored.any { it.path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT } }
+            val evidence = f.stored.last { it.path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }
+            assertThat(evidence.path("transcript").asText()).contains("Selected: Redis", "Selected: MSA").doesNotContain("Kafka")
+            assertThat(f.outputs()).hasSize(1)
+            assertThat(f.ui.none { it.path("type").asText() == Contract.USER_INPUT_STATE_EVENT }).isTrue()
+            storedChoice.complete(Unit)
+            f.await("durable GUI evidence releases the form") { f.outputs().size == 2 }
+            assertThat(f.ui.any { it.path("type").asText() == Contract.USER_INPUT_STATE_EVENT && it.path("phase").asText() == "submitted" }).isTrue()
+            assertThat(f.outputs().last().path("item").path("call_id").asText()).isEqualTo("form")
+            f.ack(f.outputs().last())
+            f.await("exact output acknowledgement resumes tutor") { f.responses().size == 4 }
+            assertThat(f.controls.tryEmitNext(submit)).isEqualTo(Sinks.EmitResult.OK)
+            f.await("duplicate submit is reacknowledged without another write") {
+                f.ui.count { it.path("type").asText() == Contract.USER_INPUT_STATE_EVENT } == 2
+            }
+            assertThat(tools.topicSubmissions).hasSize(1)
+            f.toolResponse("child-focus", "select-child", "select_voice_study")
+            f.await("child focus uses the new persisted GUI learner source") { tools.invocations.size == 2 }
+            assertThat(tools.invocations.first().context.dialogueBoundary?.latestAcceptedLearnerProviderItemId).isEqualTo("learner-1")
+            assertThat(tools.invocations.last().context.dialogueBoundary?.latestAcceptedLearnerProviderItemId).isEqualTo(evidence.path("item_id").asText())
+            assertThat(tools.invocations.last().context.dialogueBoundary?.precedingTutorProviderItemId).isNull()
+            assertThat(tools.invocations.last().context.initialLessonRevision).isEqualTo(1)
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
     @Test
     fun `empty acoustic interruption settles UI waiting after successful preparation without reviving or replaying the proposal`() {
         val release = CompletableDeferred<VoiceTutorMcpToolResult>()
@@ -625,6 +698,7 @@ class VoiceTutorNativeSessionRelayTest {
         persistAccepted: Boolean = true,
         markIncomplete: suspend () -> Boolean = { true },
         onUi: suspend (JsonNode) -> Unit = {},
+        userInputEnabled: Boolean = false,
     ) : AutoCloseable {
         val incoming = Sinks.many().unicast().onBackpressureBuffer<WebSocketMessage>()
         val controls = Sinks.many().unicast().onBackpressureBuffer<String>()
@@ -668,7 +742,7 @@ class VoiceTutorNativeSessionRelayTest {
                 }
             } as WebSocketSession
             subscription = relayVoiceTutorNativeSession(
-                socket, context(), controls.asFlux().asFlow(), terminal.asFlux().asFlow(), tools,
+                socket, context().copy(userInputEnabled = userInputEnabled), controls.asFlux().asFlow(), terminal.asFlux().asFlow(), tools,
                 connectTimeout = Duration.ofSeconds(3), responseTimeout = Duration.ofSeconds(15),
             ) { raw, persist, forward ->
                 val event = mapper.readTree(raw)
@@ -765,11 +839,11 @@ class VoiceTutorNativeSessionRelayTest {
         fun created(id: String) = provider("response.created", "response" to mapOf("id" to id,
             "metadata" to responses().last().path("response").path("metadata")))
 
-        fun toolResponse(responseId: String, callId: String, name: String) {
+        fun toolResponse(responseId: String, callId: String, name: String, arguments: String = "{}") {
             created(responseId)
             provider("response.done", "response" to mapOf("id" to responseId, "status" to "completed",
                 "output" to listOf(mapOf("id" to "item-$callId", "type" to "function_call",
-                    "status" to "completed", "call_id" to callId, "name" to name, "arguments" to "{}"))))
+                    "status" to "completed", "call_id" to callId, "name" to name, "arguments" to arguments))))
         }
 
         fun provider(type: String, vararg fields: Pair<String, Any>) {
@@ -794,6 +868,17 @@ class VoiceTutorNativeSessionRelayTest {
 
     private data class Invocation(val context: VoiceTutorWebRtcControlContext, val name: String)
     private class FakeTools(private val result: suspend () -> VoiceTutorMcpToolResult = { success() }) : VoiceTutorMcpToolPort {
+        val topicSubmissions = CopyOnWriteArrayList<List<Int>>()
+        var topicResult: suspend () -> VoiceTutorMcpToolResult = { success() }
+        override suspend fun prepareStudyTopicUserInput(context: VoiceTutorWebRtcControlContext, parentStudyId: Long,
+            topics: List<String>, difficultyLevel: Int) = VoiceTutorStudyTopicUserInput("prepared-topics", "주제 추가",
+            "제출하면 선택한 주제를 추가합니다.", topics)
+        override suspend fun submitStudyTopicUserInput(context: VoiceTutorWebRtcControlContext, proposalId: String,
+            selectedIndices: List<Int>): VoiceTutorMcpToolResult {
+            assertThat(proposalId).isEqualTo("prepared-topics")
+            topicSubmissions += selectedIndices
+            return topicResult()
+        }
         val invocations = CopyOnWriteArrayList<Invocation>()
         val polled = CopyOnWriteArrayList<VoiceTutorLearningProgress>()
         var reviewedProgress: VoiceTutorLearningProgress? = null
@@ -805,7 +890,7 @@ class VoiceTutorNativeSessionRelayTest {
         val reviewed = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
         val skipped = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
         override fun definitions(): List<VoiceTutorMcpToolDefinition> = error("The legacy classified tool catalog must not be used")
-        override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation", "request_question").map { name ->
+        override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation", "request_question", "select_voice_study").map { name ->
             VoiceTutorMcpToolDefinition(name, "Synthetic native tool", mapOf("type" to "object",
                 "properties" to emptyMap<String, Any>(), "additionalProperties" to false))
         }
@@ -830,7 +915,7 @@ class VoiceTutorNativeSessionRelayTest {
         fun context(): VoiceTutorWebRtcControlContext {
             val now = Instant.now()
             return VoiceTutorWebRtcControlContext(VoiceTutorSession(
-                id = "native-test-session", userId = 7, studyId = null, idempotencyKey = "native-test-call",
+                id = "00000000-0000-4000-8000-000000000007", userId = 7, studyId = null, idempotencyKey = "native-test-call",
                 providerSessionId = "rtc_native_test", status = VoiceTutorSessionStatus.ACTIVE,
                 resultStatus = VoiceTutorResultStatus.PENDING, language = "ko", model = "gpt-realtime",
                 voice = "marin", topic = "", difficulty = 5, periodStartedAt = now,

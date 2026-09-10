@@ -45,5 +45,9 @@ class VoiceTutorWebRtcControllerTest {
         assertThat(result.headers.contentType.toString()).isEqualTo("application/sdp")
         assertThat(result.headers.getFirst("Cache-Control")).isEqualTo("no-store")
         assertThat(result.body).isEqualTo("test-answer").doesNotContain("private-provider-call")
+        assertThat(result.headers.getFirst(VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL_HEADER)).isNull()
+        val capable = controller.negotiate("test-session", "test-offer", authentication,
+            VoiceTutorRealtimeContract.REALTIME_NATIVE_TURN_PROTOCOL, VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL)
+        assertThat(capable.headers.getFirst(VoiceTutorRealtimeContract.USER_INPUT_PROTOCOL_HEADER)).isEqualTo("user-input-v1")
     }
 }

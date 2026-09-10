@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F8C000000000000000000009 /* VoiceTutorInterruptionBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C00000000000000000000A /* VoiceTutorInterruptionBoundaryTests.swift */; };
+		F8C000000000000000000007 /* VoiceTutorUserInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000008 /* VoiceTutorUserInputTests.swift */; };
+		F8C000000000000000000005 /* VoiceTutorInterruptionBoundary.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000006 /* VoiceTutorInterruptionBoundary.swift */; };
+		F8C000000000000000000003 /* VoiceTutorUserInputCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000004 /* VoiceTutorUserInputCard.swift */; };
+		F8C000000000000000000001 /* VoiceTutorUserInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8C000000000000000000002 /* VoiceTutorUserInput.swift */; };
 		F8A000000000000000000001 /* VoiceTutorAnswerDraftState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000002 /* VoiceTutorAnswerDraftState.swift */; };
 		F8B000000000000000000001 /* VoiceTutorSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000002 /* VoiceTutorSessionState.swift */; };
 		F8A000000000000000000003 /* VoiceTutorAnswerDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000004 /* VoiceTutorAnswerDraftTests.swift */; };
@@ -327,6 +332,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F8C00000000000000000000A /* VoiceTutorInterruptionBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorInterruptionBoundaryTests.swift; sourceTree = "<group>"; };
+		F8C000000000000000000008 /* VoiceTutorUserInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorUserInputTests.swift; sourceTree = "<group>"; };
+		F8C000000000000000000006 /* VoiceTutorInterruptionBoundary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorInterruptionBoundary.swift; sourceTree = "<group>"; };
+		F8C000000000000000000004 /* VoiceTutorUserInputCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorUserInputCard.swift; sourceTree = "<group>"; };
+		F8C000000000000000000002 /* VoiceTutorUserInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorUserInput.swift; sourceTree = "<group>"; };
 		F8A000000000000000000002 /* VoiceTutorAnswerDraftState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorAnswerDraftState.swift; sourceTree = "<group>"; };
 		F8B000000000000000000002 /* VoiceTutorSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorSessionState.swift; sourceTree = "<group>"; };
 		F8A000000000000000000004 /* VoiceTutorAnswerDraftTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorAnswerDraftTests.swift; sourceTree = "<group>"; };
@@ -917,6 +927,8 @@
 				F89000000000000000000002 /* VoiceTutorStudyFocus.swift */,
 				F8A000000000000000000002 /* VoiceTutorAnswerDraftState.swift */,
 				F8B000000000000000000002 /* VoiceTutorSessionState.swift */,
+				F8C000000000000000000006 /* VoiceTutorInterruptionBoundary.swift */,
+				F8C000000000000000000002 /* VoiceTutorUserInput.swift */,
 				F89000000000000000000004 /* AppStrings+VoiceTutorDiscovery.swift */,
 				F86000000000000000000002 /* VoiceTutorVoice.swift */,
 				F86000000000000000000004 /* VoiceTutorVoiceStrings.swift */,
@@ -995,6 +1007,8 @@
 				F89000000000000000000006 /* VoiceTutorDiscoveryTests.swift */,
 				F8A000000000000000000004 /* VoiceTutorAnswerDraftTests.swift */,
 				F8B000000000000000000004 /* VoiceTutorSessionStateTests.swift */,
+				F8C00000000000000000000A /* VoiceTutorInterruptionBoundaryTests.swift */,
+				F8C000000000000000000008 /* VoiceTutorUserInputTests.swift */,
 				F8600000000000000000000A /* VoiceTutorVoiceSettingsTests.swift */,
 				F8600000000000000000000C /* VoiceTutorExplorationTests.swift */,
 				F8700000000000000000000A /* StudyLearningRecordsTests.swift */,
@@ -1026,6 +1040,7 @@
 				11000000000000000000000A /* SettingsView.swift */,
 				120000000000000000000003 /* MobileRootView.swift */,
 				F81000000000000000000008 /* VoiceTutorView.swift */,
+				F8C000000000000000000004 /* VoiceTutorUserInputCard.swift */,
 				F87000000000000000000008 /* StudyLearningRecordsView.swift */,
 				F88000000000000000000008 /* CommonStudyRecordDetailView.swift */,
 			);
@@ -1464,6 +1479,8 @@
 				F89000000000000000000005 /* VoiceTutorDiscoveryTests.swift in Sources */,
 				F8A000000000000000000003 /* VoiceTutorAnswerDraftTests.swift in Sources */,
 				F8B000000000000000000003 /* VoiceTutorSessionStateTests.swift in Sources */,
+				F8C000000000000000000009 /* VoiceTutorInterruptionBoundaryTests.swift in Sources */,
+				F8C000000000000000000007 /* VoiceTutorUserInputTests.swift in Sources */,
 				F86000000000000000000009 /* VoiceTutorVoiceSettingsTests.swift in Sources */,
 				F8600000000000000000000B /* VoiceTutorExplorationTests.swift in Sources */,
 				F87000000000000000000009 /* StudyLearningRecordsTests.swift in Sources */,
@@ -1503,6 +1520,8 @@
 				F8700000000000000000000B /* VoiceTutorCallPauseState.swift in Sources */,
 				F8A000000000000000000001 /* VoiceTutorAnswerDraftState.swift in Sources */,
 				F8B000000000000000000001 /* VoiceTutorSessionState.swift in Sources */,
+				F8C000000000000000000005 /* VoiceTutorInterruptionBoundary.swift in Sources */,
+				F8C000000000000000000001 /* VoiceTutorUserInput.swift in Sources */,
 				F8700000000000000000000D /* AppStrings+VoiceTutorPause.swift in Sources */,
 				F84000000000000000000001 /* VoiceTutorSileroSpeechScorer.swift in Sources */,
 				F84000000000000000000003 /* VoiceTutorSileroAudioPipeline.swift in Sources */,
@@ -1618,6 +1637,7 @@
 				120000000000000000000171 /* SettingsStoreCloudSyncStateRepository.swift in Sources */,
 				120000000000000000000111 /* MobileRootView.swift in Sources */,
 				F81000000000000000000007 /* VoiceTutorView.swift in Sources */,
+				F8C000000000000000000003 /* VoiceTutorUserInputCard.swift in Sources */,
 				120000000000000000000300 /* AppDebugControls.swift in Sources */,
 					120000000000000000000112 /* SwipeRevealRow.swift in Sources */,
 					120000000000000000000114 /* KeyboardDoneToolbar.swift in Sources */,

@@ -19,10 +19,12 @@ import com.buddystudy.backend.study.application.port.inbound.BrowseStudyLearning
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateRootStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicsCommand
 import com.buddystudy.backend.study.application.port.inbound.GetAnswerGradingProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerationProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
+import com.buddystudy.backend.study.application.port.inbound.StudyTreeUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyCommand
 import com.buddystudy.backend.voice.application.port.inbound.VoiceTutorUseCase
@@ -44,6 +46,7 @@ class BuddyStudyMcpService(
     private val growth: GetStudyGrowthUseCase,
     private val voiceTutor: VoiceTutorUseCase,
     private val learningRecords: BrowseStudyLearningRecordsUseCase,
+    private val studyTree: StudyTreeUseCase,
 ) : BuddyStudyMcpUseCase {
     @RequirePermission(Permissions.PROFILE_READ)
     override suspend fun getMyContext(principal: Principal): McpUserContextResponse {
@@ -116,6 +119,18 @@ class BuddyStudyMcpService(
         positiveId(parentStudyId, "parent_study_id"),
         command,
     )
+
+    @RequirePermission(Permissions.STUDY_CREATE)
+    override suspend fun suggestStudyTopics(principal: Principal, parentStudyId: Long, count: Int) =
+        studyTree.suggestTopics(
+            registered(principal),
+            positiveId(parentStudyId, "parent_study_id"),
+            boundedLimit(count, com.buddystudy.study.domain.StudyTreePolicy.MAX_TOPIC_SUGGESTIONS),
+        )
+
+    @RequirePermission(Permissions.STUDY_CREATE)
+    override suspend fun createStudyTopics(principal: Principal, parentStudyId: Long, command: CreateStudyTopicsCommand) =
+        studies.createStudyTopics(registered(principal), positiveId(parentStudyId, "parent_study_id"), command)
 
     @RequirePermission(Permissions.STUDY_DELETE)
     override suspend fun deleteStudy(

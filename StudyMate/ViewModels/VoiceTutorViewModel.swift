@@ -676,6 +676,7 @@ final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var answerDraftState = VoiceTutorAnswerDraftState()
     @Published private(set) var sessionState = VoiceTutorSessionState()
     @Published private(set) var operationState = VoiceTutorOperationState()
+    @Published private(set) var userInputState = VoiceTutorUserInputState()
 
     var quotaRemainingSeconds: Int { sessionQuota.remainingSeconds }
     var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
@@ -683,7 +684,7 @@ final class VoiceTutorViewModel: ObservableObject {
     var assistantTranscriptDraft: String { assistantTranscriptState.draft }
     var isAwaitingTutorResponse: Bool {
         phase == .listening && !pauseState.holdsMicrophone && !inputNeedsRepeat
-            && !answerDraftState.isActive
+            && !answerDraftState.isActive && !userInputState.holdsMicrophone
             && duplexPlaybackState.isAwaitingTutorResponse
     }
 
@@ -698,7 +699,7 @@ final class VoiceTutorViewModel: ObservableObject {
         return captions.filter { !hidden.contains($0.id) }
     }
     private var canControlAnswer: Bool {
-        usesWebRTC && phase.isLive && !isFinalizing && !pauseState.holdsMicrophone && activeConnection?.isCurrent() == true
+        usesWebRTC && phase.isLive && !isFinalizing && !pauseState.holdsMicrophone && !userInputState.holdsMicrophone && activeConnection?.isCurrent() == true
     }
 
     @Published private(set) var studyFocus = VoiceTutorStudyFocusState()
@@ -767,6 +768,7 @@ final class VoiceTutorViewModel: ObservableObject {
         answerDraftState = VoiceTutorAnswerDraftState()
         sessionState = VoiceTutorSessionState()
         operationState = VoiceTutorOperationState()
+        userInputState = VoiceTutorUserInputState()
         learnerCaptionIDsByItemID = [:]
         answerSourceItemIDs = []
         heldAnswerCaptionIDs = []
@@ -1041,6 +1043,7 @@ final class VoiceTutorViewModel: ObservableObject {
 
     func toggleMute() {
         guard phase.isLive, !pauseState.holdsMicrophone, !answerDraftState.holdsMicrophone,
+              !userInputState.holdsMicrophone,
               activeConnection?.isCurrent() == true else {
             return
         }
@@ -1054,6 +1057,7 @@ final class VoiceTutorViewModel: ObservableObject {
 
     func togglePause() async {
         guard usesWebRTC, phase == .listening || phase == .speaking, !isFinalizing,
+              !userInputState.holdsMicrophone,
               activeConnection?.isCurrent() == true, let controls = localSpeechEvents else { return }
         let command: VoiceTutorPauseControl
         if pauseState.mode == .active {
@@ -1104,6 +1108,17 @@ final class VoiceTutorViewModel: ObservableObject {
 
     func stopForUser() async {
         await stop(shouldNotifyServerOverSocket: true, source: .user)
+    }
+
+    func updateUserInput(requestID: String, answer: VoiceTutorUserInputAnswer) {
+        userInputState.update(requestID: requestID, answer: answer)
+    }
+
+    func submitUserInput(requestID: String, cancel: Bool = false) {
+        guard usesWebRTC, phase.isLive, !isFinalizing, activeConnection?.isCurrent() == true,
+              let controls = localSpeechEvents,
+              let command = userInputState.submit(requestID: requestID, cancel: cancel) else { return }
+        controls.yield(command)
     }
 
     func appDidEnterBackground() {
@@ -1174,6 +1189,7 @@ final class VoiceTutorViewModel: ObservableObject {
         logDiagnostic("event=stop_requested source=\(source.rawValue) socketEnd=\(shouldNotifyServerOverSocket ? 1 : 0)", isWarning: outcome == .failed)
         sessionState.endLocally()
         operationState.endLocally()
+        userInputState.endLocally()
         learnerTranscriptState.endLocally()
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()
@@ -1246,8 +1262,10 @@ final class VoiceTutorViewModel: ObservableObject {
         summaryRefreshState = .idle
         captions = []
         answerDraftState = VoiceTutorAnswerDraftState()
+        userInputState = VoiceTutorUserInputState()
         sessionState.endLocally()
         operationState.endLocally()
+        userInputState.endLocally()
         learnerTranscriptState.endLocally()
         learnerCaptionIDsByItemID = [:]
         answerSourceItemIDs = []
@@ -1290,6 +1308,21 @@ final class VoiceTutorViewModel: ObservableObject {
                     guard let self, !Task.isCancelled,
                           self.connectionAttemptFence.isCurrent(attemptID), connection.isCurrent(),
                           self.phase.isLive, !self.isFinalizing else { return }
+                    let needsBoundary: Bool
+                    switch control {
+                    case .speech(let event): needsBoundary = event.activity == .started
+                    case .pause(let command): needsBoundary = command.kind == .pause
+                    default: needsBoundary = false
+                    }
+                    if needsBoundary,
+                       let responseID = self.duplexPlaybackState.activeResponseID
+                        ?? self.pendingSpokenEndPlayoutTail?.responseID {
+                        // Provider completion can precede the final audible RTP
+                        // samples; protect that same tail before interrupting it.
+                        await self.webRTCTransport?.waitForInterruptionBoundary(responseID: responseID)
+                        guard !Task.isCancelled, self.connectionAttemptFence.isCurrent(attemptID),
+                              connection.isCurrent(), self.phase.isLive, !self.isFinalizing else { return }
+                    }
                     if case .speech(let event) = control {
                         switch event.activity {
                         case .started:
@@ -1311,6 +1344,8 @@ final class VoiceTutorViewModel: ObservableObject {
                         self.logDiagnostic("event=pause_control_sent kind=\(command.kind.rawValue) sequence=\(command.sequence)")
                     case .answer(let command):
                         self.logDiagnostic("event=answer_control_sent kind=\(command.kind.rawValue)")
+                    case .userInput(let command):
+                        self.logDiagnostic("event=user_input_control_sent cancelled=\(command.answers == nil ? 1 : 0)")
                     }
                 }
             } catch is CancellationError {
@@ -1558,6 +1593,14 @@ final class VoiceTutorViewModel: ObservableObject {
             }
         }
         switch event {
+        case .userInputRequest(let request):
+            guard usesWebRTC, phase.isLive, !isFinalizing, let sessionID,
+                  userInputState.apply(request, sessionID: sessionID) else { break }
+            guard webRTCTransport?.setMuted(true) == true else { await failAnswerControl(); break }
+        case .userInputState(let event):
+            guard usesWebRTC, phase.isLive, !isFinalizing, userInputState.apply(event) else { break }
+            let shouldMute = isMuted || pauseState.holdsMicrophone || answerDraftState.holdsMicrophone || userInputState.holdsMicrophone
+            guard webRTCTransport?.setMuted(shouldMute) == true else { await failAnswerControl(); break }
         case .operation(let event):
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
             _ = operationState.apply(event, at: ProcessInfo.processInfo.systemUptime)
@@ -1592,7 +1635,7 @@ final class VoiceTutorViewModel: ObservableObject {
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
             var acknowledged = pauseState
             guard acknowledged.acknowledge(sequence: sequence, paused: paused) else { break }
-            if !paused, webRTCTransport?.setMuted(isMuted || answerDraftState.holdsMicrophone) != true {
+            if !paused, webRTCTransport?.setMuted(isMuted || answerDraftState.holdsMicrophone || userInputState.holdsMicrophone) != true {
                 await failPause()
                 break
             }
@@ -1735,7 +1778,7 @@ final class VoiceTutorViewModel: ObservableObject {
             } else if event.phase == .cancelled {
                 if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
             }
-            let shouldMute = isMuted || pauseState.holdsMicrophone || answerDraftState.holdsMicrophone
+            let shouldMute = isMuted || pauseState.holdsMicrophone || answerDraftState.holdsMicrophone || userInputState.holdsMicrophone
             guard webRTCTransport?.setMuted(shouldMute) == true else {
                 await failAnswerControl()
                 break
@@ -2106,6 +2149,7 @@ final class VoiceTutorViewModel: ObservableObject {
         logDiagnostic("event=server_ended")
         sessionState.endLocally()
         operationState.endLocally()
+        userInputState.endLocally()
         learnerTranscriptState.endLocally()
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()

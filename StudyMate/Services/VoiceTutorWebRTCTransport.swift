@@ -570,6 +570,7 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
 final class VoiceTutorRemoteAudioRenderer: NSObject, LKRTCAudioRenderer, @unchecked Sendable {
     var onRenderedPCM: (@Sendable (TimeInterval) -> Void)?
     var onRenderedBuffer: (@Sendable (Int, Bool, TimeInterval, TimeInterval) -> Void)?
+    var onAcousticBuffer: (@Sendable (VoiceTutorInterruptionAudioLevel?, TimeInterval, TimeInterval) -> Void)?
 
     func render(pcmBuffer: AVAudioPCMBuffer) {
         guard pcmBuffer.frameLength > 0 else { return }
@@ -580,11 +581,48 @@ final class VoiceTutorRemoteAudioRenderer: NSObject, LKRTCAudioRenderer, @unchec
             : 0
         let containsAudio = Self.containsNonzeroSamples(pcmBuffer)
         onRenderedBuffer?(Int(pcmBuffer.frameLength), containsAudio, duration, uptime)
+        onAcousticBuffer?(Self.interruptionAudioLevel(pcmBuffer), duration, uptime)
         // This callback is an activity/diagnostic hint only. NetEq may render
         // nonzero comfort/concealment noise even after server audio has ended;
         // neither nonzero PCM nor its absence is a response-completion fence.
         guard containsAudio else { return }
         onRenderedPCM?(uptime)
+    }
+
+    /// Inspect in-place without retaining audio. Unknown/non-finite samples are
+    /// not silence. Both RMS and peak protect quiet consonants and brief peaks.
+    static func interruptionAudioLevel(_ buffer: AVAudioPCMBuffer) -> VoiceTutorInterruptionAudioLevel? {
+        let frames = Int(buffer.frameLength)
+        let channels = Int(buffer.format.channelCount)
+        guard frames > 0, channels > 0, channels <= 8 else { return nil }
+        let interleaved = buffer.format.isInterleaved
+        func measure<Sample>(
+            _ channelData: UnsafePointer<UnsafeMutablePointer<Sample>>?,
+            normalize: (Sample) -> Double
+        ) -> VoiceTutorInterruptionAudioLevel? {
+            guard let channelData else { return nil }
+            let bufferCount = interleaved ? 1 : channels
+            let samplesPerBuffer = frames * (interleaved ? channels : 1)
+            var maximumRMS = 0.0
+            var peak = 0.0
+            for channel in 0..<bufferCount {
+                var sumOfSquares = 0.0
+                for index in 0..<samplesPerBuffer {
+                    let sample = normalize(channelData[channel][index])
+                    guard sample.isFinite else { return nil }
+                    sumOfSquares += sample * sample
+                    peak = max(peak, abs(sample))
+                }
+                maximumRMS = max(maximumRMS, sqrt(sumOfSquares / Double(samplesPerBuffer)))
+            }
+            return .init(rms: maximumRMS, peak: peak)
+        }
+        switch buffer.format.commonFormat {
+        case .pcmFormatInt16: return measure(buffer.int16ChannelData) { Double($0) / 32_768 }
+        case .pcmFormatInt32: return measure(buffer.int32ChannelData) { Double($0) / 2_147_483_648 }
+        case .pcmFormatFloat32: return measure(buffer.floatChannelData) { Double($0) }
+        default: return nil
+        }
     }
 
     static func containsNonzeroSamples(_ buffer: AVAudioPCMBuffer) -> Bool {
@@ -833,6 +871,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private var localAudioTrack: LKRTCAudioTrack?
     private var remoteAudioTrack: LKRTCAudioTrack?
     private var localPlayoutInterruptionState = VoiceTutorLocalPlayoutInterruptionState()
+    private var interruptionBoundaryState = VoiceTutorInterruptionBoundaryState()
     private var interruptionObserver: NSObjectProtocol?
     private let stateLock = NSLock()
     private var isClosed = false
@@ -859,6 +898,12 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
                 duration: duration,
                 uptime: uptime
             )
+        }
+        remoteRenderer.onAcousticBuffer = { [weak self] level, duration, uptime in
+            guard let self else { return }
+            self.diagnosticLock.lock()
+            self.interruptionBoundaryState.observe(level: level, duration: duration, at: uptime)
+            self.diagnosticLock.unlock()
         }
     }
 
@@ -1054,6 +1099,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         remoteAudioTrack?.source.volume = 1
         diagnosticLock.lock()
         localPlayoutTailState.responseStarted(responseID)
+        interruptionBoundaryState.responseStarted(responseID)
         diagnosticLock.unlock()
         stateLock.unlock()
     }
@@ -1071,10 +1117,53 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         remoteAudioTrack?.source.volume = 0
         diagnosticLock.lock()
         _ = localPlayoutTailState.abandonResponse(responseID)
+        interruptionBoundaryState.invalidate(responseID: responseID)
         diagnosticLock.unlock()
         stateLock.unlock()
         emitMediaDiagnostic("tutor_playout_interrupted")
         return true
+    }
+
+    /// Call before the ordered learner-start/pause control is sent. Microphone
+    /// capture and native RTP playout continue during this bounded grace. No
+    /// delayed cancel is retained after this call: the caller still owns the
+    /// exact attempt and interruption operation.
+    func waitForInterruptionBoundary(responseID: String) async {
+        let requestedAt = ProcessInfo.processInfo.systemUptime
+        guard let token = interruptionBoundaryToken(responseID: responseID, at: requestedAt) else { return }
+        while !Task.isCancelled {
+            let now = ProcessInfo.processInfo.systemUptime
+            switch interruptionBoundaryDecision(for: token, now: now) {
+            case .wait(let remaining):
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(min(remaining, 0.01) * 1_000_000_000))
+                } catch { return }
+            case .quietGap:
+                emitMediaDiagnostic("interruption_boundary_quiet_gap")
+                return
+            case .deadline:
+                emitMediaDiagnostic("interruption_boundary_deadline")
+                return
+            case .superseded:
+                return
+            }
+        }
+    }
+
+    private func interruptionBoundaryToken(
+        responseID: String, at uptime: TimeInterval
+    ) -> VoiceTutorInterruptionBoundaryToken? {
+        diagnosticLock.lock()
+        defer { diagnosticLock.unlock() }
+        return interruptionBoundaryState.request(responseID: responseID, at: uptime)
+    }
+
+    private func interruptionBoundaryDecision(
+        for token: VoiceTutorInterruptionBoundaryToken, now: TimeInterval
+    ) -> VoiceTutorInterruptionBoundaryState.Decision {
+        diagnosticLock.lock()
+        defer { diagnosticLock.unlock() }
+        return interruptionBoundaryState.decision(for: token, now: now)
     }
 
     func sealLocalPlayoutResponse(responseID: String) -> VoiceTutorLocalPlayoutTailToken? {
@@ -1099,6 +1188,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     func abandonLocalPlayoutResponse(responseID: String) -> Bool {
         diagnosticLock.lock()
         let abandoned = localPlayoutTailState.abandonResponse(responseID)
+        interruptionBoundaryState.invalidate(responseID: responseID)
         diagnosticLock.unlock()
         return abandoned
     }
@@ -1145,6 +1235,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
 
         diagnosticLock.lock()
         localPlayoutTailState.invalidate()
+        interruptionBoundaryState.invalidate()
         diagnosticLock.unlock()
 
         Self.audioSessionOwnershipLock.lock()

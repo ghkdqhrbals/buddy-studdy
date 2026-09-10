@@ -90,7 +90,7 @@ class StudyTreeServiceTest {
         assertThat(response.suggestions).containsExactly("Indexes", "Transactions")
         assertThat(response.source).isEqualTo("CATALOG")
         assertThat(response.depth).isEqualTo(1)
-        assertThat(response.maxDepth).isEqualTo(5)
+        assertThat(response.maxDepth).isEqualTo(4)
         assertThat(response.childLimit).isEqualTo(10)
         assertThat(suggestions.calls).isZero()
     }
@@ -154,7 +154,7 @@ class StudyTreeServiceTest {
     }
 
     @Test
-    fun `topic suggestions stop after five descendant levels`(): Unit = runBlocking {
+    fun `topic suggestions stop after four descendant levels without removing legacy deeper nodes`(): Unit = runBlocking {
         studies.rows += study(1, null, "Root")
         studies.rows += study(2, 1, "One")
         studies.rows += study(3, 2, "Two")
@@ -162,11 +162,47 @@ class StudyTreeServiceTest {
         studies.rows += study(5, 4, "Four")
         studies.rows += study(6, 5, "Five")
 
-        val response = service.suggestTopics(principal, parentStudyId = 6, count = 10)
+        val response = service.suggestTopics(principal, parentStudyId = 5, count = 10)
+        val legacyResponse = service.suggestTopics(principal, parentStudyId = 6, count = 10)
 
         assertThat(response.suggestions).isEmpty()
         assertThat(response.source).isEqualTo("DEPTH_LIMIT")
+        assertThat(response.depth).isEqualTo(5)
+        assertThat(response.maxDepth).isEqualTo(4)
+        assertThat(legacyResponse.source).isEqualTo("DEPTH_LIMIT")
         assertThat(suggestions.calls).isZero()
+        assertThat(catalog.savedTopics).isEmpty()
+        assertThat(studies.rows).hasSize(6)
+        assertThat(studies.saved).isEmpty()
+    }
+
+    @Test
+    fun `fourth level suggestions stay lazy and do not create user nodes`(): Unit = runBlocking {
+        studies.rows += study(1, null, "Root")
+        studies.rows += study(2, 1, "One")
+        studies.rows += study(3, 2, "Two")
+        studies.rows += study(4, 3, "Three")
+        suggestions.next = listOf("Selected branch candidate", "Another candidate")
+
+        val response = service.suggestTopics(principal, parentStudyId = 4, count = 2)
+
+        assertThat(response.depth).isEqualTo(4)
+        assertThat(response.suggestions).containsExactly("Selected branch candidate", "Another candidate")
+        assertThat(catalog.savedDepth).isEqualTo(4)
+        assertThat(studies.rows).hasSize(4)
+        assertThat(studies.saved).isEmpty()
+    }
+
+    @Test
+    fun `recommendations reject a foreign parent before provider or catalog writes`() {
+        studies.rows += study(1, null, "Other owner's root").apply { userId = 99 }
+
+        assertThatThrownBy {
+            runBlocking { service.suggestTopics(principal, parentStudyId = 1, count = 5) }
+        }.isInstanceOf(ApiException::class.java)
+
+        assertThat(suggestions.calls).isZero()
+        assertThat(catalog.savedTopics).isEmpty()
     }
 
     private fun study(id: Long, parentId: Long?, topic: String) = StudyEntity(

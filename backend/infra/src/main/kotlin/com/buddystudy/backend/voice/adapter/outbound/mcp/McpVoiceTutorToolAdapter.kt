@@ -18,6 +18,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidat
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateDiscoveryScope
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
@@ -67,8 +68,9 @@ class McpVoiceTutorToolAdapter(
     private val logger = LoggerFactory.getLogger(javaClass)
     private val validator by lazy { McpJsonSchemaValidatorProvider.create() }
     private val realtimeProposals = LinkedHashMap<String, RealtimeMutation>()
+    private val topicInputProposals = LinkedHashMap<String, TopicInputProposal>()
     private val specifications by lazy {
-        mcp.tools().filter { it.tool().name() in ALLOWED_TOOLS + VoiceTutorCanonicalQuestionCoordinator.TOOLS }.associateBy { it.tool().name() }
+        mcp.tools().filter { it.tool().name() in ALLOWED_TOOLS + VoiceTutorCanonicalQuestionCoordinator.TOOLS + "create_study_topics" }.associateBy { it.tool().name() }
     }
     private val canonicalQuestions by lazy {
         VoiceTutorCanonicalQuestionCoordinator(objectMapper, clock, persistence,
@@ -184,7 +186,7 @@ class McpVoiceTutorToolAdapter(
     )
 
     override fun realtimeDefinitions(): List<VoiceTutorMcpToolDefinition> =
-        specifications.values.filter { it.tool().name() !in setOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY) }
+        specifications.values.filter { it.tool().name() !in setOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY, "create_study_topics") }
             .map { specification ->
                 val tool = specification.tool()
                 val schema = when (tool.name()) {
@@ -263,6 +265,105 @@ class McpVoiceTutorToolAdapter(
         if (result.isError() == true || !isAuthorized(context)) return null
         return result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
             ?.let(::verifiedUpdateTarget)?.takeIf { it.studyId == id && it.difficulty != null }
+    }
+
+    private data class TopicInputProposal(
+        val value: VoiceTutorStudyTopicUserInput, val parent: VoiceTutorStudyTargetCandidate, val difficulty: Int,
+        val sessionId: String, val userId: Long, val deviceId: String, val authSessionId: Long,
+        val callId: String, val revision: Long, val expiresAt: Instant,
+        var selected: List<Int>? = null, var submitting: Boolean = false, var result: VoiceTutorMcpToolResult? = null,
+    ) {
+        fun matches(context: VoiceTutorWebRtcControlContext, currentRevision: Long) =
+            sessionId == context.session.id && userId == context.principal?.userId && deviceId == context.principal?.deviceId &&
+                authSessionId == context.principal?.sessionId && callId == context.callId && revision == currentRevision &&
+                context.initialLessonRevision == revision
+    }
+
+    override suspend fun prepareStudyTopicUserInput(context: VoiceTutorWebRtcControlContext,
+        parentStudyId: Long, topics: List<String>, difficultyLevel: Int): VoiceTutorStudyTopicUserInput? {
+        if (!context.realtimeModelTools || !isAuthorized(context) || parentStudyId <= 0 || difficultyLevel !in 1..10 ||
+            topics.size !in 1..8 || topics.any { it.isBlank() || it != it.trim() || it.length > 200 } ||
+            topics.map(::normalizedStudyTopicIdentity).distinct().size != topics.size) return null
+        val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
+        if (context.initialLessonRevision != revision) return null
+        val parent = readRealtimeTarget(context, parentStudyId) ?: return null
+        if (!isAuthorized(context) || studyContexts.currentRevision(context.session.userId, context.session.id) != revision) return null
+        val value = VoiceTutorStudyTopicUserInput(UUID.randomUUID().toString(),
+            when (context.session.language) { "en" -> "Add subtopics"; "ja" -> "サブトピックを追加"; else -> "하위 주제 추가" },
+            when (context.session.language) {
+                "en" -> "Select subtopics under ${parent.topic}. Submit adds only your selections at level $difficultyLevel."
+                "ja" -> "${parent.topic} の下に追加する項目を選択してください。送信すると選択した項目をレベル $difficultyLevel で追加します。"
+                else -> "${parent.topic} 아래에 추가할 주제를 선택하세요. 제출하면 선택한 주제만 레벨 $difficultyLevel 으로 추가합니다."
+            }, topics.toList())
+        val principal = context.principal ?: return null
+        val now = clock.instant()
+        val pending = TopicInputProposal(value, parent, difficultyLevel, context.session.id, principal.userId,
+            principal.deviceId, principal.sessionId, context.callId, revision, minOf(now.plusSeconds(600), context.session.hardEndsAt))
+        synchronized(topicInputProposals) {
+            topicInputProposals.entries.removeIf { !now.isBefore(it.value.expiresAt) && !it.value.submitting }
+            if (topicInputProposals.size >= 256) return null
+            topicInputProposals[value.proposalId] = pending
+        }
+        return value
+    }
+
+    override suspend fun submitStudyTopicUserInput(context: VoiceTutorWebRtcControlContext,
+        proposalId: String, selectedIndices: List<Int>): VoiceTutorMcpToolResult {
+        if (!context.realtimeModelTools || !isAuthorized(context)) return inactiveCall()
+        val revision = studyContexts.currentRevision(context.session.userId, context.session.id)
+        val pending = synchronized(topicInputProposals) { topicInputProposals[proposalId] }
+            ?.takeIf { it.matches(context, revision) && clock.instant().isBefore(it.expiresAt) }
+            ?: return failure("PROPOSAL_EXPIRED", "This exact topic proposal is no longer available.")
+        val indices = selectedIndices.sorted()
+        if (indices.isEmpty() || indices.distinct().size != indices.size || indices.any { it !in pending.value.topics.indices })
+            return failure("INVALID_ARGUMENTS", "Select only topics in the exact prepared proposal.")
+        synchronized(topicInputProposals) {
+            if (pending.submitting || (pending.selected != null && pending.selected != indices))
+                return failure("PROPOSAL_ALREADY_SUBMITTED", "Only the original submitted selection can be retried.")
+            pending.result?.let { return it }
+            pending.selected = indices
+            pending.submitting = true
+        }
+        try {
+            if (readRealtimeTarget(context, pending.parent.studyId) != pending.parent || !isAuthorized(context) ||
+                studyContexts.currentRevision(context.session.userId, context.session.id) != revision)
+                return failure("MUTATION_TARGET_STALE", "The exact parent changed; no new write was started.")
+            val spec = specifications["create_study_topics"] ?: return failure("MCP_UNAVAILABLE", "Topic creation is unavailable.")
+            val selectedTopics = indices.map { pending.value.topics[it] }
+            val args = mapOf("parent_study_id" to pending.parent.studyId, "topics" to selectedTopics,
+                "difficulty_level" to pending.difficulty,
+                BuddyStudyMcpPort.VOICE_EXPECTED_TOPIC_ARGUMENT to pending.parent.topic,
+                BuddyStudyMcpPort.VOICE_EXPECTED_DIFFICULTY_ARGUMENT to requireNotNull(pending.parent.difficulty),
+                BuddyStudyMcpPort.VOICE_EXPECTED_PARENT_ARGUMENT to (pending.parent.parentStudyId ?: 0L))
+            val result = invoke(requireNotNull(context.principal), spec, args)
+            if (result.isError() == true) return boundedResult(result, "create_study_topics")
+            val payload = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
+            val children = payload?.path("topics")
+            if (payload == null || positiveId(payload.path("parentStudyId")) != pending.parent.studyId ||
+                children == null || !children.isArray || children.size() != selectedTopics.size)
+                return failure("RESULT_UNCONFIRMED", "Read the saved tree before retrying the same selection.")
+            val compact = children.mapIndexed { index, child ->
+                val id = positiveId(child.path("id"))
+                val level = child.path("difficultyLevel")
+                val created = child.path("created")
+                if (id == null || positiveId(child.path("parentStudyId")) != pending.parent.studyId || !created.isBoolean ||
+                    !child.path("topic").isTextual || normalizedStudyTopicIdentity(child.path("topic").asText()) != normalizedStudyTopicIdentity(selectedTopics[index]) ||
+                    !level.isIntegralNumber || level.asInt() !in 1..10 || (created.booleanValue() && level.asInt() != pending.difficulty))
+                    return failure("RESULT_UNCONFIRMED", "Read the saved tree before retrying the same selection.")
+                mapOf("id" to id, "parentStudyId" to pending.parent.studyId, "topic" to child.path("topic").asText(),
+                    "difficultyLevel" to level.asInt(), "created" to created.booleanValue())
+            }
+            if (compact.map { it["id"] }.distinct().size != compact.size)
+                return failure("RESULT_UNCONFIRMED", "Read the saved tree before retrying the same selection.")
+            val createdIds = compact.filter { it["created"] == true }.map { it["id"] as Long }
+            val confirmed = VoiceTutorMcpToolResult(objectMapper.writeValueAsString(mapOf("parentStudyId" to pending.parent.studyId,
+                "topics" to compact)), false, studyTreeChanged = createdIds.isNotEmpty(),
+                changeKind = VoiceTutorStudyChangeKind.CREATED, changedStudyIds = createdIds)
+            synchronized(topicInputProposals) { pending.result = confirmed }
+            return confirmed
+        } finally {
+            synchronized(topicInputProposals) { pending.submitting = false }
+        }
     }
 
     private suspend fun prepareRealtimeMutation(context: VoiceTutorWebRtcControlContext, arguments: Map<String, Any>): VoiceTutorMcpToolResult {
@@ -1960,7 +2061,7 @@ class McpVoiceTutorToolAdapter(
         val ALLOWED_TOOLS = setOf(
             "list_studies", "get_study", CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY,
             "list_records", "get_record", LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD,
-            "get_topic_stats", "get_study_growth",
+            "get_topic_stats", "get_study_growth", "suggest_study_topics",
             SELECT_STUDY, ADVANCE_STUDY,
         )
         val LEARNING_HISTORY_TOOLS = setOf(LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD)
