@@ -258,7 +258,7 @@ class VoiceTutorServiceTest {
             .contains("list_pending_questions for that exact study_id")
             .contains("read its question text faithfully", "Keep that question's saved topic and difficulty")
             .contains("Never call submit_answer yourself", "explicitly taps Submit", "learner-reviewed final text")
-            .contains("get_grading_process and its saved gradingResult", "Never invent a score")
+            .contains("wait for server-pushed progress and the actual saved gradingResult", "Never invent a score")
             .contains("For a hint or clarification outside answer capture, explain without submitting or grading")
             .contains("a 1-to-10 scale", "never authorize raising it")
             .contains("Silence, filler, topic selection, a skip/new-question command or a request for clarification is not an answer")
@@ -293,13 +293,13 @@ class VoiceTutorServiceTest {
             .contains("When request_user_input is available", "If this tool is absent, use the existing spoken interaction")
             .contains("you MUST call it", "a spoken list", "allowFreeText=true")
             .contains("The server subscribes to that saved process", "Do not repeatedly call get_question_process")
-            .contains("An already clear choice needs no redundant form", "Only the server-controlled readback")
+            .contains("An already clear ordinary preference needs no redundant form", "Only the server-controlled readback")
             .contains("답변 종료", "답변 제출")
             .contains("Do not tell the learner to tap Finish Answer or Submit while those controls are unavailable")
             .contains("The main topic is always the original saved root", "mandatory saved-subtopic choice card",
                 "An empty children list does not mean a leaf", "descendant depth four is always terminal")
             .contains("wait silently for the exact submitted/cancelled result", "automatically prepared one direct level at a time")
-            .contains("Except for the exact server-owned studyTopicProposal form", "its Submit creates only selected topics",
+            .contains("The two exceptions to explicit mutation prepare/confirm", "its Submit creates only selected topics",
                 "Selecting a nonterminal child shows the next branch lazily")
             .contains("There is no separate intent classifier")
             .contains("a contextual yes/no, name, number or short question can be meaningful even as one word")
@@ -307,7 +307,7 @@ class VoiceTutorServiceTest {
             .contains("Do not apply regex, a filler blacklist or a minimum word count")
             .contains("그걸 레벨 칠로 바꿔 줘")
             .contains("call prepare_voice_study_mutation")
-            .contains("Preparation makes NO change")
+            .contains("For prepare_voice_study_mutation, preparation makes NO change")
             .contains("Ask its returned confirmation_question once")
             .contains("interpret their natural yes/no yourself")
             .contains("confirm_voice_study_mutation with the exact proposal_id")
@@ -318,6 +318,53 @@ class VoiceTutorServiceTest {
             .contains("Never interrupt an unfinished learner answer")
             .doesNotContain("Never originate create_root_study yourself", "never originate update_study yourself",
                 "server independently assesses", "one-shot server attestation", "confirmation_token")
+    }
+
+    @Test
+    fun `native curriculum policy distinguishes automatic setup from explicit mutations and preserves cancelled saved children`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val instructions = service(persistence).connect(principal, persistence.session.id).instructions
+        assertThat(instructions)
+            .contains("The main topic is always the original saved root; the selected topic is a separate current descendant")
+            .contains("never turn the selected branch into a new root")
+            .contains("All newly created descendants inherit the original main root level, never the selected parent level")
+            .contains("existing child levels remain unchanged")
+            .contains("The two exceptions to explicit mutation prepare/confirm are automatic curriculum preparation inside select_voice_study and the exact server-owned studyTopicProposal form")
+            .contains("For an explicit root creation, explicit single-child addition, rename, level change or deletion outside those flows, call prepare_voice_study_mutation")
+            .contains("Cancelling curriculum choices or changing direction does not delete already saved automatic subtopics")
+            .contains("curriculum preparation never consumes question quota")
+            .doesNotContain("Except for the exact server-owned studyTopicProposal form described above")
+    }
+
+    @Test
+    fun `native question policy waits for mandatory curriculum choices and uses only the final focus ID`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val instructions = service(persistence).connect(principal, persistence.session.id).instructions
+        assertThat(instructions)
+            .contains("An empty children list does not mean a leaf")
+            .contains("Only curriculumTerminal=true or the maximum depth permits proceeding directly to questions")
+            .contains("descendant depth four is always terminal")
+            .contains("Selecting a nonterminal child shows the next branch lazily, not a question")
+            .contains("While select_voice_study is awaiting that card, do not issue a second request_user_input")
+            .contains("The original requested ID or an intermediate card choice is not the final learning focus")
+            .contains("use voiceLessonFocus.studyId as the exact study_id and call list_pending_questions")
+            .contains("A nonterminal curriculum card awaiting GUI input is not completed selection")
+            .contains("do not request questions, read a parent question or explain a lesson while it is pending")
+            .doesNotContain("then use its actual saved question or request_question as needed")
+    }
+
+    @Test
+    fun `native submitted answers await grading events without compulsory polling or another submission`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val instructions = service(persistence).connect(principal, persistence.session.id).instructions
+        assertThat(instructions)
+            .contains("Wait for the explicit app submission result")
+            .contains("wait for server-pushed progress and the actual saved gradingResult")
+            .contains("Submission does not require a get_grading_process call")
+            .contains("do not poll grading tools or ask for another submission")
+            .contains("A new explicit status or recovery request may use get_grading_process to verify the saved result")
+            .contains("Never call submit_answer yourself", "Never invent a score")
+            .doesNotContain("then get_grading_process and its saved gradingResult")
     }
 
     @Test
@@ -712,7 +759,8 @@ class VoiceTutorServiceTest {
                 .contains("Start with one short question: '$opening'")
                 .contains("without a greeting, readiness check or predetermined quiz")
                 .contains("do not introduce or name yourself or describe your role unless directly asked")
-                .contains("Selection is separate from mutation and needs no additional confirmation")
+                .contains("Selecting an existing study needs no additional spoken confirmation or special wording")
+                .contains("its automatic missing-child curriculum preparation is handled by the server")
                 .contains("when the learner chooses it or wants to start learning it")
                 .contains("A contextual agreement to your offer to start, such as '그렇게 하자'")
                 .contains("Selection has no background job to wait for")
@@ -744,7 +792,8 @@ class VoiceTutorServiceTest {
             .contains("list_studies with limit 10 and offset 0")
             .contains("Never claim a topic is absent or unique from an incomplete page")
             .contains("Offer at most three real branch choices")
-            .contains("Only its successful voiceLessonFocus establishes the current topic")
+            .contains("Only the final successful voiceLessonFocus establishes the current topic")
+            .contains("after any required GUI choices")
             .contains("acceptedStudyId is only the immutable initial request")
             .contains("Browsing with voiceLessonContextReady=false is normal")
             .contains("selection prepares its full owned path and level")

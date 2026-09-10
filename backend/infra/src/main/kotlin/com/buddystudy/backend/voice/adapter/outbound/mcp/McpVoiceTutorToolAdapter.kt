@@ -227,21 +227,19 @@ class McpVoiceTutorToolAdapter(
     )
 
     override fun realtimeDefinitions(): List<VoiceTutorMcpToolDefinition> =
-        specifications.values.filter { it.tool().name() !in setOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY, "create_study_topics") }
+        specifications.values.filter { it.tool().name() !in setOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY, "create_study_topics", "submit_answer") }
             .map { specification ->
                 val tool = specification.tool()
                 val schema = when (tool.name()) {
+                    "list_studies" -> nativeStudyListParameters(tool.inputSchema().toMap())
                     "list_pending_questions" -> focusParameters("Exact selected topic. The server pages its arrived questions and returns the current saved question.")
                     "request_question" -> focusParameters("Exact selected topic. Reuses an arrived pending question before spending quota; skip an unwanted question separately on the learner's request.")
-                    "submit_answer" -> mapOf("type" to "object", "additionalProperties" to false,
-                        "properties" to mapOf("record_id" to mapOf("type" to "integer", "minimum" to 1)), "required" to listOf("record_id"))
                     else -> tool.inputSchema().toMap()
                 }
                 val description = when (tool.name()) {
-                    "list_studies" -> "Browse saved study discovery metadata and exact parent IDs with bounded pages. This result contains no questions, answers or study prompts. Resolve the learner's chosen exact node, select it, then read list_pending_questions separately before teaching. " + tool.description().orEmpty()
-                    "list_pending_questions" -> "Read arrived pending questions for the exact selected study_id before teaching. Read the returned saved question faithfully and preserve its original level. Do not invent a replacement. Grading questions already have submitted answers and must not be asked again."
-                    "request_question" -> "Request a new saved question for the selected topic only when the learner wants one and no ready pending question remains. Existing pending questions are returned first. For an unwanted question call skip_question on an explicit skip/change request, then request again. Normal question allowance applies; the server owns retry identity. The server subscribes to completion and delivers only the saved question. Do not poll get_question_process or ask the learner to repeat the start request."
-                    "submit_answer" -> "Reserved for the learner's explicit app submission after finishing and editing their answer. Never call this tool yourself, even if speech seems complete. The server supplies the reviewed text privately after the learner taps Submit. Then use get_grading_process and only its saved grade."
+                    "list_studies" -> "Browse owned saved topics only: IDs, actual parentStudyId, topic, difficultyLevel and curriculumTerminal. No questions, answers or study prompts are returned. Start with limit 10 and offset 0; use totalCount and pagination before claiming a topic is absent or unique. parent_study_id reads direct children; query searches saved topic names. The main topic is the original root, while the chosen study_id may be a descendant. An empty children list does not prove a terminal leaf. Pass the learner's exact choice to select_voice_study; only a final voiceLessonFocus authorizes question lookup."
+                    "list_pending_questions" -> "Read arrived pending questions for the final voiceLessonFocus.studyId before teaching. A nonterminal focus first opens the server-owned curriculum choice form; wait silently for its submitted or cancelled result, never bypass it with another question tool. Read the returned saved question faithfully and preserve its original level. Do not invent a replacement. Grading questions already have submitted answers and must not be asked again."
+                    "request_question" -> "Use the final voiceLessonFocus.studyId. A nonterminal topic first opens the server-owned curriculum choice form; question generation does not start while that choice is pending. Request a new saved question for the selected topic only when the learner wants one and no ready pending question remains. Existing pending questions are returned first. For an unwanted question call skip_question on an explicit skip/change request, then request again. Normal question allowance applies; the server owns retry identity. The server subscribes to completion and delivers only the saved question. Do not poll get_question_process or ask the learner to repeat the start request."
                     "skip_question" -> "Skip only the current arrived unanswered question when the learner explicitly asks to skip or replace it. Pass its exact record_id. Do not grade it, erase drafts, skip a submitted answer, or generate a new question implicitly; check remaining pending questions next."
                     "get_question_process", "get_grading_process" -> tool.description().orEmpty() + " In voice, use only the correlation ID returned in this selected-topic call. The server subscribes to accepted question/grading completion. Use a single read for an explicit status or recovery request only; do not repeatedly poll or invent completion, scores or questions."
                     else -> tool.description().orEmpty()
@@ -250,13 +248,13 @@ class McpVoiceTutorToolAdapter(
             } +
             listOf(
                 VoiceTutorMcpToolDefinition(SELECT_STUDY,
-                    "Select the learner's chosen exact owned saved topic and freeze its real level and parent path for this call. Resolve ordinary contextual choices yourself without extra confirmation. A successful result means selection is complete; no selection operation remains running. Read list_pending_questions separately before teaching, preserving each saved question's original level. If none is ready and the learner wants to start, use request_question. On cancellation stop the old topic's follow-up; on a switch select the newly chosen saved topic without waiting for old question work. If the new topic is unspecified, ask one brief choice. Cancellation does not roll back an already committed selection. Never invent an instant quiz or choose another topic.",
+                    "Prepare learning from the learner's chosen exact owned saved study_id; it may be a descendant, not the main root. The server resolves the original root, actual path and terminal state. A curriculumTerminal leaf or descendant depth four completes selection and returns voiceLessonFocus. A nonterminal topic shows its saved direct children; if none exist, the server creates one direct curriculum level with the original root's difficulty, without question quota. Then the app waits for a real subtopic choice or cancellation. Do not call request_user_input again, narrate a spoken menu, ask for repeated start agreement or claim selection complete while this form is pending. Continue only from the final voiceLessonFocus.studyId: read list_pending_questions separately, then request_question if needed. On cancellation stop the old follow-up; on a switch follow the latest topic. Cancellation does not roll back saved curriculum nodes or a committed focus.",
                     focusParameters("Exact owned saved study ID chosen in the conversation.")),
                 VoiceTutorMcpToolDefinition(ADVANCE_STUDY,
-                    "Move the lesson to one real direct child of the current focus after feedback and the learner's conversational choice to continue there. Read actual children first; never invent edges, skip a level or switch because of silence. This changes only call focus and requires no mutation confirmation. A successful result completes selection; read list_pending_questions separately before teaching. Honour a later cancellation or topic switch immediately by stopping the old follow-up, without claiming to roll back a committed selection.",
+                    "Prepare one real direct child of the current focus after the learner chooses to continue there. Read actual children first; never invent edges or advance on silence. Uses the same curriculum gate as select_voice_study: terminal/depth-four nodes return voiceLessonFocus, while nonterminal nodes prepare missing direct children at the original root level and wait for the app choice. This needs no additional mutation confirmation. Only the final voiceLessonFocus.studyId permits list_pending_questions separately. Honour cancellation or topic switch without waiting for old question work; saved curriculum nodes are preserved.",
                     focusParameters("Exact saved direct-child ID chosen for the next lesson.")),
                 VoiceTutorMcpToolDefinition(PREPARE_MUTATION,
-                    "Prepare, but DO NOT execute, the learner's requested new root, child, name/level change or deletion. Understand natural references and intent from the conversation without requiring a repeated command. Read exact owned target/parent IDs first. Returns one immutable proposal_id and confirmation_question; ask that short question once, then wait for the learner. For deletion, the question includes the whole subtree; prior records are preserved. Use difficulty_level 1-10, default 5 for new nodes. A changed target or patch needs a new proposal. Only genuinely missing target or values need clarification.",
+                    "Prepare, but DO NOT execute, the learner's requested new root, child, name/level change or deletion. Understand natural references and intent from the conversation without requiring a repeated command. Read exact owned target/parent IDs first. Returns one immutable proposal_id and confirmation_question; ask that short question once, then wait for the learner. For deletion, the question includes the whole subtree; prior records are preserved. Use difficulty_level 1-10 for root creation or an explicit level update; a new root defaults to 5. Child creation always inherits the original main root level, determined by the server. Automatic curriculum preparation inside select_voice_study needs no separate mutation proposal. A changed target or patch needs a new proposal. Only genuinely missing target or values need clarification.",
                     mapOf("type" to "object", "additionalProperties" to false,
                         "properties" to mapOf(
                             "action" to mapOf("type" to "string", "enum" to listOf(CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY, DELETE_STUDY)),
@@ -271,6 +269,12 @@ class McpVoiceTutorToolAdapter(
                         "properties" to mapOf("proposal_id" to mapOf("type" to "string", "minLength" to 1, "maxLength" to 191),
                             "confirm" to mapOf("type" to "boolean")), "required" to listOf("proposal_id", "confirm"))),
             )
+
+    private fun nativeStudyListParameters(schema: Map<String, Any?>): Map<String, Any?> {
+        val properties = (schema["properties"] as? Map<*, *>)?.entries?.associate { it.key.toString() to it.value }.orEmpty()
+        val limit = (properties["limit"] as? Map<*, *>)?.entries?.associate { it.key.toString() to it.value }.orEmpty()
+        return schema + ("properties" to (properties + ("limit" to (limit + ("default" to 10)))))
+    }
 
     /** Canonical pending data, never an old classifier authorization or provider-controlled lease. */
     private data class RealtimeMutation(
@@ -585,9 +589,11 @@ class McpVoiceTutorToolAdapter(
             if (context.realtimeModelTools) {
                 if (toolName in VoiceTutorCanonicalQuestionCoordinator.TOOLS) {
                     if (toolName in setOf("request_question", "list_pending_questions")) {
-                        val requested = (arguments["study_id"] as? Number)?.toLong()
+                        // Validate the voice schema before curriculum preparation can create nodes.
+                        val requested = focusStudyId(arguments)
+                            ?: return failure("INVALID_ARGUMENTS", "Use only one exact positive integer study_id.")
                         val selected = currentStudyAnchor(context)
-                        if (requested != null && requested == selected) curriculum.prepare(context, requested)?.let { return it }
+                        if (requested == selected) curriculum.prepare(context, requested)?.let { return it }
                     }
                     return canonicalQuestions.execute(context, toolName, arguments)
                 }
@@ -613,7 +619,8 @@ class McpVoiceTutorToolAdapter(
             if (!validator.validate(specification.tool().inputSchema(), mcpArguments).valid()) {
                 return failure("INVALID_ARGUMENTS", "Arguments do not match this tool's input schema.")
             }
-            var effectiveArguments = arguments
+            var effectiveArguments = if (context.realtimeModelTools && toolName == "list_studies")
+                mapOf<String, Any>("limit" to 10, "offset" to 0) + arguments else arguments
             var candidateReadRequest = candidateReadRequest(toolName, effectiveArguments)
             if (!isAuthorized(context)) return inactiveCall()
             if (toolName == CREATE_ROOT) return createRootStudy(context, specification, arguments)

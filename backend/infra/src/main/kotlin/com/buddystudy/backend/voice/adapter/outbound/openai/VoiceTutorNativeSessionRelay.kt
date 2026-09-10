@@ -165,8 +165,13 @@ internal fun nativeVoiceTutorToolRelay(
             }
             // Waiting for a person's explicit action has no 15-second tool deadline.
             // The controller holds this exact call without blocking the serial worker.
-            val proposalNode = call.arguments?.let { JsonMapperProvider.mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(it) }
-                ?.get("studyTopicProposal")
+            val inputArguments = call.arguments?.let { JsonMapperProvider.mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(it) }
+            if (inputArguments == null || !VoiceTutorUserInputContract.validToolArguments(inputArguments)) {
+                controller.completeTool(call.callId, nativeToolError("INVALID_ARGUMENTS",
+                    "Provide either title and valid questions, or studyTopicProposal alone. No choice or topic was created."))
+                return@mono
+            }
+            val proposalNode = inputArguments.get("studyTopicProposal")
             if (proposalNode == null) controller.requestUserInput(call)
             else {
                 val args = VoiceTutorUserInputContract.studyTopics(proposalNode)
@@ -176,7 +181,7 @@ internal fun nativeVoiceTutorToolRelay(
                         else mcp.prepareStudyTopicUserInput(context.copy(realtimeModelTools = true,
                             initialLessonRevision = controller.toolRevision(call.callId), dialogueBoundary = controller.toolBoundary(call.callId),
                         operationStillCurrent = { controller.toolCanExecute(call.callId) }),
-                            args.parentStudyId, args.topics, args.difficultyLevel)
+                            args.parentStudyId, args.topics, args.difficultyLevel ?: 5)
                     }
                 } catch (_: TimeoutCancellationException) { null }
                 catch (error: CancellationException) { throw error }

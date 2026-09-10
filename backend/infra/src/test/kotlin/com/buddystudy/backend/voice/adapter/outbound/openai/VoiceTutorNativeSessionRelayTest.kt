@@ -46,6 +46,23 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
     @Test
+    fun `malformed or mixed preference arguments never open a form or prepare topics`() {
+        val proposal = mapOf("studyTopicProposal" to mapOf("parentStudyId" to 7, "topics" to listOf("Redis")))
+        for (arguments in listOf(emptyMap(), mapOf("title" to "Incomplete"), ordinaryInputArguments("single") + proposal)) {
+            Fixture(userInputEnabled = true).use { f ->
+                f.opening(); f.learner(1, "invalid-form"); f.transcript("invalid-form")
+                f.toolResponse("invalid-choices", "invalid-call", "request_user_input", json(arguments))
+                f.await("malformed request returns a final error") { f.outputs().size == 1 }
+                assertThat(f.outputs().single().path("item").path("output").asText()).contains("INVALID_ARGUMENTS")
+                assertThat(f.inputRequests()).isEmpty()
+                assertThat(f.tools.topicPreparations).isEmpty()
+                assertThat(f.tools.invocations).isEmpty()
+                assertThat(f.errors).isEmpty()
+            }
+        }
+    }
+
+    @Test
     fun `silent saved question readback retries and a verified refresh recovers exhausted playback into manual answer capture`() {
         for (exhaustRetry in listOf(false, true)) {
             val question = VoiceTutorQuestionReadback(74, "122", "Redis의 장점과 한계를 단계별로 설명해 주세요.")
@@ -264,9 +281,10 @@ class VoiceTutorNativeSessionRelayTest {
                 val definition = f.outgoing.first { it.path("type").asText() == "session.update" }
                     .path("session").path("tools").single { it.path("name").asText() == "request_user_input" }
                 val questionSchema = definition.path("parameters").path("properties").path("questions").path("items")
-                assertThat(questionSchema.path("required").map { it.asText() })
-                    .contains("id", "prompt", "selectionMode", "options", "allowFreeText")
-                assertThat(questionSchema.path("properties").path("selectionMode").path("enum").map { it.asText() })
+                val alternatives = questionSchema.path("anyOf")
+                alternatives.forEach { schema -> assertThat(schema.path("required").map { it.asText() })
+                    .contains("id", "prompt", "selectionMode", "options", "allowFreeText") }
+                assertThat(alternatives.map { it.path("properties").path("selectionMode").path("enum")[0].asText() })
                     .containsExactly("single", "multiple", "text")
                 f.toolResponse("ordinary-$mode", "form-$mode", "request_user_input", json(arguments))
                 f.await("ordinary $mode form is shown") { f.inputRequests().size == 1 }
@@ -427,7 +445,7 @@ class VoiceTutorNativeSessionRelayTest {
             f.ack(f.outputs().single())
             f.await("root focus continuation") { f.responses().size == 3 }
             f.toolResponse("choices", "form", "request_user_input", json(mapOf("studyTopicProposal" to mapOf(
-                "parentStudyId" to 7, "topics" to listOf("Redis", "Kafka", "MSA"), "difficultyLevel" to 8))))
+                "parentStudyId" to 7, "topics" to listOf("Redis", "Kafka", "MSA")))))
             f.await("verified topic form arrives") { f.ui.any { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT } }
             val request = f.ui.single { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
             assertThat(tools.topicSubmissions).isEmpty()
@@ -450,8 +468,9 @@ class VoiceTutorNativeSessionRelayTest {
             assertThat(f.outputs()).hasSize(1)
             assertThat(f.ui.none { it.path("type").asText() == Contract.USER_INPUT_STATE_EVENT }).isTrue()
             storedChoice.complete(Unit)
-            f.await("durable GUI evidence releases the form") { f.outputs().size == 2 }
-            assertThat(f.ui.any { it.path("type").asText() == Contract.USER_INPUT_STATE_EVENT && it.path("phase").asText() == "submitted" }).isTrue()
+            f.await("durable GUI evidence releases both the output and submitted form state") {
+                f.outputs().size == 2 && f.ui.any { it.path("type").asText() == Contract.USER_INPUT_STATE_EVENT && it.path("phase").asText() == "submitted" }
+            }
             assertThat(f.outputs().last().path("item").path("call_id").asText()).isEqualTo("form")
             f.ack(f.outputs().last())
             f.await("exact output acknowledgement resumes tutor") { f.responses().size == 4 }
@@ -1407,11 +1426,12 @@ class VoiceTutorNativeSessionRelayTest {
 
     private data class Invocation(val context: VoiceTutorWebRtcControlContext, val name: String, val arguments: Map<String, Any>)
     private class FakeTools(private val result: suspend () -> VoiceTutorMcpToolResult = { success() }) : VoiceTutorMcpToolPort {
+        val topicPreparations = CopyOnWriteArrayList<Long>()
         val topicSubmissions = CopyOnWriteArrayList<List<Int>>()
         var topicResult: suspend () -> VoiceTutorMcpToolResult = { success() }
         override suspend fun prepareStudyTopicUserInput(context: VoiceTutorWebRtcControlContext, parentStudyId: Long,
             topics: List<String>, difficultyLevel: Int) = VoiceTutorStudyTopicUserInput("prepared-topics", "주제 추가",
-            "제출하면 선택한 주제를 추가합니다.", topics)
+            "제출하면 선택한 주제를 추가합니다.", topics).also { topicPreparations += parentStudyId }
         override suspend fun submitStudyTopicUserInput(context: VoiceTutorWebRtcControlContext, proposalId: String,
             selectedIndices: List<Int>): VoiceTutorMcpToolResult {
             assertThat(proposalId).isEqualTo("prepared-topics")

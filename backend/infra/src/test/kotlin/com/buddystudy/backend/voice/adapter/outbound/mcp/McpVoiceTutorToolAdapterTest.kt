@@ -65,6 +65,31 @@ import java.time.ZoneOffset
 
 class McpVoiceTutorToolAdapterTest {
     @Test
+    fun `native question arguments are rejected before any curriculum lookup or creation`() = runBlocking<Unit> {
+        for (tool in listOf("request_question", "list_pending_questions")) {
+            for (args in listOf(emptyMap(), mapOf("study_id" to 101.5), mapOf("study_id" to "101"),
+                mapOf("study_id" to -1), mapOf("study_id" to 101L, "unexpected" to true))) {
+                val fixture = Fixture(studyContexts = ContextStore())
+                val result = fixture.adapter.execute(nativeContext().copy(userInputEnabled = true), tool, args)
+                assertCode(result, "INVALID_ARGUMENTS")
+                assertThat(fixture.calls).isEmpty()
+                assertThat(fixture.focusSelections).isEmpty()
+            }
+        }
+    }
+
+    @Test
+    fun `native discovery defaults to ten rows without changing explicit or HTTP limits`() = runBlocking<Unit> {
+        val fixture = Fixture().apply { handler = { _, _ -> success(mapOf("studies" to emptyList<Any>(), "totalCount" to 0, "offset" to 0)) } }
+        assertThat(fixture.adapter.execute(nativeContext(), "list_studies", emptyMap()).isError).isFalse()
+        assertThat(fixture.calls.last().arguments).containsEntry("limit", 10).containsEntry("offset", 0)
+        fixture.adapter.execute(nativeContext(), "list_studies", mapOf("limit" to 3, "offset" to 2))
+        assertThat(fixture.calls.last().arguments).containsEntry("limit", 3).containsEntry("offset", 2)
+        fixture.adapter.execute(context(), "list_studies", emptyMap())
+        assertThat(fixture.calls.last().arguments).isEmpty()
+    }
+
+    @Test
     fun `native selected descendant prepares root level curriculum then exact durable GUI choice selects terminal topic`() = runBlocking<Unit> {
         val contexts = ContextStore()
         val fixture = Fixture(studyContexts = contexts)
@@ -135,6 +160,32 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(result.isError).isTrue()
         assertThat(result.curriculumInput).isNull()
         assertThat(fixture.calls.none { it.name == "create_study_topics" }).isTrue()
+        assertThat(fixture.focusSelections).isEmpty()
+    }
+
+    @Test
+    fun `GUI topic creation inherits original root eight despite selected parent two and legacy hint five`() = runBlocking<Unit> {
+        val fixture = Fixture(studyContexts = ContextStore())
+        fixture.handler = { name, args -> when (name) {
+            "get_study" -> if ((args.getValue("study_id") as Number).toLong() == 101L)
+                success(mapOf("id" to 101L, "parentStudyId" to null, "topic" to "MSA", "difficultyLevel" to 8))
+            else success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Communication", "difficultyLevel" to 2))
+            "create_study_topics" -> {
+                assertThat(args["parent_study_id"]).isEqualTo(102L)
+                assertThat(args["difficulty_level"]).isEqualTo(8)
+                assertThat(args[BuddyStudyMcpPort.VOICE_INHERIT_ROOT_DIFFICULTY_ARGUMENT]).isEqualTo(true)
+                success(mapOf("parentStudyId" to 102L, "topics" to listOf(mapOf("id" to 201L,
+                    "parentStudyId" to 102L, "topic" to "Delivery", "difficultyLevel" to 8, "created" to true))))
+            }
+            else -> error("Unexpected tool $name")
+        } }
+        val context = nativeContext().copy(userInputEnabled = true)
+        val proposal = requireNotNull(fixture.adapter.prepareStudyTopicUserInput(context, 102, listOf("Delivery"), 5))
+        assertThat(proposal.prompt).contains("Communication", "8")
+        assertThat(fixture.calls.none { it.name == "create_study_topics" }).isTrue()
+        val saved = fixture.adapter.submitStudyTopicUserInput(context, proposal.proposalId, listOf(0))
+        assertThat(saved.isError).isFalse()
+        assertThat(saved.changedStudyIds).containsExactly(201L)
         assertThat(fixture.focusSelections).isEmpty()
     }
 
@@ -3227,12 +3278,18 @@ class McpVoiceTutorToolAdapterTest {
         val fixture = Fixture()
         val catalog = fixture.adapter.realtimeDefinitions()
         assertThat(catalog.map { it.name }).contains("prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study")
-            .doesNotContain("create_root_study", "create_study_topic", "update_study", "delete_study")
+            .doesNotContain("create_root_study", "create_study_topic", "update_study", "delete_study", "submit_answer")
         assertThat(catalog.joinToString { it.description }).doesNotContain("server-owned: never originate", "one-shot target attested")
         assertThat(catalog.single { it.name == "select_voice_study" }.description)
-            .contains("selection is complete", "list_pending_questions separately", "On cancellation", "on a switch", "does not roll back")
+            .contains("curriculumTerminal", "original root", "form is pending", "final voiceLessonFocus.studyId", "list_pending_questions separately", "On cancellation", "does not roll back")
         assertThat(catalog.single { it.name == "advance_voice_study" }.description)
-            .contains("completes selection", "list_pending_questions separately", "cancellation or topic switch")
+            .contains("curriculum gate", "wait for the app choice", "final voiceLessonFocus.studyId", "list_pending_questions separately", "cancellation or topic switch")
+        assertThat(catalog.single { it.name == "list_studies" }.description).contains("No questions", "limit 10", "curriculumTerminal")
+            .doesNotContain("including pending")
+        assertThat(jacksonObjectMapper().valueToTree<JsonNode>(catalog.single { it.name == "list_studies" }.parameters)
+            .path("properties").path("limit").path("default").asInt()).isEqualTo(10)
+        assertThat(catalog.single { it.name == "prepare_voice_study_mutation" }.description)
+            .contains("new root defaults to 5", "Child creation always inherits the original main root level")
         val denied = fixture.adapter.execute(nativeContext(), "create_root_study", mapOf("topic" to "Spring", "difficulty_level" to 7))
         assertThat(json(denied).path("error").path("code").asText()).isEqualTo("PROPOSAL_REQUIRED")
         assertThat(fixture.calls).isEmpty()
