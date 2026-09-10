@@ -79,6 +79,19 @@ runtime observations are recorded below after verification.
   and physical-device test execution are pending device unlock. Installation
   alone is not reported as a passing background audio integration test.
 
+### Later physical-device verification attempt
+
+The phone became available later that evening. The answer-editor follow-up
+passed five native editor tests on the paired iPhone. A 23:56 KST call started
+through iPhone Mirroring, then showed disconnection after another-app return.
+The backend recorded provider-relay completion at 23:57:43 with a fresh
+heartbeat two seconds earlier, not a client end or heartbeat expiry. This is
+not a valid background microphone integration result because Apple does not
+support microphone access through iPhone Mirroring. The app was left ready for
+a direct-device call and Mirroring was closed; physical call/return verification
+remains pending. See the [answer editor verification](voice-answer-editor-verification-2026-09-10.md)
+for the observations and Apple documentation.
+
 ### Development runtime
 
 The final JAR above was installed into the existing local development Docker

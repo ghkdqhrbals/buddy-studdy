@@ -47,7 +47,22 @@ trackpad test. iPhone Mirroring supplies a hardware keyboard, and its available
 control API does not expose a timed touch-and-hold gesture. A physical keyboard
 trackpad check therefore remains outstanding.
 
-The live-call sheet open/close and background-return smoke check was attempted,
-but the existing Home profile entry did not navigate after its loading state.
-Development profile, billing and Voice Tutor status requests returned HTTP 200;
-installation and editor tests are not reported as a passing live-call test.
+The Home profile initially remained in its preparation flow, then opened after
+relaunch and waiting. Profile preparation also awaits RevenueCat identification
+and invoices; the observed HTTP 200 responses alone did not prove that the
+entire preparation had completed. No navigation change was made.
+
+A call started through iPhone Mirroring at 23:56 KST. After Home and another-app
+switching, the UI showed a disconnected call on return at 23:58. The backend
+recorded PROVIDER_RELAY_COMPLETE / PROVIDER_CLOSED at 23:57:43, following a fresh
+heartbeat at 23:57:41, then settled 73 seconds. This was not CLIENT_END or a
+server heartbeat timeout; the server does not log the upstream close reason or
+the local microphone state.
+
+Apple explicitly states that iPhone Mirroring does not support microphone
+access: [iPhone Mirroring](https://support.apple.com/en-euro/120421). The mirrored
+call therefore cannot establish that real background microphone/media operation
+works or fails. No speculative transport change was added from that observation.
+The ended test call was dismissed, the app was left at the Voice Tutor entry,
+and Mirroring was closed. Direct physical-device call/return, editor open/close
+and spacebar trackpad checks were requested and remain pending user observation.
