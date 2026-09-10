@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy API Logs</title>
     <script src="/nav-bootstrap.js?v=2026072704"></script>
-    <link rel="stylesheet" href="/styles.css?v=2026072602" />
+    <link rel="stylesheet" href="/styles.css?v=2026091001" />
     <link rel="stylesheet" href="/react/manage.css?v=2026073103" />
   </head>
   <body>
@@ -18,7 +18,7 @@
         <header class="topbar">
           <div>
             <h1>API Logs</h1>
-            <p>BuddyStudy request traces, payloads, and related backend logs</p>
+            <p>BuddyStudy REST and MCP request traces, payloads, and related backend logs</p>
           </div>
         </header>
 
@@ -58,6 +58,7 @@
             <option>PUT</option>
             <option>PATCH</option>
             <option>DELETE</option>
+            <option>MCP</option>
           </select>
         </label>
         <label>
@@ -71,8 +72,8 @@
           </select>
         </label>
         <label class="path-filter">
-          Path search
-          <input id="pathInput" type="search" placeholder="/api/v1/devices/register" autocomplete="off" />
+          Path or tool
+          <input id="pathInput" type="search" placeholder="/api/v1/… or list_studies" autocomplete="off" />
         </label>
         <label class="path-filter">
           Request ID
@@ -80,7 +81,7 @@
         </label>
         <label class="path-filter log-search-filter">
           Log search
-          <input id="logSearchInput" type="search" placeholder="error text, user id, class name" autocomplete="off" />
+          <input id="logSearchInput" type="search" placeholder="error, user ID, session ID, voice" autocomplete="off" />
         </label>
         <button id="refreshButton" type="button">Search</button>
       </section>
@@ -134,7 +135,7 @@
               <button id="timeSortButton" class="time-sort-button" type="button">Time ↓</button>
             </div>
             <div role="columnheader">Method</div>
-            <div role="columnheader">Path</div>
+            <div role="columnheader">Path / Tool</div>
             <div role="columnheader">Status</div>
             <div role="columnheader">Duration</div>
             <div role="columnheader">Client IP</div>
@@ -155,6 +156,6 @@
     </template>
     </template>
 
-    <script type="module" src="/react/manage.js?v=2026073103"></script>
+    <script type="module" src="/react/manage.js?v=2026091001"></script>
   </body>
 </html>

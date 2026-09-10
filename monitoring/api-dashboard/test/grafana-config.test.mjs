@@ -52,6 +52,7 @@ const incidentPromptPath = path.resolve(
   "../../../.github/codex/prompts/production-incident-autofix.md",
 );
 const monitoringLogQueryPaths = [
+  "../public/logs.js",
   "../public/app.js",
   "../public/performance.js",
   "../public/metrics.js",
@@ -201,7 +202,7 @@ test("monitoring log queries use the stable backend app label", async () => {
   );
 
   for (const source of querySources) {
-    assert.match(source, /\{app="buddystudy"\}/);
+    assert.match(source, /\{app="buddystudy"\}|(?:buildApiExchangeQuery(?: as \w+)?|EXCHANGE_QUERY),/);
     assert.doesNotMatch(source, /\{container=~/);
   }
 });

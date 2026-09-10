@@ -1,7 +1,10 @@
 package com.buddystudy.backend.config
 
 import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpPort
+import com.buddystudy.backend.common.adapter.inbound.web.RequestLoggingFilter
 import com.buddystudy.backend.mcp.adapter.inbound.McpJsonSchemaValidatorProvider
+import com.buddystudy.backend.mcp.adapter.inbound.McpExchangeLogger
+import com.buddystudy.backend.mcp.adapter.inbound.McpLoggingServerTransport
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.json.McpJsonMapper
@@ -46,7 +49,12 @@ class McpServerConfig {
                 if (principal == null) {
                     McpTransportContext.EMPTY
                 } else {
-                    McpTransportContext.create(mapOf(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY to principal))
+                    McpTransportContext.create(buildMap {
+                        put(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY, principal)
+                        request.attribute(RequestLoggingFilter.REQUEST_ID_ATTRIBUTE).orElse(null)?.let {
+                            put(BuddyStudyMcpPort.PARENT_REQUEST_ID_CONTEXT_KEY, it)
+                        }
+                    })
                 }
             }
             .securityValidator(securityValidator)
@@ -64,7 +72,14 @@ class McpServerConfig {
         jsonMapper: McpJsonMapper,
         mcp: BuddyStudyMcpPort,
         properties: BuddyStudyProperties,
-    ): McpStatelessAsyncServer = McpServer.async(transport)
+        exchangeLogger: McpExchangeLogger,
+        objectMapper: ObjectMapper,
+    ): McpStatelessAsyncServer = McpServer.async(McpLoggingServerTransport(
+        delegate = transport,
+        exchangeLogger = exchangeLogger,
+        objectMapper = objectMapper,
+        resourceNames = mcp.resources().associate { it.resource().uri() to it.resource().name() },
+    ))
         .jsonMapper(jsonMapper)
         .jsonSchemaValidator(McpJsonSchemaValidatorProvider.create())
         .serverInfo("buddystudy-mcp", "0.1.0")

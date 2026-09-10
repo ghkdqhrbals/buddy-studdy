@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy API Performance</title>
     <script src="/nav-bootstrap.js?v=2026072704"></script>
-    <link rel="stylesheet" href="/styles.css?v=2026072602" />
+    <link rel="stylesheet" href="/styles.css?v=2026091001" />
     <link rel="stylesheet" href="/react/manage.css?v=2026073103" />
   </head>
   <body>
@@ -41,11 +41,12 @@
             <option>PUT</option>
             <option>PATCH</option>
             <option>DELETE</option>
+            <option>MCP</option>
           </select>
         </label>
         <label>
-          Path search
-          <input id="pathInput" type="search" placeholder="/api/v1/devices/register" autocomplete="off" />
+          Path or tool
+          <input id="pathInput" type="search" placeholder="/api/v1/… or list_studies" autocomplete="off" />
         </label>
         <button id="refreshButton" type="button">Refresh</button>
       </section>
@@ -73,7 +74,8 @@
         <div class="panel-heading">
           <div>
             <h2>API Latency Percentiles</h2>
-            <p id="rangeLabel">Grouped by method and path</p>
+            <p id="rangeLabel">Grouped by REST endpoint or MCP tool</p>
+            <p class="performance-error-note">Errors: REST 5xx; MCP failed or cancelled calls.</p>
           </div>
           <span id="statusMessage" data-tone="loading">Loading...</span>
         </div>
@@ -81,7 +83,7 @@
         <div class="performance-table" role="table" aria-label="API latency percentile table">
           <div class="performance-row table-head" role="row">
             <div role="columnheader">Method</div>
-            <div role="columnheader">Path</div>
+            <div role="columnheader">Path / Tool</div>
             <div role="columnheader">Count</div>
             <div role="columnheader">Errors</div>
             <div role="columnheader">p50</div>
@@ -101,6 +103,6 @@
     </div>
     </template>
 
-    <script type="module" src="/react/manage.js?v=2026073103"></script>
+    <script type="module" src="/react/manage.js?v=2026091001"></script>
   </body>
 </html>

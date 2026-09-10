@@ -59,6 +59,7 @@ MCP host
   -> RequestLoggingFilter (metadata only; bodies suppressed)
   -> BearerTokenFilter (JWT + active session + device ownership)
   -> WebFluxStatelessServerTransport
+  -> McpLoggingServerTransport (one redacted exchange for the final SDK result)
   -> BuddyStudyMcpPort / BuddyStudyMcpAdapter
   -> BuddyStudyMcpUseCase / BuddyStudyMcpService
   -> existing Profile, Study, Record, Question, Grading, Stats, and Voice Tutor read UseCases
@@ -70,7 +71,8 @@ Private learning context
   -> user_learning_contexts (one row per users.id, ON DELETE CASCADE)
 ```
 
-The transport copies only the already-verified `Principal` into
+The transport copies the already-verified `Principal` and the server-generated
+parent HTTP request ID into
 `McpTransportContext`. It never copies the Authorization header or raw bearer
 token. Tool arguments never include `userId`; every domain read and write is
 scoped by the authenticated principal. The MCP composition service has an
@@ -174,8 +176,10 @@ rollout gate.
   is accepted only as the complete ordered durable set. Optional score/feedback
   evidence must link the exact final answer part in the same lesson revision with
   no later linked answer or intervening tutor turn. Successful child metadata
-  refreshes never replace the active question or answer draft. Logs expose counts,
-  fixed error codes and types only, not arguments or result bodies.
+  refreshes never replace the active question or answer draft. Administrative
+  `mcp_exchange` logs capture bounded, redacted arguments and results at the
+  public voice execution boundary. Diagnostic exception logs still contain only
+  fixed error codes and types, without raw exception messages.
 
 See [OpenAI's Realtime tool guidance](https://developers.openai.com/api/docs/guides/realtime-mcp)
 for the distinction between server-owned functions and a provider-hosted remote
@@ -237,8 +241,9 @@ receive. Never put it in prompts, logs, repository files, or browser code.
 
 Tool errors use MCP `isError=true` with structured `code`, HTTP-style `status`,
 and a safe message. Business and validation failures are exposed without stack
-traces. Unexpected exceptions produce a generic internal error and logs contain
-only the operation name and exception type, never tool arguments.
+traces. Unexpected exceptions produce a generic internal error; exception
+diagnostics contain only the operation name and exception type. The separate
+administrative exchange log retains the redacted request and safe error result.
 
 The legacy application/REST root settings upsert remains available to the iOS
 sync flow, but it is intentionally not published as an MCP tool. External AI
@@ -313,7 +318,9 @@ interest list clears that field. When both fields are empty the row is deleted.
 Account deletion removes the row through the database foreign-key cascade.
 
 Resume and interest data is never added to `UserProfileResponse`, public
-question payloads, analytics events, Sentry attachments, or API body logs.
+question payloads, analytics events, or Sentry attachments. Authenticated MCP
+context reads and writes can appear as bounded, redacted administrative
+exchange bodies, under the same operator access boundary as REST API logs.
 
 ## Core flows
 
@@ -426,7 +433,9 @@ explicit user confirmation
   supplied `Origin` unless it is in `MCP_ALLOWED_ORIGINS`.
 - Request and response bodies for `/api/v1/mcp` and route-equivalent
   matrix-parameter variants are never captured by the API exchange logger.
-  Request metadata remains available operationally.
+  HTTP request metadata remains available operationally. A separate MCP
+  observer captures parsed, redacted arguments and the final SDK result after
+  schema validation, without buffering the raw HTTP stream.
 - Delete requires both a destructive tool annotation and server-enforced
   `confirm=true`.
 - Page sizes, string lengths, arrays, timestamps, enums, and unknown arguments
@@ -434,8 +443,9 @@ explicit user confirmation
 - The server never accepts a caller-supplied user ID or token passthrough.
 - Voice Tutor transcript turns, results, consent state, and recording metadata
   and node-linked voice learning exchanges remain private owner-scoped content.
-  Tool arguments and returned content are never copied into API exchange logs,
-  provider-history bodies, analytics, or error messages. MCP has no tool/resource
+  Administrative MCP exchange logs contain bounded, redacted tool arguments and
+  returned content; they do not become provider-history bodies, analytics, or
+  exception messages. MCP has no tool/resource
   for realtime frames, locally pending files, S3 object keys, upload grants, or
   presigned playback URLs, regardless of whether the owner explicitly recorded
   a call through the iOS app.
@@ -462,8 +472,25 @@ backend HTTPS origin.
 - Long-running AI work remains in the existing Redis Stream/Outbox workers;
   MCP calls enqueue and poll instead of holding an HTTP connection.
 - Record, study, pending-question, Voice Tutor, and statistics reads are bounded.
-- API logs retain request ID, user ID, method, path, status, and duration while
-  suppressing MCP bodies.
+- Administrative API Logs and API Performance include both REST and MCP calls;
+  select method `MCP` to restrict results. MCP rows retain a unique request ID,
+  trusted user ID, operation/tool/resource, HTTP or voice transport, start/end
+  timestamps, duration in milliseconds, error code, and redacted request/response
+  bodies. HTTP rows link their parent REST request ID; voice rows link session
+  and provider call IDs when available.
+- Each body is redacted before a 2,000-character preview cap. Credentials,
+  tokens, audio/binary fields, signed URLs, and recording grants are masked;
+  unparseable JSON-like text fails closed. Exchange-log failures cannot fail or
+  replay a business operation. Internal retries are timed as one logical call;
+  cancellation is recorded as status `499` and still propagates.
+- HTTP MCP observation surrounds the final SDK response, covering schema
+  failures, unknown tools, discovery, and resources. Voice observation surrounds
+  execution, explicit answer submission/skip, and `voice/progress` polling.
+  Inner shared adapters suppress duplicate exchange logs. Pre-handler HTTP
+  rejections remain visible through the existing REST metadata log.
+- Dedicated structured `mcp_exchange` logs are emitted for local voice calls as
+  well as HTTP MCP. The existing REST `api_exchange` marker, HTTP RPS metrics,
+  Grafana dashboards, and outage alert queries retain their original meaning.
 - Existing Grafana/Loki alerts own runtime outage detection. GitHub Actions
   must not add MCP smoke calls or runtime health gates.
 

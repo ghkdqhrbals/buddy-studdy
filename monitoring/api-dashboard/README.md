@@ -5,8 +5,8 @@ Grafana, and the private TestZone API behind the backend administrator session.
 
 ## Pages
 
-- `/`: paginated API request logs and request/response/trace details
-- `/performance.html`: endpoint latency and throughput grouped by API
+- `/`: paginated REST and MCP calls with request/response payloads, timing, and trace details
+- `/performance.html`: latency and call volume grouped by REST endpoint or MCP tool
 - `/system.html`: application, database, Redis, host, and runtime metrics
 - `/audit.html`: monitoring workspace page, authentication, and action history
 - `/users.html`: authenticated member search, membership tiers, and quota controls
@@ -31,6 +31,18 @@ state, dense reusable tables, and a right-side object inspector. Redis field
 values and outbox payload JSON can be explored as a nested tree or raw JSON
 without flattening the stored object. The migration and controller boundary are documented in
 `docs/observability/MONITORING_REACT_MIGRATION.md`.
+
+API Logs and API Performance read both `api_exchange` and `mcp_exchange`
+events from the existing Loki stream. Select Method `MCP` and search a tool
+name, such as `list_studies`, to isolate logical MCP calls. Expanded rows show
+HTTP or Voice transport, start/end times in KST, exact duration in milliseconds,
+and available parent request, voice session, and model call identifiers. Parent
+request IDs also link the HTTP transport log to its logical MCP operation.
+MCP failures and cancellations count as errors in API Performance; REST keeps
+its existing 5xx error definition. Server RPS, runtime latency metrics, and
+Grafana alert queries continue to read only `api_exchange`, so MCP logical
+calls do not inflate HTTP traffic statistics. The `codex:log-search` command
+supports the same events with `--method MCP --path list_studies`.
 
 ## Access Audit
 

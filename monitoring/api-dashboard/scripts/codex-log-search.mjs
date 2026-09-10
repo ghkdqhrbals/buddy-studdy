@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import {
+  buildApiExchangeQuery as exchangeQuery,
+  buildRelatedLogQuery,
   durationLabel,
   parseApiError,
   parseApiExchange,
@@ -12,8 +14,6 @@ import {
 const DEFAULT_LIMIT = 20;
 const DEFAULT_RANGE_MS = 60 * 60 * 1000;
 const DEFAULT_DASHBOARD_URL = "https://grafana.lowfidev.cloud";
-const API_EXCHANGE_QUERY = '{app="buddystudy"} |= "api_exchange"';
-
 main().catch((error) => {
   console.error(error.message);
   process.exitCode = 1;
@@ -127,17 +127,13 @@ async function lokiQueryRange(baseUrl, query, { startNs, endNs, limit, direction
 }
 
 function buildApiExchangeQuery(options) {
-  const parts = [API_EXCHANGE_QUERY];
-  if (options.method) parts.push(`|= ${quoteLogql(`"method":"${String(options.method).toUpperCase()}"`)}`);
-  if (options.status) parts.push(`|~ ${quoteLogql(`"status":${options.status}[0-9][0-9]`)}`);
-  if (options.path) parts.push(`|= ${quoteLogql(options.path)}`);
-  if (options.requestId) parts.push(`|= ${quoteLogql(options.requestId)}`);
-  if (options.q) parts.push(`|= ${quoteLogql(options.q)}`);
-  return parts.join(" ");
-}
-
-function quoteLogql(value) {
-  return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  return exchangeQuery({
+    method: options.method ? String(options.method).toUpperCase() : "",
+    statusPrefix: options.status,
+    path: options.path,
+    requestId: options.requestId,
+    logSearch: options.q,
+  });
 }
 
 function compareByTime(a, b, sort) {
@@ -147,7 +143,7 @@ function compareByTime(a, b, sort) {
 
 async function loadDetails(lokiBaseUrl, request) {
   const requestMs = Number(BigInt(request.nanoseconds) / 1_000_000n);
-  const values = await lokiQueryRange(lokiBaseUrl, `{app="buddystudy"} |= "${request.requestId}"`, {
+  const values = await lokiQueryRange(lokiBaseUrl, buildRelatedLogQuery(request), {
     startNs: ns(requestMs - 10 * 60 * 1000),
     endNs: ns(requestMs + 10 * 60 * 1000),
     limit: 200,
@@ -172,14 +168,16 @@ function renderSlackResponse({ options, range, sort, dashboardUrl, requests, sel
     const tone = statusTone(request.status);
     return `- ${request.time} ${request.method} ${request.path} status=${request.status || "-"} duration=${durationLabel(request.durationMs)} ${tone} requestId=${request.requestId}`;
   });
-  const error = detail?.errors?.[0];
+  const error = detail?.errors?.[0] ?? (selected?.errorCode
+    ? { code: selected.errorCode, message: selected.errorReason }
+    : null);
   const errorCause = error?.exceptionType
     ? `${error.exceptionType}${error.exceptionMessage && error.exceptionMessage !== "-" ? `: ${error.exceptionMessage}` : ""}`
     : "";
   const rootCause = error?.rootCauseType && error.rootCauseType !== error.exceptionType
     ? `${error.rootCauseType}${error.rootCauseMessage && error.rootCauseMessage !== "-" ? `: ${error.rootCauseMessage}` : ""}`
     : "";
-  const connectedLogs = detail?.logs?.filter((log) => log.message !== selected?.rawLine).slice(0, 6) ?? [];
+  const connectedLogs = detail?.logs?.filter((log) => log.rawLine !== selected?.rawLine).slice(0, 6) ?? [];
   return [
     "*BuddyStudy API log search*",
     `Range: ${formatKst(range.startMs)} - ${formatKst(range.endMs)}`,
@@ -194,8 +192,8 @@ function renderSlackResponse({ options, range, sort, dashboardUrl, requests, sel
     error?.origin ? `*Origin*: ${error.origin}` : "",
     error?.stack ? `\`\`\`\n${truncate(error.stack, 1800)}\n\`\`\`` : "",
     "*Recent matches*",
-    rows.length ? rows.join("\n") : "- no matching api_exchange logs",
-    connectedLogs.length ? "\n*Connected logs*\n" + connectedLogs.map((log) => `- ${log.time} ${log.level} ${truncate(log.message, 220)}`).join("\n") : "",
+    rows.length ? rows.join("\n") : "- no matching REST or MCP exchange logs",
+    connectedLogs.length ? "\n*Connected logs*\n" + connectedLogs.map((log) => `- ${log.time} ${log.level} ${truncate(log.summary, 220)}`).join("\n") : "",
     selected ? `\n*Request*\n\`\`\`json\n${truncate(safeJson(selected.request), 1800)}\n\`\`\`` : "",
     selected ? `*Response*\n\`\`\`json\n${truncate(safeJson(selected.response), 1800)}\n\`\`\`` : "",
   ].filter(Boolean).join("\n");
@@ -248,6 +246,7 @@ function printHelp() {
   console.log(`Usage:
   npm run codex:log-search -- --requestId <uuid>
   npm run codex:log-search -- --path /api/v1/devices/register --status 5 --rangeMs 900000
+  npm run codex:log-search -- --method MCP --path list_studies --rangeMs 900000
   npm run codex:log-search -- --q "NoClassDefFoundError" --from 2026-07-05T12:00:00Z --to 2026-07-05T13:00:00Z
 
 Environment:

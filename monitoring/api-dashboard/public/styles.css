@@ -1236,6 +1236,20 @@ html.nav-collapsed .side-nav-group + .side-nav-group {
   background: var(--red-soft);
 }
 
+.method-mcp {
+  color: #0f766e;
+  background: #ccfbf1;
+}
+
+.exchange-source {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+
 .status-badge.ok {
   color: var(--green);
   background: var(--green-soft);
@@ -1313,6 +1327,28 @@ html.nav-collapsed .side-nav-group + .side-nav-group {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+.exchange-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+
+.exchange-metadata > div {
+  min-width: 0;
+}
+
+.exchange-metadata dt {
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+
+.exchange-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .json-panel,

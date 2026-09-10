@@ -2,6 +2,9 @@ package com.buddystudy.backend.voice.adapter.outbound.mcp
 
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpPort
+import com.buddystudy.backend.mcp.adapter.inbound.McpExchangeContext
+import com.buddystudy.backend.mcp.adapter.inbound.McpExchangeLogger
+import com.buddystudy.backend.mcp.adapter.inbound.McpExchangeResponse
 import com.buddystudy.backend.mcp.adapter.inbound.McpJsonSchemaValidatorProvider
 import com.buddystudy.backend.voice.application.model.VoiceTutorLessonTreeContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputIntent
@@ -59,6 +62,7 @@ class McpVoiceTutorToolAdapter(
     private val studyContexts: VoiceTutorStudyContextPort = UnavailableVoiceTutorStudyContextPort,
     private val confirmations: VoiceTutorMutationConfirmationPort = UnavailableVoiceTutorMutationConfirmationPort,
     private val lessonFocus: VoiceTutorLessonFocusPort = UnavailableVoiceTutorLessonFocusPort,
+    private val exchangeLogger: McpExchangeLogger = McpExchangeLogger(objectMapper),
 ) : VoiceTutorMcpToolPort {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val validator by lazy { McpJsonSchemaValidatorProvider.create() }
@@ -82,13 +86,42 @@ class McpVoiceTutorToolAdapter(
 
     override suspend fun pollLearningProgress(context: VoiceTutorWebRtcControlContext,
         progress: com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress): VoiceTutorMcpToolResult =
-        reviewedQuestionOperation { canonicalQuestions.pollLearningProgress(context, progress) }
+        observeExchange(context, "poll", mapOf(
+            "phase" to progress.phase.name, "study_id" to progress.studyId,
+            "record_id" to progress.recordId, "correlation_id" to progress.correlationId,
+        ), operation = "voice/progress") { reviewedQuestionOperation { canonicalQuestions.pollLearningProgress(context, progress) } }
 
     override suspend fun submitReviewedAnswer(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult =
-        reviewedQuestionOperation { canonicalQuestions.submitReviewedAnswer(context, answer) }
+        observeExchange(context, "submit_answer", mapOf(
+            "answer_id" to answer.answerId, "study_id" to answer.studyId, "record_id" to answer.recordId,
+            "lesson_revision" to answer.lessonRevision, "answer" to answer.text,
+        )) { reviewedQuestionOperation { canonicalQuestions.submitReviewedAnswer(context, answer) } }
 
     override suspend fun skipReviewedQuestion(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult =
-        reviewedQuestionOperation { canonicalQuestions.skipReviewedQuestion(context, answer) }
+        observeExchange(context, "skip_question", mapOf(
+            "answer_id" to answer.answerId, "study_id" to answer.studyId,
+            "record_id" to answer.recordId, "lesson_revision" to answer.lessonRevision,
+        )) { reviewedQuestionOperation { canonicalQuestions.skipReviewedQuestion(context, answer) } }
+
+    private suspend fun observeExchange(
+        context: VoiceTutorWebRtcControlContext,
+        toolName: String,
+        arguments: Map<String, Any?>,
+        operation: String = "tools/call",
+        action: suspend () -> VoiceTutorMcpToolResult,
+    ): VoiceTutorMcpToolResult = exchangeLogger.observe(
+        context = McpExchangeContext(
+            userId = context.principal?.userId,
+            transport = "voice",
+            sessionId = context.session.id,
+            callId = context.callId,
+        ),
+        operation = operation,
+        target = toolName,
+        requestBody = mapOf("name" to toolName, "arguments" to arguments),
+        response = { McpExchangeResponse(it.output, it.isError) },
+        action = action,
+    )
 
     private suspend fun reviewedQuestionOperation(operation: suspend () -> VoiceTutorMcpToolResult): VoiceTutorMcpToolResult = try {
         operation()
@@ -383,6 +416,14 @@ class McpVoiceTutorToolAdapter(
         context: VoiceTutorWebRtcControlContext,
         toolName: String,
         arguments: Map<String, Any>,
+    ): VoiceTutorMcpToolResult = observeExchange(context, toolName, arguments) {
+        executeTool(context, toolName, arguments)
+    }
+
+    private suspend fun executeTool(
+        context: VoiceTutorWebRtcControlContext,
+        toolName: String,
+        arguments: Map<String, Any>,
     ): VoiceTutorMcpToolResult {
         if (toolName !in ALLOWED_TOOLS && !(context.realtimeModelTools && toolName in REALTIME_MUTATION_TOOLS + VoiceTutorCanonicalQuestionCoordinator.TOOLS)) {
             return failure("TOOL_NOT_ALLOWED", "This tool is not available in voice calls.")
@@ -480,7 +521,7 @@ class McpVoiceTutorToolAdapter(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            // No arguments, account credentials, study contents, or provider payloads in logs.
+            // Keep private exception details out of both the tool response and exchange log.
             return failure("MCP_UNAVAILABLE", "The study tool could not complete. Do not assume the action succeeded.")
         }
     }
@@ -1128,7 +1169,10 @@ class McpVoiceTutorToolAdapter(
         specification: McpStatelessServerFeatures.AsyncToolSpecification,
         arguments: Map<String, Any>,
     ): McpSchema.CallToolResult {
-        val transportContext = McpTransportContext.create(mapOf(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY to principal))
+        val transportContext = McpTransportContext.create(mapOf(
+            BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY to principal,
+            BuddyStudyMcpPort.SUPPRESS_EXCHANGE_LOG_CONTEXT_KEY to true,
+        ))
         val request = McpSchema.CallToolRequest.builder(specification.tool().name()).arguments(arguments).build()
         return specification.callHandler().apply(transportContext, request).awaitSingle()
     }

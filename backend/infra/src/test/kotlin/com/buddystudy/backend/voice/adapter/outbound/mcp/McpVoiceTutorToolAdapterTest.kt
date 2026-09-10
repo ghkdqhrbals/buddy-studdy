@@ -1,8 +1,13 @@
 package com.buddystudy.backend.voice.adapter.outbound.mcp
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpAdapter
 import com.buddystudy.backend.mcp.adapter.inbound.BuddyStudyMcpPort
+import com.buddystudy.backend.mcp.adapter.inbound.McpExchangeLogger
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
@@ -22,6 +27,9 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidat
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCandidateReadKind
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayAuthorizationPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
@@ -48,6 +56,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import reactor.core.publisher.Mono
 import java.lang.reflect.Proxy
 import java.time.Clock
@@ -55,6 +64,118 @@ import java.time.Instant
 import java.time.ZoneOffset
 
 class McpVoiceTutorToolAdapterTest {
+    @Test
+    fun `voice exchange logs the complete public result once when using the shared MCP handler`(): Unit = runBlocking {
+        val useCase = proxy<BuddyStudyMcpUseCase> { method, arguments ->
+            assertThat(method).isEqualTo("getStudy")
+            assertThat(arguments[0]).isSameAs(principal)
+            room(101)
+        }
+        val fixture = Fixture(BuddyStudyMcpAdapter(useCase, mapper))
+        var result: VoiceTutorMcpToolResult? = null
+        val exchanges = captureExchanges {
+            result = fixture.adapter.execute(context(), "get_study", mapOf("study_id" to 101L, "language" to "ko"))
+        }
+
+        assertThat(exchanges).hasSize(1)
+        val exchange = exchanges.single()
+        assertThat(exchange.path("method").asText()).isEqualTo("MCP")
+        assertThat(exchange.path("transport").asText()).isEqualTo("voice")
+        assertThat(exchange.path("operation").asText()).isEqualTo("tools/call")
+        assertThat(exchange.path("toolName").asText()).isEqualTo("get_study")
+        assertThat(exchange.path("userId").asLong()).isEqualTo(principal.userId)
+        assertThat(exchange.path("sessionId").asText()).isEqualTo(session().id)
+        assertThat(exchange.path("callId").asText()).isEqualTo(context().callId)
+        assertThat(exchange.path("requestId").asText()).isNotBlank()
+        assertThat(exchange.path("status").asInt()).isEqualTo(200)
+        assertThat(exchange.path("durationMs").asText().toDouble()).isGreaterThanOrEqualTo(0.0)
+        assertThat(Instant.parse(exchange.path("completedAt").asText()))
+            .isAfterOrEqualTo(Instant.parse(exchange.path("startedAt").asText()))
+        assertThat(exchangeBody(exchange, "requestBody").path("arguments").path("study_id").asLong()).isEqualTo(101)
+        assertThat(exchangeBody(exchange, "responseBody")).isEqualTo(json(requireNotNull(result)))
+        assertThat(exchange.toString()).doesNotContain(principal.deviceId, "Bearer", "Authorization")
+    }
+
+    @Test
+    fun `voice exchanges include early validation authorization and shared business errors`(): Unit = runBlocking {
+        val rejected = listOf(
+            Triple("unavailable_tool", emptyMap<String, Any>(), "TOOL_NOT_ALLOWED"),
+            Triple("get_study", mapOf("study_id" to "invalid"), "INVALID_ARGUMENTS"),
+            Triple("list_studies", emptyMap<String, Any>(), "CALL_NOT_AUTHORIZED"),
+            Triple("get_study", mapOf("study_id" to 101L), "STUDY_NOT_FOUND"),
+        )
+        for ((toolName, arguments, expectedCode) in rejected) {
+            val fixture = Fixture().apply {
+                if (expectedCode == "CALL_NOT_AUTHORIZED") authorized = false
+                handler = { _, _ -> failure("STUDY_NOT_FOUND") }
+            }
+            val exchanges = captureExchanges {
+                assertCode(fixture.adapter.execute(context(), toolName, arguments), expectedCode)
+            }
+            assertThat(exchanges).hasSize(1)
+            val exchange = exchanges.single()
+            assertThat(exchange.path("toolName").asText()).isEqualTo(toolName)
+            assertThat(exchange.path("status").asInt()).isGreaterThanOrEqualTo(400)
+            assertThat(exchangeBody(exchange, "responseBody").path("error").path("code").asText()).isEqualTo(expectedCode)
+            if (expectedCode != "STUDY_NOT_FOUND") assertThat(fixture.calls).isEmpty()
+        }
+    }
+
+    @Test
+    fun `cancelled voice exchange records failure without swallowing or exposing cancellation details`(): Unit = runBlocking {
+        val cancellation = CancellationException("private-cancellation-detail")
+        val fixture = Fixture().apply { handler = { _, _ -> throw cancellation } }
+        var propagated: CancellationException? = null
+        val exchanges = captureExchanges {
+            try {
+                fixture.adapter.execute(context(), "list_studies", emptyMap())
+            } catch (error: CancellationException) {
+                propagated = error
+            }
+        }
+        // Coroutine stack-trace recovery may copy the exception at awaitSingle;
+        // cancellation must still propagate with the original failure as its cause.
+        assertThat(propagated).isNotNull()
+        assertThat(generateSequence(propagated as Throwable?) { it.cause }.take(8).toList())
+            .contains(cancellation)
+        assertThat(exchanges).hasSize(1)
+        assertThat(exchanges.single().path("status").asInt()).isEqualTo(499)
+        assertThat(exchanges.single().toString()).doesNotContain("private-cancellation-detail")
+    }
+
+    @Test
+    fun `voice shared invocations explicitly suppress nested exchange rows`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.adapter.execute(context(), "list_studies", emptyMap())
+        assertThat(fixture.calls).hasSize(1)
+        assertThat(fixture.calls.single().exchangeLoggingSuppressed).isTrue()
+    }
+
+    @Test
+    fun `server-owned answer skip and progress operations log their own public validation result`(): Unit = runBlocking {
+        val fixture = Fixture()
+        val answer = VoiceTutorReviewedAnswer(
+            answerId = "00000000-0000-0000-0000-000000000008", studyId = 101L, recordId = "91",
+            lessonRevision = 0L, text = "An edited answer", precedingTutorProviderItemId = "private-provider-item",
+            learnerProviderItemIds = listOf("private-learner-provider-item"),
+        )
+        val exchanges = captureExchanges {
+            assertThat(fixture.adapter.submitReviewedAnswer(context(), answer).isError).isTrue()
+            assertThat(fixture.adapter.skipReviewedQuestion(context(), answer.copy(text = "")).isError).isTrue()
+            assertThat(fixture.adapter.pollLearningProgress(context(), VoiceTutorLearningProgress(
+                VoiceTutorLearningPhase.GRADING, 101L, "91", "process-1",
+            )).isError).isTrue()
+        }
+        assertThat(exchanges).hasSize(3)
+        assertThat(exchanges.take(2).map { it.path("toolName").asText() }).containsExactly("submit_answer", "skip_question")
+        assertThat(exchanges.last().path("operation").asText()).isEqualTo("voice/progress")
+        assertThat(exchangeBody(exchanges[0], "requestBody").path("arguments").path("answer").asText()).isEqualTo(answer.text)
+        assertThat(exchanges.map { it.path("requestId").asText() }.distinct()).hasSize(3)
+        assertThat(exchanges.all { it.path("status").asInt() >= 400 }).isTrue()
+        assertThat(exchanges.toString()).doesNotContain("private-provider-item", "private-learner-provider-item", principal.deviceId)
+        assertThat(fixture.calls).isEmpty()
+    }
+
     @Test
     fun `successful study read returns the immutable lesson level alongside current app metadata`(): Unit = runBlocking {
         val contextStore = ContextStore().apply {
@@ -3132,7 +3253,8 @@ class McpVoiceTutorToolAdapterTest {
                         Mono.fromCallable {
                             val caller = context.get(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY) as? Principal
                             val arguments = request.arguments().orEmpty()
-                            calls += Call(request.name(), arguments, caller)
+                            calls += Call(request.name(), arguments, caller,
+                                context.get(BuddyStudyMcpPort.SUPPRESS_EXCHANGE_LOG_CONTEXT_KEY) == true)
                             handler(request.name(), arguments)
                         }
                     }
@@ -3308,9 +3430,39 @@ class McpVoiceTutorToolAdapterTest {
         }
     }
 
-    private data class Call(val name: String, val arguments: Map<String, Any>, val principal: Principal?)
+    private data class Call(
+        val name: String,
+        val arguments: Map<String, Any>,
+        val principal: Principal?,
+        val exchangeLoggingSuppressed: Boolean = false,
+    )
 
     private companion object {
+        suspend fun captureExchanges(action: suspend () -> Unit): List<JsonNode> {
+            val logger = LoggerFactory.getLogger(McpExchangeLogger::class.java) as Logger
+            val previousLevel = logger.level
+            val appender = ListAppender<ILoggingEvent>().apply {
+                context = logger.loggerContext
+                start()
+            }
+            logger.addAppender(appender)
+            logger.level = Level.INFO
+            try {
+                action()
+                return appender.list.map { it.formattedMessage }
+                    .filter { it.startsWith("mcp_exchange ") }
+                    .map { mapper.readTree(it.removePrefix("mcp_exchange ")) }
+            } finally {
+                logger.detachAppender(appender)
+                logger.level = previousLevel
+                appender.stop()
+            }
+        }
+
+        fun exchangeBody(exchange: JsonNode, field: String): JsonNode = exchange.path(field).let {
+            if (it.isTextual) mapper.readTree(it.asText()) else it
+        }
+
         fun nativeContext(confirming: Boolean = false, currentRevision: Long = 0) = VoiceTutorWebRtcControlContext(
             session(), "rtc_synthetic_call", principal, initialLessonRevision = currentRevision, realtimeModelTools = true,
             dialogueBoundary = VoiceTutorDialogueBoundary(responseGeneration = if (confirming) 4 else 2,

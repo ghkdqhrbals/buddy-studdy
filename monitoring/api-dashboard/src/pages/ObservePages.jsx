@@ -81,13 +81,13 @@ export function ApiLogsPage() {
       contentSelector=".content-shell"
       removeSelector=".topbar"
       extraSelectors={EMPTY_TEMPLATE_SELECTOR}
-      controllerUrl="/app.js?v=2026072704"
+      controllerUrl="/app.js?v=2026091001"
       className="observe-page"
     >
       <PageHeader
         eyebrow="Observe"
         title="API logs"
-        description="Search request traces, inspect payloads, and follow every related backend log by request ID."
+        description="Search REST and MCP calls, inspect request and response payloads, and follow timing and related logs."
       />
     </LegacyControllerSurface>
   );
@@ -103,13 +103,13 @@ export function ApiPerformancePage() {
       contentSelector=".content-shell"
       removeSelector=".topbar"
       extraSelectors={EMPTY_TEMPLATE_SELECTOR}
-      controllerUrl="/performance.js?v=2026072704"
+      controllerUrl="/performance.js?v=2026091001"
       className="observe-page"
     >
       <PageHeader
         eyebrow="Observe"
         title="API performance"
-        description="Compare request volume, errors, and latency percentiles for each API endpoint."
+        description="Compare call volume, errors, and latency percentiles for REST endpoints and MCP tools."
       />
     </LegacyControllerSurface>
   );

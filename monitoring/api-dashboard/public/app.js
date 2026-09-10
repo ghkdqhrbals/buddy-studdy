@@ -1,12 +1,15 @@
 import {
+  buildApiExchangeQuery,
+  buildRelatedLogQuery,
   durationLabel,
+  exchangeMetadata,
   lokiMetricTimestampToMs,
   parseApiError,
   parseApiExchange,
   parseRelatedLog,
   safeJson,
   statusTone,
-} from "./logs.js?v=2026070711";
+} from "./logs.js?v=2026091001";
 
 const DEFAULT_RANGE_MS = 3_600_000;
 
@@ -57,9 +60,6 @@ const els = {
   pageInfo: document.querySelector("#pageInfo"),
   timeSortButton: document.querySelector("#timeSortButton"),
 };
-
-const API_EXCHANGE_QUERY = '{app="buddystudy"} |= "api_exchange"';
-const TIMELINE_QUERY = 'sum(count_over_time(({app="buddystudy"} |= "api_exchange")[$__range]))';
 
 function nowMs() {
   return Date.now();
@@ -117,7 +117,7 @@ async function loadRequestPage({ refreshTimeline = false } = {}) {
   try {
     const pageCursorNs = state.pageCursors[state.pageIndex];
     const pageRange = pageQueryRange(range, pageCursorNs);
-    const pageQuery = lokiQueryRange(buildApiExchangeQuery(), {
+    const pageQuery = lokiQueryRange(filteredExchangeQuery(), {
       ...pageRange,
       limit: state.pageSize + 1,
       direction: state.sortDirection === "desc" ? "backward" : "forward",
@@ -170,7 +170,7 @@ function resetPagination() {
 async function loadTimeline(range) {
   const stepMs = chooseTimelineStepMs(range.endMs - range.startMs);
   state.timelineStepMs = stepMs;
-  const query = TIMELINE_QUERY.replace("$__range", formatLogqlDuration(stepMs));
+  const query = `sum(count_over_time((${filteredExchangeQuery()})[${formatLogqlDuration(stepMs)}]))`;
   const values = await lokiQueryRange(query, {
     ...range,
     limit: 1000,
@@ -206,33 +206,14 @@ function nextPageCursor(nanoseconds) {
   return (BigInt(nanoseconds) + offset).toString();
 }
 
-function buildApiExchangeQuery() {
-  const parts = [API_EXCHANGE_QUERY];
-  const method = els.methodSelect.value.trim();
-  const statusPrefix = els.statusSelect.value.trim();
-  const path = els.pathInput.value.trim();
-  const requestId = els.requestIdInput.value.trim();
-  const logSearch = els.logSearchInput.value.trim();
-  if (method) {
-    parts.push(`|= ${quoteLogql(`"method":"${method}"`)}`);
-  }
-  if (statusPrefix) {
-    parts.push(`|~ ${quoteLogql(`"status":${statusPrefix}[0-9][0-9]`)}`);
-  }
-  if (path) {
-    parts.push(`|= ${quoteLogql(path)}`);
-  }
-  if (requestId) {
-    parts.push(`|= ${quoteLogql(requestId)}`);
-  }
-  if (logSearch) {
-    parts.push(`|= ${quoteLogql(logSearch)}`);
-  }
-  return parts.join(" ");
-}
-
-function quoteLogql(value) {
-  return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+function filteredExchangeQuery() {
+  return buildApiExchangeQuery({
+    method: els.methodSelect.value.trim(),
+    statusPrefix: els.statusSelect.value.trim(),
+    path: els.pathInput.value.trim(),
+    requestId: els.requestIdInput.value.trim(),
+    logSearch: els.logSearchInput.value.trim(),
+  });
 }
 
 function render() {
@@ -310,7 +291,7 @@ function renderRequestRow(request) {
   row.innerHTML = `
     <div class="time-cell" role="cell">${escapeHtml(request.time)}</div>
     <div role="cell"><span class="method-badge method-${escapeHtml(request.method.toLowerCase())}">${escapeHtml(request.method)}</span></div>
-    <div class="path-cell" role="cell" title="${escapeHtml(request.path)}">${escapeHtml(request.path)}</div>
+    <div class="path-cell" role="cell" title="${escapeHtml(request.path)}">${escapeHtml(request.path)}${request.protocol === "mcp" ? `<small class="exchange-source">${escapeHtml(request.transport === "voice" ? "Voice" : "HTTP")} · ${escapeHtml(request.toolName || request.resourceName || request.operation)}</small>` : ""}</div>
     <div role="cell"><span class="status-badge ${statusTone(request.status)}">${request.status || "-"}</span></div>
     <div role="cell">${durationLabel(request.durationMs)}</div>
     <div class="ip-cell" role="cell">${escapeHtml(request.clientIp || "-")}</div>
@@ -344,6 +325,9 @@ function renderDetailElement(request) {
       </div>
       <button type="button" data-copy="${escapeHtml(request.requestId)}">Copy requestId</button>
     </div>
+    <dl class="exchange-metadata">
+      ${exchangeMetadata(request).map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}
+    </dl>
     <div class="detail-grid">
       ${jsonPanel("Request", request.request)}
       ${jsonPanel("Response", request.response)}
@@ -425,7 +409,7 @@ async function loadDetails(request) {
   const requestMs = Number(BigInt(request.nanoseconds) / 1_000_000n);
   const startNs = ns(requestMs - 10 * 60 * 1000);
   const endNs = ns(requestMs + 10 * 60 * 1000);
-  const query = `{app="buddystudy"} |= "${request.requestId}"`;
+  const query = buildRelatedLogQuery(request);
   const values = await lokiQueryRange(query, { startNs, endNs, limit: 200, direction: "forward" });
   const logs = values.map(parseRelatedLog).sort((a, b) => Number(BigInt(a.nanoseconds) - BigInt(b.nanoseconds)));
   const errors = values

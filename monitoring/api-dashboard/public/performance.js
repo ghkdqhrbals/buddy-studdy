@@ -1,9 +1,10 @@
 import {
+  EXCHANGE_QUERY,
   durationLabel,
+  groupApiExchanges,
   parseApiExchange,
-  percentile,
   statusTone,
-} from "./logs.js?v=2026070612";
+} from "./logs.js?v=2026091001";
 
 const state = {
   requests: [],
@@ -24,8 +25,6 @@ const els = {
   worstP99: document.querySelector("#worstP99"),
   emptyTemplate: document.querySelector("#emptyTemplate"),
 };
-
-const DEFAULT_QUERY = '{app="buddystudy"} |= "api_exchange"';
 
 function ns(ms) {
   return (BigInt(ms) * 1_000_000n).toString();
@@ -55,7 +54,7 @@ async function lokiQueryRange(query, { startNs, endNs, limit = 1000 }) {
 
 async function loadPerformance() {
   setStatus("Loading API performance...", "loading");
-  const values = await lokiQueryRange(DEFAULT_QUERY, { ...timeRange(), limit: 1200 });
+  const values = await lokiQueryRange(EXCHANGE_QUERY, { ...timeRange(), limit: 1200 });
   state.requests = values
     .map((value) => {
       try {
@@ -72,42 +71,10 @@ async function loadPerformance() {
 }
 
 function applyFilters() {
-  const method = els.methodSelect.value;
-  const pathQuery = els.pathInput.value.trim().toLowerCase();
-  const filtered = state.requests.filter((request) => {
-    if (method && request.method !== method) return false;
-    if (pathQuery && !request.path.toLowerCase().includes(pathQuery)) return false;
-    return true;
+  state.groups = groupApiExchanges(state.requests, {
+    method: els.methodSelect.value,
+    pathQuery: els.pathInput.value.trim(),
   });
-  const byApi = new Map();
-  for (const request of filtered) {
-    const key = `${request.method} ${request.path}`;
-    const group = byApi.get(key) ?? {
-      method: request.method,
-      path: request.path,
-      count: 0,
-      errors: 0,
-      durations: [],
-      latestNs: request.nanoseconds,
-    };
-    group.count += 1;
-    group.errors += request.status >= 500 ? 1 : 0;
-    group.durations.push(request.durationMs);
-    if (BigInt(request.nanoseconds) > BigInt(group.latestNs)) {
-      group.latestNs = request.nanoseconds;
-    }
-    byApi.set(key, group);
-  }
-  state.groups = [...byApi.values()]
-    .map((group) => ({
-      ...group,
-      p50: percentile(group.durations, 50),
-      p90: percentile(group.durations, 90),
-      p95: percentile(group.durations, 95),
-      p99: percentile(group.durations, 99),
-      max: Math.max(...group.durations),
-    }))
-    .sort((a, b) => (b.p99 ?? 0) - (a.p99 ?? 0));
 }
 
 function render() {
@@ -135,7 +102,7 @@ function renderRows() {
   for (const group of state.groups) {
     const row = document.createElement("a");
     row.className = "performance-row data-row performance-link";
-    row.href = `/?path=${encodeURIComponent(group.path)}`;
+    row.href = `/?method=${encodeURIComponent(group.method)}&path=${encodeURIComponent(group.path)}`;
     row.setAttribute("role", "row");
     row.innerHTML = `
       <div role="cell"><span class="method-badge method-${escapeHtml(group.method.toLowerCase())}">${escapeHtml(group.method)}</span></div>

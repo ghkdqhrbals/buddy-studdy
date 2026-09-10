@@ -27,6 +27,7 @@ import java.time.Instant
 class BuddyStudyMcpAdapter(
     private val buddyStudy: BuddyStudyMcpUseCase,
     private val objectMapper: ObjectMapper,
+    private val exchangeLogger: McpExchangeLogger = McpExchangeLogger(objectMapper),
 ) : BuddyStudyMcpPort {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -577,12 +578,18 @@ class BuddyStudyMcpAdapter(
                         .onRetryExhaustedThrow { _, failure -> failure.failure() },
                 )
             } else operation
-            result
+            val completed = result
                 .map(::successResult)
                 .onErrorResume { error ->
                     if (isCancellation(error)) Mono.error(error)
                     else Mono.just(errorResult(name, error))
                 }
+            if (context.get(BuddyStudyMcpPort.SUPPRESS_EXCHANGE_LOG_CONTEXT_KEY) == true) completed
+            else exchangeLogger.observeMono(
+                logContext(context), "tools/call", name,
+                mapOf("name" to name, "arguments" to request.arguments().orEmpty()),
+                response = { value -> McpExchangeResponse(value.structuredContent() ?: mapOf("content" to value.content()), value.isError() == true) },
+            ) { completed }
         }
     }
 
@@ -599,11 +606,28 @@ class BuddyStudyMcpAdapter(
             .mimeType(APPLICATION_JSON)
             .build()
         return McpStatelessServerFeatures.AsyncResourceSpecification(definition) { context, _ ->
-            mono { handler(principal(context)) }
+            val completed = mono { handler(principal(context)) }
                 .map { value -> resourceResult(uri, value) }
-                .onErrorResume { error -> Mono.just(resourceErrorResult(uri, error)) }
+                .onErrorResume { error ->
+                    if (isCancellation(error)) Mono.error(error)
+                    else Mono.just(resourceErrorResult(uri, error))
+                }
+            if (context.get(BuddyStudyMcpPort.SUPPRESS_EXCHANGE_LOG_CONTEXT_KEY) == true) completed
+            else exchangeLogger.observeMono(
+                logContext(context), "resources/read", name, mapOf("uri" to uri),
+                response = { value ->
+                    val body = (value.contents().firstOrNull() as? McpSchema.TextResourceContents)?.text()
+                    McpExchangeResponse(body ?: mapOf("contents" to value.contents()))
+                },
+            ) { completed }
         }
     }
+
+    private fun logContext(context: McpTransportContext) = McpExchangeContext(
+        userId = (context.get(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY) as? Principal)?.userId,
+        transport = "http",
+        parentRequestId = context.get(BuddyStudyMcpPort.PARENT_REQUEST_ID_CONTEXT_KEY) as? String,
+    )
 
     private fun principal(context: McpTransportContext): Principal =
         context.get(BuddyStudyMcpPort.PRINCIPAL_CONTEXT_KEY) as? Principal
