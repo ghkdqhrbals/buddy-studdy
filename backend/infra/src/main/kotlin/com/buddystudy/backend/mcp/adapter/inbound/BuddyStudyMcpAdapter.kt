@@ -12,11 +12,15 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
 import io.modelcontextprotocol.spec.McpSchema
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.reactor.mono
 import org.slf4j.LoggerFactory
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.stereotype.Component
+import reactor.core.Exceptions
 import reactor.core.publisher.Mono
+import reactor.util.retry.Retry
+import java.time.Duration
 import java.time.Instant
 
 @Component
@@ -564,9 +568,21 @@ class BuddyStudyMcpAdapter(
             )
             .build()
         return McpStatelessServerFeatures.AsyncToolSpecification(definition) { context, request ->
-            mono { handler(principal(context), Arguments(request.arguments().orEmpty())) }
+            val operation = mono { handler(principal(context), Arguments(request.arguments().orEmpty())) }
+            val result = if (readOnly) {
+                operation.retryWhen(
+                    Retry.fixedDelay(1, Duration.ofMillis(250))
+                        .filter(::canRetryRead)
+                        .doBeforeRetry { failure -> logFailure(name, failure.failure(), retrying = true) }
+                        .onRetryExhaustedThrow { _, failure -> failure.failure() },
+                )
+            } else operation
+            result
                 .map(::successResult)
-                .onErrorResume { error -> Mono.just(errorResult(name, error)) }
+                .onErrorResume { error ->
+                    if (isCancellation(error)) Mono.error(error)
+                    else Mono.just(errorResult(name, error))
+                }
         }
     }
 
@@ -632,7 +648,7 @@ class BuddyStudyMcpAdapter(
             is McpArgumentException -> Triple("VALIDATION_ERROR", 422, error.message ?: "Invalid tool arguments.")
             is AccessDeniedException -> Triple("PERMISSION_DENIED", 403, "Permission is denied.")
             else -> {
-                log.warn("mcp_operation_failed operation={} errorType={}", operation, error.javaClass.name)
+                logFailure(operation, error, retrying = false)
                 Triple("INTERNAL_SERVER_ERROR", 500, "The MCP operation could not be completed.")
             }
         }
@@ -756,6 +772,31 @@ class BuddyStudyMcpAdapter(
             is Boolean -> value
             else -> throw McpArgumentException("$name must be a boolean.")
         }
+    }
+
+    private fun canRetryRead(error: Throwable): Boolean {
+        if (isCancellation(error)) return false
+        return when (error) {
+            is McpArgumentException, is AccessDeniedException -> false
+            is ApiRuntimeException -> error.status.is5xxServerError
+            else -> true
+        }
+    }
+
+    private fun isCancellation(error: Throwable): Boolean =
+        generateSequence(error) { it.cause }.take(8).any { it is CancellationException || Exceptions.isCancel(it) }
+
+    private fun logFailure(operation: String, error: Throwable, retrying: Boolean) {
+        val cause = generateSequence(error) { it.cause }.take(8).last()
+        // Exception messages may contain SQL values or learner text. Keep only
+        // types and source frames, which identify the failing code without data.
+        val frames = cause.stackTrace.take(8).joinToString(" <- ") {
+            "${it.className}.${it.methodName}:${it.lineNumber}"
+        }
+        log.warn(
+            "mcp_operation_failed operation={} errorType={} causeType={} retrying={} origin={}",
+            operation, error.javaClass.name, cause.javaClass.name, retrying, frames,
+        )
     }
 
     private class McpArgumentException(message: String) : RuntimeException(message)

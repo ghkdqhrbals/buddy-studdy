@@ -6,6 +6,7 @@ import ch.qos.logback.core.read.ListAppender
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
 import com.buddystudy.backend.mcp.application.model.McpDeletionResponse
 import com.buddystudy.backend.study.application.model.RootStudyCreationResponse
@@ -22,13 +23,21 @@ import com.buddystudy.backend.study.application.model.VoiceStudyLearningRecordRe
 import com.buddystudy.voice.domain.VoiceTutorExchangeKind
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.core.JsonGenerator
+import com.fasterxml.jackson.databind.JsonSerializer
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializerProvider
+import com.fasterxml.jackson.databind.module.SimpleModule
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
 import io.modelcontextprotocol.spec.McpSchema
+import kotlinx.coroutines.CancellationException
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
+import org.springframework.security.access.AccessDeniedException
 import java.lang.reflect.Proxy
 import java.time.Instant
 
@@ -288,6 +297,175 @@ class BuddyStudyMcpAdapterTest {
         assertThat(errorDetails(result))
             .containsEntry("code", "STUDY_SETTINGS_MISSING")
             .containsEntry("status", 404)
+    }
+
+    @Test
+    fun `transient study read is retried once with the same authenticated scope and arguments`() {
+        val invocations = mutableListOf<List<Any?>>()
+        val adapter = adapter(proxyUseCase { method, arguments ->
+            assertThat(method).isEqualTo("listStudies")
+            invocations += arguments.dropLast(1)
+            if (invocations.size == 1) throw IllegalStateException("Transient synthetic read failure")
+            StudyPageResponse(emptyList(), 0, 10, 0, Instant.EPOCH)
+        })
+
+        val result = call(adapter, "list_studies", mapOf("limit" to 10, "query" to "Redis"), authenticatedContext)
+
+        assertThat(result.isError()).isFalse()
+        assertThat(invocations).containsExactly(
+            listOf(principal, 10, 0, "Redis", "ko"),
+            listOf(principal, 10, 0, "Redis", "ko"),
+        )
+    }
+
+    @Test
+    fun `persistent unexpected read failure stops after one retry`() {
+        var invocations = 0
+        val adapter = adapter(proxyUseCase { _, _ ->
+            invocations += 1
+            throw IllegalStateException("Persistent synthetic read failure")
+        })
+
+        val result = call(adapter, "list_studies", emptyMap(), authenticatedContext)
+
+        assertThat(invocations).isEqualTo(2)
+        assertThat(result.isError()).isTrue()
+        assertThat(errorDetails(result)).containsEntry("code", "INTERNAL_SERVER_ERROR").containsEntry("status", 500)
+    }
+
+    @Test
+    fun `server error reads retry once and retain the application error code on exhaustion`() {
+        for (recover in listOf(true, false)) {
+            var invocations = 0
+            val adapter = adapter(proxyUseCase { _, _ ->
+                invocations += 1
+                if (!recover || invocations == 1) throw ApiRuntimeException(ApiErrorCode.SERVER_BUSY)
+                StudyPageResponse(emptyList(), 0, 100, 0, Instant.EPOCH)
+            })
+
+            val result = call(adapter, "list_studies", emptyMap(), authenticatedContext)
+
+            assertThat(invocations).isEqualTo(2)
+            assertThat(result.isError()).isEqualTo(!recover)
+            if (!recover) assertThat(errorDetails(result)).containsEntry("code", "SERVER_BUSY").containsEntry("status", 503)
+        }
+    }
+
+    @Test
+    fun `idempotent mutations are never automatically retried`() {
+        var invocations = 0
+        val adapter = adapter(proxyUseCase { method, _ ->
+            assertThat(method).isEqualTo("updateStudy")
+            invocations += 1
+            throw IllegalStateException("Synthetic mutation failure")
+        })
+
+        val result = call(adapter, "update_study", mapOf("study_id" to 42L, "topic" to "Redis"), authenticatedContext)
+
+        assertThat(invocations).isEqualTo(1)
+        assertThat(result.isError()).isTrue()
+    }
+
+    @Test
+    fun `permission validation and missing resource failures never retry a read`() {
+        val failures = listOf(
+            AccessDeniedException("Synthetic access denial") to "PERMISSION_DENIED",
+            ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid input") to "VALIDATION_ERROR",
+            ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Missing study") to "STUDY_SETTINGS_MISSING",
+            ApiRuntimeException(ApiErrorCode.SERVER_BUSY, statusOverride = HttpStatus.TOO_MANY_REQUESTS) to "SERVER_BUSY",
+        )
+        for ((failure, code) in failures) {
+            var invocations = 0
+            val adapter = adapter(proxyUseCase { _, _ ->
+                invocations += 1
+                throw failure
+            })
+
+            val result = call(adapter, "list_studies", emptyMap(), authenticatedContext)
+
+            assertThat(invocations).isEqualTo(1)
+            assertThat(errorDetails(result)).containsEntry("code", code)
+        }
+    }
+
+    @Test
+    fun `invalid read arguments are rejected before the use case and without a retry`() {
+        var invocations = 0
+        val adapter = adapter(proxyUseCase { _, _ -> invocations += 1; error("Unexpected use-case invocation") })
+        val logger = LoggerFactory.getLogger(BuddyStudyMcpAdapter::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            val result = call(adapter, "list_studies", mapOf("limit" to "invalid"), authenticatedContext)
+
+            assertThat(invocations).isZero()
+            assertThat(errorDetails(result)).containsEntry("code", "VALIDATION_ERROR")
+            assertThat(appender.list.map(ILoggingEvent::getFormattedMessage)).noneMatch { it.contains("retry") }
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
+    }
+
+    @Test
+    fun `cancelled reads propagate cancellation without retry or error conversion`() {
+        var invocations = 0
+        val adapter = adapter(proxyUseCase { _, _ ->
+            invocations += 1
+            throw CancellationException("Synthetic call cancellation")
+        })
+
+        assertThatThrownBy { call(adapter, "list_studies", emptyMap(), authenticatedContext) }
+            .isInstanceOf(CancellationException::class.java)
+        assertThat(invocations).isEqualTo(1)
+    }
+
+    @Test
+    fun `response serialization failure does not repeat a completed read`() {
+        var invocations = 0
+        val mapper = jacksonObjectMapper().findAndRegisterModules().registerModule(
+            SimpleModule().addSerializer(StudyPageResponse::class.java, object : JsonSerializer<StudyPageResponse>() {
+                override fun serialize(value: StudyPageResponse, generator: JsonGenerator, serializers: SerializerProvider) {
+                    throw IllegalStateException("Synthetic serialization failure")
+                }
+            }),
+        )
+        val adapter = adapter(proxyUseCase { _, _ ->
+            invocations += 1
+            StudyPageResponse(emptyList(), 0, 100, 0, Instant.EPOCH)
+        }, mapper)
+
+        val result = call(adapter, "list_studies", emptyMap(), authenticatedContext)
+
+        assertThat(invocations).isEqualTo(1)
+        assertThat(errorDetails(result)).containsEntry("code", "INTERNAL_SERVER_ERROR")
+    }
+
+    @Test
+    fun `retry diagnostics exclude private query exception messages and throwable payloads`() {
+        val secret = "private-query-do-not-log-8b61a34f"
+        var invocations = 0
+        val adapter = adapter(proxyUseCase { _, _ ->
+            invocations += 1
+            throw IllegalStateException("Failed query $secret", IllegalArgumentException("Nested $secret"))
+        })
+        val logger = LoggerFactory.getLogger(BuddyStudyMcpAdapter::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            val result = call(adapter, "list_studies", mapOf("query" to secret), authenticatedContext)
+
+            assertThat(invocations).isEqualTo(2)
+            assertThat(result.isError()).isTrue()
+            assertThat(appender.list.map(ILoggingEvent::getFormattedMessage))
+                .anyMatch { it.contains("operation=list_studies") }
+                .noneMatch { it.contains(secret) }
+            assertThat(appender.list).allSatisfy { event -> assertThat(event.throwableProxy).isNull() }
+            assertThat(result.content().toString()).doesNotContain(secret)
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
     }
 
     @Test
@@ -585,9 +763,9 @@ class BuddyStudyMcpAdapterTest {
 
     private fun adapter(useCase: BuddyStudyMcpUseCase = proxyUseCase { method, _ ->
         error("Unexpected use-case call: $method")
-    }): BuddyStudyMcpAdapter = BuddyStudyMcpAdapter(
+    }, mapper: ObjectMapper = jacksonObjectMapper().findAndRegisterModules()): BuddyStudyMcpAdapter = BuddyStudyMcpAdapter(
         buddyStudy = useCase,
-        objectMapper = jacksonObjectMapper().findAndRegisterModules(),
+        objectMapper = mapper,
     )
 
     private fun call(
