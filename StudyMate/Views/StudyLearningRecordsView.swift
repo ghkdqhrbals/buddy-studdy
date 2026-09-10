@@ -5,12 +5,25 @@ import SwiftUI
 /// One visible page, not a second answer screen or an unbounded history list.
 struct StudyLearningRecordsSection: View {
     @EnvironmentObject private var appState: AppState
-    @StateObject private var model = StudyLearningRecordsViewModel()
+    @StateObject private var model: StudyLearningRecordsViewModel
     @State private var scope: StudyLearningRecordScope = .node
     @State private var pageTask: Task<Void, Never>?
 
     let studyID: Int
     var allowsSubtree = false
+
+    init(
+        studyID: Int,
+        allowsSubtree: Bool = false,
+        preparedLoader: StudyLearningRecordsLoader? = nil
+    ) {
+        self.studyID = studyID
+        self.allowsSubtree = allowsSubtree
+        let matchingLoader = preparedLoader.flatMap { loader in
+            loader.context.studyID == studyID && loader.context.scope == .node ? loader : nil
+        }
+        _model = StateObject(wrappedValue: StudyLearningRecordsViewModel(preparedLoader: matchingLoader))
+    }
 
     private var strings: AppStrings { appState.strings }
     private var currentContext: StudyLearningRecordsContext? {

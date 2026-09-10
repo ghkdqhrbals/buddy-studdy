@@ -22,10 +22,12 @@ struct StudyView: View {
 
     init(
         preferredCategoryID: String? = nil,
-        isContentPrepared: Bool = false
+        isContentPrepared: Bool = false,
+        initialAnswerDraft: String = ""
     ) {
         self.preferredCategoryID = preferredCategoryID
         self.isContentPrepared = isContentPrepared
+        _draftAnswer = State(initialValue: initialAnswerDraft)
         _isResolvingInitialAnswerState = State(initialValue: !isContentPrepared)
     }
 
@@ -92,7 +94,10 @@ struct StudyView: View {
                     Divider().padding(.top, 8)
                     StudyLearningRecordsSection(
                         studyID: room.id,
-                        allowsSubtree: room.parentStudyId == nil || appState.backendStudyRooms.contains { $0.parentStudyId == room.id }
+                        allowsSubtree: room.parentStudyId == nil || appState.backendStudyRooms.contains { $0.parentStudyId == room.id },
+                        preparedLoader: isContentPrepared
+                            ? appState.makeStudyLearningRecordsLoader(studyID: room.id, scope: .node)
+                            : nil
                     )
                     .id(room.id)
                 }

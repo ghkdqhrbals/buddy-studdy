@@ -7344,6 +7344,46 @@ final class AppState: ObservableObject {
         )
     }
 
+    /// Resolves the destination before either the home list or a nested tree
+    /// publishes its own navigation state. Grading polling starts in StudyView.
+    func prepareStudyRoomForOpening(
+        categoryID: String,
+        openingRequestID: String? = nil
+    ) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        if isCommunitySessionActive && communityProfile == nil {
+            let pendingIdentity = commonRecordsIdentity
+            await loadCommunityProfile()
+            let resolvedIdentity = commonRecordsIdentity
+            guard !Task.isCancelled, isCommunitySessionActive,
+                  (communityProfile?.id ?? 0) > 0,
+                  pendingIdentity.sessionGeneration == resolvedIdentity.sessionGeneration,
+                  pendingIdentity.backendGeneration == resolvedIdentity.backendGeneration,
+                  pendingIdentity.languageCode == resolvedIdentity.languageCode else {
+                return false
+            }
+        }
+        let identity = commonRecordsIdentity
+        async let contentPrepared = refreshStudyRoomContent(
+            categoryID: categoryID,
+            openingRequestID: openingRequestID
+        )
+        async let quotaRefresh: Void = refreshQuestionQuota()
+        #if os(iOS)
+        async let historyPrepared = prepareStudyLearningRecordsForOpening(
+            studyID: Int(categoryID) ?? 0
+        )
+        let (didPrepareContent, _, didPrepareHistory) = await (
+            contentPrepared, quotaRefresh, historyPrepared
+        )
+        #else
+        let (didPrepareContent, _) = await (contentPrepared, quotaRefresh)
+        let didPrepareHistory = true
+        #endif
+        return !Task.isCancelled && identity == commonRecordsIdentity &&
+            didPrepareContent && didPrepareHistory
+    }
+
     private func beginPreparedStudyOpening(categoryID: String) {
         cancelStudyOpening(reason: "replaced")
         studyOpeningErrorMessage = nil
@@ -7357,12 +7397,10 @@ final class AppState: ObservableObject {
         studyOpeningTask = Task { [weak self] in
             guard let self else { return }
 
-            async let contentPrepared = refreshStudyRoomContent(
+            let didPrepareContent = await prepareStudyRoomForOpening(
                 categoryID: categoryID,
                 openingRequestID: requestID
             )
-            async let quotaRefresh: Void = refreshQuestionQuota()
-            let (didPrepareContent, _) = await (contentPrepared, quotaRefresh)
 
             guard studyOpeningRequestID == requestID else {
                 return
@@ -7427,8 +7465,10 @@ final class AppState: ObservableObject {
                 ?? initialCategory.flatMap({ category in Int(category.id) }) else {
             return initialCategory != nil
         }
+        let identity = commonRecordsIdentity
         guard let detail = await fetchBackendStudyDetailIfPossible(studyID: studyID),
               !Task.isCancelled,
+              identity == commonRecordsIdentity,
               openingRequestID == nil || studyOpeningRequestID == openingRequestID else {
             return false
         }

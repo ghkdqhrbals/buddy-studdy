@@ -1178,6 +1178,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     statusCode: 200,
                     body: Self.questionQuotaResponse
                 )
+            case "/api/v1/profile", "/api/v1/studies/12/learning-records", "/api/v1/studies/13/learning-records":
+                return Self.treeOpeningResponse(for: request)
             default:
                 return Self.response(for: request, statusCode: 500, body: "{}")
             }
@@ -1246,6 +1248,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     statusCode: 200,
                     body: Self.questionQuotaResponse
                 )
+            case "/api/v1/profile", "/api/v1/studies/12/learning-records", "/api/v1/studies/13/learning-records":
+                return Self.treeOpeningResponse(for: request)
             default:
                 return Self.response(for: request, statusCode: 500, body: "{}")
             }
@@ -1372,6 +1376,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     statusCode: 200,
                     body: Self.questionQuotaResponse
                 )
+            case "/api/v1/profile", "/api/v1/studies/12/learning-records", "/api/v1/studies/13/learning-records":
+                return Self.treeOpeningResponse(for: request)
             default:
                 return Self.response(for: request, statusCode: 500, body: "{}")
             }
@@ -1425,6 +1431,306 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
     }
 
+    func testTreePreparationWaitsForBothDetailAndQuotaWithoutReplacingTreeRoute() async throws {
+        for delayedPath in ["/api/v1/studies/12", "/api/v1/questions/quota"] {
+            let suiteName = "TreePreparationBarrierTests-\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+            let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+            defer {
+                defaults.removePersistentDomain(forName: suiteName)
+                try? FileManager.default.removeItem(at: databaseURL)
+            }
+            let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+            let finishedPaths = LockedValue<[String]>([])
+            let client = makeClient { request in
+                let path = request.url?.path ?? ""
+                finishedPaths.set(finishedPaths.value + [path])
+                return Self.treeOpeningResponse(for: request)
+            }
+            let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+            await appState.refreshVisibleData()
+            let treeRoute = HomeStudyRoute(categoryID: "11", showsTree: true)
+            appState.homeStudyRoute = treeRoute
+            let delayedRequestStarted = LockedValue(false)
+            QuestionGenerationURLProtocol.responseDelayHandler = { request in
+                guard request.url?.path == delayedPath else { return 0 }
+                delayedRequestStarted.set(true)
+                return 250_000_000
+            }
+            var didFinishPreparation = false
+            let preparation = Task { @MainActor in
+                let ready = await appState.prepareStudyRoomForOpening(categoryID: "12")
+                didFinishPreparation = true
+                return ready
+            }
+            let didStartDelayedRequest = await waitUntil { delayedRequestStarted.value }
+            XCTAssertTrue(didStartDelayedRequest)
+            try await Task.sleep(nanoseconds: 60_000_000)
+            XCTAssertFalse(didFinishPreparation, "The tree must stay visible while \(delayedPath) is loading.")
+            XCTAssertEqual(appState.homeStudyRoute, treeRoute)
+            let otherPath = delayedPath == "/api/v1/studies/12"
+                ? "/api/v1/questions/quota" : "/api/v1/studies/12"
+            XCTAssertTrue(finishedPaths.value.contains(otherPath))
+
+            let ready = await preparation.value
+            XCTAssertTrue(ready)
+            XCTAssertEqual(appState.homeStudyRoute, treeRoute, "Preparing a tree destination must preserve its parent route.")
+            XCTAssertEqual(appState.studyRoomRecordForDisplay(categoryID: "12")?.id, "latest-child-12")
+            QuestionGenerationURLProtocol.responseDelayHandler = nil
+        }
+    }
+
+    func testColdStartTreePreparationResolvesProfileBeforeLoadingLearningHistory() async throws {
+        let suiteName = "TreePreparationProfileBarrierTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let requestedPaths = LockedValue<[String]>([])
+        let client = makeClient { request in Self.treeOpeningResponse(for: request) }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        await appState.refreshVisibleData()
+        XCTAssertTrue(appState.isCommunitySessionActive)
+        XCTAssertNil(appState.communityProfile, "A restored signed-in session starts before its profile resolves.")
+        XCTAssertNil(appState.studyLearningRecordsIdentity)
+        let treeRoute = HomeStudyRoute(categoryID: "11", showsTree: true)
+        appState.homeStudyRoute = treeRoute
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            let path = request.url?.path ?? ""
+            requestedPaths.set(requestedPaths.value + [path])
+            switch path {
+            case "/api/v1/profile": return 250_000_000
+            case "/api/v1/studies/12/learning-records": return 150_000_000
+            default: return 0
+            }
+        }
+        var didFinishPreparation = false
+        let preparation = Task { @MainActor in
+            let ready = await appState.prepareStudyRoomForOpening(categoryID: "12")
+            didFinishPreparation = true
+            return ready
+        }
+        let didStartProfile = await waitUntil { requestedPaths.value.contains("/api/v1/profile") }
+        XCTAssertTrue(didStartProfile)
+        XCTAssertFalse(didFinishPreparation)
+        XCTAssertFalse(requestedPaths.value.contains("/api/v1/studies/12/learning-records"))
+        XCTAssertEqual(appState.homeStudyRoute, treeRoute)
+
+        let didStartHistory = await waitUntil {
+            requestedPaths.value.contains("/api/v1/studies/12/learning-records")
+        }
+        XCTAssertTrue(didStartHistory)
+        XCTAssertEqual(appState.communityProfile?.id, 7)
+        XCTAssertFalse(didFinishPreparation, "Resolving the profile alone must not bypass the initial history load.")
+        let ready = await preparation.value
+        XCTAssertTrue(ready)
+        XCTAssertEqual(appState.homeStudyRoute, treeRoute)
+        let loader = try XCTUnwrap(appState.makeStudyLearningRecordsLoader(studyID: 12, scope: .node))
+        XCTAssertNotNil(loader.cachedPage(nil))
+        XCTAssertEqual(requestedPaths.value.filter { $0 == "/api/v1/profile" }.count, 1)
+        XCTAssertEqual(requestedPaths.value.filter { $0 == "/api/v1/studies/12/learning-records" }.count, 1)
+    }
+
+    func testColdStartProfileFailureKeepsStudyDestinationClosed() async throws {
+        let suiteName = "TreePreparationProfileFailureTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let requestedPaths = LockedValue<[String]>([])
+        let client = makeClient { request in
+            let path = request.url?.path ?? ""
+            requestedPaths.set(requestedPaths.value + [path])
+            if path == "/api/v1/profile" {
+                return Self.response(for: request, statusCode: 503, body: "{}")
+            }
+            return Self.treeOpeningResponse(for: request)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        await appState.refreshVisibleData()
+        XCTAssertTrue(appState.isCommunitySessionActive)
+        XCTAssertNil(appState.communityProfile)
+        let treeRoute = HomeStudyRoute(categoryID: "11", showsTree: true)
+        appState.homeStudyRoute = treeRoute
+
+        let ready = await appState.prepareStudyRoomForOpening(categoryID: "12")
+
+        XCTAssertFalse(ready)
+        XCTAssertEqual(appState.homeStudyRoute, treeRoute)
+        XCTAssertNil(appState.communityProfile)
+        XCTAssertTrue(requestedPaths.value.contains("/api/v1/profile"))
+        XCTAssertFalse(requestedPaths.value.contains("/api/v1/studies/12"))
+        XCTAssertFalse(requestedPaths.value.contains("/api/v1/studies/12/learning-records"))
+    }
+
+    func testTreePreparationWaitsForInitialLearningHistoryBeforeBecomingReady() async throws {
+        let suiteName = "TreePreparationHistoryTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let historyRequestCount = LockedRequestCounter()
+        let client = makeClient { request in
+            if request.url?.path == "/api/v1/studies/12/learning-records" {
+                historyRequestCount.increment()
+            }
+            return Self.treeOpeningResponse(for: request)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        await appState.refreshVisibleData()
+        appState.communityProfile = CommunityUserProfile(
+            id: 7, displayName: "Learner", status: "ACTIVE", provider: "GOOGLE", bio: "", avatarURL: nil
+        )
+        XCTAssertNotNil(appState.studyLearningRecordsIdentity)
+        let historyStarted = LockedValue(false)
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.url?.path == "/api/v1/studies/12/learning-records" else { return 0 }
+            historyStarted.set(true)
+            return 250_000_000
+        }
+        var didFinishPreparation = false
+        let preparation = Task { @MainActor in
+            let ready = await appState.prepareStudyRoomForOpening(categoryID: "12")
+            didFinishPreparation = true
+            return ready
+        }
+        let didStartHistory = await waitUntil { historyStarted.value }
+        XCTAssertTrue(didStartHistory)
+        let didPrepareDetail = await waitUntil {
+            appState.studyRoomRecordForDisplay(categoryID: "12") != nil
+        }
+        XCTAssertTrue(didPrepareDetail)
+        XCTAssertFalse(didFinishPreparation, "The first history page must settle before the destination is ready.")
+        let ready = await preparation.value
+        XCTAssertTrue(ready)
+        XCTAssertEqual(historyRequestCount.value, 1)
+        let loader = try XCTUnwrap(appState.makeStudyLearningRecordsLoader(studyID: 12, scope: .node))
+        XCTAssertNotNil(loader.cachedPage(nil), "The new screen must be able to render the prepared history immediately.")
+    }
+
+    func testTreePreparationReturnsFalseWhenStudyDetailFails() async throws {
+        let suiteName = "TreePreparationFailureTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            if request.url?.path == "/api/v1/studies/12" {
+                return Self.response(for: request, statusCode: 503, body: "{}")
+            }
+            return Self.treeOpeningResponse(for: request)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        await appState.refreshVisibleData()
+        let treeRoute = HomeStudyRoute(categoryID: "11", showsTree: true)
+        appState.homeStudyRoute = treeRoute
+
+        let ready = await appState.prepareStudyRoomForOpening(categoryID: "12")
+
+        XCTAssertFalse(ready)
+        XCTAssertEqual(appState.homeStudyRoute, treeRoute)
+        XCTAssertNil(appState.studyRoomRecordForDisplay(categoryID: "12"))
+    }
+
+    func testCanceledTreePreparationCannotApplyLateStudyDetailOrBecomeReady() async throws {
+        let suiteName = "TreePreparationCancellationTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in Self.treeOpeningResponse(for: request) }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        await appState.refreshVisibleData()
+        let treeRoute = HomeStudyRoute(categoryID: "11", showsTree: true)
+        appState.homeStudyRoute = treeRoute
+        let detailStarted = LockedValue(false)
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.url?.path == "/api/v1/studies/12" else { return 0 }
+            detailStarted.set(true)
+            return 200_000_000
+        }
+        let preparation = Task { @MainActor in
+            await appState.prepareStudyRoomForOpening(categoryID: "12")
+        }
+        let didStartDetail = await waitUntil { detailStarted.value }
+        XCTAssertTrue(didStartDetail)
+        preparation.cancel()
+        let ready = await preparation.value
+        XCTAssertFalse(ready)
+        try await Task.sleep(nanoseconds: 250_000_000)
+
+        XCTAssertEqual(appState.homeStudyRoute, treeRoute)
+        XCTAssertNil(appState.studyRoomRecordForDisplay(categoryID: "12"))
+        XCTAssertFalse(appState.studyRecords.contains { $0.id == "latest-child-12" })
+    }
+
+    func testPreparedTreeQuestionRestoresEditableDraftWithoutSubmittingOrReplacingOtherDrafts() async throws {
+        let suiteName = "TreePreparationDraftTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let pendingQuestion = QuestionItem(
+            question: "Redis의 만료 정책을 설명하세요.", expectedAnswerHint: nil,
+            createdAt: Date(timeIntervalSince1970: 1_786_492_860)
+        )
+        let pendingRecord = StudyRecord(
+            id: "pending-child-12", studyID: 12, question: pendingQuestion,
+            topic: "메모리 관리와 만료 정책", difficulty: .level2, questionStatus: .ungraded
+        )
+        let otherRecord = StudyRecord(
+            id: "another-draft", studyID: 11,
+            question: QuestionItem(question: "Redis의 장점은?", expectedAnswerHint: nil, createdAt: Date()),
+            topic: "Redis", difficulty: .level10, questionStatus: .ungraded
+        )
+        let draft = "TTL이 끝난 키를 제거하고, 추가로 설명할 내용이 있습니다."
+        store.saveStudyRecord(pendingRecord)
+        store.saveStudyRecord(otherRecord)
+        store.saveAnswerDraft(draft, recordID: pendingRecord.id)
+        store.saveAnswerDraft("다른 질문에서 작성하던 답변", recordID: otherRecord.id)
+        store.saveQuestion(pendingQuestion)
+        store.saveLastAnswer(draft)
+        let client = makeClient { request in
+            if request.url?.path == "/api/v1/studies/12" {
+                return Self.response(for: request, statusCode: 200, body: Self.nestedPendingChildStudyDetailResponse)
+            }
+            return Self.treeOpeningResponse(for: request)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        await appState.refreshVisibleData()
+
+        let ready = await appState.prepareStudyRoomForOpening(categoryID: "12")
+
+        XCTAssertTrue(ready)
+        let record = try XCTUnwrap(appState.studyRoomRecordForDisplay(categoryID: "12"))
+        XCTAssertEqual(record.id, pendingRecord.id)
+        XCTAssertEqual(appState.answerDraft(for: record), draft)
+        XCTAssertTrue(StudyAnswerPresentationPolicy.shouldShowEditor(for: record))
+        XCTAssertNil(StudyAnswerPresentationPolicy.submittedAnswer(for: record))
+        XCTAssertNil(record.answer)
+        XCTAssertNil(record.gradingRequestID)
+        XCTAssertEqual(store.loadAnswerDraft(recordID: otherRecord.id), "다른 질문에서 작성하던 답변")
+        XCTAssertNil(store.loadStudyRecords().first { $0.id == otherRecord.id }?.answer)
+    }
+
     func testRapidSecondStudySelectionCannotBeOverwrittenByStaleFirstPreload() async throws {
         let suiteName = "RapidNestedStudyNavigationTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -1465,6 +1771,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     statusCode: 200,
                     body: Self.questionQuotaResponse
                 )
+            case "/api/v1/profile", "/api/v1/studies/12/learning-records", "/api/v1/studies/13/learning-records":
+                return Self.treeOpeningResponse(for: request)
             default:
                 return Self.response(for: request, statusCode: 500, body: "{}")
             }
@@ -4106,6 +4414,41 @@ final class QuestionGenerationFlowTests: XCTestCase {
         }
         """
 
+    private static let nestedPendingChildStudyDetailResponse = """
+        {
+          "id": 12,
+          "topic": "메모리 관리와 만료 정책",
+          "parentStudyId": 11,
+          "sortOrder": 0,
+          "difficultyLevel": 2,
+          "intervalMinutes": 30,
+          "enabled": true,
+          "activeForQuestions": true,
+          "notificationSound": "default",
+          "customPrompt": "",
+          "openaiModel": "gpt-5.4",
+          "maxHistoryCount": 100,
+          "pendingQuestion": {
+            "id": "pending-child-12",
+            "studyId": 12,
+            "question": {
+              "question": "Redis의 만료 정책을 설명하세요.",
+              "expectedAnswerHint": null,
+              "createdAt": "2026-08-12T00:01:00Z"
+            },
+            "answer": null,
+            "gradingResult": null,
+            "topic": "메모리 관리와 만료 정책",
+            "difficulty": 2,
+            "questionStatus": "UNGRADED",
+            "isPublic": false
+          },
+          "latestQuestion": null,
+          "createdAt": "2026-08-01T00:00:00Z",
+          "updatedAt": "2026-08-12T00:02:00Z"
+        }
+        """
+
     private static let nestedRootStudyDetailResponse = """
         {
           "id": 11,
@@ -4254,6 +4597,21 @@ final class QuestionGenerationFlowTests: XCTestCase {
           "offset": 0
         }
         """
+
+    private static func treeOpeningResponse(for request: URLRequest) -> (HTTPURLResponse, Data) {
+        let body: String
+        switch request.url?.path {
+        case "/api/v1/profile": return activeProfileResponse(for: request)
+        case "/api/v1/studies": body = nestedStudyPageResponse
+        case "/api/v1/studies/12": body = nestedChildStudyDetailResponse
+        case "/api/v1/questions/quota": body = questionQuotaResponse
+        case "/api/v1/studies/12/learning-records", "/api/v1/studies/13/learning-records":
+            body = #"{"items":[],"nextCursor":null,"hasMore":false,"limit":30}"#
+        default:
+            return response(for: request, statusCode: 500, body: "{}")
+        }
+        return response(for: request, statusCode: 200, body: body)
+    }
 
     private func makeNestedStudyStore(
         defaults: UserDefaults,

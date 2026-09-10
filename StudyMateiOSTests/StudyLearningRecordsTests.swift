@@ -242,6 +242,65 @@ final class StudyLearningRecordsTests: XCTestCase {
         XCTAssertEqual(requests, [nil, "opaque-next", nil])
     }
 
+    func testPreparedHistoryIsAvailableBeforeActivationAndOnlySkipsTheOpeningRefresh() async throws {
+        let first = try decodePage([voiceItem(id: 1)], next: "next", hasMore: true)
+        let refreshed = try decodePage([voiceItem(id: 2)])
+        var requests = 0
+        var loader = makeLoader { _ in requests += 1; return refreshed }
+        loader.cachedPage = { cursor in cursor == nil ? first : nil }
+        let model = StudyLearningRecordsViewModel(preparedLoader: loader)
+
+        XCTAssertEqual(model.page, first)
+        XCTAssertEqual(model.context, loader.context)
+        XCTAssertEqual(model.detailLoader?.context, loader.context)
+        XCTAssertFalse(model.isLoading)
+        await model.activate(loader)
+        XCTAssertEqual(requests, 0)
+        XCTAssertEqual(model.page, first)
+
+        await model.load(.refresh)
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(model.page, refreshed)
+        model.deactivate()
+        await model.activate(loader)
+        XCTAssertEqual(requests, 2)
+    }
+
+    func testPreparedHistoryWithoutACachedPageStillLoadsOnActivation() async throws {
+        let result = try decodePage([voiceItem()])
+        var requests = 0
+        let loader = makeLoader { _ in requests += 1; return result }
+        let model = StudyLearningRecordsViewModel(preparedLoader: loader)
+        XCTAssertNil(model.page)
+        await model.activate(loader)
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(model.page, result)
+    }
+
+    func testPreparedHistoryCannotSkipLoadingADifferentStudy() async throws {
+        let old = try decodePage([voiceItem(id: 1)])
+        let current = try decodePage([voiceItem(id: 2, studyID: 42)])
+        var oldLoader = makeLoader { _ in old }
+        oldLoader.cachedPage = { _ in old }
+        let model = StudyLearningRecordsViewModel(preparedLoader: oldLoader)
+        var requests = 0
+        let currentLoader = makeLoader(studyID: 42) { _ in requests += 1; return current }
+        await model.activate(currentLoader)
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(model.page, current)
+        XCTAssertEqual(model.context, currentLoader.context)
+    }
+
+    func testPreparedHistoryRejectsAnExpiredAccountBeforeReadingItsCache() throws {
+        var loader = makeLoader { _ in XCTFail("Expired account must not load"); throw CancellationError() }
+        loader.isCurrent = { false }
+        loader.cachedPage = { _ in XCTFail("Expired account must not expose cached rows"); return nil }
+        let model = StudyLearningRecordsViewModel(preparedLoader: loader)
+        XCTAssertNil(model.page)
+        XCTAssertNil(model.context)
+        XCTAssertNil(model.detailLoader)
+    }
+
     func testFailedNextPageRetainsCurrentRowsAndRetryUsesSameCursor() async throws {
         let first = try decodePage([voiceItem(id: 1)], next: "opaque-next", hasMore: true)
         let second = try decodePage([voiceItem(id: 2)])
@@ -361,6 +420,59 @@ final class StudyLearningRecordsTests: XCTestCase {
         fixture.assertDraftsUnchanged(app)
         XCTAssertEqual(fixture.requests.map(\.httpMethod), ["GET"])
         XCTAssertTrue(fixture.storage.store.loadStudyRecords().isEmpty)
+    }
+
+    func testOpeningPreparationCachesOnePageWithoutMutatingDraftsOrRepeatingTheRead() async throws {
+        let fixture = try LearningHTTPFixture(page: pageObject([questionItem(), voiceItem()]))
+        defer { fixture.close() }
+        let app = fixture.makeAppState()
+        let prepared = await app.prepareStudyLearningRecordsForOpening(studyID: 41)
+        XCTAssertTrue(prepared)
+        let loader = try XCTUnwrap(app.makeStudyLearningRecordsLoader(studyID: 41, scope: .node))
+        let model = StudyLearningRecordsViewModel(preparedLoader: loader)
+        XCTAssertEqual(model.page?.items.count, 2)
+        await model.activate(loader)
+        XCTAssertEqual(fixture.requests.count, 1)
+        XCTAssertEqual(fixture.requests.first?.url?.path, "/api/v1/studies/41/learning-records")
+        fixture.assertDraftsUnchanged(app)
+    }
+
+    func testOpeningPreparationFailureDoesNotTreatOldCachedHistoryAsReady() async throws {
+        let fixture = try LearningHTTPFixture(page: pageObject([voiceItem()]))
+        defer { fixture.close() }
+        let app = fixture.makeAppState()
+        let initiallyPrepared = await app.prepareStudyLearningRecordsForOpening(studyID: 41)
+        XCTAssertTrue(initiallyPrepared)
+        fixture.status = 500
+        fixture.response = ["code": "INTERNAL_ERROR", "message": "Synthetic failure"]
+        let prepared = await app.prepareStudyLearningRecordsForOpening(studyID: 41)
+        XCTAssertFalse(prepared)
+        fixture.assertDraftsUnchanged(app)
+    }
+
+    func testOpeningPreparationRejectsAnAccountChangeDuringTheRead() async throws {
+        let fixture = try LearningHTTPFixture(page: pageObject([voiceItem()]))
+        defer { fixture.close() }
+        let app = fixture.makeAppState()
+        fixture.onRequest = { _ in app.communityProfile = LearningHTTPFixture.profile(id: 8) }
+        let prepared = await app.prepareStudyLearningRecordsForOpening(studyID: 41)
+        XCTAssertFalse(prepared)
+        fixture.assertDraftsUnchanged(app)
+    }
+
+    func testOpeningPreparationWithoutAuthenticatedHistoryDoesNotRequestOrIgnoreCancellation() async throws {
+        let fixture = try LearningHTTPFixture(page: pageObject([]))
+        defer { fixture.close() }
+        let app = fixture.makeAppState()
+        app.communityProfile = nil
+        let prepared = await app.prepareStudyLearningRecordsForOpening(studyID: 41)
+        XCTAssertTrue(prepared)
+        let cancelled = Task { await app.prepareStudyLearningRecordsForOpening(studyID: 41) }
+        cancelled.cancel()
+        let cancelledResult = await cancelled.value
+        XCTAssertFalse(cancelledResult)
+        XCTAssertTrue(fixture.requests.isEmpty)
+        fixture.assertDraftsUnchanged(app)
     }
 
     func testAppStateDropsPageAfterLocaleChangesWhileReadIsInFlight() async throws {

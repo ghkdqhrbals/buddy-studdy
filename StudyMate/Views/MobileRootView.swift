@@ -34,7 +34,10 @@ struct MobileRootView: View {
                                 } else {
                                     StudyView(
                                         preferredCategoryID: route.categoryID,
-                                        isContentPrepared: route.isContentPrepared
+                                        isContentPrepared: route.isContentPrepared,
+                                        initialAnswerDraft: appState.answerDraft(
+                                            for: appState.studyRoomRecordForDisplay(categoryID: route.categoryID)
+                                        )
                                     )
                                         .padding(.horizontal, 16)
                                         .mobileTabTitle(studyScreenTitle(for: route))
@@ -3486,6 +3489,8 @@ struct MobileStudyTreeView: View {
     @State private var addRequest: StudyTopicAddRequest?
     @State private var editingRoom: BackendStudyRoom?
     @State private var selectedRoomID: Int?
+    @State private var openingRoomID: Int?
+    @State private var showsOpeningError = false
     @State private var selectedRoomIDs = Set<Int>()
     @State private var nodeOffsets: [Int: CGSize] = [:]
     @State private var dragStartOffsets: [Int: CGSize] = [:]
@@ -3602,7 +3607,8 @@ struct MobileStudyTreeView: View {
                                                 ) > 0,
                                             isSelectionMode: isSelectionMode,
                                             isSelected: selectedRoomIDs.contains(placement.room.id),
-                                            onOpen: { selectedRoomID = placement.room.id },
+                                            isOpening: openingRoomID == placement.room.id,
+                                            onOpen: { openingRoomID = placement.room.id },
                                             onSelect: { toggleSelection(placement.room.id) },
                                             onAddRecommendedChild: {
                                                 addRequest = StudyTopicAddRequest(
@@ -3720,10 +3726,36 @@ struct MobileStudyTreeView: View {
         }
         .navigationDestination(item: $selectedRoomID) { roomID in
             if let room = appState.backendStudyRoom(id: roomID) {
-                StudyView(preferredCategoryID: String(room.id))
+                StudyView(
+                    preferredCategoryID: String(room.id),
+                    isContentPrepared: true,
+                    initialAnswerDraft: appState.answerDraft(
+                        for: appState.studyRoomRecordForDisplay(categoryID: String(room.id))
+                    )
+                )
                     .padding(.horizontal, 16)
                     .mobileTabTitle(room.topic)
             }
+        }
+        .task(id: openingRoomID) {
+            guard let roomID = openingRoomID else { return }
+            let didPrepare = await appState.prepareStudyRoomForOpening(categoryID: String(roomID))
+            guard !Task.isCancelled, openingRoomID == roomID else { return }
+            openingRoomID = nil
+            if didPrepare, appState.backendStudyRoom(id: roomID) != nil {
+                selectedRoomID = roomID
+            } else {
+                showsOpeningError = true
+            }
+        }
+        .onDisappear { openingRoomID = nil }
+        .onChange(of: appState.selectedTab) { openingRoomID = nil }
+        .onChange(of: rootStudyID) { openingRoomID = nil }
+        .onChange(of: isSelectionMode) { openingRoomID = nil }
+        .alert(strings.unableToOpenStudy, isPresented: $showsOpeningError) {
+            Button(strings.done, role: .cancel) {}
+        } message: {
+            Text(strings.unableToOpenStudyDescription)
         }
         .sheet(item: $addRequest) { request in
             StudyTopicAddSheet(
@@ -4460,6 +4492,7 @@ private struct StudyTreeNode: View {
     var hasPendingQuestion: Bool
     var isSelectionMode: Bool
     var isSelected: Bool
+    var isOpening = false
     var onOpen: () -> Void
     var onSelect: () -> Void
     var onAddRecommendedChild: () -> Void
@@ -4490,6 +4523,10 @@ private struct StudyTreeNode: View {
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
                     .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
+                    .opacity(isOpening ? 0 : 1)
+                    .overlay {
+                        if isOpening { ProgressView().controlSize(.mini) }
+                    }
             }
             .padding(12)
             .frame(
@@ -4525,6 +4562,8 @@ private struct StudyTreeNode: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .accessibilityValue(isOpening ? strings.loading : "")
+        .accessibilityIdentifier("studyTree.node.\(room.id)")
         .contentShape(.contextMenuPreview, Circle())
         .contextMenu {
             if !isSelectionMode {

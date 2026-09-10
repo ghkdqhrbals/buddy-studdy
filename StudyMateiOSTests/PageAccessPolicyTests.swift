@@ -1,4 +1,9 @@
 import XCTest
+#if os(iOS)
+import Combine
+import SwiftUI
+import UIKit
+#endif
 @testable import StudyMate
 
 final class BillingLocalizationTests: XCTestCase {
@@ -2880,3 +2885,190 @@ final class RecordsPaginationTests: XCTestCase {
         XCTAssertTrue(state.canLoadMoreRecordResults)
     }
 }
+
+#if os(iOS)
+/// A prepared destination must render its actual editor in the first layout,
+/// before SwiftUI runs the detail task. Only synthetic drafts are displayed.
+@MainActor
+final class StudyPreparedPresentationTests: XCTestCase {
+    func testPreparedQuestionShowsEmptyAnswerEditorInFirstLayout() async throws {
+        try await assertPreparedEditorIsStable(draft: "", attachmentName: "prepared-empty-answer")
+    }
+
+    func testPreparedQuestionLaysOutSavedMultilineDraftBeforeItsTaskStarts() async throws {
+        try await assertPreparedEditorIsStable(
+            draft: "서버 A의 데이터를 서버 B에도 복사합니다.\n복제본은 장애가 발생했을 때 사용할 수 있습니다.\n복제가 곧 백업을 의미하지는 않습니다.\n동기화 방식에 따라 최신 데이터가 다를 수 있습니다.",
+            attachmentName: "prepared-saved-answer"
+        )
+    }
+
+    private func assertPreparedEditorIsStable(draft: String, attachmentName: String) async throws {
+        let suiteName = "StudyPreparedPresentationTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        let category = StudyCategory(id: "713", title: "복제와 고가용성", difficulty: .level6)
+        var settings = StudySettings(
+            topic: category.title,
+            difficulty: category.difficulty,
+            customPrompt: "",
+            intervalMinutes: 30,
+            studyCategories: [category],
+            selectedStudyCategoryID: category.id
+        )
+        settings.appLanguage = .korean
+        store.saveSettings(settings)
+        let record = StudyRecord(
+            id: "prepared-synthetic-question",
+            studyID: 713,
+            question: QuestionItem(
+                question: "서버 A의 데이터를 서버 B에도 유지한다면, 이 상황에서 복제는 무엇을 뜻하나요?",
+                expectedAnswerHint: "데이터의 사본을 생각해 보세요.",
+                createdAt: Date(timeIntervalSince1970: 713)
+            ),
+            topic: category.title,
+            difficulty: category.difficulty
+        )
+        store.replaceStudyRecords([record])
+        store.saveQuestion(record.question)
+        store.saveLastAnswer(draft)
+        store.saveAnswerDraft(draft, recordID: record.id)
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StudyPreparedPresentationRejectingURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer {
+            session.invalidateAndCancel()
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: RemotePushBackendClient(
+                baseURL: try XCTUnwrap(URL(string: "https://prepared-presentation.invalid")),
+                session: session
+            ),
+            appNotificationEventProvider: StudyPreparedPresentationNotificationEvents()
+        )
+        XCTAssertEqual(appState.studyRoomRecordForDisplay(categoryID: category.id)?.id, record.id)
+        XCTAssertEqual(appState.answerDraft(for: record), draft)
+
+        // Mount the destination directly so a navigation controller's own
+        // initial animation cannot obscure the destination's layout contract.
+        let root = StudyView(
+            preferredCategoryID: category.id,
+            isContentPrepared: true,
+            initialAnswerDraft: appState.answerDraft(for: record)
+        )
+        .padding(.horizontal, 16)
+        .environmentObject(appState)
+        .environment(\.colorScheme, .dark)
+        .environment(\.locale, Locale(identifier: "ko_KR"))
+        .dynamicTypeSize(.large)
+        let controller = UIHostingController(rootView: root)
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = try XCTUnwrap(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
+        let previousKeyWindow = scene.windows.first { $0.isKeyWindow }
+        let window = UIWindow(windowScene: scene)
+        window.overrideUserInterfaceStyle = .dark
+        window.rootViewController = controller
+        // Never replace the real app's root controller or retain its key window.
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            previousKeyWindow?.makeKey()
+        }
+        window.makeKeyAndVisible()
+        controller.loadViewIfNeeded()
+        let bounds = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.frame = bounds
+        controller.view.frame = bounds
+        layout(window: window, controller: controller)
+
+        // No suspension precedes this lookup: the editor and its final draft
+        // dimensions must already exist before the asynchronous .task runs.
+        let initialEditor = try XCTUnwrap(editableInputs(in: controller.view).first,
+            "Prepared study content must contain an editable answer in its first layout")
+        XCTAssertEqual(editableInputs(in: controller.view).count, 1)
+        XCTAssertEqual(text(in: initialEditor), draft)
+        let initialFrame = initialEditor.convert(initialEditor.bounds, to: window)
+        XCTAssertGreaterThan(initialFrame.width, 100)
+        let editorFont = try XCTUnwrap((initialEditor as? UITextField)?.font
+            ?? (initialEditor as? UITextView)?.font)
+        // SwiftUI owns the 32-point outer minimum; UIKit's inner control may
+        // be shorter. It must still fit a readable line of its actual font.
+        XCTAssertGreaterThanOrEqual(initialFrame.height + 1, editorFont.lineHeight)
+        XCTAssertTrue(bounds.intersects(initialFrame), "The answer must be visible without a second layout phase")
+        if draft.contains("\n") {
+            XCTAssertGreaterThan(initialFrame.height, 50, "A saved multiline draft must not first render as one empty line")
+        }
+        attach(window: window, name: "\(attachmentName)-initial", afterScreenUpdates: false)
+
+        await Task.yield()
+        try await Task.sleep(for: .milliseconds(350))
+        layout(window: window, controller: controller)
+        let settledEditor = try XCTUnwrap(editableInputs(in: controller.view).first)
+        let settledFrame = settledEditor.convert(settledEditor.bounds, to: window)
+        XCTAssertEqual(text(in: settledEditor), draft)
+        XCTAssertEqual(settledFrame.minX, initialFrame.minX, accuracy: 1)
+        XCTAssertEqual(settledFrame.minY, initialFrame.minY, accuracy: 1)
+        XCTAssertEqual(settledFrame.width, initialFrame.width, accuracy: 1)
+        XCTAssertEqual(settledFrame.height, initialFrame.height, accuracy: 1,
+            "Starting the prepared detail task must not insert or resize the answer editor")
+        XCTAssertEqual(store.loadAnswerDraft(recordID: record.id), draft)
+        XCTAssertEqual(appState.studyRoomRecordForDisplay(categoryID: category.id)?.id, record.id)
+        attach(window: window, name: "\(attachmentName)-settled", afterScreenUpdates: true)
+    }
+
+    private func layout(window: UIWindow, controller: UIViewController) {
+        UIView.performWithoutAnimation {
+            window.setNeedsLayout()
+            window.layoutIfNeeded()
+            controller.view.setNeedsLayout()
+            controller.view.layoutIfNeeded()
+        }
+        CATransaction.flush()
+    }
+
+    private func editableInputs(in view: UIView) -> [UIView] {
+        if let field = view as? UITextField, field.isEnabled { return [field] }
+        if let editor = view as? UITextView, editor.isEditable { return [editor] }
+        return view.subviews.flatMap { editableInputs(in: $0) }
+    }
+
+    private func text(in view: UIView) -> String? {
+        if let field = view as? UITextField { return field.text }
+        return (view as? UITextView)?.text
+    }
+
+    private func attach(window: UIWindow, name: String, afterScreenUpdates: Bool) {
+        let image = UIGraphicsImageRenderer(size: window.bounds.size).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: afterScreenUpdates)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
+@MainActor
+private struct StudyPreparedPresentationNotificationEvents: AppNotificationEventProviding {
+    func observeAPITrafficLogs(_ handler: @MainActor @escaping (APITrafficLogEntry) -> Void) -> AnyCancellable {
+        AnyCancellable {}
+    }
+    func observeBackendUnauthorized(_ handler: @MainActor @escaping (BackendUnauthorizedRequestIdentity) -> Void) -> AnyCancellable {
+        AnyCancellable {}
+    }
+}
+
+/// Every request is rejected, including an accidental detail/quota refresh.
+/// The synthetic host and injected session can never reach a real backend.
+private final class StudyPreparedPresentationRejectingURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        XCTFail("Prepared study presentation must not request data again: \(request.url?.path ?? "unknown")")
+        client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+    }
+    override func stopLoading() {}
+}
+#endif

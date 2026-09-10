@@ -16,13 +16,27 @@ final class StudyLearningRecordsViewModel: ObservableObject {
     private var isActive = false
     private var requestID = UUID()
     private var lastDirection: Direction = .refresh
+    private var skipsPreparedInitialRefresh = false
     private let actionRunner = AppActionRunner()
 
     var canGoPrevious: Bool { pageNumber > 1 && !isLoading }
     var canGoNext: Bool { page?.hasMore == true && !isLoading }
     var detailLoader: StudyLearningRecordsLoader? { loader }
 
+    init(preparedLoader: StudyLearningRecordsLoader? = nil) {
+        guard let preparedLoader, preparedLoader.isCurrent(),
+              let preparedPage = preparedLoader.cachedPage(nil) else { return }
+        context = preparedLoader.context
+        loader = preparedLoader
+        page = preparedPage
+        skipsPreparedInitialRefresh = true
+    }
+
     func activate(_ loader: StudyLearningRecordsLoader) async {
+        guard loader.isCurrent(), !Task.isCancelled else {
+            deactivate()
+            return
+        }
         if context != loader.context {
             deactivate()
             context = loader.context
@@ -34,6 +48,10 @@ final class StudyLearningRecordsViewModel: ObservableObject {
         self.loader = loader
         isActive = true
         if page == nil { page = loader.cachedPage(cursors[pageNumber - 1]) }
+        if skipsPreparedInitialRefresh {
+            skipsPreparedInitialRefresh = false
+            return
+        }
         await load(.refresh)
     }
 
@@ -41,6 +59,7 @@ final class StudyLearningRecordsViewModel: ObservableObject {
         requestID = UUID()
         isActive = false
         isLoading = false
+        skipsPreparedInitialRefresh = false
     }
 
     func load(_ requestedDirection: Direction) async {
@@ -100,6 +119,22 @@ final class StudyLearningRecordsViewModel: ObservableObject {
                 isLoading = false
             }
         )
+    }
+}
+
+extension AppState {
+    /// The opening route awaits one bounded history page before presenting the
+    /// study. Loading through the existing loader also prepares its identity-
+    /// scoped cache for the section's synchronous first render.
+    func prepareStudyLearningRecordsForOpening(studyID: Int) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        guard let loader = makeStudyLearningRecordsLoader(studyID: studyID, scope: .node) else { return true }
+        do {
+            _ = try await loader.loadPage(nil)
+            return !Task.isCancelled && loader.isCurrent()
+        } catch {
+            return false
+        }
     }
 }
 
