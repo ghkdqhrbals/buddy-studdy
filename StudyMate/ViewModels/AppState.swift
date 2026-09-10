@@ -8218,6 +8218,35 @@ final class AppState: ObservableObject {
         voiceTutorDisplayMessage(for: error)
     }
 
+    /// Home can open Voice Tutor before any destination has resolved the
+    /// signed-in account's profile. Only that required identity read precedes
+    /// voice admission; billing, products and history are unrelated work.
+    @discardableResult
+    func prepareVoiceTutorStatusForEntry() async -> BackendVoiceTutorStatus? {
+        guard !Task.isCancelled, isCommunitySessionActive else { return nil }
+        let pendingIdentity = commonRecordsIdentity
+        if communityProfile == nil {
+            guard let loadedProfileID = await refreshCommunityProfile(),
+                  loadedProfileID == communityProfile?.id else { return nil }
+        }
+        guard !Task.isCancelled, isVoiceTutorEntryIdentityCurrent(pendingIdentity) else { return nil }
+        let resolvedIdentity = commonRecordsIdentity
+        let status = await refreshVoiceTutorStatus()
+        guard !Task.isCancelled, isVoiceTutorEntryIdentityCurrent(pendingIdentity),
+              commonRecordsIdentity == resolvedIdentity else { return nil }
+        return status
+    }
+
+    func isVoiceTutorEntryIdentityCurrent(_ pendingIdentity: CommonRecordsIdentity) -> Bool {
+        let resolvedIdentity = commonRecordsIdentity
+        return isCommunitySessionActive
+            && (resolvedIdentity.userID ?? 0) > 0
+            && pendingIdentity.sessionGeneration == resolvedIdentity.sessionGeneration
+            && pendingIdentity.backendGeneration == resolvedIdentity.backendGeneration
+            && pendingIdentity.languageCode == resolvedIdentity.languageCode
+            && (pendingIdentity.userID == nil || pendingIdentity.userID == resolvedIdentity.userID)
+    }
+
     /// Returns only this refresh's verified result; cached eligibility is not
     /// evidence that a new call may begin after a failed or cancelled read.
     @discardableResult

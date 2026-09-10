@@ -270,6 +270,249 @@ final class VoiceTutorContractTests: XCTestCase {
             "Admission must not fetch history, retry recording uploads, or create a session on failure.")
     }
 
+    @MainActor
+    func testQuickCallColdEntryResolvesProfileThenFreshStatusWithoutLoadingOtherDestinations() async throws {
+        let registration = try VoiceTutorContractAppFixture.registration(ownerUserID: 7, tokenID: "cold-entry")
+        let profileArrived = expectation(description: "Cold entry resolves the restored account")
+        let statusArrived = expectation(description: "Admission follows the verified profile")
+        let releaseProfile = VoiceTutorContractResponseGate()
+        let releaseStatus = VoiceTutorContractResponseGate()
+        var paths: [String] = []
+        let fixture = try VoiceTutorContractAppFixture(registration: registration, profileOwnerUserID: nil) { request in
+            let path = request.url?.path ?? ""
+            paths.append(path)
+            if path == "/api/v1/profile" {
+                profileArrived.fulfill()
+                await releaseProfile.wait()
+            } else if path == "/api/v1/voice-tutor/status" {
+                statusArrived.fulfill()
+                await releaseStatus.wait()
+            }
+            return try VoiceTutorContractAppFixture.quickCallEntryResponse(for: request)
+        }
+        defer {
+            releaseProfile.open()
+            releaseStatus.open()
+            fixture.close()
+        }
+        XCTAssertTrue(fixture.appState.isCommunitySessionActive)
+        XCTAssertNil(fixture.appState.communityProfile)
+        let initialIdentity = fixture.appState.commonRecordsIdentity
+        XCTAssertFalse(fixture.appState.isVoiceTutorEntryIdentityCurrent(initialIdentity))
+        var finished = false
+        let entry = Task { @MainActor in
+            let starts = await VoiceTutorCallEntryAdmission().refresh(
+                startCallOnEntry: true,
+                isCurrent: { fixture.appState.isVoiceTutorEntryIdentityCurrent(initialIdentity) },
+                loadStatus: { await fixture.appState.prepareVoiceTutorStatusForEntry() }
+            )
+            finished = true
+            return starts
+        }
+        defer { entry.cancel() }
+        let profileWait = await XCTWaiter.fulfillment(of: [profileArrived], timeout: 5)
+        XCTAssertEqual(profileWait, .completed)
+        XCTAssertEqual(paths, ["/api/v1/profile"])
+        XCTAssertFalse(finished)
+        releaseProfile.open()
+        let statusWait = await XCTWaiter.fulfillment(of: [statusArrived], timeout: 5)
+        XCTAssertEqual(statusWait, .completed)
+        XCTAssertEqual(fixture.appState.communityProfile?.id, 7)
+        XCTAssertTrue(fixture.appState.isVoiceTutorEntryIdentityCurrent(initialIdentity),
+            "Resolving a previously unknown owner in the same session must preserve the explicit entry intent.")
+        XCTAssertFalse(finished, "Profile readiness alone cannot authorize a call.")
+        releaseStatus.open()
+        let starts = await entry.value
+        XCTAssertTrue(starts)
+        XCTAssertTrue(VoiceTutorCallStartPolicy.canStart(status: fixture.appState.voiceTutorStatus))
+        XCTAssertEqual(paths, ["/api/v1/profile", "/api/v1/voice-tutor/status"],
+            "Home call admission must not load billing, catalogs, history, recordings, or create a session.")
+    }
+
+    @MainActor
+    func testQuickCallColdEntryProfileFailureCannotAdmitAndNewEntryCanRetry() async throws {
+        let registration = try VoiceTutorContractAppFixture.registration(ownerUserID: 7, tokenID: "cold-failure")
+        var failProfile = true
+        var paths: [String] = []
+        let fixture = try VoiceTutorContractAppFixture(registration: registration, profileOwnerUserID: nil) { request in
+            paths.append(request.url?.path ?? "")
+            if failProfile {
+                XCTAssertEqual(request.url?.path, "/api/v1/profile")
+                throw URLError(.notConnectedToInternet)
+            }
+            return try VoiceTutorContractAppFixture.quickCallEntryResponse(for: request)
+        }
+        defer { fixture.close() }
+        let initialIdentity = fixture.appState.commonRecordsIdentity
+        let admission = VoiceTutorCallEntryAdmission()
+        let failedEntry = await admission.refresh(
+            startCallOnEntry: true,
+            isCurrent: { fixture.appState.isVoiceTutorEntryIdentityCurrent(initialIdentity) },
+            loadStatus: { await fixture.appState.prepareVoiceTutorStatusForEntry() }
+        )
+        XCTAssertFalse(failedEntry)
+        XCTAssertNil(fixture.appState.communityProfile)
+        XCTAssertNil(fixture.appState.voiceTutorStatus)
+        XCTAssertEqual(paths, ["/api/v1/profile"])
+
+        failProfile = false
+        let refreshedEntry = await admission.refresh(
+            startCallOnEntry: true,
+            isCurrent: { fixture.appState.isVoiceTutorEntryIdentityCurrent(initialIdentity) },
+            loadStatus: { await fixture.appState.prepareVoiceTutorStatusForEntry() }
+        )
+        XCTAssertFalse(refreshedEntry, "A retry can restore the page without reviving consumed automatic call intent.")
+        XCTAssertTrue(VoiceTutorCallStartPolicy.canStart(status: fixture.appState.voiceTutorStatus))
+        let newExplicitEntry = await VoiceTutorCallEntryAdmission().refresh(
+            startCallOnEntry: true,
+            isCurrent: { fixture.appState.isVoiceTutorEntryIdentityCurrent(initialIdentity) },
+            loadStatus: { await fixture.appState.prepareVoiceTutorStatusForEntry() }
+        )
+        XCTAssertTrue(newExplicitEntry)
+        XCTAssertEqual(paths, ["/api/v1/profile", "/api/v1/profile", "/api/v1/voice-tutor/status", "/api/v1/voice-tutor/status"])
+    }
+
+    @MainActor
+    func testQuickCallColdEntryCancellationDuringProfileDoesNotFetchStatusOrAdmit() async throws {
+        let registration = try VoiceTutorContractAppFixture.registration(ownerUserID: 7, tokenID: "cold-cancel")
+        let profileArrived = expectation(description: "Profile is pending before entry cancellation")
+        let releaseProfile = VoiceTutorContractResponseGate()
+        var paths: [String] = []
+        let fixture = try VoiceTutorContractAppFixture(registration: registration, profileOwnerUserID: nil) { request in
+            paths.append(request.url?.path ?? "")
+            XCTAssertEqual(request.url?.path, "/api/v1/profile")
+            profileArrived.fulfill()
+            await releaseProfile.wait()
+            return try VoiceTutorContractAppFixture.quickCallEntryResponse(for: request)
+        }
+        defer {
+            releaseProfile.open()
+            fixture.close()
+        }
+        let initialIdentity = fixture.appState.commonRecordsIdentity
+        let entry = Task { @MainActor in
+            await VoiceTutorCallEntryAdmission().refresh(
+                startCallOnEntry: true,
+                isCurrent: { fixture.appState.isVoiceTutorEntryIdentityCurrent(initialIdentity) },
+                loadStatus: { await fixture.appState.prepareVoiceTutorStatusForEntry() }
+            )
+        }
+        defer { entry.cancel() }
+        let profileWait = await XCTWaiter.fulfillment(of: [profileArrived], timeout: 5)
+        XCTAssertEqual(profileWait, .completed)
+        entry.cancel()
+        releaseProfile.open()
+        let starts = await entry.value
+        XCTAssertFalse(starts)
+        XCTAssertEqual(paths, ["/api/v1/profile"])
+        XCTAssertNil(fixture.appState.voiceTutorStatus)
+    }
+
+    @MainActor
+    func testQuickCallColdEntryAccountChangeDuringProfileOrStatusCannotAdmit() async throws {
+        for pendingPath in ["/api/v1/profile", "/api/v1/voice-tutor/status"] {
+            let registrationA = try VoiceTutorContractAppFixture.registration(ownerUserID: 7, tokenID: "cold-account-a")
+            let registrationB = try VoiceTutorContractAppFixture.registration(ownerUserID: 8, tokenID: "cold-account-b")
+            let requestArrived = expectation(description: "Account A is waiting for \(pendingPath)")
+            let releaseResponse = VoiceTutorContractResponseGate()
+            var paths: [String] = []
+            let fixture = try VoiceTutorContractAppFixture(registration: registrationA, profileOwnerUserID: nil) { request in
+                paths.append(request.url?.path ?? "")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(registrationA.accessToken!)")
+                if request.url?.path == pendingPath {
+                    requestArrived.fulfill()
+                    await releaseResponse.wait()
+                }
+                return try VoiceTutorContractAppFixture.quickCallEntryResponse(for: request)
+            }
+            defer {
+                releaseResponse.open()
+                fixture.close()
+            }
+            let initialIdentity = fixture.appState.commonRecordsIdentity
+            let entry = Task { @MainActor in
+                await VoiceTutorCallEntryAdmission().refresh(
+                    startCallOnEntry: true,
+                    isCurrent: { fixture.appState.isVoiceTutorEntryIdentityCurrent(initialIdentity) },
+                    loadStatus: { await fixture.appState.prepareVoiceTutorStatusForEntry() }
+                )
+            }
+            defer { entry.cancel() }
+            let requestWait = await XCTWaiter.fulfillment(of: [requestArrived], timeout: 5)
+            XCTAssertEqual(requestWait, .completed)
+            fixture.replaceAccount(ownerUserID: 8, registration: registrationB)
+            releaseResponse.open()
+            let starts = await entry.value
+            XCTAssertFalse(starts, "A resolved profile cannot transfer account A's pending call intent to account B.")
+            XCTAssertEqual(fixture.appState.communityProfile?.id, 8)
+            XCTAssertEqual(fixture.store.loadRemotePushRegistration(), registrationB)
+            XCTAssertNil(fixture.appState.voiceTutorStatus)
+            XCTAssertEqual(paths, pendingPath == "/api/v1/profile"
+                ? ["/api/v1/profile"] : ["/api/v1/profile", "/api/v1/voice-tutor/status"])
+        }
+    }
+
+    @MainActor
+    func testQuickCallColdEntryLanguageChangeDuringProfileCannotAdmit() async throws {
+        let registration = try VoiceTutorContractAppFixture.registration(ownerUserID: 7, tokenID: "cold-language")
+        let profileArrived = expectation(description: "Profile is pending in the original language")
+        let releaseProfile = VoiceTutorContractResponseGate()
+        var paths: [String] = []
+        let fixture = try VoiceTutorContractAppFixture(registration: registration, profileOwnerUserID: nil) { request in
+            paths.append(request.url?.path ?? "")
+            XCTAssertEqual(request.url?.path, "/api/v1/profile")
+            profileArrived.fulfill()
+            await releaseProfile.wait()
+            return try VoiceTutorContractAppFixture.quickCallEntryResponse(for: request)
+        }
+        defer {
+            releaseProfile.open()
+            fixture.close()
+        }
+        let initialIdentity = fixture.appState.commonRecordsIdentity
+        let entry = Task { @MainActor in
+            await VoiceTutorCallEntryAdmission().refresh(
+                startCallOnEntry: true,
+                isCurrent: { fixture.appState.isVoiceTutorEntryIdentityCurrent(initialIdentity) },
+                loadStatus: { await fixture.appState.prepareVoiceTutorStatusForEntry() }
+            )
+        }
+        defer { entry.cancel() }
+        let profileWait = await XCTWaiter.fulfillment(of: [profileArrived], timeout: 5)
+        XCTAssertEqual(profileWait, .completed)
+        fixture.appState.updateAppLanguage(fixture.appState.settings.appLanguage == .english ? .korean : .english)
+        releaseProfile.open()
+        let starts = await entry.value
+        XCTAssertFalse(starts)
+        XCTAssertNil(fixture.appState.communityProfile)
+        XCTAssertNil(fixture.appState.voiceTutorStatus)
+        XCTAssertEqual(paths, ["/api/v1/profile"])
+        XCTAssertFalse(fixture.appState.isVoiceTutorEntryIdentityCurrent(initialIdentity))
+    }
+
+    @MainActor
+    func testQuickCallEntryUnknownOwnerCannotBypassSessionOrBackendGeneration() throws {
+        let registration = try VoiceTutorContractAppFixture.registration(ownerUserID: 7, tokenID: "entry-generation")
+        let fixture = try VoiceTutorContractAppFixture(registration: registration) { request in
+            XCTFail("Identity validation must not make a request: \(request.url?.path ?? "")")
+            throw URLError(.badServerResponse)
+        }
+        defer { fixture.close() }
+        var unresolvedIdentity = fixture.appState.commonRecordsIdentity
+        unresolvedIdentity.userID = nil
+        XCTAssertTrue(fixture.appState.isVoiceTutorEntryIdentityCurrent(unresolvedIdentity))
+
+        var replacedSession = unresolvedIdentity
+        replacedSession.sessionGeneration &+= 1
+        XCTAssertFalse(fixture.appState.isVoiceTutorEntryIdentityCurrent(replacedSession))
+        var replacedBackend = unresolvedIdentity
+        replacedBackend.backendGeneration += 1
+        XCTAssertFalse(fixture.appState.isVoiceTutorEntryIdentityCurrent(replacedBackend))
+        var differentKnownOwner = unresolvedIdentity
+        differentKnownOwner.userID = 8
+        XCTAssertFalse(fixture.appState.isVoiceTutorEntryIdentityCurrent(differentKnownOwner))
+    }
+
     private func quickCallStatus(
         eligible: Bool = true,
         remaining: Int = 3_600,
@@ -5724,6 +5967,7 @@ private final class VoiceTutorContractAppFixture {
 
     init(
         registration: RemotePushRegistration,
+        profileOwnerUserID: Int? = 7,
         handler: @escaping VoiceTutorContractURLProtocol.Handler
     ) throws {
         let identifier = UUID().uuidString.lowercased()
@@ -5748,7 +5992,9 @@ private final class VoiceTutorContractAppFixture {
             remotePushBackendClient: client,
             appNotificationEventProvider: VoiceTutorContractNotificationEvents()
         )
-        appState.communityProfile = Self.profile(ownerUserID: 7)
+        if let profileOwnerUserID {
+            appState.communityProfile = Self.profile(ownerUserID: profileOwnerUserID)
+        }
     }
 
     func replaceAccount(ownerUserID: Int, registration: RemotePushRegistration) {
@@ -5789,6 +6035,18 @@ private final class VoiceTutorContractAppFixture {
         """
         {"accessToken":"\(registration.accessToken!)","accessTokenExpiresAt":"2100-01-01T00:00:00Z"}
         """
+    }
+
+    static func quickCallEntryResponse(for request: URLRequest) throws -> (HTTPURLResponse, Data) {
+        switch request.url?.path {
+        case "/api/v1/profile":
+            return response(for: request, body: #"{"id":7,"displayName":"Fixture-7","status":"ACTIVE","provider":"GOOGLE"}"#)
+        case "/api/v1/voice-tutor/status":
+            return response(for: request, body: #"{"eligible":true,"quota":{"limitSeconds":3600,"usedSeconds":0,"reservedSeconds":0,"remainingSeconds":3600}}"#)
+        default:
+            XCTFail("Unexpected call entry request: \(request.url?.path ?? "")")
+            throw URLError(.badServerResponse)
+        }
     }
 
     static func response(

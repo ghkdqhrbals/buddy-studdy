@@ -32,6 +32,7 @@ struct VoiceTutorView: View {
     @State private var callRecordingConsent = false
     @State private var showsCall = false
     @State private var callEntryAdmission = VoiceTutorCallEntryAdmission()
+    @State private var isPreparingEntryStatus = true
 
     init(startCallOnEntry: Bool = false) {
         self.startCallOnEntry = startCallOnEntry
@@ -65,7 +66,7 @@ struct VoiceTutorView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             Button(strings.retry) {
                                 Task {
-                                    await appState.refreshVoiceTutorStatus()
+                                    await refreshEntryStatus()
                                 }
                             }
                             .buttonStyle(.bordered)
@@ -174,10 +175,9 @@ struct VoiceTutorView: View {
             let shouldStart = await callEntryAdmission.refresh(
                 startCallOnEntry: startCallOnEntry,
                 isCurrent: {
-                    appState.isCommunitySessionActive
-                        && appState.commonRecordsIdentity == identity
+                    appState.isVoiceTutorEntryIdentityCurrent(identity)
                 },
-                loadStatus: { await appState.refreshVoiceTutorStatus() }
+                loadStatus: { await refreshEntryStatus() }
             )
             guard !Task.isCancelled else { return }
             if shouldStart, !showsCall {
@@ -194,7 +194,7 @@ struct VoiceTutorView: View {
         }
         .refreshable {
             recordingConsent = false
-            await appState.refreshVoiceTutorStatus()
+            await refreshEntryStatus()
             await appState.loadVoiceTutorSessions(reset: true)
         }
         .onChange(of: status?.recording?.enabled) { _, isEnabled in
@@ -221,7 +221,7 @@ struct VoiceTutorView: View {
     @ViewBuilder
     private var voiceAccessSection: some View {
         Section(strings.voiceTutorMonthlyUsage) {
-            if appState.isLoadingVoiceTutorStatus && status == nil {
+            if (isPreparingEntryStatus || appState.isLoadingVoiceTutorStatus) && status == nil {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text(strings.loading)
@@ -266,12 +266,19 @@ struct VoiceTutorView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Button(strings.retry) {
                 Task {
-                    await appState.refreshVoiceTutorStatus()
+                    await refreshEntryStatus()
                 }
             }
             .buttonStyle(.bordered)
         }
         .padding(.vertical, 4)
+    }
+
+    @discardableResult
+    private func refreshEntryStatus() async -> BackendVoiceTutorStatus? {
+        isPreparingEntryStatus = true
+        defer { isPreparingEntryStatus = false }
+        return await appState.prepareVoiceTutorStatusForEntry()
     }
 
 }

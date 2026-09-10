@@ -83,7 +83,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 ### Pro Voice Tutor
 
-Home provides a phone button immediately to the left of Search in the upper-right toolbar. One deliberate tap opens Voice Tutor and starts a call once a fresh server status permits it, without waiting for Profile, RevenueCat, recordings or history preparation. Guests enter sign-in first. An unavailable, exhausted or already-active status keeps the existing Voice Tutor explanation and controls visible. Returning after a call or refreshing the page must not start another call automatically. Quick calls start without recording consent; recording remains an explicit per-call choice.
+Home provides a phone button immediately to the left of Search in the upper-right toolbar. One deliberate tap opens Voice Tutor and starts a call once a fresh server status permits it, without opening Profile or waiting for RevenueCat, recordings or history preparation. If login has been restored but the authenticated profile is not loaded yet, fetch only that profile before checking Voice Tutor status. Guests enter sign-in first. An unavailable, exhausted or already-active status keeps the existing Voice Tutor explanation and controls visible. Returning after a call or refreshing the page must not start another call automatically. Quick calls start without recording consent; recording remains an explicit per-call choice.
 
 #### Current conversation contract — `realtime-native-v1`
 
