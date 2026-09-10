@@ -250,6 +250,169 @@ class VoiceTutorNativeSessionRelayTest {
     }
 
     @Test
+    fun `ordinary single multiple and text cards hold the native reply until exact submitted answers are durable and acknowledged`() {
+        for ((mode, selected) in listOf(
+            "single" to listOf("redis"), "multiple" to listOf("redis", "msa"), "text" to emptyList(),
+        )) {
+            val storedChoice = CompletableDeferred<Unit>()
+            Fixture(userInputEnabled = true, store = { event ->
+                if (event.path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT) storedChoice.await()
+            }).use { f ->
+                f.opening(); f.learner(1, "choose-direction"); f.transcript("choose-direction", "다음 공부 방향을 추천해줘.")
+                val arguments = ordinaryInputArguments(mode)
+                val definition = f.outgoing.first { it.path("type").asText() == "session.update" }
+                    .path("session").path("tools").single { it.path("name").asText() == "request_user_input" }
+                val questionSchema = definition.path("parameters").path("properties").path("questions").path("items")
+                assertThat(questionSchema.path("required").map { it.asText() })
+                    .contains("id", "prompt", "selectionMode", "options", "allowFreeText")
+                assertThat(questionSchema.path("properties").path("selectionMode").path("enum").map { it.asText() })
+                    .containsExactly("single", "multiple", "text")
+                f.toolResponse("ordinary-$mode", "form-$mode", "request_user_input", json(arguments))
+                f.await("ordinary $mode form is shown") { f.inputRequests().size == 1 }
+                val request = f.inputRequests().single()
+                assertThat(request.path("title").asText()).isEqualTo(arguments["title"])
+                assertThat(request.path("questions")).isEqualTo(mapper.valueToTree<JsonNode>(arguments["questions"]))
+                assertThat(request.path("sessionId").asText()).isEqualTo(context().session.id)
+                assertThat(request.path("requestId").asText()).matches("[0-9a-f-]{36}")
+                assertThat(request.path("attemptId").asText()).matches("[0-9a-f-]{36}")
+                assertThat(request.path("sequence").asLong()).isPositive()
+                assertThat(f.outputs()).isEmpty()
+                assertThat(f.responses()).hasSize(2)
+                assertThat(f.tools.invocations).isEmpty()
+                assertThat(f.tools.topicSubmissions).isEmpty()
+
+                val answers = listOf(mapOf("questionId" to "direction", "selectedOptionIds" to selected,
+                    "text" to "  직접 입력한 방향\n실전 예제부터  "))
+                val submit = userInputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, answers)
+                for (key in listOf("requestId", "sessionId", "attemptId")) {
+                    f.control(submit + (key to "00000000-0000-4000-8000-000000000099"))
+                }
+                // These microphone edges must be ignored while the card owns the response.
+                for (type in listOf(Contract.SPEECH_STARTED_EVENT, Contract.SPEECH_STOPPED_EVENT)) {
+                    f.control(mapOf("type" to type, "sequence" to 2))
+                }
+                f.control(userInputControl(Contract.USER_INPUT_SUBMIT_EVENT, request,
+                    listOf(mapOf("questionId" to "direction", "selectedOptionIds" to listOf("unknown"), "text" to ""))))
+                f.await("invalid ordinary answer leaves the exact card pending") {
+                    f.inputStates().lastOrNull()?.path("errorCode")?.asText() == "INVALID_ANSWERS"
+                }
+                assertThat(f.inputStates().last().path("phase").asText()).isEqualTo("pending")
+                assertThat(f.outgoing.count { it.path("type").asText() == "input_audio_buffer.commit" }).isEqualTo(1)
+                assertThat(f.outgoing.none { it.path("type").asText() == "input_audio_buffer.clear" }).isTrue()
+                assertThat(f.outputs()).isEmpty()
+                assertThat(f.responses()).hasSize(2)
+
+                f.control(submit)
+                f.await("ordinary submission clears the muted microphone tail") {
+                    f.outgoing.count { it.path("type").asText() == "input_audio_buffer.clear" } == 1
+                }
+                assertThat(f.outputs()).isEmpty()
+                assertThat(f.stored.none { it.path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }).isTrue()
+                f.provider("input_audio_buffer.cleared", "event_id" to "ordinary-$mode-clear")
+                f.await("ordinary choice is being durably stored") {
+                    f.stored.any { it.path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }
+                }
+                val evidence = f.stored.single { it.path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }
+                assertThat(evidence.path("item_id").asText()).startsWith(Metadata.STRUCTURED_ITEM_PREFIX)
+                assertThat(evidence.path("transcript").asText()).contains("Text:   직접 입력한 방향\n실전 예제부터  \n[End structured input]")
+                val expectedLabels = selected.map { if (it == "redis") "Redis" else "MSA" }
+                expectedLabels.forEach { assertThat(evidence.path("transcript").asText()).contains("Selected: $it") }
+                if (mode == "text") assertThat(evidence.path("transcript").asText()).doesNotContain("Selected:")
+                assertThat(evidence.path("transcript").asText()).doesNotContain("Selected: Kafka")
+                assertThat(f.outputs()).isEmpty()
+                assertThat(f.responses()).hasSize(2)
+                assertThat(f.inputStates().none { it.path("phase").asText() == "submitted" }).isTrue()
+                storedChoice.complete(Unit)
+                f.await("durable ordinary submission completes the exact held call") {
+                    f.outputs().size == 1 && f.inputStates().lastOrNull()?.path("phase")?.asText() == "submitted"
+                }
+                val output = f.outputs().single()
+                assertThat(output.path("item").path("call_id").asText()).isEqualTo("form-$mode")
+                val result = mapper.readTree(output.path("item").path("output").asText())
+                assertThat(result.path("requestId").asText()).isEqualTo(request.path("requestId").asText())
+                assertThat(result.path("cancelled").booleanValue()).isFalse()
+                assertThat(result.path("answers")).isEqualTo(mapper.valueToTree<JsonNode>(answers))
+                assertThat(f.responses()).hasSize(2)
+                assertThat(f.tools.invocations).isEmpty()
+                assertThat(f.tools.topicSubmissions).isEmpty()
+
+                f.provider("conversation.item.created", "item" to mapOf("type" to "function_call_output",
+                    "call_id" to "other-form", "output" to output.path("item").path("output").asText()))
+                f.provider("conversation.item.created", "item" to mapOf("id" to "after-wrong-ordinary-ack", "type" to "message"))
+                f.await("unmatched result acknowledgement does not resume the card") {
+                    f.ui.any { it.path("item").path("id").asText() == "after-wrong-ordinary-ack" }
+                }
+                assertThat(f.responses()).hasSize(2)
+                f.ack(output)
+                f.await("exact ordinary result acknowledgement resumes the reply") { f.responses().size == 3 }
+                f.completeAudioResponse("ordinary-resumed", "ordinary-resumed-item", "선택한 방향으로 이어갈게요.")
+                f.await("ordinary card resumes audible conversation") {
+                    f.stored.any { it.path("item_id").asText() == "ordinary-resumed-item" }
+                }
+                val receipts = f.inputStates().size
+                f.control(submit)
+                f.await("duplicate ordinary submit is only reacknowledged") { f.inputStates().size == receipts + 1 }
+                assertThat(f.inputStates().last().path("phase").asText()).isEqualTo("submitted")
+                assertThat(f.outputs()).hasSize(1)
+                assertThat(f.stored.count { it.path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }).isEqualTo(1)
+                assertThat(f.errors).isEmpty()
+            }
+        }
+    }
+
+    @Test
+    fun `ordinary card cancellation sends an actual cancelled result and resumes without an answer or mutation`() {
+        Fixture(userInputEnabled = true).use { f ->
+            f.opening(); f.learner(1, "choose-direction"); f.transcript("choose-direction", "다음 공부 방향을 추천해줘.")
+            f.toolResponse("ordinary-cancel", "cancel-form", "request_user_input", json(ordinaryInputArguments("multiple")))
+            f.await("ordinary cancellable card is visible") { f.inputRequests().size == 1 }
+            val request = f.inputRequests().single()
+            val cancel = userInputControl(Contract.USER_INPUT_CANCEL_EVENT, request)
+            f.control(cancel + ("requestId" to "00000000-0000-4000-8000-000000000099"))
+            f.control(userInputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, emptyList()))
+            f.await("wrong cancellation correlation cannot consume the pending card") {
+                f.inputStates().lastOrNull()?.path("errorCode")?.asText() == "INVALID_ANSWERS"
+            }
+            assertThat(f.outputs()).isEmpty()
+            assertThat(f.responses()).hasSize(2)
+            f.control(cancel)
+            f.await("cancellation clears the muted microphone tail") {
+                f.outgoing.any { it.path("type").asText() == "input_audio_buffer.clear" }
+            }
+            assertThat(f.outputs()).isEmpty()
+            f.provider("input_audio_buffer.cleared", "event_id" to "ordinary-cancel-clear")
+            f.await("cancelled result and client receipt complete the same form") {
+                f.outputs().size == 1 && f.inputStates().lastOrNull()?.path("phase")?.asText() == "cancelled"
+            }
+            val output = f.outputs().single()
+            val result = mapper.readTree(output.path("item").path("output").asText())
+            assertThat(output.path("item").path("call_id").asText()).isEqualTo("cancel-form")
+            assertThat(result.path("requestId").asText()).isEqualTo(request.path("requestId").asText())
+            assertThat(result.path("cancelled").booleanValue()).isTrue()
+            assertThat(result.path("answers").isArray).isTrue()
+            assertThat(result.path("answers").size()).isZero()
+            assertThat(f.responses()).hasSize(2)
+            assertThat(f.stored.none { it.path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }).isTrue()
+            assertThat(f.tools.invocations).isEmpty()
+            assertThat(f.tools.topicSubmissions).isEmpty()
+            f.ack(output)
+            f.await("cancelled form acknowledgement resumes ordinary conversation") { f.responses().size == 3 }
+            f.completeAudioResponse("cancel-resumed", "cancel-resumed-item", "다른 방향으로 이야기해 봐요.")
+            f.await("cancellation resumes audible conversation") {
+                f.stored.any { it.path("item_id").asText() == "cancel-resumed-item" }
+            }
+            val receipts = f.inputStates().size
+            f.control(userInputControl(Contract.USER_INPUT_SUBMIT_EVENT, request,
+                listOf(mapOf("questionId" to "direction", "selectedOptionIds" to listOf("redis"), "text" to ""))))
+            f.await("late submit cannot reverse cancellation") { f.inputStates().size == receipts + 1 }
+            assertThat(f.inputStates().last().path("phase").asText()).isEqualTo("cancelled")
+            assertThat(f.outputs()).hasSize(1)
+            assertThat(f.stored.none { it.path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }).isTrue()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
     fun `spoken root focus then selected immutable topics wait for durable GUI evidence before the next child focus`() {
         val save = CompletableDeferred<VoiceTutorMcpToolResult>()
         val storedChoice = CompletableDeferred<Unit>()
@@ -585,6 +748,85 @@ class VoiceTutorNativeSessionRelayTest {
             assertThat(f.responses()).hasSize(3)
             assertThat(f.ui.map { it.path("type").asText() }).doesNotContain("error", Contract.INPUT_RETRY_EVENT)
             assertThat(f.completed.get()).isFalse()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `explicit user end waits for the private interrupted tutor archive before releasing relay workers`() {
+        val saveArchive = CompletableDeferred<Unit>()
+        val archiveSaved = AtomicBoolean()
+        val archiveCancelled = AtomicBoolean()
+        Fixture(store = { event ->
+            if (event.path("type").asText() == Metadata.INTERRUPTED_TUTOR_EVENT) {
+                try {
+                    saveArchive.await()
+                    archiveSaved.set(true)
+                } catch (error: CancellationException) {
+                    archiveCancelled.set(true)
+                    throw error
+                }
+            }
+        }).use { f ->
+            f.opening(); f.learner(1, "learner-before-end"); f.transcript("learner-before-end", "Redis를 설명해줘.")
+            f.created("ending-response")
+            f.provider("response.output_item.added", "response_id" to "ending-response",
+                "item" to mapOf("id" to "unfinished-tutor", "type" to "message"))
+            f.provider("output_audio_buffer.started", "response_id" to "ending-response")
+            f.provider("response.output_audio_transcript.delta", "response_id" to "ending-response",
+                "item_id" to "unfinished-tutor", "delta" to "  Redis는 메모리에\n")
+            f.await("the partial tutor caption has actually reached the client") {
+                f.ui.any { it.path("item_id").asText() == "unfinished-tutor" && it.path("delta").asText() == "  Redis는 메모리에\n" }
+            }
+            // This is the terminal contract produced only by an explicit USER_ENDED action.
+            f.terminate(VoiceTutorRelayTermination(cancelActiveResponse = true, preserveInterruptedTutor = true))
+            f.await("exact private archive starts saving before terminal release") {
+                f.stored.any { it.path("type").asText() == Metadata.INTERRUPTED_TUTOR_EVENT } &&
+                    f.outgoing.any { it.path("type").asText() == "response.cancel" && it.path("response_id").asText() == "ending-response" }
+            }
+            val archive = f.stored.single { it.path("type").asText() == Metadata.INTERRUPTED_TUTOR_EVENT }
+            assertThat(archive.path("item_id").asText()).isEqualTo("unfinished-tutor")
+            assertThat(archive.path("transcript").asText()).isEqualTo("  Redis는 메모리에\n")
+            assertThat(archive.path(Metadata.POST_CALL_EVIDENCE).isBoolean).isTrue()
+            assertThat(archive.path(Metadata.POST_CALL_EVIDENCE).booleanValue()).isFalse()
+            assertThat(archive.path(Metadata.CONVERSATION_SEQUENCE).asLong()).isEqualTo(3)
+            assertThat(archive.path(Metadata.LESSON_REVISION).asLong()).isZero()
+            assertThat(archive.path(Metadata.ACCEPTED_AT_EPOCH_MILLIS).asLong()).isPositive()
+            assertThat(archive.has(Metadata.IS_STUDY_QUESTION)).isFalse()
+            assertThat(archive.has(Metadata.STUDY_QUESTION_PROVIDER_ITEM_ID)).isFalse()
+            assertThat(archive.has(Metadata.STUDY_ANSWER_PROVIDER_ITEM_ID)).isFalse()
+            f.provider("response.output_audio_transcript.delta", "response_id" to "ending-response",
+                "item_id" to "unfinished-tutor", "delta" to "LATE_GENERATED_TEXT")
+            f.provider("response.output_audio_transcript.done", "response_id" to "ending-response",
+                "item_id" to "unfinished-tutor", "transcript" to "LATE_GENERATED_TEXT")
+            f.provider("response.done", "response" to mapOf("id" to "ending-response", "status" to "cancelled",
+                "output" to listOf(mapOf("id" to "unfinished-tutor", "type" to "message", "content" to listOf(
+                    mapOf("type" to "audio", "transcript" to "LATE_GENERATED_TEXT"))))))
+            f.provider("output_audio_buffer.stopped", "response_id" to "ending-response")
+            f.provider("conversation.item.created", "item" to mapOf("id" to "after-terminal-drain", "type" to "message"))
+            f.await("provider cancellation and audio drain were processed while persistence is held") {
+                f.ui.any { it.path("item").path("id").asText() == "after-terminal-drain" }
+            }
+            // The normal idle drain threshold is 200ms. A blocked archive must outlive it.
+            f.assertRunningFor(Duration.ofMillis(350))
+            assertThat(archiveSaved.get()).isFalse()
+            assertThat(archiveCancelled.get()).isFalse()
+            assertThat(f.receiveCancelled.get()).isFalse()
+            assertThat(f.stored.map { it.path("item_id").asText() })
+                .containsExactly("tutor-0", "learner-before-end", "unfinished-tutor")
+            assertThat(f.stored.map { it.path(Metadata.CONVERSATION_SEQUENCE).asLong() }).containsExactly(1, 2, 3)
+            assertThat(f.ui.none { it.path("type").asText() == Metadata.INTERRUPTED_TUTOR_EVENT }).isTrue()
+            assertThat(f.ui.joinToString { it.toString() }).doesNotContain("LATE_GENERATED_TEXT")
+            assertThat(f.responses()).hasSize(2)
+            saveArchive.complete(Unit)
+            f.await("successful archive persistence releases the terminal relay") { f.completed.get() }
+            assertThat(archiveSaved.get()).isTrue()
+            assertThat(archiveCancelled.get()).isFalse()
+            assertThat(f.receiveCancelled.get()).isTrue()
+            assertThat(f.stored.count { it.path("item_id").asText() == "unfinished-tutor" }).isEqualTo(1)
+            assertThat(f.stored.last().path("transcript").asText()).isEqualTo("  Redis는 메모리에\n")
+            assertThat(f.integrityMarkers).isEmpty()
+            assertThat(f.tools.invocations).isEmpty()
             assertThat(f.errors).isEmpty()
         }
     }
@@ -1036,6 +1278,22 @@ class VoiceTutorNativeSessionRelayTest {
         }
 
         fun answerStates() = ui.filter { it.path("type").asText() == Contract.ANSWER_STATE_EVENT }
+        fun inputRequests() = ui.filter { it.path("type").asText() == Contract.USER_INPUT_REQUEST_EVENT }
+        fun inputStates() = ui.filter { it.path("type").asText() == Contract.USER_INPUT_STATE_EVENT }
+        fun control(event: Map<String, Any>) {
+            assertThat(controls.tryEmitNext(json(event))).isEqualTo(Sinks.EmitResult.OK)
+        }
+        fun terminate(event: VoiceTutorRelayTermination) {
+            assertThat(terminal.tryEmitNext(event)).isEqualTo(Sinks.EmitResult.OK)
+        }
+        fun assertRunningFor(duration: Duration) {
+            val deadline = System.nanoTime() + duration.toNanos()
+            while (System.nanoTime() < deadline) {
+                assertThat(completed.get()).withFailMessage("Relay released a pending transcript write").isFalse()
+                assertThat(errors).isEmpty()
+                changed.tryAcquire(20, TimeUnit.MILLISECONDS)
+            }
+        }
         fun serverCalls() = outgoing.filter { it.path("item").path("type").asText() == "function_call" }
 
         fun created(id: String) = provider("response.created", "response" to mapOf("id" to id,
@@ -1114,6 +1372,19 @@ class VoiceTutorNativeSessionRelayTest {
         val mapper = JsonMapperProvider.mapper
         fun json(value: Any): String = mapper.writeValueAsString(value)
         fun success() = VoiceTutorMcpToolResult("{\"studies\":[]}", false)
+        fun ordinaryInputArguments(mode: String): Map<String, Any> = mapOf<String, Any>(
+            "title" to "다음 공부 방향", "questions" to listOf(mapOf<String, Any>(
+                "id" to "direction", "prompt" to "어떤 방향으로 공부할까요?", "selectionMode" to mode,
+                "options" to (if (mode == "text") emptyList<Map<String, String>>() else listOf(
+                    mapOf("id" to "redis", "label" to "Redis"), mapOf("id" to "kafka", "label" to "Kafka"),
+                    mapOf("id" to "msa", "label" to "MSA"))),
+                "allowFreeText" to true,
+            )),
+        )
+        fun userInputControl(type: String, request: JsonNode, answers: List<Map<String, Any>>? = null): Map<String, Any> =
+            linkedMapOf<String, Any>("type" to type, "requestId" to request.path("requestId").asText(),
+                "sessionId" to request.path("sessionId").asText(), "attemptId" to request.path("attemptId").asText())
+                .apply { answers?.let { put("answers", it) } }
         fun context(): VoiceTutorWebRtcControlContext {
             val now = Instant.now()
             return VoiceTutorWebRtcControlContext(VoiceTutorSession(

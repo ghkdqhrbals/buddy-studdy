@@ -288,6 +288,10 @@ class VoiceTutorServiceTest {
         assertThat(instructions)
             .contains("You, the realtime model hearing this conversation, decide its meaning")
             .contains("When request_user_input is available", "If this tool is absent, use the existing spoken interaction")
+            .contains("you MUST call it", "a spoken list", "allowFreeText=true")
+            .contains("An already clear choice needs no redundant form", "Only the server-controlled readback")
+            .contains("답변 종료", "답변 제출")
+            .contains("Do not tell the learner to tap Finish Answer or Submit while those controls are unavailable")
             .contains("proactively call suggest_study_topics", "request_user_input with studyTopicProposal")
             .contains("wait silently for the exact submitted/cancelled result", "explicit Submit creates only selected children")
             .contains("Except for the exact server-owned studyTopicProposal form", "descendants stop at depth four", "build only chosen branches lazily")
@@ -1366,6 +1370,30 @@ class VoiceTutorServiceTest {
     }
 
     @Test
+    fun `interrupted tutor archive preserves original text and never accepts live learning metadata`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val service = service(persistence)
+        val original = "  중단되기 전에 생성된 설명입니다.\n"
+        assertThat(service.appendTranscript(principal, persistence.session.id, "interrupted", VoiceTutorTranscriptRole.TUTOR,
+            original, now, lessonRevision = 2, conversationSequence = 9, interrupted = true)).isTrue()
+        assertThat(persistence.lastInterrupted).isTrue()
+        assertThat(persistence.lastTranscript).isEqualTo(original)
+        assertThat(persistence.lastConversationSequence).isEqualTo(9)
+        assertThat(persistence.lastPostCallEvidence).isFalse()
+        assertThat(service.appendTranscript(principal, persistence.session.id, "user", VoiceTutorTranscriptRole.USER,
+            original, now, conversationSequence = 10, interrupted = true)).isFalse()
+        assertThat(service.appendTranscript(principal, persistence.session.id, "semantic", VoiceTutorTranscriptRole.TUTOR,
+            original, now, conversationSequence = 10, interrupted = true, isStudyQuestion = true)).isFalse()
+        assertThat(service.appendTranscript(principal, persistence.session.id, "post-call", VoiceTutorTranscriptRole.TUTOR,
+            original, now, conversationSequence = 10, interrupted = true, postCallEvidence = true)).isFalse()
+        assertThat(service.appendTranscript(principal, persistence.session.id, "unordered", VoiceTutorTranscriptRole.TUTOR,
+            original, now, interrupted = true)).isFalse()
+        assertThat(service.appendTranscript(principal, persistence.session.id, "too-long", VoiceTutorTranscriptRole.TUTOR,
+            "가".repeat(20_001), now, conversationSequence = 10, interrupted = true)).isFalse()
+        assertThat(persistence.transcriptAppendCalls).isEqualTo(1)
+    }
+
+    @Test
     fun `missing native source fails result rather than inventing empty learning or grading a partial answer`() = runBlocking<Unit> {
         val persistence = FakePersistence(now)
         val summaries = FakeSummary()
@@ -1600,6 +1628,8 @@ class VoiceTutorServiceTest {
         var verifiedLearningExchange = false
         var postCallLearningCandidates = false
         var lastPostCallEvidence = false
+        var lastInterrupted = false
+        var lastTranscript: String? = null
         var lastConversationSequence: Long? = null
         var reserveOverride: ReserveVoiceTutorSessionResult? = null
         var reserveCalls = 0
@@ -1780,12 +1810,15 @@ class VoiceTutorServiceTest {
             acceptedBeforeQuotaCutoff: Boolean,
             postCallEvidence: Boolean,
             conversationSequence: Long?,
+            interrupted: Boolean,
         ): Boolean {
             transcriptAppendCalls += 1
             lastTranscriptLessonRevision = lessonRevision
             lastStudyQuestionProviderItemId = studyQuestionProviderItemId
             lastAskedStudyQuestion = askedStudyQuestion
             lastPostCallEvidence = postCallEvidence
+            lastInterrupted = interrupted
+            lastTranscript = transcript
             lastConversationSequence = conversationSequence
             return transcriptAppendResult
         }

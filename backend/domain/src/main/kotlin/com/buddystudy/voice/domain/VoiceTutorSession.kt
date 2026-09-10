@@ -124,6 +124,8 @@ data class VoiceTutorTranscriptTurn(
     val isStudyQuestion: Boolean = false,
     /** Clean native-realtime source; learning semantics are verified only after the call. */
     val postCallEvidence: Boolean = false,
+    /** Private generated text preserved when the learner interrupted delivery; never learning evidence. */
+    val interrupted: Boolean = false,
 ) {
     val source: VoiceTutorTranscriptSource
         get() = if (providerItemId.startsWith(VoiceTutorTranscriptSource.STRUCTURED_ITEM_PREFIX)) {

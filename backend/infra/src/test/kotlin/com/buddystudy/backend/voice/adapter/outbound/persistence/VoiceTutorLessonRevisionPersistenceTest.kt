@@ -58,6 +58,7 @@ class VoiceTutorLessonRevisionPersistenceTest {
                 asked_study_question boolean not null default false,
                 is_study_question boolean not null default false,
                 post_call_evidence boolean not null default false,
+                interrupted boolean not null default false,
                 check (study_question_turn_id is null or role = 'USER'),
                 check (study_question_turn_id is null or asked_study_question = false),
                 check (study_answer_turn_id is null or role = 'TUTOR'),
@@ -767,6 +768,82 @@ class VoiceTutorLessonRevisionPersistenceTest {
         assertThat(adapter.appendTranscript(7, "owned", "answer", VoiceTutorTranscriptRole.USER, "  원래 답변입니다.\n", now,
             40_000, 2000, lessonRevision = 2, postCallEvidence = true, conversationSequence = 3)).isFalse()
         assertThat(adapter.transcript(7, "owned", 4000)).containsExactlyElementsOf(after)
+    }
+
+    @Test
+    fun `interrupted tutor archives remain private ordered immutable history after terminal sessions`() = runBlocking<Unit> {
+        native("before", VoiceTutorTranscriptRole.TUTOR, 1)
+        native("latest-user", VoiceTutorTranscriptRole.USER, 3)
+        val original = "  중단되기 전에 생성된 설명입니다.\n"
+        assertThat(adapter.appendTranscript(7, "owned", "partial", VoiceTutorTranscriptRole.TUTOR, original, now,
+            4000, 20, lessonRevision = 2, conversationSequence = 2, interrupted = true)).isTrue()
+        assertThat(adapter.appendTranscript(7, "owned", "partial", VoiceTutorTranscriptRole.TUTOR, "늦은 전체 응답", now,
+            4000, 20, lessonRevision = 3, postCallEvidence = true, conversationSequence = 4)).isFalse()
+        val originalRows = adapter.transcript(7, "owned", 4000)
+        assertThat(originalRows.map { it.providerItemId }).containsExactly("before", "partial", "latest-user")
+        assertThat(originalRows.map { it.interrupted }).containsExactly(false, true, false)
+        assertThat(originalRows[1].transcript).isEqualTo(original)
+        assertThat(originalRows[1].postCallEvidence).isFalse()
+        assertThat(originalRows[1].isStudyQuestion).isFalse()
+        assertThat(originalRows[1].studyAnswerTurnId).isNull()
+        assertThat(adapter.transcript(8, "owned", 4000)).isEmpty()
+        for (status in listOf("ENDING", "COMPLETED", "FAILED")) {
+            database.sql("update voice_tutor_sessions set status = :status where id = 'owned'")
+                .bind("status", status).fetch().rowsUpdated().awaitSingle()
+            assertThat(adapter.transcript(7, "owned", 4000)).containsExactlyElementsOf(originalRows)
+        }
+        assertThat(adapter.appendTranscript(7, "owned", "late", VoiceTutorTranscriptRole.TUTOR, original, now,
+            4000, 20, lessonRevision = 2, conversationSequence = 4, interrupted = true)).isFalse()
+    }
+
+    @Test
+    fun `interrupted archive cannot carry learning flags skip source ordering or escape session ownership`() = runBlocking<Unit> {
+        assertThat(adapter.appendTranscript(8, "owned", "wrong-owner", VoiceTutorTranscriptRole.TUTOR, "내용", now,
+            4000, 20, conversationSequence = 1, interrupted = true)).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "wrong-role", VoiceTutorTranscriptRole.USER, "내용", now,
+            4000, 20, conversationSequence = 1, interrupted = true)).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "post-call", VoiceTutorTranscriptRole.TUTOR, "내용", now,
+            4000, 20, conversationSequence = 1, postCallEvidence = true, interrupted = true)).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "question", VoiceTutorTranscriptRole.TUTOR, "내용", now,
+            4000, 20, conversationSequence = 1, isStudyQuestion = true, interrupted = true)).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "feedback", VoiceTutorTranscriptRole.TUTOR, "내용", now,
+            4000, 20, conversationSequence = 1, studyAnswerProviderItemId = "answer", interrupted = true)).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "unordered", VoiceTutorTranscriptRole.TUTOR, "내용", now,
+            4000, 20, interrupted = true)).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "expired", VoiceTutorTranscriptRole.TUTOR, "내용", now.plusSeconds(3601),
+            4000, 20, conversationSequence = 1, interrupted = true)).isFalse()
+        assertThat(adapter.transcript(7, "owned", 4000)).isEmpty()
+    }
+
+    @Test
+    fun `interrupted tutor stays an ordering barrier and cannot anchor canonical or legacy learning`() = runBlocking<Unit> {
+        execute("insert into voice_tutor_lesson_focuses (session_id, revision, study_id, captured_at) values ('owned', 2, 42, current_timestamp)")
+        assertThat(append("completed-question", VoiceTutorTranscriptRole.TUTOR, "완료된 문제", 2, true)).isTrue()
+        assertThat(adapter.appendTranscript(7, "owned", "partial", VoiceTutorTranscriptRole.TUTOR, "중단된 설명", now,
+            4000, 20, lessonRevision = 2, conversationSequence = 2, interrupted = true)).isTrue()
+        native("answer", VoiceTutorTranscriptRole.USER, 3)
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "answer", "partial", 2)).isEmpty()
+        assertThat(adapter.canonicalAnswerTurns(7, "owned", "answer", "completed-question", 2)).isEmpty()
+        assertThat(adapter.excludeCanonicalQuestionTurns(7, "owned", listOf("partial", "answer"))).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "promoted", VoiceTutorTranscriptRole.USER, "답변", now,
+            4000, 20, lessonRevision = 2, studyQuestionProviderItemId = "completed-question",
+            studyAnswerProviderItemIds = listOf("promoted"))).isFalse()
+        // Even legacy or faulty semantic flags cannot upgrade an interrupted row.
+        execute("update voice_tutor_transcript_turns set is_study_question = true, post_call_evidence = true where provider_item_id = 'partial'")
+        assertThat(adapter.hasPostCallLearningCandidates(7, "owned")).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "promoted", VoiceTutorTranscriptRole.USER, "답변", now,
+            4000, 20, lessonRevision = 2, studyQuestionProviderItemId = "partial",
+            studyAnswerProviderItemIds = listOf("promoted"))).isFalse()
+        execute("update voice_tutor_transcript_turns set study_question_turn_id = (select id from voice_tutor_transcript_turns where provider_item_id = 'partial') where provider_item_id = 'answer'")
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isFalse()
+        assertThat(adapter.appendTranscript(7, "owned", "feedback", VoiceTutorTranscriptRole.TUTOR, "평가", now,
+            4000, 20, lessonRevision = 2, studyAnswerProviderItemId = "answer")).isTrue()
+        // Invalid feedback provenance leaves the original private chat visible without promoting it.
+        val feedback = adapter.transcript(7, "owned", 4000).single { it.providerItemId == "feedback" }
+        assertThat(feedback.transcript).isEqualTo("평가")
+        assertThat(feedback.studyAnswerTurnId).isNull()
+        assertThat(feedback.isStudyQuestion).isFalse()
+        assertThat(adapter.hasVerifiedLearningExchange(7, "owned")).isFalse()
     }
 
     private suspend fun native(

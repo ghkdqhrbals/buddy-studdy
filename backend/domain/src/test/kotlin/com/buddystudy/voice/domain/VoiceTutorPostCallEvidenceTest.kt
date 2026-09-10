@@ -80,6 +80,7 @@ class VoiceTutorPostCallEvidenceTest {
             source.map { if (it.id == 2L) it.copy(providerItemId = "different") else it },
             source.map { if (it.id == 2L) it.copy(lessonRevision = 2) else it },
             source.map { if (it.id == 2L) it.copy(sequenceNumber = 31) else it },
+            source.map { if (it.id == 4L) it.copy(interrupted = true) else it },
             source.dropLast(1),
         )
         changed.forEach { assertNull(evidence.attestedTranscript("session", it, focus)) }
@@ -120,6 +121,44 @@ class VoiceTutorPostCallEvidenceTest {
         assertEquals(source, empty.attestedTranscript("session", source, focus))
         assertNull(empty.copy(learnerQuestions = listOf(VoiceTutorPostCallLearnerQuestion(3, listOf(4))))
             .attestedTranscript("session", source, focus))
+    }
+
+    @Test
+    fun `archive marker changes invalidate even an empty pending verdict`() {
+        val pending = evidence(source)
+        val changed = source.map { if (it.id == 4L) it.copy(interrupted = true) else it }
+
+        assertNull(pending.attestedTranscript("session", changed, focus))
+        assertEquals(changed, evidence(changed).attestedTranscript("session", changed, focus))
+    }
+
+    @Test
+    fun `interrupted questions and feedback cannot become attested evidence even with a raw source flag`() {
+        listOf(1L, 4L).forEach { interruptedId ->
+            val archived = source.map { if (it.id == interruptedId) it.copy(interrupted = true) else it }
+            assertNull(evidence(archived, VoiceTutorPostCallExchange(1, listOf(2, 3), 4))
+                .attestedTranscript("session", archived, focus))
+        }
+    }
+
+    @Test
+    fun `interrupted tutor remains in ordered history and cannot be skipped in a learner answer run`() {
+        val archived = turn(6, VoiceTutorTranscriptRole.TUTOR, "쓰기 뒤 캐시를").copy(
+            interrupted = true, postCallEvidence = false,
+        )
+        val transcript = source + listOf(
+            turn(5, VoiceTutorTranscriptRole.USER, "무효화는 어떻게 하나요?"),
+            archived,
+            turn(7, VoiceTutorTranscriptRole.TUTOR, "다른 주제를 선택할까요?"),
+        )
+        val base = evidence(transcript, VoiceTutorPostCallExchange(1, listOf(2, 3), 4))
+        val projected = base.attestedTranscript("session", transcript, focus)!!
+        assertEquals(archived, projected.single { it.id == archived.id })
+        assertEquals(transcript.map { it.sequenceNumber }, projected.map { it.sequenceNumber })
+        listOf(listOf(6L), listOf(7L), listOf(6L, 7L)).forEach { ids ->
+            assertNull(base.copy(learnerQuestions = listOf(VoiceTutorPostCallLearnerQuestion(5, ids)))
+                .attestedTranscript("session", transcript, focus))
+        }
     }
 
     @Test

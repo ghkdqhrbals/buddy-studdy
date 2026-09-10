@@ -810,6 +810,10 @@ struct VoiceTutorCallPresentation {
         return lessonPhase != .ending && lessonPhase != .ended && lessonPhase != .failed
     }
 
+    func canFinishAnswer(_ draft: VoiceTutorAnswerDraftState, userInputState: VoiceTutorUserInputState) -> Bool {
+        canDisplayActiveAnswer && draft.phase == .listening && !userInputState.holdsMicrophone
+    }
+
     var lessonSymbolName: String? {
         guard pauseState.mode == .active, !isServerPaused else { return nil }
         switch lessonPhase {
@@ -1970,7 +1974,23 @@ struct VoiceTutorCallScreen: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if answerDraftState.phase == .review || answerDraftState.phase == .failed {
+            if answerDraftState.phase == .listening {
+                Button {
+                    guard presentation.canFinishAnswer(answerDraftState, userInputState: userInputState),
+                          !didRequestEnd else { return }
+                    answerEditorSession = nil
+                    onFinishAnswer()
+                } label: {
+                    Text(strings.voiceTutorAnswerFinish)
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(voiceAccent)
+                .disabled(!presentation.canFinishAnswer(answerDraftState, userInputState: userInputState) || didRequestEnd)
+                .accessibilityHint(strings.voiceTutorAnswerFinishHint)
+                .accessibilityIdentifier("voiceCall.answerFinish")
+            } else if answerDraftState.phase == .review || answerDraftState.phase == .failed {
                 Button {
                     performOrbPrimaryAction()
                 } label: {
@@ -2709,6 +2729,16 @@ private struct VoiceTutorCaptionBubble: View {
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                if caption.isInterrupted {
+                    Text(strings.voiceTutorInterruptedResponse)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if caption.isUnsubmittedAnswer {
+                    Text(strings.voiceTutorUnsubmittedAnswer)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(isLearner ? 16 : 0)
             .background(
@@ -3284,6 +3314,11 @@ private struct VoiceTutorSourceConversation: View {
                             Text(verbatim: turn.text)
                                 .font(.subheadline)
                                 .fixedSize(horizontal: false, vertical: true)
+                            if turn.interrupted {
+                                Text(strings.voiceTutorInterruptedResponse)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     if visibleCount < turns.count {

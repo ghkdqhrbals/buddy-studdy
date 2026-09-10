@@ -2,6 +2,14 @@
 import Foundation
 
 extension AppStrings {
+    var voiceTutorUnsubmittedAnswer: String {
+        voiceTutorPauseText("미제출 답변", "Unsubmitted answer", "未送信の回答")
+    }
+
+    var voiceTutorInterruptedResponse: String {
+        voiceTutorPauseText("중단된 응답", "Interrupted response", "中断された応答")
+    }
+
     func voiceTutorOperationStatus(name: String, phase: VoiceTutorOperationEvent.Phase,
                                    elapsedMilliseconds: Int64) -> String {
         let status: String

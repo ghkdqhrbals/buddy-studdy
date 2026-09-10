@@ -284,6 +284,7 @@ class VoiceStudyLearningRecordPersistenceAdapter(
             (row.get("study_answer_turn_id") as? Number)?.toLong(),
             row.get("asked_study_question", java.lang.Boolean::class.java) == true,
             row.get("is_study_question", java.lang.Boolean::class.java) == true,
+            interrupted = row.get("interrupted", java.lang.Boolean::class.java) == true,
         )
     }.all().collectList().awaitSingle()
 

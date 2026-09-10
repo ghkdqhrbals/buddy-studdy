@@ -128,7 +128,8 @@ class VoiceTutorControlWebSocketHandler(
                 )
                 payload?.let { emit(outgoing, it) }
                 terminalSignal.tryEmitValue(
-                    VoiceTutorRelayTermination(cancelActiveResponse, spokenNotice, notBefore),
+                    VoiceTutorRelayTermination(cancelActiveResponse, spokenNotice, notBefore,
+                        preserveInterruptedTutor = reason == "USER_ENDED" && cancelActiveResponse),
                 )
                 true
             } else {
@@ -426,6 +427,10 @@ class VoiceTutorControlWebSocketHandler(
                     if (!context.userInputEnabled || !persist || forwardToClient) return@relaySideband false
                     return@relaySideband inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull() == true
                 }
+                if (type == VoiceTutorTranscriptMetadata.INTERRUPTED_TUTOR_EVENT) {
+                    if (!persist || forwardToClient) return@relaySideband false
+                    return@relaySideband inspectProviderEvent(principal, sessionId, raw).awaitSingleOrNull() == true
+                }
                 if (type == VoiceTutorRealtimeContract.SPOKEN_LESSON_END_EVENT) {
                     // Only the server-side semantic input path emits this type.
                     // It is never client/provider data and follows the exact
@@ -657,6 +662,12 @@ class VoiceTutorControlWebSocketHandler(
                 conversationSequence = VoiceTutorTranscriptMetadata.conversationSequence(node),
                 structuredInput = true,
             ) else Mono.just(false)
+            VoiceTutorTranscriptMetadata.INTERRUPTED_TUTOR_EVENT -> appendTranscript(
+                principal, sessionId, node.path("item_id").asText(), VoiceTutorTranscriptRole.TUTOR,
+                node.path("transcript").asText(), VoiceTutorTranscriptMetadata.lessonRevision(node),
+                acceptedAt = VoiceTutorTranscriptMetadata.acceptedAt(node),
+                conversationSequence = VoiceTutorTranscriptMetadata.conversationSequence(node), interrupted = true,
+            )
             "conversation.item.input_audio_transcription.completed" -> appendTranscript(
                 principal,
                 sessionId,
@@ -704,6 +715,7 @@ class VoiceTutorControlWebSocketHandler(
         postCallEvidence: Boolean = false,
         conversationSequence: Long? = null,
         structuredInput: Boolean = false,
+        interrupted: Boolean = false,
     ): Mono<Boolean> = if (transcript.isBlank() ||
         (providerItemId.startsWith(VoiceTutorTranscriptMetadata.STRUCTURED_ITEM_PREFIX) && !structuredInput)) {
         Mono.just(false)
@@ -725,6 +737,7 @@ class VoiceTutorControlWebSocketHandler(
                 acceptedBeforeQuotaCutoff = acceptedAt != null,
                 postCallEvidence = postCallEvidence,
                 conversationSequence = conversationSequence,
+                interrupted = interrupted,
             )
         }
     }

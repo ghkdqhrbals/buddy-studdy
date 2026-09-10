@@ -4423,6 +4423,7 @@ struct BackendVoiceTutorTranscriptTurn: Decodable, Equatable, Sendable, Identifi
     var role: String
     var text: String
     var createdAt: Date?
+    var interrupted: Bool = false
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -4431,6 +4432,7 @@ struct BackendVoiceTutorTranscriptTurn: Decodable, Equatable, Sendable, Identifi
         case transcript
         case createdAt
         case occurredAt
+        case interrupted
     }
 
     init(from decoder: Decoder) throws {
@@ -4448,6 +4450,7 @@ struct BackendVoiceTutorTranscriptTurn: Decodable, Equatable, Sendable, Identifi
             ?? ""
         createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt)
             ?? values.decodeIfPresent(Date.self, forKey: .occurredAt)
+        interrupted = try values.decodeIfPresent(Bool.self, forKey: .interrupted) ?? false
     }
 }
 

@@ -22,7 +22,8 @@ class VoiceTutorMutationConfirmationAdapter(private val database: DatabaseClient
             SELECT t.id FROM voice_tutor_transcript_turns t
             JOIN voice_tutor_sessions s ON s.id = t.session_id
             WHERE s.user_id = :userId AND s.id = :sessionId AND s.status = 'ACTIVE' AND s.ended_at IS NULL
-              AND t.role = 'USER' AND t.provider_item_id = :providerItemId AND t.lesson_revision = :revision
+              AND t.role = 'USER' AND t.interrupted = FALSE
+              AND t.provider_item_id = :providerItemId AND t.lesson_revision = :revision
               AND NOT EXISTS (SELECT 1 FROM voice_tutor_transcript_turns newer
                 WHERE newer.session_id = t.session_id AND newer.role = 'USER'
                   AND newer.sequence_number > t.sequence_number)
@@ -53,6 +54,7 @@ class VoiceTutorMutationConfirmationAdapter(private val database: DatabaseClient
               AND s.status = 'ACTIVE' AND s.ended_at IS NULL
               AND learner.role = 'USER' AND learner.provider_item_id = :learnerItem
               AND tutor.role = 'TUTOR' AND tutor.provider_item_id = :tutorItem
+              AND learner.interrupted = FALSE AND tutor.interrupted = FALSE
               AND learner.lesson_revision = :revision AND tutor.lesson_revision = :revision
               AND tutor.sequence_number < learner.sequence_number
               AND NOT EXISTS (SELECT 1 FROM voice_tutor_transcript_turns newer
@@ -87,7 +89,7 @@ class VoiceTutorMutationConfirmationAdapter(private val database: DatabaseClient
         }
         val latest = database.sql(
             """
-            SELECT t.id, t.provider_item_id, t.role, t.sequence_number
+            SELECT t.id, t.provider_item_id, t.role, t.sequence_number, t.interrupted
             FROM voice_tutor_transcript_turns t
             JOIN voice_tutor_sessions s ON s.id = t.session_id
             WHERE s.user_id = :userId AND s.id = :sessionId AND s.status = 'ACTIVE'
@@ -97,7 +99,7 @@ class VoiceTutorMutationConfirmationAdapter(private val database: DatabaseClient
             """.trimIndent(),
         ).bind("userId", userId).bind("sessionId", sessionId).bind("lessonRevision", lessonRevision)
             .map { row, _ -> boundary(row) }.one().awaitSingleOrNull()?.takeIf {
-            it.providerItemId == providerItemId && it.role == "USER"
+            !it.interrupted && it.providerItemId == providerItemId && it.role == "USER"
         } ?: return null
         // Initial focus selection needs only the exact current learner item. Guided descent
         // additionally requires the controller-frozen question, answer, feedback and offer
@@ -149,6 +151,8 @@ class VoiceTutorMutationConfirmationAdapter(private val database: DatabaseClient
         )
     }
 
+    // Read the nearest row before rejecting an archive. Filtering archives in SQL would
+    // reconnect an older offer/question to an agreement made after interrupted speech.
     private suspend fun previousRole(
         sessionId: String,
         lessonRevision: Long,
@@ -156,7 +160,7 @@ class VoiceTutorMutationConfirmationAdapter(private val database: DatabaseClient
         role: String,
     ): TurnBoundary? = database.sql(
         """
-        SELECT id, provider_item_id, role, sequence_number
+        SELECT id, provider_item_id, role, sequence_number, interrupted
         FROM voice_tutor_transcript_turns
         WHERE session_id = :sessionId AND lesson_revision = :lessonRevision
           AND sequence_number < :beforeSequence AND role = :role
@@ -165,32 +169,36 @@ class VoiceTutorMutationConfirmationAdapter(private val database: DatabaseClient
         """.trimIndent(),
     ).bind("sessionId", sessionId).bind("lessonRevision", lessonRevision)
         .bind("beforeSequence", beforeSequence).bind("role", role)
-        .map { row, _ -> boundary(row) }.one().awaitSingleOrNull()
+        .map { row, _ -> boundary(row) }.one().awaitSingleOrNull()?.takeUnless { it.interrupted }
 
     private fun boundary(row: io.r2dbc.spi.Row) = TurnBoundary(
         id = (row.get("id") as Number).toLong(),
         providerItemId = row.get("provider_item_id", String::class.java).orEmpty(),
         role = row.get("role", String::class.java).orEmpty(),
         sequenceNumber = (row.get("sequence_number") as Number).toLong(),
+        interrupted = row.get("interrupted", java.lang.Boolean::class.java) == true,
     )
 
     private fun validProviderItemId(value: String): Boolean = value.isNotBlank() && value.length <= 191
 
     private suspend fun latestTurn(userId: Long, sessionId: String, role: String): Long? = database.sql(
         """
-        SELECT t.id FROM voice_tutor_transcript_turns t
+        SELECT t.id, t.interrupted FROM voice_tutor_transcript_turns t
         JOIN voice_tutor_sessions s ON s.id = t.session_id
         WHERE s.user_id = :userId AND s.id = :sessionId AND s.status = 'ACTIVE'
           AND s.ended_at IS NULL AND t.role = :role
-        ORDER BY t.id DESC LIMIT 1
+        ORDER BY t.sequence_number DESC, t.id DESC LIMIT 1
         """.trimIndent(),
     ).bind("userId", userId).bind("sessionId", sessionId).bind("role", role)
-        .map { row, _ -> (row.get("id") as Number).toLong() }.one().awaitSingleOrNull()
+        .map { row, _ ->
+            (row.get("id") as Number).toLong() to (row.get("interrupted", java.lang.Boolean::class.java) == true)
+        }.one().awaitSingleOrNull()?.takeUnless { it.second }?.first
 
     private data class TurnBoundary(
         val id: Long,
         val providerItemId: String,
         val role: String,
         val sequenceNumber: Long,
+        val interrupted: Boolean,
     )
 }

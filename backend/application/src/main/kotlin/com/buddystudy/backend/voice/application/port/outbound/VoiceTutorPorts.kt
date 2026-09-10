@@ -163,6 +163,8 @@ interface VoiceTutorPersistencePort : VoiceTutorQuotaQueryPort {
         postCallEvidence: Boolean = false,
         /** Frozen provider conversation order, independent of final ASR arrival order. */
         conversationSequence: Long? = null,
+        /** Private incomplete TUTOR archive; never source authority or proof of heard/completed speech. */
+        interrupted: Boolean = false,
     ): Boolean
 
     suspend fun transcript(userId: Long, sessionId: String, maxCharacters: Int): List<VoiceTutorTranscriptTurn>
@@ -439,6 +441,8 @@ data class VoiceTutorRelayTermination(
     val spokenNotice: VoiceTutorSpokenTerminationNotice? = null,
     /** Do not release/finalize a pre-armed spoken terminal before this instant. */
     val notBefore: Instant? = null,
+    /** Only an explicit learner end may archive generated text from the unfinished response. */
+    val preserveInterruptedTutor: Boolean = false,
 )
 
 enum class VoiceTutorSpokenTerminationNotice {

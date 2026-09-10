@@ -45,7 +45,7 @@ data class VoiceTutorPostCallEvidence(
         val focus = VoiceTutorLessonFocusIndex(focuses, acceptedStudyId)
         val replacements = mutableMapOf<Long, VoiceTutorTranscriptTurn>()
         val consumed = mutableSetOf<Long>()
-        fun clean(turn: VoiceTutorTranscriptTurn) = turn.postCallEvidence && turn.source == VoiceTutorTranscriptSource.AUDIO &&
+        fun clean(turn: VoiceTutorTranscriptTurn) = !turn.interrupted && turn.postCallEvidence && turn.source == VoiceTutorTranscriptSource.AUDIO &&
             turn.transcript.isNotBlank() &&
             turn.lessonRevision >= 0 && focus.at(turn.lessonRevision) != null &&
             !turn.isStudyQuestion && !turn.askedStudyQuestion &&
@@ -111,7 +111,7 @@ data class VoiceTutorPostCallEvidence(
                 field(it.id.toString()); field(it.sessionId); field(it.providerItemId); field(it.role.name)
                 field(it.transcript); field(it.sequenceNumber.toString()); field(it.lessonRevision.toString())
                 field(it.occurredAt.toString())
-                field(it.postCallEvidence.toString()); field(it.isStudyQuestion.toString())
+                field(it.postCallEvidence.toString()); field(it.interrupted.toString()); field(it.isStudyQuestion.toString())
                 field(it.askedStudyQuestion.toString()); field(it.studyQuestionTurnId?.toString().orEmpty())
                 field(it.studyAnswerTurnId?.toString().orEmpty())
             }

@@ -7,6 +7,22 @@ import XCTest
 final class VoiceTutorSummaryTests: XCTestCase {
     private let sessionID = "synthetic-summary-session"
 
+    func testInterruptedTranscriptSurvivesHistoryDecodeBesideCompletedTurns() throws {
+        let turns = try JSONDecoder().decode([BackendVoiceTutorTranscriptTurn].self, from: Data("""
+        [
+          {"id":"earlier","role":"TUTOR","text":"이미 끝난 설명"},
+          {"id":"partial","role":"TUTOR","text":"화면에 보이던 설명의 앞부분","interrupted":true},
+          {"id":"learner","role":"USER","text":"잠깐, 다른 부분부터 설명해 줘","interrupted":false}
+        ]
+        """.utf8))
+        XCTAssertEqual(turns.map(\.id), ["earlier", "partial", "learner"])
+        XCTAssertEqual(turns.map(\.interrupted), [false, true, false])
+        XCTAssertEqual(turns[1].text, "화면에 보이던 설명의 앞부분")
+        for language in [AppLanguage.korean, .english, .japanese] {
+            XCTAssertFalse(AppStrings(language: language).voiceTutorInterruptedResponse.isEmpty)
+        }
+    }
+
     func testProcessingResultObjectIsNotTerminalEvenWithPartialContent() throws {
         for status in ["PENDING", "PROCESSING"] {
             let detail = try makeDetail(status: status, result: ["summaryMarkdown": "미완성 합성 요약"])

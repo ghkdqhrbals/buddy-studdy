@@ -221,19 +221,28 @@ internal class VoiceTutorNativeConversationController(
             }
             "response.output_item.added" -> {
                 val response = matchingResponse(node) ?: return false
-                if (response.superseded || response.readbackClearStartedAt != null) return false
+                if (response.superseded || response.archiveFrozen || response.readbackClearStartedAt != null) return false
                 val item = node.path("item")
                 if (item.path("type").asText() == "message") stampTutor(response, item.path("id").asText())
             }
             "response.output_audio_transcript.delta" -> {
                 val response = matchingResponse(node) ?: return false
-                if (response.superseded || response.readbackClearStartedAt != null) return false
+                if (response.superseded || response.archiveFrozen || response.readbackClearStartedAt != null) return false
                 announceResponse(response)
-                stampTutor(response, node.path("item_id").asText())
+                stampTutor(response, node.path("item_id").asText())?.let { tutor ->
+                    val delta = node.path("delta").takeIf { it.isTextual }?.asText().orEmpty()
+                    val eventId = node.path("event_id").asText()
+                    if (!tutor.partialTruncated && (eventId.isBlank() || response.transcriptDeltaEvents.add(eventId))) {
+                        val combined = tutor.partial + delta.take(MAX_INTERRUPTED_TEXT_CHARACTERS + 1)
+                        tutor.partial = combined.take(MAX_INTERRUPTED_TEXT_CHARACTERS)
+                        tutor.partialTruncated = combined.length > MAX_INTERRUPTED_TEXT_CHARACTERS
+                        trim(response.transcriptDeltaEvents, 2048)
+                    }
+                }
             }
             "response.output_audio_transcript.done" -> {
                 val response = matchingResponse(node) ?: return false
-                if (response.superseded || response.readbackClearStartedAt != null) return false
+                if (response.superseded || response.archiveFrozen || response.readbackClearStartedAt != null) return false
                 announceResponse(response)
                 val id = node.path("item_id").asText()
                 stampTutor(response, id)?.raw = raw
@@ -243,7 +252,7 @@ internal class VoiceTutorNativeConversationController(
                 response.audioStarted = true
                 response.audioStopped = false
                 if (response.superseded) { clearInterruptedOutput(response); return false }
-                if (response.readbackClearStartedAt != null) return false
+                if (response.archiveFrozen || response.readbackClearStartedAt != null) return false
                 armAnswerCapture(response)
                 announceResponse(response)
             }
@@ -251,7 +260,7 @@ internal class VoiceTutorNativeConversationController(
                 val response = matchingResponse(node) ?: return false
                 response.audioStopped = true
                 finishResponseIfReady()
-                if (response.superseded || response.readbackClearStartedAt != null) return false
+                if (response.superseded || response.archiveFrozen || response.readbackClearStartedAt != null) return false
             }
             "output_audio_buffer.cleared" -> {
                 val response = matchingResponse(node) ?: return false
@@ -272,7 +281,7 @@ internal class VoiceTutorNativeConversationController(
                 response.doneAt = nanoTime()
                 response.failed = response.failed || body.path("status").asText() != "completed"
                 response.body = body
-                if (!response.superseded) body.path("output").forEach { item ->
+                if (!response.superseded && !response.archiveFrozen) body.path("output").forEach { item ->
                     if (item.path("type").asText() == "message") {
                         val id = item.path("id").asText()
                         val tutor = stampTutor(response, id)
@@ -311,7 +320,7 @@ internal class VoiceTutorNativeConversationController(
                 if (response.expectsAudio && !response.superseded) announceResponse(response)
                 if (response.superseded && response.expectsAudio) clearInterruptedOutput(response)
                 finishResponseIfReady()
-                if (!response.expectsAudio || response.superseded) return false
+                if (!response.expectsAudio || response.superseded || response.archiveFrozen) return false
             }
             "response.output_audio.delta", "response.output_audio.done" -> {
                 val response = matchingResponse(node) ?: return false
@@ -320,9 +329,10 @@ internal class VoiceTutorNativeConversationController(
                 // WebRTC playout-start event. Generated audio is already output evidence.
                 if (type == "response.output_audio.delta" && node.path("delta").asText().isNotEmpty()) {
                     response.audioStarted = true
-                    if (!response.superseded) armAnswerCapture(response) else clearInterruptedOutput(response)
+                    if (response.superseded) clearInterruptedOutput(response)
+                    else if (!response.archiveFrozen) armAnswerCapture(response)
                 }
-                if (response.superseded) return false
+                if (response.superseded || response.archiveFrozen) return false
                 finishResponseIfReady()
             }
             "input_audio_buffer.cleared" -> {
@@ -350,6 +360,7 @@ internal class VoiceTutorNativeConversationController(
                 observeProviderError(node)
                 return false
             }
+            Metadata.INTERRUPTED_TUTOR_EVENT -> return false // Only our private persistence worker emits archives.
         }
         return true
     }
@@ -515,7 +526,8 @@ internal class VoiceTutorNativeConversationController(
     }
 
     @Synchronized
-    fun beginDrain(cancelActive: Boolean) {
+    fun beginDrain(cancelActive: Boolean, preserveInterruptedTutor: Boolean = false) {
+        if (preserveInterruptedTutor) active?.let(::archiveInterruptedTutor)
         draining = true
         sessionState.update("ending")
         cancelUserInputForTermination()
@@ -958,6 +970,7 @@ internal class VoiceTutorNativeConversationController(
     private fun interruptResponse(response: Response) {
         if (response.quota) return
         if (!response.superseded) {
+            archiveInterruptedTutor(response)
             response.interruptedAt = nanoTime()
             latestTutor = null
         }
@@ -1081,7 +1094,7 @@ internal class VoiceTutorNativeConversationController(
             return
         }
         if (response.quota && !response.deviceDrained) return
-        if (!response.failed && response.expectsAudio) {
+        if (!response.failed && !response.archiveFrozen && response.expectsAudio) {
             armAnswerCapture(response)
             if (response.tutors.isEmpty() || response.tutors.values.any { it.raw == null }) {
                 // Completed audible speech without its source is a gap, not a silent/tool-only turn.
@@ -1188,7 +1201,7 @@ internal class VoiceTutorNativeConversationController(
 
     private fun armAnswerCapture(response: Response) {
         val readback = response.questionReadback ?: return
-        if (answerCapture != null || response.failed || response.superseded || draining || quotaRequested || endingAfterResponse ||
+        if (answerCapture != null || response.failed || response.superseded || response.archiveFrozen || draining || quotaRequested || endingAfterResponse ||
             readback.revision != revision) return
         val floor = response.tutors.values.minOfOrNull { it.sequence } ?: sequence
         cancelLearningWatch(clearCompletion = true)
@@ -1396,6 +1409,31 @@ internal class VoiceTutorNativeConversationController(
         return response.tutors.getOrPut(id) { TutorTranscript(++sequence, wallClock()) }
     }
 
+    private fun archiveInterruptedTutor(response: Response) {
+        if (response.archiveFrozen || response.failed || response.superseded || response.readbackClearStartedAt != null) return
+        response.archiveFrozen = true
+        // Preserve only text received before the learner's action. It may have
+        // been generated ahead of playback; never claim an exact heard prefix.
+        response.tutors.forEach { (id, tutor) ->
+            if (id in transcripts) return@forEach
+            val text = tutor.raw?.let { mapper.readTree(it).path("transcript").asText() }
+                ?.takeIf { it.isNotBlank() } ?: tutor.partial
+            val archived = boundedInterruptedText(text)
+            if (archived.isBlank()) return@forEach
+            val event = json(mapOf("type" to Metadata.INTERRUPTED_TUTOR_EVENT, "item_id" to id,
+                "transcript" to archived, Metadata.POST_CALL_EVIDENCE to false,
+                Metadata.CONVERSATION_SEQUENCE to tutor.sequence, Metadata.LESSON_REVISION to response.revision,
+                Metadata.ACCEPTED_AT_EPOCH_MILLIS to tutor.acceptedAt.toEpochMilli()))
+            transcripts[id] = TranscriptState(archived)
+            publish(persistence, NativeTranscript(id, event))
+        }
+    }
+
+    private fun boundedInterruptedText(text: String): String {
+        val bounded = text.take(MAX_INTERRUPTED_TEXT_CHARACTERS)
+        return if (bounded.lastOrNull()?.isHighSurrogate() == true) bounded.dropLast(1) else bounded
+    }
+
     private fun matchingResponse(node: JsonNode): Response? = active?.takeIf {
         it.id != null && it.id == node.path("response_id").asText()
     }
@@ -1581,7 +1619,8 @@ internal class VoiceTutorNativeConversationController(
     private data class SpeechBoundary(val sequence: Long, var clientSequence: Long, val revision: Long, val startedOrder: Long,
         val acceptedAt: Instant, val precedingTutor: Tutor?, var committedAt: Long,
         val commitEventId: String = "buddystudy-internal-native-commit-${UUID.randomUUID()}", val answerId: String? = null)
-    private data class TutorTranscript(val sequence: Long, val acceptedAt: Instant, var raw: String? = null)
+    private data class TutorTranscript(val sequence: Long, val acceptedAt: Instant, var raw: String? = null,
+        var partial: String = "", var partialTruncated: Boolean = false)
     private data class ToolBoundary(val boundary: VoiceTutorDialogueBoundary, val revision: Long, val name: String,
         val operationContext: OperationContext)
     private data class QuestionReadback(val value: VoiceTutorQuestionReadback, val revision: Long, val epoch: Long)
@@ -1620,6 +1659,8 @@ internal class VoiceTutorNativeConversationController(
         var deviceDrained = false
         var cancellationRequested = false
         var superseded = false
+        var archiveFrozen = false
+        val transcriptDeltaEvents = linkedSetOf<String>()
         var interruptionAnnounced = false
         var interruptedAt = 0L
         var outputCleared = false
@@ -1628,6 +1669,7 @@ internal class VoiceTutorNativeConversationController(
     }
 
     companion object {
+        private const val MAX_INTERRUPTED_TEXT_CHARACTERS = 20_000
         private val OPERATION_CONTEXT_ID = Regex("[A-Za-z0-9_-]{1,191}")
         private val RESPONSE_QUIET_PERIOD = Duration.ofMillis(400)
         const val END_CALL_TOOL = "end_voice_conversation"

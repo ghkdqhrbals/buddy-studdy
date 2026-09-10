@@ -136,6 +136,7 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
                 study_answer_turn_id bigint,
                 asked_study_question boolean not null default false,
                 is_study_question boolean not null default false,
+                interrupted boolean not null default false,
                 unique (session_id, provider_item_id, role), unique (session_id, sequence_number),
                 foreign key (session_id) references voice_tutor_sessions(id) on delete cascade,
                 check (role in ('USER', 'TUTOR')), check (lesson_revision >= -1),
@@ -786,6 +787,35 @@ class VoiceStudyLearningRecordPersistenceAdapterTest {
         assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
         assertThat(projected()).isTrue()
         assertThat(outbox.events()).isEmpty()
+    }
+
+    @Test
+    fun `interrupted tutor source stays private even when completed output cites it`() = runBlocking<Unit> {
+        seed()
+        execute("update voice_tutor_transcript_turns set interrupted = true where id = 1")
+
+        append()
+
+        assertThat(count("questions")).isZero()
+        assertThat(count("voice_study_learning_records")).isZero()
+        assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
+        assertThat(outbox.events()).isEmpty()
+        assertThat(projected()).isTrue()
+    }
+
+    @Test
+    fun `interrupted supplemental answer stays in session while the genuine exchange still projects`() = runBlocking<Unit> {
+        seed()
+        execute("update voice_tutor_transcript_turns set interrupted = true where id = 6")
+
+        append(listOf(fixture.exploration().copy(exchanges = listOf(fixture.exchange(), fixture.learnerQuestion()))))
+
+        assertThat(count("questions")).isEqualTo(1)
+        assertThat(count("voice_study_learning_records")).isEqualTo(1)
+        assertThat(onlyRecord().questionTurnId).isEqualTo(1)
+        assertThat(count("voice_tutor_transcript_turns")).isEqualTo(6)
+        assertThat(text("select transcript from voice_tutor_transcript_turns where id = 6"))
+            .isEqualTo(fixture.turns().last().transcript)
     }
 
     @Test

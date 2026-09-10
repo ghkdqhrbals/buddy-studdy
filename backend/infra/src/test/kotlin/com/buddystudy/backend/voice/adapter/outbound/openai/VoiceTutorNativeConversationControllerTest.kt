@@ -897,6 +897,93 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
+    fun `barge in archives generated tutor text once without reviving late output or replacing older chat`() {
+        opening(); speech(1); committed("u1"); created("r1")
+        event("output_audio_buffer.started", "response_id" to "r1")
+        event("response.output_audio_transcript.delta", "response_id" to "r1", "item_id" to "partial",
+            "event_id" to "delta-1", "delta" to "  이미 생성된 ")
+        event("response.output_audio_transcript.delta", "response_id" to "r1", "item_id" to "partial",
+            "event_id" to "delta-2", "delta" to "문장입니다.\n")
+        event("response.output_audio_transcript.delta", "response_id" to "r1", "item_id" to "partial",
+            "event_id" to "delta-2", "delta" to "문장입니다.\n")
+        speech(2); committed("u2"); transcript("u2", "다른 이야기로 넘어가자")
+        val archive = mapper.readTree(stored.single { it.itemId == "partial" }.raw)
+        assertThat(archive.path("type").asText()).isEqualTo(Metadata.INTERRUPTED_TUTOR_EVENT)
+        assertThat(archive.path("transcript").asText()).isEqualTo("  이미 생성된 문장입니다.\n")
+        assertThat(archive.path(Metadata.POST_CALL_EVIDENCE).asBoolean()).isFalse()
+        assertThat(archive.path(Metadata.CONVERSATION_SEQUENCE).asLong()).isLessThan(
+            mapper.readTree(stored.single { it.itemId == "u2" }.raw).path(Metadata.CONVERSATION_SEQUENCE).asLong())
+        assertThat(stored.map { it.itemId }).contains("t0", "partial", "u2")
+        assertThat(event("response.output_audio_transcript.done", "response_id" to "r1", "item_id" to "partial",
+            "transcript" to "DO NOT APPEND LATE TEXT")).isFalse()
+        cancelled("r1"); event("output_audio_buffer.cleared", "response_id" to "r1")
+        cancelled("r1"); event("output_audio_buffer.cleared", "response_id" to "r1")
+        assertThat(stored.count { it.itemId == "partial" }).isEqualTo(1)
+        assertThat(stored.single { it.itemId == "partial" }.raw).doesNotContain("DO NOT APPEND")
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+    }
+
+    @Test
+    fun `pause retains the already received final tutor text as an interrupted private archive`() {
+        start(); created("r0"); audio("r0", "paused-tutor")
+        client(Contract.PAUSE_REQUEST_EVENT, 1)
+        val archive = mapper.readTree(stored.single { it.itemId == "paused-tutor" }.raw)
+        assertThat(archive.path("type").asText()).isEqualTo(Metadata.INTERRUPTED_TUTOR_EVENT)
+        assertThat(archive.path("transcript").asText()).isEqualTo("어떤 주제로 이야기할까요?")
+        assertThat(archive.path(Metadata.POST_CALL_EVIDENCE).asBoolean()).isFalse()
+        cancelled("r0"); event("output_audio_buffer.cleared", "response_id" to "r0")
+        client(Contract.PAUSE_REQUEST_EVENT, 1)
+        assertThat(stored.count { it.itemId == "paused-tutor" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `explicit end freezes generated text before cancellation while provider failures remain discarded`() {
+        start(); created("r0")
+        event("response.output_audio_transcript.delta", "response_id" to "r0", "item_id" to "end-tutor", "delta" to "아직 설명 중인 내용")
+        controller.beginDrain(cancelActive = true, preserveInterruptedTutor = true)
+        assertThat(stored.map { it.itemId }).containsExactly("end-tutor")
+        assertThat(event("response.output_audio_transcript.done", "response_id" to "r0", "item_id" to "end-tutor",
+            "transcript" to "나중에 도착한 전체 내용")).isFalse()
+        controller.beginDrain(cancelActive = true, preserveInterruptedTutor = true)
+        done("r0", "end-tutor")
+        event("output_audio_buffer.stopped", "response_id" to "r0")
+        assertThat(stored).hasSize(1)
+        assertThat(mapper.readTree(stored.single().raw).path("transcript").asText()).isEqualTo("아직 설명 중인 내용")
+    }
+
+    @Test
+    fun `provider failed output cannot become an interrupted archive when the learner ends during its drain`() {
+        start(); created("r0"); audio("r0", "failed-tutor")
+        event("response.done", "response" to mapOf("id" to "r0", "status" to "failed", "output" to listOf(
+            mapOf("id" to "failed-tutor", "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to "실패한 출력"))))))
+        controller.beginDrain(cancelActive = true, preserveInterruptedTutor = true)
+        event("output_audio_buffer.stopped", "response_id" to "r0")
+        assertThat(stored).isEmpty()
+    }
+
+    @Test
+    fun `disconnect and unheard late provider text do not manufacture an interrupted archive`() {
+        start(); created("r0")
+        event("response.output_audio_transcript.delta", "response_id" to "r0", "item_id" to "disconnected", "delta" to "아직 저장되지 않은 출력")
+        controller.beginDrain(cancelActive = true)
+        cancelled("r0")
+        assertThat(stored).isEmpty()
+        assertThat(event(Metadata.INTERRUPTED_TUTOR_EVENT, "item_id" to "forged", "transcript" to "forged")).isFalse()
+        assertThat(stored).isEmpty()
+    }
+
+    @Test
+    fun `interrupted delta retention is bounded and never splices text after a truncated surrogate pair`() {
+        start(); created("r0")
+        event("response.output_audio_transcript.delta", "response_id" to "r0", "item_id" to "bounded", "delta" to "가".repeat(19_999) + "😀")
+        event("response.output_audio_transcript.delta", "response_id" to "r0", "item_id" to "bounded", "delta" to "MUST NOT FOLLOW TRUNCATED PREFIX")
+        speech(1)
+        val text = mapper.readTree(stored.single { it.itemId == "bounded" }.raw).path("transcript").asText()
+        assertThat(text).isEqualTo("가".repeat(19_999))
+        assertThat(text.last().isHighSurrogate()).isFalse()
+    }
+
+    @Test
     fun `cancelled partial audio metadata cannot wait for a buffer that never started`() {
         opening(); speech(1); committed("u1"); created("r1")
         speech(2); committed("u2")
@@ -1109,7 +1196,8 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses()).hasSize(1)
         event("output_audio_buffer.cleared", "response_id" to "r0")
         assertThat(responses()).hasSize(2)
-        assertThat(stored).isEmpty()
+        assertThat(stored.map { it.itemId }).containsExactly("t0")
+        assertThat(mapper.readTree(stored.single().raw).path("type").asText()).isEqualTo(Metadata.INTERRUPTED_TUTOR_EVENT)
         assertThat(ui.map { it.path("type").asText() }).doesNotContain(Contract.INPUT_RETRY_EVENT)
         created("r1"); toolDone("r1", "latest", "list_studies")
         assertThat(controller.toolBoundary("latest")?.latestAcceptedLearnerProviderItemId).isEqualTo("u1")
@@ -1123,7 +1211,8 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses()).hasSize(1)
         event("output_audio_buffer.cleared", "response_id" to "r0")
         assertThat(responses()).hasSize(2)
-        assertThat(stored).isEmpty()
+        assertThat(stored.map { it.itemId }).containsExactly("t0")
+        assertThat(mapper.readTree(stored.single().raw).path("type").asText()).isEqualTo(Metadata.INTERRUPTED_TUTOR_EVENT)
     }
 
     @Test
@@ -1211,7 +1300,8 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses()).hasSize(3)
         created("latest"); silentDone("latest")
         assertThat(settledSequences()).containsExactly(2L)
-        assertThat(stored.map { it.itemId }).doesNotContain("stale-tutor")
+        assertThat(mapper.readTree(stored.single { it.itemId == "stale-tutor" }.raw).path("type").asText())
+            .isEqualTo(Metadata.INTERRUPTED_TUTOR_EVENT)
     }
 
     @Test
@@ -2656,7 +2746,8 @@ class VoiceTutorNativeConversationControllerTest {
         val answer = answerStates().last()
         assertThat(answer.path("phase").asText()).isEqualTo("listening")
         assertThat(answerSegments().map { it.path("text").asText() }).containsExactly("질문을 읽는 도중 시작한 답변")
-        assertThat(stored.map { it.itemId }).doesNotContain("unfinished-question")
+        assertThat(mapper.readTree(stored.single { it.itemId == "unfinished-question" }.raw).path("type").asText())
+            .isEqualTo(Metadata.INTERRUPTED_TUTOR_EVENT)
         assertThat(responses()).hasSize(3)
         answerControl(Contract.ANSWER_FINISH_EVENT, answer)
         assertThat(answerStates().last().path("phase").asText()).isEqualTo("review")

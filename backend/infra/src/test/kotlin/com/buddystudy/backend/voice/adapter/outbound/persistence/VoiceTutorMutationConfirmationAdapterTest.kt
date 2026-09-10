@@ -29,7 +29,7 @@ class VoiceTutorMutationConfirmationAdapterTest {
             "create table voice_tutor_sessions (id varchar(36) primary key, user_id bigint not null, status varchar(20) not null, ended_at timestamp(6))",
         )
         execute(
-            "create table voice_tutor_transcript_turns (id bigint primary key, session_id varchar(36) not null, provider_item_id varchar(191) not null, role varchar(20) not null, sequence_number bigint not null, lesson_revision bigint not null default 0, foreign key (session_id) references voice_tutor_sessions(id))",
+            "create table voice_tutor_transcript_turns (id bigint primary key, session_id varchar(36) not null, provider_item_id varchar(191) not null, role varchar(20) not null, sequence_number bigint not null, lesson_revision bigint not null default 0, interrupted boolean not null default false, foreign key (session_id) references voice_tutor_sessions(id))",
         )
     }
 
@@ -286,6 +286,69 @@ class VoiceTutorMutationConfirmationAdapterTest {
     }
 
     @Test
+    fun `an interrupted confirmation is not accepted and cannot reconnect an older offer`() = runBlocking<Unit> {
+        insertSession("owned-call", 7)
+        insertTurn(11, "owned-call", "TUTOR", providerItemId = "old-offer")
+        insertTurn(12, "owned-call", "TUTOR", providerItemId = "unfinished-offer", interrupted = true)
+        insertTurn(13, "owned-call", "USER", providerItemId = "reply")
+
+        assertThat(adapter.latestTutorTurnId(7, "owned-call")).isNull()
+        assertThat(adapter.latestLearnerTurnId(7, "owned-call")).isEqualTo(13)
+        assertThat(adapter.persistedLearnerTurnId(7, "owned-call", "reply", 0)).isEqualTo(13)
+        assertThat(adapter.persistedDialogueBoundary(7, "owned-call", "reply", "old-offer", 0)).isNull()
+        assertThat(adapter.persistedDialogueBoundary(7, "owned-call", "reply", "unfinished-offer", 0)).isNull()
+        assertThat(adapter.learnerTurnAuthorization(7, "owned-call", "reply", 0, null, null, null)?.turnId)
+            .isEqualTo(13)
+    }
+
+    @Test
+    fun `late archived insertion preserves spoken order and does not replace the newest completed tutor`() = runBlocking<Unit> {
+        insertSession("owned-call", 7)
+        insertTurn(11, "owned-call", "TUTOR", providerItemId = "new-offer", sequenceNumber = 3)
+        insertTurn(12, "owned-call", "USER", providerItemId = "reply", sequenceNumber = 4)
+        insertTurn(99, "owned-call", "TUTOR", providerItemId = "old-fragment", sequenceNumber = 1, interrupted = true)
+
+        assertThat(adapter.latestTutorTurnId(7, "owned-call")).isEqualTo(11)
+        assertThat(adapter.persistedDialogueBoundary(7, "owned-call", "reply", "new-offer", 0)?.tutorTurnId)
+            .isEqualTo(11)
+    }
+
+    @Test
+    fun `interrupted question feedback or offer cannot establish a completed exchange`() = runBlocking<Unit> {
+        for (archivedId in listOf(11L, 13L, 14L)) {
+            val call = "archive-$archivedId"
+            insertSession(call, 7)
+            insertTurn(11, call, "TUTOR", providerItemId = "question", interrupted = archivedId == 11L)
+            insertTurn(12, call, "USER", providerItemId = "answer")
+            insertTurn(13, call, "TUTOR", providerItemId = "feedback", interrupted = archivedId == 13L)
+            insertTurn(14, call, "TUTOR", providerItemId = "offer", interrupted = archivedId == 14L)
+            insertTurn(15, call, "USER", providerItemId = "agree")
+
+            val authorization = adapter.learnerTurnAuthorization(
+                7, call, "agree", 0, "question", "answer", "feedback", "offer",
+            )
+            assertThat(authorization?.turnId).isEqualTo(15)
+            assertThat(authorization?.completedExchange).describedAs("interrupted $archivedId").isFalse()
+            execute("delete from voice_tutor_transcript_turns where session_id = '$call'")
+        }
+    }
+
+    @Test
+    fun `an intervening archived tutor cannot be skipped to reuse an earlier completed feedback`() = runBlocking<Unit> {
+        insertSession("owned-call", 7)
+        insertTurn(11, "owned-call", "TUTOR", providerItemId = "question")
+        insertTurn(12, "owned-call", "USER", providerItemId = "answer")
+        insertTurn(13, "owned-call", "TUTOR", providerItemId = "feedback")
+        insertTurn(14, "owned-call", "TUTOR", providerItemId = "fragment", interrupted = true)
+        insertTurn(15, "owned-call", "TUTOR", providerItemId = "offer")
+        insertTurn(16, "owned-call", "USER", providerItemId = "agree")
+
+        assertThat(adapter.learnerTurnAuthorization(
+            7, "owned-call", "agree", 0, "question", "answer", "feedback", "offer",
+        )?.completedExchange).isFalse()
+    }
+
+    @Test
     fun `native freshness follows spoken sequence when older ASR persists with a larger row id`(): Unit = runBlocking {
         insertSession("owned-call", 7)
         insertTurn(30, "owned-call", "TUTOR", providerItemId = "question", sequenceNumber = 3)
@@ -315,11 +378,13 @@ class VoiceTutorMutationConfirmationAdapterTest {
         providerItemId: String = "item-$id",
         lessonRevision: Long = 0,
         sequenceNumber: Long = id,
+        interrupted: Boolean = false,
     ): Unit {
         database.sql(
-            "insert into voice_tutor_transcript_turns(id, session_id, provider_item_id, role, sequence_number, lesson_revision) values (:id, :sessionId, :providerItemId, :role, :sequenceNumber, :lessonRevision)",
+            "insert into voice_tutor_transcript_turns(id, session_id, provider_item_id, role, sequence_number, lesson_revision, interrupted) values (:id, :sessionId, :providerItemId, :role, :sequenceNumber, :lessonRevision, :interrupted)",
         ).bind("id", id).bind("sessionId", sessionId).bind("providerItemId", providerItemId)
             .bind("role", role).bind("sequenceNumber", sequenceNumber).bind("lessonRevision", lessonRevision)
+            .bind("interrupted", interrupted)
             .fetch().rowsUpdated().awaitSingle()
     }
 

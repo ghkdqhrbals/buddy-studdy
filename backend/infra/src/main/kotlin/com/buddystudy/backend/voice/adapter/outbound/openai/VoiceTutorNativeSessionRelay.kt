@@ -61,7 +61,7 @@ internal fun relayVoiceTutorNativeSession(
                     if (error is VoiceTutorTranscriptIntegrityException) Mono.error(error) else Mono.empty()
                 }
         } else {
-            controller.beginDrain(terminal.cancelActiveResponse)
+            controller.beginDrain(terminal.cancelActiveResponse, terminal.preserveInterruptedTutor)
             waitForNativeDrain(controller, Duration.ofSeconds(5))
         }
     }.cache()

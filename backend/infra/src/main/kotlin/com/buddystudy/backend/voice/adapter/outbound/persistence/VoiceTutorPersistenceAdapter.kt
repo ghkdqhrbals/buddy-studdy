@@ -558,13 +558,18 @@ class VoiceTutorPersistenceAdapter(
         acceptedBeforeQuotaCutoff: Boolean,
         postCallEvidence: Boolean,
         conversationSequence: Long?,
+        interrupted: Boolean,
     ): Boolean {
         require(lessonRevision >= -1) { "Voice Tutor lesson revision was invalid." }
+        if (interrupted && (role != VoiceTutorTranscriptRole.TUTOR || postCallEvidence ||
+                conversationSequence == null || conversationSequence <= 0 || lessonRevision < 0 ||
+                studyQuestionProviderItemId != null || studyAnswerProviderItemId != null ||
+                askedStudyQuestion || isStudyQuestion || studyAnswerProviderItemIds.isNotEmpty())) return false
         if (postCallEvidence && (conversationSequence == null || conversationSequence <= 0 ||
                 studyQuestionProviderItemId != null || studyAnswerProviderItemId != null ||
                 askedStudyQuestion || isStudyQuestion || studyAnswerProviderItemIds.isNotEmpty())
         ) return false
-        if (!postCallEvidence && conversationSequence != null) return false
+        if (!postCallEvidence && !interrupted && conversationSequence != null) return false
         val owned = database.sql(
             "select status, end_reason, provider_session_id, created_at, connected_at, hard_ends_at " +
                 "from voice_tutor_sessions where id = :sessionId and user_id = :userId for update",
@@ -581,6 +586,7 @@ class VoiceTutorPersistenceAdapter(
             }.one().awaitSingleOrNull() ?: return false
         val acceptedWithinSessionBoundary = !occurredAt.isBefore(owned.connectedAt ?: owned.createdAt) &&
             !occurredAt.isAfter(owned.hardEndsAt)
+        if (interrupted && !acceptedWithinSessionBoundary) return false
         val acceptedStatus = when (role) {
             VoiceTutorTranscriptRole.TUTOR -> owned.status == VoiceTutorSessionStatus.ACTIVE ||
                 owned.status == VoiceTutorSessionStatus.ENDING
@@ -637,7 +643,7 @@ class VoiceTutorPersistenceAdapter(
                 where question.session_id = :sessionId
                   and question.provider_item_id = :providerItemId
                   and question.role = 'TUTOR'
-                  and question.is_study_question = true
+                  and question.is_study_question = true and question.interrupted = false
                   and question.lesson_revision = :lessonRevision
                   and question.sequence_number < :answerSequence
                   and not exists (
@@ -674,7 +680,7 @@ class VoiceTutorPersistenceAdapter(
                                study_answer_turn_id, asked_study_question, is_study_question
                         from voice_tutor_transcript_turns
                         where session_id = :sessionId and provider_item_id = :providerItemId
-                          and role = 'USER'
+                          and role = 'USER' and interrupted = false
                         limit 1
                         """.trimIndent(),
                     ).bind("sessionId", sessionId).bind("providerItemId", answerProviderItemId)
@@ -728,12 +734,12 @@ class VoiceTutorPersistenceAdapter(
                       on question.id = answer.study_question_turn_id
                      and question.session_id = answer.session_id
                      and question.role = 'TUTOR'
-                     and question.is_study_question = true
+                     and question.is_study_question = true and question.interrupted = false
                      and question.lesson_revision = answer.lesson_revision
                      and question.sequence_number < answer.sequence_number
                     where answer.session_id = :sessionId
                       and answer.provider_item_id = :answerProviderItemId
-                      and answer.role = 'USER'
+                      and answer.role = 'USER' and answer.interrupted = false
                       and answer.lesson_revision = :lessonRevision
                       and answer.study_question_turn_id is not null
                       and answer.sequence_number < :feedbackSequence
@@ -779,11 +785,11 @@ class VoiceTutorPersistenceAdapter(
             insert ignore into voice_tutor_transcript_turns (
                 session_id, provider_item_id, role, transcript, sequence_number, occurred_at, created_at,
                 lesson_revision, study_question_turn_id, study_answer_turn_id,
-                asked_study_question, is_study_question, post_call_evidence
+                asked_study_question, is_study_question, post_call_evidence, interrupted
             ) values (
                 :sessionId, :providerItemId, :role, :transcript, :sequenceNumber, :occurredAt, :occurredAt,
                 :lessonRevision, :studyQuestionTurnId, :studyAnswerTurnId,
-                :askedStudyQuestion, :isStudyQuestion, :postCallEvidence
+                :askedStudyQuestion, :isStudyQuestion, :postCallEvidence, :interrupted
             )
             """.trimIndent(),
         ).bind("sessionId", sessionId).bind("providerItemId", providerItemId)
@@ -793,6 +799,7 @@ class VoiceTutorPersistenceAdapter(
             .bind("askedStudyQuestion", verifiedAskedStudyQuestion)
             .bind("isStudyQuestion", verifiedIsStudyQuestion)
             .bind("postCallEvidence", postCallEvidence)
+            .bind("interrupted", interrupted)
         insert = if (verifiedStudyQuestionTurnId == null) {
             insert.bindNull("studyQuestionTurnId", java.lang.Long::class.java)
         } else {
@@ -926,7 +933,7 @@ class VoiceTutorPersistenceAdapter(
             rows.last().providerItemId != latestLearnerProviderItemId ||
             rows.first().role != VoiceTutorTranscriptRole.TUTOR || rows.first().lessonRevision < 0 ||
             rows.drop(1).any { it.role != VoiceTutorTranscriptRole.USER } ||
-            rows.any { it.lessonRevision != rows.first().lessonRevision || it.transcript.isBlank() } ||
+            rows.any { it.interrupted || it.lessonRevision != rows.first().lessonRevision || it.transcript.isBlank() } ||
             rows.map { it.providerItemId }.distinct().size != rows.size
         ) return emptyList()
         return rows
@@ -941,13 +948,13 @@ class VoiceTutorPersistenceAdapter(
               on question.id = answer.study_question_turn_id
              and question.session_id = answer.session_id
              and question.role = 'TUTOR'
-             and question.is_study_question = true
+             and question.is_study_question = true and question.interrupted = false
              and question.lesson_revision = answer.lesson_revision
              and question.sequence_number < answer.sequence_number
             join voice_tutor_sessions session on session.id = answer.session_id
             where answer.session_id = :sessionId
               and session.user_id = :userId
-              and answer.role = 'USER'
+              and answer.role = 'USER' and answer.interrupted = false
               and answer.study_question_turn_id is not null
               and not exists (
                   select 1
@@ -974,11 +981,11 @@ class VoiceTutorPersistenceAdapter(
         from voice_tutor_transcript_turns question
         join voice_tutor_sessions session on session.id = question.session_id
         where question.session_id = :sessionId and session.user_id = :userId
-          and question.post_call_evidence = true and question.role = 'TUTOR'
+          and question.post_call_evidence = true and question.interrupted = false and question.role = 'TUTOR'
           and question.lesson_revision >= 0
           and exists (
               select 1 from voice_tutor_transcript_turns answer
-              where answer.session_id = question.session_id and answer.role = 'USER'
+              where answer.session_id = question.session_id and answer.role = 'USER' and answer.interrupted = false
                 and answer.post_call_evidence = true
                 and answer.lesson_revision = question.lesson_revision
                 and answer.sequence_number > question.sequence_number
@@ -1146,7 +1153,7 @@ class VoiceTutorPersistenceAdapter(
                 update voice_tutor_transcript_turns
                 set is_study_question = :isQuestion, asked_study_question = :askedQuestion,
                     study_question_turn_id = :questionId, study_answer_turn_id = :answerId
-                where id = :turnId and session_id = :sessionId and post_call_evidence = true
+                where id = :turnId and session_id = :sessionId and post_call_evidence = true and interrupted = false
                   and role = :role and lesson_revision = :revision and sequence_number = :sequence
                   and is_study_question = false and asked_study_question = false
                   and study_question_turn_id is null and study_answer_turn_id is null
@@ -1473,6 +1480,7 @@ class VoiceTutorPersistenceAdapter(
         askedStudyQuestion = get("asked_study_question", java.lang.Boolean::class.java) == true,
         isStudyQuestion = get("is_study_question", java.lang.Boolean::class.java) == true,
         postCallEvidence = get("post_call_evidence", java.lang.Boolean::class.java) == true,
+        interrupted = get("interrupted", java.lang.Boolean::class.java) == true,
     )
 
     private fun Row.result() = VoiceTutorResult(

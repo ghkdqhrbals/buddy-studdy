@@ -37,6 +37,39 @@ class VoiceTutorExplorationEvidenceTest {
     }
 
     @Test
+    fun `interrupted tutor source cannot be cited as a completed question or feedback`() {
+        listOf(1L, 3L).forEach { id ->
+            val archived = turns().map { if (it.id == id) it.copy(interrupted = true) else it }
+            assertThat(verify(exploration(), archived)).describedAs("interrupted $id").isEmpty()
+        }
+    }
+
+    @Test
+    fun `interrupted supplemental answer cannot be cited or skipped to a later tutor continuation`() {
+        val deeper = exchange().copy(
+            kind = VoiceTutorExchangeKind.LEARNER_QUESTION,
+            questionTurnId = 4, answerTurnIds = listOf(5), feedbackTurnIds = emptyList(),
+            question = "LRU와 LFU는 어떻게 달라요?", answer = "설명", score = null,
+        )
+        val archived = turns().map { if (it.id == 5L) it.copy(interrupted = true) else it } +
+            turn(6, VoiceTutorTranscriptRole.TUTOR, "새 설명")
+        listOf(listOf(5L), listOf(6L), listOf(5L, 6L)).forEach { ids ->
+            val result = verify(exploration().copy(
+                exchanges = listOf(exchange(), deeper.copy(answerTurnIds = ids)),
+            ), archived)
+            assertThat(result.single().exchanges).containsExactly(exchange())
+        }
+    }
+
+    @Test
+    fun `interrupted tutor still blocks an older question from borrowing a later answer`() {
+        val archived = turns().map { if (it.sequenceNumber >= 2) it.copy(sequenceNumber = it.sequenceNumber + 1) else it } +
+            turn(6, VoiceTutorTranscriptRole.TUTOR, "중간 설명").copy(sequenceNumber = 2, interrupted = true)
+
+        assertThat(verify(exploration(), archived)).isEmpty()
+    }
+
+    @Test
     fun `brief meaningful learner answer remains an answer without a length threshold`() {
         val briefTurns = turns().map { if (it.id == 2L) it.copy(transcript = "응") else it }
         val answer = verify(exploration().copy(exchanges = listOf(exchange().copy(answer = "응"))), briefTurns).single().exchanges.single()

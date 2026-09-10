@@ -91,6 +91,7 @@ class VoiceTutorLegacySpokenLessonEndTest {
                 acceptedBeforeQuotaCutoff: Boolean,
                 postCallEvidence: Boolean,
                 conversationSequence: Long?,
+                interrupted: Boolean,
             ): Boolean = error("Internal end must not be persisted as transcript.")
 
             override suspend fun finish(

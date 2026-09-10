@@ -90,7 +90,7 @@ internal object VoiceTutorExplorationEvidence {
             VoiceTutorExchangeKind.LEARNER_QUESTION -> VoiceTutorTranscriptRole.USER
         }
         val answerRole = if (questionRole == VoiceTutorTranscriptRole.TUTOR) VoiceTutorTranscriptRole.USER else VoiceTutorTranscriptRole.TUTOR
-        if (questionTurn.role != questionRole) return null
+        if (questionTurn.interrupted || questionTurn.role != questionRole) return null
         if (exchange.kind == VoiceTutorExchangeKind.TUTOR_QUESTION && !questionTurn.isStudyQuestion) return null
         val question = plain(exchange.question).takeIf(String::isNotBlank) ?: return null
         val answers = orderedEvidence(exchange.answerTurnIds, turns, answerRole, questionTurn.sequenceNumber) ?: return null
@@ -163,7 +163,7 @@ internal object VoiceTutorExplorationEvidence {
         var previous = afterSequence
         return ids.map { id ->
             val turn = turns[id] ?: return null
-            if (turn.role != role || turn.sequenceNumber <= previous) return null
+            if (turn.interrupted || turn.role != role || turn.sequenceNumber <= previous) return null
             previous = turn.sequenceNumber
             turn
         }
@@ -189,7 +189,7 @@ internal object VoiceTutorExplorationEvidence {
         val run = following.takeWhile {
             it.role == VoiceTutorTranscriptRole.TUTOR && it.lessonRevision == question.lessonRevision
         }
-        if (run.isEmpty() || run.withIndex().any { (index, turn) ->
+        if (run.isEmpty() || run.any { it.interrupted } || run.withIndex().any { (index, turn) ->
                 turn.sequenceNumber != question.sequenceNumber + index + 1
             }
         ) return null

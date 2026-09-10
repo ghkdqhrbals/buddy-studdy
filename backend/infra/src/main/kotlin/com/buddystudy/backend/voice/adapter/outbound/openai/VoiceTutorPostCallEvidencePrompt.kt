@@ -36,6 +36,9 @@ internal object VoiceTutorPostCallEvidencePrompt {
             Raw turns have no live semantic flags. Judge their actual conversational meaning after the call.
             Only turns with nativeSource=true may enter exchanges or learnerQuestions. A false source may
             already belong to a canonical saved question/answer; never create another learning record for it.
+            interrupted=true marks an unfinished tutor fragment retained only as private conversation history.
+            It cannot be a learning question, answer or feedback. Keep it as an ordering boundary; never
+            skip it to join an earlier question or confirmation to later speech.
             source=STRUCTURED_INPUT identifies an explicit app preference or topic selection, not microphone
             speech. Keep that source distinction: these turns must never enter exchanges or learnerQuestions,
             become spoken answers, feedback or grades, even when their selected text resembles an answer.
@@ -86,6 +89,7 @@ internal object VoiceTutorPostCallEvidencePrompt {
                         "source" to turn.source.name,
                         "sequence" to turn.sequenceNumber, "lessonRevision" to turn.lessonRevision,
                         "nativeSource" to turn.postCallEvidence,
+                        "interrupted" to turn.interrupted,
                     ) },
                 ))),
             ),

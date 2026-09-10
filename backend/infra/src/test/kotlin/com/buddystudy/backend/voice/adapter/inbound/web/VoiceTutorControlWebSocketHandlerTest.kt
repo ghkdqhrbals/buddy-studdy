@@ -52,6 +52,22 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceTutorControlWebSocketHandlerTest {
     @Test
+    fun `interrupted tutor archives persist only through the private worker and are never completed provider events`() {
+        val raw = """{"type":"${VoiceTutorTranscriptMetadata.INTERRUPTED_TUTOR_EVENT}","item_id":"partial-tutor","transcript":"  중단된 설명입니다.\n","${VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE}":12,"${VoiceTutorTranscriptMetadata.LESSON_REVISION}":2,"${VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS}":${Instant.now().toEpochMilli()},"${VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION}":true}"""
+        val result = runControlScenario(privateEvidenceEvent = raw, providerEventBeforeCompletion = raw,
+            serverLifecycleEventBeforeCompletion = raw, provider = { _, _ -> })
+        assertThat(result.transcriptWrites).hasSize(1)
+        val arguments = result.transcriptWrites.single()
+        assertThat(arguments[2]).isEqualTo("partial-tutor")
+        assertThat(arguments[3]).isEqualTo(com.buddystudy.voice.domain.VoiceTutorTranscriptRole.TUTOR)
+        assertThat(arguments[4]).isEqualTo("  중단된 설명입니다.\n")
+        assertThat(arguments[10]).isEqualTo(false) // isStudyQuestion is never inherited from raw metadata.
+        assertThat(arguments[13]).isEqualTo(false) // postCallEvidence
+        assertThat(arguments[15]).isEqualTo(true) // interrupted
+        assertThat(result.deliveryOrder).doesNotContain("sent:${VoiceTutorTranscriptMetadata.INTERRUPTED_TUTOR_EVENT}")
+    }
+
+    @Test
     fun `structured evidence persists only through the capable private worker with a distinct non audio identity`() {
         val id = VoiceTutorTranscriptMetadata.STRUCTURED_ITEM_PREFIX + "00000000-0000-4000-8000-000000000003"
         val raw = """{"type":"${VoiceTutorTranscriptMetadata.STRUCTURED_USER_INPUT_EVENT}","item_id":"$id","transcript":"[Structured input]\nSelected: Redis","${VoiceTutorTranscriptMetadata.POST_CALL_EVIDENCE}":true,"${VoiceTutorTranscriptMetadata.CONVERSATION_SEQUENCE}":12,"${VoiceTutorTranscriptMetadata.LESSON_REVISION}":2,"${VoiceTutorTranscriptMetadata.ACCEPTED_AT_EPOCH_MILLIS}":${Instant.now().toEpochMilli()},"${VoiceTutorTranscriptMetadata.IS_STUDY_QUESTION}":true}"""
@@ -237,6 +253,7 @@ class VoiceTutorControlWebSocketHandlerTest {
             provider = { _, terminal ->
                 val termination = terminal.first()
                 assertThat(termination.cancelActiveResponse).isTrue()
+                assertThat(termination.preserveInterruptedTutor).isTrue()
                 assertThat(termination.spokenNotice).isNull()
             },
         )

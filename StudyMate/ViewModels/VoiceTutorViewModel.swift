@@ -246,6 +246,8 @@ struct VoiceTutorCaption: Identifiable, Equatable {
     var providerItemID: String? = nil
     var providerItemIDs: Set<String> = []
     var answerID: String? = nil
+    var isInterrupted = false
+    var isUnsubmittedAnswer = false
 
     func containsProviderItemID(_ id: String) -> Bool {
         providerItemID == id || providerItemIDs.contains(id)
@@ -311,13 +313,57 @@ enum VoiceTutorLiveTextBounds {
     }
 }
 
+/// Capture the visible draft before cancellation without treating it as a
+/// submitted turn or borrowing a replacement answer's text and source aliases.
+struct VoiceTutorUnsubmittedAnswerSnapshot: Equatable {
+    let answerID: String
+    let change: VoiceTutorQuestionChange
+    let text: String
+    let sourceItemIDs: Set<String>
+    let isSubmissionUnconfirmed: Bool
+
+    init?(_ draft: VoiceTutorAnswerDraftState) {
+        guard draft.isActive, !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let answerID = draft.answerID, let studyID = draft.studyID, let recordID = draft.recordID,
+              let change = VoiceTutorQuestionChange(studyID: studyID, recordID: recordID) else { return nil }
+        self.answerID = answerID
+        self.change = change
+        text = draft.text
+        sourceItemIDs = draft.sourceItemIDs
+        isSubmissionUnconfirmed = draft.phase == .submitting
+    }
+
+    @discardableResult
+    func retainCaption(in captions: inout [VoiceTutorCaption]) -> Bool {
+        guard !captions.contains(where: { $0.speaker == .learner && $0.answerID == answerID }) else { return false }
+        captions.append(VoiceTutorCaption(speaker: .learner,
+            text: VoiceTutorLiveTextBounds.boundedCaption(text), providerItemIDs: sourceItemIDs,
+            answerID: answerID, isUnsubmittedAnswer: !isSubmissionUnconfirmed))
+        VoiceTutorLiveTextBounds.trim(&captions)
+        return true
+    }
+}
+
 /// Keeps a tutor sentence provisional until the provider confirms that the
 /// whole response completed. Transcript `done` only means that transcription
 /// for that output item finished; the enclosing response can still fail and be
 /// retried, so publishing it to chat at that point would preserve a failed
-/// partial answer beside its replacement.
+/// partial answer beside its replacement. Intentional interruption may retain
+/// the already visible text with an explicit interrupted marker instead.
 struct VoiceTutorAssistantTranscriptState: Equatable {
     private(set) var draft = ""
+    private(set) var responseID: String?
+
+    mutating func beginResponse(_ responseID: String) {
+        guard !responseID.isEmpty, self.responseID != responseID else { return }
+        discard()
+        self.responseID = responseID
+    }
+
+    func matchesResponse(_ responseID: String?) -> Bool {
+        guard let responseID else { return false }
+        return self.responseID == responseID
+    }
 
     mutating func append(delta: String) {
         draft = VoiceTutorLiveTextBounds.appending(delta: delta, to: draft)
@@ -333,12 +379,32 @@ struct VoiceTutorAssistantTranscriptState: Equatable {
 
     mutating func commit() -> String? {
         let normalized = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        draft = ""
+        discard()
         return normalized.isEmpty ? nil : normalized
+    }
+
+    /// Preserve what was already visible, without claiming this was a completed
+    /// or fully audible tutor turn. Exact ownership also prevents a late old
+    /// interruption from taking text that belongs to the replacement response.
+    mutating func takeInterruptedCaption(responseID: String, providerItemID: String?) -> VoiceTutorCaption? {
+        guard matchesResponse(responseID), let text = commit() else { return nil }
+        return VoiceTutorCaption(speaker: .tutor, text: text, responseID: responseID,
+            providerItemID: providerItemID, isInterrupted: true)
+    }
+
+    @discardableResult
+    mutating func retainInterruptedCaption(responseID: String, providerItemID: String?,
+                                          in captions: inout [VoiceTutorCaption]) -> Bool {
+        guard let caption = takeInterruptedCaption(responseID: responseID, providerItemID: providerItemID),
+              !captions.contains(where: { $0.speaker == .tutor && $0.responseID == responseID }) else { return false }
+        captions.append(caption)
+        VoiceTutorLiveTextBounds.trim(&captions)
+        return true
     }
 
     mutating func discard() {
         draft = ""
+        responseID = nil
     }
 }
 
@@ -1083,6 +1149,14 @@ final class VoiceTutorViewModel: ObservableObject {
         appState.saveVoiceTutorAnswerDraft(answerDraftState.text, for: change, validity: { connection.isCurrent() })
     }
 
+    private func preserveUnsubmittedAnswerDraft(_ snapshot: VoiceTutorUnsubmittedAnswerSnapshot?) {
+        guard let snapshot, let connection = activeConnection, connection.isCurrent() else { return }
+        // Use the same record-ID draft store as typed answers. This never sends
+        // an answer, grades it, or adds evidence to the server's learning record.
+        appState.saveVoiceTutorAnswerDraft(snapshot.text, for: snapshot.change, validity: { connection.isCurrent() })
+        snapshot.retainCaption(in: &captions)
+    }
+
     private func failAnswerControl() async {
         errorMessage = appState.strings.voiceTutorConnectionFailed
         failureCause = .localControl
@@ -1240,10 +1314,14 @@ final class VoiceTutorViewModel: ObservableObject {
             return
         }
         logDiagnostic("event=stop_requested source=\(source.rawValue) socketEnd=\(shouldNotifyServerOverSocket ? 1 : 0)", isWarning: outcome == .failed)
+        if source == .user || source == .dismissal, activeConnection?.isCurrent() == true {
+            preserveInterruptedAssistantTranscript(responseID: duplexPlaybackState.activeResponseID)
+        }
         sessionState.endLocally()
         operationState.endLocally()
         userInputState.endLocally()
         learnerTranscriptState.endLocally()
+        preserveUnsubmittedAnswerDraft(VoiceTutorUnsubmittedAnswerSnapshot(answerDraftState))
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()
         cancelTerminalPlayoutDrain()
@@ -1802,6 +1880,7 @@ final class VoiceTutorViewModel: ObservableObject {
             guard phase.isLive, !isFinalizing else { break }
             if studyFocus.apply(focus, attemptID: attemptID), answerDraftState.isActive,
                focus?.studyID != answerDraftState.studyID || focus?.revision != answerDraftState.revision {
+                preserveUnsubmittedAnswerDraft(VoiceTutorUnsubmittedAnswerSnapshot(answerDraftState))
                 if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
                 answerDraftState.endLocally()
             }
@@ -1826,6 +1905,8 @@ final class VoiceTutorViewModel: ObservableObject {
             guard usesWebRTC, phase.isLive, !isFinalizing,
                   connectionAttemptFence.isCurrent(attemptID), connection.isCurrent() else { break }
             let isNewAnswer = answerDraftState.answerID != event.answerID
+            let cancelledDraft = event.phase == .cancelled
+                ? VoiceTutorUnsubmittedAnswerSnapshot(answerDraftState) : nil
             if isNewAnswer {
                 guard event.phase == .listening, event.revision >= studyFocus.revision,
                       studyFocus.focus.map({ $0.studyID == event.studyID }) ?? true else { break }
@@ -1845,6 +1926,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 appendCaption(speaker: .learner, text: answerDraftState.text,
                               providerItemIDs: answerDraftState.sourceItemIDs, answerID: answerDraftState.answerID)
             } else if event.phase == .cancelled {
+                preserveUnsubmittedAnswerDraft(cancelledDraft)
                 if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
             }
             let shouldMute = isMuted || pauseState.holdsMicrophone || answerDraftState.holdsMicrophone || userInputState.holdsMicrophone
@@ -1918,12 +2000,14 @@ final class VoiceTutorViewModel: ObservableObject {
             }
             phase = .speaking
         case .assistantTranscriptDelta(let responseID, let delta):
-            guard duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
+            guard duplexPlaybackState.matchesActiveResponse(responseID: responseID),
+                  assistantTranscriptState.matchesResponse(responseID) else {
                 break
             }
             assistantTranscriptState.append(delta: delta)
         case .assistantTranscriptDone(let responseID, let transcript, let itemID):
-            guard duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
+            guard duplexPlaybackState.matchesActiveResponse(responseID: responseID),
+                  assistantTranscriptState.matchesResponse(responseID) else {
                 break
             }
             // Keep this full transcript provisional. Only a completed
@@ -1976,6 +2060,7 @@ final class VoiceTutorViewModel: ObservableObject {
                     // replacement response or persist it as completed teaching.
                     assistantTranscriptState.discard()
                 }
+                assistantTranscriptState.beginResponse(responseID)
                 cancelTerminalPlayoutDrain()
                 pendingSpokenEndPlayoutTail = nil
                 duplexPlaybackState.responseStarted(
@@ -2092,6 +2177,9 @@ final class VoiceTutorViewModel: ObservableObject {
         guard usesWebRTC, phase.isLive, !isFinalizing else { return }
         let affectsCurrentResponse = duplexPlaybackState.activeResponseID == responseID
             || (duplexPlaybackState.activeResponseID == nil && !duplexPlaybackState.wasInterrupted(responseID))
+        if affectsCurrentResponse {
+            preserveInterruptedAssistantTranscript(responseID: responseID)
+        }
         duplexPlaybackState.interruptResponse(responseID: responseID)
         // A delayed interruption for an old answer must not silence its replacement.
         guard affectsCurrentResponse,
@@ -2223,6 +2311,7 @@ final class VoiceTutorViewModel: ObservableObject {
         operationState.endLocally()
         userInputState.endLocally()
         learnerTranscriptState.endLocally()
+        preserveUnsubmittedAnswerDraft(VoiceTutorUnsubmittedAnswerSnapshot(answerDraftState))
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()
         isFinalizing = true
@@ -2268,6 +2357,9 @@ final class VoiceTutorViewModel: ObservableObject {
                 await webRTCTransport.waitForLocalPlayoutTail(token)
                 logDiagnostic("event=spoken_end_local_playout_tail_finished")
             }
+        }
+        if outcome == .ended, activeConnection?.isCurrent() == true {
+            preserveInterruptedAssistantTranscript(responseID: duplexPlaybackState.activeResponseID)
         }
         recorder?.stopAcceptingFrames()
         audioEngine.stop()
@@ -2433,9 +2525,19 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     private func commitAssistantTranscript(responseID: String) {
-        guard let text = assistantTranscriptState.commit() else { return }
+        guard assistantTranscriptState.matchesResponse(responseID),
+              let text = assistantTranscriptState.commit() else { return }
         appendCaption(speaker: .tutor, text: text, responseID: responseID,
                       providerItemID: assistantTranscriptItemID)
+        assistantTranscriptItemID = nil
+    }
+
+    private func preserveInterruptedAssistantTranscript(responseID: String?) {
+        guard let responseID, assistantTranscriptState.matchesResponse(responseID) else { return }
+        // A server-completed caption is immutable. A duplicate local/server
+        // interruption must never replace or append that response again.
+        assistantTranscriptState.retainInterruptedCaption(responseID: responseID,
+            providerItemID: assistantTranscriptItemID, in: &captions)
         assistantTranscriptItemID = nil
     }
 

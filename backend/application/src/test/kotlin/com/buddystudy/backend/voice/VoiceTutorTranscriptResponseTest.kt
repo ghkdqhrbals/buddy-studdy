@@ -12,6 +12,19 @@ import java.time.Instant
 
 class VoiceTutorTranscriptResponseTest {
     @Test
+    fun `history labels interrupted tutor archives and preserves their private original text`() {
+        val turn = VoiceTutorTranscriptTurn(2, "session", "tutor-item", VoiceTutorTranscriptRole.TUTOR,
+            "  설명을 이어가던 부분입니다.\n", 8, Instant.EPOCH, interrupted = true)
+        val json = JsonMapperProvider.mapper.valueToTree<JsonNode>(turn.toResponse())
+        assertThat(json.path("interrupted").asBoolean()).isTrue()
+        assertThat(json.path("role").asText()).isEqualTo("TUTOR")
+        assertThat(json.path("transcript").asText()).isEqualTo(turn.transcript)
+        assertThat(json.has("providerItemId")).isFalse()
+        assertThat(JsonMapperProvider.mapper.valueToTree<JsonNode>(turn.copy(interrupted = false).toResponse())
+            .path("interrupted").asBoolean()).isFalse()
+    }
+
+    @Test
     fun `history exposes structured source while retaining exact text and keeping private item ids server side`() {
         val original = VoiceTutorTranscriptTurn(1, "session", "audio-item", VoiceTutorTranscriptRole.USER,
             "[Structured input]\nSelected: Redis\nText: 더 깊게 학습", 1, Instant.EPOCH)

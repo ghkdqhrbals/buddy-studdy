@@ -119,6 +119,57 @@ class VoiceTutorSummaryTranscriptEvidenceTest {
     }
 
     @Test
+    fun `interrupted tutor cannot become a question or linked feedback in summary evidence`() {
+        val base = listOf(
+            turn(1, VoiceTutorTranscriptRole.TUTOR, "질문", isStudyQuestion = true),
+            turn(2, VoiceTutorTranscriptRole.USER, "답", studyQuestionTurnId = 1),
+            turn(3, VoiceTutorTranscriptRole.TUTOR, "85점입니다", studyAnswerTurnId = 2),
+        )
+        assertThat(VoiceTutorSummaryTranscriptEvidence.verified(
+            SESSION, 42, base.map { if (it.id == 1L) it.copy(interrupted = true) else it },
+            listOf(VoiceTutorLessonFocus(42, 1)),
+        )).isEmpty()
+        assertThat(VoiceTutorSummaryTranscriptEvidence.verified(
+            SESSION, 42, base.map { if (it.id == 3L) it.copy(interrupted = true) else it },
+            listOf(VoiceTutorLessonFocus(42, 1)),
+        ).map { it.id }).containsExactly(1, 2)
+    }
+
+    @Test
+    fun `archived fragment invalidates the entire supplemental tutor answer run without deleting history`() {
+        val base = listOf(
+            turn(1, VoiceTutorTranscriptRole.TUTOR, "질문", isStudyQuestion = true),
+            turn(2, VoiceTutorTranscriptRole.USER, "답", studyQuestionTurnId = 1),
+            turn(3, VoiceTutorTranscriptRole.USER, "더 설명해 주세요").copy(askedStudyQuestion = true),
+            turn(4, VoiceTutorTranscriptRole.TUTOR, "첫 설명"),
+            turn(5, VoiceTutorTranscriptRole.TUTOR, "이어지는 설명"),
+        )
+        assertThat(VoiceTutorSummaryTranscriptEvidence.verified(
+            SESSION, 42, base, listOf(VoiceTutorLessonFocus(42, 1)),
+        ).map { it.id }).containsExactly(1, 2, 3, 4, 5)
+        listOf(4L, 5L).forEach { id ->
+            val archived = base.map { if (it.id == id) it.copy(interrupted = true, postCallEvidence = false) else it }
+            assertThat(VoiceTutorSummaryTranscriptEvidence.verified(
+                SESSION, 42, archived, listOf(VoiceTutorLessonFocus(42, 1)),
+            ).map { it.id }).containsExactly(1, 2)
+            assertThat(archived.map { it.sequenceNumber }).containsExactly(1, 2, 3, 4, 5)
+            assertThat(archived.single { it.id == id }.transcript).isEqualTo(base.single { it.id == id }.transcript)
+        }
+    }
+
+    @Test
+    fun `interrupted tutor remains a boundary between an older question and a later linked answer`() {
+        val turns = listOf(
+            turn(1, VoiceTutorTranscriptRole.TUTOR, "질문", isStudyQuestion = true),
+            turn(2, VoiceTutorTranscriptRole.TUTOR, "다른 이야기를").copy(interrupted = true),
+            turn(3, VoiceTutorTranscriptRole.USER, "네", studyQuestionTurnId = 1),
+        )
+        assertThat(VoiceTutorSummaryTranscriptEvidence.verified(
+            SESSION, 42, turns, listOf(VoiceTutorLessonFocus(42, 1)),
+        )).isEmpty()
+    }
+
+    @Test
     fun `summary excludes feedback linked to an earlier multipart answer part`() {
         val turns = listOf(
             turn(1, VoiceTutorTranscriptRole.TUTOR, "질문", isStudyQuestion = true),

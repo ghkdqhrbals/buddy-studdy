@@ -85,8 +85,9 @@ internal object VoiceTutorUserInputContract {
     private fun safeText(value: String) = value.none { it.isISOControl() && it !in "\n\r\t" }
 
     val definition = VoiceTutorMcpToolDefinition(TOOL,
-        "Ask the learner to explicitly choose or type in the app when several preferences or recommended study subtopics need input. " +
-            "Use one request with 1-5 questions and single, multiple or text selection; allowFreeText may accompany choices. " +
+        "REQUIRED whenever you ask the learner to choose recommendations, preferences, topics, a learning direction or the next step: show selectable options in the app instead of just speaking a list or asking which one aloud. " +
+            "For ordinary choices provide title and questions (both required); each question needs id, prompt, selectionMode, options and allowFreeText. " +
+            "Use one request with 1-5 questions and single, multiple or text selection; allowFreeText=true accompanies ordinary preference choices so the learner can type an alternative. " +
             "Call this tool alone in its response. No option is preselected and nothing is applied until Submit. " +
             "Wait for the exact tool result; never keep speaking, call more tools, or infer answers while it is pending. " +
             "Cancellation is no consent and no answer. Ordinary questions collect preferences only and never authorize writes. " +

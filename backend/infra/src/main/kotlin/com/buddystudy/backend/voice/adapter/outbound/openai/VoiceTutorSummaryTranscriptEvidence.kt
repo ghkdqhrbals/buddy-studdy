@@ -39,11 +39,11 @@ internal object VoiceTutorSummaryTranscriptEvidence {
 
         ordered.filter { it.role == VoiceTutorTranscriptRole.TUTOR }.forEach { question ->
             val linked = linkedAnswers[question.id].orEmpty()
-            if (linked.isEmpty() || !question.isStudyQuestion || question.source != VoiceTutorTranscriptSource.AUDIO || question.transcript.isBlank() ||
+            if (linked.isEmpty() || question.interrupted || !question.isStudyQuestion || question.source != VoiceTutorTranscriptSource.AUDIO || question.transcript.isBlank() ||
                 question.studyQuestionTurnId != null ||
                 question.askedStudyQuestion || focusIndex.at(question.lessonRevision) == null ||
                 linked.any { answer ->
-                    answer.role != VoiceTutorTranscriptRole.USER || answer.source != VoiceTutorTranscriptSource.AUDIO || answer.transcript.isBlank() ||
+                    answer.interrupted || answer.role != VoiceTutorTranscriptRole.USER || answer.source != VoiceTutorTranscriptSource.AUDIO || answer.transcript.isBlank() ||
                         answer.lessonRevision != question.lessonRevision ||
                         answer.sequenceNumber <= question.sequenceNumber || answer.askedStudyQuestion ||
                         answer.studyAnswerTurnId != null || hasInterveningTutor(question, answer, ordered)
@@ -61,7 +61,7 @@ internal object VoiceTutorSummaryTranscriptEvidence {
         // bypass the strict persisted TUTOR_QUESTION -> USER-answer eligibility gate.
         if (!hasTutorQuestionExchange) return emptyList()
         ordered.filter { question ->
-            question.role == VoiceTutorTranscriptRole.USER && question.source == VoiceTutorTranscriptSource.AUDIO && question.askedStudyQuestion &&
+            !question.interrupted && question.role == VoiceTutorTranscriptRole.USER && question.source == VoiceTutorTranscriptSource.AUDIO && question.askedStudyQuestion &&
                 question.studyQuestionTurnId == null && question.transcript.isNotBlank() &&
                 focusIndex.at(question.lessonRevision) != null
         }.forEach { question ->
@@ -154,7 +154,9 @@ internal object VoiceTutorSummaryTranscriptEvidence {
                 it.transcript.isNotBlank()
         }
         return run.takeIf { turns ->
-            turns.withIndex().all { (index, turn) ->
+            // Do not remove an archived fragment or accept the completed prefix of a run
+            // whose answer was interrupted. Its original position remains a boundary.
+            turns.none { it.interrupted } && turns.withIndex().all { (index, turn) ->
                 turn.sequenceNumber == source.sequenceNumber + index + 1
             }
         }.orEmpty()
@@ -164,7 +166,7 @@ internal object VoiceTutorSummaryTranscriptEvidence {
         answer: VoiceTutorTranscriptTurn,
         ordered: List<VoiceTutorTranscriptTurn>,
     ): List<VoiceTutorTranscriptTurn> = ordered.filter { feedback ->
-        feedback.role == VoiceTutorTranscriptRole.TUTOR && feedback.source == VoiceTutorTranscriptSource.AUDIO &&
+        !feedback.interrupted && feedback.role == VoiceTutorTranscriptRole.TUTOR && feedback.source == VoiceTutorTranscriptSource.AUDIO &&
             feedback.studyAnswerTurnId == answer.id && feedback.transcript.isNotBlank() &&
             feedback.lessonRevision == answer.lessonRevision &&
             feedback.sequenceNumber > answer.sequenceNumber && !feedback.isStudyQuestion &&

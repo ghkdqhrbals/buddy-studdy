@@ -623,6 +623,43 @@ class OpenAIVoiceTutorSummaryAdapterTest {
     }
 
     @Test
+    fun `archived tutor fragment retains source ordering but never enters the prose summary`() = runBlocking<Unit> {
+        val requests = mutableListOf<JsonNode>()
+        val provider = adapter(exchange = ExchangeFunction { request ->
+            val output = MockClientHttpRequest(request.method(), request.url())
+            request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                output.bodyAsString.map {
+                    requests.add(mapper.readTree(it))
+                    response(envelope(if (requests.size == 1) nativeEvidence() else lessonResult()))
+                }
+            })
+        })
+        val original = nativeTurns()
+        val fragment = original.last().copy(
+            id = 4, providerItemId = "interrupted-fragment", sequenceNumber = 4,
+            transcript = "PRIVATE_ARCHIVED_FRAGMENT", postCallEvidence = false, interrupted = true,
+        )
+        val source = original + fragment
+
+        val result = provider.summarize(session(), source)
+
+        assertThat(requests).hasSize(2)
+        val evidenceInput = mapper.readTree(requests[0].path("messages").last().path("content").asText())
+        val sourceTurns = evidenceInput.path("transcriptTurns")
+        assertThat(sourceTurns.map { it.path("id").longValue() }).containsExactly(1, 2, 3, 4)
+        assertThat(sourceTurns.last().path("interrupted").booleanValue()).isTrue()
+        assertThat(sourceTurns.last().path("nativeSource").booleanValue()).isFalse()
+        assertThat(sourceTurns.last().path("sequence").longValue()).isEqualTo(4)
+        assertThat(requests[0].path("messages")[0].path("content").asText())
+            .contains("interrupted=true", "ordering boundary")
+        assertThat(requests[1].toString()).doesNotContain("PRIVATE_ARCHIVED_FRAGMENT")
+        val summaryInput = mapper.readTree(requests[1].path("messages").last().path("content").asText())
+        assertThat(summaryInput.path("transcriptTurns").map { it.path("id").longValue() }).containsExactly(1, 2, 3)
+        assertThat(result.postCallEvidence!!.attestedTranscript(session().id, source, emptyList(), session().acceptedStudyId))
+            .contains(fragment)
+    }
+
+    @Test
     fun `native evidence cannot cite an invented or partial answer before summary generation`() = runBlocking<Unit> {
         listOf(
             """{"exchanges":[{"questionTurnId":1,"answerTurnIds":[99],"feedbackTurnId":3}],"learnerQuestions":[]}""",

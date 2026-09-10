@@ -2797,6 +2797,102 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(presentation.lessonPhase, .questionReading)
     }
 
+    func testAnswerCardFinishRequiresRealDraftAndAdvancesThroughReviewBeforeSubmit() throws {
+        let presentation = VoiceTutorCallPresentation(phase: .listening,
+            sessionState: makeLessonPresentationState(.questionReading))
+        let noInput = VoiceTutorUserInputState()
+        var draft = VoiceTutorAnswerDraftState()
+        XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: noInput),
+                       "A question-reading snapshot alone cannot invent an answer ID or Finish action")
+        let answerID = "d2a27b1e-8924-4c5f-a668-0405b4f50d00"
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+            phase: .listening, text: nil, code: nil), existingDraft: "직접 작성한 답변"))
+        XCTAssertTrue(presentation.canFinishAnswer(draft, userInputState: noInput))
+        let finish = try XCTUnwrap(draft.requestFinish())
+        XCTAssertEqual(finish.kind, .finish)
+        XCTAssertEqual(finish.answerID, answerID)
+        XCTAssertEqual(finish.recordID, "101")
+        XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: noInput))
+        XCTAssertNil(draft.requestFinish(), "Repeated card taps cannot send another finish while finalizing")
+        XCTAssertTrue(draft.holdsMicrophone)
+        XCTAssertEqual(presentation.statusText(AppStrings(language: .korean), answerDraftState: draft),
+                       AppStrings(language: .korean).voiceTutorAnswerFinalizing)
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+            phase: .review, text: nil, code: nil)))
+        XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: noInput))
+        XCTAssertTrue(draft.canSubmit)
+        XCTAssertEqual(draft.text, "직접 작성한 답변")
+        let submit = try XCTUnwrap(draft.requestSubmit())
+        XCTAssertEqual(submit.kind, .submit)
+        XCTAssertEqual(submit.answerID, answerID)
+        XCTAssertEqual(submit.text, "직접 작성한 답변")
+        XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: noInput))
+    }
+
+    func testAnswerCardFinishPreservesPauseAndStructuredInputAcknowledgementHolds() throws {
+        var draft = VoiceTutorAnswerDraftState()
+        XCTAssertTrue(draft.apply(.init(answerID: "d2a27b1e-8924-4c5f-a668-0405b4f50d00", studyID: 42,
+            recordID: "101", revision: 1, phase: .listening, text: nil, code: nil)))
+        var presentation = VoiceTutorCallPresentation(phase: .listening,
+            sessionState: makeLessonPresentationState(.questionReading))
+        var userInput = VoiceTutorUserInputState()
+        presentation.pauseState.isSupported = true
+        let pause = try XCTUnwrap(presentation.pauseState.requestPause())
+        XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: userInput))
+        XCTAssertTrue(presentation.pauseState.acknowledge(sequence: pause.sequence, paused: true))
+        XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: userInput))
+        let resume = try XCTUnwrap(presentation.pauseState.requestResume())
+        XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: userInput))
+        XCTAssertTrue(presentation.pauseState.acknowledge(sequence: resume.sequence, paused: false))
+        XCTAssertTrue(presentation.canFinishAnswer(draft, userInputState: userInput))
+
+        let request = VoiceTutorUserInputRequest(requestId: "11111111-1111-4111-a111-111111111111",
+            sessionId: "22222222-2222-4222-a222-222222222222", attemptId: "33333333-3333-4333-a333-333333333333",
+            sequence: 1, title: "선택 확인", questions: [.init(id: "next", prompt: "어떻게 이어갈까요?",
+                selectionMode: .text, options: [], allowFreeText: true)])
+        XCTAssertTrue(userInput.apply(request, sessionID: request.sessionId))
+        XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: userInput))
+        userInput.update(requestID: request.id, answer: .init(questionId: "next", text: "답변을 이어갈게요"))
+        _ = try XCTUnwrap(userInput.submit(requestID: request.id, cancel: false))
+        XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: userInput), "Sending the selection must not release its ACK hold")
+        XCTAssertTrue(userInput.apply(.init(requestId: request.id, sessionId: request.sessionId,
+            attemptId: request.attemptId, sequence: 2, phase: .submitted, errorCode: nil)))
+        XCTAssertTrue(presentation.canFinishAnswer(draft, userInputState: userInput))
+        presentation.sessionState = makeLessonPresentationState(.questionReading, paused: true)
+        XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: userInput))
+        for phase in [VoiceTutorSessionPhase.ending, .ended, .failed, .connecting] {
+            presentation.phase = phase
+            XCTAssertFalse(presentation.canFinishAnswer(draft, userInputState: userInput), "\(phase)")
+        }
+        XCTAssertEqual(draft.phase, .listening)
+    }
+
+    func testAnswerCardSourceWiresFinishAndKeepsReviewSubmitAndFinalizationStatus() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("StudyMate/Views/VoiceTutorView.swift")
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw XCTSkip("Source-contract check requires the local repository; answer model/render tests run on iPhone.")
+        }
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let start = try XCTUnwrap(source.range(of: "private var answerDraftCard:"))
+        let end = try XCTUnwrap(source.range(of: "private var supplementaryErrorNotice:", range: start.upperBound..<source.endIndex))
+        let card = String(source[start.lowerBound..<end.lowerBound])
+        let finish = try XCTUnwrap(card.range(of: "voiceCall.answerFinish"))
+        let submit = try XCTUnwrap(card.range(of: "voiceCall.answerSubmit"))
+        let busy = try XCTUnwrap(card.range(of: "else if answerDraftIsBusy"))
+        XCTAssertLessThan(finish.lowerBound, submit.lowerBound)
+        XCTAssertLessThan(submit.lowerBound, busy.lowerBound)
+        XCTAssertTrue(card.contains("if answerDraftState.phase == .listening"))
+        XCTAssertTrue(card.contains("guard presentation.canFinishAnswer(answerDraftState, userInputState: userInputState)"))
+        XCTAssertTrue(card.contains(".disabled(!presentation.canFinishAnswer(answerDraftState, userInputState: userInputState) || didRequestEnd)"))
+        XCTAssertTrue(card.contains("onFinishAnswer()"))
+        XCTAssertTrue(card.contains("Text(strings.voiceTutorAnswerFinish)"))
+        XCTAssertTrue(card.contains("else if answerDraftState.phase == .review || answerDraftState.phase == .failed"))
+        XCTAssertTrue(card.contains("Text(strings.voiceTutorAnswerSubmit)"))
+        XCTAssertTrue(card.contains("Text(answerDraftStatus)"))
+        XCTAssertFalse(card.contains("UUID()"), "A displayed button must never fabricate a server-owned answer identity")
+    }
+
     private func makeLessonPresentationState(
         _ phase: VoiceTutorSessionStateEvent.Phase, paused: Bool = false
     ) -> VoiceTutorSessionState {
@@ -3709,6 +3805,269 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(transcript.commit(), "정상 대체 문장")
         XCTAssertEqual(transcript.draft, "")
         XCTAssertNil(transcript.commit())
+    }
+
+    func testIntentionalInterruptionRetainsVisibleTextPriorMessagesAndExactOperationAnchor() throws {
+        let learner = VoiceTutorCaption(speaker: .learner, text: "먼저 한 요청", providerItemID: "learner_first")
+        let completed = VoiceTutorCaption(speaker: .tutor, text: "이미 끝난 설명", responseID: "response_completed")
+        var captions = [learner, completed]
+        var transcript = VoiceTutorAssistantTranscriptState()
+        transcript.beginResponse("response_interrupted")
+        transcript.append(delta: "말하는 도중 화면에 보이던 부분")
+        var operations = VoiceTutorOperationState()
+        XCTAssertTrue(operations.applyContext(.init(operationID: "read_origin", responseID: "response_interrupted")))
+        XCTAssertTrue(operations.apply(.init(sequence: 1, operationID: "read_origin", name: "list_studies",
+            phase: .completed, elapsedMilliseconds: 100), at: 1, afterCaptionID: completed.id))
+        XCTAssertTrue(transcript.retainInterruptedCaption(responseID: "response_interrupted",
+            providerItemID: "tutor_partial", in: &captions))
+        XCTAssertEqual(Array(captions.prefix(2)), [learner, completed], "Interruption cannot remove or rewrite earlier dialogue")
+        let retained = try XCTUnwrap(captions.last)
+        XCTAssertEqual(retained.text, "말하는 도중 화면에 보이던 부분")
+        XCTAssertEqual(retained.responseID, "response_interrupted")
+        XCTAssertEqual(retained.providerItemID, "tutor_partial")
+        XCTAssertTrue(retained.isInterrupted)
+        XCTAssertFalse(completed.isInterrupted)
+        XCTAssertEqual(transcript.draft, "")
+        XCTAssertNil(transcript.responseID)
+        let layout = VoiceTutorOperationTranscriptLayout(entries: operations.visibleEntries(at: 1), captions: captions,
+            assistantResponseID: nil, hasAssistantDraft: false)
+        XCTAssertEqual(layout.byCaptionID[retained.id]?.map(\.id), ["read_origin"])
+        XCTAssertNil(layout.byCaptionID[completed.id])
+    }
+
+    func testLocalThenServerInterruptionAndLateCompletionCannotDuplicateOrUpgradeRetainedText() throws {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        var duplex = VoiceTutorDuplexPlaybackState()
+        var response = VoiceTutorWebRTCResponseState()
+        var captions: [VoiceTutorCaption] = []
+        transcript.beginResponse("partial")
+        transcript.append(delta: "중단 전에 표시된 내용")
+        XCTAssertTrue(duplex.responseStarted(responseID: "partial", isTutorIntervention: false))
+        response.responseStarted("partial")
+        XCTAssertTrue(transcript.retainInterruptedCaption(responseID: "partial", providerItemID: nil, in: &captions))
+        duplex.interruptResponse(responseID: "partial")
+        XCTAssertTrue(response.abandonResponse("partial"))
+        let retained = try XCTUnwrap(captions.first)
+
+        duplex.interruptResponse(responseID: "partial")
+        XCTAssertFalse(transcript.retainInterruptedCaption(responseID: "partial", providerItemID: nil, in: &captions))
+        XCTAssertFalse(duplex.responseStarted(responseID: "partial", isTutorIntervention: false))
+        XCTAssertFalse(duplex.matchesActiveResponse(responseID: "partial"))
+        XCTAssertFalse(transcript.matchesResponse("partial"), "Late delta/done cannot reacquire the consumed draft")
+        XCTAssertFalse(duplex.responseFinished(responseID: "partial"))
+        XCTAssertNil(response.markResponseDone("partial"))
+        XCTAssertNil(response.markOutputBufferStopped("partial"))
+        XCTAssertNil(transcript.commit())
+        XCTAssertEqual(captions, [retained])
+        XCTAssertTrue(retained.isInterrupted)
+    }
+
+    func testOldInterruptionCannotTakeReplacementTextOrMixItWithTheRetainedMessage() throws {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        var captions: [VoiceTutorCaption] = []
+        transcript.beginResponse("old")
+        transcript.append(delta: "이전 일부 설명")
+        XCTAssertTrue(transcript.retainInterruptedCaption(responseID: "old", providerItemID: nil, in: &captions))
+        let retained = try XCTUnwrap(captions.first)
+        transcript.beginResponse("replacement")
+        transcript.append(delta: "새 응답의 별도 설명")
+        XCTAssertFalse(transcript.retainInterruptedCaption(responseID: "old", providerItemID: nil, in: &captions))
+        XCTAssertTrue(transcript.matchesResponse("replacement"))
+        XCTAssertEqual(transcript.draft, "새 응답의 별도 설명")
+        let replacement = VoiceTutorCaption(speaker: .tutor, text: try XCTUnwrap(transcript.commit()), responseID: "replacement")
+        captions.append(replacement)
+        XCTAssertEqual(captions, [retained, replacement])
+        XCTAssertTrue(retained.isInterrupted)
+        XCTAssertFalse(replacement.isInterrupted)
+        XCTAssertEqual(replacement.text, "새 응답의 별도 설명")
+    }
+
+    func testEndRetentionKeepsCompletedCaptionImmutableAndStoresOnlyTheCurrentPartialOnce() throws {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        transcript.beginResponse("completed")
+        transcript.stageCompletedTranscript("끝까지 완료된 메시지")
+        let completed = VoiceTutorCaption(speaker: .tutor, text: try XCTUnwrap(transcript.commit()), responseID: "completed")
+        var captions = [completed]
+        XCTAssertFalse(transcript.retainInterruptedCaption(responseID: "completed", providerItemID: nil, in: &captions))
+        // Even an accidentally staged duplicate cannot downgrade a completed
+        // caption when explicit stop reaches the same retention path again.
+        transcript.beginResponse("completed")
+        transcript.append(delta: "중복된 늦은 텍스트")
+        XCTAssertFalse(transcript.retainInterruptedCaption(responseID: "completed", providerItemID: nil, in: &captions))
+        XCTAssertEqual(captions, [completed])
+        XCTAssertFalse(captions[0].isInterrupted)
+        transcript.beginResponse("current_partial")
+        transcript.append(delta: "종료 직전 보이던 설명")
+        XCTAssertTrue(transcript.retainInterruptedCaption(responseID: "current_partial", providerItemID: nil, in: &captions))
+        XCTAssertFalse(transcript.retainInterruptedCaption(responseID: "current_partial", providerItemID: nil, in: &captions))
+        XCTAssertEqual(captions.count, 2)
+        XCTAssertEqual(captions[0], completed)
+        XCTAssertEqual(captions[1].text, "종료 직전 보이던 설명")
+        XCTAssertTrue(captions[1].isInterrupted)
+    }
+
+    @MainActor
+    func testSpokenUnsubmittedDraftSurvivesCancellationInCanonicalStoreAndVisibleCaption() throws {
+        let registration = try VoiceTutorContractAppFixture.registration(ownerUserID: 7, tokenID: "draft-retention")
+        let fixture = try VoiceTutorContractAppFixture(registration: registration) { _ in
+            XCTFail("Retaining an unfinished answer must not submit or publish it")
+            throw URLError(.unsupportedURL)
+        }
+        defer { fixture.close() }
+        fixture.store.saveAnswerDraft("다른 질문의 초안", recordID: "102")
+        var draft = VoiceTutorAnswerDraftState()
+        let answerID = "11111111-2222-3333-4444-555555555555"
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                                        phase: .listening, text: nil, code: nil)))
+        XCTAssertTrue(draft.append(.init(answerID: answerID, recordID: "101", itemID: "spoken_part", sequence: 1,
+                                        text: "말로만 남긴 답변\n생각 중인 내용")))
+        XCTAssertFalse(draft.hasUserEdited, "This is the previously unsaved speech-only teardown path")
+        let snapshot = try XCTUnwrap(VoiceTutorUnsubmittedAnswerSnapshot(draft))
+        let prior = VoiceTutorCaption(speaker: .tutor, text: "기존 질문", responseID: "question")
+        let raw = VoiceTutorCaption(speaker: .learner, text: draft.recognizedText, providerItemID: "spoken_part")
+        var captions = [prior, raw]
+        fixture.appState.saveVoiceTutorAnswerDraft(snapshot.text, for: snapshot.change, validity: { true })
+        XCTAssertTrue(snapshot.retainCaption(in: &captions))
+        draft.endLocally()
+        XCTAssertEqual(draft.phase, .cancelled)
+        XCTAssertFalse(draft.canSubmit)
+        XCTAssertNil(VoiceTutorUnsubmittedAnswerSnapshot(draft))
+        XCTAssertFalse(snapshot.retainCaption(in: &captions), "Repeated end cannot append the same answer twice")
+        XCTAssertFalse(draft.append(.init(answerID: answerID, recordID: "101", itemID: "late_part", sequence: 2,
+                                         text: "취소 뒤 늦은 인식")))
+        let retained = try XCTUnwrap(captions.last)
+        XCTAssertEqual(retained.text, snapshot.text)
+        XCTAssertEqual(retained.answerID, answerID)
+        XCTAssertEqual(retained.providerItemIDs, ["spoken_part"])
+        XCTAssertTrue(retained.isUnsubmittedAnswer)
+        XCTAssertFalse(retained.isInterrupted)
+        XCTAssertEqual(captions.filter { $0.id != raw.id }, [prior, retained],
+                       "Keeping raw ASR hidden still leaves the authoritative visible draft")
+        XCTAssertEqual(fixture.appState.voiceTutorAnswerDraft(for: snapshot.change, validity: { true }), snapshot.text)
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: "101"), snapshot.text)
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: "102"), "다른 질문의 초안")
+        fixture.appState.saveVoiceTutorAnswerDraft("무효 계정의 텍스트", for: snapshot.change, validity: { false })
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: "101"), snapshot.text)
+    }
+
+    func testCancelledAnswerRetentionKeepsEditedTextAndCannotBorrowReplacementIdentity() throws {
+        var draft = VoiceTutorAnswerDraftState()
+        let oldID = "11111111-2222-3333-4444-555555555555"
+        let newID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        XCTAssertTrue(draft.apply(.init(answerID: oldID, studyID: 42, recordID: "101", revision: 1,
+                                        phase: .listening, text: nil, code: nil), existingDraft: "저장돼 있던 초안"))
+        XCTAssertTrue(draft.append(.init(answerID: oldID, recordID: "101", itemID: "old_part", sequence: 1, text: "음성 원문")))
+        XCTAssertTrue(draft.edit("사용자가 최종 수정한 답변"))
+        let snapshot = try XCTUnwrap(VoiceTutorUnsubmittedAnswerSnapshot(draft))
+        XCTAssertTrue(draft.apply(.init(answerID: oldID, studyID: 42, recordID: "101", revision: 1,
+                                        phase: .cancelled, text: nil, code: nil)))
+        var captions: [VoiceTutorCaption] = []
+        XCTAssertTrue(snapshot.retainCaption(in: &captions))
+        let retained = try XCTUnwrap(captions.first)
+        XCTAssertEqual(retained.text, "사용자가 최종 수정한 답변")
+        XCTAssertFalse(retained.text.contains("음성 원문"))
+        XCTAssertEqual(retained.answerID, oldID)
+        XCTAssertTrue(retained.containsProviderItemID("old_part"))
+        XCTAssertTrue(draft.apply(.init(answerID: newID, studyID: 42, recordID: "102", revision: 2,
+                                        phase: .listening, text: nil, code: nil)))
+        XCTAssertTrue(draft.edit("다음 질문의 별도 초안"))
+        XCTAssertFalse(draft.apply(.init(answerID: oldID, studyID: 42, recordID: "101", revision: 1,
+                                         phase: .cancelled, text: nil, code: nil)))
+        XCTAssertFalse(snapshot.retainCaption(in: &captions))
+        XCTAssertEqual(draft.answerID, newID)
+        XCTAssertEqual(draft.text, "다음 질문의 별도 초안")
+        XCTAssertEqual(captions, [retained])
+        var operations = VoiceTutorOperationState()
+        XCTAssertTrue(operations.applyContext(.init(operationID: "answer_action", answerID: oldID)))
+        XCTAssertTrue(operations.apply(.init(sequence: 1, operationID: "answer_action", name: "list_studies",
+            phase: .started, elapsedMilliseconds: 0), at: 0))
+        let layout = VoiceTutorOperationTranscriptLayout(entries: operations.visibleEntries(at: 0), captions: captions,
+            assistantResponseID: nil, hasAssistantDraft: false, answerDraftID: newID)
+        XCTAssertEqual(layout.byCaptionID[retained.id]?.map(\.id), ["answer_action"])
+        XCTAssertTrue(layout.afterAnswerDraft.isEmpty)
+    }
+
+    func testSubmissionInFlightRetainsTextWithoutClaimingItWasUnsubmittedOrResubmitting() throws {
+        var draft = VoiceTutorAnswerDraftState()
+        let answerID = "11111111-2222-3333-4444-555555555555"
+        XCTAssertNil(VoiceTutorUnsubmittedAnswerSnapshot(draft))
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                                        phase: .listening, text: nil, code: nil)))
+        XCTAssertNil(VoiceTutorUnsubmittedAnswerSnapshot(draft), "An empty capture must not create a blank chat row")
+        XCTAssertTrue(draft.edit("제출 결과를 아직 확인하지 못한 답변"))
+        XCTAssertNotNil(draft.requestFinish())
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                                        phase: .review, text: nil, code: nil)))
+        XCTAssertNotNil(draft.requestSubmit())
+        let pending = try XCTUnwrap(VoiceTutorUnsubmittedAnswerSnapshot(draft))
+        XCTAssertTrue(pending.isSubmissionUnconfirmed)
+        var captions: [VoiceTutorCaption] = []
+        XCTAssertTrue(pending.retainCaption(in: &captions))
+        XCTAssertFalse(try XCTUnwrap(captions.first).isUnsubmittedAnswer,
+                       "The server may have accepted a submission whose ACK was lost")
+        XCTAssertNil(draft.requestSubmit(), "Retention cannot cause automatic re-submission")
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                                        phase: .submitted, text: nil, code: nil)))
+        XCTAssertNil(VoiceTutorUnsubmittedAnswerSnapshot(draft))
+        XCTAssertFalse(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                                         phase: .cancelled, text: nil, code: nil)))
+        let confirmed = VoiceTutorCaption(speaker: .learner, text: draft.text, answerID: answerID)
+        captions = [confirmed]
+        XCTAssertFalse(pending.retainCaption(in: &captions))
+        XCTAssertEqual(captions, [confirmed], "A retained snapshot cannot downgrade an accepted answer")
+        draft = VoiceTutorAnswerDraftState()
+        XCTAssertNil(VoiceTutorUnsubmittedAnswerSnapshot(draft), "Identity reset removes any retainable previous draft")
+    }
+
+    func testUnsubmittedAnswerTeardownUsesCanonicalDraftStorageBeforeCancellation() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let sourceURL = root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift")
+        #if !targetEnvironment(simulator)
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw XCTSkip("Source wiring requires the repository; draft behavior also runs on iPhone.")
+        }
+        #endif
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        for start in ["    private func stop(\n", "    private func finishFromServer(\n"] {
+            let body = try XCTUnwrap(source.range(of: start)).upperBound
+            let cancelled = try XCTUnwrap(source.range(of: "answerDraftState.endLocally()", range: body..<source.endIndex))
+            let beforeCancellation = String(source[body..<cancelled.lowerBound])
+            XCTAssertTrue(beforeCancellation.contains("preserveUnsubmittedAnswerDraft(VoiceTutorUnsubmittedAnswerSnapshot(answerDraftState))"))
+        }
+        let saveStart = try XCTUnwrap(source.range(of: "    private func preserveUnsubmittedAnswerDraft(")).lowerBound
+        let saveEnd = try XCTUnwrap(source.range(of: "    private func failAnswerControl", range: saveStart..<source.endIndex)).lowerBound
+        let save = String(source[saveStart..<saveEnd])
+        XCTAssertTrue(save.contains("connection.isCurrent()"))
+        XCTAssertTrue(save.contains("appState.saveVoiceTutorAnswerDraft(snapshot.text, for: snapshot.change"))
+        XCTAssertFalse(save.contains("transport.send"), "Local preservation must not invoke answer submission")
+        XCTAssertFalse(save.contains("controls.yield"))
+        let privacyStart = try XCTUnwrap(source.range(of: "    private func stopForInvalidatedContext()")).lowerBound
+        let privacyEnd = try XCTUnwrap(source.range(of: "    private func ", range: source.index(after: privacyStart)..<source.endIndex)).lowerBound
+        let privacy = String(source[privacyStart..<privacyEnd])
+        XCTAssertTrue(privacy.contains("answerDraftState = VoiceTutorAnswerDraftState()"))
+        XCTAssertTrue(privacy.contains("captions = []"))
+        XCTAssertFalse(privacy.contains("preserveUnsubmittedAnswerDraft"))
+        let view = try String(contentsOf: root.appendingPathComponent("StudyMate/Views/VoiceTutorView.swift"), encoding: .utf8)
+        XCTAssertTrue(view.contains("if caption.isUnsubmittedAnswer {"))
+        XCTAssertTrue(view.contains("Text(strings.voiceTutorUnsubmittedAnswer)"))
+    }
+
+    func testProviderRetryAndIdentityDiscardDoNotArchivePartialOrCreateEmptyInterruptedMessages() {
+        let previous = VoiceTutorCaption(speaker: .learner, text: "유지할 기존 요청")
+        var captions = [previous]
+        var transcript = VoiceTutorAssistantTranscriptState()
+        for responseID in ["provider_failed", "identity_invalidated"] {
+            transcript.beginResponse(responseID)
+            transcript.append(delta: "완료 기록으로 남기지 않을 부분")
+            transcript.discard()
+            XCTAssertFalse(transcript.retainInterruptedCaption(responseID: responseID, providerItemID: nil, in: &captions))
+            XCTAssertNil(transcript.commit())
+        }
+        transcript.beginResponse("empty")
+        transcript.append(delta: " \n ")
+        XCTAssertFalse(transcript.retainInterruptedCaption(responseID: "empty", providerItemID: nil, in: &captions))
+        XCTAssertNil(transcript.responseID)
+        XCTAssertEqual(captions, [previous])
     }
 
     func testAuthoritativeEmptyTutorTranscriptClearsEarlierPartialDeltas() {

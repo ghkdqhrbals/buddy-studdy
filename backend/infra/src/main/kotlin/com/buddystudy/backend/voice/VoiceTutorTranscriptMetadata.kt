@@ -7,6 +7,7 @@ import com.buddystudy.voice.domain.VoiceTutorTranscriptSource
 internal object VoiceTutorTranscriptMetadata {
     const val INCOMPLETE_EVENT = "buddystudy-internal-voice-transcript-incomplete"
     const val STRUCTURED_USER_INPUT_EVENT = "buddystudy-internal-voice-structured-user-input"
+    const val INTERRUPTED_TUTOR_EVENT = "buddystudy-internal-voice-interrupted-tutor"
     const val STRUCTURED_ITEM_PREFIX = VoiceTutorTranscriptSource.STRUCTURED_ITEM_PREFIX
     const val ACCEPTED_AT_EPOCH_MILLIS = "_buddystudy_accepted_at_epoch_millis"
     const val LESSON_REVISION = "_buddystudy_lesson_revision"
