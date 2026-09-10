@@ -134,7 +134,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case serviceError(code: String?, message: String, retryable: Bool)
     case audioDelta(VoiceTutorRealtimeAudioDelta)
     case assistantTranscriptDelta(responseID: String?, delta: String)
-    case assistantTranscriptDone(responseID: String?, transcript: String?)
+    case assistantTranscriptDone(responseID: String?, transcript: String?, itemID: String? = nil)
     case userTranscript(String, itemID: String? = nil)
     case userSpeechStarted
     case userSpeechStopped
@@ -151,6 +151,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case answerTranscript(VoiceTutorAnswerTranscriptEvent)
     case sessionState(VoiceTutorSessionStateEvent)
     case operation(VoiceTutorOperationEvent)
+    case operationContext(VoiceTutorOperationContextEvent)
     case userInputRequest(VoiceTutorUserInputRequest)
     case userInputState(VoiceTutorUserInputStateEvent)
     case responseStarted(
@@ -201,6 +202,17 @@ enum VoiceTutorRealtimeEventParser {
                 return .ignored(type: type)
             }
             return .userInputState(event)
+        case "buddystudy.voice.operation.context":
+            let required: Set<String> = ["type", "operationId"]
+            let optional: Set<String> = ["responseId", "learnerItemId", "tutorItemId", "answerId"]
+            guard required.isSubset(of: Set(object.keys)),
+                  Set(object.keys).isSubset(of: required.union(optional)),
+                  optional.allSatisfy({ object[$0] == nil || object[$0] is String }),
+                  let operationID = string("operationId", in: object) else { return .ignored(type: type) }
+            let event = VoiceTutorOperationContextEvent(operationID: operationID,
+                responseID: string("responseId", in: object), learnerItemID: string("learnerItemId", in: object),
+                tutorItemID: string("tutorItemId", in: object), answerID: string("answerId", in: object))
+            return event.isValid ? .operationContext(event) : .ignored(type: type)
         case "buddystudy.voice.operation":
             guard Set(object.keys) == ["type", "sequence", "operationId", "name", "phase", "elapsedMs"],
                   let sequence = exactInteger("sequence", in: object),
@@ -397,7 +409,8 @@ enum VoiceTutorRealtimeEventParser {
         case "response.output_audio_transcript.done", "response.audio_transcript.done":
             return .assistantTranscriptDone(
                 responseID: string("response_id", in: object),
-                transcript: string("transcript", in: object)
+                transcript: string("transcript", in: object),
+                itemID: providerResponseID("item_id", in: object)
             )
         case "conversation.item.input_audio_transcription.completed":
             // Older PCM frames may omit an item ID; the native call requires

@@ -107,10 +107,26 @@ struct VoiceTutorOperationEvent: Equatable, Sendable {
             && name.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 95 }
     }
 
-    private static func isSafeIdentifier(_ value: String, maximumLength: Int) -> Bool {
+    static func isSafeIdentifier(_ value: String, maximumLength: Int) -> Bool {
         !value.isEmpty && value.utf8.count <= maximumLength && value.utf8.allSatisfy {
             (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 95 || $0 == 45
         }
+    }
+}
+
+/// Optional display-only correlation sent before the unchanged operation event.
+/// Older clients safely ignore this separate event. IDs never authorize actions.
+struct VoiceTutorOperationContextEvent: Equatable, Sendable {
+    let operationID: String
+    var responseID: String? = nil
+    var learnerItemID: String? = nil
+    var tutorItemID: String? = nil
+    var answerID: String? = nil
+
+    var isValid: Bool {
+        if let answerID, UUID(uuidString: answerID)?.uuidString.lowercased() != answerID { return false }
+        return [operationID, responseID, learnerItemID, tutorItemID].compactMap { $0 }
+            .allSatisfy { VoiceTutorOperationEvent.isSafeIdentifier($0, maximumLength: 191) }
     }
 }
 
@@ -120,6 +136,10 @@ struct VoiceTutorOperationState: Equatable, Sendable {
     struct Entry: Equatable, Sendable, Identifiable {
         let event: VoiceTutorOperationEvent
         let receivedAt: TimeInterval
+        let startedSequence: Int64
+        let context: VoiceTutorOperationContextEvent?
+        let afterCaptionID: UUID?
+        let fallbackResponseID: String?
         var id: String { event.operationID }
 
         func elapsedMilliseconds(at uptime: TimeInterval) -> Int64 {
@@ -136,9 +156,21 @@ struct VoiceTutorOperationState: Equatable, Sendable {
     var latestFinished: Entry? { finished.last }
     private var latestSequence: Int64 = 0
     private var isClosed = false
+    private var pendingContexts: [String: VoiceTutorOperationContextEvent] = [:]
 
     @discardableResult
-    mutating func apply(_ event: VoiceTutorOperationEvent, at uptime: TimeInterval) -> Bool {
+    mutating func applyContext(_ context: VoiceTutorOperationContextEvent) -> Bool {
+        guard !isClosed, context.isValid, pendingContexts.count < 16,
+              pendingContexts[context.operationID] == nil,
+              !active.contains(where: { $0.id == context.operationID }),
+              !finished.contains(where: { $0.id == context.operationID }) else { return false }
+        pendingContexts[context.operationID] = context
+        return true
+    }
+
+    @discardableResult
+    mutating func apply(_ event: VoiceTutorOperationEvent, at uptime: TimeInterval,
+                        afterCaptionID: UUID? = nil, responseID: String? = nil) -> Bool {
         guard !isClosed, event.isValid, uptime.isFinite, event.sequence > latestSequence else { return false }
         latestSequence = event.sequence
         if let existing = active.first(where: { $0.id == event.operationID }) {
@@ -148,7 +180,12 @@ struct VoiceTutorOperationState: Equatable, Sendable {
         } else if finished.contains(where: { $0.id == event.operationID }) {
             return false
         }
-        let entry = Entry(event: event, receivedAt: active.first(where: { $0.id == event.operationID })?.receivedAt ?? uptime)
+        let previous = active.first(where: { $0.id == event.operationID })
+        let entry = Entry(event: event, receivedAt: previous?.receivedAt ?? uptime,
+                          startedSequence: previous?.startedSequence ?? event.sequence,
+                          context: previous?.context ?? pendingContexts[event.operationID],
+                          afterCaptionID: previous.map { $0.afterCaptionID } ?? afterCaptionID,
+                          fallbackResponseID: previous.map { $0.fallbackResponseID } ?? responseID)
         if event.phase == .started {
             guard active.count < Self.maximumActiveOperations else { return false }
             active.append(entry)
@@ -157,16 +194,81 @@ struct VoiceTutorOperationState: Equatable, Sendable {
             finished.append(entry)
             if finished.count > Self.maximumFinishedOperations { finished.removeFirst(finished.count - Self.maximumFinishedOperations) }
         }
+        pendingContexts.removeValue(forKey: event.operationID)
         return true
     }
 
     func visibleEntries(at uptime: TimeInterval) -> [Entry] {
-        (finished + active).sorted { $0.receivedAt < $1.receivedAt }
+        (finished + active).sorted { $0.startedSequence < $1.startedSequence }
     }
 
     mutating func endLocally() {
         isClosed = true
         active = []
+        pendingContexts = [:]
+    }
+}
+
+/// Place each operation inside its originating turn, independent of completion
+/// order and newly appended captions. A provisional response can later commit
+/// without moving its operations to whichever message happens to be last.
+struct VoiceTutorOperationTranscriptLayout {
+    private(set) var beforeCaptions: [VoiceTutorOperationState.Entry] = []
+    private(set) var byCaptionID: [UUID: [VoiceTutorOperationState.Entry]] = [:]
+    private(set) var afterAssistantDraft: [VoiceTutorOperationState.Entry] = []
+    private(set) var byUserInputID: [String: [VoiceTutorOperationState.Entry]] = [:]
+    private(set) var afterAnswerDraft: [VoiceTutorOperationState.Entry] = []
+
+    init(entries: [VoiceTutorOperationState.Entry], captions: [VoiceTutorCaption],
+         assistantResponseID: String?, hasAssistantDraft: Bool, userInputIDs: Set<String> = [],
+         answerDraftID: String? = nil) {
+        for entry in entries {
+            if let answerID = entry.context?.answerID {
+                if let caption = captions.last(where: { $0.answerID == answerID && $0.speaker == .learner }) {
+                    byCaptionID[caption.id, default: []].append(entry)
+                } else if answerDraftID == answerID {
+                    afterAnswerDraft.append(entry)
+                }
+                // Typed answers may have no ASR items. An old learner item in
+                // the same boundary cannot stand in for this exact answer.
+                continue
+            }
+            if let responseID = entry.context?.responseID,
+               let caption = captions.last(where: { $0.responseID == responseID }) {
+                byCaptionID[caption.id, default: []].append(entry)
+            } else if hasAssistantDraft, let responseID = entry.context?.responseID,
+                      responseID == assistantResponseID {
+                afterAssistantDraft.append(entry)
+            } else if let itemID = entry.context?.learnerItemID,
+                      let caption = captions.last(where: { $0.containsProviderItemID(itemID) && $0.speaker == .learner }) {
+                byCaptionID[caption.id, default: []].append(entry)
+            } else if let itemID = entry.context?.learnerItemID,
+                      let requestID = userInputIDs.first(where: { "buddystudy-user-input-" + $0 == itemID }) {
+                byUserInputID[requestID, default: []].append(entry)
+            } else if entry.context?.learnerItemID == nil, let itemID = entry.context?.tutorItemID,
+                      let caption = captions.last(where: { $0.containsProviderItemID(itemID) && $0.speaker == .tutor }) {
+                byCaptionID[caption.id, default: []].append(entry)
+            } else if let context = entry.context,
+                      context.responseID != nil || context.learnerItemID != nil || context.tutorItemID != nil {
+                // The exact origin can arrive late or leave the bounded window.
+                // A later poll's local receipt position is not its invoking turn.
+                // Retain state, but wait for that origin instead of borrowing a
+                // newer caption. The compact active-work indicator stays live.
+                continue
+            } else if let responseID = entry.fallbackResponseID,
+                      let caption = captions.last(where: { $0.responseID == responseID }) {
+                byCaptionID[caption.id, default: []].append(entry)
+            } else if hasAssistantDraft, let responseID = entry.fallbackResponseID,
+                      responseID == assistantResponseID {
+                afterAssistantDraft.append(entry)
+            } else if let id = entry.afterCaptionID {
+                // A bounded transcript may trim the original turn. Do not move
+                // its operations beneath an unrelated, more recent message.
+                if captions.contains(where: { $0.id == id }) { byCaptionID[id, default: []].append(entry) }
+            } else {
+                beforeCaptions.append(entry)
+            }
+        }
     }
 }
 #endif

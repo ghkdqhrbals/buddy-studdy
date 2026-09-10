@@ -38,6 +38,43 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
+    fun `operation context exposes only bounded correlation ids and is separate from legacy status`() {
+        val fields = mapOf("type" to VoiceTutorRealtimeContract.OPERATION_CONTEXT_EVENT, "operationId" to "call_1",
+            "responseId" to "r1", "learnerItemId" to "u1", "tutorItemId" to "t0",
+            "answerId" to "00112233-4455-6677-8899-aabbccddeeff",
+            "arguments" to "private", "transcript" to "secret")
+        val raw = mapper.writeValueAsString(fields)
+        val result = policy.providerDecision(raw, "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND)
+        assertThat(result.terminate).isFalse()
+        val payload = mapper.readTree(result.payload)
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+            "type", "operationId", "responseId", "learnerItemId", "tutorItemId", "answerId")
+        assertThat(payload.path("operationId").asText()).isEqualTo("call_1")
+        assertThat(payload.path("responseId").asText()).isEqualTo("r1")
+        assertThat(payload.path("learnerItemId").asText()).isEqualTo("u1")
+        assertThat(payload.path("tutorItemId").asText()).isEqualTo("t0")
+        assertThat(payload.path("answerId").asText()).isEqualTo(fields["answerId"])
+        assertThat(policy.providerDecision(raw, "s1", Instant.EPOCH).payload).isNull()
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        // No audio/message may exist for a server-owned startup operation.
+        val anonymous = mapper.writeValueAsString(fields - "responseId" - "learnerItemId" - "tutorItemId" - "answerId")
+        assertThat(mapper.readTree(policy.providerDecision(anonymous, "s1", Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).fieldNames().asSequence().toSet())
+            .containsExactlyInAnyOrder("type", "operationId")
+        for (field in listOf("operationId", "responseId", "learnerItemId", "tutorItemId", "answerId")) {
+            for (invalid in listOf<Any?>(null, "", "../private", "x".repeat(192), 1, true)) {
+                assertThat(policy.providerDecision(mapper.writeValueAsString(fields + mapOf(field to invalid)),
+                    "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
+                    .describedAs("%s must be a valid supplied provider identifier", field).isNull()
+            }
+        }
+        for (invalid in listOf("arbitrary-safe-identifier", "00112233-4455-6677-8899-AABBCCDDEEFF")) {
+            assertThat(policy.providerDecision(mapper.writeValueAsString(fields + mapOf("answerId" to invalid)),
+                "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
+    }
+
+    @Test
     fun `operation telemetry permits bounded server timing only and removes private payloads`() {
         val fields = mapOf("type" to VoiceTutorRealtimeContract.OPERATION_EVENT, "operationId" to "call_1",
             "name" to "get_grading_process", "phase" to "completed", "elapsedMs" to 152,

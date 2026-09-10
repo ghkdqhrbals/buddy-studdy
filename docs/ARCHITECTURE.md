@@ -421,8 +421,26 @@ Public community feed
 - iOS renders request cards below the conversation, with native multiline text,
   explicit submission and completed/cancelled receipts. Its microphone gate
   composes user-input waiting, manual answer review and acknowledged pause.
-  Completed MCP entries remain below the conversation with seconds/minutes
-  durations; only safe function metadata enters them.
+  MCP entries remain beneath their originating message or submitted card with
+  seconds/minutes durations; only safe function metadata enters them.
+- The native controller emits `buddystudy.voice.operation.context` once before
+  each unchanged six-field operation-start event. The display-only context has
+  `operationId` and optional `responseId`, `learnerItemId`, `tutorItemId`, `answerId`, frozen
+  when the model requests work. Learning polls inherit the original request's
+  context. The authenticated event policy strips other fields and rejects
+  malformed identifiers; provider-originated context is not forwarded.
+  Old clients ignore this separate event and retain existing status handling.
+  iOS retains response/item identities on caption commits, including all source
+  segments of submitted answers, and resolves operations beneath the exact
+  response, provisional response, learner caption or submitted input card.
+  A canonical answer's ID binds submission and grading to that draft or submitted
+  answer even when it was typed entirely without audio transcription.
+  Completion only changes status/duration. Older-server operations retain their
+  initial local caption/provisional-response position; trimmed origins do not
+  acquire a newer message. An unresolved exact origin waits for its caption/card
+  instead of borrowing the current message; a trimmed origin leaves the visible
+  transcript window with its operations. Context buffers and operation history remain bounded
+  to one connection attempt. Only active operation rows run a periodic clock.
 - Interruption and pause wait for a short observed PCM gap for at most 450 ms
   before the existing response cancellation/clear handshake. The capture loop
   continues and the ordered speech/pause stream preserves input fences. The

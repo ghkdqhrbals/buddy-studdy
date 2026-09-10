@@ -242,6 +242,14 @@ struct VoiceTutorCaption: Identifiable, Equatable {
     let id = UUID()
     var speaker: Speaker
     var text: String
+    var responseID: String? = nil
+    var providerItemID: String? = nil
+    var providerItemIDs: Set<String> = []
+    var answerID: String? = nil
+
+    func containsProviderItemID(_ id: String) -> Bool {
+        providerItemID == id || providerItemIDs.contains(id)
+    }
 }
 
 /// Remembers final input items for one authenticated connection attempt, even
@@ -662,6 +670,7 @@ final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var phase: VoiceTutorSessionPhase = .idle
     @Published private(set) var captions: [VoiceTutorCaption] = []
     @Published private var assistantTranscriptState = VoiceTutorAssistantTranscriptState()
+    private var assistantTranscriptItemID: String?
     @Published private(set) var sessionQuota = VoiceTutorSessionQuotaState()
     @Published private(set) var sessionSecondsRemaining: Int?
     @Published private(set) var detail: BackendVoiceTutorSessionDetail?
@@ -682,6 +691,7 @@ final class VoiceTutorViewModel: ObservableObject {
     var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
     var quotaReservedSeconds: Int { sessionQuota.reservedSeconds }
     var assistantTranscriptDraft: String { assistantTranscriptState.draft }
+    var assistantTranscriptResponseID: String? { duplexPlaybackState.activeResponseID }
     var isAwaitingTutorResponse: Bool {
         phase == .listening && !pauseState.holdsMicrophone && !inputNeedsRepeat
             && !answerDraftState.isActive && !userInputState.holdsMicrophone
@@ -787,6 +797,7 @@ final class VoiceTutorViewModel: ObservableObject {
         detail = nil
         captions = []
         assistantTranscriptState.discard()
+        assistantTranscriptItemID = nil
         duplexPlaybackState.reset()
         webRTCResponseState.reset()
         pendingSpokenEndPlayoutTail = nil
@@ -1601,9 +1612,14 @@ final class VoiceTutorViewModel: ObservableObject {
             guard usesWebRTC, phase.isLive, !isFinalizing, userInputState.apply(event) else { break }
             let shouldMute = isMuted || pauseState.holdsMicrophone || answerDraftState.holdsMicrophone || userInputState.holdsMicrophone
             guard webRTCTransport?.setMuted(shouldMute) == true else { await failAnswerControl(); break }
+        case .operationContext(let context):
+            guard usesWebRTC, phase.isLive, !isFinalizing else { break }
+            _ = operationState.applyContext(context)
         case .operation(let event):
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
-            _ = operationState.apply(event, at: ProcessInfo.processInfo.systemUptime)
+            _ = operationState.apply(event, at: ProcessInfo.processInfo.systemUptime,
+                afterCaptionID: presentationCaptions.last?.id,
+                responseID: assistantTranscriptDraft.isEmpty ? nil : assistantTranscriptResponseID)
         case .sessionState(let event):
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
             // Only the current authenticated control receive loop reaches this
@@ -1774,7 +1790,8 @@ final class VoiceTutorViewModel: ObservableObject {
             }
             if event.phase == .submitted, submittedAnswerIDs.insert(event.answerID).inserted {
                 persistVoiceAnswerDraft(force: true)
-                appendCaption(speaker: .learner, text: answerDraftState.text)
+                appendCaption(speaker: .learner, text: answerDraftState.text,
+                              providerItemIDs: answerDraftState.sourceItemIDs, answerID: answerDraftState.answerID)
             } else if event.phase == .cancelled {
                 if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
             }
@@ -1853,20 +1870,21 @@ final class VoiceTutorViewModel: ObservableObject {
                 break
             }
             assistantTranscriptState.append(delta: delta)
-        case .assistantTranscriptDone(let responseID, let transcript):
+        case .assistantTranscriptDone(let responseID, let transcript, let itemID):
             guard duplexPlaybackState.matchesActiveResponse(responseID: responseID) else {
                 break
             }
             // Keep this full transcript provisional. Only a completed
             // response.done is allowed to publish it as a tutor chat message.
             assistantTranscriptState.stageCompletedTranscript(transcript)
+            assistantTranscriptItemID = itemID
         case .userTranscript(let transcript, let itemID):
             guard learnerTranscriptState.accept(
                 transcript: transcript, itemID: itemID,
                 attemptID: attemptID, requiresItemID: usesWebRTC
             ) else { break }
             inputNeedsRepeat = false
-            if let captionID = appendCaption(speaker: .learner, text: transcript) {
+            if let captionID = appendCaption(speaker: .learner, text: transcript, providerItemID: itemID) {
                 if answerDraftState.isActive { heldAnswerCaptionIDs.insert(captionID) }
                 if let itemID { learnerCaptionIDsByItemID[itemID] = captionID }
                 let visibleIDs = Set(captions.map(\.id))
@@ -1899,6 +1917,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 quotaExhaustionNoticeResponseID = acceptedResponseID
             }
             if !duplexPlaybackState.matchesActiveResponse(responseID: responseID) {
+                assistantTranscriptItemID = nil
                 if duplexPlaybackState.assistantResponseActive {
                     // A provider retry replaces, rather than extends, the
                     // failed partial sentence. Never merge its draft into the
@@ -1924,7 +1943,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 logDiagnostic("event=response_done")
                 finishWebRTCResponseIfReady(webRTCResponseState.markResponseDone(responseID))
             } else if let responseID {
-                commitAssistantTranscript()
+                commitAssistantTranscript(responseID: responseID)
                 audioEngine.finishResponseAudio(responseID: responseID)
             }
         case .outputAudioBufferStarted(let responseID):
@@ -1985,7 +2004,7 @@ final class VoiceTutorViewModel: ObservableObject {
         // A completed response.done is not enough: the provider can still clear
         // its output buffer. Publish tutor chat only after both exact WebRTC
         // completion boundaries have arrived in either order.
-        commitAssistantTranscript()
+        commitAssistantTranscript(responseID: responseID)
         let sealedToken = webRTCTransport?.sealLocalPlayoutResponse(
             responseID: responseID
         )
@@ -2186,7 +2205,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 // It can beat the final raw response.done over the control
                 // socket, so seal its provisional transcript before teardown.
                 if duplexPlaybackState.matchesActiveResponse(responseID: responseID) {
-                    commitAssistantTranscript()
+                    commitAssistantTranscript(responseID: responseID)
                 }
                 token = webRTCTransport?.sealLocalPlayoutResponse(responseID: responseID)
             }
@@ -2360,20 +2379,25 @@ final class VoiceTutorViewModel: ObservableObject {
         return outcome.detail
     }
 
-    private func commitAssistantTranscript() {
+    private func commitAssistantTranscript(responseID: String) {
         guard let text = assistantTranscriptState.commit() else { return }
-        appendCaption(speaker: .tutor, text: text)
+        appendCaption(speaker: .tutor, text: text, responseID: responseID,
+                      providerItemID: assistantTranscriptItemID)
+        assistantTranscriptItemID = nil
     }
 
     @discardableResult
-    private func appendCaption(speaker: VoiceTutorCaption.Speaker, text: String) -> UUID? {
+    private func appendCaption(speaker: VoiceTutorCaption.Speaker, text: String,
+                               responseID: String? = nil, providerItemID: String? = nil,
+                               providerItemIDs: Set<String> = [], answerID: String? = nil) -> UUID? {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
             return nil
         }
         let caption = VoiceTutorCaption(
             speaker: speaker,
-            text: VoiceTutorLiveTextBounds.boundedCaption(normalized)
+            text: VoiceTutorLiveTextBounds.boundedCaption(normalized),
+            responseID: responseID, providerItemID: providerItemID, providerItemIDs: providerItemIDs, answerID: answerID
         )
         captions.append(caption)
         VoiceTutorLiveTextBounds.trim(&captions)

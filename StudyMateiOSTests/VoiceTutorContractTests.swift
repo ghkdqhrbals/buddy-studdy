@@ -3427,13 +3427,13 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(responseFinished.contains("if usesWebRTC"))
         XCTAssertTrue(responseFinished.contains("finishWebRTCResponseIfReady"))
         XCTAssertTrue(responseFinished.contains("else if let responseID"))
-        XCTAssertTrue(responseFinished.contains("commitAssistantTranscript()"))
+        XCTAssertTrue(responseFinished.contains("commitAssistantTranscript(responseID: responseID)"))
 
         let webRTCFinishStart = try XCTUnwrap(source.range(of: "private func finishWebRTCResponseIfReady"))
         let webRTCFinishEnd = try XCTUnwrap(source.range(of: "private func abandonProviderTurn", range: webRTCFinishStart.upperBound..<source.endIndex))
         let webRTCFinish = String(source[webRTCFinishStart.lowerBound..<webRTCFinishEnd.lowerBound])
         XCTAssertTrue(webRTCFinish.contains("duplexPlaybackState.responseFinished"))
-        XCTAssertTrue(webRTCFinish.contains("commitAssistantTranscript()"))
+        XCTAssertTrue(webRTCFinish.contains("commitAssistantTranscript(responseID: responseID)"))
 
         let clearStart = try XCTUnwrap(source.range(of: "case .outputAudioBufferCleared(let responseID)"))
         let clearEnd = try XCTUnwrap(source.range(of: "case .ignored", range: clearStart.upperBound..<source.endIndex))

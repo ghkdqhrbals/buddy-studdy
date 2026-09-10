@@ -617,6 +617,7 @@ struct VoiceTutorSessionView: View {
             onUserInputSubmit: { id, cancel in viewModel.submitUserInput(requestID: id, cancel: cancel) },
             captions: viewModel.presentationCaptions,
             assistantTranscriptDraft: viewModel.assistantTranscriptDraft,
+            assistantTranscriptResponseID: viewModel.assistantTranscriptResponseID,
             errorMessage: viewModel.errorMessage,
             showsTranscript: $disclosureState.showsTranscript,
             showsSummary: $disclosureState.showsSummary,
@@ -1191,6 +1192,7 @@ struct VoiceTutorCallScreen: View {
     var onUserInputSubmit: (String, Bool) -> Void = { _, _ in }
     var captions: [VoiceTutorCaption] = []
     var assistantTranscriptDraft = ""
+    var assistantTranscriptResponseID: String? = nil
     var errorMessage: String?
     @Binding var showsTranscript: Bool
     @Binding var showsSummary: Bool
@@ -1384,7 +1386,7 @@ struct VoiceTutorCallScreen: View {
                 .frame(maxWidth: .infinity)
                 Spacer(minLength: 44)
 
-                operationStatus
+                operationStatus(operationState.active)
                 summaryRow
                 if showsSummary && presentation.summaryState == .ready {
                     VoiceTutorResultSections(detail: presentation.detail, strings: strings)
@@ -1789,33 +1791,41 @@ struct VoiceTutorCallScreen: View {
     }
 
     @ViewBuilder
-    private var operationStatus: some View {
-        if !operationState.visibleEntries(at: 0).isEmpty {
+    private func operationStatus(_ entries: [VoiceTutorOperationState.Entry]) -> some View {
+        if entries.contains(where: { $0.event.phase == .started }) {
             TimelineView(.periodic(from: .now, by: 1)) { _ in
-                let uptime = ProcessInfo.processInfo.systemUptime
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(operationState.visibleEntries(at: uptime)) { entry in
-                        Text(strings.voiceTutorOperationStatus(
-                            name: entry.event.name, phase: entry.event.phase,
-                            elapsedMilliseconds: entry.elapsedMilliseconds(at: uptime)
-                        ))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("voiceCall.operationStatus")
-                    }
-                }
+                operationRows(entries, at: ProcessInfo.processInfo.systemUptime)
+            }
+        } else if !entries.isEmpty {
+            operationRows(entries, at: 0)
+        }
+    }
+
+    private func operationRows(_ entries: [VoiceTutorOperationState.Entry], at uptime: TimeInterval) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(entries) { entry in
+                Text(strings.voiceTutorOperationStatus(
+                    name: entry.event.name, phase: entry.event.phase,
+                    elapsedMilliseconds: entry.elapsedMilliseconds(at: uptime)
+                ))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("voiceCall.operationStatus")
             }
         }
     }
 
-    private var userInputCards: some View {
+    private func userInputCards(operations: [String: [VoiceTutorOperationState.Entry]]) -> some View {
         ForEach(userInputState.entries) { entry in
-            VoiceTutorUserInputCard(entry: entry, strings: strings,
-                onChange: { onUserInputChange(entry.id, $0) },
-                onSubmit: { onUserInputSubmit(entry.id, false) },
-                onCancel: { onUserInputSubmit(entry.id, true) })
+            VStack(alignment: .leading, spacing: 12) {
+                VoiceTutorUserInputCard(entry: entry, strings: strings,
+                    onChange: { onUserInputChange(entry.id, $0) },
+                    onSubmit: { onUserInputSubmit(entry.id, false) },
+                    onCancel: { onUserInputSubmit(entry.id, true) })
                 .id("voiceInput.\(entry.id)")
+                operationStatus(operations[entry.id] ?? [])
+            }
         }
     }
 
@@ -2071,7 +2081,14 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var transcriptPanel: some View {
-        ScrollViewReader { proxy in
+        let operations = VoiceTutorOperationTranscriptLayout(
+            entries: operationState.visibleEntries(at: 0), captions: captions,
+            assistantResponseID: assistantTranscriptResponseID,
+            hasAssistantDraft: !assistantTranscriptDraft.isEmpty,
+            userInputIDs: Set(userInputState.entries.map(\.id)),
+            answerDraftID: hasAnswerDraft ? answerDraftState.answerID : nil
+        )
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
                     if usesAccessibilityChrome {
@@ -2094,15 +2111,27 @@ struct VoiceTutorCallScreen: View {
                         .padding(.vertical, 20)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    operationStatus(operations.beforeCaptions)
                     ForEach(captions) { caption in
-                        VoiceTutorCaptionBubble(caption: caption, strings: strings)
+                        VStack(alignment: .leading, spacing: 12) {
+                            VoiceTutorCaptionBubble(caption: caption, strings: strings)
+                            operationStatus(operations.byCaptionID[caption.id] ?? [])
+                        }
                     }
-                    if hasAnswerDraft { answerDraftCard }
+                    if hasAnswerDraft {
+                        VStack(alignment: .leading, spacing: 12) {
+                            answerDraftCard
+                            operationStatus(operations.afterAnswerDraft)
+                        }
+                    }
                     if !assistantTranscriptDraft.isEmpty {
-                        VoiceTutorCaptionBubble(
-                            caption: VoiceTutorCaption(speaker: .tutor, text: assistantTranscriptDraft),
-                            strings: strings
-                        )
+                        VStack(alignment: .leading, spacing: 12) {
+                            VoiceTutorCaptionBubble(
+                                caption: VoiceTutorCaption(speaker: .tutor, text: assistantTranscriptDraft),
+                                strings: strings
+                            )
+                            operationStatus(operations.afterAssistantDraft)
+                        }
                     } else if presentation.orbState == .thinking && !captions.isEmpty && !hasAnswerDraft
                         && (presentation.lessonPhase == nil || presentation.lessonPhase == .conversation) {
                         Label(strings.voiceTutorCallThinking, systemImage: "ellipsis")
@@ -2128,8 +2157,7 @@ struct VoiceTutorCallScreen: View {
                         .background(Color.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 16))
                         .accessibilityIdentifier("voiceCall.conversationNotice")
                     }
-                    userInputCards
-                    operationStatus
+                    userInputCards(operations: operations.byUserInputID)
                     Color.clear.frame(height: 1).id("voiceCall.latestCaption")
                 }
                 .padding(.vertical, 24)

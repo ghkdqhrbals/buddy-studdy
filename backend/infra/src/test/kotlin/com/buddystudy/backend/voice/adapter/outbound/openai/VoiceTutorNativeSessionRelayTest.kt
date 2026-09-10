@@ -216,6 +216,15 @@ class VoiceTutorNativeSessionRelayTest {
             val lookup = operationEvents.filter { it.path("name").asText() == "get_record" }
             assertThat(lookup.map { it.path("phase").asText() }).containsExactly("started", "completed")
             assertThat(lookup.map { it.path("operationId").asText() }.distinct()).hasSize(1)
+            val submissionId = f.serverCalls().single().path("item").path("call_id").asText()
+            val contexts = f.ui.filter { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+            val submissionContext = contexts.single { it.path("operationId").asText() == submissionId }
+            val lookupContext = contexts.single { it.path("operationId").asText() == lookup.first().path("operationId").asText() }
+            for (field in listOf("responseId", "learnerItemId", "tutorItemId", "answerId")) {
+                assertThat(lookupContext.path(field)).isEqualTo(submissionContext.path(field))
+            }
+            assertThat(lookupContext.path("answerId")).isEqualTo(answer.path("answerId"))
+            assertThat(f.ui.indexOf(lookupContext)).isLessThan(f.ui.indexOf(lookup.first()))
             assertThat(operationEvents.map { it.path("sequence").asLong() }).isSorted().doesNotHaveDuplicates()
             assertThat(operationEvents.joinToString()).doesNotContain("완성된 수정 답변", "grade-42", "recordId")
             assertThat(f.responses()).hasSize(responseCount)

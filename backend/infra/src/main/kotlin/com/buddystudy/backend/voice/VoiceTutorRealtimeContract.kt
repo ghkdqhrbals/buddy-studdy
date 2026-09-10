@@ -22,6 +22,7 @@ internal object VoiceTutorRealtimeContract {
     const val STUDY_TREE_CHANGED_EVENT = "buddystudy.voice.study.changed"
     const val QUESTION_CHANGED_EVENT = "buddystudy.voice.question.changed"
     const val OPERATION_EVENT = "buddystudy.voice.operation"
+    const val OPERATION_CONTEXT_EVENT = "buddystudy.voice.operation.context"
     const val USER_INPUT_REQUEST_EVENT = "buddystudy.voice.user_input.request"
     const val USER_INPUT_STATE_EVENT = "buddystudy.voice.user_input.state"
     const val USER_INPUT_SUBMIT_EVENT = "buddystudy.voice.user_input.submit"

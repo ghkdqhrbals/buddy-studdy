@@ -156,7 +156,7 @@ internal class VoiceTutorNativeConversationController(
             Contract.INPUT_SETTLED_EVENT, Contract.RESPONSE_INTERRUPTED_EVENT -> return false
             Contract.QUESTION_CHANGED_EVENT, Contract.SESSION_STATE_EVENT -> return false
             Contract.ANSWER_STATE_EVENT, Contract.ANSWER_TRANSCRIPT_EVENT -> return false
-            Contract.OPERATION_EVENT -> return false
+            Contract.OPERATION_EVENT, Contract.OPERATION_CONTEXT_EVENT -> return false
             Contract.USER_INPUT_REQUEST_EVENT, Contract.USER_INPUT_STATE_EVENT -> return false
             Metadata.STRUCTURED_USER_INPUT_EVENT -> return false
             // Provider VAD is disabled. Unexpected VAD edges cannot acquire turn authority.
@@ -533,7 +533,7 @@ internal class VoiceTutorNativeConversationController(
     @Synchronized
     fun beginTool(callId: String): Boolean {
         if (closed || !toolCoordinator.beginExecution(callId)) return false
-        pendingTools[callId]?.name?.let { beginOperation(callId, it) }
+        pendingTools[callId]?.let { beginOperation(callId, it.name, it.operationContext) }
         if (toolCanExecute(callId)) {
             if (pendingTools[callId]?.name in setOf("select_voice_study", "advance_voice_study", "list_pending_questions", "request_question")) displayOperationId = callId
             when (pendingTools[callId]?.name) {
@@ -745,7 +745,7 @@ internal class VoiceTutorNativeConversationController(
             }
             if (currentRevision && call != null && (result.lessonRevision ?: call.revision) == revision &&
                 !closed && !draining && !quotaRequested && !endingAfterResponse) {
-                result.learningProgress?.let { applyLearningProgress(it, allowConversation = stateIsCurrent) }
+                result.learningProgress?.let { applyLearningProgress(it, call.operationContext, allowConversation = stateIsCurrent) }
                 result.questionReadback?.takeIf { answerCapture == null && it.studyId > 0 &&
                     (sessionState.current.studyId == null || sessionState.current.studyId == it.studyId) &&
                     (sessionState.current.recordId == null || sessionState.current.recordId == it.recordId)
@@ -1034,7 +1034,11 @@ internal class VoiceTutorNativeConversationController(
             val body = response.body ?: return
             val calls = toolCoordinator.completedResponse(body)
             calls.forEach { call ->
-                pendingTools[call.callId] = ToolBoundary(response.boundary.copy(responseGeneration = response.generation), response.revision, call.name)
+                pendingTools[call.callId] = ToolBoundary(
+                    response.boundary.copy(responseGeneration = response.generation), response.revision, call.name,
+                    OperationContext(response.id, response.boundary.latestAcceptedLearnerProviderItemId,
+                        response.boundary.precedingTutorProviderItemId),
+                )
                 publish(tools, call)
             }
             if (!draining && !response.expectsAudio && body.path("output").isArray && body.path("output").isEmpty &&
@@ -1202,7 +1206,13 @@ internal class VoiceTutorNativeConversationController(
             capture.revision, text, capture.tutorItemId, capture.sourceIds)
         val scheduled = toolCoordinator.scheduleServerCall(if (capture.skip) "skip_question" else "submit_answer",
             mapOf("record_id" to capture.question.recordId), nanoTime())
-        pendingTools[scheduled.callId] = ToolBoundary(boundary(latestLearner), capture.revision, if (capture.skip) "skip_question" else "submit_answer")
+        val callBoundary = boundary(latestLearner)
+        pendingTools[scheduled.callId] = ToolBoundary(callBoundary, capture.revision,
+            if (capture.skip) "skip_question" else "submit_answer",
+            if (capture.skip) OperationContext(tutorItemId = capture.tutorItemId)
+            else OperationContext(learnerItemId = callBoundary.latestAcceptedLearnerProviderItemId,
+                tutorItemId = capture.tutorItemId ?: callBoundary.precedingTutorProviderItemId,
+                answerId = capture.id))
         reviewedAnswerCalls[scheduled.callId] = answer
         capture.pendingSubmissionText = null
         emit(scheduled.providerEvent)
@@ -1308,7 +1318,8 @@ internal class VoiceTutorNativeConversationController(
     }
 
     /** UI completion follows owned canonical identity, independently of the learner's next speech turn. */
-    private fun applyLearningProgress(progress: VoiceTutorLearningProgress, allowConversation: Boolean = true) {
+    private fun applyLearningProgress(progress: VoiceTutorLearningProgress, operationContext: OperationContext,
+        allowConversation: Boolean = true) {
         if (closed || draining || quotaRequested || endingAfterResponse || answerCapture != null ||
             (sessionState.current.studyId != null && sessionState.current.studyId != progress.studyId) ||
             (sessionState.current.recordId != null && progress.recordId != null && sessionState.current.recordId != progress.recordId) ||
@@ -1327,7 +1338,10 @@ internal class VoiceTutorNativeConversationController(
         if (progress.phase in setOf(VoiceTutorLearningPhase.QUESTION_GENERATING, VoiceTutorLearningPhase.GRADING) &&
             progress.correlationId?.takeIf { it.isNotBlank() && it.length <= 191 } != null) {
             if (watch?.progress == progress && watch.revision == revision) return
-            val next = LearningWatch(UUID.randomUUID().toString(), revision, progress)
+            // A later model read may refine the same process snapshot. Its
+            // polling history still belongs to the original requesting turn.
+            val next = LearningWatch(UUID.randomUUID().toString(), revision, progress,
+                watch?.takeIf { it.revision == revision }?.operationContext ?: operationContext)
             learningWatch = next
             publish(learningPolls, LearningPollCommand(next))
         } else {
@@ -1347,13 +1361,23 @@ internal class VoiceTutorNativeConversationController(
     fun beginLearningOperation(watch: LearningWatch): String? {
         if (!learningWatchIsCurrent(watch)) return null
         val id = "poll_${UUID.randomUUID()}"
-        beginOperation(id, if (watch.progress.phase == VoiceTutorLearningPhase.GRADING) "get_record" else "get_question_process")
+        beginOperation(id, if (watch.progress.phase == VoiceTutorLearningPhase.GRADING) "get_record" else "get_question_process",
+            watch.operationContext)
         return id
     }
 
-    private fun beginOperation(id: String, name: String) {
+    private fun beginOperation(id: String, name: String, context: OperationContext) {
         if (closed || id in operations || operations.size >= 16) return
         operations[id] = name to nanoTime()
+        // Keep the legacy six-field status event unchanged. Older clients ignore
+        // this separate display-only event; newer clients bind before started,
+        // even when the invoking transcript is delivered after the tool begins.
+        val anchor = linkedMapOf<String, Any>("type" to Contract.OPERATION_CONTEXT_EVENT, "operationId" to id)
+        context.responseId?.takeIf { OPERATION_CONTEXT_ID.matches(it) }?.let { anchor["responseId"] = it }
+        context.learnerItemId?.takeIf { OPERATION_CONTEXT_ID.matches(it) }?.let { anchor["learnerItemId"] = it }
+        context.tutorItemId?.takeIf { OPERATION_CONTEXT_ID.matches(it) }?.let { anchor["tutorItemId"] = it }
+        context.answerId?.let { anchor["answerId"] = it }
+        publish(client, json(anchor))
         publish(client, json(mapOf("type" to Contract.OPERATION_EVENT, "operationId" to id,
             "name" to name, "phase" to "started", "elapsedMs" to 0L, "sequence" to ++operationSequence)))
     }
@@ -1382,7 +1406,7 @@ internal class VoiceTutorNativeConversationController(
         result.questionChange?.takeIf { it.studyId == progress.studyId && it.recordId == progress.recordId }?.let {
             publish(client, json(mapOf("type" to Contract.QUESTION_CHANGED_EVENT, "studyId" to it.studyId, "recordId" to it.recordId)))
         }
-        applyLearningProgress(progress)
+        applyLearningProgress(progress, watch.operationContext)
     }
 
     @Synchronized
@@ -1422,7 +1446,11 @@ internal class VoiceTutorNativeConversationController(
     private fun trim(set: LinkedHashSet<String>, limit: Int) { while (set.size > limit) set.remove(set.first()) }
     private fun <T : Any> sink(): Sinks.Many<T> = Sinks.many().unicast().onBackpressureBuffer(Queues.get<T>(512).get())
 
-    data class LearningWatch(val id: String, val revision: Long, val progress: VoiceTutorLearningProgress)
+    /** Frozen when work is requested, never inferred from the latest transcript at completion. */
+    data class OperationContext(val responseId: String? = null, val learnerItemId: String? = null,
+        val tutorItemId: String? = null, val answerId: String? = null)
+    data class LearningWatch(val id: String, val revision: Long, val progress: VoiceTutorLearningProgress,
+        val operationContext: OperationContext)
     data class LearningPollCommand(val watch: LearningWatch?)
     data class NativeTranscript(val itemId: String, val raw: String)
     data class UserInputSubmission(val id: String, val revision: Long, val proposalId: String, val selectedIndices: List<Int>)
@@ -1442,7 +1470,8 @@ internal class VoiceTutorNativeConversationController(
         val acceptedAt: Instant, val precedingTutor: Tutor?, var committedAt: Long,
         val commitEventId: String = "buddystudy-internal-native-commit-${UUID.randomUUID()}", val answerId: String? = null)
     private data class TutorTranscript(val sequence: Long, val acceptedAt: Instant, var raw: String? = null)
-    private data class ToolBoundary(val boundary: VoiceTutorDialogueBoundary, val revision: Long, val name: String)
+    private data class ToolBoundary(val boundary: VoiceTutorDialogueBoundary, val revision: Long, val name: String,
+        val operationContext: OperationContext)
     private data class QuestionReadback(val value: VoiceTutorQuestionReadback, val revision: Long, val epoch: Long)
     private class AnswerCapture(val id: String, val question: VoiceTutorQuestionReadback, val revision: Long,
         val responseToken: String, val sequenceFloor: Long) {
@@ -1483,6 +1512,7 @@ internal class VoiceTutorNativeConversationController(
     }
 
     companion object {
+        private val OPERATION_CONTEXT_ID = Regex("[A-Za-z0-9_-]{1,191}")
         private val RESPONSE_QUIET_PERIOD = Duration.ofMillis(400)
         const val END_CALL_TOOL = "end_voice_conversation"
         val endCallDefinition = VoiceTutorMcpToolDefinition(END_CALL_TOOL,

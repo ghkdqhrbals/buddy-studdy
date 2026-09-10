@@ -205,6 +205,18 @@ internal class VoiceTutorRealtimeEventPolicy(
                 }
                 ProviderEventDecision(mapper.writeValueAsString(payload))
             }
+            VoiceTutorRealtimeContract.OPERATION_CONTEXT_EVENT -> {
+                val id = node.path("operationId")
+                val optionalIds = listOf("responseId", "learnerItemId", "tutorItemId")
+                if (transport != VoiceTutorProviderTransport.WEBRTC_SIDEBAND || !validProviderResponseId(id) ||
+                    optionalIds.any { node.has(it) && !validProviderResponseId(node.path(it)) } ||
+                    (node.has("answerId") && !validAnswerId(node.path("answerId")))
+                ) return ProviderEventDecision(payload = null)
+                val payload = linkedMapOf("type" to type, "operationId" to id.asText())
+                optionalIds.forEach { field -> if (node.has(field)) payload[field] = node.path(field).asText() }
+                if (node.has("answerId")) payload["answerId"] = node.path("answerId").asText()
+                ProviderEventDecision(mapper.writeValueAsString(payload))
+            }
             VoiceTutorRealtimeContract.OPERATION_EVENT -> {
                 val sequence = node.path("sequence")
                 val elapsed = node.path("elapsedMs")

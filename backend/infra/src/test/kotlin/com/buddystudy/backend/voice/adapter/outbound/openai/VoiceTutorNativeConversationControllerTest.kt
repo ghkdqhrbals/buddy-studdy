@@ -26,6 +26,7 @@ class VoiceTutorNativeConversationControllerTest {
     private val ui = mutableListOf<JsonNode>()
     private val stored = mutableListOf<VoiceTutorNativeConversationController.NativeTranscript>()
     private var persistStructuredInput = true
+    private var beginToolsImmediately = false
     private val calls = mutableListOf<VoiceTutorMcpCall>()
     private val watches = mutableListOf<VoiceTutorNativeConversationController.LearningWatch>()
 
@@ -37,7 +38,10 @@ class VoiceTutorNativeConversationControllerTest {
             if (persistStructuredInput && mapper.readTree(it.raw).path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT)
                 controller.transcriptCompleted(it.itemId)
         }
-        controller.toolActions().subscribe { calls += it }
+        controller.toolActions().subscribe {
+            calls += it
+            if (beginToolsImmediately) controller.beginTool(it.callId)
+        }
         controller.learningPollEvents().subscribe { it.watch?.let { watch -> watches += watch } }
     }
 
@@ -65,6 +69,8 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(controller.toolCanExecute("focus-1")).isTrue()
         assertThat(controller.toolBoundary("focus-1")?.latestAcceptedLearnerProviderItemId).isEqualTo(evidence.itemId)
         assertThat(controller.toolBoundary("focus-1")?.precedingTutorProviderItemId).isNull()
+        assertThat(ui.last { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+            .path("learnerItemId").asText()).isEqualTo(evidence.itemId)
         controller.completeTool("focus-1", VoiceTutorMcpToolResult("{}", false, lessonRevision = 1)); ackToolOutput()
         val form = mapOf("title" to "두 번째 선택", "questions" to listOf(mapOf("id" to "child", "prompt" to "선택",
             "selectionMode" to "single", "allowFreeText" to false, "options" to listOf(mapOf("id" to "a", "label" to "Kafka")))))
@@ -83,6 +89,8 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(controller.toolCanExecute("focus-2")).isTrue()
         assertThat(controller.toolBoundary("focus-2")?.latestAcceptedLearnerProviderItemId).isEqualTo(nextEvidence.itemId)
         assertThat(controller.toolBoundary("focus-2")?.latestAcceptedLearnerLessonRevision).isEqualTo(1)
+        assertThat(ui.last { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+            .path("learnerItemId").asText()).isEqualTo(nextEvidence.itemId)
         assertThat(stored.count { mapper.readTree(it.raw).path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }).isEqualTo(2)
     }
 
@@ -371,6 +379,138 @@ class VoiceTutorNativeConversationControllerTest {
         controller.completeTool("read", VoiceTutorMcpToolResult("{\"confirmation_question\":\"Forged confirmation\"}", false))
         ackToolOutput()
         assertThat(responses().last().path("response").has("instructions")).isFalse()
+    }
+
+    @Test
+    fun `operation context stays bound to its invoking response when newer input precedes execution and late ASR`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "call1", "list_studies")
+        // Native response scheduling intentionally does not await learner ASR.
+        assertThat(stored.none { it.itemId == "u1" }).isTrue()
+        speech(2); committed("u2")
+        assertThat(controller.beginTool("call1")).isTrue()
+        assertThat(controller.beginTool("call1")).isFalse()
+        val context = ui.single { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+        assertThat(context.path("operationId").asText()).isEqualTo("call1")
+        assertThat(context.path("responseId").asText()).isEqualTo("r1")
+        assertThat(context.path("learnerItemId").asText()).isEqualTo("u1")
+        assertThat(context.path("tutorItemId").asText()).isEqualTo("t0")
+        val started = ui.single { it.path("type").asText() == Contract.OPERATION_EVENT }
+        assertThat(ui.indexOf(started)).isEqualTo(ui.indexOf(context) + 1)
+        transcript("u1", "이전 질문의 늦은 음성 인식")
+        controller.completeTool("call1", VoiceTutorMcpToolResult("{}", false))
+        assertThat(ui.filter { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }).containsExactly(context)
+        assertThat(event(Contract.OPERATION_CONTEXT_EVENT, "operationId" to "call1", "responseId" to "forged")).isFalse()
+    }
+
+    @Test
+    fun `audio and tool response context precedes its final playout event without becoming an earlier turn`() {
+        opening(); speech(1); committed("u1"); created("spoken-tool"); audio("spoken-tool", "t1")
+        beginToolsImmediately = true
+        event("response.done", "response" to mapOf("id" to "spoken-tool", "status" to "completed", "output" to listOf(
+            mapOf("id" to "t1", "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to "목록을 확인할게요."))),
+            mapOf("id" to "tool-item", "type" to "function_call", "status" to "completed", "call_id" to "spoken-call",
+                "name" to "list_studies", "arguments" to "{}"))))
+        assertThat(ui.none { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }).isTrue()
+        val stopped = mapper.writeValueAsString(mapOf("type" to "output_audio_buffer.stopped", "response_id" to "spoken-tool"))
+        if (controller.observeProviderEvent(stopped)) controller.forwardClientEvent(stopped)
+        val context = ui.single { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+        assertThat(context.path("responseId").asText()).isEqualTo("spoken-tool")
+        assertThat(context.path("learnerItemId").asText()).isEqualTo("u1")
+        assertThat(context.path("tutorItemId").asText()).isEqualTo("t0")
+        assertThat(ui.indexOf(context)).isLessThan(ui.indexOfLast { it.path("type").asText() == "output_audio_buffer.stopped" })
+    }
+
+    @Test
+    fun `repeated learning polls retain the original operation context across later learner input`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generate-1")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val original = ui.single { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+        speech(2); committed("u2")
+        val watch = watches.single()
+        repeat(2) {
+            val poll = controller.beginLearningOperation(watch)!!
+            val context = ui.last { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+            assertThat(context.path("operationId").asText()).isEqualTo(poll)
+            for (field in listOf("responseId", "learnerItemId", "tutorItemId")) {
+                assertThat(context.path(field)).isEqualTo(original.path(field))
+            }
+            controller.completeOperation(poll, false)
+        }
+        assertThat(ui.count { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }).isEqualTo(3)
+        // A later response can refine that same generation process. Replacing
+        // its watch must not reassign historical/background polling to u2/r2.
+        ackToolOutput(); created("r2"); toolDone("r2", "read-progress", "get_question_process")
+        controller.beginTool("read-progress")
+        controller.completeTool("read-progress", VoiceTutorMcpToolResult("{}", false,
+            learningProgress = progress.copy(recordId = "42")))
+        val refreshed = watches.last()
+        assertThat(refreshed.id).isNotEqualTo(watch.id)
+        assertThat(refreshed.operationContext).isEqualTo(watch.operationContext)
+        val poll = controller.beginLearningOperation(refreshed)!!
+        val context = ui.last { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+        assertThat(context.path("operationId").asText()).isEqualTo(poll)
+        assertThat(context.path("responseId").asText()).isEqualTo("r1")
+        assertThat(context.path("learnerItemId").asText()).isEqualTo("u1")
+    }
+
+    @Test
+    fun `reviewed answer submission context uses the exact answer input and saved question`() {
+        val answer = manualAnswer()
+        speech(2); committed("a1"); transcript("a1", "수정할 답변"); controller.transcriptCompleted("a1")
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "직접 수정한 답변")
+        val request = serverQuestionCall()
+        event("conversation.item.created", "item" to request.path("item"))
+        val callId = request.path("item").path("call_id").asText()
+        assertThat(controller.beginTool(callId)).isTrue()
+        val context = ui.last { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+        assertThat(context.path("operationId").asText()).isEqualTo(callId)
+        assertThat(context.has("responseId")).isFalse()
+        assertThat(context.path("learnerItemId").asText()).isEqualTo("a1")
+        assertThat(context.path("tutorItemId").asText()).isEqualTo("saved-question")
+        assertThat(context.path("answerId")).isEqualTo(answer.path("answerId"))
+    }
+
+    @Test
+    fun `skipped answer operation belongs to the exact saved question without a nonexistent answer caption`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_SKIP_EVENT, answer)
+        val request = serverQuestionCall()
+        assertThat(request.path("item").path("name").asText()).isEqualTo("skip_question")
+        event("conversation.item.created", "item" to request.path("item"))
+        val callId = request.path("item").path("call_id").asText()
+        assertThat(controller.beginTool(callId)).isTrue()
+        val context = ui.last { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+        assertThat(context.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "operationId", "tutorItemId")
+        assertThat(context.path("operationId").asText()).isEqualTo(callId)
+        assertThat(context.path("tutorItemId").asText()).isEqualTo("saved-question")
+    }
+
+    @Test
+    fun `typed answer without spoken source binds submission and grading poll to the exact answer`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "말하지 않고 직접 입력한 완성 답변")
+        val request = serverQuestionCall()
+        event("conversation.item.created", "item" to request.path("item"))
+        val callId = request.path("item").path("call_id").asText()
+        assertThat(controller.beginTool(callId)).isTrue()
+        val context = ui.last { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+        assertThat(context.path("operationId").asText()).isEqualTo(callId)
+        assertThat(context.path("answerId")).isEqualTo(answer.path("answerId"))
+        assertThat(context.path("learnerItemId").asText()).isEqualTo("u1")
+        assertThat(context.has("responseId")).isFalse()
+        controller.completeTool(callId, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.GRADING, 7, "42", "grade-typed")))
+        speech(2); committed("later-input")
+        val poll = controller.beginLearningOperation(watches.single())!!
+        val pollContext = ui.last { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }
+        assertThat(pollContext.path("operationId").asText()).isEqualTo(poll)
+        assertThat(pollContext.path("answerId")).isEqualTo(answer.path("answerId"))
+        assertThat(ui.filter { it.path("type").asText() == Contract.OPERATION_CONTEXT_EVENT }.joinToString())
+            .doesNotContain("말하지 않고 직접 입력한 완성 답변", "grade-typed")
     }
 
     @Test
