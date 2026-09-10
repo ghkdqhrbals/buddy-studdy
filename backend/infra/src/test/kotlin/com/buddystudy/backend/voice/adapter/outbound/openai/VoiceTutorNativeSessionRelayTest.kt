@@ -45,6 +45,70 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
     @Test
+    fun `silent saved question readback retries and a verified refresh recovers exhausted playback into manual answer capture`() {
+        for (exhaustRetry in listOf(false, true)) {
+            val question = VoiceTutorQuestionReadback(74, "122", "Redis의 장점과 한계를 단계별로 설명해 주세요.")
+            val results = ArrayDeque(listOf(
+                VoiceTutorMcpToolResult("{\"selected\":true}", false, lessonRevision = 1,
+                    lessonFocus = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(74, 1),
+                        VoiceTutorStudySnapshot(74, null, "Redis", 10, 1))),
+                VoiceTutorMcpToolResult("{\"pendingQuestion\":{\"id\":\"122\"}}", false, lessonRevision = 1,
+                    questionReadback = question),
+                VoiceTutorMcpToolResult("{\"pendingQuestion\":{\"id\":\"122\"}}", false, lessonRevision = 1,
+                    questionReadbackRecovery = question,
+                    learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.CONVERSATION, 74)),
+            ))
+            val tools = FakeTools { results.removeFirst() }
+            Fixture(tools = tools).use { f ->
+                f.opening(); f.learner(1, "start-study"); f.transcript("start-study", "Redis 공부 시작하자.")
+                f.toolResponse("select", "select-call", "select_voice_study", "{\"study_id\":74}")
+                f.await("selection result") { f.outputs().size == 1 }
+                f.ack(f.outputs().last())
+                f.await("separate saved question lookup") { f.responses().size == 3 }
+                f.toolResponse("lookup", "lookup-call", "list_pending_questions", "{\"study_id\":74}")
+                f.await("saved question result") { f.outputs().size == 2 }
+                f.ack(f.outputs().last())
+                f.await("mandatory readback") { f.responses().size == 4 }
+                f.created("empty-readback")
+                f.provider("response.done", "response" to mapOf("id" to "empty-readback", "status" to "completed", "output" to emptyList<Any>()))
+                f.await("silent readback gets one bounded retry") { f.responses().size == 5 }
+                assertThat(f.responses().last().path("response").path("instructions").asText()).contains(question.question)
+                assertThat(f.answerStates()).isEmpty()
+                if (exhaustRetry) {
+                    f.created("empty-retry")
+                    f.provider("response.done", "response" to mapOf("id" to "empty-retry", "status" to "completed", "output" to emptyList<Any>()))
+                    f.await("exhaustion leaves reading and exposes input recovery") {
+                        f.ui.any { it.path("type").asText() == Contract.INPUT_RETRY_EVENT } &&
+                            f.ui.any { it.path("type").asText() == Contract.SESSION_STATE_EVENT && it.path("phase").asText() == "question_failed" }
+                    }
+                    assertThat(f.answerStates()).isEmpty()
+                    f.learner(2, "retry-question"); f.transcript("retry-question", "질문 다시 읽어줘.")
+                    assertThat(f.responses().last().path("response").path("instructions").asText()).doesNotContain(question.question)
+                    f.toolResponse("refresh", "refresh-call", "list_pending_questions", "{\"study_id\":74}")
+                    f.await("fresh canonical query returns the same saved identity") { f.outputs().size == 3 }
+                    f.ack(f.outputs().last())
+                    f.await("failed readback recovers after exact refreshed result acknowledgement") { f.responses().size == 7 }
+                    assertThat(f.responses().last().path("response").path("instructions").asText()).contains(question.question)
+                }
+                f.completeAudioResponse("actual-question", "actual-question-item", question.question)
+                f.await("actual question playback opens manual answer capture") {
+                    f.answerStates().lastOrNull()?.path("phase")?.asText() == "listening"
+                }
+                val capture = f.answerStates().last()
+                assertThat(capture.path("recordId").asText()).isEqualTo("122")
+                assertThat(capture.path("studyId").asLong()).isEqualTo(74)
+                val beforeAnswer = f.responses().size
+                f.capturedLearner(if (exhaustRetry) 3 else 2, "answer-fragment")
+                f.transcript("answer-fragment", "일단 메모리에 저장하니까")
+                f.await("answer fragment reaches capture") { f.stored.any { it.path("item_id").asText() == "answer-fragment" } }
+                assertThat(f.responses()).hasSize(beforeAnswer)
+                assertThat(tools.reviewed).isEmpty()
+                assertThat(f.errors).isEmpty()
+            }
+        }
+    }
+
+    @Test
     fun `learner can abandon an in flight selection and start a different topic after its saved result is reconciled`() {
         val previous = CompletableDeferred<VoiceTutorMcpToolResult>()
         val newQuestion = "스프링의 의존성 주입을 설명해 주세요."

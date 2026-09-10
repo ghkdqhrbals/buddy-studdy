@@ -756,7 +756,7 @@ struct VoiceTutorCallPresentation {
             case .questionLoading, .questionGenerating, .answerFinalizing, .answerSubmitting, .grading:
                 return .thinking
             case .questionReady: return .questionReady
-            case .questionReading: return .speaking
+            case .questionReading: return showsQuestionReadRetry ? .listening : .speaking
             case .answering: return .capturingAnswer
             case .answerReview: return .reviewingAnswer
             case .graded: return .graded
@@ -793,6 +793,13 @@ struct VoiceTutorCallPresentation {
         return sessionState.snapshot?.phase
     }
 
+    // A rejected learner turn may leave the last lesson snapshot at reading.
+    // Show its local retry outcome without claiming the question was completed.
+    // Pause and active answer controls retain their existing higher priority.
+    private var showsQuestionReadRetry: Bool {
+        phase == .listening && inputNeedsRepeat && lessonPhase == .questionReading
+    }
+
     var isServerPaused: Bool {
         lessonPhase != nil && pauseState.mode == .active && sessionState.snapshot?.paused == true
     }
@@ -809,7 +816,7 @@ struct VoiceTutorCallPresentation {
         case .questionLoading: return "tray.and.arrow.down"
         case .questionGenerating: return "sparkles"
         case .questionReady: return "book.closed"
-        case .questionReading: return "speaker.wave.2.fill"
+        case .questionReading: return showsQuestionReadRetry ? nil : "speaker.wave.2.fill"
         case .answering: return "mic.fill"
         case .answerFinalizing, .answerSubmitting, .grading: return "ellipsis"
         case .answerReview: return "text.cursor"
@@ -937,7 +944,7 @@ struct VoiceTutorCallPresentation {
         case .questionLoading: return strings.voiceTutorQuestionLoading
         case .questionGenerating: return strings.voiceTutorQuestionGenerating
         case .questionReady: return strings.voiceTutorQuestionReady
-        case .questionReading: return strings.voiceTutorQuestionReading
+        case .questionReading: return showsQuestionReadRetry ? strings.voiceTutorInputRepeat : strings.voiceTutorQuestionReading
         case .answering: return strings.voiceTutorAnswerListening
         case .answerFinalizing: return strings.voiceTutorAnswerFinalizing
         case .answerReview: return strings.voiceTutorAnswerReview

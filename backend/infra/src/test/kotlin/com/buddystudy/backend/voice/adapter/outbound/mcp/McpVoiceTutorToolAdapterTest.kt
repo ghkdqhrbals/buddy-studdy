@@ -3165,6 +3165,107 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
+    fun `native study discovery keeps a complete ten topic page without embedded question hints or custom prompts`() = runBlocking<Unit> {
+        val studies = (201L..210L).map { id -> mapOf(
+            "id" to id, "parentStudyId" to null, "topic" to "Redis $id", "difficultyLevel" to 8,
+            "sortOrder" to (id - 201).toInt(), "enabled" to true, "activeForQuestions" to false,
+            "customPrompt" to "PRIVATE_CUSTOM_PROMPT".repeat(2_000),
+            "pendingQuestion" to mapOf("question" to mapOf("question" to "PRIVATE_SAVED_QUESTION",
+                "expectedAnswerHint" to "PRIVATE_ANSWER_HINT"), "answer" to "PRIVATE_ANSWER", "likeCount" to 10),
+            "latestQuestion" to mapOf("gradingResult" to "PRIVATE_GRADE"), "lastError" to "PRIVATE_ERROR",
+        ) }
+        val rawPage = completePage(studies, totalCount = 10, limit = 10)
+        val store = ContextStore()
+        val fixture = Fixture(studyContexts = store).apply { handler = { _, _ -> success(rawPage) } }
+        lateinit var result: VoiceTutorMcpToolResult
+        val exchanges = captureExchanges {
+            result = fixture.adapter.execute(nativeContext(), "list_studies", mapOf("query" to "Redis", "limit" to 10, "offset" to 0))
+        }
+        assertThat(result.isError).isFalse()
+        val body = json(result)
+        assertThat(body.path("studies").map { it.path("id").asLong() }).containsExactlyElementsOf(201L..210L)
+        assertThat(body.path("studies").first().fieldNames().asSequence().toSet())
+            .containsExactlyInAnyOrder("id", "parentStudyId", "topic", "difficultyLevel", "sortOrder", "enabled", "activeForQuestions")
+        assertThat(body.path("studies").first().path("parentStudyId").isNull).isTrue()
+        assertThat(body.path("studies").last().path("difficultyLevel").asInt()).isEqualTo(8)
+        assertThat(body.path("totalCount").asLong()).isEqualTo(10)
+        assertThat(body.path("limit").asInt()).isEqualTo(10)
+        assertThat(body.path("offset").asInt()).isZero()
+        assertThat(result.output).doesNotContain("PRIVATE_", "pendingQuestion", "latestQuestion", "customPrompt", "likeCount", "lastError")
+        assertThat(exchanges.toString()).doesNotContain("PRIVATE_", "expectedAnswerHint")
+        assertThat(result.output.toByteArray(Charsets.UTF_8).size).isLessThan(16 * 1_024)
+        assertThat(result.candidateDiscovery?.scope).isEqualTo(VoiceTutorCandidateDiscoveryScope.CompleteQueryPage("Redis", 0, 10, 10))
+        assertThat(result.candidateDiscovery?.candidates?.map { it.studyId }).containsExactlyElementsOf(201L..210L)
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_studies")
+        assertThat(fixture.focusSelections).isEmpty()
+        assertThat(store.remembered).isEmpty()
+        assertThat(store.revised).isEmpty()
+        assertThat(rawPage.toString()).contains("PRIVATE_ANSWER_HINT")
+    }
+
+    @Test
+    fun `native discovery preserves exact child paging while projection cannot repair invalid candidate evidence`() = runBlocking<Unit> {
+        val child = candidate(201, 101) + mapOf("difficultyLevel" to 8, "pendingQuestion" to "PRIVATE_QUESTION")
+        val complete = completePage(listOf(child), totalCount = 1, limit = 10)
+        val fixture = Fixture(studyContexts = ContextStore()).apply { handler = { _, _ -> success(complete) } }
+        val arguments = mapOf("parent_study_id" to 101L, "limit" to 10, "offset" to 0)
+        val valid = fixture.adapter.execute(nativeContext(), "list_studies", arguments)
+        assertThat(valid.candidateDiscovery?.scope).isEqualTo(VoiceTutorCandidateDiscoveryScope.CompleteDirectChildrenPage(101, 0, 10, 1))
+        assertThat(valid.candidateDiscovery?.candidates).containsExactly(VoiceTutorStudyTargetCandidate(201, 101, "Topic 201"))
+        assertThat(json(valid).path("studies").first().path("parentStudyId").asLong()).isEqualTo(101L)
+        assertThat(json(valid).path("studies").first().path("difficultyLevel").asInt()).isEqualTo(8)
+
+        val invalidPages = listOf(
+            completePage(listOf(child), totalCount = 2, limit = 10),
+            completePage(listOf(child), totalCount = 1, limit = 10, offset = 1),
+            completePage(listOf(child, child), totalCount = 2, limit = 10),
+            completePage(listOf(child + ("parentStudyId" to 999L)), totalCount = 1, limit = 10),
+            completePage(listOf(child - "parentStudyId"), totalCount = 1, limit = 10),
+        )
+        for (page in invalidPages) {
+            fixture.handler = { _, _ -> success(page) }
+            val result = fixture.adapter.execute(nativeContext(), "list_studies", arguments)
+            assertThat(result.isError).isFalse()
+            assertThat(result.candidateDiscovery).isNull()
+            assertThat(json(result).path("studies").size()).isEqualTo((page.getValue("studies") as List<*>).size)
+            assertThat(result.output).doesNotContain("PRIVATE_QUESTION")
+        }
+    }
+
+    @Test
+    fun `native discovery retains errors and output bounds without returning a partial or malformed page`() = runBlocking<Unit> {
+        val fixture = Fixture(studyContexts = ContextStore())
+        fixture.handler = { _, _ -> failure("READ_FAILED") }
+        assertCode(fixture.adapter.execute(nativeContext(), "list_studies", emptyMap()), "READ_FAILED")
+        fixture.handler = { _, _ -> success(mapOf("studies" to listOf("PRIVATE_MALFORMED_ROW"))) }
+        val malformed = fixture.adapter.execute(nativeContext(), "list_studies", emptyMap())
+        assertCode(malformed, "INVALID_TOOL_RESULT")
+        assertThat(malformed.output).doesNotContain("PRIVATE_MALFORMED_ROW")
+        fixture.handler = { _, _ -> success(completePage(listOf(candidate(201, null) + ("topic" to "가".repeat(6_000))),
+            totalCount = 1, limit = 10)) }
+        val oversized = fixture.adapter.execute(nativeContext(), "list_studies", mapOf("query" to "Redis", "limit" to 10))
+        assertCode(oversized, "RESULT_TOO_LARGE")
+        assertThat(oversized.candidateDiscovery).isNull()
+        assertThat(json(oversized).has("studies")).isFalse()
+        assertThat(oversized.output.toByteArray(Charsets.UTF_8).size).isLessThan(16 * 1_024)
+    }
+
+    @Test
+    fun `study discovery projection is limited to native voice and leaves ordinary voice metadata intact`() = runBlocking<Unit> {
+        val fixture = Fixture(studyContexts = ContextStore()).apply {
+            handler = { _, _ -> success(completePage(listOf(candidate(201, null) + mapOf(
+                "customPrompt" to "original prompt", "pendingQuestion" to mapOf("id" to "301"))), totalCount = 1, limit = 10)) }
+        }
+        val legacy = fixture.adapter.execute(context(), "list_studies", mapOf("query" to "Redis", "limit" to 10))
+        val native = fixture.adapter.execute(nativeContext(), "list_studies", mapOf("query" to "Redis", "limit" to 10))
+        assertThat(legacy.isError).isFalse()
+        assertThat(legacy.output).contains("original prompt", "pendingQuestion")
+        assertThat(native.isError).isFalse()
+        assertThat(native.output).doesNotContain("original prompt", "pendingQuestion")
+        assertThat(native.candidateDiscovery).isEqualTo(legacy.candidateDiscovery)
+    }
+
+    @Test
     fun `native natural confirmation creates exact root once without any classifier intent or lease`() = runBlocking<Unit> {
         val fixture = Fixture()
         fixture.handler = { name, args ->

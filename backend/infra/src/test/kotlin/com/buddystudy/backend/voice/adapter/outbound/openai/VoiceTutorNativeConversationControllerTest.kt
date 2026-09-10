@@ -1941,6 +1941,326 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["empty", "blank", "tool"])
+    fun `mandatory saved question retries unheard output once and captures the answer only after real audio`(kind: String) {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        val initialReadback = responses().last()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_ready")
+        created("unheard-readback"); unheardReadback("unheard-readback", kind)
+        assertThat(answerStates()).isEmpty()
+        assertThat(settledSequences()).isEmpty()
+        assertThat(ui.none { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isTrue()
+        assertThat(calls.map { it.callId }).containsExactly("question-call")
+        if (kind == "tool") {
+            assertThat(responses()).hasSize(3)
+            assertThat(controller.beginTool("forbidden-unheard-readback")).isFalse()
+            val closure = mapper.readTree(outbound.last { it.path("item").path("type").asText() == "function_call_output" }
+                .path("item").path("output").asText())
+            assertThat(closure.path("error").path("executed").asBoolean()).isFalse()
+            ackToolOutput()
+        }
+        assertThat(responses()).hasSize(4)
+        assertThat(responses().last().path("response").path("instructions")).isEqualTo(initialReadback.path("response").path("instructions"))
+        assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
+        assertThat(failures.single().kind).isEqualTo(if (kind == "tool") VoiceTutorProviderTurnFailureKind.RESPONSE_UNEXPECTED_TOOL
+            else VoiceTutorProviderTurnFailureKind.RESPONSE_MISSING_AUDIO)
+        assertThat(failures.single().action).isEqualTo(VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED)
+        created("spoken-readback"); audio("spoken-readback", "saved-question"); done("spoken-readback", "saved-question")
+        event("output_audio_buffer.stopped", "response_id" to "spoken-readback")
+        assertThat(answerStates().last().path("recordId").asText()).isEqualTo("42")
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("listening")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("answering")
+        speech(2); committed("actual-answer")
+        assertThat(transcript("actual-answer", "내가 작성 중인 답변")).isFalse()
+        assertThat(answerSegments().last().path("text").asText()).isEqualTo("내가 작성 중인 답변")
+        assertThat(responses()).hasSize(4)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["empty", "blank", "tool"])
+    fun `repeated unheard saved question ends reading with an exact retry hint instead of settling as noise`(kind: String) {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("unheard-first"); unheardReadback("unheard-first", kind)
+        if (kind == "tool") ackToolOutput()
+        created("unheard-retry"); unheardReadback("unheard-retry", kind)
+        if (kind == "tool") ackToolOutput()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+        assertThat(sessionStates().last().path("recordId").asText()).isEqualTo("42")
+        assertThat(answerStates()).isEmpty()
+        assertThat(settledSequences()).isEmpty()
+        val retry = ui.single { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }
+        assertThat(retry.path("sequence").asLong()).isEqualTo(1)
+        assertThat(retry.path("abandonedResponseId").asText()).isEqualTo("unheard-retry")
+        assertThat(failures.map { it.action }).containsExactly(VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED,
+            VoiceTutorProviderTurnFailureAction.TURN_ABANDONED)
+        time += Duration.ofSeconds(120).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(4)
+        assertThat(calls.map { it.callId }).containsExactly("question-call")
+        speech(2); committed("new-command")
+        assertThat(responses()).hasSize(5)
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+    }
+
+    @Test
+    fun `tools emitted alongside mandatory question audio never execute or leave an answer capture lock`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("wrong-readback"); audio("wrong-readback", "preamble")
+        event("response.done", "response" to mapOf("id" to "wrong-readback", "status" to "completed", "output" to listOf(
+            mapOf("id" to "preamble", "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to "준비해 볼게요."))),
+            mapOf("id" to "wrong-call", "type" to "function_call", "status" to "completed", "call_id" to "forbidden-tool",
+                "name" to "list_studies", "arguments" to "{}"))))
+        assertThat(responses()).hasSize(3)
+        assertThat(calls.map { it.callId }).containsExactly("question-call")
+        event("output_audio_buffer.stopped", "response_id" to "wrong-readback")
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("cancelled")
+        assertThat(controller.beginTool("forbidden-tool")).isFalse()
+        ackToolOutput()
+        assertThat(responses()).hasSize(4)
+        assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
+        assertThat(failures.single().kind).isEqualTo(VoiceTutorProviderTurnFailureKind.RESPONSE_UNEXPECTED_TOOL)
+        assertThat(calls.map { it.callId }).containsExactly("question-call")
+    }
+
+    @Test
+    fun `unheard saved question superseded by new speech cannot retry or replace the latest conversation`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("old-readback"); speech(2); committed("new-topic-request")
+        silentDone("old-readback")
+        assertThat(responses()).hasSize(4)
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(failures).isEmpty()
+        assertThat(answerStates()).isEmpty()
+        assertThat(ui.none { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isTrue()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["list_pending_questions", "get_question_process", "request_question"])
+    fun `a fresh exact saved question lookup recovers exhausted readback and restores manual answer capture`(tool: String) {
+        exhaustQuestionReadback()
+        speech(2); committed("read-question-again")
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        created("lookup-response"); toolDone("lookup-response", "lookup", tool)
+        controller.beginTool("lookup")
+        controller.completeTool("lookup", VoiceTutorMcpToolResult("{\"sameQuestion\":true}", false,
+            questionReadbackRecovery = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION)))
+        ackToolOutput()
+        assertThat(responses().last().path("response").path("instructions").asText()).contains(SAVED_QUESTION)
+        assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
+        assertThat(answerStates()).isEmpty()
+        created("recovered-question"); audio("recovered-question", "saved-question"); done("recovered-question", "saved-question")
+        event("output_audio_buffer.stopped", "response_id" to "recovered-question")
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("listening")
+        assertThat(answerStates().last().path("recordId").asText()).isEqualTo("42")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("answering")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["study", "record", "question", "revision", "unrelated_tool"])
+    fun `readback recovery requires the exact failed question revision and a question query`(difference: String) {
+        exhaustQuestionReadback(); speech(2); committed("fresh-request"); created("lookup-response")
+        val tool = if (difference == "unrelated_tool") "list_studies" else "list_pending_questions"
+        toolDone("lookup-response", "lookup", tool); controller.beginTool("lookup")
+        controller.completeTool("lookup", VoiceTutorMcpToolResult("{}", false,
+            lessonRevision = if (difference == "revision") 1 else null,
+            questionReadbackRecovery = VoiceTutorQuestionReadback(if (difference == "study") 8 else 7,
+                if (difference == "record") "43" else "42", if (difference == "question") "다른 질문" else SAVED_QUESTION)))
+        ackToolOutput()
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(answerStates()).isEmpty()
+        // This synthetic result carries no progress update. An invalid recovery
+        // must not replace the query's loading state with a reading/answer state.
+        val expectedPhase = if (difference in setOf("revision", "unrelated_tool")) "conversation" else "question_loading"
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo(expectedPhase)
+    }
+
+    @Test
+    fun `an informational question refresh cannot start readback when no delivery has failed`() {
+        questionTool()
+        controller.completeTool("question-call", VoiceTutorMcpToolResult("{}", false,
+            questionReadbackRecovery = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION)))
+        ackToolOutput()
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(answerStates()).isEmpty()
+    }
+
+    @Test
+    fun `late recovery result cannot restore a failed question after a newer request supersedes its query`() {
+        exhaustQuestionReadback(); speech(2); committed("read-again"); created("lookup-response")
+        toolDone("lookup-response", "lookup", "list_pending_questions"); controller.beginTool("lookup")
+        speech(3); committed("different-topic")
+        val before = sessionStates().toList()
+        controller.completeTool("lookup", VoiceTutorMcpToolResult("{}", false,
+            questionReadbackRecovery = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION)))
+        ackToolOutput()
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(answerStates()).isEmpty()
+        assertThat(sessionStates()).isEqualTo(before)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["completed", "failed", "tool"])
+    fun `declared question audio without real start waits five seconds then clears exactly before retry`(kind: String) {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        val original = responses().last()
+        created("declared-audio"); declaredQuestionAudio("declared-audio", kind)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_ready")
+        time += Duration.ofMillis(4_999).toNanos(); controller.tick()
+        assertThat(outbound.none { it.path("type").asText() == "output_audio_buffer.clear" }).isTrue()
+        assertThat(answerStates()).isEmpty()
+        time += Duration.ofMillis(1).toNanos(); controller.tick()
+        assertThat(outbound.count { it.path("type").asText() == "output_audio_buffer.clear" }).isEqualTo(1)
+        assertThat(responses()).hasSize(3)
+        event("output_audio_buffer.cleared", "response_id" to "unrelated")
+        assertThat(event("output_audio_buffer.started", "response_id" to "declared-audio")).isFalse()
+        assertThat(event("response.output_audio.delta", "response_id" to "declared-audio", "delta" to "late-frame")).isFalse()
+        assertThat(event("response.output_audio_transcript.done", "response_id" to "declared-audio", "item_id" to "late-tutor",
+            "transcript" to "이전 응답은 표시하면 안 됩니다.")).isFalse()
+        assertThat(event("output_audio_buffer.stopped", "response_id" to "declared-audio")).isFalse()
+        assertThat(responses()).hasSize(3)
+        assertThat(answerStates()).isEmpty()
+        event("output_audio_buffer.cleared", "response_id" to "declared-audio")
+        if (kind == "tool") {
+            assertThat(responses()).hasSize(3)
+            assertThat(controller.beginTool("forbidden-declared-audio")).isFalse()
+            ackToolOutput()
+        }
+        assertThat(responses()).hasSize(4)
+        assertThat(responses().last().path("response").path("instructions")).isEqualTo(original.path("response").path("instructions"))
+        assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
+        assertThat(answerStates()).isEmpty()
+        assertThat(settledSequences()).isEmpty()
+        assertThat(ui.none { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isTrue()
+        assertThat(calls.map { it.callId }).containsExactly("question-call")
+    }
+
+    @Test
+    fun `saved question becomes reading only when real playback begins`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_ready")
+        created("readback"); done("readback", "saved-question")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_ready")
+        event("output_audio_buffer.started", "response_id" to "readback")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_reading")
+        assertThat(answerStates()).isEmpty()
+        event("output_audio_buffer.stopped", "response_id" to "readback")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("answering")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["late_start", "stopped_before_done", "delta_after_stop"])
+    fun `real question audio within the grace keeps normal delivery even when completion events reorder`(order: String) {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("real-readback")
+        when (order) {
+            "late_start" -> {
+                done("real-readback", "saved-question")
+                time += Duration.ofSeconds(4).toNanos(); controller.tick()
+                audio("real-readback", "saved-question")
+                event("output_audio_buffer.stopped", "response_id" to "real-readback")
+            }
+            "stopped_before_done" -> {
+                audio("real-readback", "saved-question")
+                event("output_audio_buffer.stopped", "response_id" to "real-readback")
+                done("real-readback", "saved-question")
+            }
+            "delta_after_stop" -> {
+                done("real-readback", "saved-question")
+                event("output_audio_buffer.stopped", "response_id" to "real-readback")
+                assertThat(answerStates()).isEmpty()
+                time += Duration.ofSeconds(4).toNanos(); controller.tick()
+                event("response.output_audio.delta", "response_id" to "real-readback", "delta" to "actual-audio-frame")
+            }
+        }
+        time += Duration.ofSeconds(6).toNanos(); controller.tick()
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("listening")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("answering")
+        assertThat(outbound.none { it.path("type").asText() == "output_audio_buffer.clear" }).isTrue()
+        assertThat(responses()).hasSize(3)
+        assertThat(failures).isEmpty()
+    }
+
+    @Test
+    fun `missing exact clear acknowledgement for unstarted question audio is bounded and never pretends recovery`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("unstarted-question"); declaredQuestionAudio("unstarted-question", "completed")
+        var failure: Throwable? = null
+        controller.failure().subscribe({}, { failure = it })
+        time += Duration.ofSeconds(5).toNanos(); controller.tick()
+        event("output_audio_buffer.cleared", "response_id" to "unrelated")
+        time += Duration.ofMillis(4_999).toNanos(); controller.tick()
+        assertThat(failure).isNull()
+        time += Duration.ofMillis(1).toNanos(); controller.tick()
+        assertThat(failure).isInstanceOf(VoiceTutorProviderResponseTimeoutException::class.java)
+        assertThat(responses()).hasSize(3)
+        assertThat(answerStates()).isEmpty()
+        assertThat(failures.single().action).isEqualTo(VoiceTutorProviderTurnFailureAction.SESSION_FATAL)
+    }
+
+    @Test
+    fun `repeated declared but unstarted question audio consumes only one recovery attempt`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        for (id in listOf("unstarted-first", "unstarted-retry")) {
+            created(id); declaredQuestionAudio(id, "completed")
+            time += Duration.ofSeconds(5).toNanos(); controller.tick()
+            event("output_audio_buffer.cleared", "response_id" to id)
+        }
+        assertThat(responses()).hasSize(4)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+        assertThat(ui.single { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }.path("sequence").asLong()).isEqualTo(1)
+        assertThat(answerStates()).isEmpty()
+        assertThat(failures.map { it.action }).containsExactly(VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED,
+            VoiceTutorProviderTurnFailureAction.TURN_ABANDONED)
+    }
+
+    @Test
+    fun `new speech while clearing unstarted question audio takes priority after exact acknowledgement`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("unstarted-question"); declaredQuestionAudio("unstarted-question", "completed")
+        time += Duration.ofSeconds(5).toNanos(); controller.tick()
+        speech(2); committed("new-topic-request")
+        assertThat(responses()).hasSize(3)
+        event("output_audio_buffer.cleared", "response_id" to "unstarted-question")
+        assertThat(responses()).hasSize(4)
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(answerStates()).isEmpty()
+        assertThat(ui.none { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isTrue()
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["failed", "tool"])
+    fun `audio starting after readback failure cannot acquire an answer capture for newer speech`(kind: String) {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("failed-readback"); declaredQuestionAudio("failed-readback", kind)
+        audio("failed-readback", "late-audio")
+        speech(2); committed("new-topic-request")
+        assertThat(transcript("new-topic-request", "다른 주제로 바꿔줘.")).isTrue()
+        event("output_audio_buffer.cleared", "response_id" to "failed-readback")
+        if (kind == "tool") ackToolOutput()
+        assertThat(responses()).hasSize(4)
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(answerStates()).isEmpty()
+        assertThat(answerSegments()).isEmpty()
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["failed", "tool"])
+    fun `known readback failure discards only its provisional capture before the next learner request`(kind: String) {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("failed-readback"); audio("failed-readback", "early-audio")
+        declaredQuestionAudio("failed-readback", kind)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("cancelled")
+        speech(2); committed("new-topic-request")
+        assertThat(transcript("new-topic-request", "다른 주제로 바꿔줘.")).isTrue()
+        event("output_audio_buffer.cleared", "response_id" to "failed-readback")
+        if (kind == "tool") ackToolOutput()
+        assertThat(responses()).hasSize(4)
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(answerStates().map { it.path("phase").asText() }).containsExactly("cancelled")
+        assertThat(answerSegments()).isEmpty()
+    }
+
     @Test
     fun `fresh learner speech before tool output acknowledgement clears the queued readback`() {
         questionTool(); controller.completeTool("question-call", readbackResult())
@@ -2464,6 +2784,26 @@ class VoiceTutorNativeConversationControllerTest {
     private fun textDone(responseId: String, text: String, contentType: String = "text") = event("response.done",
         "response" to mapOf("id" to responseId, "status" to "completed", "output" to listOf(
             mapOf("id" to "text-$responseId", "type" to "message", "content" to listOf(mapOf("type" to contentType, "text" to text))))))
+    private fun unheardReadback(responseId: String, kind: String) = when (kind) {
+        "empty" -> silentDone(responseId)
+        "blank" -> textDone(responseId, "  \n  ")
+        "tool" -> toolDone(responseId, "forbidden-$responseId", "list_studies")
+        else -> error("Unknown test readback kind")
+    }
+    private fun exhaustQuestionReadback() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("unheard-first"); silentDone("unheard-first")
+        created("unheard-retry"); silentDone("unheard-retry")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+    }
+    private fun declaredQuestionAudio(responseId: String, kind: String): Boolean {
+        val output = mutableListOf<Map<String, Any>>(mapOf("id" to "declared-$responseId", "type" to "message",
+            "content" to listOf(mapOf("type" to "audio", "transcript" to ""))))
+        if (kind == "tool") output += mapOf("id" to "forbidden-item", "type" to "function_call", "status" to "completed",
+            "call_id" to "forbidden-$responseId", "name" to "list_studies", "arguments" to "{}")
+        return event("response.done", "response" to mapOf("id" to responseId,
+            "status" to if (kind == "failed") "failed" else "completed", "output" to output))
+    }
     private fun rejected(request: JsonNode) = event("error", "error" to mapOf(
         "type" to "invalid_request_error", "code" to "invalid_type",
         "param" to "response.metadata.${Contract.QUOTA_NOTICE_METADATA_KEY}",

@@ -197,6 +197,7 @@ class McpVoiceTutorToolAdapter(
                     else -> tool.inputSchema().toMap()
                 }
                 val description = when (tool.name()) {
+                    "list_studies" -> "Browse saved study discovery metadata and exact parent IDs with bounded pages. This result contains no questions, answers or study prompts. Resolve the learner's chosen exact node, select it, then read list_pending_questions separately before teaching. " + tool.description().orEmpty()
                     "list_pending_questions" -> "Read arrived pending questions for the exact selected study_id before teaching. Read the returned saved question faithfully and preserve its original level. Do not invent a replacement. Grading questions already have submitted answers and must not be asked again."
                     "request_question" -> "Request a new saved question for the selected topic only when the learner wants one and no ready pending question remains. Existing pending questions are returned first. For an unwanted question call skip_question on an explicit skip/change request, then request again. Normal question allowance applies; the server owns retry identity. Poll get_question_process and speak only its saved question."
                     "submit_answer" -> "Reserved for the learner's explicit app submission after finishing and editing their answer. Never call this tool yourself, even if speech seems complete. The server supplies the reviewed text privately after the learner taps Submit. Then use get_grading_process and only its saved grade."
@@ -612,9 +613,10 @@ class McpVoiceTutorToolAdapter(
                     if (!isAuthorized(context)) return inactiveCall()
                 }
             }
-            val enriched = withLessonContext(
-                context, boundedResult(result, toolName), toolName, effectiveArguments,
-            )
+            val voiceResult = if (context.realtimeModelTools && toolName == "list_studies") {
+                boundedNativeStudyDiscovery(result)
+            } else boundedResult(result, toolName)
+            val enriched = withLessonContext(context, voiceResult, toolName, effectiveArguments)
             if (readOnly && !isAuthorized(context)) return inactiveCall()
             return attachCandidateDiscovery(
                 context, enriched, result, candidateReadRequest, candidateRevisionBefore,
@@ -1778,6 +1780,32 @@ class McpVoiceTutorToolAdapter(
 
     private data class DeletionPreview(val target: VoiceTutorStudyTargetCandidate, val ids: List<Long>)
 
+    private fun boundedNativeStudyDiscovery(result: McpSchema.CallToolResult): VoiceTutorMcpToolResult {
+        if (result.isError() == true) return boundedResult(result, "list_studies")
+        val source = result.structuredContent()?.let { objectMapper.valueToTree<JsonNode>(it) }
+        val studies = source?.path("studies")
+        if (source?.isObject != true || studies?.isArray != true || studies.any { !it.isObject }) {
+            return failure("INVALID_TOOL_RESULT", "The saved study page is unavailable. Read the exact owned topic again before selecting it.")
+        }
+        // Browse complete rows using only discovery columns. Do not let embedded
+        // questions, answer hints or long custom prompts crowd out saved topics.
+        // Candidate authorization still validates the original result independently.
+        val compact = objectMapper.createObjectNode()
+        val nodes = compact.putArray("studies")
+        studies.forEach { study ->
+            val node = nodes.addObject()
+            STUDY_DISCOVERY_FIELDS.forEach { field -> study.get(field)?.let { node.set<JsonNode>(field, it) } }
+        }
+        listOf("totalCount", "limit", "offset").forEach { field ->
+            source.get(field)?.let { compact.set<JsonNode>(field, it) }
+        }
+        val bytes = objectMapper.writeValueAsBytes(compact)
+        if (bytes.size > MAX_OUTPUT_BYTES) {
+            return failure("RESULT_TOO_LARGE", "The complete study discovery page exceeds the voice limit. Request a smaller page or a more specific study/topic filter; no rows were omitted.")
+        }
+        return VoiceTutorMcpToolResult(String(bytes, Charsets.UTF_8), false)
+    }
+
     private fun boundedResult(result: McpSchema.CallToolResult, toolName: String): VoiceTutorMcpToolResult {
         val isError = result.isError() == true
         val changed = !isError && toolName in (CREATION_TOOLS + UPDATE_STUDY)
@@ -2065,6 +2093,7 @@ class McpVoiceTutorToolAdapter(
         )
         val LEARNING_HISTORY_TOOLS = setOf(LIST_LEARNING_RECORDS, GET_VOICE_LEARNING_RECORD)
         val STUDY_CONTEXT_TOOLS = setOf("list_studies", "get_study", CREATE_ROOT, CREATE_TOPIC, UPDATE_STUDY)
+        val STUDY_DISCOVERY_FIELDS = listOf("id", "parentStudyId", "topic", "difficultyLevel", "sortOrder", "enabled", "activeForQuestions")
         val CREATION_TOOLS = setOf(CREATE_ROOT, CREATE_TOPIC)
         val DELETE_ARGUMENTS = setOf("study_id", "confirm")
         val CREATED_TOPIC_FIELDS = listOf(

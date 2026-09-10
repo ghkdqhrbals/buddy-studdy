@@ -50,6 +50,12 @@ data class VoiceTutorMcpToolResult(
     val changedStudyIds: List<Long> = emptyList(),
     /** Exact GUI action, never model JSON; its acknowledged output starts a fresh human tool budget. */
     val userInputCompleted: Boolean = false,
+    /**
+     * Verified refresh of the same saved question. This is not permission to
+     * repeat it; the native controller may use it only to recover its own failed
+     * readback for this exact question and lesson revision.
+     */
+    val questionReadbackRecovery: VoiceTutorQuestionReadback? = null,
 )
 
 /** A server-prepared immutable write proposal; model-authored form text cannot change it. */

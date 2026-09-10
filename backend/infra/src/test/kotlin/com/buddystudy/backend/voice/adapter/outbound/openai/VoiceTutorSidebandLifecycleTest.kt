@@ -9,6 +9,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DynamicTest.dynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.slf4j.LoggerFactory
 import org.springframework.web.reactive.socket.CloseStatus
 import org.springframework.web.reactive.socket.WebSocketMessage
@@ -318,8 +320,9 @@ class VoiceTutorSidebandLifecycleTest {
         assertThat(snapshot.toString()).doesNotContain(PRIVATE_PAYLOAD, CALL_ID, "sequence=")
     }
 
-    @Test
-    fun `provider turn failure diagnostics keep bounded subtype code and hashed correlation only`() {
+    @ParameterizedTest
+    @EnumSource(value = VoiceTutorProviderTurnFailureKind::class, names = ["PROVIDER_ERROR", "RESPONSE_MISSING_AUDIO", "RESPONSE_UNEXPECTED_TOOL"])
+    internal fun `provider turn failure diagnostics keep bounded subtype code and hashed correlation only`(kind: VoiceTutorProviderTurnFailureKind) {
         val logger = LoggerFactory.getLogger(
             "com.buddystudy.backend.voice.adapter.outbound.openai.VoiceTutorSidebandLifecycle",
         ) as Logger
@@ -330,7 +333,7 @@ class VoiceTutorSidebandLifecycleTest {
             val diagnostics = VoiceTutorSidebandDiagnostics(CALL_ID)
             diagnostics.observeProviderTurnFailure(
                 VoiceTutorProviderTurnFailureDiagnostic(
-                    kind = VoiceTutorProviderTurnFailureKind.PROVIDER_ERROR,
+                    kind = kind,
                     providerErrorType = "server_error",
                     providerErrorCode = "rate_limit_exceeded",
                     eventCorrelation = VoiceTutorProviderEventCorrelation.ACTIVE_RESPONSE,
@@ -342,12 +345,12 @@ class VoiceTutorSidebandLifecycleTest {
 
             val snapshot = diagnostics.snapshot(VoiceTutorSidebandBranch.RECEIVE, VoiceTutorSidebandSignal.COMPLETE)
             assertThat(snapshot.providerTurnFailureCounts).isEqualTo(
-                mapOf("provider-error:server_error:rate_limit_exceeded:active-response:retry" to 1L),
+                mapOf("${kind.diagnosticValue}:server_error:rate_limit_exceeded:active-response:retry" to 1L),
             )
             assertThat(snapshot.toString()).doesNotContain(rawEventId, PRIVATE_PAYLOAD, CALL_ID)
             assertThat(appender.list).hasSize(1)
             assertThat(appender.list.single().formattedMessage)
-                .contains(providerEventReference(rawEventId), "server_error", "rate_limit_exceeded", "attempt=1")
+                .contains(kind.diagnosticValue, providerEventReference(rawEventId), "server_error", "rate_limit_exceeded", "attempt=1")
                 .doesNotContain(rawEventId, PRIVATE_PAYLOAD, CALL_ID)
             assertThat(appender.list.single().throwableProxy).isNull()
         } finally {

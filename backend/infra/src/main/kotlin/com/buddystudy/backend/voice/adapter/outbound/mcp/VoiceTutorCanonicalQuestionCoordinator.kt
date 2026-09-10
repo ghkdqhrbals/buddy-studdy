@@ -177,6 +177,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
                 else "No ready unanswered question remains on this exact topic. If the learner wants to start or explicitly requests a new question, call request_question and wait for its saved result. Do not invent a question or resubmit an answer that is already grading.",
         )).copy(questionChange = state.question?.takeIf { newlyBound }?.let { change(state, it) },
             questionReadback = state.question?.takeIf { newlyBound }?.let { readback(state, it) },
+            questionReadbackRecovery = state.question?.takeUnless { newlyBound }?.let { readback(state, it) },
             learningProgress = if (!newlyBound) progress(state, VoiceTutorLearningPhase.CONVERSATION) else null)
     }
 
@@ -243,7 +244,8 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
             return output(mapOf("terminal" to true, "pendingQuestion" to state.question,
                 "notice" to if (newlyBound) "Read this saved question faithfully, then wait for an actual answer. Do not invent a score or reveal the answer hint." else SAME_QUESTION_NOTICE))
                 .copy(questionChange = if (newlyBound) change(state, record) else null,
-                    questionReadback = if (newlyBound) readback(state, record) else null)
+                    questionReadback = if (newlyBound) readback(state, record) else null,
+                    questionReadbackRecovery = if (!newlyBound) readback(state, record) else null)
         }
         if (body.path("terminal").asBoolean()) state.generation = null
         return result.copy(learningProgress = progress(state, if (body.path("terminal").asBoolean())

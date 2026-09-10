@@ -2703,6 +2703,100 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
+    func testExactInputRetryOverridesStaleQuestionReadingWithoutCompletingTheLesson() {
+        var duplex = VoiceTutorDuplexPlaybackState()
+        duplex.userSpeechStarted(sequence: 7)
+        duplex.userSpeechStopped(sequence: 7)
+        XCTAssertTrue(duplex.acceptInputRetry(sequence: 7, responseID: "unannounced_failed"))
+        duplex.learnerTranscriptReceived(usesWebRTC: true)
+        let snapshot = makeLessonPresentationState(.questionReading)
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            var presentation = VoiceTutorCallPresentation(phase: .listening,
+                inputNeedsRepeat: duplex.inputNeedsRepeat, isAwaitingTutorResponse: duplex.isAwaitingTutorResponse,
+                sessionState: snapshot)
+            XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorInputRepeat)
+            XCTAssertEqual(presentation.orbState, .listening)
+            XCTAssertNil(presentation.lessonSymbolName, "A rejected turn must not retain the stale speaker icon")
+            XCTAssertEqual(presentation.lessonPhase, .questionReading)
+            XCTAssertEqual(presentation.sessionState, snapshot, "Presentation cannot complete or discard the server's question")
+
+            presentation.phase = .speaking
+            XCTAssertEqual(presentation.orbState, .speaking, "Actual playback retains priority over the retry hint")
+            XCTAssertEqual(presentation.lessonSymbolName, "speaker.wave.2.fill")
+            presentation.phase = .listening
+            presentation.inputNeedsRepeat = false
+            XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorQuestionReading)
+            XCTAssertEqual(presentation.orbState, .speaking, "Without an explicit retry, the original server snapshot is unchanged")
+        }
+    }
+
+    func testQuestionReadRetryPreservesPauseAnswerAndTerminalPresentationPriority() throws {
+        let strings = AppStrings(language: .korean)
+        var pause = VoiceTutorCallPauseState()
+        pause.isSupported = true
+        let pauseCommand = try XCTUnwrap(pause.requestPause())
+        var presentation = VoiceTutorCallPresentation(phase: .listening, inputNeedsRepeat: true,
+            pauseState: pause, sessionState: makeLessonPresentationState(.questionReading))
+        XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorPausing)
+        XCTAssertEqual(presentation.orbState, .pausing)
+        XCTAssertNil(presentation.lessonSymbolName)
+        XCTAssertTrue(pause.acknowledge(sequence: pauseCommand.sequence, paused: true))
+        presentation.pauseState = pause
+        XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorPaused)
+        XCTAssertEqual(presentation.orbState, .paused)
+        XCTAssertFalse(presentation.canDisplayActiveAnswer)
+        _ = try XCTUnwrap(pause.requestResume())
+        presentation.pauseState = pause
+        XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorResuming)
+        XCTAssertEqual(presentation.orbState, .resuming)
+
+        let serverPaused = VoiceTutorCallPresentation(phase: .listening, inputNeedsRepeat: true,
+            sessionState: makeLessonPresentationState(.questionReading, paused: true))
+        XCTAssertEqual(serverPaused.statusText(strings), strings.voiceTutorPaused)
+        XCTAssertEqual(serverPaused.orbState, .paused)
+        XCTAssertNil(serverPaused.lessonSymbolName)
+
+        for phase in [VoiceTutorSessionStateEvent.Phase.answering, .answerFinalizing, .answerReview,
+                      .answerSubmitting, .grading, .graded, .answerFailed, .gradingFailed, .ending, .ended, .failed] {
+            let baseline = VoiceTutorCallPresentation(phase: .listening, sessionState: makeLessonPresentationState(phase))
+            var retry = baseline
+            retry.inputNeedsRepeat = true
+            XCTAssertEqual(retry.statusText(strings), baseline.statusText(strings), "\(phase)")
+            XCTAssertEqual(retry.orbState, baseline.orbState, "\(phase)")
+            XCTAssertEqual(retry.lessonSymbolName, baseline.lessonSymbolName, "\(phase)")
+        }
+        for phase in [VoiceTutorSessionPhase.ending, .ended, .failed] {
+            let baseline = VoiceTutorCallPresentation(phase: phase, sessionState: makeLessonPresentationState(.questionReading))
+            var retry = baseline
+            retry.inputNeedsRepeat = true
+            XCTAssertEqual(retry.statusText(strings), baseline.statusText(strings))
+            XCTAssertEqual(retry.orbState, baseline.orbState)
+        }
+    }
+
+    func testLocalAnswerDraftRemainsVisibleOverQuestionReadRetryHint() throws {
+        let strings = AppStrings(language: .korean)
+        var draft = VoiceTutorAnswerDraftState()
+        let answerID = "d2a27b1e-8924-4c5f-a668-0405b4f50d00"
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+            phase: .listening, text: nil, code: nil), existingDraft: "지켜야 하는 답변 초안"))
+        let presentation = VoiceTutorCallPresentation(phase: .listening, inputNeedsRepeat: true,
+            sessionState: makeLessonPresentationState(.questionReading))
+        XCTAssertEqual(presentation.statusText(strings, answerDraftState: draft), strings.voiceTutorAnswerListening)
+        _ = try XCTUnwrap(draft.requestFinish())
+        XCTAssertTrue(draft.holdsMicrophone)
+        XCTAssertEqual(presentation.statusText(strings, answerDraftState: draft), strings.voiceTutorAnswerFinalizing)
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+            phase: .review, text: nil, code: nil)))
+        XCTAssertEqual(presentation.statusText(strings, answerDraftState: draft), strings.voiceTutorAnswerReview)
+        _ = try XCTUnwrap(draft.requestSubmit())
+        XCTAssertEqual(presentation.statusText(strings, answerDraftState: draft), strings.voiceTutorAnswerSubmitting)
+        XCTAssertEqual(draft.text, "지켜야 하는 답변 초안")
+        XCTAssertEqual(draft.answerID, answerID)
+        XCTAssertEqual(presentation.lessonPhase, .questionReading)
+    }
+
     private func makeLessonPresentationState(
         _ phase: VoiceTutorSessionStateEvent.Phase, paused: Bool = false
     ) -> VoiceTutorSessionState {

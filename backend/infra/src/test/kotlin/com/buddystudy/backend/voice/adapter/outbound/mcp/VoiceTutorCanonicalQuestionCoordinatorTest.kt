@@ -128,19 +128,41 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
     @Test
     fun `refreshing the same question preserves the already spoken question and current original answer`(): Unit = runBlocking {
         val fixture = Fixture()
-        assertThat(fixture.coordinator.selected(fixture.context()).questionReadback).isNotNull()
+        val initial = fixture.coordinator.selected(fixture.context())
+        assertThat(initial.questionReadback).isNotNull()
+        assertThat(initial.questionReadbackRecovery).isNull()
         fixture.learner = 12
 
         val refreshed = fixture.coordinator.execute(fixture.answerContext(), "list_pending_questions", mapOf("study_id" to STUDY))
         assertThat(refreshed.isError).isFalse()
         assertThat(refreshed.questionReadback).isNull()
         assertThat(refreshed.questionChange).isNull()
+        assertThat(refreshed.questionReadbackRecovery).isEqualTo(initial.questionReadback)
+        assertThat(refreshed.output).doesNotContain("questionReadbackRecovery", "SECRET_HINT", "SECRET_RUBRIC")
         assertThat(fixture.json(refreshed).path("notice").asText()).contains("handle the learner's present answer")
 
         val submitted = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
         assertThat(submitted.isError).isFalse()
         assertThat(fixture.calls.last().arguments["answer"]).isEqualTo(EDITED_ANSWER)
         assertThat(fixture.excluded).containsExactly("question-read", "answer-1", "answer-2")
+    }
+
+    @Test
+    fun `readback recovery refresh requires a currently owned unanswered readable question`(): Unit = runBlocking {
+        for (scenario in 0..4) {
+            val fixture = Fixture()
+            fixture.coordinator.selected(fixture.context())
+            when (scenario) {
+                0 -> fixture.isAuthorized = false
+                1 -> fixture.focus = (STUDY + 1) to REVISION
+                2 -> fixture.records = emptyList()
+                3 -> fixture.records = listOf(fixture.record(101, status = "GRADING", answer = "Submitted"))
+                4 -> fixture.records = listOf(fixture.record(101, questionText = ""))
+            }
+            val refreshed = fixture.coordinator.execute(fixture.answerContext(), "list_pending_questions", mapOf("study_id" to STUDY))
+            assertThat(refreshed.questionReadbackRecovery).describedAs("scenario %s", scenario).isNull()
+            assertThat(refreshed.questionReadback).isNull()
+        }
     }
 
     @Test
@@ -177,6 +199,7 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
             assertThat(refreshed.isError).isFalse()
             assertThat(refreshed.questionReadback?.recordId).isEqualTo(id.toString())
             assertThat(refreshed.questionChange?.recordId).isEqualTo(id.toString())
+            assertThat(refreshed.questionReadbackRecovery).isNull()
             assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "submit_answer", mapOf("record_id" to id)), "USER_CONFIRMATION_REQUIRED")
             assertThat(fixture.calls.none { it.name == "submit_answer" }).isTrue()
         }

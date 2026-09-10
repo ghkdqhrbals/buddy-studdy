@@ -73,6 +73,7 @@ internal class VoiceTutorNativeConversationController(
     private var quotaRequested = false
     private var endingAfterResponse = false
     private var pendingQuestionReadback: QuestionReadback? = null
+    private var failedQuestionReadback: QuestionReadback? = null
     private var pendingMutationConfirmation: String? = null
     private var operationSequence = 0L
     private val operations = linkedMapOf<String, Pair<String, Long>>()
@@ -220,19 +221,19 @@ internal class VoiceTutorNativeConversationController(
             }
             "response.output_item.added" -> {
                 val response = matchingResponse(node) ?: return false
-                if (response.superseded) return false
+                if (response.superseded || response.readbackClearStartedAt != null) return false
                 val item = node.path("item")
                 if (item.path("type").asText() == "message") stampTutor(response, item.path("id").asText())
             }
             "response.output_audio_transcript.delta" -> {
                 val response = matchingResponse(node) ?: return false
-                if (response.superseded) return false
+                if (response.superseded || response.readbackClearStartedAt != null) return false
                 announceResponse(response)
                 stampTutor(response, node.path("item_id").asText())
             }
             "response.output_audio_transcript.done" -> {
                 val response = matchingResponse(node) ?: return false
-                if (response.superseded) return false
+                if (response.superseded || response.readbackClearStartedAt != null) return false
                 announceResponse(response)
                 val id = node.path("item_id").asText()
                 stampTutor(response, id)?.raw = raw
@@ -242,6 +243,7 @@ internal class VoiceTutorNativeConversationController(
                 response.audioStarted = true
                 response.audioStopped = false
                 if (response.superseded) { clearInterruptedOutput(response); return false }
+                if (response.readbackClearStartedAt != null) return false
                 armAnswerCapture(response)
                 announceResponse(response)
             }
@@ -249,7 +251,7 @@ internal class VoiceTutorNativeConversationController(
                 val response = matchingResponse(node) ?: return false
                 response.audioStopped = true
                 finishResponseIfReady()
-                if (response.superseded) return false
+                if (response.superseded || response.readbackClearStartedAt != null) return false
             }
             "output_audio_buffer.cleared" -> {
                 val response = matchingResponse(node) ?: return false
@@ -257,7 +259,7 @@ internal class VoiceTutorNativeConversationController(
                 response.audioStopped = true
                 response.outputCleared = true
                 // A cleared playout is not evidence of a completed question or confirmation.
-                if (!response.superseded) publish(client, json(mapOf("type" to Contract.INPUT_RETRY_EVENT, "abandonedResponseId" to response.id)))
+                if (!response.superseded && response.readbackClearStartedAt == null) publish(client, json(mapOf("type" to Contract.INPUT_RETRY_EVENT, "abandonedResponseId" to response.id)))
                 finishResponseIfReady()
                 return false
             }
@@ -267,6 +269,7 @@ internal class VoiceTutorNativeConversationController(
                 if (response.id != body.path("id").asText()) return false
                 if (response.done) return false
                 response.done = true
+                response.doneAt = nanoTime()
                 response.failed = response.failed || body.path("status").asText() != "completed"
                 response.body = body
                 if (!response.superseded) body.path("output").forEach { item ->
@@ -287,21 +290,24 @@ internal class VoiceTutorNativeConversationController(
                 response.expectsAudio = response.audioStarted || ((!response.superseded || body.path("status").asText() == "completed") && body.path("output").any { item ->
                     item.path("content").any { it.path("type").asText() in setOf("audio", "output_audio") }
                 })
-                // We requested audio. Substantive text without audio or a tool
-                // is a recoverable modality failure, not a noise-only turn.
-                // A response containing function calls must never be replayed.
+                // A mandatory saved question cannot complete silently. Ordinary
+                // noise stays silent; substantive text is a modality failure.
+                // Tools are forbidden during readback and are closed without execution.
                 val output = body.path("output")
+                response.unexpectedReadbackTools = response.questionReadback != null && !response.superseded &&
+                    output.any { it.path("type").asText() == "function_call" }
                 response.missingRequestedAudio = !response.expectsAudio && !response.superseded &&
-                    body.path("status").asText() == "completed" && output.isArray &&
-                    output.none { it.path("type").asText() == "function_call" } &&
-                    output.any { item -> item.path("type").asText() == "message" && item.path("content").any {
-                        it.path("type").asText() in setOf("text", "output_text") &&
-                            it.path("text").isTextual && it.path("text").asText().isNotBlank()
-                    } }
-                if (response.missingRequestedAudio) response.failed = true
+                    body.path("status").asText() == "completed" && (response.questionReadback != null ||
+                    (output.isArray && output.none { it.path("type").asText() == "function_call" } &&
+                        output.any { item -> item.path("type").asText() == "message" && item.path("content").any {
+                            it.path("type").asText() in setOf("text", "output_text") &&
+                                it.path("text").isTextual && it.path("text").asText().isNotBlank()
+                        } }))
+                if (response.missingRequestedAudio || response.unexpectedReadbackTools) response.failed = true
                 // A prepared confirmation is actionable output, never a noise-only turn.
                 // Retry an empty model response once through the existing response budget.
                 if (response.mutationConfirmation != null && !response.expectsAudio) response.failed = true
+                if (response.failed && !response.superseded) discardUnansweredFailedReadback(response)
                 if (response.expectsAudio && !response.superseded) announceResponse(response)
                 if (response.superseded && response.expectsAudio) clearInterruptedOutput(response)
                 finishResponseIfReady()
@@ -309,6 +315,7 @@ internal class VoiceTutorNativeConversationController(
             }
             "response.output_audio.delta", "response.output_audio.done" -> {
                 val response = matchingResponse(node) ?: return false
+                if (response.readbackClearStartedAt != null) return false
                 // Conservatively preserve output if a provider emits audio frames before its
                 // WebRTC playout-start event. Generated audio is already output evidence.
                 if (type == "response.output_audio.delta" && node.path("delta").asText().isNotEmpty()) {
@@ -316,6 +323,7 @@ internal class VoiceTutorNativeConversationController(
                     if (!response.superseded) armAnswerCapture(response) else clearInterruptedOutput(response)
                 }
                 if (response.superseded) return false
+                finishResponseIfReady()
             }
             "input_audio_buffer.cleared" -> {
                 val ackId = node.path("event_id").asText()
@@ -356,7 +364,7 @@ internal class VoiceTutorNativeConversationController(
                 if (seq > clientSpeechSequence && !draining && !quotaRequested && pendingUserInput == null && pause.acceptsSpeechEdges &&
                     (answerCapture == null || answerCapture?.phase == "listening")) {
                     invalidateQuestionReadback()
-                    if (answerCapture == null && sessionState.current.phase in setOf("graded", "question_reading", "question_loading", "question_failed", "grading_failed")) {
+                    if (answerCapture == null && sessionState.current.phase in setOf("graded", "question_ready", "question_reading", "question_loading", "question_failed", "grading_failed")) {
                         sessionState.update("conversation", revision, recordId = null, answerId = null)
                     }
                     clientSpeechSequence = seq
@@ -451,6 +459,24 @@ internal class VoiceTutorNativeConversationController(
                     }
                     return@let
                 }
+                val clearingSince = response.readbackClearStartedAt
+                if (clearingSince != null) {
+                    if (nanoTime() - clearingSince >= Duration.ofSeconds(5).toNanos()) {
+                        reportFailure(VoiceTutorProviderTurnFailureKind.RESPONSE_TIMEOUT,
+                            VoiceTutorProviderTurnFailureAction.SESSION_FATAL, response.createEventId)
+                        fail(VoiceTutorProviderResponseTimeoutException())
+                    }
+                    return@let
+                }
+                if (response.questionReadback != null && response.done && response.expectsAudio &&
+                    !response.audioStarted &&
+                    response.doneAt?.let { nanoTime() - it >= Duration.ofSeconds(5).toNanos() } == true) {
+                    response.failed = true
+                    response.missingRequestedAudio = true
+                    response.readbackClearStartedAt = nanoTime()
+                    clearInterruptedOutput(response)
+                    return@let
+                }
                 if (response.quota && !response.audioStarted && !response.done && !response.cancellationRequested &&
                     nanoTime() - response.startedAt >= Duration.ofSeconds(3).toNanos()
                 ) {
@@ -481,6 +507,7 @@ internal class VoiceTutorNativeConversationController(
         cancelLearningWatch()
         cancelAnswerCapture()
         invalidateQuestionReadback()
+        failedQuestionReadback = null
         queuedInput = false
         speaking = false
         // Prevent new input, but let the current spoken sentence complete before the terminal notice.
@@ -495,6 +522,7 @@ internal class VoiceTutorNativeConversationController(
         cancelLearningWatch()
         cancelAnswerCapture()
         invalidateQuestionReadback()
+        failedQuestionReadback = null
         queuedInput = false
         if (cancelActive) active?.id?.let { emit(mapOf("type" to "response.cancel", "response_id" to it)) }
     }
@@ -747,9 +775,21 @@ internal class VoiceTutorNativeConversationController(
             }
             val currentRevision = (result.lessonRevision ?: call?.revision ?: revision) >= revision
             val revisionChanged = result.lessonRevision?.let { it > revision } == true
+            // An informational refresh cannot repeat an already delivered question.
+            // Only our exact exhausted readback may acquire a new delivery attempt.
+            val recovery = result.questionReadbackRecovery?.takeIf { candidate ->
+                stateIsCurrent && call?.name in setOf("list_pending_questions", "get_question_process", "request_question") &&
+                    (result.lessonRevision ?: call?.revision) == revision && !result.lessonFocusCleared &&
+                    result.lessonFocus?.let { it.studyId == candidate.studyId } != false &&
+                    failedQuestionReadback?.let { it.revision == revision && it.value == candidate } == true
+            }
+            val questionReadback = result.questionReadback ?: recovery
+            if (currentRevision && (revisionChanged || result.lessonFocusCleared || result.lessonFocus?.let { focus ->
+                    failedQuestionReadback?.value?.studyId?.let { previous -> previous != focus.studyId }
+                } == true)) failedQuestionReadback = null
             if (currentRevision && (result.lessonRevision?.let { it > revision } == true ||
                 result.lessonFocus != null || result.lessonFocusCleared || result.questionChange != null ||
-                result.questionReadback != null)
+                questionReadback != null)
             ) invalidateQuestionReadback()
             if (currentRevision && (result.lessonRevision?.let { it > revision } == true ||
                 result.lessonFocus != null || result.lessonFocusCleared)) cancelAnswerCapture()
@@ -763,7 +803,7 @@ internal class VoiceTutorNativeConversationController(
             if (!studyFollowupSuperseded && currentRevision && call != null && (result.lessonRevision ?: call.revision) == revision &&
                 !closed && !draining && !quotaRequested && !endingAfterResponse) {
                 result.learningProgress?.let { applyLearningProgress(it, call.operationContext, allowConversation = stateIsCurrent) }
-                result.questionReadback?.takeIf { answerCapture == null && it.studyId > 0 &&
+                questionReadback?.takeIf { answerCapture == null && it.studyId > 0 &&
                     (sessionState.current.studyId == null || sessionState.current.studyId == it.studyId) &&
                     (sessionState.current.recordId == null || sessionState.current.recordId == it.recordId)
                 }?.let {
@@ -783,7 +823,7 @@ internal class VoiceTutorNativeConversationController(
             // This is typed server metadata, not a field in model-authored function output.
             // A slow tool may finish after newer speech; its saved result remains valid, but
             // that older learner turn no longer authorizes starting a question readback.
-            result.questionReadback?.takeIf {
+            questionReadback?.takeIf {
                 !studyFollowupSuperseded && currentRevision && call != null &&
                     call.boundary.latestAcceptedLearnerProviderItemId != null &&
                     call.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
@@ -811,7 +851,7 @@ internal class VoiceTutorNativeConversationController(
     }
 
     @Synchronized
-    fun requestSpokenEnd() { endingAfterResponse = true; sessionState.update("ending"); cancelLearningWatch(); invalidateQuestionReadback(); cancelAnswerCapture() }
+    fun requestSpokenEnd() { endingAfterResponse = true; sessionState.update("ending"); cancelLearningWatch(); invalidateQuestionReadback(); failedQuestionReadback = null; cancelAnswerCapture() }
 
     @Synchronized
     fun transcriptCompleted(itemId: String, successful: Boolean = true) {
@@ -847,6 +887,7 @@ internal class VoiceTutorNativeConversationController(
         sessionState.update(if (draining || endingAfterResponse || quotaRequested) "ended" else "failed")
         cancelUserInputForTermination()
         cancelLearningWatch()
+        failedQuestionReadback = null
         closed = true
         pause.close()
         toolCoordinator.close()
@@ -875,7 +916,7 @@ internal class VoiceTutorNativeConversationController(
         val response = Response(token, ++generation, revision, nanoTime(), quota, isOpening, boundary(learner),
             if (isOpening) 0L else learner?.clientSequence, readback, confirmation)
         active = response
-        readback?.let { sessionState.update("question_reading", revision, it.value.studyId, it.value.recordId, answerId = null) }
+        readback?.let { sessionState.update("question_ready", revision, it.value.studyId, it.value.recordId, answerId = null) }
         responseRequests.add(response.createEventId)
         trim(responseRequests, 1024)
         val instructions = when {
@@ -1004,6 +1045,11 @@ internal class VoiceTutorNativeConversationController(
     private fun finishResponseIfReady() {
         val response = active ?: return
         if (!response.done || (response.expectsAudio && !response.audioStopped)) return
+        if (response.readbackClearStartedAt != null && !response.outputCleared) return
+        // Declared audio and an early stop are not proof that the saved question
+        // played. The tick grants delayed audio a short grace before clearing it.
+        if (response.questionReadback != null && response.expectsAudio && !response.audioStarted &&
+            response.readbackClearStartedAt == null && !response.superseded) return
         if (response.superseded) {
             // A global clear must settle before another response may produce audio.
             if (response.outputClearRequested && !response.outputCleared) return
@@ -1054,11 +1100,14 @@ internal class VoiceTutorNativeConversationController(
         } else if (response.failed && answerCapture?.responseToken == response.token) {
             cancelAnswerCapture()
         }
-        val mayRetryMissingAudio = !response.missingRequestedAudio ||
+        val mayRetryRequiredOutput = (response.questionReadback == null && !response.missingRequestedAudio) ||
             (response.revision == revision && response.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
-                response.boundary.latestAcceptedLearnerSpeechStartedOrder == latestSpeechStartedOrder)
-        if (response.missingRequestedAudio) reportFailure(VoiceTutorProviderTurnFailureKind.RESPONSE_MISSING_AUDIO,
-            if (!draining && !quotaRequested && mayRetryMissingAudio && retryCount == 0)
+                response.boundary.latestAcceptedLearnerSpeechStartedOrder == latestSpeechStartedOrder &&
+                response.questionReadback?.let { it.revision == revision && it.epoch == questionReadbackEpoch } != false)
+        if (response.missingRequestedAudio || response.unexpectedReadbackTools) reportFailure(
+            if (response.unexpectedReadbackTools) VoiceTutorProviderTurnFailureKind.RESPONSE_UNEXPECTED_TOOL
+            else VoiceTutorProviderTurnFailureKind.RESPONSE_MISSING_AUDIO,
+            if (!draining && !quotaRequested && mayRetryRequiredOutput && retryCount == 0)
                 VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED else VoiceTutorProviderTurnFailureAction.TURN_ABANDONED,
             response.createEventId)
         active = null
@@ -1091,7 +1140,7 @@ internal class VoiceTutorNativeConversationController(
                     "type" to Contract.INPUT_SETTLED_EVENT, "sequence" to settled,
                 ))) }
             }
-        } else if (!draining && !quotaRequested && mayRetryMissingAudio && retryCount++ == 0) {
+        } else if (!draining && !quotaRequested && mayRetryRequiredOutput && retryCount++ == 0) {
             opening = response.opening && !response.audioStarted
             response.questionReadback?.takeIf { it.revision == revision && it.epoch == questionReadbackEpoch }
                 ?.let { pendingQuestionReadback = it }
@@ -1104,6 +1153,11 @@ internal class VoiceTutorNativeConversationController(
             publish(lifecycle, json(mapOf("type" to Contract.SPOKEN_LESSON_END_EVENT)))
             return
         } else {
+            response.questionReadback?.takeIf { mayRetryRequiredOutput && !draining && !quotaRequested }
+                ?.let {
+                    failedQuestionReadback = it
+                    sessionState.update("question_failed", revision, it.value.studyId, it.value.recordId, answerId = null)
+                }
             val retry = linkedMapOf<String, Any?>("type" to Contract.INPUT_RETRY_EVENT,
                 "abandonedResponseId" to response.id)
             // A failed tool-only response may never have been announced to the
@@ -1134,12 +1188,23 @@ internal class VoiceTutorNativeConversationController(
 
     private fun armAnswerCapture(response: Response) {
         val readback = response.questionReadback ?: return
-        if (answerCapture != null || response.superseded || draining || quotaRequested || endingAfterResponse ||
+        if (answerCapture != null || response.failed || response.superseded || draining || quotaRequested || endingAfterResponse ||
             readback.revision != revision) return
         val floor = response.tutors.values.minOfOrNull { it.sequence } ?: sequence
         cancelLearningWatch(clearCompletion = true)
+        failedQuestionReadback = null
+        sessionState.update("question_reading", revision, readback.value.studyId, readback.value.recordId, answerId = null)
         answerCapture = AnswerCapture(UUID.randomUUID().toString(), readback.value, revision, response.token, floor)
         inputs.values.filter { it.sequence > floor }.forEach(::captureInput)
+    }
+
+    private fun discardUnansweredFailedReadback(response: Response) {
+        if (response.questionReadback == null) return
+        val capture = answerCapture?.takeIf { it.responseToken == response.token } ?: return
+        // Audio may start before its response fails validation. Release that
+        // provisional capture before newer speech arrives, but preserve drafts.
+        if (capture.inputIds.isEmpty() && capture.text.isBlank() && pendingSpeech?.answerId != capture.id &&
+            commits.none { it.answerId == capture.id }) cancelAnswerCapture()
     }
 
     private fun captureInput(input: Input) {
@@ -1544,8 +1609,11 @@ internal class VoiceTutorNativeConversationController(
         var announced = false
         var body: JsonNode? = null
         var done = false
+        var doneAt: Long? = null
         var failed = false
         var missingRequestedAudio = false
+        var unexpectedReadbackTools = false
+        var readbackClearStartedAt: Long? = null
         var audioStarted = false
         var audioStopped = false
         var expectsAudio = false
