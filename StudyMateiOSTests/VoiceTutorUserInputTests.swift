@@ -289,14 +289,32 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
         try await harness.settle()
         XCTAssertEqual(harness.probe.state.pending?.answers.first?.selectedOptionIds, ["concept", "example"])
 
-        let editor = try XCTUnwrap(harness.editor())
+        XCTAssertNil(harness.editor(), "The compact card must not mount a second scrolling text editor")
+        let custom = try XCTUnwrap(harness.button(label: AppStrings(language: .korean).voiceTutorInputCustom),
+                                   harness.accessibilityDescription())
+        XCTAssertTrue(custom.accessibilityActivate())
+        let editor = try await harness.presentedEditor()
+        XCTAssertNotNil(harness.window.rootViewController?.presentedViewController,
+                        "Direct input must open its independent editing sheet")
         XCTAssertTrue(editor.becomeFirstResponder())
-        editor.insertText("직접 입력한 설명\n한글과 줄바꿈을 유지합니다.")
+        let draft = "직접 입력한 설명\n한글과 줄바꿈을 유지합니다."
+        editor.insertText(draft)
         try await harness.settle()
         XCTAssertEqual(harness.probe.state.pending?.answers.first?.text, editor.text)
-        XCTAssertEqual(editor.text, "직접 입력한 설명\n한글과 줄바꿈을 유지합니다.")
-        harness.window.endEditing(true)
+        XCTAssertEqual(editor.text, draft)
+        attach(harness, name: "voice-input-independent-editor")
+        let done = try XCTUnwrap(harness.button(label: AppStrings(language: .korean).done), harness.accessibilityDescription())
+        XCTAssertTrue(done.accessibilityActivate())
+        try await harness.waitForEditorDismissal()
+        XCTAssertTrue(harness.probe.controls.isEmpty, "Done saves the draft without submitting the request")
+        XCTAssertEqual(harness.button(label: AppStrings(language: .korean).voiceTutorInputCustom)?.accessibilityValue, draft)
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: "실제 예시")).accessibilityActivate())
         try await harness.settle()
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: "연습 문제")).accessibilityActivate())
+        try await harness.settle()
+        XCTAssertEqual(harness.probe.state.pending?.answers.first?.text, draft,
+                       "Choosing another option after closing the editor must preserve custom text")
+        XCTAssertEqual(harness.probe.state.pending?.answers.first?.selectedOptionIds, ["concept", "practice"])
         attach(harness, name: "voice-input-selected-and-free-text")
 
         let submit = try XCTUnwrap(harness.button(label: "제출하고 계속"))
@@ -306,8 +324,17 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
         XCTAssertEqual(harness.probe.controls.count, 1)
         XCTAssertTrue(harness.probe.state.holdsMicrophone)
         XCTAssertEqual(harness.probe.state.pending?.status, .submitting)
-        XCTAssertEqual(harness.probe.controls.first?.answers?.first?.text, editor.text)
+        XCTAssertEqual(harness.probe.controls.first?.answers?.first?.text, draft)
         attach(harness, name: "voice-input-awaiting-submit-ack")
+        XCTAssertTrue(harness.probe.state.apply(UserInputFixture.event(for: harness.probe.request, sequence: 2, phase: .submitted)))
+        try await harness.settle()
+        XCTAssertFalse(harness.probe.state.holdsMicrophone)
+        XCTAssertNil(harness.button(label: AppStrings(language: .korean).voiceTutorInputCustom))
+        XCTAssertNil(harness.button(label: "제출하고 계속"))
+        XCTAssertTrue(harness.hasAccessibilityLabel("개념 정리 · 연습 문제"), harness.accessibilityDescription())
+        XCTAssertFalse(harness.hasAccessibilityLabel("실제 예시"), "Completed cards omit unselected choices")
+        XCTAssertTrue(harness.hasAccessibilityLabel(draft), "The compact completed card retains custom text")
+        attach(harness, name: "voice-input-compact-completed-card")
     }
 
     func testNativeCardLargeTextShowsSelectedOptionsAndPreservesInvalidAnswerDraft() async throws {
@@ -320,12 +347,38 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
         _ = harness.probe.state.submit(requestID: request.id, cancel: false)
         XCTAssertTrue(harness.probe.state.apply(UserInputFixture.event(for: request, sequence: 2, phase: .pending, errorCode: "INVALID_ANSWERS")))
         try await harness.settle()
-        XCTAssertEqual(harness.editor()?.text, answer.text)
+        XCTAssertNil(harness.editor())
+        let custom = try XCTUnwrap(harness.button(label: AppStrings(language: .korean).voiceTutorInputCustom),
+                                   harness.accessibilityDescription())
+        XCTAssertEqual(custom.accessibilityValue, answer.text)
         XCTAssertTrue(try XCTUnwrap(harness.button(label: "연습 문제"), harness.accessibilityDescription()).accessibilityTraits.contains(.selected))
         XCTAssertFalse(try XCTUnwrap(harness.button(label: "실제 예시"), harness.accessibilityDescription()).accessibilityTraits.contains(.selected))
         XCTAssertTrue(harness.probe.state.holdsMicrophone)
         XCTAssertEqual(harness.probe.state.pending?.answers, [answer])
         attach(harness, name: "voice-input-large-text-invalid-answer-preserved")
+        XCTAssertTrue(custom.accessibilityActivate())
+        let editor = try await harness.presentedEditor()
+        XCTAssertEqual(editor.text, answer.text)
+        let done = try XCTUnwrap(harness.button(label: AppStrings(language: .korean).done))
+        XCTAssertTrue(done.accessibilityActivate())
+        try await harness.waitForEditorDismissal()
+        XCTAssertEqual(harness.probe.state.pending?.answers, [answer])
+        XCTAssertTrue(harness.probe.controls.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: AppStrings(language: .korean).cancel)).accessibilityActivate())
+        try await harness.settle()
+        XCTAssertEqual(harness.probe.controls.count, 1)
+        XCTAssertNil(harness.probe.controls.first?.answers)
+        XCTAssertTrue(harness.probe.state.holdsMicrophone)
+        XCTAssertTrue(harness.probe.state.apply(UserInputFixture.event(for: request, sequence: 3, phase: .cancelled)))
+        try await harness.settle()
+        XCTAssertFalse(harness.probe.state.holdsMicrophone)
+        XCTAssertEqual(harness.probe.state.entries.last?.answers, [answer])
+        XCTAssertNil(harness.button(label: AppStrings(language: .korean).voiceTutorInputCustom))
+        XCTAssertNil(harness.button(label: "제출하고 계속"))
+        XCTAssertTrue(harness.hasAccessibilityLabel("개념 정리 · 연습 문제"), harness.accessibilityDescription())
+        XCTAssertFalse(harness.hasAccessibilityLabel("실제 예시"))
+        XCTAssertTrue(harness.hasAccessibilityLabel(answer.text))
+        attach(harness, name: "voice-input-large-text-compact-cancelled-card")
     }
 
     /// Runs on simulator AND iPhone. It uses UIKit's real text-input path and
@@ -335,7 +388,10 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
             let harness = try UserInputCardHarness(dynamicType: size)
             defer { harness.close() }
             try await harness.settle()
-            let editor = try XCTUnwrap(harness.editor())
+            XCTAssertNil(harness.editor(), "The card uses a compact edit button, not an embedded textarea")
+            attach(harness, name: "voice-input-native-compact-card-\(size)")
+            harness.probe.presentsStandaloneEditor = true
+            let editor = try await harness.presentedEditor()
             XCTAssertTrue(editor.isEditable)
             XCTAssertTrue(editor.becomeFirstResponder())
             let draft = "  직접 작성한 한글 초안\n둘째 줄도 그대로 유지합니다. 👩‍💻  "
@@ -343,15 +399,25 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
             try await harness.settle()
             XCTAssertEqual(editor.text, draft)
             XCTAssertEqual(harness.probe.state.pending?.answers.first?.text, draft)
+            XCTAssertTrue(editor.isScrollEnabled)
+            let secondLine = try XCTUnwrap(editor.position(from: editor.beginningOfDocument, in: .down, offset: 1))
+            XCTAssertGreaterThan(editor.offset(from: editor.beginningOfDocument, to: secondLine), 0,
+                                 "The native editor must support cursor movement between rendered lines")
 
             let request = harness.probe.request
             var answer = try XCTUnwrap(harness.probe.state.pending?.answers.first)
             answer.selectedOptionIds = ["concept", "practice"]
+            let selection = NSRange(location: 2, length: 2)
+            editor.selectedRange = selection
             harness.probe.state.update(requestID: request.id, answer: answer)
             try await harness.settle()
+            XCTAssertTrue(harness.editor() === editor, "Option updates must keep the native editor instance")
             XCTAssertEqual(harness.editor()?.text, draft, "Parent selection updates must preserve the actual editor's draft")
+            XCTAssertEqual(editor.selectedRange, selection)
             harness.window.endEditing(true)
+            harness.probe.presentsStandaloneEditor = false
             try await harness.settle()
+            XCTAssertNil(harness.editor())
             attach(harness, name: "voice-input-native-draft-\(size)")
 
             harness.probe.send(cancel: false)
@@ -374,17 +440,19 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
             XCTAssertEqual(harness.probe.controls.first?.answers, [answer])
             XCTAssertEqual(harness.probe.state.pending?.status, .submitting)
             XCTAssertTrue(harness.probe.state.holdsMicrophone)
-            XCTAssertEqual(harness.editor()?.text, draft)
+            XCTAssertNil(harness.editor())
 
             XCTAssertTrue(harness.probe.state.apply(UserInputFixture.event(for: request, sequence: 2,
                 phase: .pending, errorCode: "INVALID_ANSWERS")))
             try await harness.settle()
-            XCTAssertTrue(try XCTUnwrap(harness.editor()).isEditable)
-            XCTAssertEqual(harness.editor()?.text, draft)
+            XCTAssertNil(harness.editor(), "A retry must preserve the compact card until the learner opens the editor")
             XCTAssertEqual(harness.probe.state.pending?.answers, [answer])
             XCTAssertTrue(harness.probe.state.holdsMicrophone)
 
-            let retryEditor = try XCTUnwrap(harness.editor())
+            harness.probe.presentsStandaloneEditor = true
+            let retryEditor = try await harness.presentedEditor()
+            XCTAssertTrue(retryEditor.isEditable)
+            XCTAssertEqual(retryEditor.text, draft)
             XCTAssertTrue(retryEditor.becomeFirstResponder())
             retryEditor.selectedRange = NSRange(location: draft.utf16.count, length: 0)
             retryEditor.insertText("\n재시도하며 수정했어요.")
@@ -397,9 +465,63 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
             XCTAssertEqual(harness.probe.controls.count, 1)
             XCTAssertTrue(harness.probe.state.holdsMicrophone)
             harness.window.endEditing(true)
+            harness.probe.presentsStandaloneEditor = false
             try await harness.settle()
+            XCTAssertNil(harness.editor())
             attach(harness, name: "voice-input-native-retry-draft-\(size)")
+            harness.probe.send(cancel: false)
+            XCTAssertTrue(harness.probe.state.apply(UserInputFixture.event(for: request, sequence: 3, phase: .submitted)))
+            try await harness.settle()
+            XCTAssertEqual(harness.probe.controls.count, 2)
+            XCTAssertEqual(harness.probe.controls.last?.answers, [revisedAnswer])
+            XCTAssertFalse(harness.probe.state.holdsMicrophone)
+            XCTAssertEqual(harness.probe.state.entries.last?.answers, [revisedAnswer])
+            XCTAssertNil(harness.editor())
+            attach(harness, name: "voice-input-native-completed-card-\(size)")
         }
+        // Additional visual coverage shares the same production card and has
+        // no separate interaction harness or network dependencies.
+        let narrow = try UserInputCardHarness(appearance: .light, width: 375)
+        defer { narrow.close() }
+        try await narrow.settle()
+        XCTAssertNil(narrow.editor())
+        attach(narrow, name: "voice-input-light-375-empty-card")
+        let answer = VoiceTutorUserInputAnswer(questionId: "style", selectedOptionIds: ["concept", "practice"],
+            text: "실제 프로젝트에서 쓰는 방식이 궁금해요.\n코드 예시도 함께 설명해 주세요.")
+        narrow.probe.state.update(requestID: narrow.probe.request.id, answer: answer)
+        try await narrow.settle()
+        attach(narrow, name: "voice-input-light-375-selected-draft-card")
+    }
+
+    func testNativeInputEditorPreservesKoreanCompositionAcrossParentUpdates() async throws {
+        let harness = try UserInputCardHarness()
+        defer { harness.close() }
+        var answer = try XCTUnwrap(harness.probe.state.pending?.answers.first)
+        answer.text = "직접 입력: "
+        harness.probe.state.update(requestID: harness.probe.request.id, answer: answer)
+        harness.probe.presentsStandaloneEditor = true
+        let editor = try await harness.presentedEditor()
+        XCTAssertTrue(editor.becomeFirstResponder())
+        editor.selectedRange = NSRange(location: answer.text.utf16.count, length: 0)
+        editor.setMarkedText("ㅎ", selectedRange: NSRange(location: 1, length: 0))
+        editor.setMarkedText("한", selectedRange: NSRange(location: 1, length: 0))
+        let selection = editor.selectedRange
+        XCTAssertEqual(editor.text(in: try XCTUnwrap(editor.markedTextRange)), "한")
+        harness.probe.parentRevision += 1
+        try await harness.settle()
+        XCTAssertTrue(harness.editor() === editor)
+        XCTAssertEqual(editor.text(in: try XCTUnwrap(editor.markedTextRange)), "한",
+                       "A parent refresh must neither commit nor discard unfinished Korean composition")
+        XCTAssertEqual(editor.selectedRange, selection)
+        editor.unmarkText()
+        editor.insertText("글\n둘째 줄")
+        try await harness.settle()
+        let expected = "직접 입력: 한글\n둘째 줄"
+        XCTAssertNil(editor.markedTextRange)
+        XCTAssertEqual(editor.text, expected)
+        XCTAssertEqual(harness.probe.state.pending?.answers.first?.text, expected)
+        XCTAssertTrue(harness.probe.controls.isEmpty)
+        attach(harness, name: "voice-input-native-korean-composition")
     }
 
     /// Opt in for real touch/typing verification; this does not synthesize
@@ -412,7 +534,7 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
         defer { harness.close() }
         try await harness.settle()
         attach(harness, name: "voice-input-real-touch-ready")
-        print("VOICE_USER_INPUT_INTERACTION_READY: Tap 개념 정리 and 연습 문제; enter 실기기 입력, newline, 줄바꿈 확인; tap 제출하고 계속 within 60 seconds.")
+        print("VOICE_USER_INPUT_INTERACTION_READY: Tap 개념 정리 and 연습 문제, then 직접 입력; enter 실기기 입력, newline, 줄바꿈 확인; tap 완료, then 제출 within 60 seconds.")
         let deadline = ProcessInfo.processInfo.systemUptime + 60
         while harness.probe.controls.isEmpty, ProcessInfo.processInfo.systemUptime < deadline {
             try await Task.sleep(for: .milliseconds(100))
@@ -460,6 +582,8 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
 @MainActor
 private final class UserInputCardProbe: ObservableObject {
     @Published var state = VoiceTutorUserInputState()
+    @Published var presentsStandaloneEditor = false
+    @Published var parentRevision = 0
     let request: VoiceTutorUserInputRequest
     private(set) var controls: [VoiceTutorUserInputControl] = []
 
@@ -471,6 +595,19 @@ private final class UserInputCardProbe: ObservableObject {
     func send(cancel: Bool) {
         if let control = state.submit(requestID: request.id, cancel: cancel) { controls.append(control) }
     }
+
+    func editorText(questionID: String) -> Binding<String> {
+        Binding(get: {
+            self.state.entries.first(where: { $0.id == self.request.id })?.answers
+                .first(where: { $0.questionId == questionID })?.text ?? ""
+        }, set: { text in
+            guard let entry = self.state.pending, entry.id == self.request.id,
+                  entry.status == .pending,
+                  var answer = entry.answers.first(where: { $0.questionId == questionID }) else { return }
+            answer.text = text
+            self.state.update(requestID: entry.id, answer: answer)
+        })
+    }
 }
 
 private struct UserInputCardTestParent: View {
@@ -478,12 +615,24 @@ private struct UserInputCardTestParent: View {
     let dynamicType: DynamicTypeSize
 
     var body: some View {
-        ScrollView {
-            if let entry = probe.state.entries.first {
-                VoiceTutorUserInputCard(entry: entry, strings: AppStrings(language: .korean),
-                    onChange: { probe.state.update(requestID: entry.id, answer: $0) },
-                    onSubmit: { probe.send(cancel: false) }, onCancel: { probe.send(cancel: true) })
-                    .padding(16)
+        let _ = probe.parentRevision
+        Group {
+            if probe.presentsStandaloneEditor, let entry = probe.state.entries.first,
+               let question = entry.request.questions.first {
+                // Physical hosted tests cannot activate SwiftUI's AX nodes.
+                // Host the same production editor directly; simulator tests
+                // above also verify the real card-to-sheet button route.
+                VoiceTutorUserInputEditor(strings: AppStrings(language: .korean), question: question,
+                    text: probe.editorText(questionID: question.id), isEditable: entry.status == .pending)
+            } else {
+                ScrollView {
+                    if let entry = probe.state.entries.first {
+                        VoiceTutorUserInputCard(entry: entry, strings: AppStrings(language: .korean),
+                            onChange: { probe.state.update(requestID: entry.id, answer: $0) },
+                            onSubmit: { probe.send(cancel: false) }, onCancel: { probe.send(cancel: true) })
+                            .padding(16)
+                    }
+                }
             }
         }
         .dynamicTypeSize(dynamicType)
@@ -497,13 +646,14 @@ private final class UserInputCardHarness {
     let window: UIWindow
     private let previousKeyWindow: UIWindow?
 
-    init(dynamicType: DynamicTypeSize = .large) throws {
+    init(dynamicType: DynamicTypeSize = .large, appearance: UIUserInterfaceStyle = .dark, width: CGFloat? = nil) throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try XCTUnwrap(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
         previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
         window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
-        window.overrideUserInterfaceStyle = .dark
+        if let width { window.frame.size.width = min(width, scene.screen.bounds.width) }
+        window.overrideUserInterfaceStyle = appearance
         window.rootViewController = UIHostingController(rootView: UserInputCardTestParent(probe: probe, dynamicType: dynamicType))
         window.makeKeyAndVisible()
         layout()
@@ -513,6 +663,27 @@ private final class UserInputCardHarness {
         await Task.yield()
         try await Task.sleep(for: .milliseconds(180))
         layout()
+    }
+
+    func presentedEditor() async throws -> UITextView {
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            try await settle()
+            if let editor = editor(), editor.window != nil, editor.bounds.height > 0 {
+                return editor
+            }
+        }
+        return try XCTUnwrap(editor(), "The production input editor must become visible")
+    }
+
+    func waitForEditorDismissal() async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        while window.rootViewController?.presentedViewController != nil,
+              ProcessInfo.processInfo.systemUptime < deadline {
+            try await settle()
+        }
+        XCTAssertNil(window.rootViewController?.presentedViewController, "Done must dismiss the editing sheet")
+        XCTAssertNil(editor(), "Dismissal must return to the compact card")
     }
 
     func layout() {
@@ -532,8 +703,12 @@ private final class UserInputCardHarness {
 
     func accessibilityDescription() -> String {
         accessibilityObjects().map {
-            "\(type(of: $0)) traits=\($0.accessibilityTraits.rawValue) label=\($0.accessibilityLabel ?? "nil")"
+            "\(type(of: $0)) element=\($0.isAccessibilityElement) traits=\($0.accessibilityTraits.rawValue) frame=\($0.accessibilityFrame) label=\($0.accessibilityLabel ?? "nil") value=\($0.accessibilityValue ?? "nil")"
         }.joined(separator: "\n")
+    }
+
+    func hasAccessibilityLabel(_ label: String) -> Bool {
+        accessibilityObjects().contains { $0.accessibilityLabel == label }
     }
 
     private func accessibilityObjects() -> [NSObject] {

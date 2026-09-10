@@ -100,8 +100,14 @@ Already clear learner requests need no redundant form. The request pauses conver
 selection changes do not submit automatically. Explicit Submit or Cancel waits
 for the server acknowledgment before resuming, respecting any existing pause.
 Recoverable validation or application errors retain the editable selection and
-text. An expired proposal or changed parent closes that request so the tutor can
-offer a fresh choice.
+text. Options share one compact list with clear single/multiple selection
+indicators and restrained conversation accent color. Custom input opens a
+separate native multiline editor so keyboard, caret and selection gestures do
+not compete with the transcript. Done saves the draft without submitting;
+the card shows a short preview. Submitted or cancelled requests retain their
+status and entered answers in a compact read-only summary instead of keeping
+all unselected options on screen. An expired proposal or changed parent closes
+that request so the tutor can offer a fresh choice.
 Submitted selections and custom text are recorded as app input, separately from
 spoken answers. Successive choices can change the learning direction without
 requiring an extra spoken reply; preference selections must not be graded as
