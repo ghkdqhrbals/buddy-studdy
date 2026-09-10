@@ -108,6 +108,30 @@ extension AppStrings {
     var voiceTutorCallThinking: String {
         voiceTutorPauseText("응답 준비 중", "Preparing a reply", "返答を準備中")
     }
+    var voiceTutorQuestionLoading: String {
+        voiceTutorPauseText("질문 불러오는 중", "Loading a question", "問題を読み込み中")
+    }
+    var voiceTutorQuestionGenerating: String {
+        voiceTutorPauseText("질문 만드는 중", "Creating a question", "問題を作成中")
+    }
+    var voiceTutorQuestionReady: String {
+        voiceTutorPauseText("질문 준비 완료", "Question ready", "問題の準備完了")
+    }
+    var voiceTutorQuestionReading: String {
+        voiceTutorPauseText("질문 읽는 중", "Reading the question", "問題を読み上げ中")
+    }
+    var voiceTutorAnswerGrading: String {
+        voiceTutorPauseText("채점 중", "Grading your answer", "採点中")
+    }
+    var voiceTutorAnswerGraded: String {
+        voiceTutorPauseText("채점 완료", "Answer graded", "採点完了")
+    }
+    var voiceTutorQuestionFailed: String {
+        voiceTutorPauseText("질문을 준비하지 못했어요", "Couldn't prepare the question", "問題を準備できませんでした")
+    }
+    var voiceTutorGradingFailed: String {
+        voiceTutorPauseText("채점하지 못했어요", "Couldn't grade the answer", "採点できませんでした")
+    }
     var voiceTutorCallSessionLabel: String {
         voiceTutorPauseText("음성 수업", "VOICE LESSON", "音声レッスン")
     }

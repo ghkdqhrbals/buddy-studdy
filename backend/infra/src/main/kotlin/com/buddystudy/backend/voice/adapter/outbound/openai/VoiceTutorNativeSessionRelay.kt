@@ -37,7 +37,7 @@ internal fun relayVoiceTutorNativeSession(
 ): Mono<Void> {
     val diagnostics = VoiceTutorSidebandDiagnostics(context.callId)
     val controller = VoiceTutorNativeConversationController(responseTimeout, context.initialLessonRevision, context.session.language,
-        onProviderTurnFailure = diagnostics::observeProviderTurnFailure)
+        onProviderTurnFailure = diagnostics::observeProviderTurnFailure, initialStudyId = context.session.studyId)
     val handshake = VoiceTutorWebRtcSessionHandshake(
         context.callId, connectTimeout,
         expectedTools = voiceTutorRealtimeFunctionTools(nativeVoiceTutorDefinitions(mcp)),
@@ -106,6 +106,7 @@ internal fun relayVoiceTutorNativeSession(
         }.then()
     }.takeUntilOther(release).then()
     val tools = nativeVoiceTutorToolRelay(controller, context, mcp).takeUntilOther(release)
+    val learningPolls = nativeVoiceTutorLearningProgressRelay(controller, context, mcp).takeUntilOther(release)
     val clientOutput = controller.clientEvents().concatMap { raw -> mono { onProviderEvent(raw, false, true) }.then() }
         .takeUntilOther(release).then()
     val lifecycle = controller.lifecycleEvents().concatMap { raw -> mono {
@@ -128,7 +129,7 @@ internal fun relayVoiceTutorNativeSession(
         receive, release, controller.failure(),
         // A completed control source must not cancel an in-flight transcript/tool write.
         clientControls.then(Mono.never<Void>()), clock.then(Mono.never<Void>()),
-        persistence.then(Mono.never<Void>()), tools.then(Mono.never<Void>()),
+        persistence.then(Mono.never<Void>()), tools.then(Mono.never<Void>()), learningPolls.then(Mono.never<Void>()),
         clientOutput.then(Mono.never<Void>()), lifecycle.then(Mono.never<Void>()),
     ).doFinally { controller.close() }
     return Mono.`when`(send, ready, work).onErrorMap { error ->
@@ -194,6 +195,41 @@ internal fun nativeVoiceTutorToolRelay(
         } catch (error: CancellationException) { throw error }
         catch (_: Exception) { nativeToolError("TOOL_UNAVAILABLE", "Could not confirm the result. Explain briefly without claiming success or asking for magic wording.") }
         controller.completeTool(call.callId, result)
+    }.then()
+}.then()
+
+/** Bounded, read-only observation continues even when the model does not request another poll. */
+internal fun nativeVoiceTutorLearningProgressRelay(
+    controller: VoiceTutorNativeConversationController,
+    context: VoiceTutorWebRtcControlContext,
+    mcp: VoiceTutorMcpToolPort,
+    timeoutMillis: Long = Duration.between(Instant.now(), context.session.hardEndsAt).toMillis().coerceIn(1, 3_600_000),
+    intervalMillis: Long = 3_000,
+): Mono<Void> = controller.learningPollEvents().switchMap { command ->
+    val watch = command.watch ?: return@switchMap Mono.empty<Void>()
+    mono {
+        try {
+            withTimeout(timeoutMillis) {
+                while (controller.learningWatchIsCurrent(watch)) {
+                    val result = try {
+                        withTimeout(10_000) {
+                            mcp.pollLearningProgress(context.copy(realtimeModelTools = true,
+                                initialLessonRevision = watch.revision), watch.progress)
+                        }
+                    } catch (_: TimeoutCancellationException) { null }
+                    catch (error: CancellationException) { throw error }
+                    catch (_: Exception) { null }
+                    if (result != null) {
+                        if (result.isError && JsonMapperProvider.mapper.readTree(result.output).path("error").path("code").asText() == "QUESTION_CONTEXT_UNAVAILABLE") {
+                            controller.cancelLearningPoll(watch)
+                        } else controller.completeLearningPoll(watch, result)
+                    }
+                    if (controller.learningWatchIsCurrent(watch)) delay(intervalMillis)
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            controller.cancelLearningPoll(watch)
+        }
     }.then()
 }.then()
 

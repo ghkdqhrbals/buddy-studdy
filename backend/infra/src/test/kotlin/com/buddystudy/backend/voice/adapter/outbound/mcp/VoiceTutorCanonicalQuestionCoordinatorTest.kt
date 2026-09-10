@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.outbound.mcp
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.voice.application.model.VoiceTutorDialogueBoundary
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
@@ -22,6 +23,70 @@ import java.time.Instant
 import java.time.ZoneOffset
 
 class VoiceTutorCanonicalQuestionCoordinatorTest {
+    @Test
+    fun `background generation observation waits for its exact process and never consumes the later spoken readback`(): Unit = runBlocking {
+        val fixture = Fixture().apply { records = emptyList(); generationReady = false }
+        val requested = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY))
+        val progress = requested.learningProgress!!
+        assertThat(progress.phase).isEqualTo(VoiceTutorLearningPhase.QUESTION_GENERATING)
+        val waiting = fixture.coordinator.pollLearningProgress(fixture.context(), progress)
+        assertThat(waiting.learningProgress).isEqualTo(progress)
+        fixture.generationReady = true
+        val ready = fixture.coordinator.pollLearningProgress(fixture.context(), progress)
+        assertThat(ready.learningProgress?.phase).isEqualTo(VoiceTutorLearningPhase.QUESTION_READY)
+        assertThat(ready.questionChange?.recordId).isEqualTo("201")
+        assertThat(ready.questionReadback).isNull()
+        assertThat(ready.output).isEqualTo("{}")
+        val spoken = fixture.coordinator.execute(fixture.context(), "get_question_process", mapOf("correlation_id" to progress.correlationId!!))
+        assertThat(spoken.questionReadback?.recordId).isEqualTo("201")
+        assertThat(fixture.calls.count { it.name == "request_question" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `background grading reads the submitted record without any model poll or microphone turn`(): Unit = runBlocking {
+        for (failed in listOf(false, true)) {
+            val fixture = Fixture()
+            fixture.coordinator.selected(fixture.context())
+            val submitted = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
+            val progress = submitted.learningProgress!!
+            assertThat(progress.phase).isEqualTo(VoiceTutorLearningPhase.GRADING)
+            assertThat(fixture.coordinator.pollLearningProgress(fixture.context(), progress).learningProgress?.phase).isEqualTo(VoiceTutorLearningPhase.GRADING)
+            fixture.gradeReady = true; fixture.gradingFails = failed; fixture.learner = 99
+            val completed = fixture.coordinator.pollLearningProgress(fixture.context(), progress)
+            assertThat(completed.learningProgress?.phase).isEqualTo(if (failed) VoiceTutorLearningPhase.GRADING_FAILED else VoiceTutorLearningPhase.GRADED)
+            assertThat(completed.questionChange?.recordId).isEqualTo("101")
+            assertThat(completed.questionReadback).isNull()
+            assertThat(completed.output).isEqualTo("{}")
+            assertThat(fixture.calls.none { it.name == "get_grading_process" }).isTrue()
+        }
+    }
+
+    @Test
+    fun `background observations reject mismatched process record revoked ownership and post read focus changes`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        val progress = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed()).learningProgress!!
+        for (forged in listOf(progress.copy(recordId = "999"), progress.copy(correlationId = "another-grade"), progress.copy(studyId = STUDY + 1))) {
+            val reads = fixture.calls.size
+            assertThat(fixture.coordinator.pollLearningProgress(fixture.context(), forged).isError).isTrue()
+            assertThat(fixture.calls).hasSize(reads)
+        }
+        fixture.isAuthorized = false
+        assertThat(fixture.coordinator.pollLearningProgress(fixture.context(), progress).learningProgress).isNull()
+        fixture.isAuthorized = true
+        fixture.afterInvoke = { if (it == "get_record") fixture.focus = (STUDY + 1) to REVISION }
+        assertThat(fixture.coordinator.pollLearningProgress(fixture.context(), progress).learningProgress).isNull()
+    }
+
+    @Test
+    fun `a canonical failed generation retains its process identity after clearing the pending request`(): Unit = runBlocking {
+        val fixture = Fixture().apply { records = emptyList(); generationRecord = null }
+        val pending = fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY)).learningProgress!!
+        val failed = fixture.coordinator.execute(fixture.context(), "get_question_process", mapOf("correlation_id" to pending.correlationId!!))
+        assertThat(failed.learningProgress?.phase).isEqualTo(VoiceTutorLearningPhase.QUESTION_FAILED)
+        assertThat(failed.learningProgress?.correlationId).isEqualTo(pending.correlationId)
+    }
+
     @Test
     fun `selection reuses the oldest saved pending question at its original level without revealing hints`(): Unit = runBlocking {
         val fixture = Fixture()
@@ -604,7 +669,9 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
         )
         private var generationCount = 0
         private var savedAnswer: String? = null
-        private var gradeReady = false
+        var gradeReady = false
+        var gradingFails = false
+        var generationReady = true
         private val persistence = Proxy.newProxyInstance(
             VoiceTutorPersistencePort::class.java.classLoader,
             arrayOf(VoiceTutorPersistencePort::class.java),
@@ -642,7 +709,7 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
                         else success(mapOf("records" to records.drop(offset).take(limit), "totalCount" to (totalCount ?: records.size)))
                     }
                     "request_question" -> success(mapOf("topicId" to STUDY, "correlationId" to "generation-${++generationCount}"))
-                    "get_question_process" -> success(mapOf("correlationId" to (processCorrelationOverride ?: args["correlation_id"]), "terminal" to true, "question" to generationRecord))
+                    "get_question_process" -> success(mapOf("correlationId" to (processCorrelationOverride ?: args["correlation_id"]), "terminal" to generationReady, "question" to if (generationReady) generationRecord else null))
                     "skip_question" -> success(record((args.getValue("record_id") as Number).toLong(), status = "SKIPPED"))
                     "submit_answer" -> {
                         events += "submit_answer"
@@ -659,9 +726,9 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
                             "gradingResult" to mapOf("score" to 17, "feedback" to "Wrong poll feedback")))
                     }
                     "get_record" -> success(record((args.getValue("record_id") as Number).toLong(),
-                        status = if (savedAnswer == null) "UNGRADED" else if (gradeReady) "GRADED" else "GRADING", answer = savedAnswer,
+                        status = if (savedAnswer == null) "UNGRADED" else if (gradeReady && gradingFails) "FAILED" else if (gradeReady) "GRADED" else "GRADING", answer = savedAnswer,
                         gradingId = if (savedAnswer != null) "grade-1" else null,
-                        grade = if (gradeReady) mapOf("score" to 91, "feedback" to "Canonical feedback") else null))
+                        grade = if (gradeReady && !gradingFails) mapOf("score" to 91, "feedback" to "Canonical feedback") else null))
                     else -> error("Unexpected canonical call $name")
                 }
                 afterInvoke(name)

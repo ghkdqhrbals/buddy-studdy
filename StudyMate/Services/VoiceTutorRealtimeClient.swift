@@ -143,6 +143,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case questionChanged(VoiceTutorQuestionChange)
     case answerState(VoiceTutorAnswerStateEvent)
     case answerTranscript(VoiceTutorAnswerTranscriptEvent)
+    case sessionState(VoiceTutorSessionStateEvent)
     case responseStarted(
         responseID: String?,
         isTutorIntervention: Bool,
@@ -180,6 +181,22 @@ enum VoiceTutorRealtimeEventParser {
         }
 
         switch type {
+        case "buddystudy.voice.session.state":
+            let required: Set<String> = ["type", "sequence", "phase", "paused", "revision"]
+            guard required.isSubset(of: Set(object.keys)),
+                  Set(object.keys).isSubset(of: required.union(["studyId", "recordId", "answerId"])),
+                  let sequence = exactInteger("sequence", in: object),
+                  let rawPhase = string("phase", in: object),
+                  let phase = VoiceTutorSessionStateEvent.Phase(rawValue: rawPhase),
+                  let paused = exactBoolean("paused", in: object),
+                  let revision = exactInteger("revision", in: object),
+                  object["studyId"] == nil || exactInteger("studyId", in: object).flatMap({ Int(exactly: $0) }) != nil,
+                  object["recordId"] == nil || object["recordId"] is String,
+                  object["answerId"] == nil || object["answerId"] is String else { return .ignored(type: type) }
+            let event = VoiceTutorSessionStateEvent(sequence: sequence, phase: phase, paused: paused, revision: revision,
+                studyID: exactInteger("studyId", in: object).flatMap({ Int(exactly: $0) }),
+                recordID: string("recordId", in: object), answerID: string("answerId", in: object))
+            return event.isValid ? .sessionState(event) : .ignored(type: type)
         case "buddystudy.voice.answer.state":
             let required: Set<String> = ["type", "answerId", "studyId", "recordId", "revision", "phase"]
             guard required.isSubset(of: Set(object.keys)), Set(object.keys).isSubset(of: required.union(["text", "code"])),

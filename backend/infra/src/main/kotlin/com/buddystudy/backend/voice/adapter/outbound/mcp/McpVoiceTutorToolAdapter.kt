@@ -80,6 +80,10 @@ class McpVoiceTutorToolAdapter(
             })
     }
 
+    override suspend fun pollLearningProgress(context: VoiceTutorWebRtcControlContext,
+        progress: com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress): VoiceTutorMcpToolResult =
+        reviewedQuestionOperation { canonicalQuestions.pollLearningProgress(context, progress) }
+
     override suspend fun submitReviewedAnswer(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult =
         reviewedQuestionOperation { canonicalQuestions.submitReviewedAnswer(context, answer) }
 
@@ -364,7 +368,9 @@ class McpVoiceTutorToolAdapter(
             "voiceLessonContextReady" to true, "voiceLessonFocus" to focus, "voiceLessonTopics" to listOf(focus),
             "voiceQuestion" to objectMapper.readTree(pending.output),
             "notice" to "This exact topic is selected. Read its returned pending question first; its saved difficulty is immutable. If the question lookup failed, retry list_pending_questions before teaching. If none is ready, use request_question when the learner wants a question. Never invent a question or a grade. No further selection confirmation is needed.")),
-            false, lessonRevision = selected.revision, lessonFocus = selected, questionChange = pending.questionChange, questionReadback = pending.questionReadback)
+            false, lessonRevision = selected.revision, lessonFocus = selected, questionChange = pending.questionChange, questionReadback = pending.questionReadback,
+            learningProgress = if (pending.isError) com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress(
+                com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase.QUESTION_FAILED, selected.studyId) else pending.learningProgress)
     }
 
     private fun persistencePending() = failure("INPUT_PERSISTENCE_PENDING", "The current dialogue boundary is still being saved; retry this same tool internally, without asking the learner to repeat anything.")

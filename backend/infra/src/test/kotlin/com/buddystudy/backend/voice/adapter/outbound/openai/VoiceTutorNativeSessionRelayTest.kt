@@ -4,6 +4,8 @@ import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract as Contract
 import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata as Metadata
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolDefinition
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
@@ -38,6 +40,59 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
+    @Test
+    fun `server observer reports saved grading completion while learner speaks without another model poll`() {
+        val release = CompletableDeferred<Unit>()
+        val tools = FakeTools { VoiceTutorMcpToolResult("{}", false,
+            questionReadback = VoiceTutorQuestionReadback(7, "42", "저장된 문제를 설명하세요.")) }.apply {
+            reviewedProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.GRADING, 7, "42", "grade-42")
+            pollResponse = { progress -> release.await(); VoiceTutorMcpToolResult("{}", false,
+                learningProgress = progress.copy(phase = VoiceTutorLearningPhase.GRADED)) }
+        }
+        Fixture(tools = tools).use { f ->
+            val answer = f.manualQuestion()
+            f.answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+            f.await("empty audio capture is reviewable") { f.answerStates().last().path("phase").asText() == "review" }
+            f.answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "완성된 수정 답변")
+            f.await("explicit submit creates its server call") { f.serverCalls().size == 1 }
+            f.ack(f.serverCalls().single())
+            f.await("server observation starts independently") { tools.polled.size == 1 }
+            f.controls.tryEmitNext(json(mapOf("type" to Contract.SPEECH_STARTED_EVENT, "sequence" to 2)))
+            val responseCount = f.responses().size
+            release.complete(Unit)
+            f.await("saved grade is displayed during newer speech") {
+                f.ui.lastOrNull { it.path("type").asText() == Contract.SESSION_STATE_EVENT }?.path("phase")?.asText() == "graded"
+            }
+            assertThat(f.responses()).hasSize(responseCount)
+            assertThat(tools.invocations.map { it.name }).containsExactly("list_studies")
+            assertThat(tools.polled).hasSize(1)
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
+    fun `server observation is cancelled with the control session and cannot publish a late completion`() {
+        val entered = AtomicBoolean()
+        val cancelled = AtomicBoolean()
+        val tools = FakeTools { VoiceTutorMcpToolResult("{}", false,
+            learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generation-1")) }.apply {
+            pollResponse = { progress ->
+                entered.set(true)
+                try { CompletableDeferred<Unit>().await(); VoiceTutorMcpToolResult("{}", false, learningProgress = progress) }
+                finally { cancelled.set(true) }
+            }
+        }
+        val f = Fixture(tools = tools)
+        try {
+            f.opening(); f.learner(1, "learner-1"); f.transcript("learner-1")
+            f.toolResponse("generate", "generate-call", "request_question")
+            f.await("independent generation poll started") { entered.get() }
+            f.close()
+            f.await("session disposal cancelled the suspended read") { cancelled.get() }
+            assertThat(f.ui.none { it.path("phase").asText() == "question_ready" }).isTrue()
+        } finally { f.close() }
+    }
+
     @Test
     fun `manual finish waits for its audit write then explicit edited submission uses only the reviewed port`() {
         val writeEntered = AtomicBoolean()
@@ -103,7 +158,9 @@ class VoiceTutorNativeSessionRelayTest {
             assertThat(tools.skipped.single().second.recordId).isEqualTo("42")
             assertThat(tools.skipped.single().second.text).isEmpty()
             assertThat(tools.reviewed).isEmpty()
-            assertThat(f.answerStates().last().path("phase").asText()).isEqualTo("cancelled")
+            f.await("canonical skip state reaches the independent client output stream") {
+                f.answerStates().last().path("phase").asText() == "cancelled"
+            }
             assertThat(f.responses()).hasSize(3)
             f.ack(f.outputs().last())
             f.await("skip continuation released") { f.responses().size == 4 }
@@ -656,10 +713,17 @@ class VoiceTutorNativeSessionRelayTest {
     private data class Invocation(val context: VoiceTutorWebRtcControlContext, val name: String)
     private class FakeTools(private val result: suspend () -> VoiceTutorMcpToolResult = { success() }) : VoiceTutorMcpToolPort {
         val invocations = CopyOnWriteArrayList<Invocation>()
+        val polled = CopyOnWriteArrayList<VoiceTutorLearningProgress>()
+        var reviewedProgress: VoiceTutorLearningProgress? = null
+        var pollResponse: suspend (VoiceTutorLearningProgress) -> VoiceTutorMcpToolResult = { progress -> VoiceTutorMcpToolResult("{}", false, learningProgress = progress) }
+        override suspend fun pollLearningProgress(context: VoiceTutorWebRtcControlContext, progress: VoiceTutorLearningProgress): VoiceTutorMcpToolResult {
+            polled += progress
+            return pollResponse(progress)
+        }
         val reviewed = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
         val skipped = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
         override fun definitions(): List<VoiceTutorMcpToolDefinition> = error("The legacy classified tool catalog must not be used")
-        override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation").map { name ->
+        override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation", "request_question").map { name ->
             VoiceTutorMcpToolDefinition(name, "Synthetic native tool", mapOf("type" to "object",
                 "properties" to emptyMap<String, Any>(), "additionalProperties" to false))
         }
@@ -669,7 +733,7 @@ class VoiceTutorNativeSessionRelayTest {
         }
         override suspend fun submitReviewedAnswer(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult {
             reviewed += context to answer
-            return VoiceTutorMcpToolResult("""{"queued":true,"gradingRequestId":"grade-42"}""", false)
+            return VoiceTutorMcpToolResult("""{"queued":true,"gradingRequestId":"grade-42"}""", false, learningProgress = reviewedProgress)
         }
         override suspend fun skipReviewedQuestion(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult {
             skipped += context to answer
@@ -682,7 +746,7 @@ class VoiceTutorNativeSessionRelayTest {
         fun json(value: Any): String = mapper.writeValueAsString(value)
         fun success() = VoiceTutorMcpToolResult("{\"studies\":[]}", false)
         fun context(): VoiceTutorWebRtcControlContext {
-            val now = Instant.parse("2026-09-06T00:00:00Z")
+            val now = Instant.now()
             return VoiceTutorWebRtcControlContext(VoiceTutorSession(
                 id = "native-test-session", userId = 7, studyId = null, idempotencyKey = "native-test-call",
                 providerSessionId = "rtc_native_test", status = VoiceTutorSessionStatus.ACTIVE,

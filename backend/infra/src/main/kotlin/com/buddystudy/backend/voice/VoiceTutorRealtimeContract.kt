@@ -21,6 +21,11 @@ internal object VoiceTutorRealtimeContract {
     const val STUDY_TREE_CHANGED_EVENT = "buddystudy.voice.study.changed"
     const val QUESTION_CHANGED_EVENT = "buddystudy.voice.question.changed"
     const val ANSWER_STATE_EVENT = "buddystudy.voice.answer.state"
+    const val SESSION_STATE_EVENT = "buddystudy.voice.session.state"
+    val ANSWER_SESSION_PHASES = setOf("answering", "answer_finalizing", "answer_review", "answer_submitting", "answer_failed")
+    val RECORD_SESSION_PHASES = setOf("question_ready", "question_reading", "grading", "graded", "grading_failed")
+    val SESSION_PHASES = ANSWER_SESSION_PHASES + setOf("conversation", "question_loading", "question_generating", "question_reading",
+        "question_ready", "grading", "graded", "ending", "ended", "question_failed", "grading_failed", "failed")
     const val ANSWER_TRANSCRIPT_EVENT = "buddystudy.voice.answer.transcript"
     const val ANSWER_FINISH_EVENT = "buddystudy.voice.answer.finish"
     const val ANSWER_SUBMIT_EVENT = "buddystudy.voice.answer.submit"

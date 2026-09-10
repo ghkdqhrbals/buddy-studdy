@@ -170,6 +170,34 @@ internal class VoiceTutorRealtimeEventPolicy(
                     "type" to type, "studyId" to studyId.longValue(), "recordId" to recordId.asText(),
                 ))) else ProviderEventDecision(payload = null)
             }
+            VoiceTutorRealtimeContract.SESSION_STATE_EVENT -> {
+                val sequence = node.path("sequence")
+                val revision = node.path("revision")
+                val phase = node.path("phase").asText()
+                val paused = node.path("paused")
+                val study = node.path("studyId")
+                val record = node.path("recordId")
+                val answer = node.path("answerId")
+                val hasStudy = !study.isMissingNode && !study.isNull
+                val hasRecord = !record.isMissingNode && !record.isNull
+                val hasAnswer = !answer.isMissingNode && !answer.isNull
+                if (transport != VoiceTutorProviderTransport.WEBRTC_SIDEBAND ||
+                    !sequence.isIntegralNumber || !sequence.canConvertToLong() || sequence.longValue() <= 0 ||
+                    !revision.isIntegralNumber || !revision.canConvertToLong() || revision.longValue() < 0 ||
+                    phase !in VoiceTutorRealtimeContract.SESSION_PHASES || !paused.isBoolean ||
+                    (hasStudy && (!study.isIntegralNumber || !study.canConvertToLong() || study.longValue() <= 0)) ||
+                    (hasRecord && (!hasStudy || !validRecordId(record))) ||
+                    (hasAnswer && (!hasRecord || !validAnswerId(answer))) ||
+                    (phase in VoiceTutorRealtimeContract.ANSWER_SESSION_PHASES && !hasAnswer) ||
+                    (phase in VoiceTutorRealtimeContract.RECORD_SESSION_PHASES && !hasRecord)
+                ) return ProviderEventDecision(payload = null)
+                val payload = linkedMapOf<String, Any>("type" to type, "sequence" to sequence.longValue(),
+                    "phase" to phase, "paused" to paused.booleanValue(), "revision" to revision.longValue())
+                if (hasStudy) payload["studyId"] = study.longValue()
+                if (hasRecord) payload["recordId"] = record.asText()
+                if (hasAnswer) payload["answerId"] = answer.asText()
+                ProviderEventDecision(mapper.writeValueAsString(payload))
+            }
             VoiceTutorRealtimeContract.ANSWER_STATE_EVENT, VoiceTutorRealtimeContract.ANSWER_TRANSCRIPT_EVENT -> {
                 if (transport != VoiceTutorProviderTransport.WEBRTC_SIDEBAND ||
                     !validAnswerId(node.path("answerId")) || !validRecordId(node.path("recordId")) ||

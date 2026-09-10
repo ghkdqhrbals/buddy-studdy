@@ -1963,6 +1963,131 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
+    func testBackendLessonPhasesHaveDistinctLocalizedStatusesAndOrbCues() {
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            let cases: [(VoiceTutorSessionStateEvent.Phase, String, String)] = [
+                (.questionLoading, strings.voiceTutorQuestionLoading, "tray.and.arrow.down"),
+                (.questionGenerating, strings.voiceTutorQuestionGenerating, "sparkles"),
+                (.questionReady, strings.voiceTutorQuestionReady, "book.closed"),
+                (.questionReading, strings.voiceTutorQuestionReading, "speaker.wave.2.fill"),
+                (.answering, strings.voiceTutorAnswerListening, "mic.fill"),
+                (.answerFinalizing, strings.voiceTutorAnswerFinalizing, "ellipsis"),
+                (.answerReview, strings.voiceTutorAnswerReview, "text.cursor"),
+                (.answerSubmitting, strings.voiceTutorAnswerSubmitting, "ellipsis"),
+                (.grading, strings.voiceTutorAnswerGrading, "ellipsis"),
+                (.graded, strings.voiceTutorAnswerGraded, "checkmark"),
+                (.questionFailed, strings.voiceTutorQuestionFailed, "exclamationmark"),
+                (.gradingFailed, strings.voiceTutorGradingFailed, "exclamationmark"),
+                (.answerFailed, strings.voiceTutorAnswerFailed, "exclamationmark"),
+                (.ending, strings.voiceTutorCallEnding, "phone.down.fill"),
+                (.ended, strings.voiceTutorCallEnded, "phone.down.fill"),
+                (.failed, strings.voiceTutorCallFailed, "exclamationmark")
+            ]
+            for (phase, label, symbol) in cases {
+                let presentation = VoiceTutorCallPresentation(
+                    phase: .listening, sessionState: makeLessonPresentationState(phase)
+                )
+                XCTAssertEqual(presentation.statusText(strings), label, "\(language) / \(phase)")
+                XCTAssertEqual(presentation.lessonSymbolName, symbol, "\(phase)")
+                XCTAssertTrue(presentation.needsVisibleStatus(strings, errorMessage: nil))
+                if phase == .questionReady {
+                    XCTAssertFalse(presentation.orbAnimates, "A ready question must stop the generation pulse")
+                    XCTAssertNotEqual(presentation.orbState, .thinking)
+                }
+            }
+            XCTAssertEqual(Set(cases.map(\.1)).count, cases.count, "Lesson phases must remain distinguishable")
+        }
+    }
+
+    func testBackendLessonProgressNeverMasksLocalConnectionOrPauseTransitions() throws {
+        let strings = AppStrings(language: .korean)
+        for transport in [VoiceTutorSessionPhase.connecting, .ending, .ended, .failed] {
+            let plain = VoiceTutorCallPresentation(phase: transport)
+            let withSnapshot = VoiceTutorCallPresentation(
+                phase: transport, sessionState: makeLessonPresentationState(.grading)
+            )
+            XCTAssertEqual(withSnapshot.statusText(strings), plain.statusText(strings))
+            XCTAssertEqual(withSnapshot.orbState, plain.orbState)
+            XCTAssertNil(withSnapshot.lessonSymbolName)
+            XCTAssertFalse(withSnapshot.canDisplayActiveAnswer)
+        }
+        var pause = VoiceTutorCallPauseState()
+        pause.isSupported = true
+        let command = try XCTUnwrap(pause.requestPause())
+        var presentation = VoiceTutorCallPresentation(
+            phase: .listening, pauseState: pause,
+            sessionState: makeLessonPresentationState(.answering, paused: true)
+        )
+        XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorPausing)
+        XCTAssertFalse(presentation.canDisplayActiveAnswer)
+        _ = pause.acknowledge(sequence: command.sequence, paused: true)
+        presentation.pauseState = pause
+        XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorPaused)
+        _ = try XCTUnwrap(pause.requestResume())
+        presentation.pauseState = pause
+        XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorResuming)
+        XCTAssertEqual(presentation.orbState, .resuming)
+        XCTAssertFalse(presentation.canDisplayActiveAnswer)
+
+        let serverPaused = VoiceTutorCallPresentation(
+            phase: .listening, sessionState: makeLessonPresentationState(.grading, paused: true)
+        )
+        XCTAssertEqual(serverPaused.statusText(strings), strings.voiceTutorPaused)
+        XCTAssertEqual(serverPaused.orbState, .paused)
+        XCTAssertFalse(serverPaused.orbAnimates)
+        XCTAssertFalse(serverPaused.canDisplayActiveAnswer)
+    }
+
+    func testLocalManualAnswerProgressRemainsVisibleUntilServerAcknowledgesIt() throws {
+        let strings = AppStrings(language: .english)
+        var draft = VoiceTutorAnswerDraftState()
+        let answerID = "d2a27b1e-8924-4c5f-a668-0405b4f50d00"
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                                        phase: .listening, text: nil, code: nil), existingDraft: "B, because"))
+        var presentation = VoiceTutorCallPresentation(
+            phase: .listening, sessionState: makeLessonPresentationState(.questionReading)
+        )
+        XCTAssertEqual(presentation.statusText(strings, answerDraftState: draft), strings.voiceTutorAnswerListening)
+        _ = try XCTUnwrap(draft.requestFinish())
+        presentation.sessionState = makeLessonPresentationState(.answering)
+        XCTAssertEqual(presentation.statusText(strings, answerDraftState: draft), strings.voiceTutorAnswerFinalizing)
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                                        phase: .review, text: nil, code: nil)))
+        XCTAssertEqual(presentation.statusText(strings, answerDraftState: draft), strings.voiceTutorAnswerReview)
+        _ = try XCTUnwrap(draft.requestSubmit())
+        XCTAssertEqual(presentation.statusText(strings, answerDraftState: draft), strings.voiceTutorAnswerSubmitting)
+        XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+                                        phase: .submitted, text: nil, code: nil)))
+        presentation.sessionState = makeLessonPresentationState(.grading)
+        XCTAssertEqual(presentation.statusText(strings, answerDraftState: draft), strings.voiceTutorAnswerGrading)
+        XCTAssertEqual(draft.text, "B, because", "Display snapshots never replace the learner's draft")
+    }
+
+    func testGeneralConversationRetainsAudioSpeakingAndListeningWithoutInventingALesson() {
+        let strings = AppStrings(language: .english)
+        for phase in [VoiceTutorSessionPhase.listening, .speaking] {
+            let plain = VoiceTutorCallPresentation(phase: phase)
+            let conversation = VoiceTutorCallPresentation(
+                phase: phase, sessionState: makeLessonPresentationState(.conversation)
+            )
+            XCTAssertEqual(conversation.statusText(strings), plain.statusText(strings))
+            XCTAssertEqual(conversation.orbState, plain.orbState)
+            XCTAssertNil(conversation.lessonSymbolName)
+        }
+    }
+
+    private func makeLessonPresentationState(
+        _ phase: VoiceTutorSessionStateEvent.Phase, paused: Bool = false
+    ) -> VoiceTutorSessionState {
+        var state = VoiceTutorSessionState()
+        XCTAssertTrue(state.apply(.init(
+            sequence: 1, phase: phase, paused: paused, revision: 1,
+            studyID: 42, recordID: "101", answerID: "d2a27b1e-8924-4c5f-a668-0405b4f50d00"
+        )))
+        return state
+    }
+
     @MainActor
     func testCompactVoiceCallDoesNotInferSpeakingFromCaptionsOrTranscriptDraft() {
         let strings = AppStrings(language: .korean)
@@ -3036,6 +3161,42 @@ final class VoiceTutorContractTests: XCTestCase {
             add(attachment)
         }
         XCTAssertEqual(capturedPNGs.count, selectedFixtures.count, "Each state must produce a distinct rendered screen")
+    }
+
+    @MainActor
+    func testBackendLessonProgressScreensRenderWithoutStartingAnAudioSession() async throws {
+        let fixtures: [VoiceTutorCompactCallSnapshot] = [
+            .init(name: "lesson-question-loading", phase: .listening, topic: "스프링",
+                  sessionState: makeLessonPresentationState(.questionLoading)),
+            .init(name: "lesson-question-generating", phase: .listening, topic: "스프링",
+                  sessionState: makeLessonPresentationState(.questionGenerating)),
+            .init(name: "lesson-question-ready", phase: .listening, topic: "스프링",
+                  sessionState: makeLessonPresentationState(.questionReady)),
+            .init(name: "lesson-question-reading", phase: .speaking, topic: "스프링",
+                  sessionState: makeLessonPresentationState(.questionReading)),
+            .init(name: "lesson-grading", phase: .listening, topic: "스프링",
+                  sessionState: makeLessonPresentationState(.grading)),
+            .init(name: "lesson-graded", phase: .listening, topic: "스프링",
+                  sessionState: makeLessonPresentationState(.graded)),
+            .init(name: "lesson-grading-failed-light", phase: .listening, topic: "스프링", colorScheme: .light,
+                  sessionState: makeLessonPresentationState(.gradingFailed)),
+            .init(name: "lesson-grading-transcript-accessibility", phase: .listening, showsTranscript: true,
+                  language: .english, topic: "Spring", size: CGSize(width: 320, height: 696), dynamicType: .accessibility3,
+                  sessionState: makeLessonPresentationState(.grading))
+        ]
+        var captures = Set<Data>()
+        for fixture in fixtures {
+            let image = try await renderCompactCallSnapshot(fixture)
+            let png = try XCTUnwrap(image.pngData(), fixture.name)
+            XCTAssertEqual(image.size, fixture.size)
+            XCTAssertGreaterThan(png.count, 2_000, fixture.name)
+            captures.insert(png)
+            let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+            attachment.name = fixture.name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        XCTAssertEqual(captures.count, fixtures.count, "Server lesson stages must be visually distinguishable")
     }
 
     @MainActor
@@ -4618,6 +4779,7 @@ final class VoiceTutorContractTests: XCTestCase {
                     isRecording: fixture.isRecording,
                     isAwaitingTutorResponse: fixture.isAwaitingTutorResponse,
                     pauseState: fixture.pauseState,
+                    sessionState: fixture.sessionState,
                     sessionSecondsRemaining: fixture.seconds,
                     quotaRemainingSeconds: fixture.quotaRemainingSeconds
                         ?? (fixture.phase.isLive ? 0 : 3_540),
@@ -4949,6 +5111,7 @@ private struct VoiceTutorCompactCallSnapshot {
     var dynamicType = DynamicTypeSize.large
     var colorScheme = ColorScheme.dark
     var answerDraftState = VoiceTutorAnswerDraftState()
+    var sessionState = VoiceTutorSessionState()
 }
 
 private struct VoiceTutorContractRenderFixture {

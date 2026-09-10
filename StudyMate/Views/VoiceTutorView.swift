@@ -549,6 +549,7 @@ struct VoiceTutorSessionView: View {
                 inputNeedsRepeat: viewModel.inputNeedsRepeat,
                 isAwaitingTutorResponse: viewModel.isAwaitingTutorResponse,
                 pauseState: viewModel.pauseState,
+                sessionState: viewModel.sessionState,
                 sessionSecondsRemaining: viewModel.sessionSecondsRemaining,
                 quotaRemainingSeconds: viewModel.quotaRemainingSeconds,
                 quotaReservedSeconds: viewModel.quotaReservedSeconds,
@@ -633,6 +634,7 @@ struct VoiceTutorCallPresentation {
 
     enum OrbState: Equatable {
         case connecting, listening, thinking, speaking, pausing, paused, resuming, ending, ended, failed
+        case questionReady, capturingAnswer, reviewingAnswer, graded, learningFailed
     }
 
     enum OrbAction: Equatable {
@@ -646,6 +648,7 @@ struct VoiceTutorCallPresentation {
     var inputNeedsRepeat = false
     var isAwaitingTutorResponse = false
     var pauseState = VoiceTutorCallPauseState()
+    var sessionState = VoiceTutorSessionState()
     var sessionSecondsRemaining: Int?
     var quotaRemainingSeconds = 0
     var quotaReservedSeconds = 0
@@ -668,6 +671,21 @@ struct VoiceTutorCallPresentation {
             case .resuming: return .resuming
             case .active: break
             }
+            if isServerPaused { return .paused }
+            switch lessonPhase {
+            case .questionLoading, .questionGenerating, .answerFinalizing, .answerSubmitting, .grading:
+                return .thinking
+            case .questionReady: return .questionReady
+            case .questionReading: return .speaking
+            case .answering: return .capturingAnswer
+            case .answerReview: return .reviewingAnswer
+            case .graded: return .graded
+            case .questionFailed, .gradingFailed, .answerFailed: return .learningFailed
+            case .ending: return .ending
+            case .ended: return .ended
+            case .failed: return .failed
+            case .conversation, nil: break
+            }
         }
         switch phase {
         case .idle, .requestingPermission, .connecting: return .connecting
@@ -686,6 +704,40 @@ struct VoiceTutorCallPresentation {
 
     var orbAnimates: Bool {
         orbState == .listening || orbState == .thinking || orbState == .speaking
+    }
+
+    /// Lesson progress comes from the backend; transport and pending local
+    /// controls remain authoritative for whether the user can interact.
+    var lessonPhase: VoiceTutorSessionStateEvent.Phase? {
+        guard phase == .listening || phase == .speaking else { return nil }
+        return sessionState.snapshot?.phase
+    }
+
+    var isServerPaused: Bool {
+        lessonPhase != nil && pauseState.mode == .active && sessionState.snapshot?.paused == true
+    }
+
+    var canDisplayActiveAnswer: Bool {
+        guard phase == .listening || phase == .speaking,
+              pauseState.mode == .active, !isServerPaused else { return false }
+        return lessonPhase != .ending && lessonPhase != .ended && lessonPhase != .failed
+    }
+
+    var lessonSymbolName: String? {
+        guard pauseState.mode == .active, !isServerPaused else { return nil }
+        switch lessonPhase {
+        case .questionLoading: return "tray.and.arrow.down"
+        case .questionGenerating: return "sparkles"
+        case .questionReady: return "book.closed"
+        case .questionReading: return "speaker.wave.2.fill"
+        case .answering: return "mic.fill"
+        case .answerFinalizing, .answerSubmitting, .grading: return "ellipsis"
+        case .answerReview: return "text.cursor"
+        case .graded: return "checkmark"
+        case .questionFailed, .gradingFailed, .answerFailed, .failed: return "exclamationmark"
+        case .ending, .ended: return "phone.down.fill"
+        case .conversation, nil: return nil
+        }
     }
 
     var remainingTime: RemainingTime? {
@@ -746,7 +798,11 @@ struct VoiceTutorCallPresentation {
             && errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines) == strings.voiceTutorConnectionFailed)
     }
 
-    func statusText(_ strings: AppStrings, errorMessage: String? = nil) -> String {
+    func statusText(
+        _ strings: AppStrings,
+        errorMessage: String? = nil,
+        answerDraftState: VoiceTutorAnswerDraftState = VoiceTutorAnswerDraftState()
+    ) -> String {
         if isMonthlyQuotaExhausted,
            phase == .ended || phase == .failed ||
             (phase == .ending && !isQuotaNoticeUsingFinalSeconds) {
@@ -762,6 +818,18 @@ struct VoiceTutorCallPresentation {
             case .resuming: return strings.voiceTutorResuming
             case .active: break
             }
+            if isServerPaused { return strings.voiceTutorPaused }
+            if canDisplayActiveAnswer {
+                switch answerDraftState.phase {
+                case .listening: return strings.voiceTutorAnswerListening
+                case .finalizing: return strings.voiceTutorAnswerFinalizing
+                case .review: return strings.voiceTutorAnswerReview
+                case .submitting: return strings.voiceTutorAnswerSubmitting
+                case .failed: return strings.voiceTutorAnswerFailed
+                case .inactive, .submitted, .cancelled: break
+                }
+            }
+            if let lessonStatus = lessonStatusText(strings) { return lessonStatus }
         }
         switch phase {
         case .idle, .requestingPermission, .connecting: return strings.voiceTutorCallConnecting
@@ -784,6 +852,28 @@ struct VoiceTutorCallPresentation {
         }
     }
 
+    private func lessonStatusText(_ strings: AppStrings) -> String? {
+        switch lessonPhase {
+        case .questionLoading: return strings.voiceTutorQuestionLoading
+        case .questionGenerating: return strings.voiceTutorQuestionGenerating
+        case .questionReady: return strings.voiceTutorQuestionReady
+        case .questionReading: return strings.voiceTutorQuestionReading
+        case .answering: return strings.voiceTutorAnswerListening
+        case .answerFinalizing: return strings.voiceTutorAnswerFinalizing
+        case .answerReview: return strings.voiceTutorAnswerReview
+        case .answerSubmitting: return strings.voiceTutorAnswerSubmitting
+        case .grading: return strings.voiceTutorAnswerGrading
+        case .graded: return strings.voiceTutorAnswerGraded
+        case .questionFailed: return strings.voiceTutorQuestionFailed
+        case .gradingFailed: return strings.voiceTutorGradingFailed
+        case .answerFailed: return strings.voiceTutorAnswerFailed
+        case .ending: return strings.voiceTutorCallEnding
+        case .ended: return strings.voiceTutorCallEnded
+        case .failed: return strings.voiceTutorCallFailed
+        case .conversation, nil: return nil
+        }
+    }
+
     func supplementaryError(_ strings: AppStrings, errorMessage: String?) -> String? {
         guard let error = errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
               !error.isEmpty else { return nil }
@@ -799,6 +889,7 @@ struct VoiceTutorCallPresentation {
     func needsVisibleStatus(_ strings: AppStrings, errorMessage: String?) -> Bool {
         guard phase == .listening || phase == .speaking else { return true }
         return pauseState.mode != .active || inputNeedsRepeat
+            || isServerPaused || (lessonPhase != nil && lessonPhase != .conversation)
             || supplementaryError(strings, errorMessage: errorMessage) != nil
     }
 
@@ -1285,7 +1376,7 @@ struct VoiceTutorCallScreen: View {
                 }
             }
             .overlay {
-                if hasAnswerDraft, presentation.phase.isLive, orbInteraction.stage == .idle {
+                if hasAnswerDraft, presentation.canDisplayActiveAnswer, orbInteraction.stage == .idle {
                     if answerDraftIsBusy {
                         ProgressView()
                             .tint(Color.black.opacity(0.75))
@@ -1302,6 +1393,11 @@ struct VoiceTutorCallScreen: View {
                         .foregroundStyle(Color.black.opacity(0.8))
                         .padding(.horizontal, diameter < 112 ? 7 : 20)
                     }
+                } else if orbInteraction.stage == .idle, let symbol = presentation.lessonSymbolName {
+                    Image(systemName: symbol)
+                        .font(diameter < 112 ? .caption : .title2.weight(.medium))
+                        .foregroundStyle(Color.black.opacity(0.75))
+                        .accessibilityHidden(true)
                 }
             }
             .frame(width: diameter, height: diameter)
@@ -1324,6 +1420,21 @@ struct VoiceTutorCallScreen: View {
                 ? Color(red: 0.94, green: 0.73, blue: 0.39)
                 : Color(red: 0.90, green: 0.68, blue: 0.33)
         }
+        if !hasAnswerDraft {
+            switch presentation.orbState {
+            case .thinking:
+                return colorScheme == .dark
+                    ? Color(red: 0.72, green: 0.76, blue: 0.88)
+                    : Color(red: 0.63, green: 0.69, blue: 0.83)
+            case .capturingAnswer:
+                return colorScheme == .dark
+                    ? Color(red: 0.94, green: 0.73, blue: 0.39)
+                    : Color(red: 0.90, green: 0.68, blue: 0.33)
+            case .learningFailed:
+                return Color(red: 0.85, green: 0.63, blue: 0.55)
+            default: break
+            }
+        }
         return colorScheme == .dark
             ? Color(red: 0.77, green: 0.86, blue: 0.84)
             : Color(red: 0.65, green: 0.78, blue: 0.75)
@@ -1342,9 +1453,9 @@ struct VoiceTutorCallScreen: View {
     private var orbStatusText: String {
         if orbInteraction.stage == .warning { return strings.voiceTutorOrbKeepHoldingToEnd }
         if orbInteraction.stage == .committed { return strings.voiceTutorCallEnding }
-        if hasAnswerDraft, presentation.phase.isLive,
-           presentation.pauseState.mode == .active { return answerDraftStatus }
-        return presentation.statusText(strings, errorMessage: errorMessage)
+        return presentation.statusText(
+            strings, errorMessage: errorMessage, answerDraftState: answerDraftState
+        )
     }
 
     private var orbStatusColor: Color {
@@ -1422,8 +1533,7 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var answerCaptureIsListening: Bool {
-        presentation.phase.isLive && presentation.pauseState.mode == .active
-            && answerDraftState.phase == .listening
+        presentation.canDisplayActiveAnswer && answerDraftState.phase == .listening
     }
 
     private var answerDraftIsEditable: Bool {
@@ -1436,7 +1546,7 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var answerOrbLabel: String? {
-        guard presentation.phase.isLive, presentation.pauseState.mode == .active else { return nil }
+        guard presentation.canDisplayActiveAnswer else { return nil }
         switch answerDraftState.phase {
         case .listening: return strings.voiceTutorAnswerFinish
         case .review, .failed: return strings.voiceTutorAnswerSubmit
@@ -1605,6 +1715,12 @@ struct VoiceTutorCallScreen: View {
                 : discoveryPrompt ?? strings.voiceTutorCallListeningHelp
         case .speaking:
             return strings.voiceTutorCallSpeakingHelp
+        case .capturingAnswer:
+            return strings.voiceTutorAnswerCaptureHelp
+        case .reviewingAnswer:
+            return strings.voiceTutorAnswerReviewHelp
+        case .questionReady, .graded, .learningFailed:
+            return presentation.statusText(strings)
         case .pausing:
             return strings.voiceTutorCallPausingHelp
         case .resuming:
@@ -1677,7 +1793,8 @@ struct VoiceTutorCallScreen: View {
                             caption: VoiceTutorCaption(speaker: .tutor, text: assistantTranscriptDraft),
                             strings: strings
                         )
-                    } else if presentation.orbState == .thinking && !captions.isEmpty && !hasAnswerDraft {
+                    } else if presentation.orbState == .thinking && !captions.isEmpty && !hasAnswerDraft
+                        && (presentation.lessonPhase == nil || presentation.lessonPhase == .conversation) {
                         Label(strings.voiceTutorCallThinking, systemImage: "ellipsis")
                             .font(.subheadline)
                             .foregroundStyle(voiceAccent)

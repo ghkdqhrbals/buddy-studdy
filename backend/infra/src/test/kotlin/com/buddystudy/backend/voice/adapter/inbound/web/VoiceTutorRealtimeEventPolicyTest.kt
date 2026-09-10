@@ -14,6 +14,30 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
+    fun `session state is a strict server only snapshot without private or model authored fields`() {
+        val fields = mapOf("type" to VoiceTutorRealtimeContract.SESSION_STATE_EVENT, "sequence" to 1,
+            "phase" to "answering", "paused" to false, "revision" to 2, "studyId" to 7,
+            "recordId" to "42", "answerId" to "00112233-4455-6677-8899-aabbccddeeff", "text" to "private")
+        val raw = mapper.writeValueAsString(fields)
+        val payload = mapper.readTree(policy.providerDecision(raw, "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+            "type", "sequence", "phase", "paused", "revision", "studyId", "recordId", "answerId")
+        assertThat(policy.providerDecision(raw, "s1", Instant.EPOCH).payload).isNull()
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        for (invalid in listOf(mapOf("sequence" to 0), mapOf("sequence" to 1.5), mapOf("revision" to -1),
+            mapOf("phase" to "model_grade"), mapOf("paused" to "false"), mapOf("studyId" to 0),
+            mapOf("recordId" to "9223372036854775808"), mapOf("answerId" to "forged"))) {
+            assertThat(policy.providerDecision(mapper.writeValueAsString(fields + invalid), "s1", Instant.EPOCH,
+                VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
+        for (phase in VoiceTutorRealtimeContract.ANSWER_SESSION_PHASES + VoiceTutorRealtimeContract.RECORD_SESSION_PHASES) {
+            val incomplete = fields - "answerId" - "recordId" + mapOf("phase" to phase)
+            assertThat(policy.providerDecision(mapper.writeValueAsString(incomplete), "s1", Instant.EPOCH,
+                VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
+    }
+
+    @Test
     fun `manual answer controls stay local and strictly validate bound identity and edited text`() {
         val identity = mapOf("answerId" to "00112233-4455-6677-8899-aabbccddeeff", "recordId" to "42")
         for (type in listOf(VoiceTutorRealtimeContract.ANSWER_FINISH_EVENT, VoiceTutorRealtimeContract.ANSWER_SKIP_EVENT,

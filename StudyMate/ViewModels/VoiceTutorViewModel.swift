@@ -624,6 +624,7 @@ final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var inputNeedsRepeat = false
     @Published private(set) var serverEndReason: String?
     @Published private(set) var answerDraftState = VoiceTutorAnswerDraftState()
+    @Published private(set) var sessionState = VoiceTutorSessionState()
 
     var quotaRemainingSeconds: Int { sessionQuota.remainingSeconds }
     var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
@@ -711,6 +712,7 @@ final class VoiceTutorViewModel: ObservableObject {
         summaryRefreshState = .idle
         changedQuestions = []
         answerDraftState = VoiceTutorAnswerDraftState()
+        sessionState = VoiceTutorSessionState()
         learnerCaptionIDsByItemID = [:]
         answerSourceItemIDs = []
         heldAnswerCaptionIDs = []
@@ -1101,6 +1103,7 @@ final class VoiceTutorViewModel: ObservableObject {
             return
         }
         logDiagnostic("event=stop_requested source=\(source.rawValue) socketEnd=\(shouldNotifyServerOverSocket ? 1 : 0)", isWarning: outcome == .failed)
+        sessionState.endLocally()
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()
         cancelTerminalPlayoutDrain()
@@ -1172,6 +1175,7 @@ final class VoiceTutorViewModel: ObservableObject {
         summaryRefreshState = .idle
         captions = []
         answerDraftState = VoiceTutorAnswerDraftState()
+        sessionState.endLocally()
         learnerCaptionIDsByItemID = [:]
         answerSourceItemIDs = []
         heldAnswerCaptionIDs = []
@@ -1485,6 +1489,11 @@ final class VoiceTutorViewModel: ObservableObject {
             }
         }
         switch event {
+        case .sessionState(let event):
+            guard usesWebRTC, phase.isLive, !isFinalizing else { break }
+            // Only the current authenticated control receive loop reaches this
+            // path. Display snapshots never act as microphone or submit commands.
+            _ = sessionState.apply(event, minimumRevision: studyFocus.revision)
         case .sessionReady(let hardEndsAt, let remainingSeconds, let pauseProtocol, let turnProtocol):
             if usesWebRTC, !VoiceTutorTurnProtocol.acceptsReady(turnProtocol) {
                 // Keep capture closed unless the server has accepted this
@@ -1984,6 +1993,7 @@ final class VoiceTutorViewModel: ObservableObject {
             failureCause = ended.reason?.uppercased() == "PROVIDER_ERROR" ? .provider : .connection
         }
         logDiagnostic("event=server_ended")
+        sessionState.endLocally()
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()
         isFinalizing = true

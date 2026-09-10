@@ -42,10 +42,22 @@ data class VoiceTutorMcpToolResult(
     val questionChange: VoiceTutorQuestionChange? = null,
     /** Exact saved question for a response-scoped native readback, not a model-authored prompt. */
     val questionReadback: VoiceTutorQuestionReadback? = null,
+    /** Verified canonical operation state. Never inferred from model-authored output. */
+    val learningProgress: VoiceTutorLearningProgress? = null,
 )
 
 data class VoiceTutorQuestionChange(val studyId: Long, val recordId: String)
 data class VoiceTutorQuestionReadback(val studyId: Long, val recordId: String, val question: String)
+data class VoiceTutorLearningProgress(
+    val phase: VoiceTutorLearningPhase,
+    val studyId: Long,
+    val recordId: String? = null,
+    /** Server-only process binding. Never exposed to the model or public state snapshot. */
+    val correlationId: String? = null,
+)
+enum class VoiceTutorLearningPhase {
+    CONVERSATION, QUESTION_GENERATING, QUESTION_READY, QUESTION_FAILED, GRADING, GRADED, GRADING_FAILED,
+}
 
 /** An explicit authenticated UI action bound by the native controller to its saved question.
  * Edited text is learner-authored. It never comes from model function arguments or rewrites ASR history.
@@ -146,6 +158,12 @@ interface VoiceTutorMcpToolPort {
         toolName: String,
         arguments: Map<String, Any>,
     ): VoiceTutorMcpToolResult
+
+    /** Read-only progress check for a previously accepted canonical operation. No model tool or speech. */
+    suspend fun pollLearningProgress(
+        context: VoiceTutorWebRtcControlContext,
+        progress: VoiceTutorLearningProgress,
+    ): VoiceTutorMcpToolResult = VoiceTutorMcpToolResult("{}", true)
 
     suspend fun submitReviewedAnswer(
         context: VoiceTutorWebRtcControlContext,

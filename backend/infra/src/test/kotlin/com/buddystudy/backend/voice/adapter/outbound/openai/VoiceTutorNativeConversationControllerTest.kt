@@ -3,6 +3,8 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract as Contract
 import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata as Metadata
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionChange
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
@@ -21,12 +23,235 @@ class VoiceTutorNativeConversationControllerTest {
     private val ui = mutableListOf<JsonNode>()
     private val stored = mutableListOf<VoiceTutorNativeConversationController.NativeTranscript>()
     private val calls = mutableListOf<VoiceTutorMcpCall>()
+    private val watches = mutableListOf<VoiceTutorNativeConversationController.LearningWatch>()
 
     init {
         controller.providerEvents().subscribe { outbound.add(mapper.readTree(it)) }
         controller.clientEvents().subscribe { ui.add(mapper.readTree(it)) }
         controller.persistenceEvents().subscribe { stored += it }
         controller.toolActions().subscribe { calls += it }
+        controller.learningPollEvents().subscribe { it.watch?.let { watch -> watches += watch } }
+    }
+
+    @Test
+    fun `manual capture publishes all stages after their control event and stays answering across silence`() {
+        val answer = manualAnswer()
+        assertThat(sessionStates().map { it.path("phase").asText() }).containsExactly(
+            "conversation", "question_loading", "question_ready", "question_reading", "answering")
+        val captured = sessionStates().last()
+        assertThat(captured.path("answerId").asText()).isEqualTo(answer.path("answerId").asText())
+        assertThat(ui.indexOf(answerStates().last())).isLessThan(ui.indexOf(captured))
+        time += Duration.ofSeconds(60).toNanos(); controller.tick()
+        assertThat(sessionStates().last()).isEqualTo(captured)
+        assertThat(responses()).hasSize(3)
+        speech(2); committed("a1")
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("answer_finalizing")
+        transcript("a1", "오래 생각한 답변"); controller.transcriptCompleted("a1")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("answer_review")
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "직접 수정한 완성 답변")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("answer_submitting")
+        val request = serverQuestionCall()
+        val callId = request.path("item").path("call_id").asText()
+        event("conversation.item.created", "item" to request.path("item"))
+        controller.beginTool(callId)
+        controller.completeTool(callId, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.GRADING, 7, "42")))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("grading")
+        assertThat(sessionStates().last().has("answerId")).isFalse()
+        assertThat(sessionStates().map { it.path("sequence").asLong() }).isSorted().doesNotHaveDuplicates()
+    }
+
+    @Test
+    fun `pause acknowledgement precedes snapshot and resume restores the exact capture identity`() {
+        val answer = manualAnswer()
+        client(Contract.PAUSE_REQUEST_EVENT, 10)
+        client(Contract.PAUSE_INPUT_QUIESCED_EVENT, 10)
+        event("input_audio_buffer.cleared", "event_id" to "pause-ack")
+        val paused = sessionStates().last()
+        assertThat(paused.path("paused").asBoolean()).isTrue()
+        assertThat(paused.path("phase").asText()).isEqualTo("answering")
+        assertThat(ui[ui.indexOf(paused) - 1].path("type").asText()).isEqualTo(Contract.PAUSE_STATE_EVENT)
+        client(Contract.RESUME_REQUEST_EVENT, 11)
+        event("input_audio_buffer.cleared", "event_id" to "resume-ack")
+        assertThat(sessionStates().last().path("paused").asBoolean()).isFalse()
+        assertThat(sessionStates().last().path("answerId").asText()).isEqualTo(answer.path("answerId").asText())
+    }
+
+    @Test
+    fun `question request failure and provider forged state cannot manufacture successful learning`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_generating")
+        val count = sessionStates().size
+        assertThat(event(Contract.SESSION_STATE_EVENT, "sequence" to 999, "phase" to "graded", "revision" to 0, "paused" to false)).isFalse()
+        assertThat(sessionStates()).hasSize(count)
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", true))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+        controller.beginDrain(true)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("ending")
+        controller.close()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("ended")
+    }
+
+    @Test
+    fun `slow canonical progress after fresh learner speech cannot replace the current phase`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        val before = sessionStates().last()
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false,
+            learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.GRADED, 7, "42")))
+        assertThat(sessionStates().last()).isEqualTo(before)
+    }
+
+    @Test
+    fun `server progress completes generation during new speech without any model call readback or answer capture`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generate-1")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single()
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        val providerEventsBefore = outbound.size
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            questionChange = VoiceTutorQuestionChange(7, "42"),
+            questionReadback = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION),
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_ready")
+        assertThat(outbound).hasSize(providerEventsBefore)
+        assertThat(calls).hasSize(1)
+        assertThat(answerStates()).isEmpty()
+        assertThat(controller.learningWatchIsCurrent(watch)).isFalse()
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", true))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_ready")
+    }
+
+    @Test
+    fun `server grading completes through renewed speech and late model pending cannot undo saved success`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "수정한 답변")
+        val request = serverQuestionCall()
+        event("conversation.item.created", "item" to request.path("item"))
+        val callId = request.path("item").path("call_id").asText()
+        controller.beginTool(callId)
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.GRADING, 7, "42", "grade-1")
+        controller.completeTool(callId, VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single()
+        ackToolOutput(); created("poll-response"); toolDone("poll-response", "poll", "get_grading_process")
+        controller.beginTool("poll")
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        val providerEventsBefore = outbound.size
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.GRADED)))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("graded")
+        assertThat(outbound).hasSize(providerEventsBefore)
+        controller.completeTool("poll", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("graded")
+        assertThat(controller.learningWatchIsCurrent(watch)).isFalse()
+    }
+
+    @Test
+    fun `progress failures are explicit and late read results after termination are ignored`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generate-1")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single()
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_FAILED)))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+        controller.beginDrain(true)
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("ending")
+    }
+
+    @Test
+    fun `initial request failure during newer speech clears loading without requiring another learner turn`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", true))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+        assertThat(watches).isEmpty()
+    }
+
+    @Test
+    fun `a read error or observation deadline cannot report a canonical grading failure`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "최종 답변")
+        val request = serverQuestionCall()
+        event("conversation.item.created", "item" to request.path("item"))
+        val callId = request.path("item").path("call_id").asText()
+        controller.beginTool(callId)
+        controller.completeTool(callId, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.GRADING, 7, "42", "grade-1")))
+        val watch = watches.single()
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", true))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("grading")
+        assertThat(controller.learningWatchIsCurrent(watch)).isTrue()
+        controller.cancelLearningPoll(watch)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("grading")
+    }
+
+    @Test
+    fun `a newer lesson revision cancels observation before any late process result can publish`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generate-1")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single()
+        ackToolOutput(); created("mutation-response"); toolDone("mutation-response", "mutation", "confirm_voice_study_mutation")
+        controller.beginTool("mutation")
+        controller.completeTool("mutation", VoiceTutorMcpToolResult("{}", false, lessonRevision = 1))
+        assertThat(controller.learningWatchIsCurrent(watch)).isFalse()
+        val current = sessionStates().last()
+        assertThat(current.path("revision").asLong()).isEqualTo(1)
+        assertThat(current.path("phase").asText()).isEqualTo("conversation")
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
+        assertThat(sessionStates().last()).isEqualTo(current)
+    }
+
+    @Test
+    fun `saved question ready is not lowered by a late model process timeout`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generate-1")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single()
+        ackToolOutput(); created("poll-response"); toolDone("poll-response", "poll", "get_question_process")
+        controller.beginTool("poll")
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
+        controller.completeTool("poll", VoiceTutorMcpToolResult("{\"error\":{\"code\":\"TOOL_TIMEOUT\"}}", true))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_ready")
+        assertThat(controller.learningWatchIsCurrent(watch)).isFalse()
+    }
+
+    @Test
+    fun `canonical generation failure cannot return to pending from its late model poll`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
+        controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generate-1")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single()
+        ackToolOutput(); created("poll-response"); toolDone("poll-response", "poll", "get_question_process")
+        controller.beginTool("poll")
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_FAILED)))
+        controller.completeTool("poll", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+        assertThat(controller.learningWatchIsCurrent(watch)).isFalse()
+        ackToolOutput(); created("retry-response"); toolDone("retry-response", "retry", "request_question")
+        controller.beginTool("retry")
+        controller.completeTool("retry", VoiceTutorMcpToolResult("{}", false,
+            learningProgress = progress.copy(correlationId = "generate-2")))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_generating")
+        assertThat(watches.last().progress.correlationId).isEqualTo("generate-2")
     }
 
     @Test
@@ -291,7 +516,7 @@ class VoiceTutorNativeConversationControllerTest {
         rejected(responses().last())
         rejected(responses().last())
         assertThat(responses()).hasSize(2)
-        assertThat(ui.map { it.path("type").asText() }).containsExactly(Contract.INPUT_RETRY_EVENT)
+        assertThat(ui.map { it.path("type").asText() }).containsExactly(Contract.SESSION_STATE_EVENT, Contract.INPUT_RETRY_EVENT)
         assertThat(failures.last().action).isEqualTo(VoiceTutorProviderTurnFailureAction.TURN_ABANDONED)
 
         time += Duration.ofSeconds(61).toNanos()
@@ -1118,6 +1343,7 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(error).isInstanceOf(VoiceTutorQuotaExhaustionNoticeInterruptedException::class.java)
     }
 
+    private fun sessionStates() = ui.filter { it.path("type").asText() == Contract.SESSION_STATE_EVENT }
     private fun responses() = outbound.filter { it.path("type").asText() == "response.create" }
     private fun answerStates() = ui.filter { it.path("type").asText() == Contract.ANSWER_STATE_EVENT }
     private fun answerSegments() = ui.filter { it.path("type").asText() == Contract.ANSWER_TRANSCRIPT_EVENT }
