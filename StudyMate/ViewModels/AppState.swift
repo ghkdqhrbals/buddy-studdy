@@ -280,6 +280,8 @@ final class AppState: ObservableObject {
     @Published private(set) var isLoadingVoiceTutorSessions = false
     @Published private(set) var voiceTutorErrorMessage: String?
     private var voiceTutorStatusRequestGeneration: UInt64 = 0
+    private var voiceTutorStatusRefresh: (id: UUID, identity: CommonRecordsIdentity, task: Task<Void, Never>)?
+    private var communityProfileRefresh: (id: UUID, identity: CommonRecordsIdentity, task: Task<Int?, Never>)?
     private var voiceTutorSessionsRequestGeneration: UInt64 = 0
     private var voiceTutorDetailRequestIDs: [String: UUID] = [:]
     @Published private(set) var referralSummary: BackendReferralSummary?
@@ -1763,6 +1765,10 @@ final class AppState: ObservableObject {
         )
         configuredBackendBaseURLDescription = nextBaseURLDescription
         backendClientGeneration += 1
+        communityProfileRefresh?.task.cancel()
+        communityProfileRefresh = nil
+        voiceTutorStatusRefresh?.task.cancel()
+        voiceTutorStatusRefresh = nil
         membershipRefreshOrder.invalidatePendingRequests()
         billingRefreshTask?.cancel()
         billingRefreshTask = nil
@@ -5580,6 +5586,8 @@ final class AppState: ObservableObject {
         #endif
         cancelAllAnswerGradingPolling(reason: "community-session-reset")
         setCommunitySessionSignedIn(false)
+        communityProfileRefresh?.task.cancel()
+        communityProfileRefresh = nil
         invalidateCommonRecordReads(detachQuestionDrafts: true)
         studyRoomState.replace(with: [])
         backendStudyLoadState = .idle
@@ -5706,31 +5714,91 @@ final class AppState: ObservableObject {
         }
     }
 
-    func loadCommunityProfile() async {
-        logAuthTrace("community_profile_load_start", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
-        let sessionGeneration = communitySessionState.generation
-        guard isCommunitySessionActive,
-              let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile") else {
-            logAuthTrace("community_profile_load_skipped", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
-            return
+    /// Keep the origin visible until every section used by the profile page has
+    /// settled. A restored login first needs its authoritative profile ID before
+    /// the voice entitlement request can be made.
+    func prepareProfilePageForOpening(forceRefresh: Bool = false) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        guard isCommunitySessionActive else { return true }
+        let pendingIdentity = commonRecordsIdentity
+        if communityProfile == nil {
+            guard let loadedProfileID = await refreshCommunityProfile(),
+                  communityProfile?.id == loadedProfileID else { return false }
+        } else if forceRefresh {
+            _ = await refreshCommunityProfile()
+        } else if let refresh = communityProfileRefresh,
+                  refresh.identity == pendingIdentity {
+            _ = await refresh.task.value
         }
-        guard isCurrentCommunitySession(sessionGeneration) else {
-            return
+        let resolvedIdentity = commonRecordsIdentity
+        guard !Task.isCancelled, isCommunitySessionActive,
+              (communityProfile?.id ?? 0) > 0,
+              pendingIdentity.sessionGeneration == resolvedIdentity.sessionGeneration,
+              pendingIdentity.backendGeneration == resolvedIdentity.backendGeneration,
+              pendingIdentity.languageCode == resolvedIdentity.languageCode,
+              pendingIdentity.userID == nil || pendingIdentity.userID == resolvedIdentity.userID else {
+            return false
         }
 
+        async let billingRefresh: Void = refreshBilling()
+        async let voiceRefresh: Void = refreshVoiceTutorStatus()
+        _ = await (billingRefresh, voiceRefresh)
+        return !Task.isCancelled && isCommunitySessionActive &&
+            resolvedIdentity == commonRecordsIdentity && communityProfile != nil
+    }
+
+    func loadCommunityProfile() async {
+        _ = await refreshCommunityProfile()
+    }
+
+    private func refreshCommunityProfile() async -> Int? {
+        guard !Task.isCancelled, isCommunitySessionActive else { return nil }
+        let identity = commonRecordsIdentity
+        if let refresh = communityProfileRefresh, refresh.identity == identity {
+            return await refresh.task.value
+        }
+        communityProfileRefresh?.task.cancel()
+        let requestID = UUID()
+        let task = Task { @MainActor [weak self] () -> Int? in
+            guard let self else { return nil }
+            return await self.performCommunityProfileRefresh(identity: identity)
+        }
+        communityProfileRefresh = (requestID, identity, task)
+        let profileID = await task.value
+        if communityProfileRefresh?.id == requestID {
+            communityProfileRefresh = nil
+        }
+        return profileID
+    }
+
+    private func performCommunityProfileRefresh(identity: CommonRecordsIdentity) async -> Int? {
+        logAuthTrace("community_profile_load_start", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
+        let currentCommunityUseCase = communityUseCase
+        guard !Task.isCancelled, isCommunitySessionActive,
+              identity == commonRecordsIdentity,
+              let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile"),
+              !Task.isCancelled, identity == commonRecordsIdentity else {
+            logAuthTrace("community_profile_load_skipped", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
+            return nil
+        }
+
+        var loadedProfileID: Int?
         await actionRunner.run(
             operation: {
-                try await communityUseCase.fetchMyProfile(registration: registration)
+                try await currentCommunityUseCase.fetchMyProfile(registration: registration)
             },
             onSuccess: { profile in
-                guard isCurrentCommunitySession(sessionGeneration) else {
+                guard !Task.isCancelled, identity == commonRecordsIdentity,
+                      isCommunitySessionActive else {
                     return
                 }
                 applyCommunityProfile(profile)
+                loadedProfileID = profile.id
                 logAuthTrace("community_profile_load_success", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
             },
             onFailure: { error in
-                guard isCurrentCommunitySession(sessionGeneration) else {
+                guard !Task.isCancelled, identity == commonRecordsIdentity,
+                      isCommunitySessionActive, !Self.isCancellationLikeError(error) else {
                     return
                 }
                 let handled = handleCommunityError(error)
@@ -5755,6 +5823,7 @@ final class AppState: ObservableObject {
                 log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
             }
         )
+        return loadedProfileID
     }
 
     func refreshDeveloperFeatureAccess(reason: String = "manual") async {
@@ -8040,6 +8109,8 @@ final class AppState: ObservableObject {
     }
 
     private func resetVoiceTutorState() {
+        voiceTutorStatusRefresh?.task.cancel()
+        voiceTutorStatusRefresh = nil
         voiceTutorStudyMetadataFence = VoiceTutorStudyMetadataFence()
         voiceTutorQuestionRequestIDs = [:]
         voiceTutorQuestionRoomRequestIDs = [:]
@@ -8140,9 +8211,27 @@ final class AppState: ObservableObject {
     }
 
     func refreshVoiceTutorStatus() async {
-        guard !isLoadingVoiceTutorStatus else {
+        guard !Task.isCancelled else { return }
+        let identity = commonRecordsIdentity
+        if let refresh = voiceTutorStatusRefresh, refresh.identity == identity {
+            await refresh.task.value
             return
         }
+        voiceTutorStatusRefresh?.task.cancel()
+        let requestID = UUID()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performVoiceTutorStatusRefresh()
+        }
+        voiceTutorStatusRefresh = (requestID, identity, task)
+        await task.value
+        if voiceTutorStatusRefresh?.id == requestID {
+            voiceTutorStatusRefresh = nil
+        }
+    }
+
+    private func performVoiceTutorStatusRefresh() async {
+        guard !Task.isCancelled else { return }
         let currentVoiceTutorUseCase = voiceTutorUseCase
         guard let context = try? makeVoiceTutorRequestContext() else {
             voiceTutorStatus = nil
@@ -8170,13 +8259,13 @@ final class AppState: ObservableObject {
                     try await currentVoiceTutorUseCase.status(registration: recoveredRegistration)
                 }
             )
-            guard context.isCurrent(), requestGeneration == voiceTutorStatusRequestGeneration else {
+            guard !Task.isCancelled, context.isCurrent(), requestGeneration == voiceTutorStatusRequestGeneration else {
                 return
             }
             voiceTutorStatus = status
             voiceTutorErrorMessage = nil
         } catch where !Self.isCancellationLikeError(error) {
-            guard context.isCurrent(), requestGeneration == voiceTutorStatusRequestGeneration else {
+            guard !Task.isCancelled, context.isCurrent(), requestGeneration == voiceTutorStatusRequestGeneration else {
                 return
             }
             voiceTutorErrorMessage = voiceTutorDisplayMessage(for: error)

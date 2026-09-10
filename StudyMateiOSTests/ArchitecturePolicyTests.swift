@@ -1735,10 +1735,10 @@ final class ArchitecturePolicyTests: XCTestCase {
         let content = try String(contentsOf: file, encoding: .utf8)
 
         guard let profileStart = content.range(
-            of: "private struct MobileProfilePage: View"
+            of: "struct MobileProfilePage: View"
         )?.lowerBound,
         let profileEnd = content.range(
-            of: "private struct MobileProfileEditorView: View",
+            of: "struct MobileProfileEditorView: View",
             range: profileStart..<content.endIndex
         )?.lowerBound else {
             return XCTFail("Profile page boundaries were not found.")
@@ -1756,10 +1756,10 @@ final class ArchitecturePolicyTests: XCTestCase {
         let content = try String(contentsOf: file, encoding: .utf8)
 
         guard let profileStart = content.range(
-            of: "private struct MobileProfilePage: View"
+            of: "struct MobileProfilePage: View"
         )?.lowerBound,
         let editorStart = content.range(
-            of: "private struct MobileProfileEditorView: View",
+            of: "struct MobileProfileEditorView: View",
             range: profileStart..<content.endIndex
         )?.lowerBound,
         let termsStart = content.range(
@@ -1786,7 +1786,7 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
         XCTAssertTrue(
             editorContent.contains(
-                "if appState.isCommunitySessionActive {\n                    ToolbarItem(placement: .confirmationAction)"
+                "if appState.isCommunitySessionActive, !shouldDismissEditor {\n                    ToolbarItem(placement: .confirmationAction)"
             ),
             "The avatar Save action should only appear after sign-in."
         )

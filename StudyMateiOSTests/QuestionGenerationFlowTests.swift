@@ -12,6 +12,208 @@ final class QuestionGenerationFlowTests: XCTestCase {
         super.tearDown()
     }
 
+    func testProfileOpeningResolvesIdentityBeforeWaitingForEveryVisibleSection() async throws {
+        let startedPaths = LockedValue<[String]>([])
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            let path = request.url?.path ?? ""
+            startedPaths.set(startedPaths.value + [path])
+            return path == "/api/v1/profile" || path == "/api/v1/voice-tutor/status" ? 250_000_000 : 0
+        }
+        try await withProfilePageState { appState, _ in
+            XCTAssertNil(appState.communityProfile)
+            var finished = false
+            let opening = Task { @MainActor in
+                let ready = await appState.prepareProfilePageForOpening()
+                finished = true
+                return ready
+            }
+            let profileStarted = await self.waitUntil { startedPaths.value.contains("/api/v1/profile") }
+            XCTAssertTrue(profileStarted)
+            XCTAssertFalse(startedPaths.value.contains("/api/v1/voice-tutor/status"))
+            XCTAssertFalse(startedPaths.value.contains("/api/v1/billing/status"))
+            XCTAssertFalse(finished)
+            let voiceStarted = await self.waitUntil { startedPaths.value.contains("/api/v1/voice-tutor/status") }
+            XCTAssertTrue(voiceStarted)
+            XCTAssertEqual(appState.communityProfile?.id, 7)
+            XCTAssertFalse(finished, "The profile response alone must not open a partial page.")
+            let ready = await opening.value
+            XCTAssertTrue(ready)
+            XCTAssertNotNil(appState.questionQuota)
+            XCTAssertNotNil(appState.voiceTutorStatus)
+        }
+    }
+
+    func testProfileOpeningJoinsProfileReadAlreadyInFlight() async throws {
+        let profileRequests = LockedRequestCounter()
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.url?.path == "/api/v1/profile" else { return 0 }
+            profileRequests.increment()
+            return 250_000_000
+        }
+        try await withProfilePageState { appState, _ in
+            let refresh = Task { @MainActor in await appState.loadCommunityProfile() }
+            let didStart = await self.waitUntil { profileRequests.value == 1 }
+            XCTAssertTrue(didStart)
+            async let secondRefresh: Void = appState.loadCommunityProfile()
+            async let ready = appState.prepareProfilePageForOpening()
+            let didPrepare = await ready
+            _ = await secondRefresh
+            await refresh.value
+            XCTAssertTrue(didPrepare)
+            XCTAssertEqual(profileRequests.value, 1)
+        }
+    }
+
+    func testProfileOpeningJoinsVoiceStatusReadAlreadyInFlight() async throws {
+        let voiceRequests = LockedRequestCounter()
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.url?.path == "/api/v1/voice-tutor/status" else { return 0 }
+            voiceRequests.increment()
+            return 350_000_000
+        }
+        try await withProfilePageState { appState, _ in
+            await appState.loadCommunityProfile()
+            let refresh = Task { @MainActor in await appState.refreshVoiceTutorStatus() }
+            let didStart = await self.waitUntil { voiceRequests.value == 1 }
+            XCTAssertTrue(didStart)
+            var finished = false
+            let opening = Task { @MainActor in
+                let ready = await appState.prepareProfilePageForOpening()
+                finished = true
+                return ready
+            }
+            try await Task.sleep(nanoseconds: 60_000_000)
+            XCTAssertFalse(finished, "An in-flight voice request must be awaited, not skipped.")
+            let ready = await opening.value
+            await refresh.value
+            XCTAssertTrue(ready)
+            XCTAssertEqual(voiceRequests.value, 1)
+            XCTAssertEqual(appState.voiceTutorStatus?.quota.remainingSeconds, 3_480)
+        }
+    }
+
+    func testProfileOpeningRetainsCachedContentWhenRefreshFails() async throws {
+        let shouldFail = LockedValue(false)
+        try await withProfilePageState(handler: { request in
+            if shouldFail.value {
+                return Self.response(for: request, statusCode: 503, body: "{}")
+            }
+            return Self.profilePageResponse(for: request)
+        }) { appState, _ in
+            let firstReady = await appState.prepareProfilePageForOpening()
+            XCTAssertTrue(firstReady)
+            let profile = appState.communityProfile
+            let remainingQuestions = appState.questionQuota?.remainingCount
+            let voiceStatus = appState.voiceTutorStatus
+            shouldFail.set(true)
+            let secondReady = await appState.prepareProfilePageForOpening(forceRefresh: true)
+            XCTAssertTrue(secondReady)
+            XCTAssertEqual(appState.communityProfile, profile)
+            XCTAssertEqual(appState.questionQuota?.remainingCount, remainingQuestions)
+            XCTAssertEqual(appState.voiceTutorStatus, voiceStatus)
+        }
+    }
+
+    func testExplicitProfileRefreshUpdatesExistingProfileBeforeReturningReady() async throws {
+        let profileRequests = LockedRequestCounter()
+        try await withProfilePageState(handler: { request in
+            if request.url?.path == "/api/v1/profile" {
+                profileRequests.increment()
+                if profileRequests.value > 1 {
+                    return Self.response(
+                        for: request, statusCode: 200,
+                        body: #"{"id":7,"displayName":"New-Buddy-0007","status":"ACTIVE","provider":"GOOGLE","avatarColorSeed":"avatar-color-coral"}"#
+                    )
+                }
+            }
+            return Self.profilePageResponse(for: request)
+        }) { appState, _ in
+            let firstReady = await appState.prepareProfilePageForOpening()
+            XCTAssertTrue(firstReady)
+            let cachedReady = await appState.prepareProfilePageForOpening()
+            XCTAssertTrue(cachedReady)
+            XCTAssertEqual(profileRequests.value, 1)
+            let refreshedReady = await appState.prepareProfilePageForOpening(forceRefresh: true)
+            XCTAssertTrue(refreshedReady)
+            XCTAssertEqual(profileRequests.value, 2)
+            XCTAssertEqual(appState.communityProfile?.avatarColorSeed, "avatar-color-coral")
+        }
+    }
+
+    func testProfileOpeningFailureDoesNotLoadDependentSectionsOrBecomeReady() async throws {
+        let requestedPaths = LockedValue<[String]>([])
+        try await withProfilePageState(handler: { request in
+            requestedPaths.set(requestedPaths.value + [request.url?.path ?? ""])
+            return Self.response(for: request, statusCode: 503, body: "{}")
+        }) { appState, _ in
+            let ready = await appState.prepareProfilePageForOpening()
+            XCTAssertFalse(ready)
+            XCTAssertNil(appState.communityProfile)
+            XCTAssertFalse(requestedPaths.value.contains("/api/v1/billing/status"))
+            XCTAssertFalse(requestedPaths.value.contains("/api/v1/voice-tutor/status"))
+        }
+    }
+
+    func testCancelledProfileOpeningDoesNotBecomeReadyAfterSharedReadFinishes() async throws {
+        let voiceStarted = LockedValue(false)
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.url?.path == "/api/v1/voice-tutor/status" else { return 0 }
+            voiceStarted.set(true)
+            return 200_000_000
+        }
+        try await withProfilePageState { appState, _ in
+            let opening = Task { @MainActor in await appState.prepareProfilePageForOpening() }
+            let didStart = await self.waitUntil { voiceStarted.value }
+            XCTAssertTrue(didStart)
+            opening.cancel()
+            let ready = await opening.value
+            XCTAssertFalse(ready)
+            XCTAssertTrue(appState.isCommunitySessionActive)
+            XCTAssertEqual(appState.communityProfile?.id, 7)
+        }
+    }
+
+    func testAccountReplacementCannotPublishPreparedProfileOrOldVoiceStatus() async throws {
+        let voiceStarted = LockedValue(false)
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.url?.path == "/api/v1/voice-tutor/status" else { return 0 }
+            voiceStarted.set(true)
+            return 200_000_000
+        }
+        try await withProfilePageState { appState, _ in
+            let opening = Task { @MainActor in await appState.prepareProfilePageForOpening() }
+            let didStart = await self.waitUntil { voiceStarted.value }
+            XCTAssertTrue(didStart)
+            appState.communityProfile = CommunityUserProfile(
+                id: 8, displayName: "Replacement account", status: "ACTIVE", provider: "GOOGLE", bio: "", avatarURL: nil
+            )
+            let ready = await opening.value
+            XCTAssertFalse(ready)
+            XCTAssertEqual(appState.communityProfile?.id, 8)
+            XCTAssertNil(appState.voiceTutorStatus)
+        }
+    }
+
+    func testDelayedProfileReadCannotReplaceNewAccountIdentity() async throws {
+        let profileStarted = LockedValue(false)
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.url?.path == "/api/v1/profile" else { return 0 }
+            profileStarted.set(true)
+            return 200_000_000
+        }
+        try await withProfilePageState { appState, _ in
+            let opening = Task { @MainActor in await appState.prepareProfilePageForOpening() }
+            let didStart = await self.waitUntil { profileStarted.value }
+            XCTAssertTrue(didStart)
+            appState.communityProfile = CommunityUserProfile(
+                id: 8, displayName: "Replacement account", status: "ACTIVE", provider: "GOOGLE", bio: "", avatarURL: nil
+            )
+            let ready = await opening.value
+            XCTAssertFalse(ready, "A cold-start read cannot authorize a destination after account replacement.")
+            XCTAssertEqual(appState.communityProfile?.id, 8)
+        }
+    }
+
     func testVoiceTutorRecordingRetryRecoversLostCompletionResponse() async throws {
         let sessionID = "00000000-0000-4000-8000-000000000007"
         var requests: [URLRequest] = []
@@ -4597,6 +4799,45 @@ final class QuestionGenerationFlowTests: XCTestCase {
           "offset": 0
         }
         """
+
+    private func withProfilePageState(
+        handler: ((URLRequest) throws -> (HTTPURLResponse, Data))? = nil,
+        operation: @MainActor (AppState, SettingsStore) async throws -> Void
+    ) async throws {
+        let suiteName = "ProfilePagePreparationTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            if let handler {
+                return try handler(request)
+            }
+            return Self.profilePageResponse(for: request)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        try await operation(appState, store)
+    }
+
+    private static func profilePageResponse(for request: URLRequest) -> (HTTPURLResponse, Data) {
+        switch request.url?.path {
+        case "/api/v1/profile":
+            return activeProfileResponse(for: request)
+        case "/api/v1/billing/status":
+            return response(for: request, statusCode: 200, body: tier1BillingStatusResponse)
+        case "/api/v1/voice-tutor/status":
+            return response(
+                for: request, statusCode: 200,
+                body: #"{"eligible":true,"tierCode":"TIER2","quota":{"limitSeconds":3600,"usedSeconds":120,"reservedSeconds":0,"remainingSeconds":3480}}"#
+            )
+        default:
+            // The profile does not depend on the billing catalog or invoices.
+            return response(for: request, statusCode: 503, body: "{}")
+        }
+    }
 
     private static func treeOpeningResponse(for request: URLRequest) -> (HTTPURLResponse, Data) {
         let body: String

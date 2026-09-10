@@ -1255,6 +1255,7 @@ private struct MobileHomeView: View {
     @State private var isHomeLoginPagePresented = false
     @State private var isShowingNotifications = false
     @State private var isShowingProfileSettings = false
+    @State private var isPreparingProfile = false
     @State private var isShowingSettings = false
     @State private var isShowingFeedback = false
     @State private var isShowingEmailSignIn = false
@@ -1620,13 +1621,16 @@ private struct MobileHomeView: View {
         .onDisappear {
             searchFocusTask?.cancel()
             searchFocusTask = nil
+            isPreparingProfile = false
             if activeTrimmedSearchText.isEmpty {
                 closeHomeSearch(clearText: false)
             }
         }
-        .navigationDestination(isPresented: $isShowingProfileSettings) {
-            MobileProfilePage()
-        }
+        .modifier(MobileProfileOpeningModifier(
+            appState: appState,
+            isPreparing: $isPreparingProfile,
+            isPresented: $isShowingProfileSettings
+        ))
         .sheet(isPresented: $isShowingEmailSignIn) {
             EmailSignInSheet {
                 isShowingEmailSignIn = false
@@ -1789,7 +1793,7 @@ private struct MobileHomeView: View {
 
         switch request.route {
         case .profile:
-            isShowingProfileSettings = true
+            isPreparingProfile = true
         case .settings, .settingsOpenAI:
             isShowingSettings = true
         case .studyList:
@@ -2432,7 +2436,7 @@ private struct MobileHomeView: View {
         let tierName = strings.membershipTierName(activeMembershipTierCode)
 
         return Button {
-            isShowingProfileSettings = true
+            isPreparingProfile = true
         } label: {
             HStack(spacing: 7) {
                 HomeProfileAvatar(
@@ -2443,6 +2447,10 @@ private struct MobileHomeView: View {
                     size: 34
                 )
                 .frame(width: 34, height: 34)
+                .opacity(isPreparingProfile ? 0.4 : 1)
+                .overlay {
+                    if isPreparingProfile { ProgressView().controlSize(.mini) }
+                }
 
                 if appState.isCommunitySessionActive {
                     Text(tierName)
@@ -2480,7 +2488,7 @@ private struct MobileHomeView: View {
         let strings = appState.strings
 
         return Button {
-            isShowingProfileSettings = true
+            isPreparingProfile = true
         } label: {
             HomeProfileAvatar(
                 symbolName: appState.profileAvatarSymbolName,
@@ -2490,6 +2498,10 @@ private struct MobileHomeView: View {
                 size: 34
             )
             .frame(width: 34, height: 34)
+            .opacity(isPreparingProfile ? 0.4 : 1)
+            .overlay {
+                if isPreparingProfile { ProgressView().controlSize(.mini) }
+            }
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -2770,6 +2782,38 @@ private struct MobileCommunityUserBlockAlertModifier: ViewModifier {
         } message: { selectedUser in
             Text(strings.blockUserMessage(selectedUser.displayName))
         }
+    }
+}
+
+private struct MobileProfileOpeningModifier: ViewModifier {
+    @ObservedObject var appState: AppState
+    @Binding var isPreparing: Bool
+    @Binding var isPresented: Bool
+    @State private var showsError = false
+    @State private var preparedIdentity: CommonRecordsIdentity?
+
+    func body(content: Content) -> some View {
+        content
+            .navigationDestination(isPresented: $isPresented) {
+                MobileProfilePage(preparedIdentity: preparedIdentity)
+            }
+            .task(id: isPreparing) {
+                guard isPreparing else { return }
+                let ready = await appState.prepareProfilePageForOpening()
+                guard !Task.isCancelled, isPreparing else { return }
+                isPreparing = false
+                if ready {
+                    preparedIdentity = appState.commonRecordsIdentity
+                    isPresented = true
+                } else {
+                    showsError = true
+                }
+            }
+            .onChange(of: appState.selectedTab) { isPreparing = false }
+            .alert(appState.strings.profileRequestFailed, isPresented: $showsError) {
+                Button(appState.strings.retry) { isPreparing = true }
+                Button(appState.strings.cancel, role: .cancel) {}
+            }
     }
 }
 
@@ -6301,11 +6345,21 @@ extension Color {
     }
 }
 
-private struct MobileProfilePage: View {
+struct MobileProfilePage: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var isMembershipManagementPresented = false
     @State private var developerUnlockTapTracker = RapidDeveloperUnlockTapTracker()
+    @State private var preparedIdentity: CommonRecordsIdentity?
+    @State private var initialLoadFailed = false
+
+    init(preparedIdentity: CommonRecordsIdentity? = nil) {
+        _preparedIdentity = State(initialValue: preparedIdentity)
+    }
+
+    private var hasPreparedContent: Bool {
+        !appState.isCommunitySessionActive || preparedIdentity == appState.commonRecordsIdentity
+    }
 
     private var strings: AppStrings {
         appState.strings
@@ -6329,6 +6383,57 @@ private struct MobileProfilePage: View {
     }
 
     var body: some View {
+        Group {
+            if hasPreparedContent {
+                profileContent
+            } else if initialLoadFailed {
+                ContentUnavailableView {
+                    Label(strings.profileRequestFailed, systemImage: "person.crop.circle")
+                } actions: {
+                    Button(strings.retry) {
+                        initialLoadFailed = false
+                    }
+                }
+            } else {
+                ProgressView(strings.loading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle(strings.profile)
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: ProfilePageLoadRequest(identity: appState.commonRecordsIdentity, failed: initialLoadFailed)) {
+            guard !hasPreparedContent, !initialLoadFailed else { return }
+            let ready = await appState.prepareProfilePageForOpening()
+            guard !Task.isCancelled else { return }
+            if ready {
+                preparedIdentity = appState.commonRecordsIdentity
+            } else {
+                initialLoadFailed = true
+            }
+        }
+        .onChange(of: appState.commonRecordsIdentity) { initialLoadFailed = false }
+        .refreshable {
+            if await appState.prepareProfilePageForOpening(forceRefresh: true) {
+                preparedIdentity = appState.commonRecordsIdentity
+            }
+        }
+        .sheet(isPresented: $isMembershipManagementPresented) {
+            NavigationStack {
+                MobileMembershipManagementView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(strings.close) {
+                                isMembershipManagementPresented = false
+                            }
+                        }
+                    }
+            }
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var profileContent: some View {
         List {
             if appState.isCommunitySessionActive {
                 Section {
@@ -6346,14 +6451,6 @@ private struct MobileProfilePage: View {
                             .padding(.vertical, 2)
                         }
                         .buttonStyle(.plain)
-                    } else if appState.isLoadingBilling {
-                        HStack(spacing: 9) {
-                            ProgressView()
-                            Text(strings.loading)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(minHeight: 36)
                     } else {
                         HStack(spacing: 12) {
                             Text(strings.serviceTemporarilyUnavailable)
@@ -6378,7 +6475,7 @@ private struct MobileProfilePage: View {
             Section {
                 if appState.isCommunitySessionActive {
                     NavigationLink {
-                        MobileProfileEditorView()
+                        MobileProfileEditorView(initialProfile: appState.communityProfile)
                     } label: {
                         profileDestinationLabel(
                             title: strings.avatar,
@@ -6514,29 +6611,6 @@ private struct MobileProfilePage: View {
                 }
             }
         }
-        .navigationTitle(strings.profile)
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            if appState.isCommunitySessionActive {
-                async let billingRefresh: Void = appState.refreshBilling()
-                async let profileRefresh: Void = appState.loadCommunityProfile()
-                async let voiceTutorRefresh: Void = appState.refreshVoiceTutorStatus()
-                _ = await (billingRefresh, profileRefresh, voiceTutorRefresh)
-            }
-        }
-        .sheet(isPresented: $isMembershipManagementPresented) {
-            NavigationStack {
-                MobileMembershipManagementView()
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(strings.close) {
-                                isMembershipManagementPresented = false
-                            }
-                        }
-                    }
-            }
-            .presentationDragIndicator(.visible)
-        }
     }
 
     private func registerDeveloperVersionTap() {
@@ -6566,6 +6640,9 @@ private struct MobileProfilePage: View {
                 limitSeconds: quota.limitSeconds
             )
         }
+        if appState.voiceTutorStatus == nil, appState.voiceTutorErrorMessage != nil {
+            return strings.serviceTemporarilyUnavailable
+        }
         return strings.voiceTutorProRequired
     }
 
@@ -6593,6 +6670,11 @@ private struct MobileProfilePage: View {
         }
         .padding(.vertical, 3)
     }
+}
+
+private struct ProfilePageLoadRequest: Equatable {
+    var identity: CommonRecordsIdentity
+    var failed: Bool
 }
 
 private struct MobileReferralView: View {
@@ -7977,53 +8059,48 @@ private struct BillingInvoiceSection: Identifiable {
     }
 }
 
-private struct MobileProfileEditorView: View {
+struct MobileProfileEditorView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @State private var profileDisplayName = ""
-    @State private var draftAvatarSymbolName = BuddyStudyAvatar.symbolName
-    @State private var draftAvatarColorSeed = "avatar-color-sage"
+    @State private var draft: CommunityProfileEditorDraft
     @State private var isShowingEmailSignIn = false
-    @State private var isLoadingProfileDraft = false
-    @State private var wasSignedInWhenOpened = false
+    @State private var isLoadingProfileDraft: Bool
+    @State private var profileLoadAttempt = 0
+    @State private var wasSignedInWhenOpened: Bool?
+
+    init(initialProfile: CommunityUserProfile? = nil) {
+        _draft = State(initialValue: CommunityProfileEditorDraft(profile: initialProfile))
+        _isLoadingProfileDraft = State(initialValue: initialProfile == nil)
+    }
 
     private var strings: AppStrings {
         appState.strings
     }
 
     private var trimmedProfileDisplayName: String {
-        profileDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var hasProfileChanges: Bool {
-        guard appState.isCommunitySessionActive else {
-            return false
-        }
-
-        let profile = appState.communityProfile
-        let currentDisplayName = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let currentAvatar = ProfileAvatarOption.canonicalName(
-            for: profile?.avatarSymbolName ?? appState.profileAvatarSymbolName
-        )
-        let currentColor = profile?.avatarColorSeed ?? appState.profileAvatarColorSeed
-
-        return trimmedProfileDisplayName != currentDisplayName
-            || draftAvatarSymbolName != currentAvatar
-            || draftAvatarColorSeed != currentColor
+    private var shouldDismissEditor: Bool {
+        draft.isInvalidated || draft.belongsToDifferentProfile(appState.communityProfile)
     }
 
     private var canSaveProfile: Bool {
         appState.isCommunitySessionActive
+            && draft.isPrepared
+            && draft.profileID == appState.communityProfile?.id
             && !appState.isUpdatingCommunityProfile
             && !trimmedProfileDisplayName.isEmpty
-            && hasProfileChanges
+            && draft.hasChanges
     }
 
     var body: some View {
         let strings = appState.strings
 
         Form {
-                if appState.isCommunitySessionActive, appState.communityProfile == nil {
+                if shouldDismissEditor {
+                    EmptyView()
+                } else if appState.isCommunitySessionActive, !draft.isPrepared {
                     Section {
                         VStack(spacing: 14) {
                             if isLoadingProfileDraft {
@@ -8045,12 +8122,8 @@ private struct MobileProfileEditorView: View {
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
                                 Button {
-                                    Task {
-                                        isLoadingProfileDraft = true
-                                        await appState.loadCommunityProfile()
-                                        resetDraftProfile()
-                                        isLoadingProfileDraft = false
-                                    }
+                                    isLoadingProfileDraft = true
+                                    profileLoadAttempt += 1
                                 } label: {
                                     Text(strings.retry)
                                         .font(.subheadline.weight(.semibold))
@@ -8065,9 +8138,9 @@ private struct MobileProfileEditorView: View {
                     Section {
                         VStack(alignment: .center, spacing: 14) {
                             HomeProfileAvatar(
-                                symbolName: draftAvatarSymbolName,
-                                displayName: profileDisplayName,
-                                colorSeed: draftAvatarColorSeed,
+                                symbolName: draft.avatarSymbolName,
+                                displayName: draft.displayName,
+                                colorSeed: draft.avatarColorSeed,
                                 usesNeutralColor: false,
                                 size: 94
                             )
@@ -8075,7 +8148,7 @@ private struct MobileProfileEditorView: View {
 
                             pixelAvatarPicker(strings: strings)
 
-                            TextField(strings.profileDisplayName, text: $profileDisplayName)
+                            TextField(strings.profileDisplayName, text: $draft.displayName)
                                 .font(.title2.weight(.bold))
                                 .multilineTextAlignment(.center)
                                 .textInputAutocapitalization(.words)
@@ -8127,14 +8200,15 @@ private struct MobileProfileEditorView: View {
             )
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if appState.isCommunitySessionActive {
+                if appState.isCommunitySessionActive, !shouldDismissEditor {
                     ToolbarItem(placement: .confirmationAction) {
                         Button {
                             Task {
+                                guard canSaveProfile else { return }
                                 let didUpdate = await appState.updateCommunityProfile(
                                     displayName: trimmedProfileDisplayName,
-                                    avatarSymbolName: draftAvatarSymbolName,
-                                    avatarColorSeed: draftAvatarColorSeed,
+                                    avatarSymbolName: draft.avatarSymbolName,
+                                    avatarColorSeed: draft.avatarColorSeed,
                                     avatarMode: "PIXEL",
                                     avatarConfig: nil
                                 )
@@ -8155,21 +8229,18 @@ private struct MobileProfileEditorView: View {
                 }
             }
             .onAppear {
-                wasSignedInWhenOpened = appState.isCommunitySessionActive
+                if wasSignedInWhenOpened == nil {
+                    wasSignedInWhenOpened = appState.isCommunitySessionActive
+                }
                 appState.logMobileAuthView(
                     "mobile_profile_sheet_appear",
                     page: .profile,
                     reason: "MobileProfilePage",
                     extra: ["hasProfile=\(appState.communityProfile != nil)"]
                 )
-                resetDraftProfile()
-                Task {
-                    isLoadingProfileDraft = true
-                    await appState.loadCommunityProfile()
-                    await appState.refreshTermsAndNotificationPreferences(reason: "profile-settings")
-                    resetDraftProfile()
-                    isLoadingProfileDraft = false
-                }
+            }
+            .task(id: profileLoadAttempt) {
+                await prepareDraftIfNeeded()
             }
             .onChange(of: appState.communityProfile) { _, profile in
                 appState.logMobileAuthView(
@@ -8178,18 +8249,12 @@ private struct MobileProfileEditorView: View {
                     reason: "communityProfile",
                     extra: ["hasProfile=\(profile != nil)", "provider=\(profile?.provider ?? "-")"]
                 )
-                guard isLoadingProfileDraft || !hasProfileChanges else {
+                if draft.belongsToDifferentProfile(profile) {
+                    draft.invalidate()
+                    dismiss()
                     return
                 }
-
-                guard let profile else {
-                    resetDraftProfile()
-                    return
-                }
-
-                profileDisplayName = profile.displayName
-                draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
-                draftAvatarColorSeed = profile.avatarColorSeed
+                draft.prepareIfNeeded(profile)
             }
             .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
                 appState.logMobileAuthView(
@@ -8198,7 +8263,12 @@ private struct MobileProfileEditorView: View {
                     reason: "MobileProfilePage",
                     extra: ["isSignedIn=\(isSignedIn)"]
                 )
-                if isSignedIn, !wasSignedInWhenOpened {
+                if !isSignedIn {
+                    draft.invalidate()
+                    if wasSignedInWhenOpened == true {
+                        dismiss()
+                    }
+                } else if wasSignedInWhenOpened == false {
                     dismiss()
                 }
             }
@@ -8211,13 +8281,21 @@ private struct MobileProfileEditorView: View {
             }
     }
 
-    private func resetDraftProfile() {
-        profileDisplayName = appState.communityProfile?.displayName ?? ""
-        draftAvatarSymbolName = ProfileAvatarOption.canonicalName(
-            for: appState.communityProfile?.avatarSymbolName ?? appState.profileAvatarSymbolName
-        )
-        let savedColor = appState.communityProfile?.avatarColorSeed ?? appState.profileAvatarColorSeed
-        draftAvatarColorSeed = savedColor.isEmpty ? "avatar-color-sage" : savedColor
+    @MainActor
+    private func prepareDraftIfNeeded() async {
+        guard !shouldDismissEditor else {
+            draft.invalidate()
+            dismiss()
+            return
+        }
+        guard appState.isCommunitySessionActive, !draft.isPrepared else { return }
+        isLoadingProfileDraft = true
+        if appState.communityProfile == nil {
+            await appState.loadCommunityProfile()
+        }
+        guard !Task.isCancelled, appState.isCommunitySessionActive else { return }
+        draft.prepareIfNeeded(appState.communityProfile)
+        isLoadingProfileDraft = false
     }
 
     private func avatarChoice(symbolName: String, colorSeed: String, isSelected: Bool) -> some View {
@@ -8257,12 +8335,12 @@ private struct MobileProfileEditorView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 58, maximum: 66), spacing: 8)], spacing: 8) {
                     ForEach(ProfileAvatarOption.all, id: \.self) { option in
                         Button {
-                            draftAvatarSymbolName = option
+                            draft.avatarSymbolName = option
                         } label: {
                             avatarChoice(
                                 symbolName: option,
-                                colorSeed: draftAvatarColorSeed,
-                                isSelected: draftAvatarSymbolName == option
+                                colorSeed: draft.avatarColorSeed,
+                                isSelected: draft.avatarSymbolName == option
                             )
                         }
                         .buttonStyle(.plain)
@@ -8280,11 +8358,11 @@ private struct MobileProfileEditorView: View {
                     HStack(spacing: 10) {
                         ForEach(ProfileAvatarColorOption.all.prefix(10)) { option in
                             Button {
-                                draftAvatarColorSeed = option.id
+                                draft.avatarColorSeed = option.id
                             } label: {
                                 colorChoice(
                                     color: option.color,
-                                    isSelected: draftAvatarColorSeed == option.id
+                                    isSelected: draft.avatarColorSeed == option.id
                                 )
                             }
                             .buttonStyle(.plain)
@@ -8314,6 +8392,65 @@ private struct MobileProfileEditorView: View {
             Circle()
                 .stroke(isSelected ? Color.primary.opacity(0.75) : Color.secondary.opacity(0.15), lineWidth: isSelected ? 2 : 1)
         }
+    }
+}
+
+/// A profile editor owns one snapshot for its lifetime. Background refreshes can
+/// update the profile page without replacing an in-progress name or avatar edit.
+struct CommunityProfileEditorDraft {
+    private(set) var profileID: Int?
+    private(set) var isInvalidated = false
+    var displayName = ""
+    var avatarSymbolName = ProfileAvatarOption.defaultSymbolName
+    var avatarColorSeed = "avatar-color-sage"
+    private var baseline: Values?
+
+    private struct Values: Equatable {
+        var displayName: String
+        var avatarSymbolName: String
+        var avatarColorSeed: String
+    }
+
+    init(profile: CommunityUserProfile? = nil) {
+        prepareIfNeeded(profile)
+    }
+
+    var isPrepared: Bool { baseline != nil }
+
+    var hasChanges: Bool {
+        guard let baseline else { return false }
+        return values != baseline
+    }
+
+    mutating func prepareIfNeeded(_ profile: CommunityUserProfile?) {
+        guard !isInvalidated, !isPrepared, let profile else { return }
+        profileID = profile.id
+        displayName = profile.displayName
+        avatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
+        avatarColorSeed = profile.avatarColorSeed.isEmpty ? "avatar-color-sage" : profile.avatarColorSeed
+        baseline = values
+    }
+
+    func belongsToDifferentProfile(_ profile: CommunityUserProfile?) -> Bool {
+        guard let profileID, profileID > 0, let currentID = profile?.id, currentID > 0 else { return false }
+        return profileID != currentID
+    }
+
+    mutating func invalidate() {
+        isInvalidated = true
+        profileID = nil
+        displayName = ""
+        avatarSymbolName = ProfileAvatarOption.defaultSymbolName
+        avatarColorSeed = "avatar-color-sage"
+        baseline = nil
+    }
+
+    private var values: Values {
+        Values(
+            displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+            avatarSymbolName: avatarSymbolName,
+            avatarColorSeed: avatarColorSeed
+        )
     }
 }
 

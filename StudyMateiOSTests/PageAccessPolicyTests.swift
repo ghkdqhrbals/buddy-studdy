@@ -3072,3 +3072,135 @@ private final class StudyPreparedPresentationRejectingURLProtocol: URLProtocol, 
     override func stopLoading() {}
 }
 #endif
+
+#if os(iOS)
+@MainActor
+final class ProfileEditorDraftTests: XCTestCase {
+    func testPreparedProfileHasFinalNameAndAvatarBeforeAppearance() {
+        let draft = CommunityProfileEditorDraft(profile: profile())
+
+        XCTAssertTrue(draft.isPrepared)
+        XCTAssertEqual(draft.profileID, 801)
+        XCTAssertEqual(draft.displayName, "테스트 프로필")
+        XCTAssertEqual(draft.avatarSymbolName, "pixel-cat")
+        XCTAssertEqual(draft.avatarColorSeed, "avatar-color-mint")
+        XCTAssertFalse(draft.hasChanges)
+    }
+
+    func testMissingProfileCanBePreparedAfterRetryWithoutAnEmptyEditableDraft() {
+        var draft = CommunityProfileEditorDraft()
+        XCTAssertFalse(draft.isPrepared)
+        XCTAssertFalse(draft.hasChanges)
+
+        draft.prepareIfNeeded(nil)
+        XCTAssertFalse(draft.isPrepared)
+        draft.prepareIfNeeded(profile())
+
+        XCTAssertTrue(draft.isPrepared)
+        XCTAssertEqual(draft.displayName, "테스트 프로필")
+        XCTAssertFalse(draft.hasChanges)
+    }
+
+    func testBackgroundRefreshNeverReplacesTypedNameOrChosenAvatar() {
+        var draft = CommunityProfileEditorDraft(profile: profile())
+        draft.displayName = "수정 중인 이름"
+        draft.avatarSymbolName = "pixel-rabbit"
+        draft.avatarColorSeed = "avatar-color-sage"
+        var refreshed = profile()
+        refreshed.displayName = "서버에서 갱신된 이름"
+        refreshed.avatarSymbolName = "pixel-penguin"
+        refreshed.avatarColorSeed = "avatar-color-blue"
+
+        draft.prepareIfNeeded(refreshed)
+        draft.prepareIfNeeded(nil)
+
+        XCTAssertEqual(draft.displayName, "수정 중인 이름")
+        XCTAssertEqual(draft.avatarSymbolName, "pixel-rabbit")
+        XCTAssertEqual(draft.avatarColorSeed, "avatar-color-sage")
+        XCTAssertTrue(draft.hasChanges)
+    }
+
+    func testDirtyTrackingUsesOpeningBaselineEvenIfBackgroundProfileMatchesDraft() {
+        let initial = profile()
+        var draft = CommunityProfileEditorDraft(profile: initial)
+        draft.displayName = "내가 수정한 이름"
+        var refreshed = initial
+        refreshed.displayName = draft.displayName
+
+        draft.prepareIfNeeded(refreshed)
+
+        XCTAssertTrue(draft.hasChanges,
+            "A changing server profile must not decide whether the user has edited this draft")
+        draft.displayName = initial.displayName
+        XCTAssertFalse(draft.hasChanges)
+    }
+
+    func testUntouchedSnapshotDoesNotChangeDuringSameAccountRefresh() {
+        var draft = CommunityProfileEditorDraft(profile: profile())
+        var refreshed = profile()
+        refreshed.displayName = "새 서버 이름"
+        draft.prepareIfNeeded(refreshed)
+
+        XCTAssertEqual(draft.profileID, 801)
+        XCTAssertEqual(draft.displayName, "테스트 프로필")
+        XCTAssertFalse(draft.hasChanges)
+    }
+
+    func testAccountReplacementIsDetectedButTransientMissingProfileDoesNotHideDraft() {
+        let draft = CommunityProfileEditorDraft(profile: profile())
+        XCTAssertFalse(draft.belongsToDifferentProfile(nil))
+        XCTAssertFalse(draft.belongsToDifferentProfile(profile()))
+        var other = profile()
+        other.id = 802
+        XCTAssertTrue(draft.belongsToDifferentProfile(other))
+        other.id = 0
+        XCTAssertFalse(draft.belongsToDifferentProfile(other))
+    }
+
+    func testSigningOutPermanentlyClearsThisEditorEvenIfAnotherSessionArrives() {
+        var draft = CommunityProfileEditorDraft(profile: profile())
+        draft.displayName = "이전 계정의 작성 중 이름"
+
+        draft.invalidate()
+        var other = profile()
+        other.id = 802
+        draft.prepareIfNeeded(other)
+
+        XCTAssertTrue(draft.isInvalidated)
+        XCTAssertFalse(draft.isPrepared)
+        XCTAssertFalse(draft.hasChanges)
+        XCTAssertNil(draft.profileID)
+        XCTAssertEqual(draft.displayName, "")
+        XCTAssertEqual(draft.avatarSymbolName, ProfileAvatarOption.defaultSymbolName)
+    }
+
+    func testLegacyAvatarAndEmptyColorAreNormalizedBeforeSettingTheBaseline() {
+        var initial = profile()
+        initial.displayName = "  테스트 프로필  "
+        initial.avatarSymbolName = " CAT "
+        initial.avatarColorSeed = ""
+        var draft = CommunityProfileEditorDraft(profile: initial)
+
+        XCTAssertEqual(draft.avatarSymbolName, "pixel-cat")
+        XCTAssertEqual(draft.avatarColorSeed, "avatar-color-sage")
+        XCTAssertFalse(draft.hasChanges)
+        draft.displayName = "테스트 프로필"
+        XCTAssertFalse(draft.hasChanges)
+        draft.avatarColorSeed = "avatar-color-mint"
+        XCTAssertTrue(draft.hasChanges)
+    }
+
+    private func profile() -> CommunityUserProfile {
+        CommunityUserProfile(
+            id: 801,
+            displayName: "테스트 프로필",
+            status: "ACTIVE",
+            provider: "APPLE",
+            bio: "",
+            avatarURL: nil,
+            avatarSymbolName: "pixel-cat",
+            avatarColorSeed: "avatar-color-mint"
+        )
+    }
+}
+#endif
