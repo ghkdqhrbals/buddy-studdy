@@ -244,6 +244,39 @@ struct VoiceTutorCaption: Identifiable, Equatable {
     var text: String
 }
 
+/// Remembers final input items for one authenticated connection attempt, even
+/// after their visible captions have been trimmed. Text itself is never used
+/// as an identity: repeating the same words in a new utterance is legitimate.
+struct VoiceTutorLearnerTranscriptState {
+    static let maximumItemCount = 4_096
+    private var attemptID: UUID?
+    private var itemIDs: Set<String> = []
+
+    mutating func beginAttempt(_ attemptID: UUID) {
+        self.attemptID = attemptID
+        itemIDs = []
+    }
+
+    mutating func endLocally() {
+        attemptID = nil
+        itemIDs = []
+    }
+
+    mutating func accept(
+        transcript: String,
+        itemID: String?,
+        attemptID: UUID,
+        requiresItemID: Bool
+    ) -> Bool {
+        guard self.attemptID == attemptID,
+              !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard let itemID else { return !requiresItemID }
+        guard !itemID.isEmpty, itemID.utf8.count <= 191,
+              itemIDs.count < Self.maximumItemCount else { return false }
+        return itemIDs.insert(itemID).inserted
+    }
+}
+
 enum VoiceTutorLiveTextBounds {
     static let maximumDraftCharacters = 16_000
     static let maximumCaptionCharacters = 16_000
@@ -682,6 +715,7 @@ final class VoiceTutorViewModel: ObservableObject {
     private var summaryContextValidity: (@MainActor @Sendable () -> Bool)?
     private var changedQuestions: [VoiceTutorQuestionChange] = []
     private var learnerCaptionIDsByItemID: [String: UUID] = [:]
+    private var learnerTranscriptState = VoiceTutorLearnerTranscriptState()
     @Published private var answerSourceItemIDs: Set<String> = []
     private var heldAnswerCaptionIDs: Set<UUID> = []
     private var knownAnswerRecordIDs: [String: String] = [:]
@@ -706,6 +740,7 @@ final class VoiceTutorViewModel: ObservableObject {
             return
         }
         let attemptID = connectionAttemptFence.begin()
+        learnerTranscriptState.beginAttempt(attemptID)
         studyFocus.beginAttempt(attemptID)
         summaryRequestID = UUID()
         summaryContextValidity = nil
@@ -1104,6 +1139,7 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         logDiagnostic("event=stop_requested source=\(source.rawValue) socketEnd=\(shouldNotifyServerOverSocket ? 1 : 0)", isWarning: outcome == .failed)
         sessionState.endLocally()
+        learnerTranscriptState.endLocally()
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()
         cancelTerminalPlayoutDrain()
@@ -1176,6 +1212,7 @@ final class VoiceTutorViewModel: ObservableObject {
         captions = []
         answerDraftState = VoiceTutorAnswerDraftState()
         sessionState.endLocally()
+        learnerTranscriptState.endLocally()
         learnerCaptionIDsByItemID = [:]
         answerSourceItemIDs = []
         heldAnswerCaptionIDs = []
@@ -1744,6 +1781,10 @@ final class VoiceTutorViewModel: ObservableObject {
             // response.done is allowed to publish it as a tutor chat message.
             assistantTranscriptState.stageCompletedTranscript(transcript)
         case .userTranscript(let transcript, let itemID):
+            guard learnerTranscriptState.accept(
+                transcript: transcript, itemID: itemID,
+                attemptID: attemptID, requiresItemID: usesWebRTC
+            ) else { break }
             inputNeedsRepeat = false
             if let captionID = appendCaption(speaker: .learner, text: transcript) {
                 if answerDraftState.isActive { heldAnswerCaptionIDs.insert(captionID) }
@@ -1994,6 +2035,7 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         logDiagnostic("event=server_ended")
         sessionState.endLocally()
+        learnerTranscriptState.endLocally()
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()
         isFinalizing = true

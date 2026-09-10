@@ -13,7 +13,7 @@ import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Applies and verifies server-owned turn control and input language on the GA call. */
+/** Applies and verifies server-owned turn control and input audio configuration on the GA call. */
 internal class VoiceTutorWebRtcSessionHandshake(
     callId: String,
     private val confirmationTimeout: Duration,
@@ -54,7 +54,8 @@ internal class VoiceTutorWebRtcSessionHandshake(
                                 "input" to mapOf(
                                     "transcription" to transcription,
                                     "turn_detection" to turnDetectionConfiguration(),
-                                    "noise_reduction" to mapOf("type" to "near_field"),
+                                    "noise_reduction" to if (realtimeNative) voiceTutorNativeWebRtcNoiseReduction()
+                                        else mapOf("type" to "near_field"),
                                 ),
                             ),
                         ),
@@ -100,9 +101,13 @@ internal class VoiceTutorWebRtcSessionHandshake(
         val effectiveLanguage = audioInput.path("transcription").path("language")
         val transcriptionLanguageVerified = effectiveLanguage.isTextual &&
             effectiveLanguage.textValue() == transcription.getValue("language")
+        val effectiveNoiseReduction = audioInput.path("noise_reduction")
+        // Missing is not confirmation: null must survive request serialization and the provider acknowledgement.
+        val nativeNoiseReductionVerified = if (realtimeNative) effectiveNoiseReduction.isNull else null
         val verified = requested && eventType == "session.updated" &&
             schema == VoiceTutorWebRtcConfigurationSchema.GA && sessionType == "realtime" &&
-            turnDetection.isNull && toolsVerified && transcriptionLanguageVerified
+            turnDetection.isNull && toolsVerified && transcriptionLanguageVerified &&
+            nativeNoiseReductionVerified != false
 
         onConfiguration(
             VoiceTutorWebRtcConfigurationSnapshot(
@@ -114,6 +119,12 @@ internal class VoiceTutorWebRtcSessionHandshake(
                 expectedTranscriptionLanguage = transcription.getValue("language"),
                 effectiveTranscriptionLanguage = effectiveLanguage.safeConfigurationName(QuestionLanguage.supported),
                 transcriptionLanguageVerified = transcriptionLanguageVerified,
+                effectiveNoiseReductionType = when {
+                    effectiveNoiseReduction.isNull -> "disabled"
+                    effectiveNoiseReduction.isMissingNode -> "missing"
+                    else -> effectiveNoiseReduction.path("type").safeConfigurationName(NOISE_REDUCTION_TYPES)
+                },
+                nativeNoiseReductionVerified = nativeNoiseReductionVerified,
             ),
         )
         if (requested && eventType == "session.updated") {
@@ -155,6 +166,7 @@ internal class VoiceTutorWebRtcSessionHandshake(
     private companion object {
         val SESSION_TYPES = setOf("realtime", "transcription")
         val TURN_DETECTION_TYPES = setOf("server_vad", "semantic_vad")
+        val NOISE_REDUCTION_TYPES = setOf("near_field", "far_field")
         // JSON object key order and numeric representation are not schema changes.
         // Property/required/enum contents and all validation constraints must match.
         val JSON_SCHEMA_VALUE_COMPARATOR = Comparator<JsonNode> { left, right ->
@@ -193,6 +205,13 @@ internal fun voiceTutorManualWebRtcTurnDetection(): JsonNode = NullNode.instance
  */
 internal fun voiceTutorNativeWebRtcTurnDetection(): JsonNode = NullNode.instance
 
+/**
+ * Native WebRTC already receives device-processed microphone audio. Provider near-field
+ * processing produced invented ASR on reproducible no-speech input; disable the extra stage.
+ * Keep an explicit JSON null even when the mapper excludes null map values.
+ */
+internal fun voiceTutorNativeWebRtcNoiseReduction(): JsonNode = NullNode.instance
+
 internal enum class VoiceTutorWebRtcConfigurationSchema { GA, LEGACY, MISSING }
 
 internal data class VoiceTutorWebRtcConfigurationSnapshot(
@@ -211,10 +230,12 @@ internal data class VoiceTutorWebRtcConfigurationSnapshot(
     val expectedTranscriptionLanguage: String = "none",
     val effectiveTranscriptionLanguage: String = "none",
     val transcriptionLanguageVerified: Boolean = false,
+    val effectiveNoiseReductionType: String = "missing",
+    val nativeNoiseReductionVerified: Boolean? = null,
 )
 
 internal class VoiceTutorWebRtcSessionConfigurationException :
-    RuntimeException("Provider session did not confirm server-owned Voice Tutor turns, tools and input language.")
+    RuntimeException("Provider session did not confirm server-owned Voice Tutor turns, tools and input audio configuration.")
 
 internal class VoiceTutorWebRtcSessionConfigurationTimeoutException :
     RuntimeException("Provider session configuration acknowledgement timed out.")
@@ -236,7 +257,8 @@ private fun logWebRtcConfiguration(configuration: VoiceTutorWebRtcConfigurationS
         "voice_tutor_sideband_configuration callRef={} eventType={} sessionType={} schema={} " +
             "turnDetectionType={} createResponse={} interruptResponse={} updateRequested={} verified={} " +
             "expectedToolCount={} effectiveToolCount={} toolsVerified={} " +
-            "expectedTranscriptionLanguage={} effectiveTranscriptionLanguage={} transcriptionLanguageVerified={}",
+            "expectedTranscriptionLanguage={} effectiveTranscriptionLanguage={} transcriptionLanguageVerified={} " +
+            "effectiveNoiseReductionType={} nativeNoiseReductionVerified={}",
         configuration.callRef,
         configuration.eventType,
         configuration.sessionType,
@@ -252,5 +274,7 @@ private fun logWebRtcConfiguration(configuration: VoiceTutorWebRtcConfigurationS
         configuration.expectedTranscriptionLanguage,
         configuration.effectiveTranscriptionLanguage,
         configuration.transcriptionLanguageVerified,
+        configuration.effectiveNoiseReductionType,
+        configuration.nativeNoiseReductionVerified ?: "not-required",
     )
 }

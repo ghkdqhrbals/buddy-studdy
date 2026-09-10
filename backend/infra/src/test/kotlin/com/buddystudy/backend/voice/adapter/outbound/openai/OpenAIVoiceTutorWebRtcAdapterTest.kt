@@ -82,6 +82,8 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
         val turnDetection = session.path("audio").path("input").path("turn_detection")
         assertThat(turnDetection.isNull).isTrue()
         assertThat(session.path("audio").path("input").has("turn_detection")).isTrue()
+        assertThat(session.path("audio").path("input").has("noise_reduction")).isTrue()
+        assertThat(session.path("audio").path("input").path("noise_reduction").isNull).isTrue()
     }
 
     @Test

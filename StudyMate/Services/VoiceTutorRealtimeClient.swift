@@ -364,7 +364,13 @@ enum VoiceTutorRealtimeEventParser {
                 transcript: string("transcript", in: object)
             )
         case "conversation.item.input_audio_transcription.completed":
-            return .userTranscript(string("transcript", in: object) ?? "", itemID: providerResponseID("item_id", in: object))
+            // Older PCM frames may omit an item ID; the native call requires
+            // one before presentation. A malformed supplied ID is never an
+            // anonymous utterance, since that would bypass item deduplication.
+            let itemID = providerResponseID("item_id", in: object)
+            guard let transcript = string("transcript", in: object),
+                  object["item_id"] == nil || itemID != nil else { return .ignored(type: type) }
+            return .userTranscript(transcript, itemID: itemID)
         case "input_audio_buffer.speech_started":
             return .userSpeechStarted
         case "input_audio_buffer.speech_stopped":

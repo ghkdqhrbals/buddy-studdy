@@ -5,6 +5,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -55,7 +56,68 @@ class VoiceTutorWebRtcSessionHandshakeTest {
         val transcription = session.path("audio").path("input").path("transcription")
         assertThat(transcription.path("model").asText()).isEqualTo("gpt-4o-mini-transcribe")
         assertThat(transcription.path("language").asText()).isEqualTo("ko")
+        // The older relay keeps its existing request and acknowledgement compatibility.
+        assertThat(session.path("audio").path("input").path("noise_reduction").path("type").asText()).isEqualTo("near_field")
         assertThat(updates.single()).doesNotContain("response.create", "response.cancel", "output_audio_buffer.clear")
+    }
+
+    @Test
+    fun `native update explicitly disables noise reduction and only confirmed null releases readiness`() {
+        val snapshots = mutableListOf<VoiceTutorWebRtcConfigurationSnapshot>()
+        val handshake = VoiceTutorWebRtcSessionHandshake(
+            CALL_ID, CONFIRMATION_TIMEOUT, snapshots::add, transcriptionLanguage = "ko", realtimeNative = true,
+        )
+        val updates = mutableListOf<String>()
+        StepVerifier.create(handshake.initialProviderEvents().doOnNext(updates::add))
+            .expectNextCount(1).expectComplete().verify(VERIFY_TIMEOUT)
+        val input = mapper.readTree(updates.single()).path("session").path("audio").path("input")
+        assertThat(input.has("noise_reduction")).isTrue()
+        assertThat(input.path("noise_reduction").isNull).isTrue()
+
+        StepVerifier.withVirtualTime { handshake.awaitConfirmation() }
+            .expectSubscription()
+            .then { handshake.observeProviderEvent(nativeUpdated().replace("session.updated", "session.created")) }
+            .expectNoEvent(Duration.ofMillis(1))
+            .then { handshake.observeProviderEvent(nativeUpdated()) }
+            .expectComplete().verify(VERIFY_TIMEOUT)
+        assertThat(snapshots.map { it.verified }).containsExactly(false, true)
+        assertThat(snapshots.last().nativeNoiseReductionVerified).isTrue()
+        assertThat(snapshots.last().effectiveNoiseReductionType).isEqualTo("disabled")
+    }
+
+    @TestFactory
+    fun `native missing malformed or enabled effective noise reduction fails closed`() = listOf(
+        "missing" to null,
+        "near field" to """{"type":"near_field"}""",
+        "far field" to """{"type":"far_field"}""",
+        "empty object" to "{}",
+        "string null" to "\"null\"",
+        "false" to "false",
+        "zero" to "0",
+    ).map { (name, noiseReduction) ->
+        dynamicTest(name) {
+            val snapshots = mutableListOf<VoiceTutorWebRtcConfigurationSnapshot>()
+            val handshake = VoiceTutorWebRtcSessionHandshake(
+                CALL_ID, CONFIRMATION_TIMEOUT, snapshots::add, transcriptionLanguage = "ko", realtimeNative = true,
+            )
+            dispatch(handshake)
+            assertThatThrownBy { handshake.observeProviderEvent(nativeUpdated(noiseReduction)) }
+                .isInstanceOf(VoiceTutorWebRtcSessionConfigurationException::class.java)
+            assertThat(snapshots.last().verified).isFalse()
+            assertThat(snapshots.last().nativeNoiseReductionVerified).isFalse()
+        }
+    }
+
+    @Test
+    fun `native provider re-enabling noise reduction after readiness is rejected`() {
+        val handshake = VoiceTutorWebRtcSessionHandshake(
+            CALL_ID, CONFIRMATION_TIMEOUT, {}, transcriptionLanguage = "ko", realtimeNative = true,
+        )
+        dispatch(handshake)
+        handshake.observeProviderEvent(nativeUpdated())
+        StepVerifier.create(handshake.awaitConfirmation()).expectComplete().verify(VERIFY_TIMEOUT)
+        assertThatThrownBy { handshake.observeProviderEvent(nativeUpdated("""{"type":"near_field"}""")) }
+            .isInstanceOf(VoiceTutorWebRtcSessionConfigurationException::class.java)
     }
 
     @Test
@@ -334,6 +396,15 @@ class VoiceTutorWebRtcSessionHandshakeTest {
 
     private fun validUpdated() =
         """{"type":"session.updated","session":{"type":"realtime","audio":{"input":{"turn_detection":null,"transcription":{"model":"gpt-4o-mini-transcribe","language":"ko"}}}}}"""
+
+    private fun nativeUpdated(noiseReduction: String? = "null"): String {
+        val event = mapper.readTree(validUpdated())
+        if (noiseReduction != null) {
+            (event.path("session").path("audio").path("input") as ObjectNode)
+                .set<JsonNode>("noise_reduction", mapper.readTree(noiseReduction))
+        }
+        return mapper.writeValueAsString(event)
+    }
 
     private fun automaticUpdated() = validUpdated().replace(
         "null", """{"type":"server_vad","create_response":false,"interrupt_response":false}""",

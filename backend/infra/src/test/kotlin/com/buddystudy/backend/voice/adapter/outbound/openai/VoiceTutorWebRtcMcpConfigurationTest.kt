@@ -80,6 +80,10 @@ class VoiceTutorWebRtcMcpConfigurationTest {
         assertThat(sideband.path("tool_choice").asText()).isEqualTo("auto")
         assertThat(sdpConfiguration.path("audio").path("input").path("turn_detection").isNull).isTrue()
         assertThat(sideband.path("audio").path("input").path("turn_detection").isNull).isTrue()
+        assertThat(sdpConfiguration.path("audio").path("input").has("noise_reduction")).isTrue()
+        assertThat(sdpConfiguration.path("audio").path("input").path("noise_reduction").isNull).isTrue()
+        assertThat(sideband.path("audio").path("input").has("noise_reduction")).isTrue()
+        assertThat(sideband.path("audio").path("input").path("noise_reduction").isNull).isTrue()
         assertThat(definitionReads).isEqualTo(2)
     }
 

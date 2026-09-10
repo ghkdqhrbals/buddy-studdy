@@ -405,7 +405,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
                 "input" to linkedMapOf(
                     "transcription" to voiceTutorInputTranscription(request.language),
                     "turn_detection" to voiceTutorNativeWebRtcTurnDetection(),
-                    "noise_reduction" to mapOf("type" to "near_field"),
+                    "noise_reduction" to voiceTutorNativeWebRtcNoiseReduction(),
                 ),
                 "output" to linkedMapOf(
                     "voice" to request.voice,

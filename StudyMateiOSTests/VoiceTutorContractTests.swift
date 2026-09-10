@@ -4272,6 +4272,88 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(VoiceTutorAudioSessionInterruption.began(Notification(name: .init("other"))))
     }
 
+    func testLearnerFinalTranscriptDeduplicatesItemsWithoutDeduplicatingSpeechText() {
+        let attempt = UUID()
+        var state = VoiceTutorLearnerTranscriptState()
+        state.beginAttempt(attempt)
+
+        XCTAssertTrue(state.accept(transcript: "다시 설명해 줘", itemID: "item-1", attemptID: attempt, requiresItemID: true))
+        XCTAssertFalse(state.accept(transcript: "다시 설명해 줘", itemID: "item-1", attemptID: attempt, requiresItemID: true))
+        XCTAssertFalse(state.accept(transcript: "변경된 중복 결과", itemID: "item-1", attemptID: attempt, requiresItemID: true))
+        XCTAssertTrue(state.accept(transcript: "다시 설명해 줘", itemID: "item-2", attemptID: attempt, requiresItemID: true),
+                      "A new utterance may deliberately repeat the same words")
+    }
+
+    func testLearnerFinalTranscriptIdentityEndsWithItsConnectionAttempt() {
+        let oldAttempt = UUID()
+        let newAttempt = UUID()
+        var state = VoiceTutorLearnerTranscriptState()
+        state.beginAttempt(oldAttempt)
+        XCTAssertTrue(state.accept(transcript: "첫 통화", itemID: "item-1", attemptID: oldAttempt, requiresItemID: true))
+        state.beginAttempt(newAttempt)
+        XCTAssertFalse(state.accept(transcript: "늦게 도착한 이전 통화", itemID: "item-2", attemptID: oldAttempt, requiresItemID: true))
+        XCTAssertTrue(state.accept(transcript: "새 통화", itemID: "item-1", attemptID: newAttempt, requiresItemID: true))
+        state.endLocally()
+        XCTAssertFalse(state.accept(transcript: "종료 이후", itemID: "item-3", attemptID: newAttempt, requiresItemID: true))
+        XCTAssertFalse(state.accept(transcript: "이전 계정", itemID: nil, attemptID: oldAttempt, requiresItemID: false))
+    }
+
+    func testLearnerFinalTranscriptRequiresNativeItemIdentityAndPreservesLegacyFrames() {
+        let attempt = UUID()
+        var state = VoiceTutorLearnerTranscriptState()
+        state.beginAttempt(attempt)
+        XCTAssertFalse(state.accept(transcript: "텍스트", itemID: nil, attemptID: attempt, requiresItemID: true))
+        XCTAssertFalse(state.accept(transcript: "텍스트", itemID: "", attemptID: attempt, requiresItemID: true))
+        XCTAssertFalse(state.accept(transcript: " \n ", itemID: "item-1", attemptID: attempt, requiresItemID: true))
+        XCTAssertTrue(state.accept(transcript: "완성된 문장", itemID: "item-1", attemptID: attempt, requiresItemID: true),
+                      "An empty frame must not consume a later visible item's identity")
+        XCTAssertTrue(state.accept(transcript: "기존 PCM", itemID: nil, attemptID: attempt, requiresItemID: false))
+        XCTAssertTrue(state.accept(transcript: "기존 PCM", itemID: nil, attemptID: attempt, requiresItemID: false))
+    }
+
+    func testLearnerFinalTranscriptDeduplicationOutlivesVisibleCaptionTrimmingAndIsBounded() {
+        let attempt = UUID()
+        var state = VoiceTutorLearnerTranscriptState()
+        state.beginAttempt(attempt)
+        var captions: [VoiceTutorCaption] = []
+        for index in 0..<VoiceTutorLearnerTranscriptState.maximumItemCount {
+            let text = "발화 \(index)"
+            if state.accept(transcript: text, itemID: "item-\(index)", attemptID: attempt, requiresItemID: true) {
+                captions.append(VoiceTutorCaption(speaker: .learner, text: text))
+                VoiceTutorLiveTextBounds.trim(&captions)
+            } else {
+                XCTFail("Every distinct input inside the call's bound must be accepted")
+            }
+        }
+        XCTAssertEqual(captions.count, VoiceTutorLiveTextBounds.maximumCaptionCount)
+        XCTAssertFalse(captions.contains { $0.text == "발화 0" })
+        XCTAssertFalse(state.accept(transcript: "발화 0", itemID: "item-0", attemptID: attempt, requiresItemID: true),
+                      "Trimming an old caption must not make its duplicate a new utterance")
+        XCTAssertFalse(state.accept(transcript: "용량 초과", itemID: "overflow", attemptID: attempt, requiresItemID: true),
+                      "Do not evict old identities and reopen them when the bounded call limit is reached")
+    }
+
+    func testLearnerFinalTranscriptParserRejectsMalformedIdentityAndText() throws {
+        let type = "conversation.item.input_audio_transcription.completed"
+        let frames: [[String: Any]] = [
+            ["type": type, "transcript": "텍스트", "item_id": ""],
+            ["type": type, "transcript": "텍스트", "item_id": "invalid id"],
+            ["type": type, "transcript": "텍스트", "item_id": 7],
+            ["type": type, "transcript": "텍스트", "item_id": NSNull()],
+            ["type": type, "transcript": "텍스트", "item_id": String(repeating: "x", count: 192)],
+            ["type": type, "transcript": 7, "item_id": "item-1"],
+            ["type": type, "item_id": "item-1"]
+        ]
+        for frame in frames {
+            let data = try JSONSerialization.data(withJSONObject: frame)
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(data: data), .ignored(type: type))
+        }
+        XCTAssertEqual(
+            try VoiceTutorRealtimeEventParser.parse(text: #"{"type":"conversation.item.input_audio_transcription.completed","item_id":"item-1","transcript":"제가 말한 그대로"}"#),
+            .userTranscript("제가 말한 그대로", itemID: "item-1")
+        )
+    }
+
     func testLiveTutorTextIsBoundedInMemory() {
         let oversized = String(repeating: "가", count: 20_000)
         let draft = VoiceTutorLiveTextBounds.appending(delta: oversized, to: "")
