@@ -73,6 +73,19 @@ alone therefore cannot show local development calls.
 Production availability requires separate backend and Monitoring module
 rollouts through the existing GitHub Actions/personal-deploy workflows. No
 production rollout or remote Loki ingestion is claimed by this verification.
-Local Docker replacement is coordinated with the concurrent voice change so
-one verified JAR includes both completed commits before a single idle-call
-restart.
+At the user's explicit local-only restart request, `backend-backend-1` was
+restarted at **2026-09-10 19:50:27 KST** with the verified `61b03f42` backend.
+All 1,022 backend source files in the build snapshot matched that commit, and
+the installed JAR contains the MCP logger and final-response transport wrapper.
+The JAR SHA-256 is
+`ea7ec99dd71083641dff1ff65f6f68c3f8f377d99ee58db0dc52667b9c9bdfc4`.
+
+- Active voice sessions were **0** immediately before restart.
+- `http://127.0.0.1:8080/health` returned **200** with `{"ok":true}` afterward.
+- The previous JAR was preserved as
+  `/app/pre-mcp-observability-20260910.jar` in the existing app volume.
+- The installed BuddyStudy **1.1.0 (16)** app was successfully activated on the
+  connected Min iPhone at **19:51:04 KST** using `devicectl`; no app reinstall
+  was necessary.
+- Concurrent uncommitted native-input-admission server changes were left out
+  of this verified JAR and remain owned by the other task for its later rollout.
