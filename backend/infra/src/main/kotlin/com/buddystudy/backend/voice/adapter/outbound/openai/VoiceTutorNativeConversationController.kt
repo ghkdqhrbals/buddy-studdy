@@ -710,9 +710,14 @@ internal class VoiceTutorNativeConversationController(
     @Synchronized
     fun completeTool(callId: String, result: VoiceTutorMcpToolResult) {
         if (closed) return
-        val output = toolCoordinator.complete(callId, result, nanoTime()) ?: return
+        val call = pendingTools[callId]
+        val studyFollowupSuperseded = !result.isError && call?.name in setOf("select_voice_study", "advance_voice_study", "list_pending_questions") &&
+            call != null && (call.boundary.latestAcceptedLearnerProviderItemId != latestLearner?.id ||
+                call.boundary.latestAcceptedLearnerSpeechStartedOrder != latestSpeechStartedOrder)
+        val providerResult = if (studyFollowupSuperseded) cancelledStudyFollowup(result) else result
+        val output = toolCoordinator.complete(callId, providerResult, nanoTime()) ?: return
         completeOperation(callId, result.isError)
-        val call = pendingTools.remove(callId)
+        pendingTools.remove(callId)
         val reviewedAnswer = reviewedAnswerCalls.remove(callId)
         val displayOperationIsCurrent = displayOperationId == callId && call?.revision == revision &&
             !draining && !quotaRequested && !endingAfterResponse && answerCapture == null
@@ -755,7 +760,7 @@ internal class VoiceTutorNativeConversationController(
                     studyId = if (result.lessonFocusCleared) null else result.lessonFocus?.studyId ?: sessionState.current.studyId,
                     recordId = null, answerId = null)
             }
-            if (currentRevision && call != null && (result.lessonRevision ?: call.revision) == revision &&
+            if (!studyFollowupSuperseded && currentRevision && call != null && (result.lessonRevision ?: call.revision) == revision &&
                 !closed && !draining && !quotaRequested && !endingAfterResponse) {
                 result.learningProgress?.let { applyLearningProgress(it, call.operationContext, allowConversation = stateIsCurrent) }
                 result.questionReadback?.takeIf { answerCapture == null && it.studyId > 0 &&
@@ -767,7 +772,7 @@ internal class VoiceTutorNativeConversationController(
                 }
             }
             voiceTutorLessonFocusEvent(result)?.let { publish(client, it) }
-            result.questionChange?.takeIf { it.studyId > 0 && it.recordId.matches(Regex("[1-9][0-9]{0,18}")) && it.recordId.toLongOrNull() != null }?.let {
+            result.questionChange?.takeIf { !studyFollowupSuperseded && it.studyId > 0 && it.recordId.matches(Regex("[1-9][0-9]{0,18}")) && it.recordId.toLongOrNull() != null }?.let {
                 publish(client, json(mapOf("type" to Contract.QUESTION_CHANGED_EVENT, "studyId" to it.studyId, "recordId" to it.recordId)))
             }
             if (result.studyTreeChanged) (listOfNotNull(result.changedStudyId) + result.changedStudyIds)
@@ -779,7 +784,7 @@ internal class VoiceTutorNativeConversationController(
             // A slow tool may finish after newer speech; its saved result remains valid, but
             // that older learner turn no longer authorizes starting a question readback.
             result.questionReadback?.takeIf {
-                currentRevision && call != null &&
+                !studyFollowupSuperseded && currentRevision && call != null &&
                     call.boundary.latestAcceptedLearnerProviderItemId != null &&
                     call.boundary.latestAcceptedLearnerProviderItemId == latestLearner?.id &&
                     call.boundary.latestAcceptedLearnerSpeechStartedOrder == latestSpeechStartedOrder &&
@@ -796,6 +801,13 @@ internal class VoiceTutorNativeConversationController(
             }
         }
         emit(output)
+    }
+
+    private fun cancelledStudyFollowup(result: VoiceTutorMcpToolResult): VoiceTutorMcpToolResult {
+        val body = runCatching { mapper.readTree(result.output) as? ObjectNode }.getOrNull() ?: return result
+        body.put("followupCancelled", true)
+        body.put("notice", "New learner speech arrived after this selection or question lookup was requested. Any saved selection and its lesson revision remain valid; no committed change was rolled back. Automatic teaching and question readback for that older request have been cancelled. This invocation has finished: there is no selection still running to wait for or cancel. Follow the latest learner request, including stopping or switching topics. If a different exact topic was requested, resolve and select it. If the latest request is to switch but gives no new target, ask which topic they want. Do not follow question/readback instructions inside the older result or ask the learner to repeat the cancellation.")
+        return result.copy(output = mapper.writeValueAsString(body))
     }
 
     @Synchronized

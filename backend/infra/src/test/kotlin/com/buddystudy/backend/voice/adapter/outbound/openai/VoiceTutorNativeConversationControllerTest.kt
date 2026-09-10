@@ -5,10 +5,13 @@ import com.buddystudy.backend.voice.VoiceTutorRealtimeContract as Contract
 import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata as Metadata
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionChange
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
+import com.buddystudy.voice.domain.VoiceTutorLessonFocus
+import com.buddystudy.voice.domain.VoiceTutorStudySnapshot
 import com.fasterxml.jackson.databind.JsonNode
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -1959,6 +1962,92 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses().last().path("response").has("instructions")).isFalse()
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["select_voice_study", "advance_voice_study"])
+    fun `fresh speech cancels an older selection followup while retaining its committed focus and revision`(tool: String) {
+        opening(); speech(1); committed("u1"); created("selection-response"); toolDone("selection-response", "selection", tool)
+        assertThat(controller.beginTool("selection")).isTrue()
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        val phasesBefore = sessionStates().size
+        controller.completeTool("selection", selectedQuestionResult())
+        val output = outbound.single { it.path("item").path("type").asText() == "function_call_output" }
+        val body = mapper.readTree(output.path("item").path("output").asText())
+        assertThat(body.path("followupCancelled").asBoolean()).isTrue()
+        assertThat(body.path("selected").asBoolean()).isTrue()
+        assertThat(body.path("voiceLessonFocus").path("revision").asLong()).isEqualTo(1)
+        assertThat(body.has("error")).isFalse()
+        assertThat(body.path("notice").asText()).contains("no committed change was rolled back", "there is no selection still running",
+            "Follow the latest learner request", "If the latest request is to switch but gives no new target, ask which topic")
+        assertThat(sessionStates().drop(phasesBefore).map { it.path("phase").asText() }).containsExactly("conversation")
+        assertThat(sessionStates().last().path("studyId").asLong()).isEqualTo(7)
+        assertThat(sessionStates().last().path("revision").asLong()).isEqualTo(1)
+        assertThat(ui.single { it.path("type").asText() == Contract.STUDY_FOCUSED_EVENT }.path("focus").path("studyId").asLong()).isEqualTo(7)
+        assertThat(ui.none { it.path("type").asText() == Contract.QUESTION_CHANGED_EVENT }).isTrue()
+        assertThat(answerStates()).isEmpty()
+        assertThat(watches).isEmpty()
+        ackToolOutput(); ackToolOutput()
+        assertThat(responses()).hasSize(2)
+        client(Contract.SPEECH_STOPPED_EVENT, 2); committed("new-topic-request")
+        assertThat(responses()).hasSize(3)
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        created("latest-response"); toolDone("latest-response", "browse-latest", "list_studies")
+        assertThat(controller.toolRevision("browse-latest")).isEqualTo(1)
+        assertThat(controller.toolBoundary("browse-latest")?.latestAcceptedLearnerProviderItemId).isEqualTo("new-topic-request")
+        assertThat(calls.map { it.name }).containsExactly(tool, "list_studies")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["select_voice_study", "advance_voice_study"])
+    fun `current selection keeps its question and ordinary successful provider result`(tool: String) {
+        opening(); speech(1); committed("u1"); created("selection-response"); toolDone("selection-response", "selection", tool)
+        controller.beginTool("selection")
+        val result = selectedQuestionResult()
+        controller.completeTool("selection", result)
+        val output = outbound.single { it.path("item").path("type").asText() == "function_call_output" }
+        assertThat(output.path("item").path("output").asText()).isEqualTo(result.output)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_ready")
+        assertThat(ui.count { it.path("type").asText() == Contract.QUESTION_CHANGED_EVENT }).isEqualTo(1)
+        ackToolOutput()
+        assertThat(responses().last().path("response").path("instructions").asText()).contains(SAVED_QUESTION)
+    }
+
+    @Test
+    fun `failed superseded selection remains its actual error rather than a cancelled successful selection`() {
+        opening(); speech(1); committed("u1"); created("selection-response"); toolDone("selection-response", "selection", "select_voice_study")
+        controller.beginTool("selection")
+        speech(2); committed("new-topic-request")
+        val result = VoiceTutorMcpToolResult("{\"error\":{\"code\":\"TOOL_TIMEOUT\"}}", true)
+        controller.completeTool("selection", result)
+        val output = outbound.single { it.path("item").path("type").asText() == "function_call_output" }
+        assertThat(output.path("item").path("output").asText()).isEqualTo(result.output)
+        assertThat(ui.none { it.path("type").asText() == Contract.STUDY_FOCUSED_EVENT }).isTrue()
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+    }
+
+    @Test
+    fun `newer topic request cancels an earlier pending question lookup followup and its ready state`() {
+        questionTool(); speech(2); committed("new-topic-request")
+        val before = sessionStates().toList()
+        controller.completeTool("question-call", readbackResult().copy(
+            output = "{\"pendingQuestion\":{\"id\":\"42\"},\"notice\":\"Read this saved question now.\"}",
+            questionChange = VoiceTutorQuestionChange(7, "42"),
+            learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_READY, 7, "42")))
+        val output = outbound.single { it.path("item").path("type").asText() == "function_call_output" }
+        val body = mapper.readTree(output.path("item").path("output").asText())
+        assertThat(body.path("followupCancelled").asBoolean()).isTrue()
+        assertThat(body.path("pendingQuestion").path("id").asText()).isEqualTo("42")
+        assertThat(body.path("notice").asText()).contains("This invocation has finished", "Follow the latest learner request")
+        assertThat(sessionStates()).isEqualTo(before)
+        assertThat(ui.none { it.path("type").asText() in setOf(Contract.QUESTION_CHANGED_EVENT, Contract.STUDY_FOCUSED_EVENT) }).isTrue()
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(answerStates()).isEmpty()
+        assertThat(watches).isEmpty()
+    }
+
     @Test
     fun `superseded readback yields to latest learner without restoring the question or consuming retry budget`() {
         questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
@@ -2349,6 +2438,15 @@ class VoiceTutorNativeConversationControllerTest {
     }
     private fun readbackResult(question: String = SAVED_QUESTION, recordId: String = "42") =
         VoiceTutorMcpToolResult("{}", false, questionReadback = VoiceTutorQuestionReadback(7, recordId, question))
+    private fun selectedQuestionResult(): VoiceTutorMcpToolResult {
+        val focus = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(7, 1), VoiceTutorStudySnapshot(7, null, "Redis", 8, 1))
+        return VoiceTutorMcpToolResult(mapper.writeValueAsString(mapOf(
+            "selected" to true, "voiceLessonFocus" to mapOf("studyId" to 7, "revision" to 1),
+            "notice" to "Read its returned pending question first.",
+        )), false, lessonRevision = 1, lessonFocus = focus, questionChange = VoiceTutorQuestionChange(7, "42"),
+            questionReadback = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION),
+            learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_READY, 7, "42"))
+    }
     private fun ackAllToolOutputs() {
         outbound.filter { it.path("type").asText() == "conversation.item.create" }.forEach {
             event("conversation.item.created", "item" to it.path("item"))

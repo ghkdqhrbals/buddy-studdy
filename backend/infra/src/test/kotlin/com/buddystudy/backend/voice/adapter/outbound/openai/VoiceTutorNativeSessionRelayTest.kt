@@ -45,6 +45,76 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
     @Test
+    fun `learner can abandon an in flight selection and start a different topic after its saved result is reconciled`() {
+        val previous = CompletableDeferred<VoiceTutorMcpToolResult>()
+        val newQuestion = "스프링의 의존성 주입을 설명해 주세요."
+        var invocation = 0
+        val tools = FakeTools {
+            when (invocation++) {
+                0 -> previous.await()
+                1 -> VoiceTutorMcpToolResult("{\"selected\":true,\"voiceQuestion\":{\"lookupRequired\":true}}", false,
+                    lessonRevision = 2, lessonFocus = VoiceTutorLessonFocusSelection(
+                        VoiceTutorLessonFocus(84, 2), VoiceTutorStudySnapshot(84, null, "스프링", 7, 2)))
+                else -> VoiceTutorMcpToolResult("{\"recordId\":\"43\"}", false, lessonRevision = 2,
+                    questionReadback = VoiceTutorQuestionReadback(84, "43", newQuestion))
+            }
+        }
+        Fixture(tools = tools).use { f ->
+            f.opening(); f.learner(1, "old-choice"); f.transcript("old-choice", "메모리 관리로 시작하자.")
+            f.toolResponse("old-selection", "select-old", "select_voice_study", "{\"study_id\":75}")
+            f.await("old selection is executing") { tools.invocations.size == 1 }
+            for (type in listOf(Contract.SPEECH_STARTED_EVENT, Contract.SPEECH_STOPPED_EVENT)) {
+                assertThat(f.controls.tryEmitNext(json(mapOf("type" to type, "sequence" to 2))))
+                    .isEqualTo(Sinks.EmitResult.OK)
+            }
+            f.await("cancellation and replacement speech is committed") {
+                f.outgoing.count { it.path("type").asText() == "input_audio_buffer.commit" } == 2
+            }
+            f.provider("input_audio_buffer.committed", "item_id" to "new-choice")
+            f.transcript("new-choice", "그거 취소하고 스프링으로 먼저 시작하자.")
+            f.await("new choice is durable while the old operation is still in flight") {
+                f.stored.any { it.path("item_id").asText() == "new-choice" }
+            }
+            previous.complete(VoiceTutorMcpToolResult("{\"selected\":true,\"notice\":\"Read the old question now\"}", false,
+                lessonRevision = 1, lessonFocus = VoiceTutorLessonFocusSelection(
+                    VoiceTutorLessonFocus(75, 1), VoiceTutorStudySnapshot(75, 74, "메모리 관리", 8, 1)),
+                questionReadback = VoiceTutorQuestionReadback(75, "42", "이전 주제의 문제")))
+            f.await("saved result is reconciled without starting its lesson") { f.outputs().size == 1 }
+            val oldResult = mapper.readTree(f.outputs().single().path("item").path("output").asText())
+            assertThat(oldResult.path("selected").asBoolean()).isTrue()
+            assertThat(oldResult.path("followupCancelled").asBoolean()).isTrue()
+            assertThat(f.ui.none { it.path("type").asText() == Contract.SESSION_STATE_EVENT &&
+                it.path("phase").asText() in setOf("question_ready", "question_reading") }).isTrue()
+            assertThat(f.answerStates()).isEmpty()
+            assertThat(f.responses()).hasSize(2)
+            f.ack(f.outputs().single())
+            f.await("latest request receives a fresh response") { f.responses().size == 3 }
+            assertThat(f.responses().last().path("response").path("instructions").asText()).doesNotContain("이전 주제의 문제")
+            f.toolResponse("new-selection", "select-new", "select_voice_study", "{\"study_id\":84}")
+            f.await("different topic selection succeeds") { f.outputs().size == 2 }
+            val newContext = tools.invocations[1].context
+            assertThat(newContext.initialLessonRevision).isEqualTo(1)
+            assertThat(newContext.dialogueBoundary?.latestAcceptedLearnerProviderItemId).isEqualTo("new-choice")
+            f.ack(f.outputs().last())
+            f.await("new selection returns before its separate question lookup") { f.responses().size == 4 }
+            f.toolResponse("new-question-lookup", "lookup-new", "list_pending_questions", "{\"study_id\":84}")
+            f.await("new topic question arrives") { f.outputs().size == 3 }
+            f.ack(f.outputs().last())
+            f.await("only the new topic gets a readback") { f.responses().size == 5 }
+            assertThat(f.responses().last().path("response").path("instructions").asText()).contains(newQuestion)
+            f.completeAudioResponse("new-question", "new-question-item", newQuestion)
+            f.await("new topic answer capture is available") {
+                f.answerStates().lastOrNull()?.path("phase")?.asText() == "listening"
+            }
+            assertThat(f.answerStates().last().path("studyId").asLong()).isEqualTo(84)
+            assertThat(tools.invocations.map { it.name }).containsExactly(
+                "select_voice_study", "select_voice_study", "list_pending_questions")
+            assertThat(tools.invocations.map { it.arguments["study_id"] }).containsExactly(75, 84, 84)
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
     fun `agreement after a level change selects the updated topic and reaches saved question readback without repeating the write`() {
         val topic = "메모리 관리와 만료 정책"
         val question = "메모리 만료 정책의 동작을 설명해 주세요."
@@ -53,9 +123,10 @@ class VoiceTutorNativeSessionRelayTest {
                 mutationConfirmationQuestion = "$topic 주제를 레벨 8로 바꿀까요?"),
             VoiceTutorMcpToolResult("{\"id\":75,\"difficultyLevel\":8,\"voiceLessonContextReady\":false}", false,
                 lessonRevision = 1),
-            VoiceTutorMcpToolResult("{\"selected\":true}", false, lessonRevision = 2,
+            VoiceTutorMcpToolResult("{\"selected\":true,\"voiceQuestion\":{\"lookupRequired\":true}}", false, lessonRevision = 2,
                 lessonFocus = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(75, 2),
-                    VoiceTutorStudySnapshot(75, 74, topic, 8, 2)),
+                    VoiceTutorStudySnapshot(75, 74, topic, 8, 2))),
+            VoiceTutorMcpToolResult("{\"recordId\":\"42\"}", false, lessonRevision = 2,
                 questionReadback = VoiceTutorQuestionReadback(75, "42", question)),
         ))
         val tools = FakeTools { results.removeFirst() }
@@ -77,15 +148,19 @@ class VoiceTutorNativeSessionRelayTest {
             f.toolResponse("selection-response", "select", "select_voice_study", "{\"study_id\":75}")
             f.await("selection finishes") { f.outputs().size == 3 }
             f.ack(f.outputs().last())
-            f.await("saved question is ready for audio") { f.responses().size == 7 }
+            f.await("selection completes before question lookup") { f.responses().size == 7 }
+            f.toolResponse("question-lookup", "lookup", "list_pending_questions", "{\"study_id\":75}")
+            f.await("saved question is returned separately") { f.outputs().size == 4 }
+            f.ack(f.outputs().last())
+            f.await("saved question is ready for audio") { f.responses().size == 8 }
             assertThat(f.responses().last().path("response").path("instructions").asText()).contains(question)
             f.completeAudioResponse("question", "question-item", question)
             f.await("answer capture starts instead of staying in response preparation") {
                 f.answerStates().lastOrNull()?.path("phase")?.asText() == "listening"
             }
             assertThat(tools.invocations.map { it.name }).containsExactly(
-                "prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study")
-            val selection = tools.invocations.last().context
+                "prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study", "list_pending_questions")
+            val selection = tools.invocations[2].context
             assertThat(selection.initialLessonRevision).isEqualTo(1)
             assertThat(selection.dialogueBoundary?.latestAcceptedLearnerProviderItemId).isEqualTo("start-agreement")
             assertThat(selection.dialogueBoundary?.precedingTutorProviderItemId).isEqualTo("changed-item")
@@ -929,7 +1004,7 @@ class VoiceTutorNativeSessionRelayTest {
         override fun close() { subscription.dispose() }
     }
 
-    private data class Invocation(val context: VoiceTutorWebRtcControlContext, val name: String)
+    private data class Invocation(val context: VoiceTutorWebRtcControlContext, val name: String, val arguments: Map<String, Any>)
     private class FakeTools(private val result: suspend () -> VoiceTutorMcpToolResult = { success() }) : VoiceTutorMcpToolPort {
         val topicSubmissions = CopyOnWriteArrayList<List<Int>>()
         var topicResult: suspend () -> VoiceTutorMcpToolResult = { success() }
@@ -953,12 +1028,12 @@ class VoiceTutorNativeSessionRelayTest {
         val reviewed = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
         val skipped = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
         override fun definitions(): List<VoiceTutorMcpToolDefinition> = error("The legacy classified tool catalog must not be used")
-        override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation", "confirm_voice_study_mutation", "request_question", "select_voice_study").map { name ->
+        override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation", "confirm_voice_study_mutation", "request_question", "select_voice_study", "list_pending_questions").map { name ->
             VoiceTutorMcpToolDefinition(name, "Synthetic native tool", mapOf("type" to "object",
                 "properties" to emptyMap<String, Any>(), "additionalProperties" to false))
         }
         override suspend fun execute(context: VoiceTutorWebRtcControlContext, toolName: String, arguments: Map<String, Any>): VoiceTutorMcpToolResult {
-            invocations += Invocation(context, toolName)
+            invocations += Invocation(context, toolName, arguments)
             return result()
         }
         override suspend fun submitReviewedAnswer(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult {

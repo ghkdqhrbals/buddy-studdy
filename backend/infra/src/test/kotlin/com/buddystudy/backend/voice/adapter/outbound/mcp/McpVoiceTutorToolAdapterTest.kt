@@ -3155,6 +3155,10 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(catalog.map { it.name }).contains("prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study")
             .doesNotContain("create_root_study", "create_study_topic", "update_study", "delete_study")
         assertThat(catalog.joinToString { it.description }).doesNotContain("server-owned: never originate", "one-shot target attested")
+        assertThat(catalog.single { it.name == "select_voice_study" }.description)
+            .contains("selection is complete", "list_pending_questions separately", "On cancellation", "on a switch", "does not roll back")
+        assertThat(catalog.single { it.name == "advance_voice_study" }.description)
+            .contains("completes selection", "list_pending_questions separately", "cancellation or topic switch")
         val denied = fixture.adapter.execute(nativeContext(), "create_root_study", mapOf("topic" to "Spring", "difficulty_level" to 7))
         assertThat(json(denied).path("error").path("code").asText()).isEqualTo("PROPOSAL_REQUIRED")
         assertThat(fixture.calls).isEmpty()
@@ -3272,6 +3276,116 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(result.isError).isFalse()
         assertThat(fixture.focusSelections).containsExactly(101L)
         assertThat(fixture.lastExpectedCandidate).isEqualTo(VoiceTutorStudyTargetCandidate(101, null, "Redis", 3))
+    }
+
+    @Test
+    fun `native focus returns committed revision before a separate pending lookup preserves the saved question`() = runBlocking<Unit> {
+        val contexts = ContextStore()
+        val fixture = Fixture(studyContexts = contexts).apply {
+            focusResult = focusSelection(101, 1)
+            afterFocus = { contexts.revision = 1 }
+            handler = { name, args -> when (name) {
+                "get_study" -> success(mapOf("id" to 101L, "parentStudyId" to null, "topic" to "Redis", "difficultyLevel" to 3))
+                "list_pending_questions" -> {
+                    assertThat(args["study_id"]).isEqualTo(101L)
+                    success(mapOf("totalCount" to 1, "records" to listOf(mapOf(
+                        "id" to "301", "studyId" to 101L, "topic" to "Redis", "difficulty" to 2,
+                        "questionStatus" to "UNGRADED", "answer" to null,
+                        "question" to mapOf("question" to "Redis가 무엇인가요?", "createdAt" to now.toString()),
+                    ))))
+                }
+                else -> error("Unexpected tool $name")
+            } }
+        }
+
+        val selected = fixture.adapter.execute(nativeContext(), "select_voice_study", mapOf("study_id" to 101L))
+        assertThat(selected.isError).isFalse()
+        assertThat(selected.lessonRevision).isEqualTo(1)
+        assertThat(selected.lessonFocus).isEqualTo(fixture.focusResult)
+        assertThat(selected.questionChange).isNull()
+        assertThat(selected.questionReadback).isNull()
+        assertThat(selected.learningProgress).isNull()
+        assertThat(json(selected).path("voiceQuestion")).isEqualTo(mapper.readTree("""{"lookupRequired":true}"""))
+        assertThat(json(selected).path("notice").asText()).contains("selection is complete", "No selection operation is running")
+        assertThat(fixture.calls.map { it.name }).containsExactly("get_study")
+
+        val pending = fixture.adapter.execute(nativeContext(currentRevision = selected.lessonRevision!!),
+            "list_pending_questions", mapOf("study_id" to 101L))
+        assertThat(pending.isError).isFalse()
+        assertThat(pending.questionReadback?.question).isEqualTo("Redis가 무엇인가요?")
+        assertThat(pending.questionChange?.recordId).isEqualTo("301")
+        assertThat(json(pending).path("pendingQuestion").path("difficulty").asInt()).isEqualTo(2)
+        assertThat(fixture.calls.map { it.name }).containsExactly("get_study", "list_pending_questions")
+        assertThat(fixture.focusSelections).containsExactly(101L)
+    }
+
+    @Test
+    fun `native committed selection survives cancelled question lookup and lets a newer learner switch topics`() = runBlocking<Unit> {
+        val contexts = ContextStore()
+        val fixture = Fixture(studyContexts = contexts).apply { focusResult = focusSelection(101, 1) }
+        fixture.afterFocus = { contexts.revision = fixture.focusResult!!.revision }
+        val lookupCancelled = CancellationException("synthetic question lookup cancellation")
+        fixture.handler = { name, args -> when (name) {
+            "get_study" -> success(mapOf("id" to args.getValue("study_id"), "parentStudyId" to null,
+                "topic" to "Redis", "difficultyLevel" to 3))
+            "list_pending_questions" -> throw lookupCancelled
+            else -> error("Unexpected tool $name")
+        } }
+
+        val selected = fixture.adapter.execute(nativeContext(), "select_voice_study", mapOf("study_id" to 101L))
+        assertThat(selected.isError).isFalse()
+        assertThat(selected.lessonRevision).isEqualTo(1)
+        assertThat(fixture.persistedSession?.studyId).isEqualTo(101L)
+        assertThat(fixture.calls.map { it.name }).containsExactly("get_study")
+        val caught = try {
+            fixture.adapter.execute(nativeContext(currentRevision = selected.lessonRevision!!),
+                "list_pending_questions", mapOf("study_id" to 101L))
+            null
+        } catch (cancelled: CancellationException) { cancelled }
+        assertThat(caught).isInstanceOf(CancellationException::class.java).hasMessage(lookupCancelled.message)
+
+        fixture.learnerTurnId = 13
+        fixture.acceptedProviderItemId = "new-topic-request"
+        fixture.acceptedLessonRevision = 1
+        fixture.focusResult = focusSelection(202, 2)
+        val newer = nativeContext(currentRevision = selected.lessonRevision!!).let {
+            it.copy(dialogueBoundary = it.dialogueBoundary!!.copy(
+                responseGeneration = 4, latestAcceptedLearnerSpeechStartedOrder = 6,
+                latestAcceptedLearnerProviderItemId = fixture.acceptedProviderItemId,
+                latestAcceptedLearnerLessonRevision = fixture.acceptedLessonRevision,
+            ))
+        }
+        val switched = fixture.adapter.execute(newer, "select_voice_study", mapOf("study_id" to 202L))
+        assertThat(switched.isError).isFalse()
+        assertThat(switched.lessonRevision).isEqualTo(2)
+        assertThat(switched.lessonFocus?.studyId).isEqualTo(202L)
+        assertThat(fixture.persistedSession?.studyId).isEqualTo(202L)
+        assertThat(fixture.focusSelections).containsExactly(101L, 202L)
+        assertThat(fixture.calls.map { it.name }).containsExactly("get_study", "list_pending_questions", "get_study")
+    }
+
+    @Test
+    fun `native child advance completes its committed focus without starting question work`() = runBlocking<Unit> {
+        val contexts = ContextStore()
+        val fixture = Fixture(studyContexts = contexts).apply {
+            focusResult = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(102, 1),
+                VoiceTutorStudySnapshot(102, 101, "Redis Streams", 8, 1))
+            afterFocus = { contexts.revision = 1 }
+            handler = { name, args ->
+                assertThat(name).isEqualTo("get_study")
+                assertThat(args["study_id"]).isEqualTo(102L)
+                success(mapOf("id" to 102L, "parentStudyId" to 101L, "topic" to "Redis Streams", "difficultyLevel" to 8))
+            }
+        }
+        val result = fixture.adapter.execute(nativeContext(), "advance_voice_study", mapOf("study_id" to 102L))
+        assertThat(result.isError).isFalse()
+        assertThat(result.lessonRevision).isEqualTo(1)
+        assertThat(result.lessonFocus).isEqualTo(fixture.focusResult)
+        assertThat(result.questionReadback).isNull()
+        assertThat(result.learningProgress).isNull()
+        assertThat(json(result).path("voiceQuestion").path("lookupRequired").asBoolean()).isTrue()
+        assertThat(fixture.calls.map { it.name }).containsExactly("get_study")
+        assertThat(fixture.focusSelections).containsExactly(102L)
     }
 
     private class Fixture(

@@ -208,10 +208,10 @@ class McpVoiceTutorToolAdapter(
             } +
             listOf(
                 VoiceTutorMcpToolDefinition(SELECT_STUDY,
-                    "Select the learner's chosen exact owned saved topic and freeze its real level and parent path for this call. Resolve ordinary contextual choices yourself without extra confirmation. The result includes voiceQuestion with any arrived pending question: read that saved question first and await an answer, preserving its original level. If none is ready and the learner wants to start, request_question through MCP. Never invent an instant quiz or choose another topic.",
+                    "Select the learner's chosen exact owned saved topic and freeze its real level and parent path for this call. Resolve ordinary contextual choices yourself without extra confirmation. A successful result means selection is complete; no selection operation remains running. Read list_pending_questions separately before teaching, preserving each saved question's original level. If none is ready and the learner wants to start, use request_question. On cancellation stop the old topic's follow-up; on a switch select the newly chosen saved topic without waiting for old question work. If the new topic is unspecified, ask one brief choice. Cancellation does not roll back an already committed selection. Never invent an instant quiz or choose another topic.",
                     focusParameters("Exact owned saved study ID chosen in the conversation.")),
                 VoiceTutorMcpToolDefinition(ADVANCE_STUDY,
-                    "Move the lesson to one real direct child of the current focus after feedback and the learner's conversational choice to continue there. Read actual children first; never invent edges, skip a level or switch because of silence. This changes only call focus and requires no mutation confirmation.",
+                    "Move the lesson to one real direct child of the current focus after feedback and the learner's conversational choice to continue there. Read actual children first; never invent edges, skip a level or switch because of silence. This changes only call focus and requires no mutation confirmation. A successful result completes selection; read list_pending_questions separately before teaching. Honour a later cancellation or topic switch immediately by stopping the old follow-up, without claiming to roll back a committed selection.",
                     focusParameters("Exact saved direct-child ID chosen for the next lesson.")),
                 VoiceTutorMcpToolDefinition(PREPARE_MUTATION,
                     "Prepare, but DO NOT execute, the learner's requested new root, child, name/level change or deletion. Understand natural references and intent from the conversation without requiring a repeated command. Read exact owned target/parent IDs first. Returns one immutable proposal_id and confirmation_question; ask that short question once, then wait for the learner. For deletion, the question includes the whole subtree; prior records are preserved. Use difficulty_level 1-10, default 5 for new nodes. A changed target or patch needs a new proposal. Only genuinely missing target or values need clarification.",
@@ -498,14 +498,13 @@ class McpVoiceTutorToolAdapter(
         if (selected.studyId != candidate.studyId || selected.snapshot.parentStudyId != candidate.parentStudyId ||
             selected.topic != candidate.topic || selected.difficulty != candidate.difficulty) return failure("LESSON_FOCUS_UNCONFIRMED", "The exact saved focus result could not be verified.")
         val focus = focusMetadata(selected)
-        val pending = canonicalQuestions.selected(context.copy(initialLessonRevision = selected.revision))
+        // Focus is already committed. Do not suspend on question work here: a timeout or
+        // cancellation after commit would lose the revision the controller must synchronize.
         return VoiceTutorMcpToolResult(objectMapper.writeValueAsString(mapOf("selected" to true,
             "voiceLessonContextReady" to true, "voiceLessonFocus" to focus, "voiceLessonTopics" to listOf(focus),
-            "voiceQuestion" to objectMapper.readTree(pending.output),
-            "notice" to "This exact topic is selected. Read its returned pending question first; its saved difficulty is immutable. If the question lookup failed, retry list_pending_questions before teaching. If none is ready, use request_question when the learner wants a question. Never invent a question or a grade. No further selection confirmation is needed.")),
-            false, lessonRevision = selected.revision, lessonFocus = selected, questionChange = pending.questionChange, questionReadback = pending.questionReadback,
-            learningProgress = if (pending.isError) com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress(
-                com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase.QUESTION_FAILED, selected.studyId) else pending.learningProgress)
+            "voiceQuestion" to mapOf("lookupRequired" to true),
+            "notice" to "This exact topic is selected and selection is complete. No selection operation is running. Call list_pending_questions separately for this exact study_id before teaching; preserve the saved question's original difficulty. If none is ready, use request_question when the learner wants a question. On cancellation stop this topic's follow-up; on a switch follow the latest chosen saved topic without waiting for old question work. Cancellation does not undo this committed selection. Never invent a question or a grade. No further selection confirmation is needed.")),
+            false, lessonRevision = selected.revision, lessonFocus = selected)
     }
 
     private fun persistencePending() = failure("INPUT_PERSISTENCE_PENDING", "The current dialogue boundary is still being saved; retry this same tool internally, without asking the learner to repeat anything.")
