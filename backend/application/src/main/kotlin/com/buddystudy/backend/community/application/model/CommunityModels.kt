@@ -7,6 +7,7 @@ import com.buddystudy.backend.study.application.model.ContentLocalizationRespons
 import com.buddystudy.backend.study.application.model.RecordLocalizationResponse
 import com.buddystudy.backend.study.application.model.VoiceRecordContentResponse
 import com.buddystudy.study.domain.entity.StudyRecordType
+import com.fasterxml.jackson.annotation.JsonProperty
 import java.time.Instant
 
 data class ReportQuestionResponse(val ok: Boolean = true)
@@ -36,6 +37,9 @@ data class CommunityQuestionResponse(
     val localization: RecordLocalizationResponse? = null,
     val recordType: StudyRecordType = StudyRecordType.QUESTION,
     val voiceRecord: VoiceRecordContentResponse? = null,
+    /** Exact authenticated viewer ownership, independent of public author-profile availability. */
+    @get:JsonProperty("isOwnedByMe")
+    val isOwnedByMe: Boolean = false,
 )
 
 data class CommunityQuestionsResponse(

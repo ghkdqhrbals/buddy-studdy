@@ -800,6 +800,7 @@ class CommunityService(
                 viewMode = viewMode,
                 voiceRecord = voice.content,
                 voiceLocalization = voice.localization,
+                isOwnedByMe = context.viewerUserId != null && q.userId == context.viewerUserId,
             )
         }
         val projected = localizedRecord(
@@ -823,6 +824,7 @@ class CommunityService(
                 answerTranslationPending = projected.answerTranslationPending,
                 aiResponseTranslationPending = projected.aiResponseTranslationPending,
                 answerAuthorOriginal = projected.answerAuthorOriginal,
+                isOwnedByMe = context.viewerUserId != null && q.userId == context.viewerUserId,
             )
     }
 

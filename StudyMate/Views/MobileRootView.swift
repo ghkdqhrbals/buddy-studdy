@@ -2360,10 +2360,7 @@ private struct MobileHomeView: View {
     }
 
     private func communityQuestionActionPolicy(_ question: CommunityQuestion) -> CommunityQuestionActionPolicy {
-        CommunityQuestionActionPolicy(
-            isSignedIn: appState.isCommunitySessionActive,
-            isOwner: question.author.map { appState.isCurrentCommunityUser(id: $0.id) } ?? false
-        )
+        appState.communityQuestionActionPolicy(for: question)
     }
 
     private func openCommunityQuestion(_ question: CommunityQuestion) {
@@ -2371,15 +2368,23 @@ private struct MobileHomeView: View {
     }
 
     private func makeOwnedCommunityQuestionPrivate(_ question: CommunityQuestion) {
+        guard communityQuestionActionPolicy(question).canManage else { return }
+        let identity = appState.commonRecordsIdentity
         Task {
-            guard let record = await recordForCommunityQuestionAction(question) else { return }
+            guard let record = await recordForCommunityQuestionAction(question),
+                  identity == appState.commonRecordsIdentity,
+                  communityQuestionActionPolicy(question).canManage else { return }
             appState.updateStudyRecordPublicity(record, isPublic: false)
         }
     }
 
     private func deleteOwnedCommunityQuestion(_ question: CommunityQuestion) {
+        guard communityQuestionActionPolicy(question).canManage else { return }
+        let identity = appState.commonRecordsIdentity
         Task {
-            guard let record = await recordForCommunityQuestionAction(question) else { return }
+            guard let record = await recordForCommunityQuestionAction(question),
+                  identity == appState.commonRecordsIdentity,
+                  communityQuestionActionPolicy(question).canManage else { return }
             appState.deleteStudyRecord(record)
         }
     }
@@ -10476,15 +10481,10 @@ struct CommunityQuestionDetailView: View {
         .navigationTitle(displayQuestion.recordType == .voiceTutor ? strings.commonRecordTitle : strings.communityQuestion)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if contentSource == .community && appState.isCommunitySessionActive {
+            if contentSource == .community && appState.communityQuestionActionPolicy(for: displayQuestion).hasActions {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        let policy = CommunityQuestionActionPolicy(
-                            isSignedIn: appState.isCommunitySessionActive,
-                            isOwner: displayQuestion.author.map {
-                                appState.isCurrentCommunityUser(id: $0.id)
-                            } ?? false
-                        )
+                        let policy = appState.communityQuestionActionPolicy(for: displayQuestion)
 
                         if policy.canManage {
                             Button {
@@ -10634,16 +10634,22 @@ struct CommunityQuestionDetailView: View {
     }
 
     private func makeQuestionPrivate() {
+        guard appState.communityQuestionActionPolicy(for: displayQuestion).canManage else { return }
+        let identity = appState.commonRecordsIdentity
         Task {
-            guard let record = await recordForQuestionAction() else { return }
+            guard let record = await recordForQuestionAction(), identity == appState.commonRecordsIdentity,
+                  appState.communityQuestionActionPolicy(for: displayQuestion).canManage else { return }
             appState.updateStudyRecordPublicity(record, isPublic: false)
             dismiss()
         }
     }
 
     private func deleteQuestion() {
+        guard appState.communityQuestionActionPolicy(for: displayQuestion).canManage else { return }
+        let identity = appState.commonRecordsIdentity
         Task {
-            guard let record = await recordForQuestionAction() else { return }
+            guard let record = await recordForQuestionAction(), identity == appState.commonRecordsIdentity,
+                  appState.communityQuestionActionPolicy(for: displayQuestion).canManage else { return }
             appState.deleteStudyRecord(record)
             dismiss()
         }

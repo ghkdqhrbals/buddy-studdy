@@ -1494,6 +1494,16 @@ final class AppState: ObservableObject {
         logAuthTrace(event, page: page, reason: reason, extra: extra)
     }
 
+    func communityQuestionActionPolicy(for question: CommunityQuestion) -> CommunityQuestionActionPolicy {
+        let viewerIDs = Set([communityProfile?.id, Int(exactly: backendAccessState.user.id)].compactMap { $0 })
+        return CommunityQuestionActionPolicy(
+            isSignedIn: isCommunitySessionActive,
+            isOwnedByMe: question.isOwnedByMe,
+            authorID: question.author?.id,
+            viewerIDs: viewerIDs
+        )
+    }
+
     func isCurrentCommunityUser(id userID: Int) -> Bool {
         if let profile = communityProfile,
            profile.id == userID {
@@ -6161,10 +6171,13 @@ final class AppState: ObservableObject {
     }
 
     func reportCommunityQuestion(_ question: CommunityQuestion, reason: String, message: String = "") async {
+        guard communityQuestionActionPolicy(for: question).canReport else { return }
+        let identity = commonRecordsIdentity
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-report") else {
             clearCommunityErrorForMissingRegistration(reason: "community-report")
             return
         }
+        guard identity == commonRecordsIdentity, communityQuestionActionPolicy(for: question).canReport else { return }
 
         await actionRunner.runVoid(
             operation: {

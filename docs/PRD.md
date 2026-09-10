@@ -140,6 +140,8 @@ Voice Tutor selection and display clarifications:
 
 ### Community
 
+Public-question options are owner-aware. The authenticated backend returns `isOwnedByMe` from the canonical record owner for feed, detail, search and liked pages, including when author profile display data is unavailable. My own question offers only Make private and Delete; it has no Edit, Report or Block action. Other users' questions retain moderation actions. Older responses without the field may use a resolved numeric account/author identity; unknown ownership must not be treated as another author while the profile is loading.
+
 1. Signed-in users can open Liked Questions from Profile and browse every public question they have liked, not only liked items that happen to be present in the currently loaded public feed.
 2. The liked collection is a server-filtered, newest-first 20-item page with search, lazy pagination, retry, and a dedicated empty state. Deleted, private, unanswered, blocked-author, or otherwise non-public questions never appear, and native advertisements are not inserted into this personal collection.
 3. Like state is account-owned backend data and is not duplicated into `SettingsStore`. Signing out, withdrawing the account, or resetting backend identity clears the in-memory liked collection so one account's items cannot appear for another account.
@@ -247,6 +249,8 @@ Voice Tutor selection and display clarifications:
 12. Every active Redis Stream exposes a same-group recovery consumer before failures occur. Handler delivery is attempted at most three times; terminal deliveries leave the pending list but retain their Stream event for bounded operational history.
 
 ### Community
+
+Public-question options are owner-aware. The authenticated backend returns `isOwnedByMe` from the canonical record owner for feed, detail, search and liked pages, including when author profile display data is unavailable. My own question offers only Make private and Delete; it has no Edit, Report or Block action. Other users' questions retain moderation actions. Older responses without the field may use a resolved numeric account/author identity; unknown ownership must not be treated as another author while the profile is loading.
 
 1. Community questions are available only after Google Login.
 2. A signed-in user can maintain a public profile with display name and a short bio.

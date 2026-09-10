@@ -121,6 +121,74 @@ class CommunityServiceTest {
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
+    fun `public list detail liked and search use exact authenticated row ownership rather than author presentation`(): Unit = runBlocking {
+        users.rows += UserEntity(id = principal.userId, providerId = "owner", displayName = "Same name")
+        users.rows += UserEntity(id = 10, providerId = "other", displayName = "Same name")
+        questions.rows += publicQuestion(100, principal.userId, "Redis")
+        questions.rows += publicQuestion(101, 10, "Redis")
+        likes.rows += QuestionLikeEntity(questionId = 100, userId = principal.userId)
+        likes.rows += QuestionLikeEntity(questionId = 101, userId = principal.userId)
+
+        val pages = listOf(
+            service.getPublicQuestions(principal, null, "ko", "original", 20, 0),
+            service.getPublicQuestions(principal, "Redis", "ko", "original", 20, 0),
+            service.getPublicQuestionsV2(principal, null, "ko", "original", 20, 0),
+            service.getPublicQuestionsV2(principal, "Redis", "ko", "original", 20, 0),
+            service.getPublicQuestionFeedV2(principal, "ko", "original", 20, 0),
+            service.getLikedPublicQuestions(principal, null, "ko", "original", 20, 0),
+        )
+        pages.forEach { page ->
+            assertThat(page.questions.associate { it.id to it.isOwnedByMe }).isEqualTo(mapOf("100" to true, "101" to false))
+            assertThat(page.items.mapNotNull { it.question }.associate { it.id to it.isOwnedByMe })
+                .isEqualTo(page.questions.associate { it.id to it.isOwnedByMe })
+        }
+        val own = service.getPublicQuestion(principal, 100, "ko", "original")
+        val other = service.getPublicQuestion(principal, 101, "ko", "original")
+        assertThat(own.isOwnedByMe).isTrue()
+        assertThat(other.isOwnedByMe).isFalse()
+        assertThat(own.author?.displayName).isEqualTo(other.author?.displayName)
+        // Public author profiles intentionally omit private account status.
+        assertThat(own.author?.status).isEqualTo("ANONYMOUS")
+        assertThat(other.author?.status).isEqualTo("ANONYMOUS")
+    }
+
+    @Test
+    fun `unauthenticated viewer never owns public rows while missing author profile cannot erase actual ownership`(): Unit = runBlocking {
+        questions.rows += publicQuestion(100, principal.userId, "Redis")
+        val own = service.getPublicQuestion(principal, 100, "ko", "original")
+        assertThat(own.author).isNull()
+        assertThat(own.isOwnedByMe).isTrue()
+        assertThat(service.getPublicQuestion(null, 100, "ko", "original").isOwnedByMe).isFalse()
+        assertThat(service.getPublicQuestions(null, null, "ko", "original", 20, 0).questions.single().isOwnedByMe).isFalse()
+        assertThat(service.getPublicQuestionsV2(null, "Redis", "ko", "original", 20, 0).questions.single().isOwnedByMe).isFalse()
+        assertThat(service.getPublicQuestionFeedV2(null, "ko", "original", 20, 0).questions.single().isOwnedByMe).isFalse()
+        // This field states ownership only; permission/sign-in gates remain separate.
+        assertThat(service.getPublicQuestion(principal.copy(anonymous = true), 100, "ko", "original").isOwnedByMe).isTrue()
+    }
+
+    @Test
+    fun `voice record ownership is canonical and independent of author lookup on public and liked surfaces`(): Unit = runBlocking {
+        val own = voiceQuestion(200, principal.userId)
+        val other = voiceQuestion(201, 10)
+        questions.rows += listOf(own, other)
+        voiceLocalizations.rows += listOf(voiceRecord(own), voiceRecord(other))
+        likes.rows += QuestionLikeEntity(questionId = own.id, userId = principal.userId)
+        likes.rows += QuestionLikeEntity(questionId = other.id, userId = principal.userId)
+
+        val detail = service.getPublicQuestion(principal, own.id, "ko", "original")
+        assertThat(detail.id).isEqualTo("200")
+        assertThat(detail.recordType).isEqualTo(StudyRecordType.VOICE_TUTOR)
+        assertThat(detail.author).isNull()
+        assertThat(detail.isOwnedByMe).isTrue()
+        assertThat(service.getPublicQuestion(principal, other.id, "ko", "original").isOwnedByMe).isFalse()
+        assertThat(service.getPublicQuestion(null, own.id, "ko", "original").isOwnedByMe).isFalse()
+        listOf(service.getPublicQuestions(principal, null, "ko", "original", 20, 0),
+            service.getLikedPublicQuestions(principal, null, "ko", "original", 20, 0)).forEach { page ->
+            assertThat(page.questions.associate { it.id to it.isOwnedByMe }).isEqualTo(mapOf("200" to true, "201" to false))
+        }
+    }
+
+    @Test
     fun `community endpoints that can repair voice translations are read write transactions`(): Unit {
         val methods = CommunityService::class.java.declaredMethods
             .filter { it.name == "getPublicQuestionsV2" || it.name == "getLikedPublicQuestions" }

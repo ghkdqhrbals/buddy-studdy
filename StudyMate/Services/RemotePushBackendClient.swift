@@ -4894,6 +4894,9 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var createdAt: Date
     var answeredAt: Date?
     var author: CommunityUserProfile?
+    /// Viewer-specific server proof. Nil means an older response omitted it;
+    /// false is authoritative and must not fall back to a cached profile.
+    var isOwnedByMe: Bool?
     var likeCount: Int
     var commentCount: Int
     var viewCount: Int
@@ -4913,6 +4916,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         case createdAt
         case answeredAt
         case author
+        case isOwnedByMe
+        case ownedByMe
         case likeCount
         case commentCount
         case viewCount
@@ -4939,7 +4944,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         isLikedByMe: Bool = false,
         localization: RecordLocalizationMetadata? = nil,
         recordType: StudyRecordType = .question,
-        voiceRecord: VoiceRecordContent? = nil
+        voiceRecord: VoiceRecordContent? = nil,
+        isOwnedByMe: Bool? = nil
     ) {
         self.id = id
         self.recordType = recordType
@@ -4954,6 +4960,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         self.createdAt = createdAt
         self.answeredAt = answeredAt
         self.author = author
+        self.isOwnedByMe = isOwnedByMe
         self.likeCount = likeCount
         self.commentCount = commentCount
         self.viewCount = viewCount
@@ -4976,6 +4983,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
         author = try container.decodeIfPresent(CommunityUserProfile.self, forKey: .author)
+        isOwnedByMe = try container.decodeIfPresent(Bool.self, forKey: .isOwnedByMe)
+            ?? container.decodeIfPresent(Bool.self, forKey: .ownedByMe)
         likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
         commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
         viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0

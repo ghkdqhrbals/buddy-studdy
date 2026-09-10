@@ -1119,6 +1119,47 @@ final class CommunityQuestionResultPresentationTests: XCTestCase {
 }
 
 final class CommunityQuestionActionPolicyTests: XCTestCase {
+    func testServerOwnershipShowsOwnerActionsBeforeProfileLoads() {
+        let policy = CommunityQuestionActionPolicy(isSignedIn: true, isOwnedByMe: true,
+                                                   authorID: 42, viewerIDs: [0])
+        XCTAssertTrue(policy.canManage)
+        XCTAssertFalse(policy.canReport)
+        XCTAssertFalse(policy.canBlock)
+    }
+
+    func testServerOwnershipWorksWithoutAnAuthorProjectionAndOverridesStaleLocalIdentity() {
+        let owned = CommunityQuestionActionPolicy(isSignedIn: true, isOwnedByMe: true,
+                                                  authorID: nil, viewerIDs: [])
+        XCTAssertTrue(owned.canManage)
+        let other = CommunityQuestionActionPolicy(isSignedIn: true, isOwnedByMe: false,
+                                                  authorID: 42, viewerIDs: [42])
+        XCTAssertFalse(other.canManage)
+        XCTAssertTrue(other.canReport)
+    }
+
+    func testUnresolvedLegacyOwnershipNeverShowsModerationOrManagement() {
+        for ids in [Set<Int>(), Set([0]), Set([42, 43])] {
+            let policy = CommunityQuestionActionPolicy(isSignedIn: true, isOwnedByMe: nil,
+                                                       authorID: 42, viewerIDs: ids)
+            XCTAssertFalse(policy.hasActions)
+        }
+        XCTAssertFalse(CommunityQuestionActionPolicy(isSignedIn: true, isOwner: nil).hasActions)
+    }
+
+    func testLegacyOwnershipRequiresOnePositiveViewerAndKnownAuthor() {
+        XCTAssertTrue(CommunityQuestionActionPolicy(isSignedIn: true, isOwnedByMe: nil,
+                                                    authorID: 42, viewerIDs: [42]).canManage)
+        XCTAssertTrue(CommunityQuestionActionPolicy(isSignedIn: true, isOwnedByMe: nil,
+                                                    authorID: 43, viewerIDs: [42]).canReport)
+        XCTAssertFalse(CommunityQuestionActionPolicy(isSignedIn: true, isOwnedByMe: nil,
+                                                     authorID: nil, viewerIDs: [42]).hasActions)
+    }
+
+    func testSignedOutViewerCannotReuseAnOwnedResponseToManage() {
+        XCTAssertFalse(CommunityQuestionActionPolicy(isSignedIn: false, isOwnedByMe: true,
+                                                     authorID: 42, viewerIDs: [42]).hasActions)
+    }
+
     func testOwnerCanManageWithoutReportingOwnQuestion() {
         let policy = CommunityQuestionActionPolicy(isSignedIn: true, isOwner: true)
 

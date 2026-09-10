@@ -191,9 +191,24 @@ struct CommunityQuestionActionPolicy: Equatable {
     let canReport: Bool
     let canBlock: Bool
 
-    init(isSignedIn: Bool, isOwner: Bool) {
-        canManage = isSignedIn && isOwner
-        canReport = isSignedIn && !isOwner
-        canBlock = isSignedIn && !isOwner
+    var hasActions: Bool { canManage || canReport || canBlock }
+
+    init(isSignedIn: Bool, isOwner: Bool?) {
+        canManage = isSignedIn && isOwner == true
+        canReport = isSignedIn && isOwner == false
+        canBlock = isSignedIn && isOwner == false
+    }
+
+    init(isSignedIn: Bool, isOwnedByMe: Bool?, authorID: Int?, viewerIDs: Set<Int>) {
+        let knownViewerIDs = viewerIDs.filter { $0 > 0 }
+        let legacyOwnership: Bool?
+        if knownViewerIDs.count == 1, let authorID, authorID > 0 {
+            legacyOwnership = knownViewerIDs.contains(authorID)
+        } else {
+            legacyOwnership = nil
+        }
+        // Authenticated server ownership is available before /profile finishes.
+        // A missing legacy identity is unknown, never evidence of another author.
+        self.init(isSignedIn: isSignedIn, isOwner: isOwnedByMe ?? legacyOwnership)
     }
 }

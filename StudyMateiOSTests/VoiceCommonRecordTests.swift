@@ -142,6 +142,86 @@ final class VoiceCommonRecordTests: XCTestCase {
         XCTAssertThrowsError(try decode(malformed) as CommunityQuestion)
     }
 
+    func testPublicQuestionOwnershipProofDoesNotRequireAnAuthorProfile() throws {
+        for owned in [true, false] {
+            var object = publicJSON()
+            object["isOwnedByMe"] = owned
+            let question: CommunityQuestion = try decode(object)
+            XCTAssertNil(question.author)
+            XCTAssertEqual(question.isOwnedByMe, owned)
+            var updated = question
+            updated.isLikedByMe = true
+            updated.commentCount += 1
+            XCTAssertEqual(updated.isOwnedByMe, owned, "Local feed updates must retain the server ownership proof")
+        }
+    }
+
+    func testLegacyPublicQuestionOwnershipRemainsUnknownInsteadOfBecomingFalse() throws {
+        let omitted: CommunityQuestion = try decode(publicJSON())
+        XCTAssertNil(omitted.isOwnedByMe)
+        var object = publicJSON(); object["isOwnedByMe"] = NSNull()
+        let explicitNull: CommunityQuestion = try decode(object)
+        XCTAssertNil(explicitNull.isOwnedByMe)
+    }
+
+    func testPublicQuestionOwnershipProofRejectsNonBooleanValues() {
+        for invalid in [1, 0, "true", "false", [], [:]] as [Any] {
+            var object = publicJSON(); object["isOwnedByMe"] = invalid
+            XCTAssertThrowsError(try decode(object) as CommunityQuestion)
+        }
+    }
+
+    func testPublicQuestionOwnershipAcceptsBeanAliasButCanonicalFalseWins() throws {
+        var object = publicJSON(); object["ownedByMe"] = true
+        let aliased: CommunityQuestion = try decode(object)
+        XCTAssertEqual(aliased.isOwnedByMe, true)
+        object["isOwnedByMe"] = false
+        let canonical: CommunityQuestion = try decode(object)
+        XCTAssertEqual(canonical.isOwnedByMe, false)
+
+        for key in ["isOwnedByMe", "ownedByMe"] {
+            for invalid in [1, "true"] as [Any] {
+                var malformed = publicJSON(); malformed["ownedByMe"] = true; malformed[key] = invalid
+                XCTAssertThrowsError(try decode(malformed) as CommunityQuestion, key)
+            }
+        }
+    }
+
+    func testColdStartPublicQuestionActionsUseServerOwnershipBeforeTheProfileLoads() throws {
+        let fixture = try CommonRecordHTTPFixture(response: publicJSON())
+        defer { fixture.close() }
+        // Recreate the real startup state instead of the fixture's already-loaded profile.
+        let app = AppState(settingsStore: fixture.store, remotePushBackendClient: fixture.client,
+                           appNotificationEventProvider: CommonRecordNotificationEvents())
+        XCTAssertTrue(app.isCommunitySessionActive)
+        XCTAssertNil(app.communityProfile)
+        XCTAssertEqual(app.backendAccessState.user.id, 0)
+
+        var ownedJSON = publicJSON(); ownedJSON["isOwnedByMe"] = true
+        let owned: CommunityQuestion = try decode(ownedJSON)
+        XCTAssertNil(owned.author)
+        let ownActions = app.communityQuestionActionPolicy(for: owned)
+        XCTAssertTrue(ownActions.canManage)
+        XCTAssertFalse(ownActions.canReport)
+        XCTAssertFalse(ownActions.canBlock)
+
+        var otherJSON = publicJSON(); otherJSON["isOwnedByMe"] = false
+        let other: CommunityQuestion = try decode(otherJSON)
+        let otherActions = app.communityQuestionActionPolicy(for: other)
+        XCTAssertFalse(otherActions.canManage)
+        XCTAssertTrue(otherActions.canReport)
+        XCTAssertTrue(otherActions.canBlock)
+
+        var legacy: CommunityQuestion = try decode(publicJSON())
+        legacy.author = CommonRecordHTTPFixture.profile(id: 7)
+        let unknownActions = app.communityQuestionActionPolicy(for: legacy)
+        XCTAssertFalse(unknownActions.canManage)
+        XCTAssertFalse(unknownActions.canReport)
+        XCTAssertFalse(unknownActions.canBlock)
+        XCTAssertTrue(fixture.requests.isEmpty, "Ownership presentation must not need a profile fetch or mutation")
+        fixture.assertDraftPreserved(app)
+    }
+
     func testPublicAndLikedFeedsKeepCompletedVoiceAndExcludeUnansweredVoice() throws {
         let voice: CommunityQuestion = try decode(publicJSON())
         var unanswered = voice; unanswered.id = "901"; unanswered.answer = nil

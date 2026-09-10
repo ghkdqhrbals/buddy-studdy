@@ -23,6 +23,7 @@ fun PublicQuestionProjection.toCommunityQuestionResponse(
     answerAuthorOriginal: Boolean = false,
     voiceRecord: VoiceRecordContentResponse? = null,
     voiceLocalization: RecordLocalizationResponse? = null,
+    isOwnedByMe: Boolean = false,
 ) = CommunityQuestionResponse(
     id = id,
     question = question,
@@ -50,6 +51,7 @@ fun PublicQuestionProjection.toCommunityQuestionResponse(
     commentCount = commentCount,
     viewCount = viewCount,
     isLikedByMe = isLikedByMe,
+    isOwnedByMe = isOwnedByMe,
     recordType = recordType,
     voiceRecord = voiceRecord,
     localization = voiceLocalization ?: RecordLocalizationResponse(
