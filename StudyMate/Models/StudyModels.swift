@@ -692,6 +692,14 @@ enum StudyLanguage: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+}
+
 enum AppLanguage: String, CaseIterable, Codable, Identifiable {
     case korean
     case english
@@ -2976,6 +2984,19 @@ struct AppStrings {
     var topicGrowthOverview: String { text("주제별 성장", "Growth by topic") }
     var learningRhythmSettings: String { text("학습 리듬", "Learning rhythm") }
     var appEnvironmentSettings: String { text("앱 환경", "App preferences") }
+    var appearanceSettings: String { text("화면 모드", "Appearance", "表示モード") }
+    var appearanceSettingsHelp: String {
+        text("선택하면 바로 적용돼요. 시스템은 기기 설정을 따라요.",
+             "Changes apply immediately. System follows your device settings.",
+             "選ぶとすぐに反映されます。システムは端末の設定に従います。")
+    }
+    func appearanceName(_ appearance: AppAppearance) -> String {
+        switch appearance {
+        case .system: text("시스템", "System", "システム")
+        case .light: text("라이트", "Light", "ライト")
+        case .dark: text("다크", "Dark", "ダーク")
+        }
+    }
     var dataSyncSettings: String { text("데이터 동기화", "Data sync") }
     var enabledStatus: String { text("켜짐", "On") }
     var disabledStatus: String { text("꺼짐", "Off") }

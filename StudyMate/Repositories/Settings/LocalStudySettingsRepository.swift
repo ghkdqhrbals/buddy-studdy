@@ -8,6 +8,8 @@ struct LocalStudySettingsSnapshot {
 }
 
 protocol LocalStudySettingsRepository {
+    func loadAppAppearance() -> AppAppearance
+    func saveAppAppearance(_ appearance: AppAppearance)
     func loadLocalStudySettings() -> LocalStudySettingsSnapshot
     func saveSettings(_ settings: StudySettings)
     func saveAPIKey(_ apiKey: String)

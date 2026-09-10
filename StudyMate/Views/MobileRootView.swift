@@ -11433,6 +11433,28 @@ private struct MobileSettingsView: View {
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
+                MobileSettingsCard(
+                    title: strings.appearanceSettings,
+                    systemImage: "circle.lefthalf.filled"
+                ) {
+                    Picker(strings.appearanceSettings, selection: Binding(
+                        get: { appState.appAppearance },
+                        set: { appState.setAppAppearance($0) }
+                    )) {
+                        ForEach(AppAppearance.allCases) { appearance in
+                            Text(strings.appearanceName(appearance)).tag(appearance)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("settings.appearance")
+
+                    Text(strings.appearanceSettingsHelp)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Group {
                 if appState.isCommunitySessionActive {
                     MobileSettingsCard(
                         title: strings.accountSettings,
@@ -11720,6 +11742,8 @@ private struct MobileSettingsView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
+                }
+                .disabled(appState.isLoadingBackendSettingsForEditing)
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
@@ -11754,7 +11778,6 @@ private struct MobileSettingsView: View {
             .environmentObject(appState)
         }
         .contentShape(Rectangle())
-        .disabled(appState.isLoadingBackendSettingsForEditing)
         .onAppear {
             appState.beginSettingsEditing()
             Task {

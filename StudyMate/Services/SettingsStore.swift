@@ -7,6 +7,7 @@ final class SettingsStore {
 
     private enum Keys {
         static let settings = "studySettings"
+        static let appAppearance = "appAppearance"
         static let currentQuestion = "currentQuestion"
         static let questionHistory = "questionHistory"
         static let studyRecords = "studyRecords"
@@ -136,6 +137,14 @@ final class SettingsStore {
                 $0.isFinite ? max(0, $0) : 0
             }
         )
+    }
+
+    func loadAppAppearance() -> AppAppearance {
+        defaults.string(forKey: Keys.appAppearance).flatMap(AppAppearance.init(rawValue:)) ?? .system
+    }
+
+    func saveAppAppearance(_ appearance: AppAppearance) {
+        defaults.set(appearance.rawValue, forKey: Keys.appAppearance)
     }
 
     func loadSettings() -> StudySettings {

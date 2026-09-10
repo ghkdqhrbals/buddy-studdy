@@ -7,6 +7,10 @@ struct LocalStudySettingsUseCase {
         self.repository = repository
     }
 
+    func loadAppAppearance() -> AppAppearance { repository.loadAppAppearance() }
+
+    func saveAppAppearance(_ appearance: AppAppearance) { repository.saveAppAppearance(appearance) }
+
     func loadSettings() -> LocalStudySettingsSnapshot {
         repository.loadLocalStudySettings()
     }

@@ -228,6 +228,7 @@ final class AppState: ObservableObject {
     #endif
 
     @Published var settings: StudySettings
+    @Published private(set) var appAppearance: AppAppearance
     @Published var draftSettings: StudySettings
     @Published var currentQuestion: QuestionItem?
     @Published var lastAnswer: String
@@ -2046,6 +2047,7 @@ final class AppState: ObservableObject {
         self.appControlProvider = appControlProvider ?? FirebaseAppControlProvider()
         self.appControlSettingsStore = settingsStore
         self.settings = effectiveLoadedSettings
+        self.appAppearance = localUseCases.localStudySettings.loadAppAppearance()
         self.draftSettings = effectiveLoadedSettings
         self.pendingReferralCode = loadedPendingReferralAttribution?.code
         self.deferredReferralLink = loadedIsCommunitySignedIn
@@ -4930,6 +4932,12 @@ final class AppState: ObservableObject {
         }
 
         isValidatingAPIKey = false
+    }
+
+    func setAppAppearance(_ appearance: AppAppearance) {
+        guard appAppearance != appearance else { return }
+        localStudySettingsUseCase.saveAppAppearance(appearance)
+        appAppearance = appearance
     }
 
     func beginSettingsEditing() {

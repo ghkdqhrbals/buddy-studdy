@@ -58,6 +58,24 @@ struct StudyMateiOSApp: App {
     }
 }
 
+extension AppAppearance {
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+
+    var interfaceStyle: UIUserInterfaceStyle {
+        switch self {
+        case .system: .unspecified
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
 private struct StudyMateiOSBootstrapView: View {
     @Binding var appState: AppState?
     @State private var didBootstrap = false
@@ -161,6 +179,7 @@ private struct DebugOverlayWindowInstaller: UIViewRepresentable {
                 overlayWindow = window
                 self.hostingController = hostingController
             }
+            overlayWindow?.overrideUserInterfaceStyle = appState.appAppearance.interfaceStyle
         }
 
         func detach() {
@@ -220,6 +239,7 @@ private struct StudyMateiOSRootContent: View {
             }
         }
         .environmentObject(appState)
+        .preferredColorScheme(appState.appAppearance.colorScheme)
         .animation(.easeOut(duration: 0.2), value: appState.appUpdateDecision?.campaignID)
     }
 }
