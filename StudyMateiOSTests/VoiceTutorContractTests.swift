@@ -1072,6 +1072,37 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(state.isAwaitingTutorResponse)
     }
 
+    func testSilentLearnerSettlementConsumesUnannouncedOpeningOnlyForMatchingPendingTurn() {
+        var state = VoiceTutorDuplexPlaybackState()
+        state.awaitInitialResponse()
+        state.userSpeechStarted(sequence: 1)
+        state.userSpeechStopped(sequence: 1)
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+
+        // The server yields or supersedes the opening before announcing any
+        // tutor response, then the learner continues before a reply is ready.
+        state.userSpeechStarted(sequence: 2)
+        XCTAssertTrue(state.isUserSpeaking)
+        XCTAssertFalse(state.isAwaitingTutorResponse)
+        state.userSpeechStopped(sequence: 2)
+        let awaitingLatestTurn = state
+        XCTAssertFalse(state.inputSettled(sequence: 1), "An older input cannot settle the current learner turn")
+        XCTAssertFalse(state.inputSettled(sequence: 3), "An unseen input cannot consume the opening wait")
+        XCTAssertEqual(state, awaitingLatestTurn)
+        XCTAssertTrue(state.isAwaitingTutorResponse)
+
+        XCTAssertTrue(state.inputSettled(sequence: 2))
+        XCTAssertFalse(state.isAwaitingTutorResponse, "The silent learner reply also replaces the unannounced opening")
+        XCTAssertFalse(state.assistantResponseActive)
+        XCTAssertFalse(state.isAwaitingActiveResponseAudio)
+        XCTAssertNil(state.activeResponseID)
+        XCTAssertFalse(state.isUserSpeaking)
+        state.awaitInitialResponse()
+        XCTAssertFalse(state.isAwaitingTutorResponse, "A late ready event cannot revive the superseded opening")
+        XCTAssertFalse(state.inputSettled(sequence: 2))
+        XCTAssertFalse(state.inputSettled(sequence: 0))
+    }
+
     func testRejectedOpeningCannotLeaveGreetingWaitAfterRepeatedInputSettlesSilently() {
         var state = VoiceTutorDuplexPlaybackState()
         state.awaitInitialResponse()
@@ -3029,7 +3060,7 @@ final class VoiceTutorContractTests: XCTestCase {
         ])
     }
 
-    func testLocalVoiceActivityStartsOnceAndStopsAfterFourHundredEightyMillisecondsOfQuiet() {
+    func testLocalVoiceActivityStartsOnceAndStopsAfterOneThousandTwoHundredEightyMillisecondsOfQuiet() {
         var detector = VoiceTutorLocalSpeechDetector()
         _ = detector.updateGate(mediaReady: true, muted: false)
         XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 7).isEmpty)
@@ -3039,7 +3070,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(detector.isSpeaking)
         XCTAssertTrue(localSpeechEvents(&detector, rms: 0.03, frames: 200).isEmpty,
                       "A sustained utterance starts only once")
-        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 47).isEmpty)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 127).isEmpty)
         XCTAssertTrue(detector.isSpeaking, "A brief pause must not end a turn early")
         XCTAssertEqual(detector.process(normalizedRMS: 0, duration: 0.01),
                        VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1))
@@ -3058,8 +3089,8 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(detector.isSpeaking)
         XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 40).isEmpty)
         XCTAssertNil(detector.process(normalizedRMS: 0.004, duration: 0.01))
-        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 47).isEmpty,
-                      "Continuing speech restarts the complete 480ms silence hold")
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 127).isEmpty,
+                      "Continuing speech restarts the complete 1,280 ms silence hold")
         XCTAssertEqual(detector.process(normalizedRMS: 0, duration: 0.01),
                        VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1))
     }
@@ -3069,7 +3100,7 @@ final class VoiceTutorContractTests: XCTestCase {
         var nativeDetector = VoiceTutorLocalSpeechDetector()
         _ = normalizedDetector.updateGate(mediaReady: true, muted: false)
         _ = nativeDetector.updateGate(mediaReady: true, muted: false)
-        let segments: [(Float, Int)] = [(0, 30), (0.012, 16), (0.004, 40), (0, 80), (0.02, 12), (0, 80)]
+        let segments: [(Float, Int)] = [(0, 30), (0.012, 16), (0.004, 40), (0, 160), (0.02, 12), (0, 160)]
         var normalizedEvents: [VoiceTutorLocalSpeechEvent] = []
         var nativeEvents: [VoiceTutorLocalSpeechEvent] = []
         for (amplitude, frames) in segments {
@@ -3145,7 +3176,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(localSpeechEvents(&detector, rms: 0.03, frames: 8), [
             VoiceTutorLocalSpeechEvent(activity: .started, sequence: 1)
         ])
-        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 47).isEmpty)
+        XCTAssertTrue(localSpeechEvents(&detector, rms: 0, frames: 127).isEmpty)
         for rms in invalidRMS {
             XCTAssertNil(detector.process(normalizedRMS: rms, duration: 0.01))
         }
@@ -3194,7 +3225,7 @@ final class VoiceTutorContractTests: XCTestCase {
                        VoiceTutorLocalSpeechEvent(activity: .started, sequence: 2))
         XCTAssertNil(detector.updateGate(mediaReady: true, muted: false))
         XCTAssertTrue(detector.isSpeaking, "Reasserting an open gate must not interrupt an utterance")
-        XCTAssertEqual(localSpeechEvents(&detector, rms: 0, frames: 70), [
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0, frames: 160), [
             VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 2)
         ])
     }
@@ -3253,7 +3284,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(playback.isUserSpeaking)
         XCTAssertTrue(playback.assistantResponseActive)
         XCTAssertEqual(playback.activeResponseID, "synthetic-tutor-sentence")
-        XCTAssertEqual(localSpeechEvents(&detector, rms: 0, frames: 70), [
+        XCTAssertEqual(localSpeechEvents(&detector, rms: 0, frames: 160), [
             VoiceTutorLocalSpeechEvent(activity: .stopped, sequence: 1)
         ])
         playback.userSpeechStopped()
@@ -3269,7 +3300,7 @@ final class VoiceTutorContractTests: XCTestCase {
         var events: [VoiceTutorLocalSpeechEvent] = []
         for _ in 0..<6 {
             events += localSpeechEvents(&detector, rms: 0.03, frames: 8)
-            events += localSpeechEvents(&detector, rms: 0, frames: 70)
+            events += localSpeechEvents(&detector, rms: 0, frames: 160)
         }
         XCTAssertEqual(events.count, 12)
         for (index, event) in events.enumerated() {

@@ -107,10 +107,10 @@ enum VoiceTutorSpeechSampleScale: Equatable, Sendable {
 /// Silero probability, not amplitude, words or the tutor's speaking state. It
 /// never changes microphone/tutor PCM or commits provider input itself.
 struct VoiceTutorLocalSpeechDetector {
-    /// Fifteen 32 ms Silero windows. This is an early acoustic boundary, not
-    /// permission for the tutor to answer; semantic completeness stays on the
-    /// server and any returning speech starts a new, paired activity edge.
-    static let quietHoldDuration: TimeInterval = 0.48
+    /// Forty 32 ms Silero windows preserve the learner's turn across short
+    /// thinking pauses and quiet word endings. Continuing speech resets this
+    /// entire hold; the server still owns when a tutor response may begin.
+    static let quietHoldDuration: TimeInterval = 1.28
 
     private(set) var isSpeaking = false
     private(set) var sequence = 0

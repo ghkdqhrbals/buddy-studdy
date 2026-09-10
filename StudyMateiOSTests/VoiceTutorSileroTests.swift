@@ -21,7 +21,7 @@ final class VoiceTutorSileroTests: XCTestCase {
         XCTAssertEqual(detector.sequence, 0)
     }
 
-    func testProbabilityHysteresisStartsOnceAndStopsAfterFifteenQuietWindows() {
+    func testProbabilityHysteresisStartsOnceAndStopsAfterFortyQuietWindows() {
         var detector = enabledDetector()
         XCTAssertNil(detector.process(speechProbability: 0.5, duration: frameDuration))
         XCTAssertNil(detector.process(speechProbability: 0.5, duration: frameDuration))
@@ -30,11 +30,11 @@ final class VoiceTutorSileroTests: XCTestCase {
             // The continuation band does not require repeatedly crossing onset.
             XCTAssertNil(detector.process(speechProbability: 0.35, duration: frameDuration))
         }
-        for _ in 0..<14 {
+        for _ in 0..<39 {
             XCTAssertNil(detector.process(speechProbability: 0.349, duration: frameDuration))
         }
-        XCTAssertTrue(detector.isSpeaking, "14 x 32 ms is only 448 ms")
-        XCTAssertEqual(VoiceTutorLocalSpeechDetector.quietHoldDuration, 15 * frameDuration, accuracy: 0.000_001)
+        XCTAssertTrue(detector.isSpeaking, "39 x 32 ms is only 1,248 ms")
+        XCTAssertEqual(VoiceTutorLocalSpeechDetector.quietHoldDuration, 40 * frameDuration, accuracy: 0.000_001)
         XCTAssertEqual(detector.process(speechProbability: 0.349, duration: frameDuration), event(.stopped, 1))
         for _ in 0..<30 {
             XCTAssertNil(detector.process(speechProbability: 0, duration: frameDuration))
@@ -46,26 +46,29 @@ final class VoiceTutorSileroTests: XCTestCase {
     func testProbabilityQuietGapResetsWhenSpeechReturnsAndSequencesStayPaired() {
         var detector = enabledDetector()
         XCTAssertEqual(feed(&detector, probability: 0.9, frames: 4), [event(.started, 1)])
-        XCTAssertTrue(feed(&detector, probability: 0.1, frames: 13).isEmpty)
+        XCTAssertTrue(feed(&detector, probability: 0.1, frames: 38).isEmpty)
         XCTAssertTrue(feed(&detector, probability: 0.8, frames: 1).isEmpty)
-        XCTAssertTrue(feed(&detector, probability: 0.1, frames: 14).isEmpty)
+        XCTAssertTrue(feed(&detector, probability: 0.1, frames: 39).isEmpty)
         XCTAssertEqual(feed(&detector, probability: 0.1, frames: 1), [event(.stopped, 1)])
         XCTAssertEqual(feed(&detector, probability: 0.9, frames: 3), [event(.started, 2)])
-        XCTAssertEqual(feed(&detector, probability: 0.1, frames: 15), [event(.stopped, 2)])
+        XCTAssertEqual(feed(&detector, probability: 0.1, frames: 40), [event(.stopped, 2)])
     }
 
     func testProbabilityRepeatedWithinPhrasePausesNeverFinishContinuingSpeech() {
         var detector = enabledDetector()
         XCTAssertEqual(feed(&detector, probability: 0.9, frames: 3), [event(.started, 1)])
-        for _ in 0..<60 {
-            XCTAssertTrue(feed(&detector, probability: 0.1, frames: 14).isEmpty)
-            // Quiet but genuine continuation resets the entire quiet window,
-            // without needing another loud onset or a different transcript.
-            XCTAssertNil(detector.process(speechProbability: 0.35, duration: frameDuration))
+        for _ in 0..<15 {
+            for pauseFrames in [15, 24, 32, 39] {
+                // 480–1,248 ms pauses previously ended the learner's turn.
+                XCTAssertTrue(feed(&detector, probability: 0.1, frames: pauseFrames).isEmpty)
+                // A continuation below the onset threshold resets the whole
+                // hold without another loud onset or transcript evidence.
+                XCTAssertNil(detector.process(speechProbability: 0.35, duration: frameDuration))
+            }
         }
         XCTAssertTrue(detector.isSpeaking)
         XCTAssertEqual(detector.sequence, 1)
-        XCTAssertEqual(feed(&detector, probability: 0.1, frames: 15), [event(.stopped, 1)])
+        XCTAssertEqual(feed(&detector, probability: 0.1, frames: 40), [event(.stopped, 1)])
     }
 
     func testProbabilityInvalidValuesDoNotAdvanceOnsetOrQuietTimers() {
@@ -79,7 +82,7 @@ final class VoiceTutorSileroTests: XCTestCase {
         }
         XCTAssertFalse(detector.isSpeaking)
         XCTAssertEqual(feed(&detector, probability: 0.9, frames: 1), [event(.started, 1)])
-        _ = feed(&detector, probability: 0.1, frames: 14)
+        _ = feed(&detector, probability: 0.1, frames: 39)
         for probability in [Double.nan, .infinity, -1, 2] {
             XCTAssertNil(detector.process(speechProbability: probability, duration: frameDuration))
         }
@@ -125,7 +128,7 @@ final class VoiceTutorSileroTests: XCTestCase {
         response.markOutputBufferStarted("synthetic-tutor-response")
         XCTAssertTrue(response.mayIndicateSpeaking)
         XCTAssertEqual(feed(&detector, probability: 0.9, frames: 3), [event(.started, 1)])
-        XCTAssertEqual(feed(&detector, probability: 0.01, frames: 22), [event(.stopped, 1)])
+        XCTAssertEqual(feed(&detector, probability: 0.01, frames: 44), [event(.stopped, 1)])
         XCTAssertTrue(response.mayIndicateSpeaking, "Input classification cannot cancel or stop tutor output")
         XCTAssertTrue(detector.isEnabled)
     }
@@ -613,8 +616,11 @@ extension VoiceTutorSileroTests {
             // A real continuous pre-roll/tail advances recurrent state. There
             // is no phrase-specific threshold, word rule, padding per callback
             // or direct injection of an expected speech probability.
+            // Retain 800 ms for recurrent-model release and frame alignment,
+            // followed by the full acoustic quiet hold under test.
+            let tailDuration = VoiceTutorLocalSpeechDetector.quietHoldDuration + 0.8
             let input = [Float](repeating: 0, count: Int(clip.sampleRate * 0.2)) + clip.samples +
-                [Float](repeating: 0, count: Int(clip.sampleRate * 1.28))
+                [Float](repeating: 0, count: Int(clip.sampleRate * tailDuration))
             let packetSize = max(1, Int(clip.sampleRate / 100))
             for start in stride(from: 0, to: input.count, by: packetSize) {
                 try Task.checkCancellation()

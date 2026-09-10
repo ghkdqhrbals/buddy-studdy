@@ -28,6 +28,189 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
+    fun `opening waits for the ready quiet period and a learner who speaks first owns the response`() {
+        controller.start()
+        time += Duration.ofMillis(399).toNanos(); controller.tick()
+        assertThat(responses()).isEmpty()
+        client(Contract.SPEECH_STARTED_EVENT, 1)
+        time += Duration.ofSeconds(1).toNanos(); controller.tick()
+        assertThat(responses()).isEmpty()
+        client(Contract.SPEECH_STOPPED_EVENT, 1); committed("u1", settle = false)
+        time += Duration.ofMillis(399).toNanos(); controller.tick()
+        assertThat(responses()).isEmpty()
+        time += Duration.ofMillis(1).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(1)
+        assertThat(responses().single().path("response").has("instructions")).isFalse()
+        created("r1"); silentDone("r1")
+        assertThat(settledSequences()).containsExactly(1L)
+    }
+
+    @Test
+    fun `commit acknowledgement cannot bypass 400ms quiet and a fresh start cancels the pending response`() {
+        opening(); speech(1); committed("u1", settle = false)
+        time += Duration.ofMillis(399).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(1)
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        time += Duration.ofSeconds(1).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(1)
+        client(Contract.SPEECH_STOPPED_EVENT, 2); committed("u2", settle = false)
+        time += Duration.ofMillis(399).toNanos(); controller.tick()
+        // A stale stop neither releases the response nor extends the current deadline.
+        client(Contract.SPEECH_STOPPED_EVENT, 1)
+        assertThat(responses()).hasSize(1)
+        time += Duration.ofMillis(1).toNanos(); controller.tick(); controller.tick()
+        assertThat(responses()).hasSize(2)
+        created("latest"); silentDone("latest")
+        assertThat(settledSequences()).containsExactly(2L)
+        assertThat(calls).isEmpty()
+    }
+
+    @Test
+    fun `tool continuation acknowledgement stays behind newer learner input and the same quiet deadline`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "call1", "list_studies")
+        controller.beginTool("call1")
+        controller.completeTool("call1", VoiceTutorMcpToolResult("{\"studies\":[]}", false))
+        client(Contract.SPEECH_STARTED_EVENT, 2); ackToolOutput()
+        assertThat(responses()).hasSize(2)
+        client(Contract.SPEECH_STOPPED_EVENT, 2); committed("u2", settle = false)
+        time += Duration.ofMillis(399).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(2)
+        time += Duration.ofMillis(1).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(3)
+        assertThat(calls).hasSize(1)
+    }
+
+    @Test
+    fun `renewed speech before response created cancels only the exact late accepted request`() {
+        opening(); speech(1); committed("u1")
+        val request = responses().last()
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        assertThat(cancellations()).isEmpty()
+        created("unrelated", responses().first())
+        assertThat(cancellations()).isEmpty()
+        created("r1", request); created("r1", request)
+        assertThat(cancellations().map { it.path("response_id").asText() }).containsExactly("r1")
+        assertThat(event("response.output_audio_transcript.done", "response_id" to "r1", "item_id" to "stale-tutor",
+            "transcript" to "This superseded speech must not be displayed or stored.")).isFalse()
+        toolDone("r1", "stale-call", "prepare_voice_study_mutation")
+        assertThat(calls).isEmpty()
+        assertThat(stored.map { it.itemId }).doesNotContain("stale-tutor")
+        assertThat(responses()).hasSize(2)
+        client(Contract.SPEECH_STOPPED_EVENT, 2); committed("u2", settle = false)
+        settleQuiet()
+        assertThat(responses()).hasSize(3)
+        assertThat(ui.map { it.path("type").asText() }).doesNotContain(Contract.INPUT_RETRY_EVENT)
+        assertThat(outbound.map { it.path("type").asText() }).doesNotContain("output_audio_buffer.clear")
+    }
+
+    @Test
+    fun `superseded response cancellation waits for quiet and does not consume the new turn retry budget`() {
+        opening(); speech(1); committed("u1"); created("r1")
+        speech(2); committed("u2", settle = false)
+        assertThat(cancellations().map { it.path("response_id").asText() }).containsExactly("r1")
+        cancelled("r1")
+        assertThat(responses()).hasSize(2)
+        settleQuiet()
+        assertThat(responses()).hasSize(3)
+        rejected(responses().last())
+        assertThat(responses()).hasSize(4)
+        assertThat(failures.last().action).isEqualTo(VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED)
+        assertThat(settledSequences()).isEmpty()
+    }
+
+    @Test
+    fun `late audio after supersession drains without forwarding or persisting stale speech`() {
+        opening(); speech(1); committed("u1"); created("r1")
+        speech(2); committed("u2")
+        assertThat(event("output_audio_buffer.started", "response_id" to "r1")).isFalse()
+        assertThat(event("response.output_audio_transcript.done", "response_id" to "r1", "item_id" to "stale-tutor",
+            "transcript" to "stale")).isFalse()
+        done("r1", "stale-tutor")
+        assertThat(responses()).hasSize(2)
+        assertThat(event("output_audio_buffer.stopped", "response_id" to "r1")).isFalse()
+        assertThat(responses()).hasSize(3)
+        assertThat(stored.map { it.itemId }).doesNotContain("stale-tutor")
+        assertThat(ui.any { it.path("response").path("id").asText() == "r1" }).isFalse()
+        assertThat(cancellations()).hasSize(1)
+        assertThat(outbound.map { it.path("type").asText() }).doesNotContain("output_audio_buffer.clear")
+    }
+
+    @Test
+    fun `cancelled partial audio metadata cannot wait for a buffer that never started`() {
+        opening(); speech(1); committed("u1"); created("r1")
+        speech(2); committed("u2")
+        event("response.done", "response" to mapOf("id" to "r1", "status" to "cancelled", "output" to listOf(
+            mapOf("id" to "partial", "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to ""))))))
+        assertThat(responses()).hasSize(3)
+        assertThat(stored.map { it.itemId }).doesNotContain("partial")
+        assertThat(ui.map { it.path("type").asText() }).doesNotContain(Contract.INPUT_RETRY_EVENT)
+        assertThat(settledSequences()).isEmpty()
+    }
+
+    @Test
+    fun `late nonempty audio frames require drain even when cancelled response output is empty`() {
+        opening(); speech(1); committed("u1"); created("r1")
+        speech(2); committed("u2")
+        assertThat(event("response.output_audio.delta", "response_id" to "r1", "delta" to "AQID")).isFalse()
+        cancelled("r1")
+        assertThat(responses()).hasSize(2)
+        event("output_audio_buffer.stopped", "response_id" to "r1")
+        assertThat(responses()).hasSize(3)
+        assertThat(cancellations()).hasSize(1)
+    }
+
+    @Test
+    fun `exact rejection of a superseded unaccepted retry preserves quiet and the newest turn retry allowance`() {
+        opening(); speech(1); committed("u1")
+        rejected(responses().last())
+        assertThat(responses()).hasSize(3)
+        val abandonedRetry = responses().last()
+        speech(2); committed("u2", settle = false)
+        rejected(abandonedRetry)
+        assertThat(failures.last().action).isEqualTo(VoiceTutorProviderTurnFailureAction.TURN_ABANDONED)
+        assertThat(responses()).hasSize(3)
+        time += Duration.ofMillis(399).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(3)
+        time += Duration.ofMillis(1).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(4)
+        rejected(responses().last())
+        assertThat(responses()).hasSize(5)
+        assertThat(failures.last().attempt).isEqualTo(1)
+        assertThat(failures.last().action).isEqualTo(VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED)
+        assertThat(cancellations()).isEmpty()
+        assertThat(ui.map { it.path("type").asText() }).doesNotContain(Contract.INPUT_RETRY_EVENT)
+    }
+
+    @Test
+    fun `caption evidence prevents superseding a response even before the provider audio start event`() {
+        opening(); speech(1); committed("u1"); created("r1")
+        event("response.output_audio_transcript.delta", "response_id" to "r1", "item_id" to "t1", "delta" to "이미")
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        assertThat(cancellations()).isEmpty()
+        assertThat(ui.any { it.path("response").path("id").asText() == "r1" }).isTrue()
+    }
+
+    @Test
+    fun `audio frames prevent supersession even before a provider playout start boundary`() {
+        opening(); speech(1); committed("u1"); created("r1")
+        event("response.output_audio.delta", "response_id" to "r1", "delta" to "AQID")
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        assertThat(cancellations()).isEmpty()
+    }
+
+    @Test
+    fun `quota notice retains its hard terminal boundary while ordinary opening waits for quiet`() {
+        controller.start(); client(Contract.SPEECH_STARTED_EVENT, 1)
+        assertThat(responses()).isEmpty()
+        controller.requestQuotaNotice()
+        assertThat(responses()).hasSize(1)
+        assertThat(responses().single().path("response").path("metadata").path(Contract.QUOTA_NOTICE_METADATA_KEY).asText())
+            .isEqualTo("true")
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        assertThat(cancellations()).isEmpty()
+    }
+
+    @Test
     fun `opening ordinary and quota response metadata satisfies the provider string contract`() {
         opening()
         speech(1); committed("u1"); created("r1"); audio("r1", "t1"); done("r1", "t1")
@@ -46,7 +229,7 @@ class VoiceTutorNativeConversationControllerTest {
 
     @Test
     fun `rejected opening is retried immediately with the original question and a new request identity`() {
-        controller.start()
+        start()
         val first = responses().single()
         rejected(first)
 
@@ -73,7 +256,7 @@ class VoiceTutorNativeConversationControllerTest {
     fun `repeated create rejections abandon only that turn without a later timeout or blocking new speech`() {
         var error: Throwable? = null
         controller.failure().subscribe({}, { error = it })
-        controller.start()
+        start()
         rejected(responses().last())
         rejected(responses().last())
         assertThat(responses()).hasSize(2)
@@ -93,7 +276,7 @@ class VoiceTutorNativeConversationControllerTest {
 
     @Test
     fun `unrelated and already accepted request errors cannot replay an active response`() {
-        controller.start()
+        start()
         val request = responses().single()
         event("error", "error" to mapOf("type" to "invalid_request_error", "code" to "invalid_type", "event_id" to "unrelated"))
         created("r0")
@@ -110,7 +293,7 @@ class VoiceTutorNativeConversationControllerTest {
     fun `fatal provider errors terminate immediately instead of leaving a response watchdog running`() {
         var error: Throwable? = null
         controller.failure().subscribe({}, { error = it })
-        controller.start()
+        start()
         event("error", "error" to mapOf("type" to "authentication_error", "code" to "invalid_api_key"))
         assertThat(error).isInstanceOf(VoiceTutorProviderProtocolException::class.java)
         assertThat(failures.single().action).isEqualTo(VoiceTutorProviderTurnFailureAction.SESSION_FATAL)
@@ -139,7 +322,7 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
-    fun `ordinary response is created on audio commit without ASR classifier or persistence`() {
+    fun `ordinary response follows acoustic quiet and audio commit without ASR classifier or persistence`() {
         opening()
         speech(1)
         committed("u1")
@@ -150,7 +333,7 @@ class VoiceTutorNativeConversationControllerTest {
 
     @Test
     fun `learner speech never cancels or clears the tutor and waits for playout stop`() {
-        controller.start(); created("r0"); audio("r0", "t0")
+        start(); created("r0"); audio("r0", "t0")
         speech(1); committed("u1")
         done("r0", "t0")
         assertThat(responses()).hasSize(1)
@@ -201,7 +384,7 @@ class VoiceTutorNativeConversationControllerTest {
 
     @Test
     fun `tutor transcript is eligible only after clean provider completion and playout`() {
-        controller.start(); created("r0"); audio("r0", "t0")
+        start(); created("r0"); audio("r0", "t0")
         assertThat(stored).isEmpty()
         done("r0", "t0")
         assertThat(stored).isEmpty()
@@ -211,7 +394,7 @@ class VoiceTutorNativeConversationControllerTest {
 
     @Test
     fun `stop before response done also completes exactly once`() {
-        controller.start(); created("r0"); audio("r0", "t0")
+        start(); created("r0"); audio("r0", "t0")
         event("output_audio_buffer.stopped", "response_id" to "r0")
         assertThat(stored).isEmpty()
         done("r0", "t0"); done("r0", "t0")
@@ -220,7 +403,7 @@ class VoiceTutorNativeConversationControllerTest {
 
     @Test
     fun `cleared audio is not a completed question and response retry does not end call`() {
-        controller.start(); created("r0"); audio("r0", "t0")
+        start(); created("r0"); audio("r0", "t0")
         event("output_audio_buffer.cleared", "response_id" to "r0")
         done("r0", "t0")
         assertThat(stored).isEmpty()
@@ -238,39 +421,39 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
-    fun `silent opening settles only the initial greeting even with a newer learner turn queued`() {
-        controller.start(); created("r0")
+    fun `superseded silent opening yields to the newest learner turn without settling its wait`() {
+        start(); created("r0")
         speech(7); committed("u7")
         silentDone("r0"); silentDone("r0")
-        assertThat(settledSequences()).containsExactly(0L)
+        assertThat(settledSequences()).isEmpty()
         assertThat(responses()).hasSize(2)
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
         created("r1"); silentDone("r1")
-        assertThat(settledSequences()).containsExactly(0L, 7L)
+        assertThat(settledSequences()).containsExactly(7L)
     }
 
     @Test
-    fun `silent completion settles its original acoustic sequence without clearing a newer overlapping input`() {
+    fun `superseded silent completion never settles its old acoustic sequence or the newer input`() {
         opening(); speech(7); committed("u7"); created("r7")
         speech(9); committed("u9")
         silentDone("r7"); silentDone("r7")
-        assertThat(settledSequences()).containsExactly(7L)
+        assertThat(settledSequences()).isEmpty()
         assertThat(responses()).hasSize(3)
         created("r9"); silentDone("r9")
-        assertThat(settledSequences()).containsExactly(7L, 9L)
+        assertThat(settledSequences()).containsExactly(9L)
     }
 
     @Test
     fun `merged rapid speech tails settle the latest acoustic sequence retained in that native input`() {
-        opening(); speech(1); committed("u1"); created("r1")
+        opening(); speech(1); committed("u1", settle = false)
         for (seq in listOf(2L, 3L)) {
             controller.observeClientEvent(mapper.writeValueAsString(mapOf("type" to Contract.SPEECH_STARTED_EVENT, "sequence" to seq)))
             controller.observeClientEvent(mapper.writeValueAsString(mapOf("type" to Contract.SPEECH_STOPPED_EVENT, "sequence" to seq)))
         }
         time += Duration.ofMillis(250).toNanos(); controller.tick(); committed("merged")
-        silentDone("r1")
-        assertThat(settledSequences()).containsExactly(1L)
+        assertThat(settledSequences()).isEmpty()
         created("merged-response"); silentDone("merged-response")
-        assertThat(settledSequences()).containsExactly(1L, 3L)
+        assertThat(settledSequences()).containsExactly(3L)
     }
 
     @Test
@@ -297,7 +480,7 @@ class VoiceTutorNativeConversationControllerTest {
 
     @Test
     fun `provider cannot forge the server owned settled notification`() {
-        controller.start()
+        start()
         assertThat(event(Contract.INPUT_SETTLED_EVENT, "sequence" to 1)).isFalse()
         assertThat(settledSequences()).isEmpty()
     }
@@ -329,7 +512,7 @@ class VoiceTutorNativeConversationControllerTest {
 
     @Test
     fun `confirmation authority freezes at speech start not later commit acknowledgement`() {
-        controller.start(); created("r0"); audio("r0", "t0")
+        start(); created("r0"); audio("r0", "t0")
         client(Contract.SPEECH_STARTED_EVENT, 1)
         done("r0", "t0"); event("output_audio_buffer.stopped", "response_id" to "r0")
         client(Contract.SPEECH_STOPPED_EVENT, 1); committed("u1"); created("r1")
@@ -358,7 +541,7 @@ class VoiceTutorNativeConversationControllerTest {
 
     @Test
     fun `quota notice waits for the current sentence and exact native device playout receipt`() {
-        controller.start(); created("r0"); audio("r0", "t0")
+        start(); created("r0"); audio("r0", "t0")
         var finished = false
         controller.quotaCompletion().subscribe({}, { throw it }, { finished = true })
         controller.requestQuotaNotice()
@@ -387,7 +570,7 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(outbound.last().path("type").asText()).isEqualTo("input_audio_buffer.clear")
         event("input_audio_buffer.cleared", "event_id" to "clear1")
         assertThat(ui.last().path("paused").asBoolean()).isTrue()
-        client(Contract.RESUME_REQUEST_EVENT, 2); event("input_audio_buffer.cleared", "event_id" to "clear2")
+        client(Contract.RESUME_REQUEST_EVENT, 2); event("input_audio_buffer.cleared", "event_id" to "clear2"); settleQuiet()
         assertThat(ui.last().path("paused").asBoolean()).isFalse()
         speech(2); committed("u2")
         assertThat(responses()).hasSize(3)
@@ -410,6 +593,7 @@ class VoiceTutorNativeConversationControllerTest {
         client(Contract.RESUME_REQUEST_EVENT, 2)
         assertThat(responses()).hasSize(1)
         event("input_audio_buffer.cleared", "event_id" to "resume-clear")
+        settleQuiet()
         assertThat(ui.last().path("paused").asBoolean()).isFalse()
         assertThat(responses()).hasSize(2)
 
@@ -424,7 +608,7 @@ class VoiceTutorNativeConversationControllerTest {
     @Test
     fun `long learner answer checkpoints context without taking the floor and spaces the short final tail`() {
         opening(); client(Contract.SPEECH_STARTED_EVENT, 1)
-        time += Duration.ofSeconds(20).toNanos(); controller.tick(); committed("u1")
+        time += Duration.ofSeconds(20).toNanos(); controller.tick(); committed("u1", settle = false)
         assertThat(responses()).hasSize(1)
         client(Contract.SPEECH_STOPPED_EVENT, 1)
         assertThat(outbound.count { it.path("type").asText() == "input_audio_buffer.commit" }).isEqualTo(1)
@@ -446,6 +630,10 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     private fun responses() = outbound.filter { it.path("type").asText() == "response.create" }
+    private fun cancellations() = outbound.filter { it.path("type").asText() == "response.cancel" }
+    private fun cancelled(id: String) = event("response.done", "response" to mapOf(
+        "id" to id, "status" to "cancelled", "output" to emptyList<Any>(),
+    ))
     private fun settledSequences() = ui.filter { it.path("type").asText() == Contract.INPUT_SETTLED_EVENT }
         .map { it.path("sequence").asLong() }
     private fun silentDone(responseId: String) = event("response.done", "response" to mapOf(
@@ -457,15 +645,21 @@ class VoiceTutorNativeConversationControllerTest {
         "event_id" to request.path("event_id").asText(),
         "message" to "Synthetic provider schema rejection; must never reach diagnostics or the app.",
     ))
-    private fun opening() { controller.start(); created("r0"); audio("r0", "t0"); done("r0", "t0"); event("output_audio_buffer.stopped", "response_id" to "r0") }
+    private fun opening() { start(); created("r0"); audio("r0", "t0"); done("r0", "t0"); event("output_audio_buffer.stopped", "response_id" to "r0") }
     private fun client(type: String, seq: Long) {
         if (type == Contract.SPEECH_STARTED_EVENT) time += Duration.ofSeconds(1).toNanos()
         controller.observeClientEvent(mapper.writeValueAsString(mapOf("type" to type, "sequence" to seq)))
     }
     private fun speech(seq: Long) { client(Contract.SPEECH_STARTED_EVENT, seq); client(Contract.SPEECH_STOPPED_EVENT, seq) }
-    private fun committed(id: String) = event("input_audio_buffer.committed", "item_id" to id)
+    private fun start() { controller.start(); settleQuiet() }
+    private fun settleQuiet() { time += Duration.ofMillis(400).toNanos(); controller.tick() }
+    private fun committed(id: String, settle: Boolean = true): Boolean {
+        val forward = event("input_audio_buffer.committed", "item_id" to id)
+        if (settle) settleQuiet()
+        return forward
+    }
     private fun transcript(id: String, text: String) = event("conversation.item.input_audio_transcription.completed", "item_id" to id, "transcript" to text)
-    private fun created(id: String) = event("response.created", "response" to mapOf("id" to id, "metadata" to responses().last().path("response").path("metadata")))
+    private fun created(id: String, request: JsonNode = responses().last()) = event("response.created", "response" to mapOf("id" to id, "metadata" to request.path("response").path("metadata")))
     private fun audio(r: String, t: String) {
         event("response.output_item.added", "response_id" to r, "item" to mapOf("id" to t, "type" to "message"))
         event("output_audio_buffer.started", "response_id" to r)

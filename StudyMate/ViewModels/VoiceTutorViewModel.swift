@@ -393,6 +393,10 @@ struct VoiceTutorDuplexPlaybackState: Equatable {
         }
         guard sequence > 0, hasPendingLearnerTurn,
               pendingLearnerSpeechSequence == sequence else { return false }
+        // The opening can yield to learner input without ever being announced.
+        // An exact settled learner turn consumes that initial expectation too,
+        // including a ready event delivered after the silent completion.
+        stopWaitingForInitialResponse()
         // A silent response is complete, not a request to repeat. Preserve any
         // newer live speech and any independently active tutor audio.
         hasPendingLearnerTurn = false

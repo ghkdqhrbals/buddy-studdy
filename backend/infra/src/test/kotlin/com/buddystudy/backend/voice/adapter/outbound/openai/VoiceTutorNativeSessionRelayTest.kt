@@ -37,6 +37,47 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
     @Test
+    fun `renewed speech cancels an unstarted reply and the relay tick answers only the latest committed input`() {
+        Fixture().use { f ->
+            f.opening(); f.learner(1, "learner-1"); f.created("superseded")
+            assertThat(f.controls.tryEmitNext(json(mapOf("type" to Contract.SPEECH_STARTED_EVENT, "sequence" to 2))))
+                .isEqualTo(Sinks.EmitResult.OK)
+            f.await("exact unstarted provider response cancelled") {
+                f.outgoing.any { it.path("type").asText() == "response.cancel" &&
+                    it.path("response_id").asText() == "superseded" }
+            }
+            assertThat(f.controls.tryEmitNext(json(mapOf("type" to Contract.SPEECH_STOPPED_EVENT, "sequence" to 2))))
+                .isEqualTo(Sinks.EmitResult.OK)
+            f.await("newest learner buffer committed") {
+                f.outgoing.count { it.path("type").asText() == "input_audio_buffer.commit" } == 2
+            }
+            f.provider("input_audio_buffer.committed", "item_id" to "learner-2")
+            f.provider("response.output_audio_transcript.done", "response_id" to "superseded",
+                "item_id" to "stale-tutor", "transcript" to "Synthetic discarded response")
+            f.provider("response.done", "response" to mapOf("id" to "superseded", "status" to "cancelled",
+                "output" to listOf(mapOf("id" to "stale-tutor", "type" to "message", "content" to listOf(
+                    mapOf("type" to "audio", "transcript" to ""))))))
+            // No more inbound events: the relay clock must release the quiet deadline itself.
+            f.await("quiet deadline releases newest native response without ASR") { f.responses().size == 3 }
+            f.created("latest")
+            f.provider("response.done", "response" to mapOf("id" to "latest", "status" to "completed",
+                "output" to emptyList<Any>()))
+            f.await("only newest acoustic input is settled") {
+                f.ui.any { it.path("type").asText() == Contract.INPUT_SETTLED_EVENT && it.path("sequence").asLong() == 2L }
+            }
+            assertThat(f.ui.filter { it.path("type").asText() == Contract.INPUT_SETTLED_EVENT }
+                .map { it.path("sequence").asLong() }).containsExactly(2L)
+            assertThat(f.ui.map { it.path("type").asText() }).doesNotContain(Contract.INPUT_RETRY_EVENT)
+            assertThat(f.ui.map { it.path("item_id").asText() }).doesNotContain("stale-tutor")
+            assertThat(f.stored.map { it.path("item_id").asText() }).doesNotContain("stale-tutor")
+            assertThat(f.outgoing.count { it.path("type").asText() == "response.cancel" }).isEqualTo(1)
+            assertThat(f.outgoing.map { it.path("type").asText() }).doesNotContain("output_audio_buffer.clear")
+            assertThat(f.tools.invocations).isEmpty()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
     fun `a provider rejected opening recovers on the live relay and subsequent learner speech gets a reply`() {
         Fixture().use { f ->
             f.connect()
