@@ -21,6 +21,7 @@ internal object VoiceTutorRealtimeContract {
     const val SPOKEN_LESSON_END_EVENT = "buddystudy-internal-voice-session-end"
     const val STUDY_TREE_CHANGED_EVENT = "buddystudy.voice.study.changed"
     const val QUESTION_CHANGED_EVENT = "buddystudy.voice.question.changed"
+    const val OPERATION_EVENT = "buddystudy.voice.operation"
     const val ANSWER_STATE_EVENT = "buddystudy.voice.answer.state"
     const val SESSION_STATE_EVENT = "buddystudy.voice.session.state"
     val ANSWER_SESSION_PHASES = setOf("answering", "answer_finalizing", "answer_review", "answer_submitting", "answer_failed")

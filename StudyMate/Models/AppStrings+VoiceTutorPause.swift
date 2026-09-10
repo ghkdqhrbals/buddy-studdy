@@ -2,6 +2,17 @@
 import Foundation
 
 extension AppStrings {
+    func voiceTutorOperationStatus(name: String, phase: VoiceTutorOperationEvent.Phase,
+                                   elapsedMilliseconds: Int64) -> String {
+        let status: String
+        switch phase {
+        case .started: status = voiceTutorPauseText("실행 중", "Running", "実行中")
+        case .completed: status = voiceTutorPauseText("완료", "Completed", "完了")
+        case .failed: status = voiceTutorPauseText("실패", "Failed", "失敗")
+        }
+        return "\(name) · \(status) · \(elapsedMilliseconds) ms"
+    }
+
     var voiceTutorProviderCallFailed: String {
         voiceTutorPauseText(
             "AI 응답 중단됨",

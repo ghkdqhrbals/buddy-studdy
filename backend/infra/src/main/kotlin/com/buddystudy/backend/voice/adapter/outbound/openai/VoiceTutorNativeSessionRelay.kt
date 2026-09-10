@@ -161,7 +161,7 @@ internal fun nativeVoiceTutorToolRelay(
                         while (controller.toolCanExecute(call.callId) && !controller.toolTranscriptReady(call.callId)) delay(25)
                     }
                 }
-                if (!controller.toolCanExecute(call.callId)) nativeToolError("STALE_TURN", "The learner has moved on; listen to the latest turn before acting.")
+                if (!controller.toolCanExecute(call.callId)) nativeToolError("STALE_TURN", "Only this follow-up was superseded by newer speech. Previously accepted answers remain saved and grading continues. Listen to the latest turn; do not describe this as a failed answer submission.")
                 else if (call.arguments == null) nativeToolError("INVALID_ARGUMENTS", "Use the documented tool arguments.")
                 else if (reviewedAnswer != null) {
                     val executionContext = context.copy(realtimeModelTools = true, initialLessonRevision = reviewedAnswer.lessonRevision)
@@ -211,14 +211,17 @@ internal fun nativeVoiceTutorLearningProgressRelay(
         try {
             withTimeout(timeoutMillis) {
                 while (controller.learningWatchIsCurrent(watch)) {
+                    val operationId = controller.beginLearningOperation(watch) ?: break
+                    var failed = true
                     val result = try {
                         withTimeout(10_000) {
                             mcp.pollLearningProgress(context.copy(realtimeModelTools = true,
                                 initialLessonRevision = watch.revision), watch.progress)
-                        }
+                        }.also { failed = it.isError }
                     } catch (_: TimeoutCancellationException) { null }
                     catch (error: CancellationException) { throw error }
                     catch (_: Exception) { null }
+                    finally { controller.completeOperation(operationId, failed) }
                     if (result != null) {
                         if (result.isError && JsonMapperProvider.mapper.readTree(result.output).path("error").path("code").asText() == "QUESTION_CONTEXT_UNAVAILABLE") {
                             controller.cancelLearningPoll(watch)

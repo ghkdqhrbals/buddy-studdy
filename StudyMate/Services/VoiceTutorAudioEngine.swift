@@ -209,7 +209,7 @@ final class VoiceTutorAudioEngine {
             options: [.defaultToSpeaker, .allowBluetoothHFP]
         )
         try session.setPreferredIOBufferDuration(0.02)
-        try session.setActive(true, options: .notifyOthersOnDeactivation)
+        try session.setActive(true)
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: session,

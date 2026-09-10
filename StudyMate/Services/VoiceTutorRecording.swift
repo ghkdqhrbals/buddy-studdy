@@ -2,6 +2,104 @@
 import AVFoundation
 import CryptoKit
 import Foundation
+import UIKit
+
+/// Live recording files can remain open while locked, but exporting the final
+/// mix reopens fully protected files. Wait for unlock rather than treating file
+/// protection as an export failure and deleting a completed lesson's audio.
+enum VoiceTutorProtectedRecordingAccess {
+    /// Access errors must also coincide with observed protection loss. An
+    /// unrelated permissions problem, missing file, or corrupt asset must not
+    /// keep retrying a finalization that cannot succeed.
+    static func isFileProtectionAccessError(_ error: Error, depth: Int = 0) -> Bool {
+        guard depth < 8 else { return false }
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain,
+           [NSFileReadNoPermissionError, NSFileWriteNoPermissionError].contains(error.code) { return true }
+        if error.domain == NSPOSIXErrorDomain,
+           [Int(EACCES), Int(EPERM)].contains(error.code) { return true }
+        if error.domain == NSOSStatusErrorDomain, error.code == -54 { return true }
+        guard let underlying = error.userInfo[NSUnderlyingErrorKey] as? Error else { return false }
+        return isFileProtectionAccessError(underlying, depth: depth + 1)
+    }
+
+    @MainActor
+    static func finalize<Value: Sendable>(
+        notificationCenter: NotificationCenter = .default,
+        isAvailable: @MainActor () -> Bool = { UIApplication.shared.isProtectedDataAvailable },
+        isCurrent: @MainActor () -> Bool,
+        operation: @Sendable () async throws -> Value
+    ) async throws -> Value {
+        let protectionLoss = VoiceTutorRecordingProtectionLoss()
+        let observer = notificationCenter.addObserver(
+            forName: UIApplication.protectedDataWillBecomeUnavailableNotification,
+            object: nil,
+            queue: nil
+        ) { _ in protectionLoss.record() }
+        defer { notificationCenter.removeObserver(observer) }
+        while true {
+            try Task.checkCancellation()
+            guard isCurrent() else { throw VoiceTutorRecordingError.lifecycleInvalidated }
+            try await waitUntilAvailable(notificationCenter: notificationCenter, isAvailable: isAvailable)
+            guard isCurrent() else { throw VoiceTutorRecordingError.lifecycleInvalidated }
+            let generation = protectionLoss.generation
+            do {
+                let value = try await operation()
+                guard isCurrent() else { throw VoiceTutorRecordingError.lifecycleInvalidated }
+                return value
+            } catch {
+                guard isCurrent() else { throw VoiceTutorRecordingError.lifecycleInvalidated }
+                guard isFileProtectionAccessError(error),
+                      !isAvailable() || protectionLoss.generation != generation else { throw error }
+                // Source recordings remain intact. The next pass waits for
+                // unlock and revalidates the owner before retrying the export.
+            }
+        }
+    }
+
+    @MainActor
+    static func waitUntilAvailable(
+        notificationCenter: NotificationCenter = .default,
+        isAvailable: @MainActor () -> Bool = { UIApplication.shared.isProtectedDataAvailable }
+    ) async throws {
+        try Task.checkCancellation()
+        let (events, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        // Subscribe before checking availability so unlock cannot be missed
+        // between reading the property and beginning the asynchronous wait.
+        let observer = notificationCenter.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil,
+            queue: .main
+        ) { _ in continuation.yield(()) }
+        defer {
+            notificationCenter.removeObserver(observer)
+            continuation.finish()
+        }
+        if isAvailable() { return }
+        for await _ in events {
+            try Task.checkCancellation()
+            if isAvailable() { return }
+        }
+        try Task.checkCancellation()
+    }
+}
+
+private final class VoiceTutorRecordingProtectionLoss: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64 = 0
+
+    var generation: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func record() {
+        lock.lock()
+        value &+= 1
+        lock.unlock()
+    }
+}
 
 struct VoiceTutorPCMFrame: @unchecked Sendable {
     var sampleRate: Double
@@ -154,7 +252,9 @@ final class VoiceTutorSessionRecorder: @unchecked Sendable {
     }
 
     func finish() async throws -> VoiceTutorPendingRecording {
-        try await withCheckedThrowingContinuation { continuation in
+        stopAcceptingFrames()
+        try await VoiceTutorProtectedRecordingAccess.waitUntilAvailable()
+        return try await withCheckedThrowingContinuation { continuation in
             queue.async { [weak self] in
                 guard let self else {
                     continuation.resume(throwing: CancellationError())
@@ -166,6 +266,14 @@ final class VoiceTutorSessionRecorder: @unchecked Sendable {
                 }
                 hasFinished = true
                 do {
+                    // The owner may have signed out while export waited for
+                    // unlock. Never reopen or publish the old account's audio.
+                    guard VoiceTutorRecordingStore.isCurrentLifecycleGeneration(
+                        lifecycleGeneration,
+                        checkingPersistentMarker: true
+                    ) else {
+                        throw VoiceTutorRecordingError.lifecycleInvalidated
+                    }
                     if let recordingFailure {
                         throw recordingFailure
                     }
@@ -179,25 +287,13 @@ final class VoiceTutorSessionRecorder: @unchecked Sendable {
                     )
                     Task {
                         do {
-                            try await self.exportMixedRecording()
-                            try VoiceTutorRecordingStore.protectAndExcludeFromBackup(self.mixedURL)
-                            let attributes = try FileManager.default.attributesOfItem(
-                                atPath: self.mixedURL.path
-                            )
-                            let contentLength = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-                            let pending = VoiceTutorPendingRecording(
-                                ownerUserID: self.ownerUserID,
-                                sessionID: self.sessionID,
-                                fileName: self.mixedURL.lastPathComponent,
-                                contentType: "audio/mp4",
-                                contentLength: contentLength,
-                                sha256: try Self.sha256(of: self.mixedURL),
-                                durationMilliseconds: max(0, durationMilliseconds),
-                                createdAt: Date()
-                            )
-                            try await VoiceTutorRecordingStore.shared.save(
-                                pending,
-                                lifecycleGeneration: self.lifecycleGeneration
+                            let pending = try await VoiceTutorProtectedRecordingAccess.finalize(
+                                isCurrent: {
+                                    VoiceTutorRecordingStore.isCurrentLifecycleGeneration(self.lifecycleGeneration)
+                                },
+                                operation: {
+                                    try await self.exportAndSaveRecording(durationMilliseconds: durationMilliseconds)
+                                }
                             )
                             try? FileManager.default.removeItem(at: self.learnerURL)
                             try? FileManager.default.removeItem(at: self.tutorURL)
@@ -215,6 +311,29 @@ final class VoiceTutorSessionRecorder: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    private func exportAndSaveRecording(durationMilliseconds: Int64) async throws -> VoiceTutorPendingRecording {
+        // A protection interruption may leave a partial mix or a complete mix
+        // without its manifest. Preserve both originals until save succeeds.
+        if FileManager.default.fileExists(atPath: mixedURL.path) {
+            try FileManager.default.removeItem(at: mixedURL)
+        }
+        try await exportMixedRecording()
+        try VoiceTutorRecordingStore.protectAndExcludeFromBackup(mixedURL)
+        let attributes = try FileManager.default.attributesOfItem(atPath: mixedURL.path)
+        let pending = VoiceTutorPendingRecording(
+            ownerUserID: ownerUserID,
+            sessionID: sessionID,
+            fileName: mixedURL.lastPathComponent,
+            contentType: "audio/mp4",
+            contentLength: (attributes[.size] as? NSNumber)?.int64Value ?? 0,
+            sha256: try Self.sha256(of: mixedURL),
+            durationMilliseconds: max(0, durationMilliseconds),
+            createdAt: Date()
+        )
+        try await VoiceTutorRecordingStore.shared.save(pending, lifecycleGeneration: lifecycleGeneration)
+        return pending
     }
 
     private func cleanupAfterFailure(originalError: Error) -> Error {

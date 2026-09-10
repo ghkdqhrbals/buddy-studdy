@@ -3120,6 +3120,7 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(id).isNotBlank()
         assertThat(json(repeated).path("proposal_id").asText()).isEqualTo(id)
         assertThat(json(prepared).path("executed").asBoolean()).isFalse()
+        assertThat(prepared.mutationConfirmationQuestion).isEqualTo("Spring 주제를 레벨 7로 만들까요?")
         assertThat(fixture.calls).isEmpty()
         fixture.learnerTurnId = 13; fixture.tutorTurnId = 12
         val confirmed = fixture.adapter.execute(nativeContext(confirming = true), "confirm_voice_study_mutation", mapOf("proposal_id" to id, "confirm" to true))

@@ -1221,8 +1221,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             object: AVAudioSession.sharedInstance(),
             queue: nil
         ) { [weak self] notification in
-            guard let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  AVAudioSession.InterruptionType(rawValue: typeValue) == .began else {
+            guard VoiceTutorAudioSessionInterruption.began(notification) else {
                 return
             }
             self?.onInterruption?()

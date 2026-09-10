@@ -558,6 +558,7 @@ struct VoiceTutorSessionView: View {
                 summaryRefreshState: viewModel.summaryRefreshState
             ),
             strings: strings,
+            operationState: viewModel.operationState,
             captions: viewModel.presentationCaptions,
             assistantTranscriptDraft: viewModel.assistantTranscriptDraft,
             errorMessage: viewModel.errorMessage,
@@ -591,16 +592,21 @@ struct VoiceTutorSessionView: View {
             await viewModel.start()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .background else {
-                return
-            }
-            Task {
-                await viewModel.stopForBackground()
+            switch newPhase {
+            case .background:
+                viewModel.appDidEnterBackground()
+            case .active:
+                viewModel.appDidBecomeActive()
+            default:
+                break
             }
         }
         .onDisappear {
+            // App switching/locking can remove the rendered surface without
+            // dismissing the user's call. Only foreground navigation ends it.
+            guard scenePhase == .active else { return }
             Task {
-                await viewModel.stopForBackground()
+                await viewModel.stopForDismissal()
             }
         }
     }
@@ -1046,12 +1052,14 @@ struct VoiceTutorCallScreen: View {
     @State private var orbHoldTask: Task<Void, Never>?
     @State private var didRequestEnd = false
     @State private var showsEndConfirmation = false
+    @State private var expiredOperationSequence: Int64?
     @GestureState private var orbDragIsActive = false
     @FocusState private var answerEditorIsFocused: Bool
     let topic: String
     var discoveryPrompt: String? = nil
     let presentation: VoiceTutorCallPresentation
     let strings: AppStrings
+    var operationState = VoiceTutorOperationState()
     var captions: [VoiceTutorCaption] = []
     var assistantTranscriptDraft = ""
     var errorMessage: String?
@@ -1275,6 +1283,7 @@ struct VoiceTutorCallScreen: View {
                 callTime
                 if presentation.isRecording { recordingIndicator }
             }
+            operationStatus
             if answerCaptureIsListening, orbInteraction.stage == .idle {
                 answerCaptureHelp
             }
@@ -1486,6 +1495,8 @@ struct VoiceTutorCallScreen: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("voiceCall.status")
 
+            operationStatus
+
             if answerCaptureIsListening, orbInteraction.stage == .idle {
                 answerCaptureHelp
                     .multilineTextAlignment(.center)
@@ -1516,6 +1527,40 @@ struct VoiceTutorCallScreen: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var operationStatus: some View {
+        if presentation.phase.isLive,
+           !operationState.active.isEmpty || (operationState.latestFinished != nil
+               && operationState.latestFinished?.event.sequence != expiredOperationSequence) {
+            TimelineView(.animation(minimumInterval: 0.1,
+                                    paused: scenePhase != .active || operationState.active.isEmpty)) { _ in
+                let uptime = ProcessInfo.processInfo.systemUptime
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(operationState.visibleEntries(at: uptime)) { entry in
+                        Text(strings.voiceTutorOperationStatus(
+                            name: entry.event.name,
+                            phase: entry.event.phase,
+                            elapsedMilliseconds: entry.elapsedMilliseconds(at: uptime)
+                        ))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("voiceCall.operationStatus")
+                    }
+                }
+            }
+            .task(id: operationState.latestFinished?.event.sequence) {
+                guard let finished = operationState.latestFinished else {
+                    expiredOperationSequence = nil
+                    return
+                }
+                let remaining = max(0, 5 - (ProcessInfo.processInfo.systemUptime - finished.receivedAt))
+                do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+                expiredOperationSequence = finished.event.sequence
+            }
+        }
     }
 
     private var recordingIndicator: some View {

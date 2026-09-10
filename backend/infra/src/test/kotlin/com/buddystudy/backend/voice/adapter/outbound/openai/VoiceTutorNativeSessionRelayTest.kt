@@ -41,6 +41,43 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
     @Test
+    fun `empty acoustic interruption settles UI waiting after successful preparation without reviving or replaying the proposal`() {
+        val release = CompletableDeferred<VoiceTutorMcpToolResult>()
+        val tools = FakeTools { release.await() }
+        Fixture(tools = tools).use { f ->
+            f.opening(); f.learner(1, "learner-1"); f.transcript("learner-1")
+            f.toolResponse("prepare-response", "prepare-1", "prepare_voice_study_mutation")
+            f.await("preparation began") { tools.invocations.size == 1 }
+            for (type in listOf(Contract.SPEECH_STARTED_EVENT, Contract.SPEECH_STOPPED_EVENT)) {
+                assertThat(f.controls.tryEmitNext(json(mapOf("type" to type, "sequence" to 2))))
+                    .isEqualTo(Sinks.EmitResult.OK)
+            }
+            f.await("new acoustic input committed") {
+                f.outgoing.count { it.path("type").asText() == "input_audio_buffer.commit" } == 2
+            }
+            val emptyCommit = f.outgoing.last { it.path("type").asText() == "input_audio_buffer.commit" }
+            release.complete(VoiceTutorMcpToolResult("{\"prepared\":true}", false,
+                mutationConfirmationQuestion = "MSA 주제를 레벨 8로 만들까요?"))
+            f.await("accepted preparation finishes once") { f.outputs().size == 1 }
+            f.ack(f.outputs().single())
+            f.provider("error", "error" to mapOf("code" to "input_audio_buffer_commit_empty",
+                "event_id" to emptyCommit.path("event_id").asText()))
+            f.await("latest empty input stops indefinite response waiting") {
+                f.ui.any { it.path("type").asText() == Contract.INPUT_SETTLED_EVENT && it.path("sequence").asLong() == 2L }
+            }
+            assertThat(f.responses()).hasSize(2)
+            assertThat(tools.invocations.map { it.name }).containsExactly("prepare_voice_study_mutation")
+            assertThat(f.ui.any { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isFalse()
+            assertThat(f.completed.get()).isFalse()
+            assertThat(f.errors).isEmpty()
+            f.learner(3, "learner-3")
+            assertThat(f.responses()).hasSize(3)
+            assertThat(f.responses().last().path("response").has("instructions")).isFalse()
+            assertThat(tools.invocations).hasSize(1)
+        }
+    }
+
+    @Test
     fun `barge in clears live provider output before replying to the correction and never relays stale speech`() {
         Fixture().use { f ->
             f.opening(); f.learner(1, "learner-1"); f.created("response-1")
@@ -90,12 +127,24 @@ class VoiceTutorNativeSessionRelayTest {
             f.await("explicit submit creates its server call") { f.serverCalls().size == 1 }
             f.ack(f.serverCalls().single())
             f.await("server observation starts independently") { tools.polled.size == 1 }
+            f.await("actual grading lookup is visible while suspended") {
+                f.ui.any { it.path("type").asText() == Contract.OPERATION_EVENT &&
+                    it.path("name").asText() == "get_record" && it.path("phase").asText() == "started" }
+            }
+            assertThat(f.ui.any { it.path("type").asText() == Contract.OPERATION_EVENT &&
+                it.path("name").asText() == "get_record" && it.path("phase").asText() == "completed" }).isFalse()
             f.controls.tryEmitNext(json(mapOf("type" to Contract.SPEECH_STARTED_EVENT, "sequence" to 2)))
             val responseCount = f.responses().size
             release.complete(Unit)
             f.await("saved grade is displayed during newer speech") {
                 f.ui.lastOrNull { it.path("type").asText() == Contract.SESSION_STATE_EVENT }?.path("phase")?.asText() == "graded"
             }
+            val operationEvents = f.ui.filter { it.path("type").asText() == Contract.OPERATION_EVENT }
+            val lookup = operationEvents.filter { it.path("name").asText() == "get_record" }
+            assertThat(lookup.map { it.path("phase").asText() }).containsExactly("started", "completed")
+            assertThat(lookup.map { it.path("operationId").asText() }.distinct()).hasSize(1)
+            assertThat(operationEvents.map { it.path("sequence").asLong() }).isSorted().doesNotHaveDuplicates()
+            assertThat(operationEvents.joinToString()).doesNotContain("완성된 수정 답변", "grade-42", "recordId")
             assertThat(f.responses()).hasSize(responseCount)
             assertThat(tools.invocations.map { it.name }).containsExactly("list_studies")
             assertThat(tools.polled).hasSize(1)

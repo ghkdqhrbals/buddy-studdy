@@ -44,6 +44,8 @@ data class VoiceTutorMcpToolResult(
     val questionReadback: VoiceTutorQuestionReadback? = null,
     /** Verified canonical operation state. Never inferred from model-authored output. */
     val learningProgress: VoiceTutorLearningProgress? = null,
+    /** Exact server-prepared question; spoken once after tool acknowledgement, never a write authority. */
+    val mutationConfirmationQuestion: String? = null,
 )
 
 data class VoiceTutorQuestionChange(val studyId: Long, val recordId: String)

@@ -326,7 +326,8 @@ class McpVoiceTutorToolAdapter(
         }
         return VoiceTutorMcpToolResult(objectMapper.writeValueAsString(mapOf("prepared" to true, "executed" to false,
             "proposal_id" to pending.id, "confirmation_question" to pending.question,
-            "notice" to "Ask this question once, wait for the learner, then use confirm_voice_study_mutation; do not repeat the original command.")), false)
+            "notice" to "Ask this question once, wait for the learner, then use confirm_voice_study_mutation; do not repeat the original command.")), false,
+            mutationConfirmationQuestion = pending.question)
     }
 
     private suspend fun confirmRealtimeMutation(context: VoiceTutorWebRtcControlContext, arguments: Map<String, Any>): VoiceTutorMcpToolResult {

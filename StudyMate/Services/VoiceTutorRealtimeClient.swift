@@ -145,6 +145,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case answerState(VoiceTutorAnswerStateEvent)
     case answerTranscript(VoiceTutorAnswerTranscriptEvent)
     case sessionState(VoiceTutorSessionStateEvent)
+    case operation(VoiceTutorOperationEvent)
     case responseStarted(
         responseID: String?,
         isTutorIntervention: Bool,
@@ -182,6 +183,17 @@ enum VoiceTutorRealtimeEventParser {
         }
 
         switch type {
+        case "buddystudy.voice.operation":
+            guard Set(object.keys) == ["type", "sequence", "operationId", "name", "phase", "elapsedMs"],
+                  let sequence = exactInteger("sequence", in: object),
+                  let operationID = string("operationId", in: object),
+                  let name = string("name", in: object),
+                  let rawPhase = string("phase", in: object),
+                  let phase = VoiceTutorOperationEvent.Phase(rawValue: rawPhase),
+                  let elapsed = exactInteger("elapsedMs", in: object) else { return .ignored(type: type) }
+            let event = VoiceTutorOperationEvent(sequence: sequence, operationID: operationID,
+                name: name, phase: phase, elapsedMilliseconds: elapsed)
+            return event.isValid ? .operation(event) : .ignored(type: type)
         case "buddystudy.voice.session.state":
             let required: Set<String> = ["type", "sequence", "phase", "paused", "revision"]
             guard required.isSubset(of: Set(object.keys)),

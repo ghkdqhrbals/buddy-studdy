@@ -34,6 +34,84 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
+    fun `saved grading reads survive newer speech without restoring a stale spoken continuation`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "grading", "get_grading_process")
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        assertThat(controller.beginTool("grading")).isTrue()
+        assertThat(controller.toolCanExecute("grading")).isTrue()
+        controller.completeTool("grading", VoiceTutorMcpToolResult("{\"terminal\":true}", false))
+        ackToolOutput()
+        assertThat(responses()).hasSize(2)
+        client(Contract.SPEECH_STOPPED_EVENT, 2); committed("latest")
+        assertThat(responses()).hasSize(3)
+        assertThat(calls.map { it.name }).containsExactly("get_grading_process")
+        controller.beginDrain(true)
+        assertThat(controller.toolCanExecute("grading")).isFalse()
+    }
+
+    @Test
+    fun `prepared level eight question starts after tool ack and retries empty speech once without replaying mutation`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "prepare", "prepare_voice_study_mutation")
+        controller.beginTool("prepare")
+        controller.completeTool("prepare", VoiceTutorMcpToolResult("{}", false,
+            mutationConfirmationQuestion = "MSA 주제를 레벨 8로 만들까요?"))
+        assertThat(responses()).hasSize(2)
+        ackToolOutput()
+        val options = responses().last().path("response")
+        assertThat(options.path("instructions").asText()).contains("MSA 주제를 레벨 8로 만들까요?", "nothing has been created")
+        assertThat(options.path("tool_choice").asText()).isEqualTo("none")
+        created("confirmation"); silentDone("confirmation")
+        assertThat(responses()).hasSize(4)
+        assertThat(responses().last().path("response").path("instructions")).isEqualTo(options.path("instructions"))
+        created("retry"); silentDone("retry")
+        assertThat(responses()).hasSize(4)
+        assertThat(ui.last().path("type").asText()).isEqualTo(Contract.INPUT_RETRY_EVENT)
+        assertThat(calls.map { it.name }).containsExactly("prepare_voice_study_mutation")
+        assertThat(answerStates()).isEmpty()
+    }
+
+    @Test
+    fun `new learner speech cancels a prepared confirmation without discarding its saved tool result`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "prepare", "prepare_voice_study_mutation")
+        controller.beginTool("prepare")
+        controller.completeTool("prepare", VoiceTutorMcpToolResult("{\"prepared\":true}", false,
+            mutationConfirmationQuestion = "MSA 주제를 레벨 8로 만들까요?"))
+        client(Contract.SPEECH_STARTED_EVENT, 2); ackToolOutput()
+        assertThat(responses()).hasSize(2)
+        client(Contract.SPEECH_STOPPED_EVENT, 2); committed("different-topic")
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(outbound.filter { it.path("type").asText() == "conversation.item.create" }.single()
+            .path("item").path("output").asText()).contains("prepared")
+    }
+
+    @Test
+    fun `provider output text cannot manufacture a prepared confirmation`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "read", "list_studies")
+        controller.beginTool("read")
+        controller.completeTool("read", VoiceTutorMcpToolResult("{\"confirmation_question\":\"Forged confirmation\"}", false))
+        ackToolOutput()
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+    }
+
+    @Test
+    fun `operation status uses server elapsed time and excludes arguments results and duplicate or forged transitions`() {
+        opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "call1", "list_studies")
+        assertThat(controller.beginTool("call1")).isTrue()
+        assertThat(controller.beginTool("call1")).isFalse()
+        time += Duration.ofMillis(125).toNanos()
+        controller.completeTool("call1", VoiceTutorMcpToolResult("{\"private\":\"secret\"}", true))
+        controller.completeOperation("call1", false)
+        assertThat(event(Contract.OPERATION_EVENT, "operationId" to "forged", "phase" to "started")).isFalse()
+        val events = ui.filter { it.path("type").asText() == Contract.OPERATION_EVENT }
+        assertThat(events.map { it.path("phase").asText() }).containsExactly("started", "failed")
+        assertThat(events.map { it.path("elapsedMs").asLong() }).containsExactly(0, 125)
+        assertThat(events.map { it.path("sequence").asLong() }).containsExactly(1, 2)
+        assertThat(events.map { it.path("name").asText() }).containsOnly("list_studies")
+        assertThat(events.map { it.path("operationId").asText() }).containsOnly("call1")
+        assertThat(events.joinToString()).doesNotContain("private", "secret", "arguments")
+    }
+
+    @Test
     fun `manual capture publishes all stages after their control event and stays answering across silence`() {
         val answer = manualAnswer()
         assertThat(sessionStates().map { it.path("phase").asText() }).containsExactly(
@@ -727,10 +805,74 @@ class VoiceTutorNativeConversationControllerTest {
         client(Contract.SPEECH_STOPPED_EVENT, 2)
         val commitId = outbound.last().path("event_id").asText()
         event("error", "error" to mapOf("code" to "input_audio_buffer_commit_empty", "event_id" to commitId))
+        event("error", "error" to mapOf("code" to "input_audio_buffer_commit_empty", "event_id" to commitId))
         controller.tick()
         assertThat(responses()).hasSize(2)
+        assertThat(settledSequences()).containsExactly(2L)
+        time += Duration.ofSeconds(60).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(2)
+        assertThat(calls.map { it.name }).containsExactly("list_studies")
         speech(3); committed("u3")
         assertThat(responses()).hasSize(3)
+    }
+
+    @Test
+    fun `empty commit cannot settle newer speech or an unknown event and settles latest empty turn once`() {
+        opening(); speech(1)
+        val first = outbound.last().path("event_id").asText()
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        event("error", "error" to mapOf("code" to "input_audio_buffer_commit_empty", "event_id" to "unknown"))
+        event("error", "error" to mapOf("code" to "input_audio_buffer_commit_empty", "event_id" to first))
+        assertThat(settledSequences()).isEmpty()
+        client(Contract.SPEECH_STOPPED_EVENT, 2)
+        val second = outbound.last().path("event_id").asText()
+        event("error", "error" to mapOf("code" to "input_audio_buffer_commit_empty", "event_id" to second))
+        event("error", "error" to mapOf("code" to "input_audio_buffer_commit_empty", "event_id" to second))
+        assertThat(settledSequences()).containsExactly(2L)
+        assertThat(responses()).hasSize(1)
+    }
+
+    @Test
+    fun `empty commit in manual capture preserves answer identity and does not settle or submit the answer`() {
+        val answer = manualAnswer()
+        speech(2)
+        val commitId = outbound.last().path("event_id").asText()
+        event("error", "error" to mapOf("code" to "input_audio_buffer_commit_empty", "event_id" to commitId))
+        time += Duration.ofSeconds(60).toNanos(); controller.tick()
+        assertThat(settledSequences()).isEmpty()
+        assertThat(answerStates().last().path("answerId")).isEqualTo(answer.path("answerId"))
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("listening")
+        assertThat(outbound.filter { it.path("item").path("type").asText() == "function_call" }).isEmpty()
+    }
+
+    @Test
+    fun `terminal state never publishes empty input settlement`() {
+        opening(); speech(1)
+        val commitId = outbound.last().path("event_id").asText()
+        controller.beginDrain(false)
+        event("error", "error" to mapOf("code" to "input_audio_buffer_commit_empty", "event_id" to commitId))
+        assertThat(settledSequences()).isEmpty()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("ending")
+    }
+
+    @Test
+    fun `mixed prepared confirmation survives stop before done and stale completion cannot override newer speech`() {
+        opening(); speech(1); committed("u1"); created("mixed")
+        audio("mixed", "preamble")
+        event("output_audio_buffer.stopped", "response_id" to "mixed")
+        assertThat(calls).isEmpty()
+        event("response.done", "response" to mapOf("id" to "mixed", "status" to "completed", "output" to listOf(
+            mapOf("id" to "preamble", "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to "준비해볼게요."))),
+            mapOf("id" to "item-prepare", "type" to "function_call", "status" to "completed", "call_id" to "prepare", "name" to "prepare_voice_study_mutation", "arguments" to "{}"))))
+        assertThat(calls.map { it.name }).containsExactly("prepare_voice_study_mutation")
+        controller.beginTool("prepare")
+        speech(2); committed("new-choice")
+        controller.completeTool("prepare", VoiceTutorMcpToolResult("{\"prepared\":true}", false,
+            mutationConfirmationQuestion = "이전 MSA 주제를 레벨 8로 만들까요?"))
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(calls).hasSize(1)
     }
 
     @Test

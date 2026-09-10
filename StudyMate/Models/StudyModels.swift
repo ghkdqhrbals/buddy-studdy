@@ -3240,11 +3240,11 @@ struct AppStrings {
             "音声学習を始めるには、設定でマイクへのアクセスを許可してください。"
         )
     }
-    var voiceTutorForegroundOnly: String {
+    var voiceTutorBackgroundContinuation: String {
         text(
-            "앱을 벗어나거나 화면을 잠그면 현재 통화가 안전하게 종료됩니다.",
-            "Leaving the app or locking the screen safely ends the current call.",
-            "アプリを離れるか画面をロックすると、現在の通話は安全に終了します。"
+            "앱을 전환하거나 화면을 잠가도 통화가 계속됩니다. 통화를 마치려면 통화 화면에서 종료해 주세요.",
+            "Your call continues when you switch apps or lock the screen. End it from the call screen when you are finished.",
+            "アプリを切り替えたり画面をロックしたりしても通話は続きます。通話を終えるときは通話画面で終了してください。"
         )
     }
     var voiceTutorSignInRequired: String {

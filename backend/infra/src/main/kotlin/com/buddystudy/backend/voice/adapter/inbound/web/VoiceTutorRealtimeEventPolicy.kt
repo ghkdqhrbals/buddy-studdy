@@ -180,6 +180,23 @@ internal class VoiceTutorRealtimeEventPolicy(
                     "type" to type, "studyId" to studyId.longValue(), "recordId" to recordId.asText(),
                 ))) else ProviderEventDecision(payload = null)
             }
+            VoiceTutorRealtimeContract.OPERATION_EVENT -> {
+                val sequence = node.path("sequence")
+                val elapsed = node.path("elapsedMs")
+                val id = node.path("operationId")
+                val name = node.path("name")
+                val phase = node.path("phase").asText()
+                if (transport != VoiceTutorProviderTransport.WEBRTC_SIDEBAND ||
+                    !sequence.isIntegralNumber || !sequence.canConvertToLong() || sequence.longValue() <= 0 ||
+                    !elapsed.isIntegralNumber || !elapsed.canConvertToLong() || elapsed.longValue() !in 0..3_600_000 ||
+                    !id.isTextual || !id.asText().matches(Regex("[A-Za-z0-9_-]{1,191}")) ||
+                    !name.isTextual || !name.asText().matches(Regex("[a-z][a-z0-9_]{0,63}")) ||
+                    phase !in setOf("started", "completed", "failed") || (phase == "started" && elapsed.longValue() != 0L)
+                ) return ProviderEventDecision(payload = null)
+                ProviderEventDecision(mapper.writeValueAsString(mapOf("type" to type,
+                    "operationId" to id.asText(), "name" to name.asText(), "phase" to phase,
+                    "elapsedMs" to elapsed.longValue(), "sequence" to sequence.longValue())))
+            }
             VoiceTutorRealtimeContract.SESSION_STATE_EVENT -> {
                 val sequence = node.path("sequence")
                 val revision = node.path("revision")

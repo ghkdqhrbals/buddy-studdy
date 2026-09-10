@@ -85,4 +85,89 @@ struct VoiceTutorSessionState: Equatable, Sendable {
         snapshot = nil
     }
 }
+
+/// Safe operation metadata from the authenticated control stream. Arguments,
+/// results, transcripts, and provider error text never enter this display state.
+struct VoiceTutorOperationEvent: Equatable, Sendable {
+    enum Phase: String, CaseIterable, Sendable {
+        case started, completed, failed
+    }
+
+    let sequence: Int64
+    let operationID: String
+    let name: String
+    let phase: Phase
+    let elapsedMilliseconds: Int64
+
+    var isValid: Bool {
+        sequence > 0 && elapsedMilliseconds >= 0 && elapsedMilliseconds <= 3_600_000
+            && Self.isSafeIdentifier(operationID, maximumLength: 191)
+            && !name.isEmpty && name.utf8.count <= 64
+            && name.utf8.first.map({ (97...122).contains($0) }) == true
+            && name.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 95 }
+    }
+
+    private static func isSafeIdentifier(_ value: String, maximumLength: Int) -> Bool {
+        !value.isEmpty && value.utf8.count <= maximumLength && value.utf8.allSatisfy {
+            (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 95 || $0 == 45
+        }
+    }
+}
+
+/// One bounded state per call attempt. The live clock uses uptime so changing
+/// the wall clock or returning from another app cannot reset an operation timer.
+struct VoiceTutorOperationState: Equatable, Sendable {
+    struct Entry: Equatable, Sendable, Identifiable {
+        let event: VoiceTutorOperationEvent
+        let receivedAt: TimeInterval
+        var id: String { event.operationID }
+
+        func elapsedMilliseconds(at uptime: TimeInterval) -> Int64 {
+            guard event.phase == .started else { return event.elapsedMilliseconds }
+            let duration = min(3_600, max(0, uptime - receivedAt))
+            return event.elapsedMilliseconds + Int64(duration * 1_000)
+        }
+    }
+
+    static let maximumActiveOperations = 8
+    private(set) var active: [Entry] = []
+    private(set) var latestFinished: Entry?
+    private var latestSequence: Int64 = 0
+    private var isClosed = false
+
+    @discardableResult
+    mutating func apply(_ event: VoiceTutorOperationEvent, at uptime: TimeInterval) -> Bool {
+        guard !isClosed, event.isValid, uptime.isFinite, event.sequence > latestSequence else { return false }
+        latestSequence = event.sequence
+        if let existing = active.first(where: { $0.id == event.operationID }) {
+            guard existing.event.name == event.name else { return false }
+            // Duplicate starts must not reset the elapsed clock.
+            guard event.phase != .started else { return false }
+        } else if latestFinished?.id == event.operationID {
+            return false
+        }
+        let entry = Entry(event: event, receivedAt: uptime)
+        if event.phase == .started {
+            guard active.count < Self.maximumActiveOperations else { return false }
+            active.append(entry)
+            latestFinished = nil
+        } else {
+            active.removeAll { $0.id == event.operationID }
+            latestFinished = entry
+        }
+        return true
+    }
+
+    func visibleEntries(at uptime: TimeInterval) -> [Entry] {
+        if !active.isEmpty { return active }
+        guard let latestFinished, uptime - latestFinished.receivedAt < 5 else { return [] }
+        return [latestFinished]
+    }
+
+    mutating func endLocally() {
+        isClosed = true
+        active = []
+        latestFinished = nil
+    }
+}
 #endif

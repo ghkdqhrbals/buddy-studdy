@@ -37,7 +37,7 @@ enum VoiceTutorSessionPhase: Equatable {
         !isFinalizing && (isLive || self == .ending)
     }
 
-    func shouldCloseFinalizingMediaForBackground(isFinalizing: Bool) -> Bool {
+    func shouldCloseFinalizingMediaForDismissal(isFinalizing: Bool) -> Bool {
         isFinalizing && self == .ending
     }
 }
@@ -134,7 +134,7 @@ enum VoiceTutorStartupFailurePolicy {
 }
 
 private enum VoiceTutorStopSource: String {
-    case startupFailure, user, backgroundOrDismissal, audioInterruption, mediaFailure
+    case startupFailure, user, dismissal, audioInterruption, mediaFailure
     case identityInvalidated, controlReceiveFailure, providerError, pcmPlaybackFailure
     case localSpeechDeliveryFailure, pauseControlFailure
 }
@@ -675,6 +675,7 @@ final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var serverEndReason: String?
     @Published private(set) var answerDraftState = VoiceTutorAnswerDraftState()
     @Published private(set) var sessionState = VoiceTutorSessionState()
+    @Published private(set) var operationState = VoiceTutorOperationState()
 
     var quotaRemainingSeconds: Int { sessionQuota.remainingSeconds }
     var quotaLimitSeconds: Int { sessionQuota.limitSeconds }
@@ -765,6 +766,7 @@ final class VoiceTutorViewModel: ObservableObject {
         changedQuestions = []
         answerDraftState = VoiceTutorAnswerDraftState()
         sessionState = VoiceTutorSessionState()
+        operationState = VoiceTutorOperationState()
         learnerCaptionIDsByItemID = [:]
         answerSourceItemIDs = []
         heldAnswerCaptionIDs = []
@@ -960,7 +962,7 @@ final class VoiceTutorViewModel: ObservableObject {
             }
             startCountdown()
         } catch is CancellationError where phase != .connecting {
-            // A foreground-loss/user stop can close WebRTC while an awaited SDP
+            // A dismissal/user stop can close WebRTC while an awaited SDP
             // step is resuming. Re-run idempotent teardown without replacing the
             // terminal UI state chosen by the stop path.
             guard connectionAttemptFence.isCurrent(attemptID) else { return }
@@ -1104,10 +1106,25 @@ final class VoiceTutorViewModel: ObservableObject {
         await stop(shouldNotifyServerOverSocket: true, source: .user)
     }
 
-    func stopForBackground() async {
-        if phase.shouldCloseFinalizingMediaForBackground(isFinalizing: isFinalizing) {
+    func appDidEnterBackground() {
+        guard phase.isLive || phase == .ending else { return }
+        // The active playAndRecord session and audio background mode keep the
+        // existing media/control connection alive. Do not mute, pause, settle,
+        // or invalidate the response that is currently speaking or using tools.
+        persistVoiceAnswerDraft(force: answerDraftState.hasUserEdited)
+        logDiagnostic("event=app_backgrounded callContinues=1")
+    }
+
+    func appDidBecomeActive() {
+        guard phase.isLive || phase == .ending else { return }
+        updateSessionCountdown()
+        logDiagnostic("event=app_foregrounded callContinues=1")
+    }
+
+    func stopForDismissal() async {
+        if phase.shouldCloseFinalizingMediaForDismissal(isFinalizing: isFinalizing) {
             // A server-spoken-end tail may be awaiting its short local render
-            // fence. Lock/dismiss wins immediately: invalidate playout while the
+            // fence. Explicit dismissal wins: invalidate playout while the
             // already-running control/REST settlement continues on its own.
             recorder?.stopAcceptingFrames()
             audioEngine.stop()
@@ -1120,7 +1137,7 @@ final class VoiceTutorViewModel: ObservableObject {
         guard phase.isLive || phase == .ending, !isFinalizing else {
             return
         }
-        await stop(shouldNotifyServerOverSocket: true, source: .backgroundOrDismissal)
+        await stop(shouldNotifyServerOverSocket: true, source: .dismissal)
     }
 
     private func handleAudioSessionInterruption() async {
@@ -1156,6 +1173,7 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         logDiagnostic("event=stop_requested source=\(source.rawValue) socketEnd=\(shouldNotifyServerOverSocket ? 1 : 0)", isWarning: outcome == .failed)
         sessionState.endLocally()
+        operationState.endLocally()
         learnerTranscriptState.endLocally()
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()
@@ -1229,6 +1247,7 @@ final class VoiceTutorViewModel: ObservableObject {
         captions = []
         answerDraftState = VoiceTutorAnswerDraftState()
         sessionState.endLocally()
+        operationState.endLocally()
         learnerTranscriptState.endLocally()
         learnerCaptionIDsByItemID = [:]
         answerSourceItemIDs = []
@@ -1539,6 +1558,9 @@ final class VoiceTutorViewModel: ObservableObject {
             }
         }
         switch event {
+        case .operation(let event):
+            guard usesWebRTC, phase.isLive, !isFinalizing else { break }
+            _ = operationState.apply(event, at: ProcessInfo.processInfo.systemUptime)
         case .sessionState(let event):
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
             // Only the current authenticated control receive loop reaches this
@@ -2083,6 +2105,7 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         logDiagnostic("event=server_ended")
         sessionState.endLocally()
+        operationState.endLocally()
         learnerTranscriptState.endLocally()
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()

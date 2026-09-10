@@ -1638,16 +1638,16 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(VoiceTutorSessionPhase.failed.maySealServerResponse(isFinalizing: false))
         XCTAssertTrue(
             VoiceTutorSessionPhase.ending
-                .shouldCloseFinalizingMediaForBackground(isFinalizing: true),
-            "Lock/dismiss must abort a pending local playout tail without waiting"
+                .shouldCloseFinalizingMediaForDismissal(isFinalizing: true),
+            "Explicit dismissal must abort a pending local playout tail without waiting"
         )
         XCTAssertFalse(
             VoiceTutorSessionPhase.ending
-                .shouldCloseFinalizingMediaForBackground(isFinalizing: false)
+                .shouldCloseFinalizingMediaForDismissal(isFinalizing: false)
         )
         XCTAssertFalse(
             VoiceTutorSessionPhase.listening
-                .shouldCloseFinalizingMediaForBackground(isFinalizing: true)
+                .shouldCloseFinalizingMediaForDismissal(isFinalizing: true)
         )
     }
 
@@ -4339,6 +4339,185 @@ final class VoiceTutorContractTests: XCTestCase {
                 afterHTTPStatus: 500
             )
         )
+    }
+
+    func testActiveVoiceCallDeclaresBackgroundAudio() throws {
+        let modes = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])
+        XCTAssertTrue(modes.contains("audio"), "A live tutor call must continue when switching apps or locking the iPhone")
+        XCTAssertTrue(modes.contains("remote-notification"))
+    }
+
+    @MainActor
+    func testRecordingFinalizationWaitsForActualProtectedDataAvailability() async throws {
+        let center = NotificationCenter()
+        let checked = expectation(description: "Protected recording is waiting for unlock")
+        let rechecked = expectation(description: "Availability rechecked after notification")
+        var isAvailable = false
+        var checks = 0
+        var didContinue = false
+        let finalization = Task {
+            try await VoiceTutorProtectedRecordingAccess.waitUntilAvailable(notificationCenter: center) {
+                checks += 1
+                if checks == 1 { checked.fulfill() }
+                if checks == 2 { rechecked.fulfill() }
+                return isAvailable
+            }
+            didContinue = true
+        }
+        defer { finalization.cancel() }
+        let initialCheck = await XCTWaiter.fulfillment(of: [checked], timeout: 2)
+        XCTAssertEqual(initialCheck, .completed)
+        XCTAssertFalse(didContinue)
+        center.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
+        let secondCheck = await XCTWaiter.fulfillment(of: [rechecked], timeout: 2)
+        XCTAssertEqual(secondCheck, .completed)
+        XCTAssertFalse(didContinue, "A notification alone must not reopen protected audio")
+        isAvailable = true
+        center.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
+        try await finalization.value
+        XCTAssertTrue(didContinue)
+    }
+
+    @MainActor
+    func testProtectedRecordingWaitCanBeCancelledWithoutUnlocking() async {
+        let checked = expectation(description: "Protected data remains locked")
+        let finalization = Task {
+            try await VoiceTutorProtectedRecordingAccess.waitUntilAvailable(notificationCenter: NotificationCenter()) {
+                checked.fulfill()
+                return false
+            }
+        }
+        let ready = await XCTWaiter.fulfillment(of: [checked], timeout: 2)
+        XCTAssertEqual(ready, .completed)
+        finalization.cancel()
+        do {
+            try await finalization.value
+            XCTFail("Cancellation must not begin export while audio is protected")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+    }
+
+    @MainActor
+    func testUnlockedRecordingFinalizationDoesNotWaitForAnUnlockNotification() async throws {
+        try await VoiceTutorProtectedRecordingAccess.waitUntilAvailable(notificationCenter: NotificationCenter()) { true }
+    }
+
+    @MainActor
+    func testRecordingFinalizationRetainsSourcesAndRetriesAfterRelockDuringExportHashOrSave() async throws {
+        let failures: [NSError] = [
+            NSError(domain: AVFoundationErrorDomain, code: -11800, userInfo: [
+                NSUnderlyingErrorKey: NSError(domain: NSOSStatusErrorDomain, code: -54)
+            ]),
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError),
+            NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+        ]
+        for failure in failures {
+            let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            let audio = Data("retained learner and tutor audio".utf8)
+            try audio.write(to: source)
+            defer { try? FileManager.default.removeItem(at: source) }
+            let center = NotificationCenter()
+            let locked = expectation(description: "Finalization encountered a protected-file access error")
+            var available = true
+            var attempts = 0
+            let finalization = Task {
+                try await VoiceTutorProtectedRecordingAccess.finalize(
+                    notificationCenter: center,
+                    isAvailable: { available },
+                    isCurrent: { true },
+                    operation: { @MainActor in
+                        attempts += 1
+                        if attempts == 1 {
+                            available = false
+                            center.post(name: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil)
+                            locked.fulfill()
+                            throw failure
+                        }
+                        return try Data(contentsOf: source)
+                    }
+                )
+            }
+            defer { finalization.cancel() }
+            let ready = await XCTWaiter.fulfillment(of: [locked], timeout: 2)
+            guard ready == .completed else { XCTFail("Finalization did not start"); return }
+            XCTAssertEqual(attempts, 1)
+            XCTAssertEqual(try Data(contentsOf: source), audio, "A temporary protected-file error must retain the originals")
+            available = true
+            center.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
+            let recoveredAudio = try await finalization.value
+            XCTAssertEqual(recoveredAudio, audio)
+            XCTAssertEqual(attempts, 2)
+        }
+    }
+
+    @MainActor
+    func testRecordingFinalizationRetriesAnAccessErrorEvenWhenUnlockPrecedesItsDelivery() async throws {
+        let center = NotificationCenter()
+        var attempts = 0
+        let result = try await VoiceTutorProtectedRecordingAccess.finalize(
+            notificationCenter: center,
+            isAvailable: { true },
+            isCurrent: { true },
+            operation: { @MainActor in
+                attempts += 1
+                if attempts == 1 {
+                    center.post(name: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil)
+                    center.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))
+                }
+                return "saved"
+            }
+        )
+        XCTAssertEqual(result, "saved")
+        XCTAssertEqual(attempts, 2)
+    }
+
+    @MainActor
+    func testRecordingFinalizationDoesNotRetryUnrelatedOrUnexplainedAccessFailures() async {
+        for failure in [
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError),
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadCorruptFileError),
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError)
+        ] {
+            var attempts = 0
+            do {
+                let _: Bool = try await VoiceTutorProtectedRecordingAccess.finalize(
+                    notificationCenter: NotificationCenter(), isAvailable: { true }, isCurrent: { true },
+                    operation: { @MainActor in attempts += 1; throw failure }
+                )
+                XCTFail("A permanent failure must reach existing cleanup")
+            } catch {
+                XCTAssertEqual((error as NSError).domain, failure.domain)
+                XCTAssertEqual((error as NSError).code, failure.code)
+                XCTAssertEqual(attempts, 1)
+            }
+        }
+    }
+
+    @MainActor
+    func testRecordingFinalizationDoesNotRetryAfterAccountInvalidation() async {
+        var isCurrent = true
+        var attempts = 0
+        let center = NotificationCenter()
+        do {
+            let _: Bool = try await VoiceTutorProtectedRecordingAccess.finalize(
+                notificationCenter: center, isAvailable: { true }, isCurrent: { isCurrent },
+                operation: { @MainActor in
+                    attempts += 1
+                    center.post(name: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil)
+                    isCurrent = false
+                    throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError)
+                }
+            )
+            XCTFail("The invalidated owner must reach existing purge cleanup")
+        } catch {
+            guard case VoiceTutorRecordingError.lifecycleInvalidated = error else {
+                XCTFail("Expected lifecycle invalidation, got \(error)")
+                return
+            }
+            XCTAssertEqual(attempts, 1)
+        }
     }
 
     func testAudioSessionInterruptionOnlyEndsOnBeganNotification() {

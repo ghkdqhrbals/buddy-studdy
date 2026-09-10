@@ -14,6 +14,26 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
+    fun `operation telemetry permits bounded server timing only and removes private payloads`() {
+        val fields = mapOf("type" to VoiceTutorRealtimeContract.OPERATION_EVENT, "operationId" to "call_1",
+            "name" to "get_grading_process", "phase" to "completed", "elapsedMs" to 152,
+            "sequence" to 2, "arguments" to "private", "output" to "secret", "error" to "private")
+        val raw = mapper.writeValueAsString(fields)
+        val payload = mapper.readTree(policy.providerDecision(raw, "s1", Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+            "type", "operationId", "name", "phase", "elapsedMs", "sequence")
+        assertThat(policy.providerDecision(raw, "s1", Instant.EPOCH).payload).isNull()
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        for (invalid in listOf(mapOf("sequence" to 0), mapOf("sequence" to 1.2), mapOf("elapsedMs" to -1),
+            mapOf("elapsedMs" to 3_600_001), mapOf("name" to "../private"), mapOf("operationId" to "x".repeat(192)),
+            mapOf("phase" to "unknown"), mapOf("phase" to "started"), mapOf("elapsedMs" to "152"))) {
+            assertThat(policy.providerDecision(mapper.writeValueAsString(fields + invalid), "s1", Instant.EPOCH,
+                VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
+    }
+
+    @Test
     fun `intentional interruption exposes only its exact response id and cannot be forged as client control`() {
         val raw = mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT,
             "responseId" to "r1", "transcript" to "private", "error" to "private"))
