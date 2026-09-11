@@ -72,7 +72,7 @@ runtime comparison or rollback does not fork application behavior.
   - Use `BackendVoiceTutorStatus`, `BackendVoiceTutorQuota`, `BackendVoiceTutorSessionStart`, `BackendVoiceTutorSessionListItem`, `BackendVoiceTutorSessionPage`, `BackendVoiceTutorSessionDetail`, `BackendVoiceTutorSessionResult`, and `BackendVoiceTutorTranscriptTurn` as additive backend contracts.
   - Open only the authenticated BuddyStudy WebSocket with subprotocol `buddystudy.voice.v1`; the iOS process never receives the server's OpenAI Realtime credential.
   - Own microphone/audio-route and interruption state for the lifetime of a user-started call. The active play-and-record voice-chat audio session and UIBackgroundModes audio entry preserve microphone, media and control through app backgrounding and device locking. Explicit dismissal, end, audio interruption, logout or account replacement still closes the stream and requests idempotent session finalization.
-  - `buddystudy.voice.operation` carries a session-monotonic sequence, safe operation ID/function name, started/completed/failed phase and server-measured `elapsedMs`. Native tool work and automatic question/grading reads emit their actual operation boundaries. iOS retains bounded operation state (eight active and 512 completed/failed entries) for diagnostics and exact choice-card correlation, closing the event gate at termination. The live UI does not render operation rows or run a display timer for them. Provider-authored metadata, arguments and results never become visible status text.
+  - `buddystudy.voice.operation` carries a session-monotonic sequence, safe operation ID/function name, started/completed/failed phase and server-measured `elapsedMs`. Native tool work and automatic question/grading reads emit their actual operation boundaries. iOS retains bounded operation state (eight active and 512 completed/failed entries), closing the event gate at termination. `VoiceTutorOperationTranscriptLayout` places persistent rows beneath the exact originating caption, provisional reply, answer or user-input card. Completion changes only status and server-measured duration; no display polling/timer or raw arguments/results are rendered. The compact orb surface keeps these diagnostic rows in chat.
   - Manual canonical-question capture reads and saves the existing record-ID draft through AppState/SettingsStore. Finish, reviewed Submit and Skip travel as typed authenticated control events; the backend owns canonical submission, generation and quota operations.
   - Before the first manual answer state, `buddystudy.voice.answer.ready` carries the immutable saved question (nonblank, at most 8,000 UTF-16 code units), answer/record/study/revision identities and an empty initial text field. iOS requires that receipt to initialize a new answer draft and renders its question with the controls. Later legacy `answer.state` receipts can update that established draft without repeating the question; they cannot initialize a draft by themselves. The separate ready event preserves the existing strict legacy state shape for older apps. Roll out the backend before the new iOS build; a new app connected to an older backend cannot enable canonical answer capture without this receipt.
 
@@ -472,12 +472,27 @@ Public community feed
   acquire a newer message. An unresolved exact origin waits for its caption/card
   instead of borrowing the current message; a trimmed origin leaves the visible
   transcript window with its operations. Context buffers and operation history remain bounded
-  to one connection attempt. Only active operation rows run a periodic clock.
-- Interruption and pause wait for a short observed PCM gap for at most 450 ms
-  before the existing response cancellation/clear handshake. The capture loop
-  continues and the ordered speech/pause stream preserves input fences. The
-  native continuous RTP track does not expose word timestamps; this is a
-  bounded acoustic opportunity, not exact word or sentence completion.
+  to one connection attempt. Rows display the authenticated measured duration
+  without a periodic clock.
+- Interruption and pause allow up to 1.2 seconds to reach an observed 80 ms PCM
+  gap, then finish an 80 ms raised-cosine output gain ramp before the existing
+  response cancellation/clear handshake. A hard deadline also uses the ramp
+  instead of an immediate gain step. The captured response ID and generation
+  fence both the wait and fade, so a replacement response cannot be silenced by
+  an older request. Repeated start events cannot reset a fade. Capture, AEC and
+  RTP continue; the ordered speech/pause stream preserves input fences. The
+  native track does not expose word timestamps, so this is a bounded acoustic
+  opportunity, not proof of exact word or three-word sentence completion.
+- Orb and chat remain mounted with one shared background and one interpolated
+  orb. A separate timeline owns its small breathing scale; state changes do not
+  reset disclosure animation. Question/choice/review events preserve the user's
+  chosen surface. Compact forms reuse the same request-ID-bound input state and
+  native editor. Grading cues derive from the authenticated lesson phase rather
+  than disappearing with the submitted answer draft.
+- Learning cancellation requires the exact current lesson identity/revision,
+  including while paused. Late nonterminal receipts from another exercise
+  cannot reacquire input; exact terminal receipts can still settle a preserved
+  draft. A new ready event cannot steal the post-cancellation choice hold.
 
 `VoiceTutorSessionView` automatically dismisses after the view model reaches
 `.ended`, once final playout, recording and server settlement work has completed.

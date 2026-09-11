@@ -852,7 +852,8 @@ final class VoiceTutorViewModel: ObservableObject {
     var canSkipReviewedQuestion: Bool { canControlAnswer && answerDraftState.canSkip }
     var canCancelLearning: Bool {
         usesWebRTC && phase.isLive && !isFinalizing && !userInputState.holdsMicrophone
-            && activeConnection?.isCurrent() == true && answerDraftState.canCancel
+            && activeConnection?.isCurrent() == true
+            && answerDraftState.canCancel(in: sessionState.snapshot, minimumRevision: studyFocus.revision)
     }
     var presentationCaptions: [VoiceTutorCaption] {
         let hidden = Set(answerSourceItemIDs.compactMap { learnerCaptionIDsByItemID[$0] }).union(heldAnswerCaptionIDs)
@@ -1507,9 +1508,10 @@ final class VoiceTutorViewModel: ObservableObject {
                     case .pause(let command): needsBoundary = command.kind == .pause
                     default: needsBoundary = false
                     }
-                    if needsBoundary,
-                       let responseID = self.duplexPlaybackState.activeResponseID
-                        ?? self.pendingSpokenEndPlayoutTail?.responseID {
+                    let interruptionResponseID = needsBoundary
+                        ? self.duplexPlaybackState.activeResponseID ?? self.pendingSpokenEndPlayoutTail?.responseID
+                        : nil
+                    if let responseID = interruptionResponseID {
                         // Provider completion can precede the final audible RTP
                         // samples; protect that same tail before interrupting it.
                         await self.webRTCTransport?.waitForInterruptionBoundary(responseID: responseID)
@@ -1519,7 +1521,8 @@ final class VoiceTutorViewModel: ObservableObject {
                     if case .speech(let event) = control {
                         switch event.activity {
                         case .started:
-                            self.handleLearnerSpeechStarted(sequence: event.sequence)
+                            self.handleLearnerSpeechStarted(sequence: event.sequence,
+                                interruptionResponseID: interruptionResponseID)
                         case .stopped:
                             self.duplexPlaybackState.userSpeechStopped(sequence: event.sequence)
                         }
@@ -2253,15 +2256,18 @@ final class VoiceTutorViewModel: ObservableObject {
         if phase.isLive { phase = .listening }
     }
 
-    private func handleLearnerSpeechStarted(sequence: Int? = nil) {
+    private func handleLearnerSpeechStarted(sequence: Int? = nil, interruptionResponseID: String? = nil) {
         guard phase.isLive, !isFinalizing else { return }
         if let sequence, sequence <= 0 { return }
         inputNeedsRepeat = false
-        if usesWebRTC,
-           let responseID = duplexPlaybackState.activeResponseID ?? pendingSpokenEndPlayoutTail?.responseID {
+        if usesWebRTC, let responseID = interruptionResponseID,
+           responseID == (duplexPlaybackState.activeResponseID ?? pendingSpokenEndPlayoutTail?.responseID) {
             interruptTutorResponse(responseID: responseID)
         }
-        duplexPlaybackState.userSpeechStarted(sequence: sequence, interruptsTutor: usesWebRTC)
+        // The boundary wait belongs to the captured response, not a replacement
+        // that arrived during its suspension. Register the learner edge without
+        // implicitly interrupting whichever response happens to be current now.
+        duplexPlaybackState.userSpeechStarted(sequence: sequence, interruptsTutor: false)
         if !duplexPlaybackState.assistantResponseActive { phase = .listening }
     }
 

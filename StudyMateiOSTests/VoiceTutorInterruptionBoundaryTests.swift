@@ -17,15 +17,15 @@ final class VoiceTutorInterruptionBoundaryTests: XCTestCase {
                 return XCTFail("An ongoing sound should receive the bounded grace.")
             }
         }
-        for tick in 11...15 {
+        for tick in 11...17 {
             let now = 10 + Double(tick) * 0.01
             state.observe(level: quiet, duration: 0.01, at: now)
             guard case .wait = state.decision(for: token, now: now) else {
-                return XCTFail("A gap shorter than 60 ms must not stop playout.")
+                return XCTFail("A gap shorter than 80 ms must not stop playout.")
             }
         }
-        state.observe(level: quiet, duration: 0.01, at: 10.16)
-        XCTAssertEqual(state.decision(for: token, now: 10.16), .quietGap)
+        state.observe(level: quiet, duration: 0.01, at: 10.18)
+        XCTAssertEqual(state.decision(for: token, now: 10.18), .quietGap)
     }
 
     func testBriefPhonemeGapAndLowRMSWithSharpPeaksDoNotReleaseTheWait() throws {
@@ -51,17 +51,83 @@ final class VoiceTutorInterruptionBoundaryTests: XCTestCase {
             var state = VoiceTutorInterruptionBoundaryState()
             state.responseStarted("answer")
             let token = try XCTUnwrap(state.request(responseID: "answer", at: 30))
-            for tick in 1...44 {
+            for tick in 1...119 {
                 let now = 30 + Double(tick) * 0.01
                 state.observe(level: level, duration: 0.01, at: now)
                 guard case .wait = state.decision(for: token, now: now) else {
                     return XCTFail("Unknown or ongoing audio must not invent a boundary.")
                 }
             }
-            XCTAssertEqual(state.decision(for: token, now: 30.45), .deadline)
+            XCTAssertEqual(state.decision(for: token, now: 31.2), .deadline)
             XCTAssertEqual(state.decision(for: token, now: 300), .deadline,
                 "Continued callbacks cannot extend a user's interruption indefinitely.")
         }
+    }
+
+    func testAWordCanFinishBeyondTheFormerCutoffWithoutWaitingForTheWholeReply() throws {
+        var state = VoiceTutorInterruptionBoundaryState()
+        state.responseStarted("answer")
+        let token = try XCTUnwrap(state.request(responseID: "answer", at: 60))
+        for tick in 1...65 {
+            let now = 60 + Double(tick) * 0.01
+            state.observe(level: voiced, duration: 0.01, at: now)
+            guard case .wait = state.decision(for: token, now: now) else {
+                return XCTFail("The former 450 ms deadline must not cut this still-running word")
+            }
+        }
+        for tick in 66...73 { state.observe(level: quiet, duration: 0.01, at: 60 + Double(tick) * 0.01) }
+        XCTAssertEqual(state.decision(for: token, now: 60.73), .quietGap)
+        XCTAssertLessThan(0.73, VoiceTutorInterruptionBoundaryState.maximumGraceSeconds)
+    }
+
+    func testRecentSilenceBeforeTheRequestCannotSkipTheNextBoundary() throws {
+        var state = VoiceTutorInterruptionBoundaryState()
+        state.responseStarted("answer")
+        for tick in 1...9 { state.observe(level: quiet, duration: 0.01, at: 70 + Double(tick) * 0.01) }
+        let token = try XCTUnwrap(state.request(responseID: "answer", at: 70.10))
+        guard case .wait = state.decision(for: token, now: 70.10) else {
+            return XCTFail("A fresh but earlier gap is not an observation after the user's request")
+        }
+        state.observe(level: voiced, duration: 0.01, at: 70.11)
+        guard case .wait = state.decision(for: token, now: 70.11) else {
+            return XCTFail("The current voiced sound must retain its boundary opportunity")
+        }
+    }
+
+    func testGainFadeIsContinuousMonotonicAndEndsWithinItsShortBound() throws {
+        var fade = VoiceTutorInterruptionFadeState()
+        fade.responseStarted("answer")
+        let token = try XCTUnwrap(fade.request(responseID: "answer", at: 80))
+        XCTAssertEqual(fade.gain(for: token, at: 80), 1)
+        var previous: Float = 1
+        for tick in 1...10 {
+            let gain = try XCTUnwrap(fade.gain(for: token, at: 80 + Double(tick) * 0.008))
+            XCTAssertLessThanOrEqual(gain, previous)
+            XCTAssertGreaterThanOrEqual(gain, 0)
+            if tick < 10 { XCTAssertGreaterThan(gain, 0, "A fade must not immediately hard-mute the source") }
+            previous = gain
+        }
+        XCTAssertEqual(try XCTUnwrap(fade.gain(for: token, at: 80.04)), 0.5, accuracy: 0.000_01)
+        XCTAssertEqual(fade.gain(for: token, at: 80.09), 0)
+        XCTAssertEqual(fade.currentGain(at: 100), 0, "Completed fading stays silent until the next response")
+    }
+
+    func testDuplicateResponseEventsCannotReopenAFadeAndOldTokensCannotMuteNewSpeech() throws {
+        var fade = VoiceTutorInterruptionFadeState()
+        fade.responseStarted("old")
+        let old = try XCTUnwrap(fade.request(responseID: "old", at: 90))
+        fade.responseStarted("old")
+        XCTAssertEqual(try XCTUnwrap(fade.gain(for: old, at: 90.04)), 0.5, accuracy: 0.000_01)
+        XCTAssertEqual(fade.request(responseID: "old", at: 90.04), old,
+                       "Repeated interruption requests must not restart the ramp")
+        fade.responseStarted("new")
+        XCTAssertNil(fade.gain(for: old, at: 90.05))
+        XCTAssertEqual(fade.currentGain(at: 90.05), 1)
+        XCTAssertNil(fade.request(responseID: "old", at: 90.05))
+        let next = try XCTUnwrap(fade.request(responseID: "new", at: 90.06))
+        fade.invalidate()
+        XCTAssertNil(fade.gain(for: next, at: 90.07))
+        XCTAssertNil(fade.request(responseID: "new", at: 90.07))
     }
 
     func testOldQuietAudioAndRepeatedCallbacksCannotInventANewGap() throws {

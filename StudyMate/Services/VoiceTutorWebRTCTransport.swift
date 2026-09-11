@@ -988,6 +988,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private var localAudioTrack: LKRTCAudioTrack?
     private var remoteAudioTrack: LKRTCAudioTrack?
     private var localPlayoutInterruptionState = VoiceTutorLocalPlayoutInterruptionState()
+    private var interruptionFadeState = VoiceTutorInterruptionFadeState()
     private var interruptionBoundaryState = VoiceTutorInterruptionBoundaryState()
     private var interruptionObserver: NSObjectProtocol?
     private var audioConfigurationObservers: [NSObjectProtocol] = []
@@ -1275,7 +1276,10 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             stateLock.unlock()
             return
         }
-        remoteAudioTrack?.source.volume = 1
+        interruptionFadeState.responseStarted(responseID)
+        // A repeated created/output-start notification for this same response
+        // must not restore its gain halfway through an intentional fade.
+        remoteAudioTrack?.source.volume = Double(interruptionFadeState.currentGain(at: ProcessInfo.processInfo.systemUptime))
         diagnosticLock.lock()
         localPlayoutTailState.responseStarted(responseID)
         interruptionBoundaryState.responseStarted(responseID)
@@ -1294,6 +1298,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             return false
         }
         remoteAudioTrack?.source.volume = 0
+        interruptionFadeState.invalidate()
         diagnosticLock.lock()
         _ = localPlayoutTailState.abandonResponse(responseID)
         interruptionBoundaryState.invalidate(responseID: responseID)
@@ -1319,14 +1324,46 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
                 } catch { return }
             case .quietGap:
                 emitMediaDiagnostic("interruption_boundary_quiet_gap")
+                await fadeLocalPlayoutResponse(responseID: responseID)
                 return
             case .deadline:
                 emitMediaDiagnostic("interruption_boundary_deadline")
+                await fadeLocalPlayoutResponse(responseID: responseID)
                 return
             case .superseded:
                 return
             }
         }
+    }
+
+    /// Complete the ramp before the ordered speech/pause control asks the
+    /// backend to clear audio. Fading after that clear would still allow an
+    /// abrupt provider stop to beat the local transition.
+    private func fadeLocalPlayoutResponse(responseID: String) async {
+        guard let token = requestInterruptionFade(responseID: responseID) else { return }
+        while !Task.isCancelled {
+            guard let gain = applyInterruptionFade(token, at: ProcessInfo.processInfo.systemUptime), gain > 0 else { return }
+            do { try await Task.sleep(for: .milliseconds(8)) }
+            catch { return }
+        }
+    }
+
+    private func requestInterruptionFade(responseID: String) -> VoiceTutorInterruptionFadeToken? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !isClosed, localPlayoutInterruptionState.activeResponseID == responseID,
+              !localPlayoutInterruptionState.isMuted else { return nil }
+        return interruptionFadeState.request(responseID: responseID, at: ProcessInfo.processInfo.systemUptime)
+    }
+
+    private func applyInterruptionFade(_ token: VoiceTutorInterruptionFadeToken, at uptime: TimeInterval) -> Float? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !isClosed, localPlayoutInterruptionState.activeResponseID == token.responseID,
+              !localPlayoutInterruptionState.isMuted,
+              let gain = interruptionFadeState.gain(for: token, at: uptime) else { return nil }
+        remoteAudioTrack?.source.volume = Double(gain)
+        return gain
     }
 
     private func interruptionBoundaryToken(
@@ -1422,6 +1459,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         Self.audioSessionOwnershipLock.lock()
         stateLock.lock()
         isClosed = true
+        interruptionFadeState.invalidate()
         sessionMediaReady = false
         microphoneMuted = true
         microphoneInputClosed = true
@@ -1727,7 +1765,8 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         guard !isClosed, remoteAudioTrack !== track else { return }
         remoteAudioTrack?.remove(remoteRenderer)
         remoteAudioTrack = track
-        track.source.volume = localPlayoutInterruptionState.isMuted ? 0 : 1
+        track.source.volume = localPlayoutInterruptionState.isMuted ? 0
+            : Double(interruptionFadeState.currentGain(at: ProcessInfo.processInfo.systemUptime))
         track.add(remoteRenderer)
     }
 

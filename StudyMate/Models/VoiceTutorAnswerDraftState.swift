@@ -74,6 +74,10 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
     var shouldPersistAutomatically: Bool { !hadExistingDraft || hasUserEdited }
     var hasCanonicalQuestion: Bool { Self.isValidQuestion(questionText) }
 
+    func canCancel(in snapshot: VoiceTutorSessionStateEvent?, minimumRevision: Int64 = 0) -> Bool {
+        canCancel && revision >= minimumRevision && belongsToCurrentLesson(snapshot)
+    }
+
     static func isValidQuestion(_ value: String) -> Bool {
         !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && value.utf16.count <= maximumQuestionLength
@@ -112,7 +116,8 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
             guard event.phase == .listening, event.revision >= revision,
                   event.revision >= minimumRevision,
                   let question = event.question,
-                  !retiredAnswerIDs.contains(event.answerID), !isActive else { return false }
+                  !retiredAnswerIDs.contains(event.answerID), !isActive,
+                  !awaitingCancellationChoices else { return false }
             if let answerID { retiredAnswerIDs.insert(answerID) }
             guard retiredAnswerIDs.count <= 64 else { return false }
             answerID = event.answerID
@@ -135,6 +140,13 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
                   event.question.map({ $0 == questionText }) ?? true,
                   !isCancelling || event.phase == .cancelled,
                   permits(event.phase) else { return false }
+            // Exact terminal receipts may still settle an old preserved draft.
+            // A late review/listening/failure cannot reacquire input after the
+            // authenticated lesson snapshot has advanced to another exercise.
+            if ![.submitted, .cancelled].contains(event.phase) {
+                guard event.revision >= minimumRevision,
+                      belongsToCurrentLesson(currentLesson) else { return false }
+            }
         }
         if event.phase == .review, let finalText = event.text {
             // Review is emitted after all final parts. It is only a fallback

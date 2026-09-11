@@ -467,36 +467,30 @@ final class VoiceTutorOperationStateTests: XCTestCase {
     }
 
     @MainActor
-    func testOperationStatusRendersInCallAndTranscript() async throws {
+    func testOperationStatusIsVisibleOnlyInTranscript() async throws {
         for expanded in [false, true] {
             var state = VoiceTutorOperationState()
-            _ = state.apply(event(1, "visual_operation", .started), at: ProcessInfo.processInfo.systemUptime - 0.275)
-            let root = VoiceTutorCallScreen(
-                topic: "스프링", presentation: VoiceTutorCallPresentation(phase: .listening, isAwaitingTutorResponse: true),
-                strings: AppStrings(language: .korean), operationState: state,
-                captions: [VoiceTutorCaption(speaker: .tutor, text: "저장된 채점 결과를 확인하고 있어요.")],
-                showsTranscript: .constant(expanded), showsSummary: .constant(false)
-            ).environment(\.colorScheme, .dark).environment(\.scenePhase, .active)
-            let controller = UIHostingController(rootView: root)
-            let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-            let previous = scene?.windows.first { $0.isKeyWindow }
-            let window = scene.map(UIWindow.init(windowScene:)) ?? UIWindow()
-            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
-            window.overrideUserInterfaceStyle = .dark
-            window.rootViewController = controller
-            window.makeKeyAndVisible()
-            defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKey() }
-            controller.view.frame = window.bounds
-            controller.view.layoutIfNeeded()
-            try await Task.sleep(for: .milliseconds(150))
-            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { context in
-                window.layer.render(in: context.cgContext)
+            let caption = VoiceTutorCaption(speaker: .tutor, text: "저장된 채점 결과를 확인했어요.")
+            XCTAssertTrue(state.apply(event(1, "visual_operation", .started), at: 10, afterCaptionID: caption.id))
+            XCTAssertTrue(state.apply(event(2, "visual_operation", .completed, elapsed: 2_300), at: 12.3))
+            let harness = try OperationTranscriptHarness(captions: [caption], operations: state, showsTranscript: expanded)
+            defer { harness.close() }
+            try await harness.settle()
+            #if targetEnvironment(simulator)
+            let label = AppStrings(language: .korean).voiceTutorOperationStatus(name: "get_grading_process",
+                phase: .completed, elapsedMilliseconds: 2_300)
+            XCTAssertEqual(harness.semanticTextElements().filter { $0.accessibilityLabel == label }.count, expanded ? 1 : 0,
+                "The same persisted MCP result is discoverable only in the expanded conversation")
+            #endif
+            XCTAssertEqual(harness.probe.operations.finished.count, 1, "Hiding MCP must not discard its history")
+            let image = UIGraphicsImageRenderer(bounds: harness.window.bounds).image { _ in
+                XCTAssertTrue(harness.window.drawHierarchy(in: harness.window.bounds, afterScreenUpdates: true))
             }
             let attachment = XCTAttachment(image: image)
             attachment.name = expanded ? "voice-operation-transcript" : "voice-operation-call"
             attachment.lifetime = .keepAlways
             add(attachment)
-            XCTAssertGreaterThan(image.size.width, 0)
+            XCTAssertGreaterThan(image.pngData()?.count ?? 0, 1_024)
         }
     }
 
@@ -592,38 +586,15 @@ final class VoiceTutorOperationTranscriptPresentationTests: XCTestCase {
     }
 
     private func assertNativeOrder(_ texts: [String], in harness: OperationTranscriptHarness) throws {
-        let nodes = harness.semanticTextElements()
-        let description = nodes.map { "\($0.accessibilityLabel ?? "nil") frame=\($0.accessibilityFrame)" }.joined(separator: "\n")
         var previousIndex: Int?
         var previousFrame: CGRect?
         for text in texts {
-            let matches = nodes.indices.filter { nodes[$0].accessibilityLabel?.contains(text) == true }
-            let exactMatches = matches.filter { nodes[$0].accessibilityLabel == text }
-            XCTAssertEqual(exactMatches.count, 1, "Each visible message/status must have exactly one text leaf: \(text)\n\(description)")
-            var index = try XCTUnwrap(exactMatches.first, description)
-            var frame = nodes[index].accessibilityFrame
-            XCTAssertGreaterThan(frame.height, 0, description)
-            // The native automation tree exposes both CaptionBubble's combined
-            // speaker + text node and its selectable text leaf. Only accept that
-            // containing parent; a second text leaf or a separately positioned
-            // copy remains a failure. Compare the full bubble's bounds below.
-            let parents = matches.filter { $0 != index }
-            XCTAssertLessThanOrEqual(parents.count, 1, "Only the combined caption parent may repeat its text\n\(description)")
-            let strings = AppStrings(language: .korean)
-            let combinedLabels = ["\(strings.voiceTutorYou), \(text)", "\(strings.voiceTutorTeacher), \(text)"]
-            for parentIndex in parents {
-                let parent = nodes[parentIndex]
-                XCTAssertTrue(combinedLabels.contains(parent.accessibilityLabel ?? ""), description)
-                XCTAssertLessThan(parentIndex, index, "The combined caption must precede its text leaf\n\(description)")
-                XCTAssertTrue(parent.accessibilityFrame.insetBy(dx: -1, dy: -1).contains(frame),
-                    "Combined caption bounds must contain its leaf, not represent another rendering\n\(description)")
-                frame = parent.accessibilityFrame
-                index = parentIndex
-            }
-            if let previousIndex { XCTAssertLessThan(previousIndex, index, "Native reading order must follow the operation's origin\n\(description)") }
-            if let previousFrame { XCTAssertLessThanOrEqual(previousFrame.maxY, frame.minY + 1, "The operation must render below its origin and above later conversation\n\(description)") }
-            previousIndex = index
-            previousFrame = frame
+            let row = try harness.logicalTextRow(text)
+            if let previousIndex { XCTAssertLessThan(previousIndex, row.index, "Native reading order must follow the operation's origin") }
+            if let previousFrame { XCTAssertLessThanOrEqual(previousFrame.maxY, row.frame.minY + 1,
+                "The operation must render below its origin and above later conversation") }
+            previousIndex = row.index
+            previousFrame = row.frame
         }
     }
 
@@ -702,15 +673,18 @@ final class VoiceTutorUserInputTranscriptPresentationTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(500))
             try await harness.scrollTranscript(toBottom: false)
             #if targetEnvironment(simulator)
-            try assertNativeOrder([first.text, cancelled.title, second.text], in: harness)
+            try assertNativeOrder([first.text, AppStrings(language: .korean).voiceTutorInputCancelled, second.text], in: harness)
             XCTAssertFalse(harness.semanticTextElements().contains { $0.accessibilityLabel == "Redis" },
                 "A blank cancelled form cannot look like a selected answer")
             #endif
             attach(harness, name: "voice-input-transcript-\(style)-cancelled-origin")
             try await harness.scrollTranscript(toBottom: true)
             #if targetEnvironment(simulator)
-            try assertNativeOrder([second.text, submitted.title, AppStrings(language: .korean).voiceTutorInputSubmittedAnswers,
-                submitted.questions[0].prompt, "개념 정리 · 실제 예시", answer.text, later.text], in: harness)
+            try assertNativeOrder([second.text, AppStrings(language: .korean).voiceTutorInputSubmitted,
+                "개념 정리 · 실제 예시", answer.text, later.text], in: harness)
+            XCTAssertFalse(harness.semanticTextElements().contains {
+                $0.accessibilityLabel == AppStrings(language: .korean).voiceTutorInputSubmittedAnswers
+            }, "The compact result keeps the chosen answer without auxiliary submitted-answer headings")
             XCTAssertFalse(harness.semanticTextElements().contains { $0.accessibilityLabel == "연습 문제" },
                 "Read-only results omit the option that was never submitted")
             #endif
@@ -719,21 +693,15 @@ final class VoiceTutorUserInputTranscriptPresentationTests: XCTestCase {
     }
 
     private func assertNativeOrder(_ texts: [String], in harness: OperationTranscriptHarness) throws {
-        let nodes = harness.semanticTextElements()
-        let description = nodes.map { "\($0.accessibilityLabel ?? "nil") frame=\($0.accessibilityFrame)" }.joined(separator: "\n")
         var previousIndex: Int?
         var previousFrame: CGRect?
         for text in texts {
-            let matches = nodes.indices.filter { nodes[$0].accessibilityLabel == text }
-            XCTAssertEqual(matches.count, 1, "Each original caption and result must render once: \(text)\n\(description)")
-            let index = try XCTUnwrap(matches.first, description)
-            let frame = nodes[index].accessibilityFrame
-            XCTAssertGreaterThan(frame.height, 0, description)
-            if let previousIndex { XCTAssertLessThan(previousIndex, index, "Native reading order must match the originating conversation\n\(description)") }
-            if let previousFrame { XCTAssertLessThanOrEqual(previousFrame.maxY, frame.minY + 1,
-                "The card and submitted answers must be below their origin and above the later conversation\n\(description)") }
-            previousIndex = index
-            previousFrame = frame
+            let row = try harness.logicalTextRow(text)
+            if let previousIndex { XCTAssertLessThan(previousIndex, row.index, "Native reading order must match the originating conversation") }
+            if let previousFrame { XCTAssertLessThanOrEqual(previousFrame.maxY, row.frame.minY + 1,
+                "The card and submitted answers must be below their origin and above the later conversation") }
+            previousIndex = row.index
+            previousFrame = row.frame
         }
     }
 
@@ -750,26 +718,275 @@ final class VoiceTutorUserInputTranscriptPresentationTests: XCTestCase {
     }
 }
 
+/// Drives only the production view's value inputs. No ViewModel, session owner,
+/// account, transport, audio engine, or microphone is created by these fixtures.
+@MainActor
+final class VoiceTutorCompactInteractionPresentationTests: XCTestCase {
+    private let strings = AppStrings(language: .korean)
+
+    func testCompactChoiceSelectionAndTypingSubmitFromTheSameOrbWithoutOpeningChat() async throws {
+        try requireHostedAccessibility()
+        let harness = try OperationTranscriptHarness(captions: [], showsTranscript: false)
+        defer { harness.close() }
+        try await harness.settle()
+        let request = request()
+        XCTAssertTrue(harness.probe.userInputs.apply(request, sessionID: request.sessionId))
+        try await harness.settle()
+        try assertCompact(harness)
+        try harness.assertSingleButtonRow(label: "개념 정리")
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: "개념 정리")).accessibilityActivate())
+        try await harness.settle()
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: "실제 예시")).accessibilityActivate())
+        try await harness.settle()
+        XCTAssertEqual(harness.probe.userInputs.pending?.answers.first?.selectedOptionIds, ["concept", "example"])
+
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: strings.voiceTutorInputCustom)).accessibilityActivate())
+        let editor = try await harness.presentedEditor()
+        XCTAssertNotNil(harness.window.rootViewController?.presentedViewController)
+        XCTAssertFalse(harness.probe.showsTranscript, "Opening the independent editor cannot switch conversation layouts")
+        XCTAssertTrue(editor.becomeFirstResponder())
+        let draft = "서비스 경계부터 설명해 주세요.\n한글 초안과 선택을 함께 제출합니다."
+        editor.insertText(draft)
+        try await harness.settle()
+        // A tool update while editing cannot replace the compact card, its
+        // selected options, or the native editing session.
+        XCTAssertTrue(harness.probe.operations.apply(.init(sequence: 1, operationID: "synthetic_lookup",
+            name: "list_studies", phase: .completed, elapsedMilliseconds: 120), at: 1))
+        try await harness.settle()
+        XCTAssertTrue(harness.editor() === editor)
+        XCTAssertEqual(editor.text, draft)
+        XCTAssertFalse(harness.probe.showsTranscript)
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: strings.done)).accessibilityActivate())
+        try await harness.waitForEditorDismissal()
+        try assertCompact(harness)
+        XCTAssertEqual(harness.button(label: strings.voiceTutorInputCustom)?.accessibilityValue, draft)
+        XCTAssertTrue(harness.probe.controls.isEmpty, "Done retains the draft; only the explicit submit action sends it")
+
+        let orb = try XCTUnwrap(harness.orbElements.first)
+        XCTAssertEqual(orb.accessibilityLabel, strings.voiceTutorInputSubmit)
+        XCTAssertTrue(orb.accessibilityActivate(), "The same compact orb must submit the completed choice")
+        try await harness.settle()
+        XCTAssertEqual(harness.probe.controls.count, 1)
+        XCTAssertEqual(harness.probe.controls.first?.answers?.first?.selectedOptionIds, ["concept", "example"])
+        XCTAssertEqual(harness.probe.controls.first?.answers?.first?.text, draft)
+        XCTAssertEqual(harness.probe.userInputs.pending?.status, .submitting)
+        try assertCompact(harness)
+        XCTAssertTrue(harness.probe.userInputs.apply(acknowledgment(request, phase: .submitted)))
+        try await harness.settle()
+        XCTAssertNil(harness.probe.userInputs.pending)
+        XCTAssertEqual(harness.probe.userInputs.entries.first?.submittedAnswers, harness.probe.controls.first?.answers)
+        try assertCompact(harness)
+    }
+
+    func testCompactChoiceCanBeCancelledWithoutSubmittingOrOpeningChat() async throws {
+        try requireHostedAccessibility()
+        let harness = try OperationTranscriptHarness(captions: [], showsTranscript: false)
+        defer { harness.close() }
+        try await harness.settle()
+        let request = request()
+        XCTAssertTrue(harness.probe.userInputs.apply(request, sessionID: request.sessionId))
+        try await harness.settle()
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: "개념 정리")).accessibilityActivate())
+        try await harness.settle()
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: strings.cancel)).accessibilityActivate())
+        try await harness.settle()
+        XCTAssertEqual(harness.probe.controls.count, 1)
+        XCTAssertNil(harness.probe.controls.first?.answers, "Cancel sends the cancellation control, never an answer")
+        try assertCompact(harness)
+        XCTAssertTrue(harness.probe.userInputs.apply(acknowledgment(request, phase: .cancelled)))
+        try await harness.settle()
+        XCTAssertNil(harness.probe.userInputs.pending)
+        XCTAssertEqual(harness.probe.userInputs.entries.first?.status, .cancelled)
+        XCTAssertEqual(harness.probe.userInputs.entries.first?.answers.first?.selectedOptionIds, ["concept"])
+        XCTAssertNil(harness.probe.userInputs.entries.first?.submittedAnswers)
+        try assertCompact(harness)
+    }
+
+    func testGradingAndGradedStateKeepOneAccessibleCircleInBothLayoutsAndThemes() async throws {
+        try requireHostedAccessibility()
+        for appearance in [UIUserInterfaceStyle.light, .dark] {
+            let harness = try OperationTranscriptHarness(captions: [
+                VoiceTutorCaption(speaker: .learner, text: "내 답변을 확인해 주세요."),
+                VoiceTutorCaption(speaker: .tutor, text: "채점 결과를 확인했어요.")
+            ], appearance: appearance, showsTranscript: false)
+            defer { harness.close() }
+            try await harness.settle()
+            for (index, phase) in [VoiceTutorSessionStateEvent.Phase.grading, .graded].enumerated() {
+                XCTAssertTrue(harness.probe.presentation.sessionState.apply(.init(sequence: Int64(index + 1),
+                    phase: phase, paused: false, revision: 1, studyID: 101, recordID: "202")))
+                try await harness.settle()
+                try assertCompact(harness)
+                let orb = try XCTUnwrap(harness.orbElements.first)
+                XCTAssertTrue(orb.accessibilityValue?.contains(harness.probe.presentation.statusText(strings)) == true)
+                XCTAssertGreaterThan(orb.accessibilityFrame.width, 100, "A lesson state update must preserve the full compact circle")
+            }
+            harness.probe.showsTranscript = true
+            try await harness.settle()
+            XCTAssertEqual(harness.orbElements.count, 1, "Disclosure moves the existing orb instead of mounting a second circle")
+            let orb = try XCTUnwrap(harness.orbElements.first)
+            XCTAssertGreaterThan(orb.accessibilityFrame.width, 64, "The chat circle reserves room for its grading label")
+            XCTAssertLessThanOrEqual(orb.accessibilityFrame.width, 96)
+            XCTAssertTrue(orb.accessibilityValue?.contains(strings.voiceTutorAnswerGraded) == true)
+            XCTAssertNotNil(harness.button(label: strings.voiceTutorCallCollapseConversation))
+            harness.probe.showsTranscript = false
+            try await harness.settle()
+            try assertCompact(harness)
+        }
+    }
+
+    func testCompactChoiceAndGradedCircleRenderWithoutStartingARealSession() async throws {
+        guard ProcessInfo.processInfo.environment["BUDDYSTUDY_VOICE_UI_RENDER_SMOKE"] == "1" else {
+            throw XCTSkip("Opt in with BUDDYSTUDY_VOICE_UI_RENDER_SMOKE=1 for synthetic native iPhone/simulator screenshots")
+        }
+        let request = request()
+        for appearance in [UIUserInterfaceStyle.light, .dark] {
+            let theme = appearance == .light ? "light" : "dark"
+            let first = VoiceTutorCaption(speaker: .tutor, text: "서비스 경계부터 함께 살펴볼까요?", responseID: "synthetic_origin")
+            let learner = VoiceTutorCaption(speaker: .learner, text: "개념과 실제 예시를 함께 공부할게요.")
+            let harness = try OperationTranscriptHarness(captions: [first, learner], appearance: appearance,
+                showsTranscript: false, useDeviceBounds: true)
+            defer { harness.close() }
+            try await harness.settle()
+            XCTAssertTrue(harness.probe.userInputs.apply(request, sessionID: request.sessionId, afterCaptionID: first.id))
+            try await harness.settle()
+            XCTAssertFalse(harness.probe.showsTranscript)
+            attach(harness, name: "voice-compact-choice-\(theme)")
+            harness.probe.userInputs.update(requestID: request.id,
+                answer: .init(questionId: "style", selectedOptionIds: ["concept", "example"], text: "서비스 경계 예시도 함께 설명해 주세요."))
+            try await harness.settle()
+            attach(harness, name: "voice-compact-selected-choice-\(theme)")
+            harness.probe.send(requestID: request.id, cancel: false)
+            XCTAssertTrue(harness.probe.userInputs.apply(acknowledgment(request, phase: .submitted)))
+            XCTAssertTrue(harness.probe.operations.apply(.init(sequence: 1, operationID: "synthetic_grade",
+                name: "get_grading_process", phase: .completed, elapsedMilliseconds: 2_300), at: 3, afterCaptionID: learner.id))
+            XCTAssertTrue(harness.probe.presentation.sessionState.apply(.init(sequence: 1, phase: .graded,
+                paused: false, revision: 1, studyID: 101, recordID: "202")))
+            try await harness.settle()
+            XCTAssertFalse(harness.probe.showsTranscript)
+            attach(harness, name: "voice-graded-circle-compact-\(theme)")
+            harness.probe.showsTranscript = true
+            await Task.yield()
+            try await Task.sleep(for: .milliseconds(80))
+            // A time-sampled native animation image, not a claim of exactly 50%
+            // spring progress. Orb midpoint geometry is tested separately.
+            attach(harness, name: "voice-disclosure-in-flight-\(theme)", afterScreenUpdates: false)
+            try await harness.settle()
+            try await harness.scrollTranscript(toBottom: true)
+            attach(harness, name: "voice-graded-circle-transcript-\(theme)")
+            let metadata = XCTAttachment(string: "Synthetic native CallScreen only; no account, network, audio or microphone. Theme=\(theme), bounds=\(harness.window.bounds). Pending/selected/graded states are injected test values. In-flight image captured 80ms after disclosure request; exact midpoint geometry is verified by testVoiceCallUsesOneOrbAlongAContinuousLayoutPath.")
+            metadata.name = "voice-ui-render-fixture-metadata-\(theme)"
+            metadata.lifetime = .keepAlways
+            add(metadata)
+        }
+    }
+
+    func testPortraitCompactChoiceAndGradedTranscriptRenderWithoutStartingARealSession() async throws {
+        guard ProcessInfo.processInfo.environment["BUDDYSTUDY_VOICE_UI_RENDER_SMOKE"] == "1" else {
+            throw XCTSkip("Opt in with BUDDYSTUDY_VOICE_UI_RENDER_SMOKE=1 for the synthetic portrait viewport")
+        }
+        let request = request()
+        for appearance in [UIUserInterfaceStyle.light, .dark] {
+            let theme = appearance == .light ? "light" : "dark"
+            let first = VoiceTutorCaption(speaker: .tutor, text: "서비스 경계부터 함께 살펴볼까요?", responseID: "synthetic_portrait_origin")
+            let learner = VoiceTutorCaption(speaker: .learner, text: "개념과 실제 예시를 함께 공부할게요.")
+            let harness = try OperationTranscriptHarness(captions: [first, learner], appearance: appearance,
+                showsTranscript: false, useDeviceBounds: true, usePortraitViewport: true)
+            defer { harness.close() }
+            try await harness.settle()
+            XCTAssertGreaterThan(harness.window.bounds.height, harness.window.bounds.width)
+            XCTAssertTrue(harness.probe.userInputs.apply(request, sessionID: request.sessionId, afterCaptionID: first.id))
+            harness.probe.userInputs.update(requestID: request.id,
+                answer: .init(questionId: "style", selectedOptionIds: ["concept", "example"], text: "서비스 경계 예시도 함께 설명해 주세요."))
+            try await harness.settle()
+            XCTAssertFalse(harness.probe.showsTranscript)
+            attach(harness, name: "voice-portrait-compact-selected-choice-\(theme)")
+            harness.probe.send(requestID: request.id, cancel: false)
+            XCTAssertTrue(harness.probe.userInputs.apply(acknowledgment(request, phase: .submitted)))
+            XCTAssertTrue(harness.probe.operations.apply(.init(sequence: 1, operationID: "synthetic_portrait_grade",
+                name: "get_grading_process", phase: .completed, elapsedMilliseconds: 2_300), at: 3, afterCaptionID: learner.id))
+            XCTAssertTrue(harness.probe.presentation.sessionState.apply(.init(sequence: 1, phase: .graded,
+                paused: false, revision: 1, studyID: 101, recordID: "202")))
+            harness.probe.showsTranscript = true
+            try await harness.settle()
+            try await harness.scrollTranscript(toBottom: true)
+            XCTAssertGreaterThan(harness.window.bounds.height, harness.window.bounds.width)
+            attach(harness, name: "voice-portrait-graded-transcript-\(theme)")
+            let metadata = XCTAttachment(string: "Synthetic native CallScreen portrait viewport; not touch or orientation E2E. No account, network, audio or microphone. Theme=\(theme), windowBounds=\(harness.window.bounds), nativeScreenBounds=\(String(describing: harness.window.windowScene?.screen.bounds)), nativeSceneOrientation=\(String(describing: harness.window.windowScene?.interfaceOrientation.rawValue)). The viewport uses the device's shorter dimension as width and longer dimension as height. No device/scene orientation change is requested; closing restores the previous key window.")
+            metadata.name = "voice-portrait-render-fixture-metadata-\(theme)"
+            metadata.lifetime = .keepAlways
+            add(metadata)
+        }
+    }
+
+    private func request() -> VoiceTutorUserInputRequest {
+        .init(requestId: "55555555-5555-4555-a555-555555555555",
+            sessionId: "11111111-1111-4111-a111-111111111111",
+            attemptId: "22222222-2222-4222-a222-222222222222", sequence: 1, title: "학습 방식",
+            questions: [.init(id: "style", prompt: "필요한 설명을 골라 주세요.", selectionMode: .multiple,
+                options: [.init(id: "concept", label: "개념 정리"), .init(id: "example", label: "실제 예시")],
+                allowFreeText: true)], operationId: "synthetic_form")
+    }
+
+    private func acknowledgment(_ request: VoiceTutorUserInputRequest,
+                                phase: VoiceTutorUserInputStateEvent.Phase) -> VoiceTutorUserInputStateEvent {
+        .init(requestId: request.id, sessionId: request.sessionId, attemptId: request.attemptId,
+            sequence: 2, phase: phase, errorCode: nil)
+    }
+
+    private func requireHostedAccessibility() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Native SwiftUI AX actions run on simulator; opt-in synthetic render coverage runs on iPhone")
+        #endif
+    }
+
+    private func assertCompact(_ harness: OperationTranscriptHarness, file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertFalse(harness.probe.showsTranscript, "Only the learner opens the conversation", file: file, line: line)
+        XCTAssertNil(harness.button(label: strings.voiceTutorCallCollapseConversation), file: file, line: line)
+        XCTAssertEqual(harness.orbElements.count, 1, "Keep one accessible circle across updates", file: file, line: line)
+    }
+
+    private func attach(_ harness: OperationTranscriptHarness, name: String, afterScreenUpdates: Bool = true) {
+        let image = UIGraphicsImageRenderer(bounds: harness.window.bounds).image { _ in
+            XCTAssertTrue(harness.window.drawHierarchy(in: harness.window.bounds, afterScreenUpdates: afterScreenUpdates))
+        }
+        XCTAssertGreaterThan(image.pngData()?.count ?? 0, 1_024)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
 @MainActor
 private final class OperationTranscriptProbe: ObservableObject {
     @Published var captions: [VoiceTutorCaption]
     @Published var operations: VoiceTutorOperationState
     @Published var userInputs: VoiceTutorUserInputState
+    @Published var showsTranscript: Bool
+    @Published var presentation = VoiceTutorCallPresentation(phase: .listening)
+    private(set) var controls: [VoiceTutorUserInputControl] = []
     init(captions: [VoiceTutorCaption], operations: VoiceTutorOperationState = .init(),
-         userInputs: VoiceTutorUserInputState = .init()) {
+         userInputs: VoiceTutorUserInputState = .init(), showsTranscript: Bool = true) {
         self.captions = captions
         self.operations = operations
         self.userInputs = userInputs
+        self.showsTranscript = showsTranscript
+    }
+
+    func send(requestID: String, cancel: Bool) {
+        if let control = userInputs.submit(requestID: requestID, cancel: cancel) { controls.append(control) }
     }
 }
 
 private struct OperationTranscriptTestParent: View {
     @ObservedObject var probe: OperationTranscriptProbe
     var body: some View {
-        VoiceTutorCallScreen(topic: "스프링", presentation: VoiceTutorCallPresentation(phase: .listening),
+        VoiceTutorCallScreen(topic: "스프링", presentation: probe.presentation,
             strings: AppStrings(language: .korean), operationState: probe.operations,
-            userInputState: probe.userInputs, captions: probe.captions,
-            showsTranscript: .constant(true), showsSummary: .constant(false))
+            userInputState: probe.userInputs,
+            onUserInputChange: { probe.userInputs.update(requestID: $0, answer: $1) },
+            onUserInputSubmit: { probe.send(requestID: $0, cancel: $1) },
+            captions: probe.captions, showsTranscript: $probe.showsTranscript, showsSummary: .constant(false))
             .environment(\.locale, Locale(identifier: "ko_KR"))
             .environment(\.scenePhase, .active)
     }
@@ -780,15 +997,24 @@ private final class OperationTranscriptHarness {
     let probe: OperationTranscriptProbe
     let window: UIWindow
     private let previousKeyWindow: UIWindow?
+    private let portraitViewport: CGRect?
 
     init(captions: [VoiceTutorCaption], operations: VoiceTutorOperationState = .init(),
-         userInputs: VoiceTutorUserInputState = .init(), appearance: UIUserInterfaceStyle = .dark) throws {
+         userInputs: VoiceTutorUserInputState = .init(), appearance: UIUserInterfaceStyle = .dark,
+         showsTranscript: Bool = true, useDeviceBounds: Bool = false, usePortraitViewport: Bool = false) throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try XCTUnwrap(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
         previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
-        probe = OperationTranscriptProbe(captions: captions, operations: operations, userInputs: userInputs)
+        let deviceBounds = scene.screen.bounds
+        // This is a native rendering canvas, not a request to rotate the phone.
+        // Keep a portrait viewport even if the hosted test's scene is landscape.
+        portraitViewport = usePortraitViewport ? CGRect(x: 0, y: 0,
+            width: min(deviceBounds.width, deviceBounds.height),
+            height: max(deviceBounds.width, deviceBounds.height)) : nil
+        probe = OperationTranscriptProbe(captions: captions, operations: operations,
+            userInputs: userInputs, showsTranscript: showsTranscript)
         window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.frame = portraitViewport ?? (useDeviceBounds ? deviceBounds : CGRect(x: 0, y: 0, width: 393, height: 852))
         window.overrideUserInterfaceStyle = appearance
         window.rootViewController = UIHostingController(rootView: OperationTranscriptTestParent(probe: probe))
         window.makeKeyAndVisible()
@@ -802,6 +1028,10 @@ private final class OperationTranscriptHarness {
     }
 
     func layout() {
+        if let portraitViewport {
+            window.frame = portraitViewport
+            window.rootViewController?.view.frame = window.bounds
+        }
         window.setNeedsLayout()
         window.layoutIfNeeded()
         window.rootViewController?.view.layoutIfNeeded()
@@ -839,7 +1069,86 @@ private final class OperationTranscriptHarness {
         return nodes
     }
 
+    func button(label: String) -> NSObject? {
+        semanticTextElements().first { $0.accessibilityLabel == label && $0.accessibilityTraits.contains(.button) }
+    }
+
+    func logicalTextRow(_ text: String) throws -> (index: Int, frame: CGRect) {
+        let nodes = semanticTextElements()
+        let description = nodes.map { "\($0.accessibilityLabel ?? "nil") frame=\($0.accessibilityFrame)" }.joined(separator: "\n")
+        let strings = AppStrings(language: .korean)
+        let combinedLabel = probe.captions.first(where: { $0.text == text }).map {
+            ($0.speaker == .learner ? strings.voiceTutorYou : strings.voiceTutorTeacher) + ". " + text
+        }
+        let leaves = nodes.indices.filter { nodes[$0].accessibilityLabel == text }
+        let parents = combinedLabel.map { label in nodes.indices.filter { nodes[$0].accessibilityLabel == label } } ?? []
+        XCTAssertLessThanOrEqual(leaves.count, 1, "A second text leaf is a duplicate row: \(text)\n\(description)")
+        XCTAssertLessThanOrEqual(parents.count, 1, "A second combined caption is a duplicate row: \(text)\n\(description)")
+        let index = try XCTUnwrap(parents.first ?? leaves.first, "Missing exact message/status: \(text)\n\(description)")
+        let frame = nodes[index].accessibilityFrame
+        XCTAssertGreaterThan(frame.height, 0, description)
+        // SwiftUI may expose the combined caption alone, or also its selectable
+        // text child. Collapse only that exact speaker label and contained leaf.
+        if let parent = parents.first, let leaf = leaves.first {
+            XCTAssertLessThan(parent, leaf, "A containing caption must precede its own leaf\n\(description)")
+            XCTAssertTrue(nodes[parent].accessibilityFrame.insetBy(dx: -1, dy: -1).contains(nodes[leaf].accessibilityFrame),
+                "A separate rendering cannot be normalized as a caption child\n\(description)")
+        }
+        return (index, frame)
+    }
+
+    func assertSingleButtonRow(label: String) throws {
+        let nodes = semanticTextElements()
+        let matches = nodes.indices.filter { nodes[$0].accessibilityLabel == label }
+        let buttons = matches.filter { nodes[$0].accessibilityTraits.contains(.button) }
+        let leaves = matches.filter { !nodes[$0].accessibilityTraits.contains(.button) }
+        let description = matches.map {
+            "\(type(of: nodes[$0])) button=\(nodes[$0].accessibilityTraits.contains(.button)) frame=\(nodes[$0].accessibilityFrame)"
+        }.joined(separator: "\n")
+        XCTAssertEqual(buttons.count, 1, "The hidden transcript cannot expose another option button\n\(description)")
+        XCTAssertLessThanOrEqual(leaves.count, 1, "Only the option's own text leaf may repeat its label\n\(description)")
+        let button = try XCTUnwrap(buttons.first, description)
+        XCTAssertGreaterThan(nodes[button].accessibilityFrame.height, 0, description)
+        if let leaf = leaves.first {
+            XCTAssertLessThan(button, leaf, description)
+            XCTAssertTrue(nodes[button].accessibilityFrame.insetBy(dx: -1, dy: -1).contains(nodes[leaf].accessibilityFrame),
+                "A separately positioned copy is a second form, not the button's text\n\(description)")
+        }
+    }
+
+    var orbElements: [NSObject] {
+        semanticTextElements().filter {
+            $0.accessibilityTraits.contains(.button) && $0.accessibilityValue?.hasPrefix("스프링, ") == true
+        }
+    }
+
+    func editor() -> UITextView? {
+        func visit(_ view: UIView) -> UITextView? {
+            if let text = view as? UITextView { return text }
+            return view.subviews.lazy.compactMap(visit).first
+        }
+        return visit(window)
+    }
+
+    func presentedEditor() async throws -> UITextView {
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            try await settle()
+            if let editor = editor(), editor.window != nil, editor.bounds.height > 0 { return editor }
+        }
+        return try XCTUnwrap(editor(), "The compact choice must present its production editor sheet")
+    }
+
+    func waitForEditorDismissal() async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        while window.rootViewController?.presentedViewController != nil,
+              ProcessInfo.processInfo.systemUptime < deadline { try await settle() }
+        XCTAssertNil(window.rootViewController?.presentedViewController)
+        XCTAssertNil(editor())
+    }
+
     func close() {
+        window.endEditing(true)
         window.isHidden = true
         window.rootViewController = nil
         previousKeyWindow?.makeKey()

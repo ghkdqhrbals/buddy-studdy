@@ -328,6 +328,73 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
         XCTAssertEqual(ending.text, "보존할 답변")
     }
 
+    func testCancellationRequiresTheCurrentExerciseAndRemainsAvailableWhilePaused() {
+        let state = listening(existing: "보존할 답변")
+        for paused in [false, true] {
+            let current = VoiceTutorSessionStateEvent(sequence: 2, phase: .answering, paused: paused,
+                revision: 1, studyID: 42, recordID: "101", answerID: answerID)
+            XCTAssertTrue(state.canCancel(in: current, minimumRevision: 1))
+        }
+        for snapshot in [
+            VoiceTutorSessionStateEvent(sequence: 3, phase: .conversation, paused: false,
+                revision: 1, studyID: 42),
+            VoiceTutorSessionStateEvent(sequence: 3, phase: .grading, paused: false,
+                revision: 1, studyID: 42, recordID: "101"),
+            VoiceTutorSessionStateEvent(sequence: 3, phase: .graded, paused: false,
+                revision: 1, studyID: 42, recordID: "101"),
+            VoiceTutorSessionStateEvent(sequence: 3, phase: .questionGenerating, paused: false,
+                revision: 2, studyID: 42),
+            VoiceTutorSessionStateEvent(sequence: 3, phase: .answering, paused: false,
+                revision: 1, studyID: 42, recordID: "102", answerID: answerID)
+        ] {
+            XCTAssertFalse(state.canCancel(in: snapshot), "A stale cancel would have no matching server capture to acknowledge")
+        }
+        XCTAssertFalse(state.canCancel(in: nil, minimumRevision: 2))
+        XCTAssertEqual(state.text, "보존할 답변")
+    }
+
+    func testLateActiveAnswerStatesCannotReacquireInputAfterTheLessonMovesOn() {
+        for snapshot in [
+            VoiceTutorSessionStateEvent(sequence: 3, phase: .questionGenerating, paused: false,
+                revision: 2, studyID: 42),
+            VoiceTutorSessionStateEvent(sequence: 3, phase: .graded, paused: false,
+                revision: 1, studyID: 42, recordID: "101"),
+            VoiceTutorSessionStateEvent(sequence: 3, phase: .answering, paused: false,
+                revision: 1, studyID: 42, recordID: "102", answerID: answerID)
+        ] {
+            for next in [VoiceTutorAnswerDraftState.Phase.listening, .finalizing, .review, .failed] {
+                var state = listening(existing: "이전 질문의 미제출 초안")
+                let original = state
+                XCTAssertFalse(state.apply(event(next, text: "늦은 상태"),
+                    minimumRevision: snapshot.revision, currentLesson: snapshot))
+                XCTAssertEqual(state, original)
+                XCTAssertFalse(state.holdsMicrophone)
+                XCTAssertTrue(state.apply(event(.cancelled), minimumRevision: snapshot.revision,
+                    currentLesson: snapshot), "An exact cancellation receipt can still close the retained draft")
+                XCTAssertEqual(state.text, original.text)
+                XCTAssertFalse(state.holdsMicrophone)
+            }
+        }
+    }
+
+    func testNewReadyCannotReplaceTheCancellationHoldBeforeItsNextActionRequest() throws {
+        var state = listening(existing: "취소한 미제출 초안")
+        XCTAssertNotNil(state.requestCancel())
+        XCTAssertTrue(state.apply(event(.cancelled, code: "ANSWER_CANCELLED")))
+        let newReady = VoiceTutorAnswerStateEvent(answerID: "22222222-2222-3333-4444-555555555555",
+            studyID: 42, recordID: "102", revision: 2, phase: .listening,
+            text: "", code: nil, question: "다음 저장 질문")
+        let cancelled = state
+        XCTAssertFalse(state.apply(newReady))
+        XCTAssertEqual(state, cancelled)
+        state.didReceiveCancellationChoices()
+        XCTAssertTrue(state.apply(newReady, existingDraft: "다음 질문의 초안"))
+        XCTAssertEqual(state.recordID, "102")
+        XCTAssertEqual(state.text, "다음 질문의 초안")
+        XCTAssertFalse(state.apply(event(.cancelled, code: "ANSWER_CANCELLED")),
+                       "A late cancellation receipt cannot close the new exercise")
+    }
+
     func testCancelControlUsesExactAnswerIdentityWithoutTextOrSkipMutation() throws {
         let command = VoiceTutorAnswerControl(kind: .cancel, answerID: answerID, recordID: "101")
         let payload = try VoiceTutorTurnProtocol.payload(for: .answer(command))
@@ -564,8 +631,8 @@ final class VoiceTutorLearningCancelPresentationTests: XCTestCase {
             XCTAssertTrue(harness.probe.receiveReady())
             XCTAssertTrue(harness.probe.receiveListening())
             try await harness.settle()
-            XCTAssertTrue(harness.probe.showsTranscript, "A new canonical answer opens the question automatically")
-            for expanded in [true, false] {
+            XCTAssertFalse(harness.probe.showsTranscript, "A new question stays on the circle surface until the learner chooses the transcript")
+            for expanded in [false, true] {
                 harness.probe.showsTranscript = expanded
                 try await harness.settle()
                 // SwiftUI's private selectable-text nodes need not conform to

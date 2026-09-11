@@ -7,6 +7,7 @@ struct VoiceTutorUserInputCard: View {
     @State private var editingQuestion: VoiceTutorUserInputQuestion?
     let entry: VoiceTutorUserInputState.Entry
     let strings: AppStrings
+    var isCompact = false
     var onChange: (VoiceTutorUserInputAnswer) -> Void
     var onSubmit: () -> Void
     var onCancel: () -> Void
@@ -18,8 +19,8 @@ struct VoiceTutorUserInputCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            header
+        VStack(alignment: .leading, spacing: isCompact ? 12 : 18) {
+            if !isCompact || !entry.isWaiting { header }
             if entry.isWaiting {
                 ForEach(Array(entry.request.questions.enumerated()), id: \.element.id) { index, question in
                     if index > 0 { Divider().overlay(Color.secondary.opacity(0.08)) }
@@ -37,7 +38,7 @@ struct VoiceTutorUserInputCard: View {
                 completedAnswers
             }
         }
-        .padding(16)
+        .padding(isCompact ? 14 : 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 20))
         .overlay {
@@ -100,7 +101,7 @@ struct VoiceTutorUserInputCard: View {
         let answer = answer(for: question)
         return VStack(alignment: .leading, spacing: 12) {
             Text(question.prompt)
-                .font(.body.weight(.semibold))
+                .font(isCompact ? .subheadline.weight(.semibold) : .body.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
             if question.selectionMode != .text {
                 options(question, answer: answer)
@@ -141,8 +142,8 @@ struct VoiceTutorUserInputCard: View {
                             .accessibilityHidden(true)
                     }
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 13)
-                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                    .padding(.vertical, isCompact ? 10 : 13)
+                    .frame(maxWidth: .infinity, minHeight: isCompact ? 44 : 48, alignment: .leading)
                     .background(selected ? accent.opacity(0.09) : Color.clear)
                     .contentShape(Rectangle())
                 }
