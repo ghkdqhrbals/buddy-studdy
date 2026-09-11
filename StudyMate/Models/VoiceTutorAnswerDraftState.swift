@@ -20,6 +20,22 @@ struct VoiceTutorAnswerTranscriptEvent: Equatable, Sendable {
     let text: String
 }
 
+/// Additive server receipt linking a canonical question to the response that
+/// actually read it. Text similarity must never hide another conversation turn.
+struct VoiceTutorAnswerQuestionSource: Equatable, Sendable {
+    let answerID: String
+    let studyID: Int
+    let recordID: String
+    let revision: Int64
+    let responseID: String
+    let itemIDs: Set<String>
+
+    func belongs(to draft: VoiceTutorAnswerDraftState) -> Bool {
+        draft.hasCanonicalQuestion && draft.answerID == answerID && draft.studyID == studyID
+            && draft.recordID == recordID && draft.revision == revision
+    }
+}
+
 struct VoiceTutorAnswerControl: Equatable, Sendable {
     enum Kind: String, Sendable {
         case finish = "buddystudy.voice.answer.finish"

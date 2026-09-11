@@ -37,6 +37,33 @@ class VoiceTutorQuestionReadbackContentTest {
         assertThat(VoiceTutorQuestionReadbackContent.matches(question, "레디스의 티티엘과 에이피아이를 설명하세요.")).isFalse()
     }
 
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = [
+        "Redis의 TTL을 설명하고 예시를 2개 드세요.|그럼 문제를 그대로 읽어드릴게요. 레디스의 티티엘을 설명하고 예시를 두 개 드세요.",
+        "Redis의 TTL을 설명하고 예시를 2개 드세요.|문제를 그대로 읽어드릴게요. Redis의 TTL을 설명하고 예시를 2개 드세요.",
+        "Explain Redis TTL.|I'll read the question exactly. Explain Redis TTL.",
+        "RedisのTTLを説明してください。|それでは、問題をそのまま読み上げます。RedisのTTLを説明してください。",
+    ])
+    fun `one fixed short delivery preface permits only a complete unchanged question`(question: String, transcript: String) {
+        assertThat(VoiceTutorQuestionReadbackContent.matches(question, transcript)).isTrue()
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = [
+        "그럼 문제를 그대로 읽어드릴게요.",
+        "그럼 문제를 그대로 읽어드릴게요. Redis의 TTL을 설명하세요.",
+        "그럼 문제를 그대로 읽어드릴게요. Redis의 TTL을 설명하고 예시를 3개 드세요.",
+        "그럼 문제를 그대로 읽어드릴게요. Redis의 만료 시간을 설명하고 예시를 2개 드세요.",
+        "그럼 문제를 그대로 읽어드릴게요. Redis의 TTL을 설명하고 예시를 2개 드세요. 힌트는 만료 시간입니다.",
+        "힌트는 만료 시간입니다. Redis의 TTL을 설명하고 예시를 2개 드세요.",
+        "그럼 문제를 그대로 읽어드릴게요. 문제를 그대로 읽어드릴게요. Redis의 TTL을 설명하고 예시를 2개 드세요.",
+        "Redis의 TTL을 설명하고 예시를 2개 드세요. 그럼 문제를 그대로 읽어드릴게요.",
+        "곧 질문이 도착해요. Redis의 TTL을 설명하고 예시를 2개 드세요.",
+    ])
+    fun `preface tolerance never strips arbitrary words omissions changes trailing hints or repeated introductions`(transcript: String) {
+        assertThat(VoiceTutorQuestionReadbackContent.matches("Redis의 TTL을 설명하고 예시를 2개 드세요.", transcript)).isFalse()
+    }
+
     @Test
     fun `Unicode composition and nonbreaking spaces normalize consistently`() {
         assertThat(VoiceTutorQuestionReadbackContent.matches(

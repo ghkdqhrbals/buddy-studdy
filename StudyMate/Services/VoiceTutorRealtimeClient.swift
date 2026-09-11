@@ -161,8 +161,10 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case heartbeatAcknowledged
     case serviceError(code: String?, message: String, retryable: Bool)
     case audioDelta(VoiceTutorRealtimeAudioDelta)
-    case assistantTranscriptDelta(responseID: String?, delta: String)
-    case assistantTranscriptDone(responseID: String?, transcript: String?, itemID: String? = nil)
+    case assistantTranscriptDelta(responseID: String?, delta: String, itemID: String? = nil,
+                                  outputIndex: Int? = nil, eventID: String? = nil)
+    case assistantTranscriptDone(responseID: String?, transcript: String?, itemID: String? = nil,
+                                 outputIndex: Int? = nil)
     case userTranscript(String, itemID: String? = nil)
     case userSpeechStarted
     case userSpeechStopped
@@ -178,6 +180,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case studyTreeDeleted(studyIDs: Set<Int>)
     case questionChanged(VoiceTutorQuestionChange)
     case answerState(VoiceTutorAnswerStateEvent)
+    case answerQuestionSource(VoiceTutorAnswerQuestionSource)
     case answerTranscript(VoiceTutorAnswerTranscriptEvent)
     case sessionState(VoiceTutorSessionStateEvent)
     case operation(VoiceTutorOperationEvent)
@@ -271,6 +274,20 @@ enum VoiceTutorRealtimeEventParser {
                 studyID: exactInteger("studyId", in: object).flatMap({ Int(exactly: $0) }),
                 recordID: string("recordId", in: object), answerID: string("answerId", in: object))
             return event.isValid ? .sessionState(event) : .ignored(type: type)
+        case "buddystudy.voice.answer.question_source":
+            guard Set(object.keys) == ["type", "answerId", "studyId", "recordId", "revision", "responseId", "itemIds"],
+                  let answerID = answerIdentifier(in: object),
+                  let studyID = exactInteger("studyId", in: object).flatMap({ Int(exactly: $0) }),
+                  let recordID = string("recordId", in: object), VoiceTutorQuestionChange(studyID: studyID, recordID: recordID) != nil,
+                  let revision = exactInteger("revision", in: object), revision >= 0,
+                  let responseID = providerResponseID("responseId", in: object),
+                  let itemIDs = object["itemIds"] as? [String], !itemIDs.isEmpty, itemIDs.count <= 32,
+                  Set(itemIDs).count == itemIDs.count,
+                  itemIDs.allSatisfy({ providerResponseID("id", in: ["id": $0]) != nil }) else {
+                return .ignored(type: type)
+            }
+            return .answerQuestionSource(.init(answerID: answerID, studyID: studyID, recordID: recordID,
+                revision: revision, responseID: responseID, itemIDs: Set(itemIDs)))
         case "buddystudy.voice.answer.state", "buddystudy.voice.answer.ready":
             let isReady = type == "buddystudy.voice.answer.ready"
             let required: Set<String> = Set(["type", "answerId", "studyId", "recordId", "revision", "phase"])
@@ -463,13 +480,17 @@ enum VoiceTutorRealtimeEventParser {
         case "response.output_audio_transcript.delta", "response.audio_transcript.delta":
             return .assistantTranscriptDelta(
                 responseID: string("response_id", in: object),
-                delta: string("delta", in: object) ?? ""
+                delta: string("delta", in: object) ?? "",
+                itemID: providerResponseID("item_id", in: object),
+                outputIndex: exactInteger("output_index", in: object).flatMap { $0 >= 0 ? Int(exactly: $0) : nil },
+                eventID: providerResponseID("event_id", in: object)
             )
         case "response.output_audio_transcript.done", "response.audio_transcript.done":
             return .assistantTranscriptDone(
                 responseID: string("response_id", in: object),
                 transcript: string("transcript", in: object),
-                itemID: providerResponseID("item_id", in: object)
+                itemID: providerResponseID("item_id", in: object),
+                outputIndex: exactInteger("output_index", in: object).flatMap { $0 >= 0 ? Int(exactly: $0) : nil }
             )
         case "conversation.item.input_audio_transcription.completed":
             // Older PCM frames may omit an item ID; the native call requires

@@ -190,11 +190,11 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         if (!current(context, state)) return unavailable()
         if (allowAdvance && newlyBound) state.activeGradingCorrelationId = null
         return output(mapOf(
-            "studyId" to state.scope.study, "pendingQuestion" to state.question,
+            "studyId" to state.scope.study, "pendingQuestion" to state.question?.let(::pendingQuestionSummary),
             "gradingQuestions" to records.filter { it.path("questionStatus").asText() == "GRADING" }.map {
                 mapOf("id" to recordId(it).toString(), "questionStatus" to "GRADING")
             },
-            "notice" to if (newlyBound) "Read pendingQuestion.question.question faithfully and wait for the learner's answer. Its original topic and difficulty stay unchanged. Do not invent another question or give its hint/answer. Wait for the learner to finish, edit and explicitly submit through the app; never call submit_answer or assess unfinished speech."
+            "notice" to if (newlyBound) QUESTION_DELIVERY_NOTICE
                 else if (candidate != null) SAME_QUESTION_NOTICE
                 else "No ready unanswered question remains on this exact topic. If the learner wants to start or explicitly requests a new question, call request_question and wait for its saved result. Do not invent a question or resubmit an answer that is already grading.",
         )).copy(questionChange = state.question?.takeIf { newlyBound }?.let { change(state, it) },
@@ -273,8 +273,8 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
             val newlyBound = bind(context, state, record)
             if (!current(context, state)) return unavailable()
             completeGeneration(state, correlationId)
-            return output(mapOf("terminal" to true, "pendingQuestion" to state.question,
-                "notice" to if (newlyBound) "Read this saved question faithfully, then wait for an actual answer. Do not invent a score or reveal the answer hint." else SAME_QUESTION_NOTICE))
+            return output(mapOf("terminal" to true, "pendingQuestion" to state.question?.let(::pendingQuestionSummary),
+                "notice" to if (newlyBound) QUESTION_DELIVERY_NOTICE else SAME_QUESTION_NOTICE))
                 .copy(questionChange = if (newlyBound) change(state, record) else null,
                     questionReadback = if (newlyBound) readback(state, record) else null,
                     questionReadbackRecovery = if (!newlyBound) readback(state, record) else null)
@@ -475,6 +475,13 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
             (!args.containsKey("correlation_id") || correlation(mapper.valueToTree(args["correlation_id"])))
         else -> false
     }
+    /** Native tools expose identity, never a second copy the ordinary model could read. */
+    private fun pendingQuestionSummary(record: JsonNode): JsonNode = mapper.createObjectNode().apply {
+        listOf("id", "studyId", "topic", "difficulty", "questionStatus").forEach { key ->
+            record.get(key)?.let { set<JsonNode>(key, it) }
+        }
+    }
+
     private fun feedbackRecord(record: JsonNode): JsonNode = mapper.createObjectNode().apply {
         // The canonical grader receives the full edited text. Keep model tool output
         // small and avoid showing an earlier ASR answer or duplicating a long question.
@@ -522,6 +529,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
     private fun invalidResult() = error("INVALID_QUESTION_RESULT", "The saved question identity could not be verified. Do not invent a question, answer or grade.")
 
     companion object {
+        private const val QUESTION_DELIVERY_NOTICE = "The saved question is ready. The server exclusively owns its dedicated verbatim readback and answer controls; this tool result never authorizes an ordinary conversational response to read or paraphrase it. Do not repeat the question, announce a second reading, give a hint or answer, or assess unfinished speech. Handle a newer learner request if needed, otherwise leave question delivery to the server. The learner finishes, edits and explicitly submits through the app; never call submit_answer."
         private const val SAME_QUESTION_NOTICE = "This is the same current saved question, not a new question or a request to repeat its readback. Preserve the current question and handle the learner's present answer or explicit skip/replace request. Do not ask them to repeat an answer merely because this state was refreshed."
         private val GRADING_TOOLS = setOf("get_grading_process", "get_answer_status")
         val TOOLS = setOf("list_pending_questions", "request_question", "get_question_process", "skip_question", "submit_answer") + GRADING_TOOLS

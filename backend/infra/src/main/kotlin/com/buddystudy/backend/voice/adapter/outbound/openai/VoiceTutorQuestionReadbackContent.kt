@@ -11,8 +11,19 @@ import java.util.Locale
 internal object VoiceTutorQuestionReadbackContent {
     fun matches(question: String, transcript: String): Boolean {
         if (question.isBlank() || transcript.isBlank() || question.length > 8_000 || transcript.length > 20_000) return false
-        val expected = normalize(question)
         val actual = normalize(transcript)
+        if (matchesContent(question, actual)) return true
+        // Tolerate one fixed delivery preface, never arbitrary extra speech.
+        // The complete saved body must still match after it; no fuzzy matching
+        // or question extraction can authorize omitted options, hints or answers.
+        return deliveryPrefaces.any { preface ->
+            val prefix = normalize(preface)
+            actual.startsWith(prefix) && matchesContent(question, actual.removePrefix(prefix))
+        }
+    }
+
+    private fun matchesContent(question: String, actual: String): Boolean {
+        val expected = normalize(question)
         if (expected.isEmpty() || actual.isEmpty()) return false
         if (expected == actual) return true
         // Expand only labels/numbers that actually occur in the saved source.
@@ -137,6 +148,12 @@ internal object VoiceTutorQuestionReadbackContent {
 
     private fun space(point: Int): Boolean = Character.isWhitespace(point) || Character.isSpaceChar(point)
 
+    private val deliveryPrefaces = listOf(
+        "그럼 문제를 그대로 읽어드릴게요.",
+        "문제를 그대로 읽어드릴게요.",
+        "I'll read the question exactly.",
+        "それでは、問題をそのまま読み上げます。",
+    )
     private val emphasis = Regex("(?<![\\p{L}\\p{N}])(\\*{1,3}|_{1,3}|~~)(?=\\S)([^\\r\\n]*?\\S)\\1(?![a-z0-9])")
     private val markdownLineMarker = Regex("(?m)^[ \t]{0,3}(?:[-*+] +|> +|```[A-Za-z0-9_-]*[ \t]*(?:$|\n))")
     private val spokenToken = Regex("(?<![A-Za-z0-9])[A-Za-z]+(?![A-Za-z0-9])|(?<![A-Za-z0-9])[0-9]+")

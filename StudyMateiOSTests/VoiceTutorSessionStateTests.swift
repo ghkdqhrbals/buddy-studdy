@@ -966,6 +966,33 @@ final class VoiceTutorLessonContentPresentationTests: XCTestCase {
         feedback: "보상 작업과 멱등성의 필요성을 잘 설명했어요. 재시도 한도와 실패 상태를 저장하는 방법도 덧붙이면 더 정확해요.",
         explanation: "각 서비스가 로컬 트랜잭션의 결과를 저장하고 다음 단계를 이벤트로 전달합니다. 주문 저장이 실패하면 결제 취소를 요청하고, 같은 요청이 반복되어도 멱등 키로 이미 처리한 보상인지 확인합니다.")
 
+    func testVerifiedReadbackAndCanonicalAnswerQuestionRenderOnceWithoutRemovingHistory() async throws {
+        try requireHostedAccessibility()
+        let question = "**Saga**의 보상 작업을 설명해 주세요."
+        let spoken = "Saga의 보상 작업을 설명해 주세요."
+        let source = VoiceTutorCaption(speaker: .tutor, text: spoken,
+            responseID: "saved-readback", providerItemID: "saved-question-item")
+        let learner = VoiceTutorCaption(speaker: .learner, text: "시작해 주세요.", providerItemID: "start-item")
+        let interrupted = VoiceTutorCaption(speaker: .tutor, text: "앞서 말하던 내용", responseID: "interrupted", isInterrupted: true)
+        let harness = try OperationTranscriptHarness(captions: [learner, interrupted, source])
+        defer { harness.close() }
+        XCTAssertTrue(harness.probe.receiveQuestion(question))
+        harness.probe.answerQuestionSource = .init(answerID: OperationTranscriptProbe.answerID,
+            studyID: 101, recordID: "202", revision: 1, responseID: "saved-readback", itemIDs: ["saved-question-item"])
+        XCTAssertTrue(harness.probe.presentation.sessionState.apply(snapshot(.answering, sequence: 1)))
+        try await harness.settle()
+        _ = try harness.logicalTextRow(spoken)
+        _ = try harness.logicalTextRow(learner.text)
+        _ = try harness.logicalTextRow(interrupted.text)
+        XCTAssertEqual(harness.probe.captions, [learner, interrupted, source])
+        XCTAssertNotNil(harness.button(label: strings.voiceTutorAnswerFinish))
+        harness.probe.showsTranscript = false
+        try await harness.settle()
+        _ = try harness.logicalTextRow(spoken)
+        XCTAssertTrue(try XCTUnwrap(harness.orbElements.first).accessibilityValue?.contains(strings.voiceTutorAnswerWaiting) == true)
+        XCTAssertEqual(harness.probe.captions, [learner, interrupted, source])
+    }
+
     func testCanonicalQuestionAndEditedAnswerStayOnOrbSurfaceThroughExplicitSubmissionAndExactGrade() async throws {
         try requireHostedAccessibility()
         let harness = try OperationTranscriptHarness(captions: [], appearance: .light, showsTranscript: false)
@@ -1346,6 +1373,7 @@ private final class OperationTranscriptProbe: ObservableObject {
     @Published var presentation = VoiceTutorCallPresentation(phase: .listening)
     @Published var errorMessage: String?
     @Published var answerDraft = VoiceTutorAnswerDraftState()
+    @Published var answerQuestionSource: VoiceTutorAnswerQuestionSource?
     @Published var gradingResult = VoiceTutorGradingResultState()
     private(set) var controls: [VoiceTutorUserInputControl] = []
     private(set) var answerControls: [VoiceTutorAnswerControl] = []
@@ -1403,6 +1431,7 @@ private struct OperationTranscriptTestParent: View {
             captions: probe.captions, errorMessage: probe.errorMessage,
             showsTranscript: $probe.showsTranscript, showsSummary: .constant(false),
             answerDraftState: probe.answerDraft,
+            answerQuestionSource: probe.answerQuestionSource,
             answerDraftText: Binding(get: { probe.answerDraft.text }, set: { _ = probe.answerDraft.edit($0) }),
             canSubmitAnswer: probe.answerDraft.canSubmit,
             onFinishAnswer: { probe.finishAnswer() }, onSubmitAnswer: { probe.submitAnswer() },

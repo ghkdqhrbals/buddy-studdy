@@ -296,6 +296,22 @@ internal class VoiceTutorRealtimeEventPolicy(
                 if (hasAnswer) payload["answerId"] = answer.asText()
                 ProviderEventDecision(mapper.writeValueAsString(payload))
             }
+            VoiceTutorRealtimeContract.ANSWER_QUESTION_SOURCE_EVENT -> {
+                val studyId = node.path("studyId")
+                val revision = node.path("revision")
+                val itemIds = node.path("itemIds")
+                if (transport != VoiceTutorProviderTransport.WEBRTC_SIDEBAND ||
+                    !validAnswerId(node.path("answerId")) || !validRecordId(node.path("recordId")) ||
+                    !validProviderResponseId(node.path("responseId")) ||
+                    !studyId.isIntegralNumber || !studyId.canConvertToLong() || studyId.longValue() <= 0 ||
+                    !revision.isIntegralNumber || !revision.canConvertToLong() || revision.longValue() < 0 ||
+                    !itemIds.isArray || itemIds.size() !in 1..32 || itemIds.any { !validProviderResponseId(it) } ||
+                    itemIds.map { it.asText() }.distinct().size != itemIds.size()) return ProviderEventDecision(payload = null)
+                ProviderEventDecision(mapper.writeValueAsString(mapOf("type" to type,
+                    "answerId" to node.path("answerId").asText(), "recordId" to node.path("recordId").asText(),
+                    "studyId" to studyId.longValue(), "revision" to revision.longValue(),
+                    "responseId" to node.path("responseId").asText(), "itemIds" to itemIds.map { it.asText() })))
+            }
             VoiceTutorRealtimeContract.ANSWER_READY_EVENT, VoiceTutorRealtimeContract.ANSWER_STATE_EVENT,
             VoiceTutorRealtimeContract.ANSWER_TRANSCRIPT_EVENT -> {
                 if (transport != VoiceTutorProviderTransport.WEBRTC_SIDEBAND ||

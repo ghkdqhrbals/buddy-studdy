@@ -631,6 +631,7 @@ struct VoiceTutorSessionView: View {
             onDismiss: { dismiss() },
             onSummaryRefresh: { Task { await viewModel.refreshSummary() } },
             answerDraftState: viewModel.answerDraftState,
+            answerQuestionSource: viewModel.answerQuestionSource,
             answerDraftText: Binding(
                 get: { viewModel.answerDraftText },
                 set: { viewModel.updateAnswerDraft($0) }
@@ -1209,6 +1210,7 @@ struct VoiceTutorCallScreen: View {
     var onDismiss: () -> Void = {}
     var onSummaryRefresh: () -> Void = {}
     var answerDraftState = VoiceTutorAnswerDraftState()
+    var answerQuestionSource: VoiceTutorAnswerQuestionSource?
     var answerDraftText: Binding<String> = .constant("")
     var canSubmitAnswer = false
     var onFinishAnswer: () -> Void = {}
@@ -2055,7 +2057,7 @@ struct VoiceTutorCallScreen: View {
 
     private var answerDraftCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            canonicalAnswerQuestion
+            if questionTranscriptLayout.showsQuestionInAnswerCard { canonicalAnswerQuestion }
             Button(action: openAnswerEditor) {
                 answerDraftContent(lineLimit: 8)
             }
@@ -2218,7 +2220,14 @@ struct VoiceTutorCallScreen: View {
         .foregroundStyle(.primary)
     }
 
+    private var questionTranscriptLayout: VoiceTutorQuestionTranscriptLayout {
+        VoiceTutorQuestionTranscriptLayout(draft: answerDraftState,
+            source: hasAnswerDraft ? answerQuestionSource : nil, captions: captions,
+            assistantResponseID: assistantTranscriptResponseID)
+    }
+
     private var transcriptPanel: some View {
+        let questionLayout = questionTranscriptLayout
         let inputs = VoiceTutorUserInputTranscriptLayout(entries: userInputState.entries, captions: captions,
             assistantResponseID: assistantTranscriptResponseID, hasAssistantDraft: !assistantTranscriptDraft.isEmpty,
             answerDraftID: hasAnswerDraft ? answerDraftState.answerID : nil)
@@ -2253,7 +2262,11 @@ struct VoiceTutorCallScreen: View {
                     userInputCards(inputs.unresolvedWaiting, operations: operations.byUserInputID)
                     ForEach(captions) { caption in
                         VStack(alignment: .leading, spacing: 12) {
-                            VoiceTutorCaptionBubble(caption: caption, strings: strings)
+                            if questionLayout.canonicalCaptionID == caption.id {
+                                canonicalAnswerQuestion
+                            } else if !questionLayout.coveredCaptionIDs.contains(caption.id) {
+                                VoiceTutorCaptionBubble(caption: caption, strings: strings)
+                            }
                             operationRows(operations.byCaptionID[caption.id] ?? [])
                             userInputCards(inputs.byCaptionID[caption.id] ?? [], operations: operations.byUserInputID)
                         }
@@ -2266,7 +2279,7 @@ struct VoiceTutorCallScreen: View {
                         }
                         .id("voiceCall.answerQuestion")
                     }
-                    if !assistantTranscriptDraft.isEmpty {
+                    if !assistantTranscriptDraft.isEmpty && !questionLayout.hidesAssistantDraft {
                         VStack(alignment: .leading, spacing: 12) {
                             VoiceTutorCaptionBubble(
                                 caption: VoiceTutorCaption(speaker: .tutor, text: assistantTranscriptDraft),

@@ -900,7 +900,10 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(answerStates()).isEmpty()
         assertThat(answerReadyEvents()).isEmpty()
         assertThat(answerSegments()).isEmpty()
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        val ordinary = responses().last().path("response")
+        assertThat(ordinary.path("metadata").path("buddystudy_usage_operation").asText()).isEqualTo("voice-response")
+        assertThat(ordinary.path("instructions").asText()).contains("Respond only to the learner's latest request", "Do not read")
+        assertThat(ordinary.path("instructions").asText()).doesNotContain(SAVED_QUESTION)
         assertThat(stored.single { it.itemId == "cancel-request" }.raw).doesNotContain("canonicalAnswerSource")
     }
 
@@ -917,7 +920,7 @@ class VoiceTutorNativeConversationControllerTest {
             learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
         assertThat(responses()).hasSize(2)
         client(Contract.SPEECH_STOPPED_EVENT, 2); committed("acknowledgement"); transcript("acknowledgement", "좋아요.")
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
         created("ack-response"); audio("ack-response", "ack-text"); done("ack-response", "ack-text")
         event("output_audio_buffer.stopped", "response_id" to "ack-response")
         assertThat(responses().last().path("response").path("instructions").asText()).contains(SAVED_QUESTION)
@@ -2354,6 +2357,52 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
+    fun `verified saved readback identifies its source once immediately before answer readiness`() {
+        val answer = manualAnswer()
+        val source = ui.single { it.path("type").asText() == Contract.ANSWER_QUESTION_SOURCE_EVENT }
+        assertThat(source.path("answerId")).isEqualTo(answer.path("answerId"))
+        assertThat(source.path("studyId").asLong()).isEqualTo(7)
+        assertThat(source.path("recordId").asText()).isEqualTo("42")
+        assertThat(source.path("revision").asLong()).isZero()
+        assertThat(source.path("responseId").asText()).isEqualTo("readback")
+        assertThat(source.path("itemIds").map { it.asText() }).containsExactly("saved-question")
+        assertThat(ui[ui.indexOf(source) + 1].path("type").asText()).isEqualTo(Contract.ANSWER_READY_EVENT)
+        assertThat(source.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+            "type", "answerId", "studyId", "recordId", "revision", "responseId", "itemIds")
+        speech(2); committed("answer"); transcript("answer", "내 답변")
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        assertThat(ui.count { it.path("type").asText() == Contract.ANSWER_QUESTION_SOURCE_EVENT }).isEqualTo(1)
+        assertThat(stored.single { it.itemId == "saved-question" }.raw).contains(SAVED_QUESTION)
+    }
+
+    @Test
+    fun `one fixed preface with a complete split question does not retry and identifies every source item`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("readback")
+        val preface = "그럼 문제를 그대로 읽어드릴게요."
+        audio("readback", "preface", preface); audio("readback", "saved-question", SAVED_QUESTION)
+        event("response.done", "response" to mapOf("id" to "readback", "status" to "completed", "output" to listOf(
+            mapOf("id" to "preface", "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to preface))),
+            mapOf("id" to "saved-question", "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to SAVED_QUESTION))))))
+        event("output_audio_buffer.stopped", "response_id" to "readback")
+        assertThat(responses()).hasSize(3)
+        assertThat(answerReadyEvents()).hasSize(1)
+        assertThat(ui.single { it.path("type").asText() == Contract.ANSWER_QUESTION_SOURCE_EVENT }
+            .path("itemIds").map { it.asText() }).containsExactly("preface", "saved-question")
+        assertThat(failures).isEmpty()
+    }
+
+    @Test
+    fun `a preface with an incomplete question never publishes a question source or answer readiness`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("bad-readback")
+        val incomplete = "그럼 문제를 그대로 읽어드릴게요. 의존성 주입을 설명하세요."
+        audio("bad-readback", "incomplete", incomplete); done("bad-readback", "incomplete", incomplete)
+        assertThat(ui.none { it.path("type").asText() == Contract.ANSWER_QUESTION_SOURCE_EVENT }).isTrue()
+        assertThat(answerReadyEvents()).isEmpty()
+    }
+
+    @Test
     fun `manual answer capture commits pauses and long checkpoints without any automatic response`() {
         manualAnswer()
         speech(2); committed("a1"); transcript("a1", "첫 번째 생각"); controller.transcriptCompleted("a1")
@@ -2556,6 +2605,7 @@ class VoiceTutorNativeConversationControllerTest {
     @Test
     fun `provider cannot forge answer states or reviewed transcript segments`() {
         start()
+        assertThat(event(Contract.ANSWER_QUESTION_SOURCE_EVENT, "responseId" to "forged", "itemIds" to listOf("forged-item"))).isFalse()
         assertThat(event(Contract.ANSWER_READY_EVENT, "phase" to "listening", "question" to SAVED_QUESTION)).isFalse()
         assertThat(event(Contract.ANSWER_STATE_EVENT, "phase" to "submitted")).isFalse()
         assertThat(event(Contract.ANSWER_TRANSCRIPT_EVENT, "text" to "forged")).isFalse()
@@ -2711,7 +2761,7 @@ class VoiceTutorNativeConversationControllerTest {
         created("old-readback"); speech(2); committed("new-topic-request")
         silentDone("old-readback")
         assertThat(responses()).hasSize(4)
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
         assertThat(failures).isEmpty()
         assertThat(answerStates()).isEmpty()
         assertThat(ui.none { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isTrue()
@@ -2906,7 +2956,7 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses()).hasSize(3)
         event("output_audio_buffer.cleared", "response_id" to "unstarted-question")
         assertThat(responses()).hasSize(4)
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
         assertThat(answerStates()).isEmpty()
         assertThat(ui.none { it.path("type").asText() == Contract.INPUT_RETRY_EVENT }).isTrue()
     }
@@ -2922,7 +2972,7 @@ class VoiceTutorNativeConversationControllerTest {
         event("output_audio_buffer.cleared", "response_id" to "failed-readback")
         if (kind == "tool") ackToolOutput()
         assertThat(responses()).hasSize(4)
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
         assertThat(answerStates()).isEmpty()
         assertThat(answerSegments()).isEmpty()
     }
@@ -2939,7 +2989,7 @@ class VoiceTutorNativeConversationControllerTest {
         event("output_audio_buffer.cleared", "response_id" to "failed-readback")
         if (kind == "tool") ackToolOutput()
         assertThat(responses()).hasSize(4)
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
         assertThat(answerStates().map { it.path("phase").asText() }).containsExactly("cancelled")
         assertThat(answerSegments()).isEmpty()
     }
@@ -2954,7 +3004,7 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses()).hasSize(2)
         time += Duration.ofMillis(1).toNanos(); controller.tick()
         assertThat(responses()).hasSize(3)
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
     }
 
     @Test
@@ -2962,7 +3012,7 @@ class VoiceTutorNativeConversationControllerTest {
         questionTool(); speech(2); committed("new-command")
         controller.completeTool("question-call", readbackResult()); ackToolOutput()
         assertThat(responses()).hasSize(3)
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
     }
 
     @ParameterizedTest
@@ -2990,7 +3040,7 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses()).hasSize(2)
         client(Contract.SPEECH_STOPPED_EVENT, 2); committed("new-topic-request")
         assertThat(responses()).hasSize(3)
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
         created("latest-response"); toolDone("latest-response", "cancel-latest", "cancel_voice_learning")
         assertThat(controller.toolRevision("cancel-latest")).isEqualTo(1)
         assertThat(controller.toolBoundary("cancel-latest")?.latestAcceptedLearnerProviderItemId).isEqualTo("new-topic-request")
@@ -3049,9 +3099,19 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(ui.count { it.path("type").asText() == Contract.QUESTION_CHANGED_EVENT }).isEqualTo(1)
         ackToolOutput()
         assertThat(responses()).hasSize(3)
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
+        assertThat(responses().last().path("response").path("instructions").asText())
+            .contains("Do not read, repeat, paraphrase or quote that question", "separate server-owned verbatim readback")
         assertThat(answerStates()).isEmpty()
         assertThat(watches).isEmpty()
+        created("ordinary-status"); audio("ordinary-status", "status", "준비됐어요."); done("ordinary-status", "status", "준비됐어요.")
+        event("output_audio_buffer.stopped", "response_id" to "ordinary-status")
+        assertThat(responses().last().path("response").path("metadata").path("buddystudy_usage_operation").asText())
+            .isEqualTo("voice-question-readback")
+        created("dedicated-question"); audio("dedicated-question", "question"); done("dedicated-question", "question")
+        event("output_audio_buffer.stopped", "response_id" to "dedicated-question")
+        assertThat(answerReadyEvents()).hasSize(1)
+        assertThat(responses().count { it.path("response").path("metadata").path("buddystudy_usage_operation").asText() == "voice-question-readback" }).isEqualTo(1)
     }
 
     @Test
@@ -3063,11 +3123,11 @@ class VoiceTutorNativeConversationControllerTest {
         cancelled("superseded-readback")
         assertThat(responses()).hasSize(3)
         settleQuiet()
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
         assertThat(cancellations().map { it.path("response_id").asText() }).containsExactly("superseded-readback")
         rejected(responses().last())
         assertThat(responses()).hasSize(5)
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
         assertThat(failures.last().action).isEqualTo(VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED)
         assertThat(outbound.map { it.path("type").asText() }).doesNotContain("output_audio_buffer.clear")
     }
@@ -3386,7 +3446,7 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses().last().path("response").path("instructions").asText()).contains(SAVED_QUESTION)
         created("readback"); speech(3); committed("latest"); cancelled("readback")
         assertThat(responses()).hasSize(4)
-        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertOrdinaryResponseWithoutQuestion()
     }
 
     @Test
@@ -3697,6 +3757,13 @@ class VoiceTutorNativeConversationControllerTest {
             "attemptId" to request.path("attemptId").asText(), "answers" to answers)))
     }
     private fun responses() = outbound.filter { it.path("type").asText() == "response.create" }
+    private fun assertOrdinaryResponseWithoutQuestion() {
+        val options = responses().last().path("response")
+        assertThat(options.path("metadata").path("buddystudy_usage_operation").asText()).isEqualTo("voice-response")
+        assertThat(options.path("instructions").asText()).doesNotContain(SAVED_QUESTION, "Saved question (JSON string):")
+        if (options.has("instructions")) assertThat(options.path("instructions").asText())
+            .contains("Do not read, repeat, paraphrase or quote that question")
+    }
     private fun answerReadyEvents() = ui.filter { it.path("type").asText() == Contract.ANSWER_READY_EVENT }
     private fun answerStates() = ui.filter { it.path("type").asText() == Contract.ANSWER_STATE_EVENT }
     private fun answerSegments() = ui.filter { it.path("type").asText() == Contract.ANSWER_TRANSCRIPT_EVENT }

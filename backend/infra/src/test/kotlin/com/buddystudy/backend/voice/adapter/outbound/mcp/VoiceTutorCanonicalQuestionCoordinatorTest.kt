@@ -45,6 +45,8 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
         val spoken = fixture.coordinator.execute(fixture.context(), "get_question_process", mapOf("correlation_id" to progress.correlationId!!))
         assertThat(spoken.questionReadback).isNull()
         assertThat(spoken.questionReadbackRecovery?.recordId).isEqualTo("201")
+        assertThat(spoken.questionReadbackRecovery?.question).isEqualTo(PROMPT)
+        assertThat(fixture.json(spoken).path("pendingQuestion").has("question")).isFalse()
         assertThat(fixture.calls.count { it.name == "request_question" }).isEqualTo(1)
     }
 
@@ -126,7 +128,10 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
         assertThat(body.path("pendingQuestion").path("id").asText()).isEqualTo("101")
         assertThat(body.path("pendingQuestion").path("difficulty").asInt()).isEqualTo(3)
         assertThat(body.path("pendingQuestion").path("topic").asText()).isEqualTo("Dependency injection")
-        assertThat(body.path("pendingQuestion").path("question").path("question").asText()).isEqualTo(PROMPT)
+        assertThat(body.path("pendingQuestion").has("question")).isFalse()
+        assertThat(result.questionReadback?.question).isEqualTo(PROMPT)
+        assertThat(result.output).doesNotContain(PROMPT)
+        assertThat(body.path("notice").asText()).contains("server exclusively owns", "never authorizes an ordinary conversational response")
         assertThat(body.path("gradingQuestions").map { it.path("id").asText() }).containsExactly("103")
         assertThat(result.output).doesNotContain("SECRET_HINT", "SECRET_RUBRIC", "Already submitted")
         assertThat(body.path("gradingQuestions").first().fieldNames().asSequence().toSet())

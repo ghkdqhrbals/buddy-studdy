@@ -10,6 +10,198 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
     private let answerID = "11111111-2222-3333-4444-555555555555"
     private let savedQuestion = "Redis의 TTL을 설명하고 예시를 2개 드세요."
 
+    func testTutorTranscriptParserRetainsPartOrderAndEventIdentity() throws {
+        XCTAssertEqual(try parse(["type": "response.output_audio_transcript.delta", "response_id": "readback",
+            "item_id": "q-part-2", "output_index": 1, "event_id": "delta-2", "delta": "후반"]),
+            .assistantTranscriptDelta(responseID: "readback", delta: "후반", itemID: "q-part-2", outputIndex: 1, eventID: "delta-2"))
+        XCTAssertEqual(try parse(["type": "response.output_audio_transcript.done", "response_id": "readback",
+            "item_id": "q-part-1", "output_index": 0, "transcript": "전반"]),
+            .assistantTranscriptDone(responseID: "readback", transcript: "전반", itemID: "q-part-1", outputIndex: 0))
+    }
+
+    func testOutOfOrderMultipartTranscriptPreservesEveryItemOnceAndIgnoresLateDeltas() {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        transcript.beginResponse("readback")
+        transcript.append(delta: "후", itemID: "q2", outputIndex: 1, eventID: "d2")
+        transcript.append(delta: "전", itemID: "q1", outputIndex: 0, eventID: "d1")
+        transcript.append(delta: "전", itemID: "q1", outputIndex: 0, eventID: "d1")
+        XCTAssertEqual(transcript.draft, "전\n후")
+        transcript.stageCompletedTranscript("후반 질문", itemID: "q2", outputIndex: 1)
+        transcript.stageCompletedTranscript("전반 질문", itemID: "q1", outputIndex: 0)
+        transcript.stageCompletedTranscript("후반 질문", itemID: "q2", outputIndex: 1)
+        transcript.stageCompletedTranscript("다른 늦은 텍스트", itemID: "q1", outputIndex: 0)
+        transcript.append(delta: "다시붙이지않음", itemID: "q2", outputIndex: 1, eventID: "late")
+        XCTAssertEqual(transcript.draft, "전반 질문\n후반 질문")
+        XCTAssertEqual(transcript.providerItemIDs, ["q1", "q2"])
+        XCTAssertEqual(transcript.lastProviderItemID, "q2")
+        XCTAssertEqual(transcript.commit(), "전반 질문\n후반 질문")
+        XCTAssertTrue(transcript.providerItemIDs.isEmpty)
+        XCTAssertNil(transcript.commit())
+    }
+
+    func testLegacyDeltaBindsToItsFinalItemAndEmptyFinalOnlyClearsThatPart() {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        transcript.beginResponse("readback")
+        transcript.append(delta: "익명 부분")
+        transcript.stageCompletedTranscript("첫 질문", itemID: "q1", outputIndex: 0)
+        XCTAssertEqual(transcript.draft, "첫 질문")
+        XCTAssertEqual(transcript.providerItemIDs, ["q1"])
+        transcript.append(delta: "잘못된 뒷부분", itemID: "q2", outputIndex: 1)
+        transcript.stageCompletedTranscript("  ", itemID: "q2", outputIndex: 1)
+        XCTAssertEqual(transcript.draft, "첫 질문")
+        XCTAssertEqual(transcript.providerItemIDs, ["q1"], "An empty part is not a rendered source")
+        transcript.stageCompletedTranscript("세 번째 설명", itemID: "q3", outputIndex: 2)
+        XCTAssertEqual(transcript.commit(), "첫 질문\n세 번째 설명")
+    }
+
+    func testIndexedAnonymousPartsStaySeparateAndBindToTheirOwnFinalItemIDs() {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        transcript.beginResponse("readback")
+        transcript.append(delta: "첫 ", outputIndex: 0)
+        transcript.append(delta: "둘째 ", outputIndex: 1)
+        transcript.append(delta: "부분", outputIndex: 0)
+        XCTAssertEqual(transcript.draft, "첫 부분\n둘째 ")
+        transcript.stageCompletedTranscript("둘째 부분", itemID: "q2", outputIndex: 1)
+        transcript.stageCompletedTranscript("첫 부분", itemID: "q1", outputIndex: 0)
+        transcript.append(delta: "중복 부분", outputIndex: 1)
+        XCTAssertEqual(transcript.draft, "첫 부분\n둘째 부분")
+        XCTAssertEqual(transcript.providerItemIDs, ["q1", "q2"])
+        XCTAssertEqual(transcript.lastProviderItemID, "q2")
+        XCTAssertEqual(transcript.commit(), "첫 부분\n둘째 부분")
+    }
+
+    func testMultipartInterruptionRetainsAllVisiblePartsAndSourceAliasesWithoutTouchingPriorChat() throws {
+        let prior = VoiceTutorCaption(speaker: .learner, text: "원래 대화", providerItemID: "learner")
+        var captions = [prior]
+        var transcript = VoiceTutorAssistantTranscriptState()
+        transcript.beginResponse("readback")
+        transcript.stageCompletedTranscript("완료된 앞부분", itemID: "q1", outputIndex: 0)
+        transcript.append(delta: "말하던 뒷부분", itemID: "q2", outputIndex: 1)
+        XCTAssertTrue(transcript.retainInterruptedCaption(responseID: "readback", providerItemID: "q1", in: &captions))
+        XCTAssertEqual(captions.first, prior)
+        let retained = try XCTUnwrap(captions.last)
+        XCTAssertEqual(retained.text, "완료된 앞부분\n말하던 뒷부분")
+        XCTAssertEqual(retained.providerItemID, "q2")
+        XCTAssertEqual(retained.providerItemIDs, ["q1", "q2"])
+        XCTAssertTrue(retained.isInterrupted)
+        XCTAssertFalse(transcript.retainInterruptedCaption(responseID: "readback", providerItemID: "q2", in: &captions))
+        transcript.beginResponse("replacement")
+        transcript.append(delta: "새 응답", itemID: "new", outputIndex: 0, eventID: "d1")
+        XCTAssertFalse(transcript.retainInterruptedCaption(responseID: "readback", providerItemID: "q2", in: &captions))
+        XCTAssertEqual(transcript.draft, "새 응답")
+        XCTAssertEqual(transcript.providerItemIDs, ["new"])
+        XCTAssertEqual(captions, [prior, retained])
+    }
+
+    func testMultipartQuestionCaptionRemainsCompleteAfterAnswerSubmission() throws {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        transcript.beginResponse("readback")
+        transcript.stageCompletedTranscript("Redis의 TTL을 설명하고", itemID: "q1", outputIndex: 0)
+        transcript.stageCompletedTranscript("예시를 2개 드세요.", itemID: "q2", outputIndex: 1)
+        let sourceIDs = transcript.providerItemIDs
+        let primary = transcript.lastProviderItemID
+        let caption = VoiceTutorCaption(speaker: .tutor, text: try XCTUnwrap(transcript.commit()),
+            responseID: "readback", providerItemID: primary, providerItemIDs: sourceIDs)
+        var draft = listening()
+        let source = VoiceTutorAnswerQuestionSource(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+            responseID: "readback", itemIDs: ["q1", "q2"])
+        XCTAssertEqual(VoiceTutorQuestionTranscriptLayout(draft: draft, source: source, captions: [caption]).canonicalCaptionID, caption.id)
+        XCTAssertTrue(draft.apply(event(.review)))
+        XCTAssertTrue(draft.edit("최종 답변"))
+        XCTAssertTrue(draft.apply(event(.submitting)))
+        XCTAssertTrue(draft.apply(event(.submitted)))
+        let afterSubmission = VoiceTutorQuestionTranscriptLayout(draft: draft, source: nil, captions: [caption])
+        XCTAssertTrue(afterSubmission.coveredCaptionIDs.isEmpty)
+        XCTAssertEqual(caption.text, "Redis의 TTL을 설명하고\n예시를 2개 드세요.")
+        XCTAssertEqual(caption.providerItemIDs, ["q1", "q2"])
+    }
+
+    func testMultipartTranscriptItemAndTotalTextStorageStayBounded() {
+        var transcript = VoiceTutorAssistantTranscriptState()
+        for index in 0..<(VoiceTutorAssistantTranscriptState.maximumItemCount + 10) {
+            transcript.stageCompletedTranscript("부분\(index)", itemID: "q\(index)", outputIndex: index)
+        }
+        XCTAssertEqual(transcript.providerItemIDs.count, VoiceTutorAssistantTranscriptState.maximumItemCount)
+        XCTAssertFalse(transcript.draft.contains("부분32"))
+        transcript.discard()
+        transcript.stageCompletedTranscript(String(repeating: "가", count: 10_000), itemID: "q1")
+        transcript.stageCompletedTranscript(String(repeating: "나", count: 10_000), itemID: "q2")
+        XCTAssertEqual(transcript.draft.count, VoiceTutorLiveTextBounds.maximumDraftCharacters)
+        XCTAssertTrue(transcript.draft.hasPrefix(String(repeating: "가", count: 10_000)))
+    }
+
+    func testQuestionSourceReceiptRequiresExactBoundedIdentitiesWithoutChangingLegacyReady() throws {
+        let fields: [String: Any] = ["type": "buddystudy.voice.answer.question_source", "answerId": answerID,
+            "studyId": 42, "recordId": "101", "revision": 1, "responseId": "readback-1", "itemIds": ["q-part-1", "q-part-2"]]
+        guard case .answerQuestionSource(let source) = try parse(fields) else { return XCTFail("Expected question source") }
+        XCTAssertEqual(source.itemIDs, ["q-part-1", "q-part-2"])
+        XCTAssertTrue(source.belongs(to: listening()))
+        for key in fields.keys where key != "type" {
+            var invalid = fields; invalid.removeValue(forKey: key)
+            XCTAssertEqual(try parse(invalid), .ignored(type: "buddystudy.voice.answer.question_source"))
+        }
+        for (key, value) in [("answerId", "not-uuid" as Any), ("recordId", "0101"), ("studyId", true),
+            ("revision", -1), ("responseId", "다른응답"), ("responseId", String(repeating: "r", count: 192)),
+            ("itemIds", []), ("itemIds", ["same", "same"]), ("itemIds", ["not a valid id"]),
+            ("itemIds", ["다른항목"]), ("itemIds", (0..<33).map { "item-\($0)" })] {
+            var invalid = fields; invalid[key] = value
+            XCTAssertEqual(try parse(invalid), .ignored(type: "buddystudy.voice.answer.question_source"), key)
+        }
+        var extra = fields; extra["question"] = savedQuestion
+        XCTAssertEqual(try parse(extra), .ignored(type: "buddystudy.voice.answer.question_source"))
+        XCTAssertEqual(try parse(readyFields()), .answerState(event(.listening, text: "")))
+        var legacy = event(.listening); legacy.question = nil
+        XCTAssertEqual(try parse(self.fields()), .answerState(legacy))
+    }
+
+    func testCanonicalQuestionCoalescesOnlyExactReadbackPartsAndKeepsHistoryAndAnchors() {
+        let draft = listening()
+        let source = VoiceTutorAnswerQuestionSource(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+            responseID: "readback", itemIDs: ["q1", "q2"])
+        let earlier = VoiceTutorCaption(speaker: .tutor, text: savedQuestion, responseID: "other", providerItemID: "old-q")
+        let interrupted = VoiceTutorCaption(speaker: .tutor, text: "Redis의", responseID: "readback",
+            providerItemID: "q1", isInterrupted: true)
+        let learner = VoiceTutorCaption(speaker: .learner, text: savedQuestion, responseID: "readback", providerItemID: "q1")
+        let first = VoiceTutorCaption(speaker: .tutor, text: "Redis의 TTL을 설명하고", responseID: "readback", providerItemID: "q1")
+        let second = VoiceTutorCaption(speaker: .tutor, text: "예시를 2개 드세요.", responseID: "readback", providerItemID: "q2")
+        let unrelatedItem = VoiceTutorCaption(speaker: .tutor, text: "추가 대화", responseID: "readback", providerItemID: "other-item")
+        let captions = [earlier, interrupted, learner, first, second, unrelatedItem]
+        let layout = VoiceTutorQuestionTranscriptLayout(draft: draft, source: source, captions: captions,
+            assistantResponseID: "readback")
+        XCTAssertEqual(layout.canonicalCaptionID, first.id)
+        XCTAssertEqual(layout.coveredCaptionIDs, [first.id, second.id])
+        XCTAssertFalse(layout.showsQuestionInAnswerCard)
+        XCTAssertTrue(layout.hidesAssistantDraft)
+        XCTAssertEqual(captions.map(\.id), [earlier.id, interrupted.id, learner.id, first.id, second.id, unrelatedItem.id],
+            "Presentation cannot delete source captions or their MCP anchor IDs")
+        XCTAssertEqual(draft.questionText, savedQuestion)
+    }
+
+    func testQuestionSourceBeforeCaptionShowsOneQuestionAndOldOrMissingSourceNeverHidesText() {
+        let draft = listening()
+        let source = VoiceTutorAnswerQuestionSource(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
+            responseID: "readback", itemIDs: ["q1"])
+        let pending = VoiceTutorQuestionTranscriptLayout(draft: draft, source: source, captions: [], assistantResponseID: "readback")
+        XCTAssertTrue(pending.showsQuestionInAnswerCard)
+        XCTAssertTrue(pending.hidesAssistantDraft)
+        let later = VoiceTutorCaption(speaker: .tutor, text: savedQuestion, responseID: "readback", providerItemID: "q1")
+        let wrongSources: [VoiceTutorAnswerQuestionSource?] = [nil,
+            .init(answerID: UUID().uuidString, studyID: 42, recordID: "101", revision: 1, responseID: "readback", itemIDs: ["q1"]),
+            .init(answerID: answerID, studyID: 43, recordID: "101", revision: 1, responseID: "readback", itemIDs: ["q1"]),
+            .init(answerID: answerID, studyID: 42, recordID: "102", revision: 1, responseID: "readback", itemIDs: ["q1"]),
+            .init(answerID: answerID, studyID: 42, recordID: "101", revision: 0, responseID: "readback", itemIDs: ["q1"])]
+        for source in wrongSources {
+            let layout = VoiceTutorQuestionTranscriptLayout(draft: draft, source: source, captions: [later], assistantResponseID: "readback")
+            XCTAssertNil(layout.canonicalCaptionID)
+            XCTAssertTrue(layout.coveredCaptionIDs.isEmpty)
+            XCTAssertTrue(layout.showsQuestionInAnswerCard)
+            XCTAssertFalse(layout.hidesAssistantDraft)
+        }
+        let unrelated = VoiceTutorQuestionTranscriptLayout(draft: draft, source: source, captions: [later], assistantResponseID: "new-response")
+        XCTAssertFalse(unrelated.hidesAssistantDraft)
+        XCTAssertEqual(unrelated.canonicalCaptionID, later.id)
+    }
+
     func testIncompleteTranscriptReviewExplainsMissingSpeechWithoutChangingEditedDraftOrSubmitting() throws {
         var state = listening(existing: "기존 답변")
         XCTAssertTrue(state.edit("내가 수정한 답변과 아직 설명할 부분"))

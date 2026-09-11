@@ -211,6 +211,43 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
+    fun `question source preserves exact bounded identities and cannot be forged by a client or direct provider`() {
+        val fields = mapOf("type" to VoiceTutorRealtimeContract.ANSWER_QUESTION_SOURCE_EVENT,
+            "answerId" to "00112233-4455-6677-8899-aabbccddeeff", "recordId" to "42", "studyId" to 7,
+            "revision" to 0, "responseId" to "response-1", "itemIds" to listOf("preface", "question"), "private" to "discard")
+        val raw = mapper.writeValueAsString(fields)
+        val payload = mapper.readTree(policy.providerDecision(raw, "s1", Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+            "type", "answerId", "studyId", "recordId", "revision", "responseId", "itemIds")
+        assertThat(payload.path("itemIds").map { it.asText() }).containsExactly("preface", "question")
+        assertThat(payload.path("responseId").asText()).isEqualTo("response-1")
+        assertThat(policy.providerDecision(raw, "s1", Instant.EPOCH).payload).isNull()
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }.isInstanceOf(VoiceTutorClientProtocolException::class.java)
+    }
+
+    @Test
+    fun `question source rejects missing mismatched type unbounded duplicate or unsafe identities`() {
+        val fields = mapOf("type" to VoiceTutorRealtimeContract.ANSWER_QUESTION_SOURCE_EVENT,
+            "answerId" to "00112233-4455-6677-8899-aabbccddeeff", "recordId" to "42", "studyId" to 7,
+            "revision" to 0, "responseId" to "response-1", "itemIds" to listOf("question"))
+        val invalid = fields.keys.filter { it != "type" }.map { fields - it } + listOf(
+            fields + ("answerId" to "wrong"), fields + ("recordId" to "0"), fields + ("studyId" to -1),
+            fields + ("revision" to -1), fields + ("responseId" to "unsafe response"),
+            fields + ("itemIds" to emptyList<String>()), fields + ("itemIds" to listOf("same", "same")),
+            fields + ("itemIds" to listOf(" ")), fields + ("itemIds" to listOf(42)),
+            fields + ("itemIds" to List(33) { "item-$it" }), fields + ("itemIds" to listOf("a".repeat(192))),
+        )
+        invalid.forEach { value ->
+            assertThat(policy.providerDecision(mapper.writeValueAsString(value), "s1", Instant.EPOCH,
+                VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
+        val maximum = fields + ("itemIds" to List(32) { "item-$it" })
+        assertThat(policy.providerDecision(mapper.writeValueAsString(maximum), "s1", Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNotNull()
+    }
+
+    @Test
     fun `answer readiness delivers the exact question without changing the legacy state shape`() {
         val question = "결제가 승인됐지만 재고 갱신이 실패했다면?\n- A. 무시한다.\n- B. 보상한다."
         val fields = mapOf("type" to VoiceTutorRealtimeContract.ANSWER_READY_EVENT,
