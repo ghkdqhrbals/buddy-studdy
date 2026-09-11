@@ -1,4 +1,6 @@
 import AVFoundation
+import CoreMedia
+import Speech
 import XCTest
 @testable import StudyMate
 
@@ -247,5 +249,557 @@ final class VoiceTutorInterruptionBoundaryTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? VoiceTutorLocalSpeechDeliveryError, .staleAttempt)
         }
+    }
+}
+
+/// A local, opt-in device capability probe. It never opens the microphone, requests
+/// speech authorization, installs language assets, or contacts the application API.
+final class VoiceTutorWordAlignmentCapabilityTests: XCTestCase {
+    func testInstalledOnDeviceWordAlignmentCapabilities() async throws {
+        guard ProcessInfo.processInfo.environment["BUDDYSTUDY_WORD_ALIGNMENT_PROBE"] == "1" else {
+            throw XCTSkip("Opt in only when inspecting a connected iPhone's installed speech assets.")
+        }
+        guard #available(iOS 26.0, *) else {
+            throw XCTSkip("SpeechAnalyzer requires iOS 26.")
+        }
+
+        let available = SpeechTranscriber.isAvailable
+        let supported = try await WordAlignmentProbeDeadline.value("speech-supported-locales") { await SpeechTranscriber.supportedLocales }
+        let installed = try await WordAlignmentProbeDeadline.value("speech-installed-locales") { await SpeechTranscriber.installedLocales }
+        var localeReports: [[String: Any]] = []
+        for identifier in ["ko-KR", "en-US"] {
+            let equivalent = try await WordAlignmentProbeDeadline.value("speech-equivalent-locale") { await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: identifier)) }
+            let normalized = equivalent?.identifier.replacingOccurrences(of: "_", with: "-")
+            let hasInstalledAsset = normalized.map { expected in
+                installed.contains { $0.identifier.replacingOccurrences(of: "_", with: "-") == expected }
+            } ?? false
+            var report: [String: Any] = [
+                "requestedLocale": identifier,
+                "supported": equivalent != nil,
+                "installed": hasInstalledAsset,
+                "compatibleFormats": [[String: Any]]()
+            ]
+            if let equivalent {
+                report["equivalentLocale"] = equivalent.identifier
+                let transcriber = SpeechTranscriber(locale: equivalent, preset: .timeIndexedProgressiveTranscription)
+                let formats = try await WordAlignmentProbeDeadline.value("compatible-formats") { await transcriber.availableCompatibleAudioFormats }
+                report["compatibleFormats"] = formats.map {
+                    ["sampleRate": $0.sampleRate, "channels": $0.channelCount,
+                     "commonFormat": $0.commonFormat.rawValue, "interleaved": $0.isInterleaved] as [String: Any]
+                }
+            }
+            localeReports.append(report)
+        }
+
+        let dictationSupported = try await WordAlignmentProbeDeadline.value("dictation-supported-locales") { await DictationTranscriber.supportedLocales }
+        let dictationInstalled = try await WordAlignmentProbeDeadline.value("dictation-installed-locales") { await DictationTranscriber.installedLocales }
+        var dictationReports: [[String: Any]] = []
+        for identifier in ["ko-KR", "en-US"] {
+            let equivalent = try await WordAlignmentProbeDeadline.value("dictation-equivalent-locale") { await DictationTranscriber.supportedLocale(equivalentTo: Locale(identifier: identifier)) }
+            let hasInstalledAsset = equivalent.map { locale in
+                dictationInstalled.contains {
+                    $0.identifier.replacingOccurrences(of: "_", with: "-") == locale.identifier.replacingOccurrences(of: "_", with: "-")
+                }
+            } ?? false
+            var report: [String: Any] = ["requestedLocale": identifier, "supported": equivalent != nil,
+                                         "installed": hasInstalledAsset, "compatibleFormats": [[String: Any]]()]
+            if let equivalent {
+                report["equivalentLocale"] = equivalent.identifier
+                let transcriber = DictationTranscriber(locale: equivalent, preset: .timeIndexedLongDictation)
+                let formats = try await WordAlignmentProbeDeadline.value("compatible-formats") { await transcriber.availableCompatibleAudioFormats }
+                report["compatibleFormats"] = formats.map {
+                    ["sampleRate": $0.sampleRate, "channels": $0.channelCount,
+                     "commonFormat": $0.commonFormat.rawValue, "interleaved": $0.isInterleaved] as [String: Any]
+                }
+            }
+            dictationReports.append(report)
+        }
+        let data = try JSONSerialization.data(withJSONObject: [
+            "dictationSupportedLocaleCount": dictationSupported.count,
+            "dictationInstalledLocaleCount": dictationInstalled.count,
+            "dictationLocales": dictationReports,
+            "speechTranscriberAvailable": available,
+            "supportedLocaleCount": supported.count,
+            "installedLocaleCount": installed.count,
+            "locales": localeReports,
+            "assetInstallationRequested": false,
+            "microphoneOpened": false,
+            "speechAuthorizationRequested": false
+        ], options: [.sortedKeys, .prettyPrinted])
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "voice-word-alignment-installed-capabilities"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("BUDDYSTUDY_WORD_ALIGNMENT_CAPABILITIES " + String(decoding: data, as: UTF8.self))
+    }
+}
+
+/// Keeps the timestamp experiment separate from production playback. All audio is
+/// a fixed Korean fixture rendered into memory/file output by Apple's local TTS.
+/// Neither microphone capture nor any asset-download API is used by this harness.
+final class VoiceTutorWordAlignmentLatencyTests: XCTestCase {
+    @MainActor
+    func testInstalledKoreanEngineWordTimestampArrivalAtRealtimePace() async throws {
+        guard ProcessInfo.processInfo.environment["BUDDYSTUDY_WORD_ALIGNMENT_PROBE"] == "1" else {
+            throw XCTSkip("Opt in to the local synthetic word-timestamp experiment.")
+        }
+        guard #available(iOS 26.0, *) else { throw XCTSkip("SpeechAnalyzer requires iOS 26.") }
+        executionTimeAllowance = 120
+        let requested = Locale(identifier: "ko-KR")
+        let speechLocale = try await WordAlignmentProbeDeadline.value("speech-korean-locale") { await SpeechTranscriber.supportedLocale(equivalentTo: requested) }
+        let dictationLocale = try await WordAlignmentProbeDeadline.value("dictation-korean-locale") { await DictationTranscriber.supportedLocale(equivalentTo: requested) }
+        let speechInstalled = try await WordAlignmentProbeDeadline.value("speech-installed-locales") { await SpeechTranscriber.installedLocales }
+        let dictationInstalled = try await WordAlignmentProbeDeadline.value("dictation-installed-locales") { await DictationTranscriber.installedLocales }
+        func installed(_ locale: Locale?, in locales: [Locale]) -> Bool {
+            guard let locale else { return false }
+            return locales.contains {
+                $0.identifier.replacingOccurrences(of: "_", with: "-") == locale.identifier.replacingOccurrences(of: "_", with: "-")
+            }
+        }
+        var engines: [WordAlignmentProbeEngine] = []
+        let periodicOnly = ProcessInfo.processInfo.environment["BUDDYSTUDY_WORD_ALIGNMENT_FINALIZE_PROBE"] == "1"
+        if !periodicOnly, SpeechTranscriber.isAvailable, let speechLocale, installed(speechLocale, in: speechInstalled) {
+            engines.append(.speech(SpeechTranscriber(locale: speechLocale, preset: .timeIndexedProgressiveTranscription)))
+        }
+        if let dictationLocale, installed(dictationLocale, in: dictationInstalled) {
+            if periodicOnly {
+                engines.append(.periodicDictation(DictationTranscriber(
+                    locale: dictationLocale, contentHints: [], transcriptionOptions: [],
+                    reportingOptions: [.volatileResults], attributeOptions: [.audioTimeRange]
+                )))
+            } else {
+                engines.append(.dictation(DictationTranscriber(
+                    locale: dictationLocale, contentHints: [], transcriptionOptions: [],
+                    reportingOptions: [.volatileResults], attributeOptions: [.audioTimeRange]
+                )))
+                engines.append(.frequentDictation(DictationTranscriber(
+                    locale: dictationLocale, contentHints: [], transcriptionOptions: [],
+                    reportingOptions: [.volatileResults, .frequentFinalization], attributeOptions: [.audioTimeRange]
+                )))
+            }
+        }
+        attach([
+            "locale": "ko-KR", "speechSupported": speechLocale != nil,
+            "speechInstalled": installed(speechLocale, in: speechInstalled),
+            "dictationSupported": dictationLocale != nil,
+            "dictationInstalled": installed(dictationLocale, in: dictationInstalled),
+            "runnableEngines": engines.map(\.name), "modelDownloadsRequested": false,
+            "microphoneOpened": false, "audioSource": "fixed-local-apple-tts-fixture"
+        ], name: "voice-word-alignment-latency-availability")
+        guard !engines.isEmpty else {
+            throw XCTSkip("No supported Korean transcriber has installed assets; no model was downloaded.")
+        }
+        guard let voice = AVSpeechSynthesisVoice.speechVoices().first(where: {
+            $0.language.replacingOccurrences(of: "_", with: "-") == "ko-KR"
+        }) else { throw XCTSkip("No installed Korean Apple synthesis voice; no voice was downloaded.") }
+        let url = try await WordAlignmentProbeSynthesis.render(voice: voice)
+        defer { try? FileManager.default.removeItem(at: url) }
+        if ProcessInfo.processInfo.environment["BUDDYSTUDY_WORD_ALIGNMENT_EXPORT_FIXTURE"] == "1" {
+            let directory = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
+                                                         appropriateFor: nil, create: true)
+            let destination = directory.appendingPathComponent("word-alignment-fixed-korean.caf")
+            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+            try FileManager.default.copyItem(at: url, to: destination)
+            attach(["fixtureExported": true, "filename": destination.lastPathComponent,
+                    "source": "fixed-local-apple-tts-fixture", "analysisStarted": false],
+                   name: "voice-word-alignment-fixture-export")
+            return
+        }
+        for engine in engines {
+            do {
+                let report = try await WordAlignmentProbeRunner.run(engine: engine, fixtureURL: url)
+                let data = try JSONEncoder().encode(report)
+                let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+                attachment.name = "voice-word-alignment-latency-\(engine.name)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                print("BUDDYSTUDY_WORD_ALIGNMENT_LATENCY " + String(decoding: data, as: UTF8.self))
+                XCTAssertFalse(report.timedOut, "A stalled local engine cannot establish a usable lookahead bound.")
+                XCTAssertGreaterThan(report.timedRuns.count, 0, "No word-time attributes were observed.")
+            } catch {
+                let nsError = error as NSError
+                attach(["engine": engine.name, "errorDomain": nsError.domain, "errorCode": nsError.code],
+                       name: "voice-word-alignment-latency-\(engine.name)-error")
+                XCTFail("Local \(engine.name) probe failed: \(nsError.domain) / \(nsError.code)")
+            }
+        }
+    }
+
+    private func attach(_ metadata: [String: Any], name: String) {
+        guard let data = try? JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys]) else { return }
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("BUDDYSTUDY_WORD_ALIGNMENT_LATENCY_METADATA " + String(decoding: data, as: UTF8.self))
+    }
+}
+
+@available(iOS 26.0, *)
+private enum WordAlignmentProbeEngine: Sendable {
+    case speech(SpeechTranscriber)
+    case dictation(DictationTranscriber)
+    case frequentDictation(DictationTranscriber)
+    case periodicDictation(DictationTranscriber)
+
+    var usesPeriodicFinalization: Bool {
+        if case .periodicDictation = self { return true }
+        return false
+    }
+
+    var name: String {
+        switch self {
+        case .speech: "speech-transcriber"
+        case .dictation: "dictation-transcriber"
+        case .frequentDictation: "dictation-frequent-finalization"
+        case .periodicDictation: "dictation-periodic-finalization-500ms-with-500ms-context"
+        }
+    }
+
+    var module: any SpeechModule {
+        switch self {
+        case .speech(let value): value
+        case .dictation(let value), .frequentDictation(let value), .periodicDictation(let value): value
+        }
+    }
+
+    func collect(into timeline: WordAlignmentProbeTimeline) async throws {
+        switch self {
+        case .speech(let transcriber):
+            for try await result in transcriber.results {
+                let receivedAt = ProcessInfo.processInfo.systemUptime
+                await timeline.record(result.text, isFinal: result.isFinal, receivedAt: receivedAt)
+            }
+        case .dictation(let transcriber), .frequentDictation(let transcriber), .periodicDictation(let transcriber):
+            for try await result in transcriber.results {
+                let receivedAt = ProcessInfo.processInfo.systemUptime
+                await timeline.record(result.text, isFinal: result.isFinal, receivedAt: receivedAt)
+            }
+        }
+    }
+}
+
+private struct WordAlignmentProbeReport: Codable, Sendable {
+    struct ExplicitFinalization: Codable, Sendable {
+        let throughSeconds: Double
+        let requestedSeconds: Double
+        let returnedSeconds: Double
+    }
+    struct TimedRun: Codable, Sendable {
+        let text: String
+        let startSeconds: Double
+        let endSeconds: Double
+        let receivedSeconds: Double
+        let inputThroughSeconds: Double
+        let delayAfterWordEndSeconds: Double
+        let isFinal: Bool
+        let whitespaceDelimitedWordCount: Int
+    }
+    let engine: String
+    let sampleRate: Double
+    let chunkMilliseconds: Int
+    let sourceDurationSeconds: Double
+    let postrollSilenceSeconds: Double
+    let timedOut: Bool
+    let timedRuns: [TimedRun]
+    let explicitFinalizations: [ExplicitFinalization]
+    let fixedSyntheticSourceText: String
+    let firstObservedTimedRunCount: Int
+    let firstObservedTimedRunsWithinOneSecond: Int
+    let firstObservedMaximumDelaySeconds: Double?
+    let finalTimedRunCount: Int
+    let finalTimedRunsWithinOneSecond: Int
+    let finalMaximumDelaySeconds: Double?
+    let note: String
+}
+
+@available(iOS 26.0, *)
+private actor WordAlignmentProbeTimeline {
+    private var beganAt = ProcessInfo.processInfo.systemUptime
+    private var inputThroughSeconds: Double = 0
+    private var timedOut = false
+    private var runs: [WordAlignmentProbeReport.TimedRun] = []
+    private var finalizations: [WordAlignmentProbeReport.ExplicitFinalization] = []
+
+    func begin(at uptime: Double) { beganAt = uptime }
+    func submitted(through seconds: Double) { inputThroughSeconds = seconds }
+    func timeout() { timedOut = true }
+    func submittedThrough() -> Double { inputThroughSeconds }
+    func recordFinalization(through: Double, requestedAt: Double, returnedAt: Double) {
+        finalizations.append(.init(throughSeconds: through, requestedSeconds: requestedAt - beganAt,
+                                   returnedSeconds: returnedAt - beganAt))
+    }
+
+    func record(_ text: AttributedString, isFinal: Bool, receivedAt: Double) {
+        for run in text.runs {
+            guard let range = run.audioTimeRange else { continue }
+            let start = range.start.seconds
+            let end = range.end.seconds
+            guard start.isFinite, end.isFinite else { continue }
+            let words = String(text[run.range].characters)
+            guard !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            runs.append(.init(text: words, startSeconds: start, endSeconds: end,
+                              receivedSeconds: receivedAt - beganAt, inputThroughSeconds: inputThroughSeconds,
+                              delayAfterWordEndSeconds: receivedAt - beganAt - end, isFinal: isFinal,
+                              whitespaceDelimitedWordCount: words.split(whereSeparator: \.isWhitespace).count))
+        }
+    }
+
+    func report(engine: String, format: AVAudioFormat, sourceDuration: Double) -> WordAlignmentProbeReport {
+        // This conservative key keeps timing revisions visible rather than presenting
+        // changing provisional offsets as stable, recognized word boundaries.
+        var seen = Set<String>()
+        let first = runs.filter { run in
+            seen.insert("\(run.text)|\(run.startSeconds)|\(run.endSeconds)").inserted
+        }
+        let final = runs.filter(\.isFinal)
+        return .init(engine: engine, sampleRate: format.sampleRate, chunkMilliseconds: 10,
+                     sourceDurationSeconds: sourceDuration, postrollSilenceSeconds: 2,
+                     timedOut: timedOut, timedRuns: runs, explicitFinalizations: finalizations,
+                     fixedSyntheticSourceText: WordAlignmentProbeSynthesis.fixtureText,
+                     firstObservedTimedRunCount: first.count,
+                     firstObservedTimedRunsWithinOneSecond: first.filter { $0.delayAfterWordEndSeconds <= 1 }.count,
+                     firstObservedMaximumDelaySeconds: first.map(\.delayAfterWordEndSeconds).max(),
+                     finalTimedRunCount: final.count,
+                     finalTimedRunsWithinOneSecond: final.filter { $0.delayAfterWordEndSeconds <= 1 }.count,
+                     finalMaximumDelaySeconds: final.map(\.delayAfterWordEndSeconds).max(),
+                     note: "Synthetic Apple Korean speech, paced 10 ms PCM. Provisional word offsets may change. This measures availability/latency, not an acoustic guarantee for OpenAI speech.")
+    }
+}
+
+@available(iOS 26.0, *)
+private enum WordAlignmentProbeRunner {
+    static func run(engine: WordAlignmentProbeEngine, fixtureURL: URL) async throws -> WordAlignmentProbeReport {
+        let analyzer = SpeechAnalyzer(modules: [engine.module])
+        guard let format = try await WordAlignmentProbeDeadline.value("analyzer-compatible-format", operation: {
+            await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [engine.module])
+        }) else {
+            throw WordAlignmentProbeError.noCompatibleFormat
+        }
+        let source = try convertedFixture(url: fixtureURL, format: format)
+        let sourceDuration = Double(source.frameLength) / format.sampleRate
+        let timeline = WordAlignmentProbeTimeline()
+        let timeout = Task {
+            try await Task.sleep(for: .seconds(sourceDuration + 20))
+            await timeline.timeout()
+            await analyzer.cancelAndFinishNow()
+        }
+        defer { timeout.cancel() }
+        do {
+            try await analyzer.prepareToAnalyze(in: format)
+            let collected = Task { try await engine.collect(into: timeline) }
+            let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+            defer { continuation.finish(); collected.cancel() }
+            try await analyzer.start(inputSequence: stream)
+            let beganAt = ProcessInfo.processInfo.systemUptime
+            await timeline.begin(at: beganAt)
+            let periodicFinalizer = Task {
+                guard engine.usesPeriodicFinalization else { return }
+                var step = 1
+                var lastThrough: Double = 0
+                while !Task.isCancelled {
+                    let wait = beganAt + Double(step) * 0.5 - ProcessInfo.processInfo.systemUptime
+                    do {
+                        if wait > 0 { try await Task.sleep(for: .seconds(wait)) }
+                        try Task.checkCancellation()
+                        let submitted = await timeline.submittedThrough()
+                        let through = max(0, submitted - 0.5)
+                        if through > lastThrough {
+                            let requestedAt = ProcessInfo.processInfo.systemUptime
+                            try await analyzer.finalize(through: CMTime(seconds: through, preferredTimescale: 16_000))
+                            await timeline.recordFinalization(through: through, requestedAt: requestedAt,
+                                                               returnedAt: ProcessInfo.processInfo.systemUptime)
+                            lastThrough = through
+                        }
+                    } catch { return }
+                    step += 1
+                }
+            }
+            defer { periodicFinalizer.cancel() }
+            let framesPerChunk = max(1, Int(format.sampleRate / 100))
+            let totalFrames = Int(source.frameLength) + Int(format.sampleRate * 2)
+            var offset = 0
+            while offset < totalFrames {
+                try Task.checkCancellation()
+                let count = min(framesPerChunk, totalFrames - offset)
+                let inputThrough = Double(offset + count) / format.sampleRate
+                let wait = beganAt + inputThrough - ProcessInfo.processInfo.systemUptime
+                if wait > 0 { try await Task.sleep(for: .seconds(wait)) }
+                let buffer = try chunk(source: source, offset: offset, frames: count)
+                await timeline.submitted(through: inputThrough)
+                continuation.yield(AnalyzerInput(buffer: buffer,
+                    bufferStartTime: CMTime(value: Int64(offset), timescale: Int32(format.sampleRate))))
+                offset += count
+            }
+            continuation.finish()
+            periodicFinalizer.cancel()
+            await periodicFinalizer.value
+            try await analyzer.finalizeAndFinishThroughEndOfInput()
+            try await collected.value
+            return await timeline.report(engine: engine.name, format: format, sourceDuration: sourceDuration)
+        } catch {
+            await analyzer.cancelAndFinishNow()
+            throw error
+        }
+    }
+
+    private static func convertedFixture(url: URL, format: AVAudioFormat) throws -> AVAudioPCMBuffer {
+        let file = try AVAudioFile(forReading: url)
+        guard let source = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+              let converter = AVAudioConverter(from: file.processingFormat, to: format) else {
+            throw WordAlignmentProbeError.noCompatibleFormat
+        }
+        try file.read(into: source)
+        let capacity = AVAudioFrameCount(ceil(Double(source.frameLength) * format.sampleRate / source.format.sampleRate) + 1024)
+        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
+            throw WordAlignmentProbeError.noCompatibleFormat
+        }
+        let input = WordAlignmentProbeConverterInput(source)
+        var error: NSError?
+        let status = converter.convert(to: output, error: &error) { _, outStatus in
+            if let buffer = input.take() { outStatus.pointee = .haveData; return buffer }
+            outStatus.pointee = .endOfStream
+            return nil
+        }
+        if let error { throw error }
+        guard status != .error, output.frameLength > 0 else { throw WordAlignmentProbeError.emptySynthesis }
+        return output
+    }
+
+    private static func chunk(source: AVAudioPCMBuffer, offset: Int, frames: Int) throws -> AVAudioPCMBuffer {
+        guard let output = AVAudioPCMBuffer(pcmFormat: source.format, frameCapacity: AVAudioFrameCount(frames)) else {
+            throw WordAlignmentProbeError.noCompatibleFormat
+        }
+        output.frameLength = AVAudioFrameCount(frames)
+        let inputs = UnsafeMutableAudioBufferListPointer(source.mutableAudioBufferList)
+        let outputs = UnsafeMutableAudioBufferListPointer(output.mutableAudioBufferList)
+        let bytesPerFrame = Int(source.format.streamDescription.pointee.mBytesPerFrame)
+        let availableFrames = min(frames, max(0, Int(source.frameLength) - offset))
+        for index in outputs.indices {
+            guard let target = outputs[index].mData else { continue }
+            memset(target, 0, frames * bytesPerFrame)
+            if availableFrames > 0, let input = inputs[index].mData {
+                memcpy(target, input.advanced(by: offset * bytesPerFrame), availableFrames * bytesPerFrame)
+            }
+        }
+        return output
+    }
+}
+
+private enum WordAlignmentProbeError: Error {
+    case noCompatibleFormat
+    case emptySynthesis
+    case synthesisTimeout
+}
+
+private final class WordAlignmentProbeConverterInput: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer: AVAudioPCMBuffer?
+    init(_ buffer: AVAudioPCMBuffer) { self.buffer = buffer }
+    func take() -> AVAudioPCMBuffer? {
+        lock.withLock { defer { buffer = nil }; return buffer }
+    }
+}
+
+private final class WordAlignmentProbeFileWriter: @unchecked Sendable {
+    private let lock = NSLock()
+    private let url: URL
+    private var file: AVAudioFile?
+    private var continuation: CheckedContinuation<URL, any Error>?
+    init(url: URL, continuation: CheckedContinuation<URL, any Error>) {
+        self.url = url
+        self.continuation = continuation
+    }
+    func receive(_ audio: AVAudioBuffer) {
+        lock.withLock {
+            guard continuation != nil else { return }
+            guard let pcm = audio as? AVAudioPCMBuffer else { finishLocked(.failure(WordAlignmentProbeError.emptySynthesis)); return }
+            if pcm.frameLength == 0 {
+                let result: Result<URL, any Error> = file == nil ? .failure(WordAlignmentProbeError.emptySynthesis) : .success(url)
+                finishLocked(result)
+                return
+            }
+            do {
+                if file == nil {
+                    file = try AVAudioFile(forWriting: url, settings: pcm.format.settings,
+                                           commonFormat: pcm.format.commonFormat, interleaved: pcm.format.isInterleaved)
+                }
+                try file?.write(from: pcm)
+            } catch { finishLocked(.failure(error)) }
+        }
+    }
+    func fail(_ error: any Error) { lock.withLock { finishLocked(.failure(error)) } }
+    private func finishLocked(_ result: Result<URL, any Error>) {
+        file = nil
+        let current = continuation
+        continuation = nil
+        current?.resume(with: result)
+    }
+}
+
+private enum WordAlignmentProbeSynthesis {
+    static let fixtureText = "분산 시스템에서는 서비스 사이의 연결이 중요합니다. 서킷 브레이커는 장애가 생겼을 때 요청을 잠시 멈춥니다. 지금 말하고 있는 단어를 끝내고 다음 답변을 들어 보겠습니다."
+
+    @MainActor
+    static func render(voice: AVSpeechSynthesisVoice) async throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("voice-word-probe-\(UUID().uuidString).caf")
+        let synthesizer = AVSpeechSynthesizer()
+        let utterance = AVSpeechUtterance(string: fixtureText)
+        utterance.voice = voice
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        var timeout: Task<Void, Never>?
+        defer { timeout?.cancel() }
+        do {
+            return try await withCheckedThrowingContinuation { continuation in
+                let writer = WordAlignmentProbeFileWriter(url: url, continuation: continuation)
+                timeout = Task { @MainActor in
+                    do { try await Task.sleep(for: .seconds(20)) } catch { return }
+                    writer.fail(WordAlignmentProbeError.synthesisTimeout)
+                    synthesizer.stopSpeaking(at: .immediate)
+                }
+                synthesizer.write(utterance) { buffer in writer.receive(buffer) }
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
+    }
+}
+
+
+/// The framework query can outlive its caller when a Simulator speech service is
+/// unavailable. A one-shot continuation bounds the probe without waiting for the
+/// framework task to acknowledge cancellation or initiating model installation.
+private enum WordAlignmentProbeDeadline {
+    static func value<Value: Sendable>(
+        _ query: String, operation: @escaping @Sendable () async -> Value
+    ) async throws -> Value {
+        try await withCheckedThrowingContinuation { continuation in
+            let completion = WordAlignmentProbeOneShot(continuation)
+            Task { completion.resolve(.success(await operation())) }
+            Task {
+                try await Task.sleep(for: .seconds(3))
+                let skipped = XCTSkip("Local speech capability query \(query) did not return within 3 seconds; assets were not installed.")
+                if completion.resolve(.failure(skipped)) {
+                    print("BUDDYSTUDY_WORD_ALIGNMENT_QUERY_TIMEOUT \(query)")
+                }
+            }
+        }
+    }
+}
+
+private final class WordAlignmentProbeOneShot<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, any Error>?
+    init(_ continuation: CheckedContinuation<Value, any Error>) { self.continuation = continuation }
+    @discardableResult
+    func resolve(_ result: Result<Value, any Error>) -> Bool {
+        let current = lock.withLock {
+            let current = continuation
+            continuation = nil
+            return current
+        }
+        current?.resume(with: result)
+        return current != nil
     }
 }

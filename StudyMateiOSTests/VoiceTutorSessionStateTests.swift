@@ -1197,6 +1197,66 @@ final class VoiceTutorLessonContentPresentationTests: XCTestCase {
         add(metadata)
     }
 
+    func testSourceBoundQuestionRendersOnceInPortraitWithoutStartingARealSession() async throws {
+        guard ProcessInfo.processInfo.environment["BUDDYSTUDY_VOICE_UI_RENDER_SMOKE"] == "1" else {
+            throw XCTSkip("Opt in with BUDDYSTUDY_VOICE_UI_RENDER_SMOKE=1 for synthetic question source screenshots")
+        }
+        let question = "주문은 취소됐지만 배송은 시작됐습니다. **Saga**의 `보상 작업`으로 어떻게 복구할까요?"
+        let spoken = "주문은 취소됐지만 배송은 시작됐습니다. Saga의 보상 작업으로 어떻게 복구할까요?"
+        let interrupted = VoiceTutorCaption(speaker: .tutor, text: "먼저 주문 흐름부터 살펴보면",
+            responseID: "synthetic-earlier-response", providerItemID: "synthetic-earlier-item", isInterrupted: true)
+        let learner = VoiceTutorCaption(speaker: .learner, text: "이 문제로 시작해요.", providerItemID: "synthetic-learner-item")
+        let questionCaption = VoiceTutorCaption(speaker: .tutor, text: "그럼 문제를 그대로 읽어드릴게요.\n" + spoken,
+            responseID: "synthetic-readback", providerItemID: "synthetic-question-item",
+            providerItemIDs: ["synthetic-preface-item", "synthetic-question-item"])
+        let captions = [interrupted, learner, questionCaption]
+        let sourcePayload: [String: Any] = ["type": "buddystudy.voice.answer.question_source",
+            "answerId": OperationTranscriptProbe.answerID, "studyId": 101, "recordId": "202", "revision": 1,
+            "responseId": "synthetic-readback", "itemIds": ["synthetic-preface-item", "synthetic-question-item"]]
+        let readyPayload: [String: Any] = ["type": "buddystudy.voice.answer.ready",
+            "answerId": OperationTranscriptProbe.answerID, "studyId": 101, "recordId": "202", "revision": 1,
+            "phase": "listening", "question": question, "text": ""]
+        guard case .answerQuestionSource(let source) = try VoiceTutorRealtimeEventParser.parse(
+            data: JSONSerialization.data(withJSONObject: sourcePayload)),
+              case .answerState(let ready) = try VoiceTutorRealtimeEventParser.parse(
+            data: JSONSerialization.data(withJSONObject: readyPayload)) else { return XCTFail("Expected exact synthetic source and ready receipts") }
+        for appearance in [UIUserInterfaceStyle.light, .dark] {
+            let theme = appearance == .light ? "light" : "dark"
+            let harness = try OperationTranscriptHarness(captions: captions, appearance: appearance,
+                showsTranscript: true, useDeviceBounds: true, usePortraitViewport: true)
+            defer { harness.close() }
+            harness.probe.answerQuestionSource = source
+            XCTAssertTrue(harness.probe.answerDraft.apply(ready))
+            XCTAssertTrue(source.belongs(to: harness.probe.answerDraft))
+            XCTAssertTrue(harness.probe.presentation.sessionState.apply(snapshot(.answering, sequence: 1)))
+            let layout = VoiceTutorQuestionTranscriptLayout(draft: harness.probe.answerDraft,
+                source: source, captions: harness.probe.captions)
+            XCTAssertEqual(layout.canonicalCaptionID, questionCaption.id)
+            XCTAssertEqual(layout.coveredCaptionIDs, [questionCaption.id])
+            XCTAssertFalse(layout.showsQuestionInAnswerCard)
+            try await harness.settle()
+            #if targetEnvironment(simulator)
+            _ = try harness.logicalTextRow(spoken)
+            _ = try harness.logicalTextRow(interrupted.text)
+            _ = try harness.logicalTextRow(learner.text)
+            #endif
+            attach(harness, name: "voice-question-once-transcript-portrait-\(theme)")
+            harness.probe.showsTranscript = false
+            try await harness.settle()
+            #if targetEnvironment(simulator)
+            _ = try harness.logicalTextRow(spoken)
+            #endif
+            attach(harness, name: "voice-question-once-orb-portrait-\(theme)")
+            XCTAssertEqual(harness.probe.captions, captions, "Both surfaces preserve the original learner, interrupted and completed captions")
+            XCTAssertEqual(harness.probe.answerDraft.phase, .listening)
+            XCTAssertTrue(harness.probe.answerControls.isEmpty)
+        }
+        let metadata = XCTAttachment(string: "Four synthetic native portrait renders of an exact source-bound question: transcript and orb in light/dark. Source and ready receipts are decoded by the production parser; original interrupted tutor, learner and readback captions stay unchanged. No voice session, audio capture, API operation or answer submission is started by this fixture. On iPhone this supplies rendered screenshot evidence and pure state assertions; hosted accessibility assertions run only on simulator. The normal test-host app may initialize its services.")
+        metadata.name = "voice-question-once-render-metadata"
+        metadata.lifetime = .keepAlways
+        add(metadata)
+    }
+
     private func snapshot(_ phase: VoiceTutorSessionStateEvent.Phase, sequence: Int64) -> VoiceTutorSessionStateEvent {
         .init(sequence: sequence, phase: phase, paused: false, revision: 1,
             studyID: 101, recordID: "202", answerID: OperationTranscriptProbe.answerID)

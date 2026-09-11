@@ -54,7 +54,9 @@ bounded response draft and committed or interrupted caption.
 | Backend executable JAR | `:tutor:bootJar` passed. SHA-256 `6852cfe02eaf9531d177b6bce3c2d17f4af970de4bfadbd076ac79d2853d1a71`. |
 | iOS source binding, multipart history and rendering | Final simulator run: 287 cases, 282 passed, 5 opt-in skips, 0 failures. Includes contract, answer-draft, session-state and hosted lesson-content checks. |
 | Generic iOS build and signed build-for-testing | Passed using StudyMateiOS and iOS destinations only. |
-| Real iPhone app replacement and local backend replacement | Pending; the existing active conversation has been preserved. |
+| Additional source-bound portrait fixture | 1 simulator test passed, including four light/dark transcript/orb screenshots and accessibility checks. |
+| Real iPhone verification | 43 tests passed, 0 failures/skips on iPhone 16 Pro, iOS 26.6.1. Includes source/ready state and four native portrait renders. The renders were visually inspected; no paid voice conversation was started. |
+| Local backend and iPhone application | Applied after the existing conversation completed naturally. Only the backend container was restarted; the running JAR matches the SHA-256 above and local health returned HTTP 200 / UP. The updated iPhone app was launched normally after testing. |
 
 Backend artifacts: `build/voice-question-readback-backend-tests.log`,
 `build/voice-question-readback-backend-first-pass.json`,
@@ -63,6 +65,19 @@ Backend artifacts: `build/voice-question-readback-backend-tests.log`,
 `build/voice-question-source-final.xcresult`.
 The correction after the first backend run changed test expectations only; no
 production source changed after the executable JAR was built.
+
+The existing conversation completed at approximately 20:10:44 UTC before any
+backend or main-app replacement. Backend startup was 20:11:37 UTC. The previous
+JAR is retained at `/app/buddystudy-backend.pre-question-readback-20260912.jar`.
+The development URL and externally mapped port 8080 were preserved. No
+production deployment or image build was performed.
+
+Real-device results: `build/voice-question-source-device.xcresult` and
+`build/voice-question-source-device-attachments/voice-question-once-{transcript|orb}-portrait-{light|dark}.png`.
+The screenshot fixture decodes production source/ready receipts while retaining
+learner, interrupted tutor and completed readback captions. Device checks cover
+state and native rendering; they do not claim a new live-provider audio end-to-end
+test. The app's normal launch was restored after the test environment override.
 
 The earlier acoustic-gap interruption policy is still not a word-alignment
 implementation. The learner has allowed approximately one second of additional
@@ -74,3 +89,5 @@ any of its 18 final word times within one second. Most provisional ranges
 covered the whole sentence, so their earlier arrival does not prove word timing.
 These results do not establish the behavior of every engine or the actual iPhone.
 No provider calls, model downloads or microphone input were used by the probes.
+The subsequent actual-iPhone measurements and unresolved one-second word-boundary
+constraint are documented in [the dedicated probe report](voice-word-alignment-probe-2026-09-12.md).
