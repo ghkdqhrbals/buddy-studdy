@@ -52,16 +52,18 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
     private(set) var pendingControl: VoiceTutorAnswerControl.Kind?
     private(set) var awaitingCancellationChoices = false
     private(set) var hasUserEdited = false
+    private(set) var isEditing = false
     private(set) var hadExistingDraft = false
     private(set) var sourceItemIDs: Set<String> = []
     private(set) var recognizedText = ""
     private var segments: [Int64: VoiceTutorAnswerTranscriptEvent] = [:]
     private var nextSequence: Int64 = 1
+    private var suppressedSequences: Set<Int64> = []
     private var retiredAnswerIDs: Set<String> = []
 
     var isActive: Bool { ![.inactive, .submitted, .cancelled].contains(phase) }
     var isEditable: Bool { [.listening, .review, .failed].contains(phase) }
-    var holdsMicrophone: Bool { awaitingCancellationChoices || [.finalizing, .review, .submitting, .failed].contains(phase) }
+    var holdsMicrophone: Bool { isEditing || awaitingCancellationChoices || [.finalizing, .review, .submitting, .failed].contains(phase) }
     var canSubmit: Bool {
         [.review, .failed].contains(phase) && Self.isValidSubmission(text)
     }
@@ -92,7 +94,7 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
               snapshot.recordID.map({ $0 == recordID }) ?? true,
               snapshot.answerID.map({ $0 == answerID }) ?? true else { return false }
         return ![.conversation, .questionLoading, .questionGenerating, .questionFailed,
-                 .grading, .graded, .gradingFailed, .ending, .ended, .failed].contains(snapshot.phase)
+                 .grading, .graded, .gradingUnavailable, .gradingFailed, .ending, .ended, .failed].contains(snapshot.phase)
     }
 
     static func isValidSubmission(_ text: String) -> Bool {
@@ -128,6 +130,8 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
             text = existingDraft
             hadExistingDraft = !existingDraft.isEmpty
             hasUserEdited = false
+            isEditing = false
+            suppressedSequences = []
             sourceItemIDs = []
             recognizedText = ""
             segments = [:]
@@ -166,13 +170,32 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
               event.recordID == recordID, event.sequence > 0, event.sequence <= 256,
               !sourceItemIDs.contains(event.itemID), segments[event.sequence] == nil else { return false }
         sourceItemIDs.insert(event.itemID)
+        if isEditing { suppressedSequences.insert(event.sequence) }
         segments[event.sequence] = event
         while let segment = segments[nextSequence] {
-            recognizedText = Self.appending(segment.text, to: recognizedText)
-            text = Self.appending(segment.text, to: text)
+            if !suppressedSequences.contains(nextSequence) {
+                recognizedText = Self.appending(segment.text, to: recognizedText)
+                text = Self.appending(segment.text, to: text)
+            }
             nextSequence += 1
         }
         return true
+    }
+
+    /// The capture fence lasts through the server resume ACK, not merely the
+    /// sheet animation. Consume late ASR IDs/sequence slots without altering
+    /// the edited answer, including buffered out-of-order parts.
+    @discardableResult
+    mutating func beginEditing(answerID: String) -> Bool {
+        guard self.answerID == answerID, isEditable, !isEditing else { return false }
+        isEditing = true
+        suppressedSequences.formUnion(segments.keys.filter { $0 >= nextSequence })
+        return true
+    }
+
+    mutating func endEditing(answerID: String) {
+        guard self.answerID == answerID else { return }
+        isEditing = false
     }
 
     @discardableResult
@@ -215,6 +238,7 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
     }
 
     mutating func endLocally() {
+        isEditing = false
         if isActive { phase = .cancelled }
         pendingControl = nil
         awaitingCancellationChoices = false

@@ -1,6 +1,7 @@
 package com.buddystudy.backend.voice.adapter.outbound.mcp
 
 import com.buddystudy.backend.voice.application.model.VoiceTutorWebRtcControlContext
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorGradingReadback
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
@@ -34,6 +35,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         @Volatile var generation: JsonNode? = null
         @Volatile var completedGeneration: String? = null
         val gradings = linkedMapOf<String, Submitted>()
+        @Volatile var activeGradingCorrelationId: String? = null
     }
     private data class Submitted(val record: JsonNode, val answer: String)
     private val sessions = linkedMapOf<String, State>()
@@ -44,7 +46,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
     }
 
     suspend fun execute(context: VoiceTutorWebRtcControlContext, name: String, arguments: Map<String, Any>): VoiceTutorMcpToolResult {
-        val state = state(context) ?: return unavailable()
+        val state = state(context) ?: return if (name in GRADING_TOOLS) gradingUnavailable() else unavailable()
         if (!validArguments(name, arguments, state)) return error("QUESTION_SCOPE_MISMATCH", "Use the selected topic and the exact current question returned by its tools.")
         return when (name) {
             "list_pending_questions" -> pending(context, state)
@@ -52,9 +54,20 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
             "get_question_process" -> generation(context, state, arguments.getValue("correlation_id").toString())
             "skip_question" -> skip(context, state)
             "submit_answer" -> error("USER_CONFIRMATION_REQUIRED", "Only the learner can finish, edit and submit this answer from the app. Never submit or assess unfinished speech.")
-            "get_grading_process" -> grading(context, state, arguments.getValue("correlation_id").toString())
+            "get_grading_process" -> grading(context, state, arguments.getValue("correlation_id").toString(),
+                arguments["record_id"]?.let { id(mapper.valueToTree(it)) })
+            "get_answer_status" -> answerStatus(context, state, requireNotNull(id(mapper.valueToTree(arguments["record_id"]))),
+                arguments["correlation_id"]?.toString())
             else -> unavailable()
         }
+    }
+
+    /** Native pending lookup must not reopen curriculum while a submitted record owns the flow. */
+    suspend fun submittedAnswerStatus(context: VoiceTutorWebRtcControlContext, arguments: Map<String, Any>): VoiceTutorMcpToolResult? {
+        val state = state(context) ?: return null
+        val active = activeSubmission(state) ?: return null
+        if (!validArguments("list_pending_questions", arguments, state)) return gradingUnavailable()
+        return readSubmittedRecord(context, state, active.first, active.second)
     }
 
     suspend fun pollLearningProgress(context: VoiceTutorWebRtcControlContext, requested: VoiceTutorLearningProgress): VoiceTutorMcpToolResult {
@@ -89,16 +102,10 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
                     learningProgress = requested.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = recordId(record).toString()))
             }
             VoiceTutorLearningPhase.GRADING -> {
-                val submitted = synchronized(state.gradings) { state.gradings[correlationId] } ?: return unavailable()
-                if (requested.recordId != recordId(submitted.record)?.toString()) return unavailable()
-                val result = invoke(context, "get_record", mapOf("record_id" to recordId(submitted.record)!!,
-                    "language" to context.session.language, "view" to "original"))
-                if (result.isError || !current(context, state)) return if (result.isError) result else unavailable()
-                val record = mapper.readTree(result.output)
-                if (recordId(record) != recordId(submitted.record) || id(record.path("studyId")) != state.scope.study ||
-                    record.path("gradingRequestId").asText() != correlationId || record.path("answer").asText().trim() != submitted.answer.trim()) return invalidResult()
-                output(emptyMap<String, Any>()).copy(questionChange = if (record.path("questionStatus").asText() != "GRADING") change(state, record) else null,
-                    learningProgress = gradingProgress(state, record))
+                val submitted = activeSubmission(state)?.takeIf { it.first == correlationId }?.second ?: return gradingUnavailable()
+                if (requested.recordId != recordId(submitted.record)?.toString()) return gradingUnavailable()
+                val result = readSubmittedRecord(context, state, correlationId, submitted)
+                if (result.isError) result else result.copy(output = "{}")
             }
             else -> unavailable()
         }
@@ -160,7 +167,12 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         authorized(context) && currentFocus(context) == (state.scope.study to state.scope.revision) &&
             synchronized(sessions) { sessions[context.session.id] === state }
 
-    private suspend fun pending(context: VoiceTutorWebRtcControlContext, state: State): VoiceTutorMcpToolResult {
+    private suspend fun pending(context: VoiceTutorWebRtcControlContext, state: State, allowAdvance: Boolean = false): VoiceTutorMcpToolResult {
+        // A pending-list read is not a request to leave a submitted answer. Recover
+        // that exact grading record, even after failure/completion, without rebinding.
+        if (!allowAdvance) activeSubmission(state)?.let { (correlationId, submitted) ->
+            return readSubmittedRecord(context, state, correlationId, submitted)
+        }
         val result = readPending(context, state)
         if (result.isError || !current(context, state)) return if (result.isError) result else unavailable()
         val body = mapper.readTree(result.output)
@@ -176,6 +188,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         val newlyBound = if (candidate != null) bind(context, state, candidate)
         else { state.question = null; false }
         if (!current(context, state)) return unavailable()
+        if (allowAdvance && newlyBound) state.activeGradingCorrelationId = null
         return output(mapOf(
             "studyId" to state.scope.study, "pendingQuestion" to state.question,
             "gradingQuestions" to records.filter { it.path("questionStatus").asText() == "GRADING" }.map {
@@ -223,7 +236,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         if (!current(context, state)) return unavailable()
         state.generation?.let { return output(mapOf("generation" to it, "notice" to "This generation is already requested. The server subscribes to its completion and will deliver the saved question; do not poll, request another question or ask the learner to start again."))
             .copy(learningProgress = progress(state, VoiceTutorLearningPhase.QUESTION_GENERATING)) }
-        val checked = pending(context, state)
+        val checked = pending(context, state, allowAdvance = true)
         if (checked.isError) return checked
         if (state.question != null) return checked
         if (!state.checked || !current(context, state)) return unavailable()
@@ -240,6 +253,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         if (id(body.path("topicId")) != state.scope.study || !correlation(body.path("correlationId"))) return invalidResult()
         state.completedGeneration = null
         state.generation = body
+        state.activeGradingCorrelationId = null
         return output(mapOf("generation" to body, "notice" to "Generation was requested through the normal question allowance. The server subscribes to completion and delivers the saved question. Do not poll or ask the learner to repeat the start request."))
             .copy(learningProgress = progress(state, VoiceTutorLearningPhase.QUESTION_GENERATING))
     }
@@ -320,23 +334,62 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         if (recordId(record) != recordId(question) || id(record.path("studyId")) != state.scope.study || record.path("answer").asText().trim() != answer.trim()) return invalidResult()
         rememberSubmission(state, record, answer)
         return output(mapOf("record" to feedbackRecord(record), "notice" to "The reviewed answer is saved; prior microphone text may be superseded. Grading completion arrives automatically. Do not poll, resubmit or invent feedback."))
-            .copy(questionChange = change(state, record), learningProgress = gradingProgress(state, record))
+            .copy(questionChange = change(state, record), learningProgress = gradingProgress(state, record),
+                gradingReadback = gradingReadback(state, record, gradingProgress(state, record)))
     }
 
-    private suspend fun grading(context: VoiceTutorWebRtcControlContext, state: State, correlationId: String): VoiceTutorMcpToolResult {
-        val submitted = synchronized(state.gradings) { state.gradings[correlationId] } ?: return unavailable()
-        val result = awaitProcess(context, state, "get_grading_process", correlationId)
-        if (result.isError) return result
-        if (!mapper.readTree(result.output).path("terminal").asBoolean()) return result.copy(
-            learningProgress = progress(state, VoiceTutorLearningPhase.GRADING, submitted.record))
-        val question = submitted.record
-        val recordResult = invoke(context, "get_record", mapOf("record_id" to recordId(question)!!, "language" to context.session.language, "view" to "original"))
-        if (recordResult.isError || !current(context, state)) return if (recordResult.isError) recordResult else unavailable()
-        val record = mapper.readTree(recordResult.output)
-        if (recordId(record) != recordId(question) || id(record.path("studyId")) != state.scope.study || record.path("answer").asText().trim() != submitted.answer.trim()) return invalidResult()
-        return output(mapOf("terminal" to true, "record" to feedbackRecord(record),
-            "notice" to "Use only this saved gradingResult for score and feedback, based on the learner-reviewed edited answer rather than superseded microphone text. If gradingDetailsAvailableInRecord is true, say the saved result can be read in the app. Otherwise, when gradingResult is absent, report that grading is not complete; do not invent a grade. Wait for the learner before selecting another question."))
-            .copy(questionChange = change(state, record), learningProgress = gradingProgress(state, record))
+    private fun activeSubmission(state: State): Pair<String, Submitted>? = synchronized(state.gradings) {
+        state.activeGradingCorrelationId?.let { correlation -> state.gradings[correlation]?.let { correlation to it } }
+    }
+
+    private suspend fun grading(context: VoiceTutorWebRtcControlContext, state: State, correlationId: String,
+        expectedRecordId: Long? = null): VoiceTutorMcpToolResult {
+        val submitted = activeSubmission(state)?.takeIf { it.first == correlationId }?.second ?: return gradingUnavailable()
+        if (expectedRecordId != null && expectedRecordId != recordId(submitted.record)) return gradingUnavailable()
+        return readSubmittedRecord(context, state, correlationId, submitted)
+    }
+
+    private suspend fun answerStatus(context: VoiceTutorWebRtcControlContext, state: State, expectedRecordId: Long,
+        correlationId: String?): VoiceTutorMcpToolResult {
+        val active = activeSubmission(state)?.takeIf { recordId(it.second.record) == expectedRecordId &&
+            (correlationId == null || correlationId == it.first) } ?: return gradingUnavailable()
+        return readSubmittedRecord(context, state, active.first, active.second)
+    }
+
+    private suspend fun readSubmittedRecord(context: VoiceTutorWebRtcControlContext, state: State,
+        correlationId: String, submitted: Submitted): VoiceTutorMcpToolResult {
+        val expected = requireNotNull(recordId(submitted.record))
+        if (!current(context, state) || state.activeGradingCorrelationId != correlationId) return gradingUnavailable()
+        // The owned original record is authoritative even if the event/process endpoint
+        // failed. Never gate completed feedback on a progress-stream lookup.
+        val result = invoke(context, "get_record", mapOf("record_id" to expected,
+            "language" to context.session.language, "view" to "original"))
+        if (!current(context, state) || state.activeGradingCorrelationId != correlationId) return gradingUnavailable()
+        if (result.isError) return error("GRADING_STATUS_UNAVAILABLE",
+            "The saved status of this submitted answer could not be read. Keep this exact record and retry get_answer_status; do not read pending questions, generate a replacement or resubmit the answer.")
+        val record = mapper.readTree(result.output)
+        if (recordId(record) != expected || id(record.path("studyId")) != state.scope.study ||
+            record.path("gradingRequestId").asText() != correlationId ||
+            record.path("answer").asText().trim() != submitted.answer.trim() ||
+            record.path("question").path("question") != submitted.record.path("question").path("question"))
+            return error("GRADING_RESULT_MISMATCH", "The saved result does not match this exact submitted question, answer and grading attempt. Keep the current answer; do not switch questions or invent feedback.")
+        val progress = gradingProgress(state, record)
+        return output(mapOf("terminal" to (progress.phase != VoiceTutorLearningPhase.GRADING),
+            "record" to feedbackRecord(record), "notice" to
+                "This is the saved status for the exact submitted record. Use only its gradingResult for feedback; missing feedback is not a completed grade. Keep this question and answer. Do not use list_pending_questions, resubmit or start another question for a grading status request."))
+            .copy(questionChange = if (progress.phase != VoiceTutorLearningPhase.GRADING) change(state, record) else null,
+                learningProgress = progress, gradingReadback = gradingReadback(state, record, progress))
+    }
+
+    private fun gradingReadback(state: State, record: JsonNode, progress: VoiceTutorLearningProgress): VoiceTutorGradingReadback? {
+        if (progress.phase != VoiceTutorLearningPhase.GRADED) return null
+        val grade = record.path("gradingResult")
+        val feedback = grade.path("feedback").takeIf { it.isTextual }?.asText().orEmpty()
+        val explanation = grade.path("explanation").takeIf { it.isTextual }?.asText().orEmpty()
+        return VoiceTutorGradingReadback(state.scope.study, requireNotNull(recordId(record)).toString(),
+            requireNotNull(progress.correlationId), grade.path("score").takeIf { it.isIntegralNumber && it.canConvertToInt() && it.asInt() in 0..100 }?.asInt(),
+            feedback.takeIf { it.length <= 8_000 }.orEmpty(), explanation.takeIf { it.length <= 8_000 }.orEmpty(),
+            detailsAvailableInRecord = feedback.length > 8_000 || explanation.length > 8_000)
     }
 
     private fun progress(state: State, phase: VoiceTutorLearningPhase, record: JsonNode? = null) =
@@ -389,6 +442,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         record.path("gradingRequestId").takeIf(::correlation)?.asText()?.let {
             synchronized(state.gradings) {
                 state.gradings[it] = Submitted(compact(record), answer)
+                state.activeGradingCorrelationId = it
                 while (state.gradings.size > 32) state.gradings.remove(state.gradings.keys.first())
             }
         }
@@ -396,17 +450,29 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
     private fun recoverSubmission(state: State, record: JsonNode, answer: String): VoiceTutorMcpToolResult? {
         if (recordId(record) != recordId(state.question) || id(record.path("studyId")) != state.scope.study ||
             record.path("answer").asText().trim() != answer.trim() ||
-            record.path("questionStatus").asText() !in setOf("GRADING", "GRADED", "COMPLETED") || !correlation(record.path("gradingRequestId"))) return null
+            record.path("questionStatus").asText() !in setOf("GRADING", "GRADED", "COMPLETED", "FAILED") || !correlation(record.path("gradingRequestId"))) return null
         rememberSubmission(state, record, answer)
         return output(mapOf("record" to feedbackRecord(record), "notice" to "This exact learner-reviewed answer was already accepted. Continue its gradingRequestId; do not submit again or assess superseded microphone text."))
-            .copy(questionChange = change(state, record), learningProgress = gradingProgress(state, record))
+            .copy(questionChange = change(state, record), learningProgress = gradingProgress(state, record),
+                gradingReadback = gradingReadback(state, record, gradingProgress(state, record)))
     }
 
     private fun validArguments(name: String, args: Map<String, Any>, state: State): Boolean = when (name) {
         "list_pending_questions" -> args.keys == setOf("study_id") && id(mapper.valueToTree(args["study_id"])) == state.scope.study
         "request_question" -> args.keys == setOf("study_id") && id(mapper.valueToTree(args["study_id"])) == state.scope.study
         "submit_answer", "skip_question" -> args.keys == setOf("record_id") && id(mapper.valueToTree(args["record_id"])) == recordId(state.question)
-        "get_question_process", "get_grading_process" -> args.keys == setOf("correlation_id") && args["correlation_id"] is String
+        "get_question_process" -> args.keys == setOf("correlation_id") && correlation(mapper.valueToTree(args["correlation_id"]))
+        "get_grading_process" -> args.keys.all { it in setOf("correlation_id", "record_id", "after_event_id") } &&
+            correlation(mapper.valueToTree(args["correlation_id"])) &&
+            (!args.containsKey("record_id") || id(mapper.valueToTree(args["record_id"])) != null) &&
+            // Older open native sessions advertised this cursor. Accept it without
+            // replaying events: the exact submitted record remains authoritative.
+            (!args.containsKey("after_event_id") || mapper.valueToTree<JsonNode>(args["after_event_id"]).let {
+                it.isIntegralNumber && it.canConvertToLong() && it.asLong() >= 0
+            })
+        "get_answer_status" -> args.keys.all { it in setOf("record_id", "correlation_id") } &&
+            id(mapper.valueToTree(args["record_id"])) != null &&
+            (!args.containsKey("correlation_id") || correlation(mapper.valueToTree(args["correlation_id"])))
         else -> false
     }
     private fun feedbackRecord(record: JsonNode): JsonNode = mapper.createObjectNode().apply {
@@ -451,11 +517,13 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
     private fun error(code: String, message: String) = VoiceTutorMcpToolResult(mapper.writeValueAsString(mapOf("error" to mapOf("code" to code, "message" to message))), true)
     private fun persistencePending() = error("INPUT_PERSISTENCE_PENDING", "The exact original speech is still being saved. Retry internally without asking the learner to repeat or inventing text.")
     private fun pendingPageIncomplete() = error("PENDING_PAGE_INCOMPLETE", "The complete pending question set could not be read consistently. Retry its read before generating a replacement.")
+    private fun gradingUnavailable() = error("GRADING_CONTEXT_UNAVAILABLE", "Use get_answer_status with the exact submitted record_id from this conversation and its grading attempt. Do not select another topic, read pending questions or resubmit to recover a grade.")
     private fun unavailable() = error("QUESTION_CONTEXT_UNAVAILABLE", "Select the exact topic and read its current pending question before acting; stale or other-topic work cannot continue.")
     private fun invalidResult() = error("INVALID_QUESTION_RESULT", "The saved question identity could not be verified. Do not invent a question, answer or grade.")
 
     companion object {
         private const val SAME_QUESTION_NOTICE = "This is the same current saved question, not a new question or a request to repeat its readback. Preserve the current question and handle the learner's present answer or explicit skip/replace request. Do not ask them to repeat an answer merely because this state was refreshed."
-        val TOOLS = setOf("list_pending_questions", "request_question", "get_question_process", "skip_question", "submit_answer", "get_grading_process")
+        private val GRADING_TOOLS = setOf("get_grading_process", "get_answer_status")
+        val TOOLS = setOf("list_pending_questions", "request_question", "get_question_process", "skip_question", "submit_answer") + GRADING_TOOLS
     }
 }

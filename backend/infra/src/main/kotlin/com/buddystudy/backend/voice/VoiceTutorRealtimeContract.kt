@@ -17,6 +17,9 @@ internal object VoiceTutorRealtimeContract {
     const val INPUT_SETTLED_EVENT = "buddystudy.voice.input.settled"
     const val RESPONSE_RECOVERING_EVENT = "buddystudy.voice.response.recovering"
     const val RESPONSE_INTERRUPTED_EVENT = "buddystudy.voice.response.interrupted"
+    const val RESPONSE_FINISH_WORD_EVENT = "buddystudy.voice.response.finish_word"
+    const val RESPONSE_WORD_FINISHED_EVENT = "buddystudy.voice.response.word_finished"
+    const val GRADING_REFRESH_EVENT = "buddystudy.voice.grading.refresh"
     const val ABANDONED_RESPONSE_ID_FIELD = "abandonedResponseId"
     // Server-only lifecycle request. It is never accepted from or forwarded to the client/provider.
     const val SPOKEN_LESSON_END_EVENT = "buddystudy-internal-voice-session-end"
@@ -34,9 +37,9 @@ internal object VoiceTutorRealtimeContract {
     const val ANSWER_STATE_EVENT = "buddystudy.voice.answer.state"
     const val SESSION_STATE_EVENT = "buddystudy.voice.session.state"
     val ANSWER_SESSION_PHASES = setOf("answering", "answer_finalizing", "answer_review", "answer_submitting", "answer_failed")
-    val RECORD_SESSION_PHASES = setOf("question_ready", "question_reading", "grading", "graded", "grading_failed")
+    val RECORD_SESSION_PHASES = setOf("question_ready", "question_reading", "grading", "graded", "grading_failed", "grading_unavailable")
     val SESSION_PHASES = ANSWER_SESSION_PHASES + setOf("conversation", "question_loading", "question_generating", "question_reading",
-        "question_ready", "grading", "graded", "ending", "ended", "question_failed", "grading_failed", "failed")
+        "question_ready", "grading", "graded", "ending", "ended", "question_failed", "grading_failed", "grading_unavailable", "failed")
     const val ANSWER_TRANSCRIPT_EVENT = "buddystudy.voice.answer.transcript"
     const val ANSWER_FINISH_EVENT = "buddystudy.voice.answer.finish"
     const val ANSWER_SUBMIT_EVENT = "buddystudy.voice.answer.submit"

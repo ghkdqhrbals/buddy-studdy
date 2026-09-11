@@ -479,6 +479,42 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
         XCTAssertEqual(delivered, [.speech(started), .speech(stopped), .answer(finish)])
     }
 
+    func testEditingConsumesLateAndBufferedASRWithoutChangingTypedAnswerOrBlockingNewSpeech() {
+        var state = listening(existing: "기존 초안")
+        XCTAssertTrue(state.append(segment(2, "늦게 도착한 기존 음성")))
+        XCTAssertTrue(state.beginEditing(answerID: answerID))
+        XCTAssertTrue(state.holdsMicrophone)
+        XCTAssertTrue(state.edit("직접 수정한 답변"))
+        XCTAssertTrue(state.append(segment(1, "편집 전 음성")))
+        XCTAssertTrue(state.append(segment(3, "편집 중 음성")))
+        XCTAssertEqual(state.text, "직접 수정한 답변")
+        XCTAssertEqual(state.recognizedText, "")
+        XCTAssertEqual(state.sourceItemIDs.count, 3)
+        state.endEditing(answerID: "another-answer")
+        XCTAssertTrue(state.isEditing, "A stale sheet cannot release the current input fence")
+        state.endEditing(answerID: answerID)
+        XCTAssertFalse(state.holdsMicrophone)
+        XCTAssertFalse(state.append(segment(3, "편집 중 음성")))
+        XCTAssertTrue(state.append(segment(4, "재개 후 덧붙인 설명")))
+        XCTAssertEqual(state.text, "직접 수정한 답변\n재개 후 덧붙인 설명")
+        XCTAssertEqual(state.recognizedText, "재개 후 덧붙인 설명")
+    }
+
+    func testClosingEditorKeepsReviewMicrophoneHoldAndLocalEndReleasesOnlyEditorState() {
+        var state = listening(existing: "작성 중 답변")
+        XCTAssertTrue(state.apply(event(.review)))
+        XCTAssertTrue(state.beginEditing(answerID: answerID))
+        XCTAssertTrue(state.edit("수정 완료"))
+        state.endEditing(answerID: answerID)
+        XCTAssertFalse(state.isEditing)
+        XCTAssertTrue(state.holdsMicrophone, "Review must not restart capture when editing ends")
+        XCTAssertTrue(state.beginEditing(answerID: answerID))
+        state.endLocally()
+        XCTAssertFalse(state.isEditing)
+        XCTAssertEqual(state.text, "수정 완료")
+        XCTAssertFalse(state.beginEditing(answerID: answerID))
+    }
+
     private func listening(existing: String = "") -> VoiceTutorAnswerDraftState {
         var state = VoiceTutorAnswerDraftState()
         XCTAssertTrue(state.apply(event(.listening), existingDraft: existing))

@@ -14,6 +14,26 @@ class VoiceTutorRealtimeEventPolicyTest {
     private val policy = VoiceTutorRealtimeEventPolicy(mapper)
 
     @Test
+    fun `word boundary handshake and grading refresh are bounded local controls`() {
+        val boundary = mapOf("type" to VoiceTutorRealtimeContract.RESPONSE_FINISH_WORD_EVENT,
+            "responseId" to "response_1", "requestId" to "request-1", "extra" to "drop")
+        val projected = mapper.readTree(policy.providerDecision(mapper.writeValueAsString(boundary), "session", Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
+        assertThat(projected.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("type", "responseId", "requestId")
+        assertThat(policy.providerDecision(mapper.writeValueAsString(boundary), "session", Instant.EPOCH).payload).isNull()
+        val ack = mapOf("type" to VoiceTutorRealtimeContract.RESPONSE_WORD_FINISHED_EVENT,
+            "responseId" to "response_1", "requestId" to "request-1")
+        val refresh = mapOf("type" to VoiceTutorRealtimeContract.GRADING_REFRESH_EVENT, "recordId" to "42")
+        assertThat(policy.shouldForwardClientEvent(mapper.writeValueAsString(ack))).isFalse()
+        assertThat(policy.shouldForwardClientEvent(mapper.writeValueAsString(refresh))).isFalse()
+        for (invalid in listOf(ack + ("requestId" to "../invalid"), ack + ("responseId" to "x".repeat(192)),
+                ack + ("extra" to "invalid"), refresh + ("recordId" to "-42"), refresh + ("studyId" to "7"))) {
+            assertThatThrownBy { policy.shouldForwardClientEvent(mapper.writeValueAsString(invalid)) }
+                .isInstanceOf(VoiceTutorClientProtocolException::class.java)
+        }
+    }
+
+    @Test
     fun `structured input is bounded session scoped and strips provider extras while client replies stay local`() {
         val session = "00000000-0000-4000-8000-000000000001"
         val base = mapOf("requestId" to "00000000-0000-4000-8000-000000000002", "sessionId" to session,

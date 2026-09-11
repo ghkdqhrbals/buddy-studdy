@@ -28,10 +28,11 @@ struct VoiceTutorInterruptionBoundaryState: Equatable {
         case superseded
     }
 
-    // A 450 ms cutoff could still fall inside the current word. Give a short
-    // phrase room to finish, but never wait for an unbounded full response.
-    static let maximumGraceSeconds: TimeInterval = 1.2
-    static let minimumQuietSeconds: TimeInterval = 0.08
+    // Stop at the first short acoustic gap; do not wait for sentence punctuation
+    // or let a nearly-finished phrase keep talking. RTP exposes no word times,
+    // so continuous speech still needs a short bound and a smooth gain ramp.
+    static let maximumGraceSeconds: TimeInterval = 0.75
+    static let minimumQuietSeconds: TimeInterval = 0.04
     static let maximumObservationGapSeconds: TimeInterval = 0.08
     static let maximumBufferDurationSeconds: TimeInterval = 0.25
 
@@ -39,6 +40,7 @@ struct VoiceTutorInterruptionBoundaryState: Equatable {
     private(set) var generation: UInt64 = 0
     private var lastObservedAt: TimeInterval?
     private var quietDuration: TimeInterval = 0
+    private var interruptionRequestedAt: TimeInterval?
 
     mutating func responseStarted(_ responseID: String?) {
         guard let responseID, !responseID.isEmpty, self.responseID != responseID else { return }
@@ -46,6 +48,7 @@ struct VoiceTutorInterruptionBoundaryState: Equatable {
         self.responseID = responseID
         lastObservedAt = nil
         quietDuration = 0
+        interruptionRequestedAt = nil
     }
 
     mutating func observe(
@@ -76,10 +79,15 @@ struct VoiceTutorInterruptionBoundaryState: Equatable {
         lastObservedAt = uptime
     }
 
-    func request(responseID: String, at uptime: TimeInterval) -> VoiceTutorInterruptionBoundaryToken? {
+    mutating func request(responseID: String, at uptime: TimeInterval) -> VoiceTutorInterruptionBoundaryToken? {
         guard self.responseID == responseID, !responseID.isEmpty,
               uptime.isFinite, uptime >= 0 else { return nil }
-        return .init(responseID: responseID, generation: generation, requestedAtUptime: uptime)
+        let requestedAt = interruptionRequestedAt ?? uptime
+        guard uptime >= requestedAt else { return nil }
+        interruptionRequestedAt = requestedAt
+        // A concurrent result-arrival or pause request shares the first user's
+        // deadline instead of granting the same old response another grace.
+        return .init(responseID: responseID, generation: generation, requestedAtUptime: requestedAt)
     }
 
     func decision(for token: VoiceTutorInterruptionBoundaryToken, now: TimeInterval) -> Decision {
@@ -101,6 +109,7 @@ struct VoiceTutorInterruptionBoundaryState: Equatable {
         self.responseID = nil
         lastObservedAt = nil
         quietDuration = 0
+        interruptionRequestedAt = nil
     }
 }
 
@@ -114,7 +123,7 @@ struct VoiceTutorInterruptionFadeToken: Equatable, Sendable {
 /// to clear interrupted audio. It changes only output gain; it never freezes
 /// the RTP queue or microphone. Every update is fenced to the original reply.
 struct VoiceTutorInterruptionFadeState: Equatable {
-    static let durationSeconds: TimeInterval = 0.08
+    static let durationSeconds: TimeInterval = 0.04
     private(set) var responseID: String?
     private(set) var generation: UInt64 = 0
     private var startedAt: TimeInterval?

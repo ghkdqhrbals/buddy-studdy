@@ -991,6 +991,9 @@ final class VoiceTutorLessonContentPresentationTests: XCTestCase {
         editor.selectedRange = NSRange(location: 8, length: 0)
         try await harness.settle()
         let selection = editor.selectedRange
+        XCTAssertTrue(harness.probe.answerDraft.isEditing)
+        XCTAssertTrue(harness.probe.answerDraft.append(.init(answerID: OperationTranscriptProbe.answerID,
+            recordID: "202", itemID: "synthetic-late-asr", sequence: 1, text: "편집 중 늦은 음성")))
         XCTAssertTrue(harness.probe.operations.apply(.init(sequence: 1, operationID: "synthetic_editor_update",
             name: "list_studies", phase: .completed, elapsedMilliseconds: 120), at: 1))
         try await harness.settle()
@@ -1000,6 +1003,7 @@ final class VoiceTutorLessonContentPresentationTests: XCTestCase {
         XCTAssertFalse(harness.probe.showsTranscript)
         XCTAssertTrue(try XCTUnwrap(harness.button(label: strings.done)).accessibilityActivate())
         try await harness.waitForEditorDismissal()
+        XCTAssertFalse(harness.probe.answerDraft.isEditing)
         XCTAssertEqual(harness.button(label: strings.voiceTutorAnswerEdit)?.accessibilityValue, answer)
         XCTAssertEqual(harness.probe.answerDraft.questionText, question)
         XCTAssertTrue(harness.probe.answerControls.isEmpty, "Closing the editor must not submit an answer")
@@ -1021,6 +1025,26 @@ final class VoiceTutorLessonContentPresentationTests: XCTestCase {
         XCTAssertFalse(harness.probe.showsTranscript)
         try assertFullGrade(in: harness)
         XCTAssertEqual(harness.probe.answerDraft.text, answer, "Displaying a grade cannot erase the submitted answer")
+        XCTAssertTrue(harness.probe.presentation.sessionState.apply(snapshot(.conversation, sequence: 4)))
+        try await harness.settle()
+        try assertFullGrade(in: harness)
+        XCTAssertTrue(try XCTUnwrap(harness.orbElements.first).accessibilityValue?.contains(strings.voiceTutorAnswerGraded) == true)
+        XCTAssertTrue(harness.probe.presentation.sessionState.apply(snapshot(.questionLoading, sequence: 5)))
+        try await harness.settle()
+        try assertNoGrade(in: harness)
+    }
+
+    func testCanonicalQuestionRendersMarkdownWithoutChangingSavedPrompt() async throws {
+        try requireHostedAccessibility()
+        let harness = try OperationTranscriptHarness(captions: [], showsTranscript: false)
+        defer { harness.close() }
+        let markdown = "**Redis TTL**을 설명하고 `EXPIRE`의 역할을 설명해 주세요."
+        XCTAssertTrue(harness.probe.receiveQuestion(markdown))
+        XCTAssertTrue(harness.probe.presentation.sessionState.apply(snapshot(.answering, sequence: 1)))
+        try await harness.settle()
+        _ = try harness.logicalTextRow("Redis TTL을 설명하고 EXPIRE의 역할을 설명해 주세요.")
+        XCTAssertEqual(harness.probe.answerDraft.questionText, markdown)
+        XCTAssertFalse(harness.probe.showsTranscript)
     }
 
     func testMissingFailedAndMismatchedGradeNeverDisplayAStaleScoreAndRetryRemainsExplicit() async throws {
@@ -1055,6 +1079,30 @@ final class VoiceTutorLessonContentPresentationTests: XCTestCase {
         try assertNoGrade(in: harness)
         _ = try harness.logicalTextRow(strings.voiceTutorGradingResultLoading)
         XCTAssertFalse(harness.probe.showsTranscript)
+    }
+
+    func testUnavailableGradingOffersExactRetryWithoutClaimingFailureOrScore() async throws {
+        try requireHostedAccessibility()
+        let harness = try OperationTranscriptHarness(captions: [], showsTranscript: false)
+        defer { harness.close() }
+        XCTAssertTrue(harness.probe.presentation.sessionState.apply(snapshot(.gradingUnavailable, sequence: 1)))
+        let request = try XCTUnwrap(harness.probe.gradingResult.reconcile(snapshot: harness.probe.presentation.sessionState.snapshot,
+            sessionID: "synthetic-ui-session", attemptID: UUID(), ownerUserID: 7))
+        XCTAssertTrue(harness.probe.gradingResult.fail(for: request))
+        try await harness.settle()
+        try assertNoGrade(in: harness)
+        _ = try harness.logicalTextRow(strings.voiceTutorGradingUnavailableHelp)
+        let orb = try XCTUnwrap(harness.orbElements.first)
+        XCTAssertEqual(orb.accessibilityLabel, strings.voiceTutorGradingResultReloadTitle)
+        XCTAssertTrue(orb.accessibilityValue?.contains(strings.voiceTutorGradingUnavailable) == true)
+        XCTAssertTrue(orb.accessibilityActivate())
+        try await harness.settle()
+        XCTAssertEqual(harness.probe.gradingRetryCount, 1)
+        XCTAssertEqual(harness.probe.gradingRetryRequest?.target.recordID, "202")
+        XCTAssertNil(harness.button(label: strings.voiceTutorGradingResultReloadTitle))
+        XCTAssertTrue(try XCTUnwrap(harness.orbElements.first).accessibilityActivate())
+        XCTAssertEqual(harness.probe.gradingRetryCount, 1)
+        XCTAssertTrue(harness.probe.answerControls.isEmpty)
     }
 
     func testSavedGradeRemainsVisibleWhileAChoiceOwnsTheOrb() async throws {
@@ -1358,7 +1406,9 @@ private struct OperationTranscriptTestParent: View {
             answerDraftText: Binding(get: { probe.answerDraft.text }, set: { _ = probe.answerDraft.edit($0) }),
             canSubmitAnswer: probe.answerDraft.canSubmit,
             onFinishAnswer: { probe.finishAnswer() }, onSubmitAnswer: { probe.submitAnswer() },
-            gradingResultState: probe.gradingResult, onGradingResultRetry: { probe.retryGrading() })
+            gradingResultState: probe.gradingResult, onGradingResultRetry: { probe.retryGrading() },
+            onAnswerEditingBegin: { probe.answerDraft.beginEditing(answerID: $0) },
+            onAnswerEditingEnd: { probe.answerDraft.endEditing(answerID: $0) })
             .dynamicTypeSize(probe.dynamicType)
             .environment(\.locale, Locale(identifier: "ko_KR"))
             .environment(\.scenePhase, .active)

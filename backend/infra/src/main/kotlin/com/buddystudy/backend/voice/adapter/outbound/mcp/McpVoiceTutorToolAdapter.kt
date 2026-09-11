@@ -234,12 +234,16 @@ class McpVoiceTutorToolAdapter(
                     "list_studies" -> nativeStudyListParameters(tool.inputSchema().toMap())
                     "list_pending_questions" -> focusParameters("Exact selected topic. The server pages its arrived questions and returns the current saved question.")
                     "request_question" -> focusParameters("Exact selected topic. Reuses an arrived pending question before spending quota; skip an unwanted question separately on the learner's request.")
+                    "get_grading_process" -> gradingStatusParameters(requireRecord = false)
                     else -> tool.inputSchema().toMap()
                 }
                 val description = nativeToolDescription(tool.name(), tool.description().orEmpty())
                 VoiceTutorMcpToolDefinition(tool.name(), description, schema)
             } +
             listOf(
+                VoiceTutorMcpToolDefinition("get_answer_status",
+                    "Read the saved grading status and feedback for the exact submitted record_id. Supply its correlation_id when known. This recovers transient status failures without pending-question lookup, resubmission or changing the question. Completion is pushed; use only for an explicit status/recovery request.",
+                    gradingStatusParameters(requireRecord = true)),
                 VoiceTutorMcpToolDefinition(CANCEL_LEARNING,
                     "Cancel automatic learning on an explicit cancellation or topic switch, then follow the latest request. Keeps the call, saved focus, questions, accepted jobs and drafts. Never use for acknowledgement, thinking pause or status questions.",
                     mapOf("type" to "object", "additionalProperties" to false,
@@ -273,9 +277,18 @@ class McpVoiceTutorToolAdapter(
         "list_pending_questions" -> "Recover the current saved question for final voiceLessonFocus.studyId. Preserve its wording and original level; never repeat an already delivered question or assess unfinished speech. Selection already continues question work automatically."
         "request_question" -> "Recover or request a question for final voiceLessonFocus.studyId on an explicit learner request. Reuses pending questions; generation is idempotent and completion is event-driven. Never poll or ask to repeat a start. The learner finishes, edits and submits in the app."
         "skip_question" -> "Skip the exact arrived unanswered record_id only on an explicit skip/change request. Preserves drafts; never submits, grades or generates a question."
-        "get_question_process", "get_grading_process" -> "Read one explicit status/recovery snapshot for this call's returned correlation_id. Completion is delivered automatically; never poll, infer a grade or repeat an accepted write."
+        "get_question_process" -> "Read one explicit generation status/recovery snapshot for this call's returned correlation_id. Completion is delivered automatically; never poll or repeat an accepted write."
+        "get_grading_process" -> "Compatibility alias for the exact submitted grading attempt. Prefer get_answer_status(record_id) to read its saved status and feedback. Never use list_pending_questions, resubmit or switch questions to recover a grade."
         else -> fallback
     }
+
+    private fun gradingStatusParameters(requireRecord: Boolean): Map<String, Any?> = mapOf(
+        "type" to "object", "additionalProperties" to false,
+        "properties" to mapOf(
+            "record_id" to mapOf("type" to "integer", "minimum" to 1, "description" to "Exact submitted question record ID."),
+            "correlation_id" to mapOf("type" to "string", "minLength" to 1, "maxLength" to 100,
+                "description" to "That record's accepted gradingRequestId.")),
+        "required" to listOf(if (requireRecord) "record_id" else "correlation_id"))
 
     private fun nativeStudyListParameters(schema: Map<String, Any?>): Map<String, Any?> {
         val properties = (schema["properties"] as? Map<*, *>)?.entries?.associate { it.key.toString() to it.value }.orEmpty()
@@ -605,6 +618,9 @@ class McpVoiceTutorToolAdapter(
                         false, learningContinuationCancelled = true)
                 }
                 if (toolName in VoiceTutorCanonicalQuestionCoordinator.TOOLS) {
+                    if (toolName == "list_pending_questions") {
+                        canonicalQuestions.submittedAnswerStatus(context, arguments)?.let { return it }
+                    }
                     if (toolName in setOf("request_question", "list_pending_questions")) {
                         // Validate the voice schema before curriculum preparation can create nodes.
                         val requested = focusStudyId(arguments)

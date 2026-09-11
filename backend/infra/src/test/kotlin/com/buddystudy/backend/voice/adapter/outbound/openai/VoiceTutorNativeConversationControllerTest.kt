@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract as Contract
 import com.buddystudy.backend.voice.VoiceTutorTranscriptMetadata as Metadata
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorGradingReadback
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningPhase
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearningProgress
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
@@ -1022,10 +1023,10 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["GRADED", "GRADING_FAILED", "WRONG"])
+    @ValueSource(strings = ["GRADING", "GRADED", "GRADING_FAILED", "WRONG_GRADING", "WRONG_GRADED", "WRONG_GRADING_FAILED"])
     fun `a fresh exact grading lookup recovers an observation timeout without accepting another process`(terminal: String) {
-        val matches = terminal != "WRONG"
-        val phase = if (terminal == "GRADING_FAILED") VoiceTutorLearningPhase.GRADING_FAILED else VoiceTutorLearningPhase.GRADED
+        val matches = !terminal.startsWith("WRONG_")
+        val phase = VoiceTutorLearningPhase.valueOf(terminal.removePrefix("WRONG_"))
         val answer = manualAnswer()
         answerControl(Contract.ANSWER_FINISH_EVENT, answer)
         answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "검토한 답변")
@@ -1036,14 +1037,24 @@ class VoiceTutorNativeConversationControllerTest {
         ackToolOutput()
         client(Contract.SPEECH_STARTED_EVENT, 2)
         controller.failLearningWatch(watches.single())
-        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("grading_unavailable")
         client(Contract.SPEECH_STOPPED_EVENT, 2); committed("check-grade")
         created("check-grade-response"); toolDone("check-grade-response", "grade-status", "get_grading_process")
         controller.beginTool("grade-status")
+        val correlation = if (matches) requireNotNull(progress.correlationId) else "wrong-process"
+        val changesBefore = ui.count { it.path("type").asText() == Contract.QUESTION_CHANGED_EVENT }
         controller.completeTool("grade-status", VoiceTutorMcpToolResult("{}", false,
-            learningProgress = progress.copy(phase = phase,
-                correlationId = if (matches) progress.correlationId else "wrong-process")))
-        assertThat(sessionStates().last().path("phase").asText()).isEqualTo(if (matches) phase.name.lowercase() else "conversation")
+            learningProgress = progress.copy(phase = phase, correlationId = correlation),
+            questionChange = if (phase == VoiceTutorLearningPhase.GRADING) null else VoiceTutorQuestionChange(7, "42"),
+            gradingReadback = if (phase == VoiceTutorLearningPhase.GRADED)
+                VoiceTutorGradingReadback(7, "42", correlation, 87, "검증 대상 이유", "검증 대상 해설") else null))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo(if (matches) phase.name.lowercase() else "grading_unavailable")
+        assertThat(ui.count { it.path("type").asText() == Contract.QUESTION_CHANGED_EVENT })
+            .isEqualTo(changesBefore + if (matches && phase != VoiceTutorLearningPhase.GRADING) 1 else 0)
+        assertThat(watches).hasSize(if (matches && phase == VoiceTutorLearningPhase.GRADING) 2 else 1)
+        ackToolOutput()
+        if (!matches) assertThat(responses().last().path("response").path("instructions").asText())
+            .doesNotContain("검증 대상 이유", "검증 대상 해설")
     }
 
     @ParameterizedTest
@@ -3570,6 +3581,111 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(responses().last().path("response").path("tool_choice").asText()).isEqualTo("none")
         assertThat(responses().last().path("response").path("instructions").asText()).contains("취소했어요")
     }
+
+    @Test
+    fun `saved grading replaces waiting audio only after its exact word boundary acknowledgement`() {
+        val watch = submittedGrading()
+        created("waiting"); audio("waiting", "waiting-text", "아직 채점 중이에요")
+        controller.completeLearningPoll(watch, completedGrade(watch))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("graded")
+        val stop = ui.last { it.path("type").asText() == Contract.RESPONSE_FINISH_WORD_EVENT }
+        assertThat(cancellations()).noneMatch { it.path("response_id").asText() == "waiting" }
+        controller.observeClientEvent(mapper.writeValueAsString(mapOf("type" to Contract.RESPONSE_WORD_FINISHED_EVENT,
+            "responseId" to "waiting", "requestId" to "wrong")))
+        assertThat(cancellations()).noneMatch { it.path("response_id").asText() == "waiting" }
+        controller.observeClientEvent(mapper.writeValueAsString(mapOf("type" to Contract.RESPONSE_WORD_FINISHED_EVENT,
+            "responseId" to "waiting", "requestId" to stop.path("requestId").asText())))
+        assertThat(cancellations()).anyMatch { it.path("response_id").asText() == "waiting" }
+        cancelled("waiting"); event("output_audio_buffer.cleared", "response_id" to "waiting"); settleQuiet()
+        val next = responses().last().path("response")
+        assertThat(next.path("instructions").asText()).contains("now graded", "87", "검증된 이유")
+        assertThat(next.path("tool_choice").asText()).isEqualTo("none")
+        assertThat(next.path("input").isArray).isTrue()
+        assertThat(next.path("input").isEmpty).isTrue()
+        val stops = ui.count { it.path("type").asText() == Contract.RESPONSE_FINISH_WORD_EVENT }
+        controller.completeLearningPoll(watch, completedGrade(watch))
+        assertThat(ui.count { it.path("type").asText() == Contract.RESPONSE_FINISH_WORD_EVENT }).isEqualTo(stops)
+    }
+
+    @Test
+    fun `missing word acknowledgement has a bounded fallback without waiting for whole response`() {
+        val watch = submittedGrading()
+        created("waiting"); audio("waiting", "waiting-text")
+        controller.completeLearningPoll(watch, completedGrade(watch))
+        time += Duration.ofMillis(1499).toNanos(); controller.tick()
+        assertThat(cancellations()).noneMatch { it.path("response_id").asText() == "waiting" }
+        time += Duration.ofMillis(1).toNanos(); controller.tick()
+        assertThat(cancellations()).anyMatch { it.path("response_id").asText() == "waiting" }
+    }
+
+    @Test
+    fun `ordinary speech preserves graded identity and pending list reads cannot reset a submitted record`() {
+        val watch = submittedGrading()
+        created("status"); toolDone("status", "pending", "list_pending_questions")
+        controller.beginTool("pending")
+        assertThat(controller.learningWatchIsCurrent(watch)).isTrue()
+        assertThat(sessionStates().last().path("recordId").asText()).isEqualTo("42")
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = watch.progress.copy(phase = VoiceTutorLearningPhase.GRADED)))
+        client(Contract.SPEECH_STARTED_EVENT, 3)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("graded")
+        assertThat(sessionStates().last().path("recordId").asText()).isEqualTo("42")
+    }
+
+    @Test
+    fun `grading observation failure exposes recoverable exact record and manual refresh never lists questions`() {
+        val watch = submittedGrading()
+        created("waiting"); silentDone("waiting")
+        controller.failLearningWatch(watch)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("grading_unavailable")
+        assertThat(sessionStates().last().path("recordId").asText()).isEqualTo("42")
+        created("notice"); audio("notice", "notice-text"); done("notice", "notice-text")
+        event("output_audio_buffer.stopped", "response_id" to "notice")
+        val count = serverCalls().size
+        controller.observeClientEvent("{\"type\":\"${Contract.GRADING_REFRESH_EVENT}\",\"recordId\":\"999\"}")
+        assertThat(serverCalls()).hasSize(count)
+        controller.observeClientEvent("{\"type\":\"${Contract.GRADING_REFRESH_EVENT}\",\"recordId\":\"42\"}")
+        assertThat(serverCalls()).hasSize(count + 1)
+        val call = serverCalls().last().path("item")
+        assertThat(call.path("name").asText()).isEqualTo("get_answer_status")
+        assertThat(mapper.readTree(call.path("arguments").asText()).path("record_id").asLong()).isEqualTo(42)
+    }
+
+    @Test
+    fun `answer editor pause acknowledgement waits for earlier committed ASR segment`() {
+        manualAnswer()
+        speech(2); committed("answer-before-edit")
+        client(Contract.PAUSE_REQUEST_EVENT, 1); client(Contract.PAUSE_INPUT_QUIESCED_EVENT, 1)
+        controller.tick()
+        val clears = outbound.count { it.path("type").asText() == "input_audio_buffer.clear" }
+        transcript("answer-before-edit", "편집 이전 발화")
+        controller.tick()
+        assertThat(answerSegments().last().path("itemId").asText()).isEqualTo("answer-before-edit")
+        assertThat(outbound.count { it.path("type").asText() == "input_audio_buffer.clear" }).isEqualTo(clears + 1)
+        event("input_audio_buffer.cleared", "event_id" to "editor-clear")
+        assertThat(ui.last { it.path("type").asText() == Contract.PAUSE_STATE_EVENT }.path("paused").asBoolean()).isTrue()
+        assertThat(ui.indexOf(answerSegments().last())).isLessThan(ui.indexOfLast { it.path("type").asText() == Contract.PAUSE_STATE_EVENT })
+    }
+
+    private fun submittedGrading(): VoiceTutorNativeConversationController.LearningWatch {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_FINISH_EVENT, answer)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, answer, "최종 답변")
+        val request = serverQuestionCall()
+        event("conversation.item.created", "item" to request.path("item"))
+        val callId = request.path("item").path("call_id").asText()
+        controller.beginTool(callId)
+        controller.completeTool(callId, VoiceTutorMcpToolResult("{}", false,
+            learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.GRADING, 7, "42", "grade-1")))
+        ackToolOutput()
+        // Reproduce a learner asking about progress while the accepted grading
+        // subscription remains active; this creates actual waiting audio.
+        speech(2); committed("status-request")
+        return watches.single()
+    }
+    private fun completedGrade(watch: VoiceTutorNativeConversationController.LearningWatch) = VoiceTutorMcpToolResult("{}", false,
+        learningProgress = watch.progress.copy(phase = VoiceTutorLearningPhase.GRADED),
+        gradingReadback = VoiceTutorGradingReadback(7, "42", "grade-1", 87, "검증된 이유", "저장된 해설"))
 
     private fun validFormAnswers() = listOf(
         mapOf("questionId" to "single", "selectedOptionIds" to listOf("a"), "text" to "추가 선호"),

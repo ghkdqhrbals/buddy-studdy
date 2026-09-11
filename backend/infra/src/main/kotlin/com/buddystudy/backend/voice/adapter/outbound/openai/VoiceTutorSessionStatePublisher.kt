@@ -24,6 +24,9 @@ internal class VoiceTutorSessionStatePublisher(
 
     fun start() = emit()
 
+    /** Explicit read completion needs a fresh receipt even when state is unchanged. */
+    fun refresh() = emit(force = true)
+
     fun update(
         phase: String,
         revision: Long = current.revision,
@@ -49,8 +52,8 @@ internal class VoiceTutorSessionStatePublisher(
         emit()
     }
 
-    private fun emit() {
-        if (published == current) return
+    private fun emit(force: Boolean = false) {
+        if (!force && published == current) return
         published = current
         val event = linkedMapOf<String, Any>(
             "type" to VoiceTutorRealtimeContract.SESSION_STATE_EVENT,

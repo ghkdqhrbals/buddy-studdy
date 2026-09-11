@@ -905,6 +905,7 @@ final class VoiceTutorViewModel: ObservableObject {
     }
     private var canControlAnswer: Bool {
         usesWebRTC && phase.isLive && !isFinalizing && !pauseState.holdsMicrophone && !userInputState.holdsMicrophone
+            && !answerDraftState.isEditing
             && activeConnection?.isCurrent() == true && answerDraftState.belongsToCurrentLesson(sessionState.snapshot)
             && answerDraftState.revision >= studyFocus.revision
     }
@@ -927,6 +928,12 @@ final class VoiceTutorViewModel: ObservableObject {
     private var serverEndContinuation: AsyncStream<VoiceTutorRealtimeEnded>.Continuation?
     private var heartbeatTask: Task<Void, Never>?
     private var countdownTask: Task<Void, Never>?
+    private var answerEditorID: String?
+    private var answerEditorPauseOwned = false
+    private var answerEditorClosingID: String?
+    private var finishWordTask: Task<Void, Never>?
+    private var finishWordRequestID: String?
+    private var pendingGradingRefresh: VoiceTutorGradingResultState.Request?
     private var gradingResultTask: Task<Void, Never>?
     private var gradingResultTimeoutTask: Task<Void, Never>?
     private var activeConnection: VoiceTutorLiveConnection?
@@ -1197,6 +1204,61 @@ final class VoiceTutorViewModel: ObservableObject {
         }
     }
 
+    func beginAnswerEditing(answerID: String) -> Bool {
+        guard usesWebRTC, phase.isLive, !isFinalizing, activeConnection?.isCurrent() == true,
+              !userInputState.holdsMicrophone, pauseState.mode != .resuming,
+              let controls = localSpeechEvents,
+              answerDraftState.beginEditing(answerID: answerID) else { return false }
+        answerEditorID = answerID
+        answerEditorClosingID = nil
+        answerEditorPauseOwned = false
+        if pauseState.mode == .active, let pause = pauseState.requestPause() {
+            answerEditorPauseOwned = true
+            controls.yield(pause)
+            guard webRTCTransport?.setMuted(true) == true else {
+                Task { await failPause() }; return false
+            }
+            controls.yield(VoiceTutorPauseControl(kind: .inputQuiesced, sequence: pause.sequence))
+            startPauseTimeout(sequence: pause.sequence)
+        } else if webRTCTransport?.setMuted(true) != true {
+            Task { await failPause() }; return false
+        }
+        return true
+    }
+
+    func endAnswerEditing(answerID: String) {
+        guard answerEditorID == answerID else { return }
+        answerEditorID = nil
+        persistVoiceAnswerDraft(force: answerDraftState.hasUserEdited)
+        if answerEditorPauseOwned, phase.isLive, !isFinalizing {
+            answerEditorClosingID = answerID
+            resumeAfterAnswerEditingIfReady()
+        } else if pauseState.mode == .pausing, phase.isLive, !isFinalizing {
+            // An earlier user pause still owns the call. Keep discarding its
+            // pending ASR until that exact pause is acknowledged, without
+            // acquiring ownership or scheduling an unwanted resume.
+            answerEditorClosingID = answerID
+        } else {
+            answerDraftState.endEditing(answerID: answerID)
+            restoreAnswerMicrophoneGate()
+        }
+    }
+
+    private func resumeAfterAnswerEditingIfReady() {
+        guard answerEditorPauseOwned, answerEditorClosingID != nil,
+              let controls = localSpeechEvents, let resume = pauseState.requestResume() else { return }
+        controls.yield(resume)
+        startPauseTimeout(sequence: resume.sequence)
+    }
+
+    private func restoreAnswerMicrophoneGate() {
+        guard phase.isLive, !isFinalizing, activeConnection?.isCurrent() == true else { return }
+        if webRTCTransport?.setMuted(isMuted || pauseState.holdsMicrophone
+            || answerDraftState.holdsMicrophone || userInputState.holdsMicrophone) != true {
+            Task { await failPause() }
+        }
+    }
+
     func updateAnswerDraft(_ text: String) {
         guard phase.isLive, !isFinalizing, activeConnection?.isCurrent() == true,
               answerDraftState.edit(text) else { return }
@@ -1209,7 +1271,7 @@ final class VoiceTutorViewModel: ObservableObject {
         guard let target = currentGradingResultTarget,
               retainedGradingResultState.target == target,
               let request = retainedGradingResultState.retry() else { return }
-        startGradingResultRequest(request)
+        startGradingResultRequest(request, refreshStatus: sessionState.snapshot?.phase == .gradingUnavailable)
     }
 
     private var currentGradingResultTarget: VoiceTutorGradingResultTarget? {
@@ -1218,9 +1280,14 @@ final class VoiceTutorViewModel: ObservableObject {
               let sessionID, sessionID == connection.session.sessionId,
               studyFocus.revision == 0 || studyFocus.focus != nil,
               studyFocus.focus.map({ $0.studyID == sessionState.snapshot?.studyID }) ?? true else { return nil }
-        return VoiceTutorGradingResultTarget(snapshot: sessionState.snapshot, sessionID: sessionID,
+        if let current = VoiceTutorGradingResultTarget(snapshot: sessionState.snapshot, sessionID: sessionID,
             attemptID: connectionAttemptFence.currentID, ownerUserID: connection.ownerUserID,
-            minimumRevision: studyFocus.revision)
+            minimumRevision: studyFocus.revision) { return current }
+        guard let retained = retainedGradingResultState.target,
+              retained.sessionID == sessionID, retained.attemptID == connectionAttemptFence.currentID,
+              retained.ownerUserID == connection.ownerUserID, retained.revision >= studyFocus.revision,
+              retained.remainsVisible(after: sessionState.snapshot) else { return nil }
+        return retained
     }
 
     private func reconcileGradingResult() {
@@ -1230,11 +1297,24 @@ final class VoiceTutorViewModel: ObservableObject {
         startGradingResultRequest(request)
     }
 
-    private func startGradingResultRequest(_ request: VoiceTutorGradingResultState.Request) {
+    private func startGradingResultRequest(_ request: VoiceTutorGradingResultState.Request, refreshStatus: Bool = false) {
         gradingResultTask?.cancel()
         gradingResultTimeoutTask?.cancel()
+        pendingGradingRefresh = refreshStatus ? request : nil
         gradingResultTask = Task { [weak self] in
             guard let self, self.isCurrentGradingResultRequest(request) else { return }
+            if refreshStatus {
+                do { try await self.transport.sendGradingRefresh(recordID: request.target.recordID, attemptID: request.target.attemptID) }
+                catch {
+                    guard self.isCurrentGradingResultRequest(request) else { return }
+                    _ = self.retainedGradingResultState.fail(for: request)
+                    self.pendingGradingRefresh = nil
+                    self.gradingResultTimeoutTask?.cancel()
+                }
+                // The authoritative graded snapshot starts the record GET.
+                // Keep the request loading (and controls disabled) until then.
+                return
+            }
             // loadStudyRecordDetail uses the authenticated records use case and
             // fences account, backend and language changes before and after GET.
             // It does not replace the active answer or write a parallel cache.
@@ -1244,11 +1324,22 @@ final class VoiceTutorViewModel: ObservableObject {
             self.gradingResultTimeoutTask?.cancel()
             self.gradingResultTimeoutTask = nil
             self.gradingResultTask = nil
+            if let target = self.retainedGradingResultState.claimReadyStatusRefresh(after: self.sessionState.snapshot),
+               self.currentGradingResultTarget == target {
+                do {
+                    try await self.transport.sendGradingRefresh(recordID: target.recordID, attemptID: target.attemptID)
+                } catch {
+                    // An exact authenticated result is already available. A
+                    // failed control refresh cannot erase it or resubmit work.
+                    self.logDiagnostic("event=ready_grading_status_refresh_failed", isWarning: true)
+                }
+            }
         }
         gradingResultTimeoutTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(20)) } catch { return }
             guard let self, !Task.isCancelled, self.isCurrentGradingResultRequest(request) else { return }
             _ = self.retainedGradingResultState.fail(for: request, reason: .timedOut)
+            self.pendingGradingRefresh = nil
             self.gradingResultTask?.cancel()
             self.gradingResultTask = nil
             self.gradingResultTimeoutTask = nil
@@ -1260,6 +1351,7 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     private func clearGradingResult() {
+        pendingGradingRefresh = nil
         gradingResultTask?.cancel()
         gradingResultTask = nil
         gradingResultTimeoutTask?.cancel()
@@ -1353,7 +1445,7 @@ final class VoiceTutorViewModel: ObservableObject {
 
     func togglePause() async {
         guard usesWebRTC, phase == .listening || phase == .speaking, !isFinalizing,
-              !userInputState.holdsMicrophone,
+              !userInputState.holdsMicrophone, !answerDraftState.isEditing,
               activeConnection?.isCurrent() == true, let controls = localSpeechEvents else { return }
         let command: VoiceTutorPauseControl
         if pauseState.mode == .active {
@@ -1686,6 +1778,12 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     private func stopLocalSpeechEventPump() {
+        finishWordTask?.cancel()
+        finishWordTask = nil
+        finishWordRequestID = nil
+        answerEditorID = nil
+        answerEditorPauseOwned = false
+        answerEditorClosingID = nil
         pauseTimeoutTask?.cancel()
         pauseTimeoutTask = nil
         localSpeechEvents?.finish()
@@ -1930,8 +2028,22 @@ final class VoiceTutorViewModel: ObservableObject {
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
             // Only the current authenticated control receive loop reaches this
             // path. Display snapshots never act as microphone or submit commands.
+            let previousPhase = sessionState.snapshot?.phase
             if sessionState.apply(event, minimumRevision: studyFocus.revision) {
                 reconcileGradingResult()
+                if event.phase == .graded, let request = pendingGradingRefresh,
+                   isCurrentGradingResultRequest(request) {
+                    startGradingResultRequest(request)
+                } else if event.phase == .gradingUnavailable, let request = pendingGradingRefresh,
+                          isCurrentGradingResultRequest(request) {
+                    _ = retainedGradingResultState.fail(for: request)
+                    pendingGradingRefresh = nil
+                    gradingResultTask?.cancel()
+                    gradingResultTimeoutTask?.cancel()
+                } else if previousPhase == .gradingUnavailable, event.phase == .graded,
+                          let request = retainedGradingResultState.retry() {
+                    startGradingResultRequest(request)
+                }
             }
         case .sessionReady(let hardEndsAt, let remainingSeconds, let pauseProtocol, let turnProtocol):
             if usesWebRTC, !VoiceTutorTurnProtocol.acceptsReady(turnProtocol) {
@@ -1959,6 +2071,11 @@ final class VoiceTutorViewModel: ObservableObject {
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
             var acknowledged = pauseState
             guard acknowledged.acknowledge(sequence: sequence, paused: paused) else { break }
+            if !paused, let answerID = answerEditorClosingID, answerEditorPauseOwned {
+                answerDraftState.endEditing(answerID: answerID)
+                answerEditorClosingID = nil
+                answerEditorPauseOwned = false
+            }
             if !paused, webRTCTransport?.setMuted(isMuted || answerDraftState.holdsMicrophone || userInputState.holdsMicrophone) != true {
                 await failPause()
                 break
@@ -1966,6 +2083,11 @@ final class VoiceTutorViewModel: ObservableObject {
             pauseTimeoutTask?.cancel()
             pauseTimeoutTask = nil
             pauseState = acknowledged
+            if paused, let answerID = answerEditorClosingID, !answerEditorPauseOwned {
+                answerDraftState.endEditing(answerID: answerID)
+                answerEditorClosingID = nil
+            }
+            if paused { resumeAfterAnswerEditingIfReady() }
             inputNeedsRepeat = false
             logDiagnostic("event=pause_acknowledged paused=\(paused ? 1 : 0) sequence=\(sequence)")
         case .quotaUpdated(let quota):
@@ -2063,6 +2185,33 @@ final class VoiceTutorViewModel: ObservableObject {
             logDiagnostic("event=input_settled sequence=\(sequence) accepted=\(accepted ? 1 : 0)")
         case .providerTurnAbandoned(let responseID):
             abandonProviderTurn(responseID: responseID)
+        case .finishWordRequested(let request):
+            finishWordTask?.cancel()
+            finishWordRequestID = request.requestID
+            finishWordTask = Task { [weak self] in
+                guard let self else { return }
+                let isCurrent = { [weak self] in
+                    guard let self else { return false }
+                    return !Task.isCancelled && self.connectionAttemptFence.isCurrent(attemptID)
+                        && connection.isCurrent() && self.phase.isLive && !self.isFinalizing
+                        && self.finishWordRequestID == request.requestID
+                }
+                guard isCurrent() else { return }
+                if self.duplexPlaybackState.matchesActiveResponse(responseID: request.responseID)
+                    || self.pendingSpokenEndPlayoutTail?.responseID == request.responseID {
+                    await self.webRTCTransport?.waitForInterruptionBoundary(responseID: request.responseID)
+                }
+                guard isCurrent() else { return }
+                // Both interruption methods are response scoped. A newer turn
+                // that arrived while waiting must keep playing untouched.
+                if self.duplexPlaybackState.matchesActiveResponse(responseID: request.responseID)
+                    || self.pendingSpokenEndPlayoutTail?.responseID == request.responseID {
+                    self.interruptTutorResponse(responseID: request.responseID)
+                }
+                do { try await self.transport.sendWordFinished(request, attemptID: attemptID) }
+                catch { self.logDiagnostic("event=word_finished_delivery_failed", isWarning: true) }
+                if isCurrent() { self.finishWordTask = nil; self.finishWordRequestID = nil }
+            }
         case .responseInterrupted(let responseID):
             interruptTutorResponse(responseID: responseID)
         case .responseRecovering(let responseID, let sequence):

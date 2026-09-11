@@ -643,7 +643,9 @@ struct VoiceTutorSessionView: View {
             canCancelLearning: viewModel.canCancelLearning,
             onCancelLearning: { Task { await viewModel.cancelLearning() } },
             gradingResultState: viewModel.gradingResultState,
-            onGradingResultRetry: { viewModel.retryGradingResult() }
+            onGradingResultRetry: { viewModel.retryGradingResult() },
+            onAnswerEditingBegin: { viewModel.beginAnswerEditing(answerID: $0) },
+            onAnswerEditingEnd: { viewModel.endAnswerEditing(answerID: $0) }
         )
         .navigationTitle(strings.voiceTutorCallTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -766,7 +768,7 @@ struct VoiceTutorCallPresentation {
             case .answering: return hasCanonicalAnswerQuestion ? .capturingAnswer : .questionReady
             case .answerReview: return .reviewingAnswer
             case .graded: return .graded
-            case .questionFailed, .gradingFailed, .answerFailed: return .learningFailed
+            case .questionFailed, .gradingFailed, .gradingUnavailable, .answerFailed: return .learningFailed
             case .ending: return .ending
             case .ended: return .ended
             case .failed: return .failed
@@ -817,7 +819,7 @@ struct VoiceTutorCallPresentation {
     }
 
     func canFinishAnswer(_ draft: VoiceTutorAnswerDraftState, userInputState: VoiceTutorUserInputState) -> Bool {
-        canPresentAnswer(draft) && draft.phase == .listening && !userInputState.holdsMicrophone
+        canPresentAnswer(draft) && draft.phase == .listening && !draft.isEditing && !userInputState.holdsMicrophone
     }
 
     func canPresentAnswer(_ draft: VoiceTutorAnswerDraftState) -> Bool {
@@ -945,6 +947,7 @@ struct VoiceTutorCallPresentation {
         case .graded: return strings.voiceTutorAnswerGraded
         case .questionFailed: return strings.voiceTutorQuestionFailed
         case .gradingFailed: return strings.voiceTutorGradingFailed
+        case .gradingUnavailable: return strings.voiceTutorGradingUnavailable
         case .answerFailed: return strings.voiceTutorAnswerFailed
         case .ending: return strings.voiceTutorCallEnding
         case .ended: return strings.voiceTutorCallEnded
@@ -1216,6 +1219,8 @@ struct VoiceTutorCallScreen: View {
     var onCancelLearning: () -> Void = {}
     var gradingResultState = VoiceTutorGradingResultState()
     var onGradingResultRetry: () -> Void = {}
+    var onAnswerEditingBegin: (String) -> Bool = { _ in true }
+    var onAnswerEditingEnd: (String) -> Void = { _ in }
 
     private var usesAccessibilityChrome: Bool {
         VoiceTutorCallAdaptiveLayout.usesAccessibilityChrome(for: dynamicTypeSize)
@@ -1301,6 +1306,9 @@ struct VoiceTutorCallScreen: View {
         .onChange(of: answerDraftState.answerID) { _, _ in
             answerEditorSession = nil
         }
+        .onChange(of: answerEditorSession?.id) { previousID, _ in
+            if let previousID { onAnswerEditingEnd(previousID) }
+        }
         .sheet(item: $answerEditorSession) { session in
             VoiceTutorAnswerEditor(strings: strings, text: Binding(
                 get: { answerDraftState.answerID == session.id ? answerDraftText.wrappedValue : "" },
@@ -1309,8 +1317,9 @@ struct VoiceTutorCallScreen: View {
                     answerDraftText.wrappedValue = text
                 }
             ))
+            .interactiveDismissDisabled()
             .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .presentationContentInteraction(.scrolls)
         }
         .onChange(of: orbDragIsActive) { _, isTouching in
@@ -1380,7 +1389,7 @@ struct VoiceTutorCallScreen: View {
                     if hasAnswerDraft && userInputState.pending == nil { canonicalAnswerQuestion }
                     answerOrbPlaceholder(.call, diameter: compactOrbDiameter(in: geometry))
                     callNotices
-                    if showsGradingResult { gradingResultCard }
+                    if showsGradingResultCard { gradingResultCard }
                     if let pending = userInputState.pending {
                         VoiceTutorUserInputCard(entry: pending, strings: strings, isCompact: true,
                             onChange: { onUserInputChange(pending.id, $0) },
@@ -1506,7 +1515,7 @@ struct VoiceTutorCallScreen: View {
         orbVisual(diameter: diameter)
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(hasAnswerDraft || userInputState.pending != nil || presentation.showsPauseControl ? orbActionLabel : strings.voiceTutorTeacher)
+            .accessibilityLabel(hasAnswerDraft || userInputState.pending != nil || canRefreshUnavailableGrade || presentation.showsPauseControl ? orbActionLabel : strings.voiceTutorTeacher)
             .accessibilityValue(orbAccessibilityValue)
             .accessibilityHint(orbActionHint)
             .accessibilityAddTraits(presentation.pauseState.holdsMicrophone ? .isSelected : [])
@@ -1724,6 +1733,11 @@ struct VoiceTutorCallScreen: View {
         if orbInteraction.stage == .warning { return strings.voiceTutorOrbKeepHoldingToEnd }
         if orbInteraction.stage == .committed { return strings.voiceTutorCallEnding }
         if userInputState.holdsMicrophone { return strings.voiceTutorInputStatus }
+        if showsGradingResult, presentation.pauseState.mode == .active, !presentation.isServerPaused {
+            if visibleGradingResult != nil { return strings.voiceTutorAnswerGraded }
+            if presentation.lessonPhase == .gradingUnavailable { return strings.voiceTutorGradingUnavailable }
+            return strings.voiceTutorGradingResultLoading
+        }
         if answerCaptureIsListening && answerDraftText.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return strings.voiceTutorAnswerWaiting
         }
@@ -1821,7 +1835,7 @@ struct VoiceTutorCallScreen: View {
     private var hasCompactInteraction: Bool { userInputState.pending != nil || hasAnswerDraft || showsGradingResult }
 
     private var hasLessonOrbContent: Bool {
-        hasCompactInteraction || [.grading, .graded, .gradingFailed].contains(presentation.lessonPhase)
+        hasCompactInteraction || [.grading, .graded, .gradingFailed, .gradingUnavailable].contains(presentation.lessonPhase)
     }
 
     private var answerCaptureIsListening: Bool {
@@ -1859,7 +1873,8 @@ struct VoiceTutorCallScreen: View {
     }
 
     private func openAnswerEditor() {
-        guard answerDraftIsEditable, let answerID = answerDraftState.answerID else { return }
+        guard answerDraftIsEditable, let answerID = answerDraftState.answerID,
+              onAnswerEditingBegin(answerID) else { return }
         transcriptAutoScrollTask?.cancel()
         transcriptAutoScrollTask = nil
         transcriptScrollSettleTask?.cancel()
@@ -1915,7 +1930,7 @@ struct VoiceTutorCallScreen: View {
             Text(strings.voiceTutorQuestionHeading)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(voiceAccent)
-            Text(verbatim: answerDraftState.questionText)
+            MarkdownMessageText(markdown: answerDraftState.questionText)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineSpacing(5)
@@ -1934,10 +1949,29 @@ struct VoiceTutorCallScreen: View {
         }
     }
 
-    private var showsGradingResult: Bool { presentation.lessonPhase == .graded }
+    private var showsGradingResult: Bool {
+        guard presentation.phase.isLive else { return false }
+        return [.graded, .gradingUnavailable].contains(presentation.lessonPhase)
+            || gradingResultState.remainsVisible(after: presentation.sessionState.snapshot)
+    }
+
+    private var showsGradingResultCard: Bool {
+        guard showsGradingResult else { return false }
+        let hasFailure = gradingResultState.phase == .failed
+            && gradingResultState.remainsVisible(after: presentation.sessionState.snapshot)
+        // The orb already owns the loading status. Show a separate panel only
+        // for actual result/error content, or when another action owns the orb.
+        return visibleGradingResult != nil || hasFailure
+            || orbStatusText != strings.voiceTutorGradingResultLoading
+    }
+
+    private var canRefreshUnavailableGrade: Bool {
+        presentation.lessonPhase == .gradingUnavailable && gradingResultState.phase == .failed
+            && gradingResultState.remainsVisible(after: presentation.sessionState.snapshot)
+    }
 
     private var visibleGradingResult: GradingResult? {
-        guard showsGradingResult, gradingResultState.matches(presentation.sessionState.snapshot) else { return nil }
+        guard showsGradingResult, gradingResultState.remainsVisible(after: presentation.sessionState.snapshot) else { return nil }
         return gradingResultState.result
     }
 
@@ -1957,8 +1991,10 @@ struct VoiceTutorCallScreen: View {
                     gradingSection(title: strings.explanation,
                         text: result.explanation, identifier: "voiceCall.gradingExplanation")
                 }
-            } else if gradingResultState.matches(presentation.sessionState.snapshot), gradingResultState.phase == .failed {
-                Text(strings.voiceTutorGradingResultFailureHelp(gradingResultState.failure))
+            } else if gradingResultState.remainsVisible(after: presentation.sessionState.snapshot), gradingResultState.phase == .failed {
+                Text(presentation.lessonPhase == .gradingUnavailable
+                    ? strings.voiceTutorGradingUnavailableHelp
+                    : strings.voiceTutorGradingResultFailureHelp(gradingResultState.failure))
                     .font(.body.weight(.medium))
                 Button(strings.voiceTutorGradingResultReloadTitle, action: onGradingResultRetry)
                     .font(.subheadline.weight(.semibold))
@@ -2683,6 +2719,9 @@ struct VoiceTutorCallScreen: View {
         if let pending = userInputState.pending {
             return pending.canSubmit ? strings.voiceTutorInputSubmit : strings.voiceTutorInputWaitingShort
         }
+        if presentation.lessonPhase == .gradingUnavailable {
+            return canRefreshUnavailableGrade ? strings.voiceTutorGradingResultReloadTitle : orbStatusText
+        }
         if let answerOrbLabel { return answerOrbLabel }
         if hasAnswerDraft, presentation.pauseState.mode == .active { return answerDraftStatus }
         return orbRepresentsResume ? strings.voiceTutorResumeLesson : strings.voiceTutorTakeBreak
@@ -2706,6 +2745,10 @@ struct VoiceTutorCallScreen: View {
         if let pending = userInputState.pending {
             guard pending.canSubmit else { return }
             onUserInputSubmit(pending.id, false)
+            return
+        }
+        if presentation.lessonPhase == .gradingUnavailable {
+            if canRefreshUnavailableGrade { onGradingResultRetry() }
             return
         }
         if hasAnswerDraft, presentation.pauseState.mode == .active {
@@ -2739,7 +2782,7 @@ struct VoiceTutorCallScreen: View {
     private var orbAccessibilityValue: String {
         var parts = [displayTopic, orbStatusText]
         if let result = visibleGradingResult { parts.append(strings.voiceTutorLessonScore(result.score)) }
-        if presentation.lessonPhase == .graded, orbStatusText != strings.voiceTutorAnswerGraded {
+        if visibleGradingResult != nil, orbStatusText != strings.voiceTutorAnswerGraded {
             parts.append(strings.voiceTutorAnswerGraded)
         }
         if let discoveryPrompt,

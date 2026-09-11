@@ -573,19 +573,21 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
     }
 
     @Test
-    fun `grading uses the submitted canonical correlation and original saved grade rather than poll content`(): Unit = runBlocking {
+    fun `grading uses the submitted canonical record directly without depending on the process endpoint`(): Unit = runBlocking {
         val fixture = Fixture()
         fixture.coordinator.selected(fixture.context())
         fixture.learner = 12
         fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
-        assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "get_grading_process", mapOf("correlation_id" to "someone-elses-grade")), "QUESTION_CONTEXT_UNAVAILABLE")
+        assertCode(fixture, fixture.coordinator.execute(fixture.answerContext(), "get_grading_process", mapOf("correlation_id" to "someone-elses-grade")), "GRADING_CONTEXT_UNAVAILABLE")
 
+        fixture.gradeReady = true
         val result = fixture.coordinator.execute(fixture.answerContext(), "get_grading_process", mapOf("correlation_id" to "grade-1"))
 
         assertThat(result.isError).isFalse()
         assertThat(fixture.json(result).path("record").path("gradingResult").path("score").asInt()).isEqualTo(91)
         assertThat(fixture.json(result).path("record").path("gradingResult").path("feedback").asText()).isEqualTo("Canonical feedback")
-        assertThat(fixture.calls.takeLast(2).map { it.name }).containsExactly("get_grading_process", "get_record")
+        assertThat(fixture.calls.last().name).isEqualTo("get_record")
+        assertThat(fixture.calls.none { it.name == "get_grading_process" }).isTrue()
         assertThat(fixture.calls.last().arguments).isEqualTo(mapOf("record_id" to 101L, "language" to "ko", "view" to "original"))
         assertThat(result.output).doesNotContain("Wrong poll feedback", "SECRET_HINT")
     }
@@ -613,13 +615,131 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
 
         fixture.records = listOf(fixture.record(101, status = "GRADING", answer = EDITED_ANSWER, gradingId = "grade-1"))
         val pending = fixture.coordinator.execute(fixture.answerContext(), "list_pending_questions", mapOf("study_id" to STUDY))
-        assertThat(fixture.json(pending).path("pendingQuestion").isNull).isTrue()
+        assertThat(fixture.json(pending).path("record").path("id").asText()).isEqualTo("101")
         assertThat(pending.questionReadback).isNull()
+        fixture.gradeReady = true
         val graded = fixture.coordinator.execute(fixture.answerContext(), "get_grading_process", mapOf("correlation_id" to "grade-1"))
         assertThat(graded.isError).isFalse()
         assertThat(graded.questionChange?.recordId).isEqualTo("101")
         assertThat(fixture.json(graded).path("record").path("gradingResult").path("score").asInt()).isEqualTo(91)
         assertThat(fixture.calls.count { it.name == "submit_answer" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `legacy grading cursor matches incident and recovers exact record after a transient read failure`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
+        val before = fixture.calls.size
+        fixture.recordReadFails = true
+        val failed = fixture.coordinator.execute(fixture.answerContext(), "get_grading_process",
+            mapOf("correlation_id" to "grade-1", "after_event_id" to 0))
+        assertCode(fixture, failed, "GRADING_STATUS_UNAVAILABLE")
+        assertThat(failed.learningProgress).isNull()
+        assertThat(failed.gradingReadback).isNull()
+        fixture.recordReadFails = false; fixture.gradeReady = true
+        val recovered = fixture.coordinator.execute(fixture.answerContext(), "get_answer_status", mapOf("record_id" to 101L))
+        assertThat(recovered.learningProgress?.phase).isEqualTo(VoiceTutorLearningPhase.GRADED)
+        assertThat(recovered.learningProgress?.recordId).isEqualTo("101")
+        assertThat(recovered.gradingReadback?.correlationId).isEqualTo("grade-1")
+        assertThat(recovered.gradingReadback?.score).isEqualTo(91)
+        assertThat(recovered.gradingReadback?.feedback).isEqualTo("Canonical feedback")
+        assertThat(recovered.gradingReadback?.explanation).isEqualTo("Canonical explanation")
+        val legacy = fixture.coordinator.execute(fixture.answerContext(), "get_grading_process",
+            mapOf("correlation_id" to "grade-1", "record_id" to 101L, "after_event_id" to 2L))
+        assertThat(legacy.gradingReadback).isEqualTo(recovered.gradingReadback)
+        assertThat(fixture.calls.drop(before).map { it.name }).containsExactly("get_record", "get_record", "get_record")
+        assertThat(fixture.calls.count { it.name == "submit_answer" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `pending refresh cannot replace a submitted answer with a newly arrived question while grading or graded`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
+        fixture.records = listOf(fixture.record(202, questionText = "A different arrived question"))
+        val before = fixture.calls.size
+        for (graded in listOf(false, true)) {
+            fixture.gradeReady = graded
+            val refreshed = fixture.coordinator.execute(fixture.answerContext(), "list_pending_questions", mapOf("study_id" to STUDY))
+            assertThat(refreshed.isError).isFalse()
+            assertThat(refreshed.learningProgress?.recordId).isEqualTo("101")
+            assertThat(refreshed.learningProgress?.phase).isEqualTo(if (graded) VoiceTutorLearningPhase.GRADED else VoiceTutorLearningPhase.GRADING)
+            assertThat(refreshed.questionReadback).isNull()
+            assertThat(refreshed.questionReadbackRecovery).isNull()
+            assertThat(refreshed.output).doesNotContain("A different arrived question")
+        }
+        assertThat(fixture.calls.drop(before).map { it.name }).containsExactly("get_record", "get_record")
+        val next = fixture.coordinator.execute(fixture.answerContext(), "request_question", mapOf("study_id" to STUDY))
+        assertThat(next.questionReadback?.recordId).isEqualTo("202")
+        val late = fixture.coordinator.execute(fixture.answerContext(), "get_answer_status", mapOf("record_id" to 101L))
+        assertCode(fixture, late, "GRADING_CONTEXT_UNAVAILABLE")
+        assertThat(late.questionChange).isNull()
+        assertThat(late.gradingReadback).isNull()
+    }
+
+    @Test
+    fun `exact answer status rejects wrong record correlation and legacy malformed cursor before any read`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
+        val before = fixture.calls.size
+        for ((tool, args) in listOf(
+            "get_answer_status" to mapOf("record_id" to 202L),
+            "get_answer_status" to mapOf("record_id" to 101L, "correlation_id" to "other"),
+            "get_grading_process" to mapOf("correlation_id" to "grade-1", "record_id" to 202L),
+            "get_grading_process" to mapOf("correlation_id" to "grade-1", "after_event_id" to -1),
+            "get_grading_process" to mapOf("correlation_id" to "grade-1", "after_event_id" to 0.5),
+        )) {
+            val result = fixture.coordinator.execute(fixture.answerContext(), tool, args)
+            assertThat(result.isError).isTrue()
+            assertThat(result.learningProgress).isNull()
+            assertThat(result.gradingReadback).isNull()
+        }
+        assertThat(fixture.calls).hasSize(before)
+    }
+
+    @Test
+    fun `saved grade must match original submitted question record study answer and grading attempt`(): Unit = runBlocking {
+        for (mismatch in listOf("record", "study", "answer", "correlation", "question")) {
+            val fixture = Fixture()
+            fixture.coordinator.selected(fixture.context())
+            fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed())
+            fixture.recordOverride = fixture.record(if (mismatch == "record") 202 else 101,
+                study = if (mismatch == "study") STUDY + 1 else STUDY,
+                status = "GRADED", answer = if (mismatch == "answer") "wrong answer" else EDITED_ANSWER,
+                gradingId = if (mismatch == "correlation") "other" else "grade-1",
+                questionText = if (mismatch == "question") "Changed question" else PROMPT,
+                grade = mapOf("score" to 91, "feedback" to "unverified feedback"))
+            val result = fixture.coordinator.execute(fixture.answerContext(), "get_answer_status", mapOf("record_id" to 101L))
+            assertCode(fixture, result, "GRADING_RESULT_MISMATCH")
+            assertThat(result.gradingReadback).isNull()
+            assertThat(result.questionChange).isNull()
+        }
+    }
+
+    @Test
+    fun `saved grading failure stays attached to submitted record and background completion supplies bounded typed feedback`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        val progress = fixture.coordinator.submitReviewedAnswer(fixture.answerContext(), fixture.reviewed()).learningProgress!!
+        fixture.gradeReady = true; fixture.gradingFails = true
+        val failed = fixture.coordinator.execute(fixture.answerContext(), "get_answer_status", mapOf("record_id" to 101L))
+        assertThat(failed.learningProgress?.phase).isEqualTo(VoiceTutorLearningPhase.GRADING_FAILED)
+        assertThat(failed.learningProgress?.recordId).isEqualTo("101")
+        assertThat(failed.gradingReadback).isNull()
+        fixture.gradingFails = false
+        val completed = fixture.coordinator.pollLearningProgress(fixture.context(), progress)
+        assertThat(completed.gradingReadback?.recordId).isEqualTo("101")
+        assertThat(completed.gradingReadback?.score).isEqualTo(91)
+        assertThat(completed.output).isEqualTo("{}")
+        fixture.recordOverride = fixture.record(101, status = "GRADED", answer = EDITED_ANSWER, gradingId = "grade-1",
+            grade = mapOf("score" to 101, "feedback" to "x".repeat(8_001), "explanation" to "Saved explanation"))
+        val large = fixture.coordinator.execute(fixture.context(), "get_answer_status", mapOf("record_id" to 101L))
+        assertThat(large.gradingReadback?.score).isNull()
+        assertThat(large.gradingReadback?.feedback).isEmpty()
+        assertThat(large.gradingReadback?.explanation).isEqualTo("Saved explanation")
+        assertThat(large.gradingReadback?.detailsAvailableInRecord).isTrue()
     }
 
     @Test
@@ -729,6 +849,8 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
         private var savedAnswer: String? = null
         var gradeReady = false
         var gradingFails = false
+        var recordReadFails = false
+        var recordOverride: JsonNode? = null
         var generationReady = true
         private val persistence = Proxy.newProxyInstance(
             VoiceTutorPersistencePort::class.java.classLoader,
@@ -783,10 +905,11 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
                         success(mapOf("correlationId" to args["correlation_id"], "terminal" to true,
                             "gradingResult" to mapOf("score" to 17, "feedback" to "Wrong poll feedback")))
                     }
-                    "get_record" -> success(record((args.getValue("record_id") as Number).toLong(),
+                    "get_record" -> if (recordReadFails) VoiceTutorMcpToolResult("{\"error\":{\"code\":\"READ_TIMEOUT\"}}", true)
+                    else success(recordOverride ?: record((args.getValue("record_id") as Number).toLong(),
                         status = if (savedAnswer == null) "UNGRADED" else if (gradeReady && gradingFails) "FAILED" else if (gradeReady) "GRADED" else "GRADING", answer = savedAnswer,
                         gradingId = if (savedAnswer != null) "grade-1" else null,
-                        grade = if (gradeReady && !gradingFails) mapOf("score" to 91, "feedback" to "Canonical feedback") else null))
+                        grade = if (gradeReady && !gradingFails) mapOf("score" to 91, "feedback" to "Canonical feedback", "explanation" to "Canonical explanation") else null))
                     else -> error("Unexpected canonical call $name")
                 }
                 afterInvoke(name)

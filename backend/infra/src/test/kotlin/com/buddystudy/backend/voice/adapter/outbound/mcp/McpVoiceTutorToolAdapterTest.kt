@@ -3310,10 +3310,56 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
+    fun `native grading status uses exact submitted record and pending fallback never reopens curriculum`() = runBlocking<Unit> {
+        val fixture = Fixture(studyContexts = ContextStore())
+        var submitted = false
+        fun record() = mapOf("id" to "301", "studyId" to 101L, "topic" to "Redis", "difficulty" to 3,
+            "questionStatus" to if (submitted) "GRADED" else "UNGRADED",
+            "answer" to if (submitted) "직접 입력한 답변" else null,
+            "gradingRequestId" to if (submitted) "exact-grading" else null,
+            "gradingResult" to if (submitted) mapOf("score" to 90, "feedback" to "저장된 피드백", "explanation" to "저장된 해설") else null,
+            "question" to mapOf("question" to "Redis 질문", "createdAt" to now.toString()))
+        fixture.handler = { name, args -> when (name) {
+            "get_study" -> {
+                check(!submitted) { "Grading recovery must not prepare curriculum" }
+                success(mapOf("id" to 101L, "parentStudyId" to null, "topic" to "Redis", "difficultyLevel" to 3, "curriculumTerminal" to true))
+            }
+            "list_pending_questions" -> {
+                check(!submitted) { "Grading recovery must not discover another question" }
+                success(mapOf("totalCount" to 1, "records" to listOf(record())))
+            }
+            "get_record" -> { assertThat(args["record_id"]).isEqualTo(301L); success(record()) }
+            "submit_answer" -> { submitted = true; success(record()) }
+            else -> error("Unexpected tool $name")
+        } }
+        val question = fixture.adapter.execute(nativeContext(), "list_pending_questions", mapOf("study_id" to 101L))
+        assertThat(question.questionReadback?.recordId).isEqualTo("301")
+        val accepted = fixture.adapter.submitReviewedAnswer(nativeContext(), VoiceTutorReviewedAnswer(
+            "739a067a-7578-4d42-80bf-f66d80725802", 101, "301", 0, "직접 입력한 답변", null))
+        assertThat(accepted.isError).isFalse()
+        assertThat(accepted.gradingReadback?.recordId).isEqualTo("301")
+        val before = fixture.calls.size
+        val status = fixture.adapter.execute(nativeContext(), "get_answer_status", mapOf("record_id" to 301L))
+        assertThat(status.gradingReadback).isEqualTo(accepted.gradingReadback)
+        val pending = fixture.adapter.execute(nativeContext(), "list_pending_questions", mapOf("study_id" to 101L))
+        assertThat(pending.gradingReadback).isEqualTo(accepted.gradingReadback)
+        assertThat(pending.questionReadback).isNull()
+        val legacy = fixture.adapter.execute(nativeContext(), "get_grading_process",
+            mapOf("correlation_id" to "exact-grading", "after_event_id" to 0))
+        assertThat(legacy.gradingReadback).isEqualTo(accepted.gradingReadback)
+        assertThat(fixture.calls.drop(before).map { it.name }).containsExactly("get_record", "get_record", "get_record")
+    }
+
+    @Test
     fun `native catalog exposes model selection and immutable proposal tools but hides raw mutations`() = runBlocking<Unit> {
         val fixture = Fixture()
         val catalog = fixture.adapter.realtimeDefinitions()
-        assertThat(catalog.map { it.name }).contains("prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study")
+        val status = catalog.single { it.name == "get_answer_status" }
+        assertThat(status.parameters["required"]).isEqualTo(listOf("record_id"))
+        assertThat(status.description).contains("exact submitted record_id", "without pending-question lookup")
+        assertThat(mapper.valueToTree<JsonNode>(catalog.single { it.name == "get_grading_process" }.parameters)
+            .path("properties").has("after_event_id")).isFalse()
+        assertThat(catalog.map { it.name }).contains("get_answer_status", "prepare_voice_study_mutation", "confirm_voice_study_mutation", "select_voice_study")
             .doesNotContain("create_root_study", "create_study_topic", "update_study", "delete_study", "submit_answer")
         assertThat(catalog.joinToString { it.description }).doesNotContain("server-owned: never originate", "one-shot target attested")
         assertThat(catalog.single { it.name == "select_voice_study" }.description)

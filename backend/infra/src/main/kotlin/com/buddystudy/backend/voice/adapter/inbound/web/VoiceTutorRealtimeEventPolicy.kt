@@ -34,6 +34,15 @@ internal class VoiceTutorRealtimeEventPolicy(
         ) {
             validatePlaybackCompletion(node)
         }
+        if (type == VoiceTutorRealtimeContract.RESPONSE_WORD_FINISHED_EVENT &&
+            (!validProviderResponseId(node.path("responseId")) || !validProviderResponseId(node.path("requestId")) ||
+                node.fieldNames().asSequence().toSet() != setOf("type", "responseId", "requestId"))) {
+            throw VoiceTutorClientProtocolException("Voice Tutor output boundary identity is invalid.")
+        }
+        if (type == VoiceTutorRealtimeContract.GRADING_REFRESH_EVENT &&
+            (!validRecordId(node.path("recordId")) || node.fieldNames().asSequence().toSet() != setOf("type", "recordId"))) {
+            throw VoiceTutorClientProtocolException("Voice Tutor grading record identity is invalid.")
+        }
         if (type == VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT ||
             type == VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT
         ) {
@@ -124,6 +133,13 @@ internal class VoiceTutorRealtimeEventPolicy(
                         "responseId" to node.path("responseId").asText(), "sequence" to sequence.longValue())))
                 } else ProviderEventDecision(payload = null)
             }
+            VoiceTutorRealtimeContract.RESPONSE_FINISH_WORD_EVENT -> if (
+                transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
+                validProviderResponseId(node.path("responseId")) && validProviderResponseId(node.path("requestId"))
+            ) {
+                ProviderEventDecision(mapper.writeValueAsString(mapOf("type" to type,
+                    "responseId" to node.path("responseId").asText(), "requestId" to node.path("requestId").asText())))
+            } else ProviderEventDecision(payload = null)
             VoiceTutorRealtimeContract.RESPONSE_INTERRUPTED_EVENT -> if (
                 transport == VoiceTutorProviderTransport.WEBRTC_SIDEBAND &&
                 validProviderResponseId(node.path("responseId"))
@@ -543,6 +559,8 @@ internal class VoiceTutorRealtimeEventPolicy(
             CLIENT_HEARTBEAT_EVENT,
             VoiceTutorRealtimeContract.PLAYBACK_COMPLETED_EVENT,
             VoiceTutorRealtimeContract.PLAYOUT_DRAINED_EVENT,
+            VoiceTutorRealtimeContract.RESPONSE_WORD_FINISHED_EVENT,
+            VoiceTutorRealtimeContract.GRADING_REFRESH_EVENT,
             VoiceTutorRealtimeContract.SPEECH_STARTED_EVENT,
             VoiceTutorRealtimeContract.SPEECH_STOPPED_EVENT,
             VoiceTutorRealtimeContract.PAUSE_REQUEST_EVENT,

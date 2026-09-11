@@ -17,6 +17,7 @@ struct VoiceTutorSessionStateEvent: Equatable, Sendable {
         case grading, graded, ending, ended
         case questionFailed = "question_failed"
         case gradingFailed = "grading_failed"
+        case gradingUnavailable = "grading_unavailable"
         case answerFailed = "answer_failed"
         case failed
 
@@ -25,7 +26,7 @@ struct VoiceTutorSessionStateEvent: Equatable, Sendable {
         }
 
         var requiresQuestion: Bool {
-            requiresAnswer || [.questionReady, .questionReading, .grading, .graded, .gradingFailed].contains(self)
+            requiresAnswer || [.questionReady, .questionReading, .grading, .graded, .gradingFailed, .gradingUnavailable].contains(self)
         }
 
         var isTerminal: Bool { self == .ended || self == .failed }
@@ -98,7 +99,7 @@ struct VoiceTutorGradingResultTarget: Equatable, Sendable {
 
     init?(snapshot: VoiceTutorSessionStateEvent?, sessionID: String, attemptID: UUID,
           ownerUserID: Int64, minimumRevision: Int64 = 0) {
-        guard let snapshot, snapshot.isValid, snapshot.phase == .graded,
+        guard let snapshot, snapshot.isValid, [.graded, .gradingUnavailable].contains(snapshot.phase),
               snapshot.revision >= minimumRevision,
               let studyID = snapshot.studyID, let recordID = snapshot.recordID,
               !sessionID.isEmpty, ownerUserID > 0 else { return nil }
@@ -112,8 +113,17 @@ struct VoiceTutorGradingResultTarget: Equatable, Sendable {
 
     func matches(_ snapshot: VoiceTutorSessionStateEvent?) -> Bool {
         guard let snapshot, snapshot.isValid else { return false }
-        return snapshot.phase == .graded && snapshot.revision == revision
+        return [.graded, .gradingUnavailable].contains(snapshot.phase) && snapshot.revision == revision
             && snapshot.studyID == studyID && snapshot.recordID == recordID
+    }
+
+    /// Passive listening is not a request to discard the last exact grade.
+    /// A new exercise, focus epoch, record, or terminal snapshot releases it.
+    func remainsVisible(after snapshot: VoiceTutorSessionStateEvent?) -> Bool {
+        if matches(snapshot) { return true }
+        guard let snapshot, snapshot.isValid, snapshot.phase == .conversation else { return false }
+        return snapshot.revision == revision && snapshot.studyID == studyID
+            && (snapshot.recordID == nil || snapshot.recordID == recordID)
     }
 }
 
@@ -132,9 +142,14 @@ struct VoiceTutorGradingResultState: Equatable {
     private(set) var result: GradingResult?
     private(set) var failure: Failure?
     private var activeRequest: Request?
+    private var reportedReadyTarget: VoiceTutorGradingResultTarget?
 
     func matches(_ snapshot: VoiceTutorSessionStateEvent?) -> Bool {
         target?.matches(snapshot) == true
+    }
+
+    func remainsVisible(after snapshot: VoiceTutorSessionStateEvent?) -> Bool {
+        target?.remainsVisible(after: snapshot) == true
     }
 
     func accepts(_ request: Request) -> Bool {
@@ -145,8 +160,12 @@ struct VoiceTutorGradingResultState: Equatable {
     mutating func reconcile(snapshot: VoiceTutorSessionStateEvent?, sessionID: String,
                             attemptID: UUID, ownerUserID: Int64,
                             minimumRevision: Int64 = 0) -> Request? {
-        reconcile(target: VoiceTutorGradingResultTarget(snapshot: snapshot, sessionID: sessionID,
-            attemptID: attemptID, ownerUserID: ownerUserID, minimumRevision: minimumRevision))
+        let next = VoiceTutorGradingResultTarget(snapshot: snapshot, sessionID: sessionID,
+            attemptID: attemptID, ownerUserID: ownerUserID, minimumRevision: minimumRevision)
+        if next == nil, let target, target.sessionID == sessionID, target.attemptID == attemptID,
+           target.ownerUserID == ownerUserID, target.revision >= minimumRevision,
+           target.remainsVisible(after: snapshot) { return nil }
+        return reconcile(target: next)
     }
 
     @discardableResult
@@ -194,6 +213,15 @@ struct VoiceTutorGradingResultState: Equatable {
         phase = .failed
         activeRequest = nil
         return true
+    }
+
+    /// A saved exact grade can arrive before the control stream recovers.
+    /// Notify the controller once without dropping the visible result or polling.
+    mutating func claimReadyStatusRefresh(after snapshot: VoiceTutorSessionStateEvent?) -> VoiceTutorGradingResultTarget? {
+        guard phase == .ready, result != nil, snapshot?.phase == .gradingUnavailable,
+              let target, target.matches(snapshot), reportedReadyTarget != target else { return nil }
+        reportedReadyTarget = target
+        return target
     }
 
     mutating func clear() { self = Self() }

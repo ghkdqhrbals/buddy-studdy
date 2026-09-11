@@ -17,29 +17,30 @@ final class VoiceTutorInterruptionBoundaryTests: XCTestCase {
                 return XCTFail("An ongoing sound should receive the bounded grace.")
             }
         }
-        for tick in 11...17 {
+        for tick in 11...13 {
             let now = 10 + Double(tick) * 0.01
             state.observe(level: quiet, duration: 0.01, at: now)
             guard case .wait = state.decision(for: token, now: now) else {
-                return XCTFail("A gap shorter than 80 ms must not stop playout.")
+                return XCTFail("A gap shorter than 40 ms must not stop playout.")
             }
         }
-        state.observe(level: quiet, duration: 0.01, at: 10.18)
-        XCTAssertEqual(state.decision(for: token, now: 10.18), .quietGap)
+        state.observe(level: quiet, duration: 0.01, at: 10.14)
+        XCTAssertEqual(state.decision(for: token, now: 10.14), .quietGap,
+                       "The first short word gap must stop without waiting for a longer phrase pause.")
     }
 
     func testBriefPhonemeGapAndLowRMSWithSharpPeaksDoNotReleaseTheWait() throws {
         var state = VoiceTutorInterruptionBoundaryState()
         state.responseStarted("answer")
         let token = try XCTUnwrap(state.request(responseID: "answer", at: 20))
-        for tick in 1...5 { state.observe(level: quiet, duration: 0.01, at: 20 + Double(tick) * 0.01) }
-        state.observe(level: voiced, duration: 0.01, at: 20.06)
-        for tick in 7...11 { state.observe(level: quiet, duration: 0.01, at: 20 + Double(tick) * 0.01) }
-        guard case .wait = state.decision(for: token, now: 20.11) else {
+        for tick in 1...3 { state.observe(level: quiet, duration: 0.01, at: 20 + Double(tick) * 0.01) }
+        state.observe(level: voiced, duration: 0.01, at: 20.04)
+        for tick in 5...7 { state.observe(level: quiet, duration: 0.01, at: 20 + Double(tick) * 0.01) }
+        guard case .wait = state.decision(for: token, now: 20.07) else {
             return XCTFail("Separate short gaps cannot accumulate across speech.")
         }
         let consonant = VoiceTutorInterruptionAudioLevel(rms: 0.001, peak: 0.02)
-        for tick in 12...20 { state.observe(level: consonant, duration: 0.01, at: 20 + Double(tick) * 0.01) }
+        for tick in 8...20 { state.observe(level: consonant, duration: 0.01, at: 20 + Double(tick) * 0.01) }
         guard case .wait = state.decision(for: token, now: 20.20) else {
             return XCTFail("RMS alone cannot classify a quiet consonant as a pause.")
         }
@@ -51,14 +52,14 @@ final class VoiceTutorInterruptionBoundaryTests: XCTestCase {
             var state = VoiceTutorInterruptionBoundaryState()
             state.responseStarted("answer")
             let token = try XCTUnwrap(state.request(responseID: "answer", at: 30))
-            for tick in 1...119 {
+            for tick in 1...74 {
                 let now = 30 + Double(tick) * 0.01
                 state.observe(level: level, duration: 0.01, at: now)
                 guard case .wait = state.decision(for: token, now: now) else {
                     return XCTFail("Unknown or ongoing audio must not invent a boundary.")
                 }
             }
-            XCTAssertEqual(state.decision(for: token, now: 31.2), .deadline)
+            XCTAssertEqual(state.decision(for: token, now: 30.75), .deadline)
             XCTAssertEqual(state.decision(for: token, now: 300), .deadline,
                 "Continued callbacks cannot extend a user's interruption indefinitely.")
         }
@@ -75,9 +76,22 @@ final class VoiceTutorInterruptionBoundaryTests: XCTestCase {
                 return XCTFail("The former 450 ms deadline must not cut this still-running word")
             }
         }
-        for tick in 66...73 { state.observe(level: quiet, duration: 0.01, at: 60 + Double(tick) * 0.01) }
-        XCTAssertEqual(state.decision(for: token, now: 60.73), .quietGap)
-        XCTAssertLessThan(0.73, VoiceTutorInterruptionBoundaryState.maximumGraceSeconds)
+        for tick in 66...69 { state.observe(level: quiet, duration: 0.01, at: 60 + Double(tick) * 0.01) }
+        XCTAssertEqual(state.decision(for: token, now: 60.69), .quietGap)
+        XCTAssertLessThan(0.69, VoiceTutorInterruptionBoundaryState.maximumGraceSeconds)
+    }
+
+    func testResultArrivalAndLearnerInterruptionShareTheFirstWordDeadline() throws {
+        var state = VoiceTutorInterruptionBoundaryState()
+        state.responseStarted("waiting-notice")
+        let learner = try XCTUnwrap(state.request(responseID: "waiting-notice", at: 100))
+        let grading = try XCTUnwrap(state.request(responseID: "waiting-notice", at: 100.5))
+        XCTAssertEqual(grading, learner, "A second interruption cannot buy the old speech another word.")
+        XCTAssertEqual(state.decision(for: grading, now: 100.75), .deadline)
+        XCTAssertNil(state.request(responseID: "waiting-notice", at: 99))
+        state.responseStarted("grading-feedback")
+        let next = try XCTUnwrap(state.request(responseID: "grading-feedback", at: 101))
+        XCTAssertEqual(next.requestedAtUptime, 101, "The next response owns an independent deadline.")
     }
 
     func testRecentSilenceBeforeTheRequestCannotSkipTheNextBoundary() throws {
@@ -101,14 +115,14 @@ final class VoiceTutorInterruptionBoundaryTests: XCTestCase {
         XCTAssertEqual(fade.gain(for: token, at: 80), 1)
         var previous: Float = 1
         for tick in 1...10 {
-            let gain = try XCTUnwrap(fade.gain(for: token, at: 80 + Double(tick) * 0.008))
+            let gain = try XCTUnwrap(fade.gain(for: token, at: 80 + Double(tick) * 0.004))
             XCTAssertLessThanOrEqual(gain, previous)
             XCTAssertGreaterThanOrEqual(gain, 0)
             if tick < 10 { XCTAssertGreaterThan(gain, 0, "A fade must not immediately hard-mute the source") }
             previous = gain
         }
-        XCTAssertEqual(try XCTUnwrap(fade.gain(for: token, at: 80.04)), 0.5, accuracy: 0.000_01)
-        XCTAssertEqual(fade.gain(for: token, at: 80.09), 0)
+        XCTAssertEqual(try XCTUnwrap(fade.gain(for: token, at: 80.02)), 0.5, accuracy: 0.000_01)
+        XCTAssertEqual(fade.gain(for: token, at: 80.05), 0)
         XCTAssertEqual(fade.currentGain(at: 100), 0, "Completed fading stays silent until the next response")
     }
 
@@ -117,8 +131,8 @@ final class VoiceTutorInterruptionBoundaryTests: XCTestCase {
         fade.responseStarted("old")
         let old = try XCTUnwrap(fade.request(responseID: "old", at: 90))
         fade.responseStarted("old")
-        XCTAssertEqual(try XCTUnwrap(fade.gain(for: old, at: 90.04)), 0.5, accuracy: 0.000_01)
-        XCTAssertEqual(fade.request(responseID: "old", at: 90.04), old,
+        XCTAssertEqual(try XCTUnwrap(fade.gain(for: old, at: 90.02)), 0.5, accuracy: 0.000_01)
+        XCTAssertEqual(fade.request(responseID: "old", at: 90.02), old,
                        "Repeated interruption requests must not restart the ramp")
         fade.responseStarted("new")
         XCTAssertNil(fade.gain(for: old, at: 90.05))
@@ -199,5 +213,39 @@ final class VoiceTutorInterruptionBoundaryTests: XCTestCase {
         XCTAssertNil(VoiceTutorRemoteAudioRenderer.interruptionAudioLevel(invalid))
         invalid.frameLength = 0
         XCTAssertNil(VoiceTutorRemoteAudioRenderer.interruptionAudioLevel(invalid))
+    }
+
+    func testServerFinishWordRequestRoundTripsOnlyItsExactResponseAndRequestFences() throws {
+        let request = try XCTUnwrap(VoiceTutorFinishWordRequest(responseID: "resp_1", requestID: "request-2"))
+        XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(text:
+            #"{"type":"buddystudy.voice.response.finish_word","responseId":"resp_1","requestId":"request-2"}"#),
+            .finishWordRequested(request))
+        XCTAssertEqual(request.acknowledgementPayload, [
+            "type": "buddystudy.voice.response.word_finished", "responseId": "resp_1", "requestId": "request-2"
+        ])
+        let malformedPayloads: [[String: Any]] = [
+            ["responseId": "resp_1"], ["responseId": "resp_1", "requestId": ""],
+            ["responseId": " ", "requestId": "request-2"],
+            ["responseId": "resp_1", "requestId": String(repeating: "a", count: 192)],
+            ["responseId": "resp_1", "requestId": 2],
+            ["responseId": "resp_1", "requestId": "request-2", "recordId": "42"]
+        ]
+        for malformed in malformedPayloads {
+            var payload = malformed
+            payload["type"] = "buddystudy.voice.response.finish_word"
+            XCTAssertEqual(try VoiceTutorRealtimeEventParser.parse(data: JSONSerialization.data(withJSONObject: payload)),
+                           .ignored(type: "buddystudy.voice.response.finish_word"))
+        }
+    }
+
+    func testWordFinishedAcknowledgementCannotUseAnotherConnectionAttempt() async throws {
+        let transport = VoiceTutorWebSocketTransport()
+        let request = try XCTUnwrap(VoiceTutorFinishWordRequest(responseID: "resp_1", requestID: "request-2"))
+        do {
+            try await transport.sendWordFinished(request, attemptID: UUID())
+            XCTFail("A stale boundary task must not send an acknowledgement.")
+        } catch {
+            XCTAssertEqual(error as? VoiceTutorLocalSpeechDeliveryError, .staleAttempt)
+        }
     }
 }

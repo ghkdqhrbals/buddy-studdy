@@ -66,7 +66,7 @@ final class VoiceTutorGradingResultTests: XCTestCase {
     }
 
     func testOnlyValidAuthenticatedGradedScopeStartsLoading() {
-        for phase in VoiceTutorSessionStateEvent.Phase.allCases where phase != .graded {
+        for phase in VoiceTutorSessionStateEvent.Phase.allCases where phase != .graded && phase != .gradingUnavailable {
             var state = VoiceTutorGradingResultState()
             XCTAssertNil(state.reconcile(snapshot: Self.snapshot(phase: phase), sessionID: "call-1",
                 attemptID: attemptID, ownerUserID: 7), phase.rawValue)
@@ -165,8 +165,73 @@ final class VoiceTutorGradingResultTests: XCTestCase {
         }
     }
 
+    func testPassiveConversationKeepsSavedGradeAndPendingFetchUntilNewWork() throws {
+        for completed in [false, true] {
+            var state = VoiceTutorGradingResultState()
+            let request = try XCTUnwrap(state.reconcile(snapshot: Self.snapshot(), sessionID: "call-1",
+                attemptID: attemptID, ownerUserID: 7))
+            if completed { XCTAssertTrue(state.resolve(Self.record(), for: request)) }
+            let passive = VoiceTutorSessionStateEvent(sequence: 2, phase: .conversation,
+                paused: false, revision: 3, studyID: 42)
+            XCTAssertNil(state.reconcile(snapshot: passive, sessionID: "call-1", attemptID: attemptID, ownerUserID: 7))
+            XCTAssertTrue(state.remainsVisible(after: passive))
+            if !completed { XCTAssertTrue(state.resolve(Self.record(), for: request)) }
+            XCTAssertEqual(state.result?.score, 82)
+            XCTAssertEqual(state.result?.feedback, Self.record().gradingResult?.feedback)
+            XCTAssertNil(state.reconcile(snapshot: Self.snapshot(phase: .questionLoading),
+                sessionID: "call-1", attemptID: attemptID, ownerUserID: 7))
+            XCTAssertEqual(state.phase, .idle)
+        }
+    }
+
+    func testPassiveConversationNeverCarriesGradeAcrossOwnerAttemptOrLessonChanges() throws {
+        let passive = Self.snapshot(phase: .conversation)
+        for (owner, attempt, snapshot) in [(Int64(8), attemptID, passive), (7, UUID(), passive),
+                                          (7, attemptID, Self.snapshot(phase: .conversation, revision: 4)),
+                                          (7, attemptID, Self.snapshot(phase: .conversation, studyID: 43)),
+                                          (7, attemptID, Self.snapshot(phase: .conversation, recordID: "102"))] {
+            var state = VoiceTutorGradingResultState()
+            let request = try XCTUnwrap(state.reconcile(snapshot: Self.snapshot(), sessionID: "call-1",
+                attemptID: attemptID, ownerUserID: 7))
+            XCTAssertTrue(state.resolve(Self.record(), for: request))
+            XCTAssertNil(state.reconcile(snapshot: snapshot, sessionID: "call-1", attemptID: attempt, ownerUserID: owner))
+            XCTAssertNil(state.result)
+        }
+    }
+
+    func testUnavailableStatusLoadsOnlyExactSavedResultAndCannotFabricateCompletion() throws {
+        var state = VoiceTutorGradingResultState()
+        let snapshot = Self.snapshot(phase: .gradingUnavailable)
+        let request = try XCTUnwrap(state.reconcile(snapshot: snapshot, sessionID: "call-1",
+            attemptID: attemptID, ownerUserID: 7))
+        XCTAssertEqual(request.target.recordID, "101")
+        XCTAssertNil(state.result)
+        XCTAssertTrue(state.resolve(nil, for: request))
+        XCTAssertEqual(state.phase, .failed)
+        let retry = try XCTUnwrap(state.retry())
+        XCTAssertNil(state.retry(), "Only one exact result retry may be in flight")
+        XCTAssertTrue(state.resolve(Self.record(), for: retry))
+        XCTAssertEqual(state.result?.score, 82)
+    }
+
+    func testExactSavedGradeClaimsOneControllerRefreshWithoutClearingTheVisibleResult() throws {
+        var state = VoiceTutorGradingResultState()
+        let unavailable = Self.snapshot(phase: .gradingUnavailable)
+        let request = try XCTUnwrap(state.reconcile(snapshot: unavailable, sessionID: "call-1",
+            attemptID: attemptID, ownerUserID: 7))
+        XCTAssertNil(state.claimReadyStatusRefresh(after: unavailable), "Do not refresh merely because a GET is pending")
+        XCTAssertTrue(state.resolve(Self.record(), for: request))
+        XCTAssertNil(state.claimReadyStatusRefresh(after: Self.snapshot()), "A synchronized controller needs no notification")
+        XCTAssertNil(state.claimReadyStatusRefresh(after: Self.snapshot(phase: .gradingUnavailable, recordID: "102")))
+        XCTAssertEqual(state.claimReadyStatusRefresh(after: unavailable), request.target)
+        XCTAssertEqual(state.phase, .ready)
+        XCTAssertEqual(state.result, Self.record().gradingResult)
+        XCTAssertNil(state.claimReadyStatusRefresh(after: Self.snapshot(sequence: 2, phase: .gradingUnavailable, paused: true)),
+            "Repeated unavailable or pause snapshots cannot poll the controller")
+    }
+
     func testLeavingLessonClearsCompletedGradeAndRejectsDelayedCallbacks() throws {
-        for next in [Self.snapshot(phase: .conversation), Self.snapshot(phase: .grading),
+        for next in [Self.snapshot(phase: .questionLoading), Self.snapshot(phase: .grading),
                      Self.snapshot(phase: .ended), nil] {
             var state = VoiceTutorGradingResultState()
             let request = try XCTUnwrap(state.reconcile(snapshot: Self.snapshot(), sessionID: "call-1",

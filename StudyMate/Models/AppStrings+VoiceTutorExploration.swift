@@ -114,6 +114,16 @@ extension AppStrings {
         }
     }
 
+    var voiceTutorGradingUnavailable: String {
+        voiceTutorExplorationText("채점 확인 필요", "Check grading status", "採点状況の確認が必要です")
+    }
+
+    var voiceTutorGradingUnavailableHelp: String {
+        voiceTutorExplorationText("답안은 제출됐어요. 결과를 다시 확인해 주세요.",
+            "Your answer was submitted. Check the result again.",
+            "回答は送信済みです。結果をもう一度確認してください。")
+    }
+
     var voiceTutorGradingResultReloadTitle: String {
         voiceTutorExplorationText("결과 다시 불러오기", "Reload result", "結果を再読み込み")
     }

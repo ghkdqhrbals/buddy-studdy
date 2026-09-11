@@ -343,6 +343,12 @@ class VoiceTutorControlWebSocketHandler(
                             )))
                         }
                     }
+                    VoiceTutorRealtimeContract.RESPONSE_WORD_FINISHED_EVENT,
+                    VoiceTutorRealtimeContract.GRADING_REFRESH_EVENT -> {
+                        // The event policy already validates the bounded exact
+                        // identities; the native controller owns their authority.
+                        if (sidebandReady.get()) Mono.just(raw) else Mono.empty()
+                    }
                     VoiceTutorRealtimeContract.PAUSE_REQUEST_EVENT,
                     VoiceTutorRealtimeContract.PAUSE_INPUT_QUIESCED_EVENT,
                     VoiceTutorRealtimeContract.RESUME_REQUEST_EVENT,

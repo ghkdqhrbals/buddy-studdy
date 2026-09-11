@@ -66,6 +66,8 @@ data class VoiceTutorMcpToolResult(
     val learningContinuationCancelled: Boolean = false,
     /** A verified accepted selection may schedule one server-owned question continuation after focus ACK. */
     val continueSelectedLesson: Boolean = false,
+    /** Verified saved grade for this exact submitted record, never model-authored feedback. */
+    val gradingReadback: VoiceTutorGradingReadback? = null,
 )
 
 data class VoiceTutorCurriculumUserInput(val proposalId: String, val title: String, val prompt: String,
@@ -77,6 +79,16 @@ data class VoiceTutorStudyTopicUserInput(
     val title: String,
     val prompt: String,
     val topics: List<String>,
+)
+
+data class VoiceTutorGradingReadback(
+    val studyId: Long,
+    val recordId: String,
+    val correlationId: String,
+    val score: Int?,
+    val feedback: String,
+    val explanation: String,
+    val detailsAvailableInRecord: Boolean = false,
 )
 
 data class VoiceTutorQuestionChange(val studyId: Long, val recordId: String)

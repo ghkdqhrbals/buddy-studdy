@@ -24,6 +24,13 @@ enum VoiceTutorTurnProtocol {
         protocolValue == capabilityValue
     }
 
+    static func gradingRefreshPayload(recordID: String) throws -> [String: String] {
+        guard VoiceTutorQuestionChange(studyID: 1, recordID: recordID) != nil else {
+            throw VoiceTutorLocalSpeechDeliveryError.invalidSequence
+        }
+        return ["type": "buddystudy.voice.grading.refresh", "recordId": recordID]
+    }
+
     /// Silero sends only numbered acoustic boundaries. The backend commits
     /// audio; the Realtime model interprets meaning and tool intent in context.
     static func payload(for event: VoiceTutorCallControlEvent) throws -> [String: Any] {
@@ -108,6 +115,27 @@ struct VoiceTutorRealtimeAudioDelta: Equatable, Sendable {
     var contentIndex: Int
 }
 
+/// Exact response/request fences for a server-initiated result replacement.
+/// This acknowledgement confirms local boundary handling, never lesson state.
+struct VoiceTutorFinishWordRequest: Equatable, Sendable {
+    let responseID: String
+    let requestID: String
+
+    init?(responseID: String, requestID: String) {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        guard [responseID, requestID].allSatisfy({ id in
+            !id.isEmpty && id.utf8.count <= 191 &&
+                id.unicodeScalars.allSatisfy { $0.isASCII && allowed.contains($0) }
+        }) else { return nil }
+        self.responseID = responseID
+        self.requestID = requestID
+    }
+
+    var acknowledgementPayload: [String: String] {
+        ["type": "buddystudy.voice.response.word_finished", "responseId": responseID, "requestId": requestID]
+    }
+}
+
 struct VoiceTutorQuestionChange: Equatable, Hashable, Sendable {
     let studyID: Int
     let recordID: String
@@ -143,6 +171,7 @@ enum VoiceTutorRealtimeEvent: Equatable, Sendable {
     case inputSettled(sequence: Int)
     case providerTurnAbandoned(responseID: String)
     case responseInterrupted(responseID: String)
+    case finishWordRequested(VoiceTutorFinishWordRequest)
     case studyFocused(VoiceTutorStudyFocus?)
     case studyTreeChanged(studyID: Int)
     case studyTreeUpdated(studyID: Int)
@@ -347,6 +376,14 @@ enum VoiceTutorRealtimeEventParser {
                 return .ignored(type: type)
             }
             return .responseInterrupted(responseID: responseID)
+        case "buddystudy.voice.response.finish_word":
+            guard Set(object.keys) == ["type", "responseId", "requestId"],
+                  let responseID = string("responseId", in: object),
+                  let requestID = string("requestId", in: object),
+                  let request = VoiceTutorFinishWordRequest(responseID: responseID, requestID: requestID) else {
+                return .ignored(type: type)
+            }
+            return .finishWordRequested(request)
         case "buddystudy.voice.response.recovering":
             guard Set(object.keys) == ["type", "responseId", "sequence"],
                   let responseID = providerResponseID("responseId", in: object),
@@ -645,6 +682,28 @@ actor VoiceTutorWebSocketTransport {
         // old pump can never send its utterance sequence to a retried call.
         let payload = try VoiceTutorTurnProtocol.payload(for: event)
         let data = try JSONSerialization.data(withJSONObject: payload)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8
+        }
+        try await socketTask.send(.string(text))
+    }
+
+    func sendWordFinished(_ request: VoiceTutorFinishWordRequest, attemptID: UUID) async throws {
+        guard localSpeechAttemptID == attemptID else { throw VoiceTutorLocalSpeechDeliveryError.staleAttempt }
+        guard let socketTask else { throw TransportError.notConnected }
+        // Capture only this attempt's socket before suspending. A delayed old
+        // boundary task cannot acknowledge an interruption on a reconnected call.
+        let data = try JSONSerialization.data(withJSONObject: request.acknowledgementPayload)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8
+        }
+        try await socketTask.send(.string(text))
+    }
+
+    func sendGradingRefresh(recordID: String, attemptID: UUID) async throws {
+        guard localSpeechAttemptID == attemptID else { throw VoiceTutorLocalSpeechDeliveryError.staleAttempt }
+        guard let socketTask else { throw TransportError.notConnected }
+        let data = try JSONSerialization.data(withJSONObject: VoiceTutorTurnProtocol.gradingRefreshPayload(recordID: recordID))
         guard let text = String(data: data, encoding: .utf8) else {
             throw VoiceTutorRealtimeEventParser.ParseError.invalidUTF8
         }
