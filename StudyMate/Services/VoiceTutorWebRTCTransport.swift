@@ -272,6 +272,18 @@ enum VoiceTutorEchoCancellationPolicy {
         return result
     }
 
+    static func startCaptureForReadiness(factory: LKRTCPeerConnectionFactory, track: LKRTCAudioTrack) throws {
+        let device = factory.audioDeviceModule
+        try prepareDevice(device)
+        try configure(track)
+        // A disabled sender does not start this SDK's recording engine. Start
+        // local I/O explicitly while RTP and the speech gate remain closed.
+        // Waiting for recording before doing this would deadlock session-ready.
+        guard device.initAndStartRecording(audioProcessingOptions: communicationOptions()) == 0 else {
+            throw VoiceTutorWebRTCError.echoCancellationUnavailable
+        }
+    }
+
     static func canOpenMicrophone(engineRunning: Bool, recording: Bool,
                                   hasAudioProcessingModule: Bool, softwareActive: Bool,
                                   platformActive: Bool, voiceProcessingEnabled: Bool) -> Bool {
@@ -1095,21 +1107,17 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
 
     private func waitForEchoCancellation(factory: LKRTCPeerConnectionFactory, track: LKRTCAudioTrack) async throws {
         try ensureOpen()
-        // This SDK starts ADM for the negotiated sending stream even while
-        // track.isEnabled is false; that flag mutes samples rather than closing
-        // the input engine. We can therefore validate before session-ready.
-        if !VoiceTutorEchoCancellationPolicy.isActive(factory: factory) {
-            // Keep the selected path stable across delayed engine setup. Never
-            // accept a return to automatic/platform processing as a successful
-            // repair, or open capture on an unverified software request.
-            try VoiceTutorEchoCancellationPolicy.prepareDevice(factory.audioDeviceModule)
-            try VoiceTutorEchoCancellationPolicy.configure(track)
-            emitMediaDiagnostic("echo_cancellation_reapplying")
+        try VoiceTutorEchoCancellationPolicy.startCaptureForReadiness(factory: factory, track: track)
+        do { try ensureOpen() }
+        catch {
+            _ = factory.audioDeviceModule.stopRecording()
+            throw error
         }
-        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        emitMediaDiagnostic("capture_readiness_started")
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
         while true {
             try ensureOpen()
-            if VoiceTutorEchoCancellationPolicy.isActive(factory: factory) {
+            if VoiceTutorEchoCancellationPolicy.isActive(factory: factory), hasReceivedCaptureFrames() {
                 emitMediaDiagnostic("echo_cancellation_active")
                 return
             }
@@ -1120,6 +1128,13 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             }
             try await Task.sleep(for: .milliseconds(50))
         }
+    }
+
+    private func hasReceivedCaptureFrames() -> Bool {
+        stateLock.lock()
+        let tap = captureTap
+        stateLock.unlock()
+        return (tap?.snapshot().validInputBufferCount ?? 0) > 0
     }
 
     private func takePreparedSpeechScorer() -> VoiceTutorSileroSpeechScorer? {
@@ -1372,6 +1387,9 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         withExtendedLifetime(
             (localTrack, peerFactory, processingModule, nextCaptureTap, nextRenderTap)
         ) {
+            // Recording was started explicitly while the sender was disabled;
+            // teardown must also cover failure before the sender ever opens.
+            _ = peerFactory?.audioDeviceModule.stopRecording()
             remoteTrack?.remove(remoteRenderer)
             peer?.delegate = nil
             peer?.close()
@@ -1740,6 +1758,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
                 "buffers=\(snapshot.buffers)", "frames=\(snapshot.frames)", "nonzeroBuffers=\(snapshot.nonzero)",
                 "admSnapshot=async", "playoutInitialized=\(flag(device?.isPlayoutInitialized))",
                 "playing=\(flag(device?.isPlaying))", "engineRunning=\(flag(device?.isEngineRunning))",
+                "recordingInitialized=\(flag(device?.isRecordingInitialized))", "recording=\(flag(device?.isRecording))",
                 "remoteEnabled=\(flag(snapshot.track?.isEnabled))",
                 "category=\(category)", "mode=\(mode)",
                 "ports=\(ports.isEmpty ? "none" : ports)", "inputPorts=\(inputPorts.isEmpty ? "none" : inputPorts)",
