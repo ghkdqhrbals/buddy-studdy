@@ -272,14 +272,30 @@ enum VoiceTutorEchoCancellationPolicy {
         return result
     }
 
-    static func startCaptureForReadiness(factory: LKRTCPeerConnectionFactory, track: LKRTCAudioTrack) throws {
+    static func startCaptureForReadiness(
+        factory: LKRTCPeerConnectionFactory,
+        track: LKRTCAudioTrack,
+        onDiagnostic: ((String) -> Void)? = nil
+    ) throws {
         let device = factory.audioDeviceModule
-        try prepareDevice(device)
-        try configure(track)
+        onDiagnostic?("capture_readiness_device_policy_start")
+        do { try prepareDevice(device) }
+        catch {
+            onDiagnostic?("capture_readiness_device_policy_failed")
+            throw error
+        }
+        onDiagnostic?("capture_readiness_track_options_start")
+        do { try configure(track) }
+        catch {
+            onDiagnostic?("capture_readiness_track_options_failed")
+            throw error
+        }
         // A disabled sender does not start this SDK's recording engine. Start
         // local I/O explicitly while RTP and the speech gate remain closed.
         // Waiting for recording before doing this would deadlock session-ready.
-        guard device.initAndStartRecording(audioProcessingOptions: communicationOptions()) == 0 else {
+        let status = device.initAndStartRecording(audioProcessingOptions: communicationOptions())
+        onDiagnostic?("capture_readiness_native_start_status_\(status)")
+        guard status == 0 else {
             throw VoiceTutorWebRTCError.echoCancellationUnavailable
         }
     }
@@ -1084,6 +1100,11 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         )
         resourcesInstalled = true
 
+        // Start input before SDP can activate the remote receiver's playout.
+        // On iOS, adding input to an output-only software-AEC engine can expose
+        // a zero-format input node (-4010). Input-first prepares a duplex graph
+        // while the sender and speech gate remain closed until session-ready.
+        try await prepareCaptureForConnection(factory: factory, track: localTrack)
         let offer = try await createOffer(peer: peer, constraints: constraints)
         try ensureOpen()
         // Keep a validated value snapshot before handing the description to
@@ -1101,19 +1122,27 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         // socket only after ICE + DTLS are connected so its opening tutor turn
         // cannot run ahead of the iPhone's media path.
         try await waitForMediaConnection(peer: peer)
-        try await waitForEchoCancellation(factory: factory, track: localTrack)
+        // Negotiation may reconfigure the audio graph. Validate its live state
+        // again without restarting recording or replacing the prepared graph.
+        try await waitForEchoCancellation(factory: factory)
         emitMediaDiagnostic("media_connected")
     }
 
-    private func waitForEchoCancellation(factory: LKRTCPeerConnectionFactory, track: LKRTCAudioTrack) async throws {
+    private func prepareCaptureForConnection(factory: LKRTCPeerConnectionFactory, track: LKRTCAudioTrack) async throws {
         try ensureOpen()
-        try VoiceTutorEchoCancellationPolicy.startCaptureForReadiness(factory: factory, track: track)
+        try VoiceTutorEchoCancellationPolicy.startCaptureForReadiness(factory: factory, track: track) { [weak self] event in
+            self?.emitMediaDiagnostic(event)
+        }
         do { try ensureOpen() }
         catch {
             _ = factory.audioDeviceModule.stopRecording()
             throw error
         }
         emitMediaDiagnostic("capture_readiness_started")
+        try await waitForEchoCancellation(factory: factory)
+    }
+
+    private func waitForEchoCancellation(factory: LKRTCPeerConnectionFactory) async throws {
         let deadline = ProcessInfo.processInfo.systemUptime + 3
         while true {
             try ensureOpen()

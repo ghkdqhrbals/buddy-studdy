@@ -6236,7 +6236,7 @@ final class VoiceTutorContractTests: XCTestCase {
         defer {
             // Preserve startup evidence even if permission, activation, peer
             // creation, or native recording fails before the frame attachment.
-            XCTAssertLessThanOrEqual(preflight.count, 7)
+            XCTAssertLessThanOrEqual(preflight.count, 8)
             let attachment = XCTAttachment(string: preflight.joined(separator: "\n\n"))
             attachment.name = "native-voice-capture-preflight-metadata-only"
             attachment.lifetime = .keepAlways
@@ -6304,6 +6304,7 @@ final class VoiceTutorContractTests: XCTestCase {
         defer {
             tap.close()
             _ = device.stopRecording()
+            _ = device.stopPlayout()
             capturePeer?.close()
             module.capturePostProcessingDelegate = nil
             module.renderPreProcessingDelegate = nil
@@ -6324,6 +6325,10 @@ final class VoiceTutorContractTests: XCTestCase {
         )
         capturePeer = factory.peerConnection(with: configuration, constraints: constraints, delegate: nil)
         let peer = try XCTUnwrap(capturePeer, "The native capture probe must initialize WebRTC's media engine")
+        let sender = try XCTUnwrap(peer.add(track, streamIds: ["synthetic-native-capture-probe"]),
+                                   "Readiness must be checked with production's disabled local sender installed")
+        XCTAssertEqual(sender.track?.trackId, track.trackId)
+        XCTAssertEqual(sender.track?.isEnabled, false)
         preflight.append(nativeVoiceCapturePreflight(phase: "peer_initialized", device: device))
         XCTAssertTrue(factory.audioProcessingState.echoCancellation.isSoftwareActive)
         XCTAssertFalse(device.isRecording)
@@ -6332,15 +6337,32 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(tap.snapshot().validInputBufferCount, 0)
         XCTAssertFalse(track.isEnabled)
         XCTAssertFalse(tap.snapshot().gateEnabled)
-        // The peer is retained only for native initialization: no sender, SDP,
-        // ICE gathering, remote candidate, provider, recorder, or playout.
+        XCTAssertFalse(device.isPlaying)
+        // Start input before SDP can initialize output. Initializing an output-
+        // only graph first caused the real call's later input activation to
+        // fail with SDK -4010 (recording device format unavailable).
         preflight.append(nativeVoiceCapturePreflight(phase: "before_native_start", device: device))
         try VoiceTutorEchoCancellationPolicy.startCaptureForReadiness(factory: factory, track: track)
         preflight.append(nativeVoiceCapturePreflight(phase: "after_native_start", device: device))
+        XCTAssertTrue(device.isRecording)
+        XCTAssertFalse(device.isPlaying, "Production prepares local input before negotiation can start output")
         XCTAssertFalse(track.isEnabled, "Starting local capture must not publish learner audio before session readiness")
         XCTAssertFalse(tap.snapshot().gateEnabled)
+        let inputBuffersBeforePlayout = tap.snapshot().validInputBufferCount
+        let playoutInitStatus = device.initPlayout()
+        let playoutStartStatus = playoutInitStatus == 0 ? device.startPlayout() : nil
+        preflight.append(nativeVoiceCapturePreflight(phase: "playout_started_after_capture", device: device)
+            + "\nnativePlayoutInitStatus=\(playoutInitStatus)"
+            + "\nnativePlayoutStartStatus=\(playoutStartStatus.map { String($0) } ?? "not_attempted")"
+            + "\ninputBuffersBeforePlayout=\(inputBuffersBeforePlayout)")
+        XCTAssertEqual(playoutInitStatus, 0)
+        XCTAssertEqual(playoutStartStatus, 0)
+        guard playoutInitStatus == 0, playoutStartStatus == 0 else { return }
+        XCTAssertTrue(device.isPlaying)
+        XCTAssertTrue(device.isRecording, "Adding output must retain the already prepared input path")
         let deadline = ProcessInfo.processInfo.systemUptime + 3
-        while (tap.snapshot().validInputBufferCount < 5 || !VoiceTutorEchoCancellationPolicy.isActive(factory: factory))
+        while (tap.snapshot().validInputBufferCount < inputBuffersBeforePlayout + 5
+                || !VoiceTutorEchoCancellationPolicy.isActive(factory: factory))
                 && ProcessInfo.processInfo.systemUptime < deadline {
             try await Task.sleep(for: .milliseconds(50))
         }
@@ -6359,6 +6381,8 @@ final class VoiceTutorContractTests: XCTestCase {
         trackEnabled=\(track.isEnabled)
         engineRunning=\(device.isEngineRunning)
         nativeRecording=\(device.isRecording)
+        nativePlaying=\(device.isPlaying)
+        inputBuffersBeforePlayout=\(inputBuffersBeforePlayout)
         speechInferenceCount=\(snapshot.speechInferenceCount)
         initializedDiagnosticCount=\(observed.initializationEvents)
         firstValidInputDiagnosticCount=\(observed.firstInputEvents)
@@ -6380,12 +6404,15 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertGreaterThan(snapshot.initializationCount, 0, "The actual native APM must initialize the installed capture delegate")
         XCTAssertGreaterThanOrEqual(snapshot.validInputBufferCount, 5,
                                     "A started device without native capture callbacks is a failure, not a passed probe")
+        XCTAssertGreaterThanOrEqual(snapshot.validInputBufferCount - inputBuffersBeforePlayout, 5,
+                                    "Real input must continue arriving after output starts, not just before the graph transition")
         XCTAssertGreaterThan(snapshot.validInputFrameCount, 0)
         XCTAssertGreaterThan(snapshot.sampleRate, 0)
         XCTAssertFalse(snapshot.gateEnabled, "Native callback delivery must be observable before session-ready gating")
         XCTAssertFalse(track.isEnabled, "Readiness checks must leave provider input disabled")
         XCTAssertTrue(device.isEngineRunning)
         XCTAssertTrue(device.isRecording)
+        XCTAssertTrue(device.isPlaying)
         XCTAssertEqual(snapshot.speechInferenceCount, 0, "Closed readiness gating must not process learner speech")
         XCTAssertEqual(observed.initializationEvents, 1)
         XCTAssertEqual(observed.firstInputEvents, 1)
@@ -6394,9 +6421,9 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(VoiceTutorEchoCancellationPolicy.isActive(factory: factory),
                       "Real processed input frames must have an active echo canceller before media-ready can open capture")
         XCTAssertFalse(device.isMicrophoneMuted, "AEC must not rely on muting the native microphone")
-        // This sender-less probe exercises the same capture-readiness helper
-        // as production with its track and speech gate closed. It cannot
-        // verify connected SDP or measure acoustic echo without remote playout.
+        // The disabled sender and input-first/output-second graph exercise the
+        // production readiness ordering without SDP, ICE or a provider. This
+        // verifies live duplex I/O, not residual echo from real remote speech.
         XCTAssertFalse(device.isPlatformVoiceProcessingAllowed)
         XCTAssertFalse(platform.echoCancellation.isRequested)
         XCTAssertFalse(platform.echoCancellation.isActive)
@@ -6409,13 +6436,13 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertFalse(module.config.isEchoCancellationMobileMode)
         XCTAssertNil(peer.localDescription)
         XCTAssertNil(peer.remoteDescription)
-        XCTAssertTrue(peer.senders.isEmpty)
-        XCTAssertTrue(peer.receivers.isEmpty)
+        XCTAssertEqual(peer.senders.count, 1)
+        XCTAssertTrue(peer.senders.allSatisfy { $0.track?.isEnabled == false })
         XCTAssertEqual(peer.iceGatheringState, .new, "The microphone probe must never gather ICE candidates")
         if verifySilero {
             // Additional explicit opt-in: observe the actual native callback →
             // copy → resampler → bundled Core ML path. Activity is counted only;
-            // there is still no sender, SDP, provider, playback or audio storage.
+            // no SDP, provider, transmitted audio or audio storage is involved.
             tap.updateGate(mediaReady: true, muted: false)
             let acousticDeadline = ProcessInfo.processInfo.systemUptime + 3
             while tap.snapshot().speechInferenceCount < 5,
@@ -6444,6 +6471,8 @@ final class VoiceTutorContractTests: XCTestCase {
         tap.close()
         XCTAssertEqual(device.stopRecording(), 0)
         XCTAssertFalse(device.isRecording, "Teardown must stop the explicitly started readiness capture")
+        XCTAssertEqual(device.stopPlayout(), 0)
+        XCTAssertFalse(device.isPlaying)
         XCTAssertFalse(track.isEnabled)
         XCTAssertFalse(tap.snapshot().gateEnabled)
         #endif

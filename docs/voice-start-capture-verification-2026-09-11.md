@@ -1,5 +1,9 @@
 # Conversation startup capture fix — 2026-09-11
 
+This initial fix was incomplete in a provider-connected call. The follow-up
+[duplex startup investigation](voice-duplex-startup-verification-2026-09-11.md)
+records the reproduced failure and the corrected pre-SDP ordering.
+
 ## Observed failure
 
 Three user attempts at 14:40:23, 14:40:44 and 14:41:03 KST received a successful
