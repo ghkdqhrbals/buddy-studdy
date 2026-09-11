@@ -247,6 +247,10 @@ class McpVoiceTutorToolAdapter(
                 VoiceTutorMcpToolDefinition(tool.name(), description, schema)
             } +
             listOf(
+                VoiceTutorMcpToolDefinition(CANCEL_LEARNING,
+                    "Stop the current automatic study continuation when the learner explicitly cancels learning, chooses ordinary conversation, or asks to switch away from the current topic. Call this first for a spoken cancellation; saying that learning is cancelled without this tool does not stop its pending delivery. This ends no call, deletes nothing, changes no saved focus, skips no question, and never submits or discards an answer. Accepted generation and grading jobs keep their saved results. Do not use for a short acknowledgement, thinking pause, microphone check, or a progress question. After completion, follow the latest learner request without restarting the cancelled question; an explicit new study selection may start a new lesson.",
+                    mapOf("type" to "object", "additionalProperties" to false,
+                        "properties" to emptyMap<String, Any>(), "required" to emptyList<String>())),
                 VoiceTutorMcpToolDefinition(SELECT_STUDY,
                     "Prepare learning from the learner's chosen exact owned saved study_id; it may be a descendant, not the main root. The server resolves the original root, actual path and terminal state. A curriculumTerminal leaf or descendant depth four completes selection and returns voiceLessonFocus. A nonterminal topic shows its saved direct children; if none exist, the server creates one direct curriculum level with the original root's difficulty, without question quota. Then the app waits for a real subtopic choice or cancellation. Do not call request_user_input again, narrate a spoken menu, ask for repeated start agreement or claim selection complete while this form is pending. Continue only from the final voiceLessonFocus.studyId: read list_pending_questions separately, then request_question if needed. On cancellation stop the old follow-up; on a switch follow the latest topic. Cancellation does not roll back saved curriculum nodes or a committed focus.",
                     focusParameters("Exact owned saved study ID chosen in the conversation.")),
@@ -579,7 +583,7 @@ class McpVoiceTutorToolAdapter(
         toolName: String,
         arguments: Map<String, Any>,
     ): VoiceTutorMcpToolResult {
-        if (toolName !in ALLOWED_TOOLS && !(context.realtimeModelTools && toolName in REALTIME_MUTATION_TOOLS + VoiceTutorCanonicalQuestionCoordinator.TOOLS)) {
+        if (toolName !in ALLOWED_TOOLS && !(context.realtimeModelTools && toolName in REALTIME_MUTATION_TOOLS + VoiceTutorCanonicalQuestionCoordinator.TOOLS + CANCEL_LEARNING)) {
             return failure("TOOL_NOT_ALLOWED", "This tool is not available in voice calls.")
         }
         try {
@@ -587,6 +591,16 @@ class McpVoiceTutorToolAdapter(
                 return failure("INVALID_ARGUMENTS", "Tool arguments are too large.")
             }
             if (context.realtimeModelTools) {
+                if (toolName == CANCEL_LEARNING) {
+                    if (arguments.isNotEmpty()) return failure("INVALID_ARGUMENTS", "This call-local action accepts no arguments.")
+                    if (!isAuthorized(context)) return inactiveCall()
+                    if (context.operationStillCurrent?.invoke() == false)
+                        return failure("STALE_TURN", "The learner has supplied a newer request; this earlier cancellation was not applied.")
+                    return VoiceTutorMcpToolResult(objectMapper.writeValueAsString(mapOf(
+                        "cancelled" to true,
+                        "notice" to "Automatic learning is stopped. The call remains open, and saved topics, focus, questions, accepted jobs and answer drafts are preserved. Follow the latest request; do not resume the cancelled question or ask for a second cancellation.")),
+                        false, learningContinuationCancelled = true)
+                }
                 if (toolName in VoiceTutorCanonicalQuestionCoordinator.TOOLS) {
                     if (toolName in setOf("request_question", "list_pending_questions")) {
                         // Validate the voice schema before curriculum preparation can create nodes.
@@ -2138,6 +2152,7 @@ class McpVoiceTutorToolAdapter(
         const val DELETE_STUDY = "delete_study"
         const val PREPARE_MUTATION = "prepare_voice_study_mutation"
         const val CONFIRM_MUTATION = "confirm_voice_study_mutation"
+        const val CANCEL_LEARNING = "cancel_voice_learning"
         val REALTIME_MUTATION_TOOLS = setOf(PREPARE_MUTATION, CONFIRM_MUTATION)
         const val LIST_LEARNING_RECORDS = "list_study_learning_records"
         const val GET_VOICE_LEARNING_RECORD = "get_voice_learning_record"

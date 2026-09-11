@@ -1,7 +1,5 @@
 package com.buddystudy.backend.config
 
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.reactive.awaitSingle
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
@@ -14,12 +12,14 @@ suspend fun <T : Any> R2dbcEntityTemplate.selectPage(
     countQuery: Query,
     type: Class<T>,
     pageable: Pageable,
-): Page<T> = coroutineScope {
-    val content = async {
-        select(query.limit(pageable.pageSize).offset(pageable.offset), type).collectList().awaitSingle()
-    }
-    val total = async { count(countQuery, type).awaitSingle() }
-    PageImpl(content.await(), pageable, total.await())
+): Page<T> {
+    // A reactive transaction binds both queries to one connection. Consume the
+    // page before submitting the count so cancellation cannot leave a sibling
+    // query queued on that same MySQL connection.
+    val content = select(query.limit(pageable.pageSize).offset(pageable.offset), type)
+        .collectList().awaitSingle()
+    val total = count(countQuery, type).awaitSingle()
+    return PageImpl(content, pageable, total)
 }
 
 suspend fun <T : Any> R2dbcEntityTemplate.saveEntity(entity: T, id: Long): T =

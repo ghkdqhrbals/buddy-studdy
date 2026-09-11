@@ -139,6 +139,14 @@ use an immutable proposal whose exact submission creates that batch. Curriculum
 setup, root creation and question generation remain separate operations; topic
 creation never consumes question quota.
 
+Once a study is chosen, its question preparation continues through a short
+acknowledgement, a progress check or a thinking pause. New speech briefly takes
+the floor; it does not itself cancel the requested learning. The saved question
+is delivered at the next quiet boundary after that exchange. A spoken request
+to cancel learning or change direction stops this automatic continuation while
+preserving the call, saved focus, accepted generation jobs, questions and drafts.
+It must not require repeating either the start request or the cancellation.
+
 #### Current conversation contract — `realtime-native-v1`
 
 Speaker output must not become learner input. The iOS transport explicitly
@@ -150,7 +158,7 @@ or transcript similarity filtering. The PCM audio graph also uses actual Voice
 Processing I/O. Diagnostics report processing state and audio routes, without
 recording audio or speech content.
 
-The conversation shows small gray MCP execution entries directly beneath the message that invoked them, retaining completed and failed entries at that position. Server-owned response and input item identities associate delayed transcripts and asynchronous completion with the original turn; calls made without spoken tutor text attach to their originating learner message or submitted choice card. New messages never move old entries to the bottom. The actual function name and running/completed/failed state accompany a compact seconds/minutes duration. Only authenticated backend operation metadata drives this display; arguments, results and provider error bodies are excluded. Concurrent operations retain separate timers and stale events cannot reset them. The compact call surface shows only active operations; retained history belongs to the transcript's bounded visible turns. UI labels call the experience a conversation.
+The conversation keeps the learner's words, tutor responses, choices and answer controls visually prominent. Do not render MCP execution logs, repeated speaker labels, answer placeholders or supplementary pause instructions on either conversation surface. Keep the current lesson stage, remaining time, actionable errors, interruption/draft state and recording indicator. Completed choice cards retain the actual selections or text and submitted/cancelled state beneath the originating turn, without repeating the original question or topic metadata. Speaker and input guidance remain available to accessibility. Authenticated operation metadata and exact response/input identities remain internal state for diagnostics and delayed choice-card correlation; hiding the logs must not discard that state or move cards to newer turns. UI labels call the experience a conversation.
 
 This is the active iOS voice contract. The realtime model hears the full conversation and decides meaning, turn intent, topic choice and tool use itself. No separate live GPT intent, filler, consent, question or feedback classifier gates a normal response. The detailed independently attested offer/lease and approved-input rules retained below describe only the legacy `local-vad-v1`/PCM implementations; they do not apply to this native conversation path. Entitlement, quota, foreground lifecycle, recording privacy, drafts and common learning-record ownership remain shared requirements.
 

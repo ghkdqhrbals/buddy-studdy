@@ -1132,25 +1132,14 @@ struct VoiceTutorAnswerEditor: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .topLeading) {
-                if text.isEmpty {
-                    Text(strings.voiceTutorAnswerPlaceholder)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 8)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-                TextEditor(text: $text)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .scrollDismissesKeyboard(.never)
-                    .focused($isFocused)
-                    .accessibilityLabel(strings.voiceTutorAnswerEdit)
-                    .accessibilityHint(strings.voiceTutorAnswerReviewHelp)
-                    .accessibilityIdentifier("voiceCall.answerEditor")
-            }
+            TextEditor(text: $text)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.never)
+                .focused($isFocused)
+                .accessibilityLabel(strings.voiceTutorAnswerEdit)
+                .accessibilityHint(strings.voiceTutorAnswerReviewHelp)
+                .accessibilityIdentifier("voiceCall.answerEditor")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
@@ -1406,7 +1395,6 @@ struct VoiceTutorCallScreen: View {
                 .frame(maxWidth: .infinity)
                 Spacer(minLength: 44)
 
-                operationStatus(operationState.active)
                 summaryRow
                 if showsSummary && presentation.summaryState == .ready {
                     VoiceTutorResultSections(detail: presentation.detail, strings: strings)
@@ -1466,21 +1454,10 @@ struct VoiceTutorCallScreen: View {
                 callTime
                 if presentation.isRecording { recordingIndicator }
             }
-            if showsAnswerPauseControl, presentation.pauseState.holdsMicrophone, orbInteraction.stage == .idle {
-                answerPauseHelp
-            } else if answerCaptureIsListening, orbInteraction.stage == .idle {
-                answerCaptureHelp
-            }
             if orbInteraction.stage == .warning {
                 Text(strings.voiceTutorOrbReleaseCancels)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            if presentation.phase.isLive && presentation.pauseState.holdsMicrophone {
-                Text(strings.voiceTutorPauseUsesTime)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 20)
@@ -1748,23 +1725,6 @@ struct VoiceTutorCallScreen: View {
             : Color(red: 0.52, green: 0.31, blue: 0.08)
     }
 
-    private var answerCaptureHelp: some View {
-        Text(strings.voiceTutorAnswerCaptureHelp)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("voiceCall.answerCaptureHelp")
-    }
-
-    private var answerPauseHelp: some View {
-        Text(strings.voiceTutorAnswerPauseHelp)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .transition(.opacity)
-            .accessibilityIdentifier("voiceCall.answerPauseHelp")
-    }
-
     private var callNotices: some View {
         VStack(spacing: 12) {
             Text(orbStatusText)
@@ -1773,21 +1733,12 @@ struct VoiceTutorCallScreen: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("voiceCall.status")
-
-
-            if showsAnswerPauseControl, presentation.pauseState.holdsMicrophone, orbInteraction.stage == .idle {
-                answerPauseHelp.multilineTextAlignment(.center)
-            } else if answerCaptureIsListening, orbInteraction.stage == .idle {
-                answerCaptureHelp
-                    .multilineTextAlignment(.center)
-            }
-
             if orbInteraction.stage == .warning {
                 Text(strings.voiceTutorOrbReleaseCancels)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-            } else if presentation.phase == .failed || presentation.phase == .ended {
+            } else if presentation.phase == .failed {
                 Text(callExplanation)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -1797,56 +1748,18 @@ struct VoiceTutorCallScreen: View {
             }
 
             if presentation.isRecording { recordingIndicator }
-            if presentation.phase.isLive && presentation.pauseState.holdsMicrophone {
-                Text(strings.voiceTutorPauseUsesTime)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("voiceCall.pauseUsesTime")
-            }
         }
         .frame(maxWidth: .infinity)
         .animation(answerControlAnimation, value: presentation.pauseState.mode)
     }
 
-    @ViewBuilder
-    private func operationStatus(_ entries: [VoiceTutorOperationState.Entry]) -> some View {
-        if entries.contains(where: { $0.event.phase == .started }) {
-            TimelineView(.periodic(from: .now, by: 1)) { _ in
-                operationRows(entries, at: ProcessInfo.processInfo.systemUptime)
-            }
-        } else if !entries.isEmpty {
-            operationRows(entries, at: 0)
-        }
-    }
-
-    private func operationRows(_ entries: [VoiceTutorOperationState.Entry], at uptime: TimeInterval) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(entries) { entry in
-                Text(strings.voiceTutorOperationStatus(
-                    name: entry.event.name, phase: entry.event.phase,
-                    elapsedMilliseconds: entry.elapsedMilliseconds(at: uptime)
-                ))
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("voiceCall.operationStatus")
-            }
-        }
-    }
-
-    private func userInputCards(_ entries: [VoiceTutorUserInputState.Entry],
-                                operations: [String: [VoiceTutorOperationState.Entry]]) -> some View {
+    private func userInputCards(_ entries: [VoiceTutorUserInputState.Entry]) -> some View {
         ForEach(entries) { entry in
-            VStack(alignment: .leading, spacing: 12) {
-                VoiceTutorUserInputCard(entry: entry, strings: strings,
-                    onChange: { onUserInputChange(entry.id, $0) },
-                    onSubmit: { onUserInputSubmit(entry.id, false) },
-                    onCancel: { onUserInputSubmit(entry.id, true) })
-                .id("voiceInput.\(entry.id)")
-                operationStatus(operations[entry.id] ?? [])
-            }
+            VoiceTutorUserInputCard(entry: entry, strings: strings,
+                onChange: { onUserInputChange(entry.id, $0) },
+                onSubmit: { onUserInputSubmit(entry.id, false) },
+                onCancel: { onUserInputSubmit(entry.id, true) })
+            .id("voiceInput.\(entry.id)")
         }
     }
 
@@ -1924,12 +1837,13 @@ struct VoiceTutorCallScreen: View {
                 }
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
-                Text(answerDraftText.wrappedValue.isEmpty
-                     ? strings.voiceTutorAnswerPlaceholder : answerDraftText.wrappedValue)
-                    .font(.subheadline)
-                    .foregroundStyle(answerDraftText.wrappedValue.isEmpty ? .secondary : .primary)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
+                if !answerDraftText.wrappedValue.isEmpty {
+                    Text(answerDraftText.wrappedValue)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1956,12 +1870,13 @@ struct VoiceTutorCallScreen: View {
                                 .foregroundStyle(voiceAccent)
                         }
                     }
-                    Text(answerDraftText.wrappedValue.isEmpty
-                         ? strings.voiceTutorAnswerPlaceholder : answerDraftText.wrappedValue)
-                        .font(.body)
-                        .foregroundStyle(answerDraftText.wrappedValue.isEmpty ? .secondary : .primary)
-                        .lineLimit(6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !answerDraftText.wrappedValue.isEmpty {
+                        Text(answerDraftText.wrappedValue)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .lineLimit(6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .multilineTextAlignment(.leading)
                 .contentShape(Rectangle())
@@ -1971,12 +1886,6 @@ struct VoiceTutorCallScreen: View {
             .accessibilityLabel(strings.voiceTutorAnswerEdit)
             .accessibilityValue(answerDraftText.wrappedValue)
             .accessibilityIdentifier("voiceCall.answerEdit")
-            if answerDraftState.phase != .listening && !answerDraftState.isCancelling {
-                Text(strings.voiceTutorAnswerReviewHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             if answerDraftState.phase == .failed {
                 Text(answerDraftState.failureCode == "ANSWER_TOO_LONG"
                      ? strings.voiceTutorAnswerTooLong : strings.voiceTutorAnswerFailedHelp)
@@ -2144,13 +2053,6 @@ struct VoiceTutorCallScreen: View {
         let inputs = VoiceTutorUserInputTranscriptLayout(entries: userInputState.entries, captions: captions,
             assistantResponseID: assistantTranscriptResponseID, hasAssistantDraft: !assistantTranscriptDraft.isEmpty,
             answerDraftID: hasAnswerDraft ? answerDraftState.answerID : nil)
-        let operations = VoiceTutorOperationTranscriptLayout(
-            entries: operationState.visibleEntries(at: 0), captions: captions,
-            assistantResponseID: assistantTranscriptResponseID,
-            hasAssistantDraft: !assistantTranscriptDraft.isEmpty,
-            userInputIDs: Set(userInputState.entries.map(\.id)),
-            answerDraftID: hasAnswerDraft ? answerDraftState.answerID : nil
-        )
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
@@ -2166,31 +2068,24 @@ struct VoiceTutorCallScreen: View {
                             Text(strings.voiceTutorCallEmptyConversation)
                                 .font(.headline)
                                 .foregroundStyle(.primary)
-                            Text(callExplanation)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(.vertical, 20)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    operationStatus(operations.beforeCaptions)
-                    userInputCards(inputs.beforeCaptions, operations: operations.byUserInputID)
+                    userInputCards(inputs.beforeCaptions)
                     // A delayed exact source must not make an interactive form
                     // inaccessible or attach it to an unrelated recent message.
-                    userInputCards(inputs.unresolvedWaiting, operations: operations.byUserInputID)
+                    userInputCards(inputs.unresolvedWaiting)
                     ForEach(captions) { caption in
                         VStack(alignment: .leading, spacing: 12) {
                             VoiceTutorCaptionBubble(caption: caption, strings: strings)
-                            operationStatus(operations.byCaptionID[caption.id] ?? [])
-                            userInputCards(inputs.byCaptionID[caption.id] ?? [], operations: operations.byUserInputID)
+                            userInputCards(inputs.byCaptionID[caption.id] ?? [])
                         }
                     }
                     if hasAnswerDraft {
                         VStack(alignment: .leading, spacing: 12) {
                             answerDraftCard
-                            operationStatus(operations.afterAnswerDraft)
-                            userInputCards(inputs.afterAnswerDraft, operations: operations.byUserInputID)
+                            userInputCards(inputs.afterAnswerDraft)
                         }
                     }
                     if !assistantTranscriptDraft.isEmpty {
@@ -2199,8 +2094,7 @@ struct VoiceTutorCallScreen: View {
                                 caption: VoiceTutorCaption(speaker: .tutor, text: assistantTranscriptDraft),
                                 strings: strings
                             )
-                            operationStatus(operations.afterAssistantDraft)
-                            userInputCards(inputs.afterAssistantDraft, operations: operations.byUserInputID)
+                            userInputCards(inputs.afterAssistantDraft)
                         }
                     } else if presentation.orbState == .thinking && !captions.isEmpty && !hasAnswerDraft
                         && (presentation.lessonPhase == nil || presentation.lessonPhase == .conversation) {
@@ -2212,10 +2106,12 @@ struct VoiceTutorCallScreen: View {
                     }
                     if presentation.phase == .failed || presentation.phase == .ended {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(callExplanation)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                            if presentation.phase == .failed {
+                                Text(callExplanation)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                             supplementaryErrorNotice
                             summaryRow
                             if showsSummary && presentation.summaryState == .ready {
@@ -2762,9 +2658,6 @@ private struct VoiceTutorCaptionBubble: View {
             if isLearner { Spacer(minLength: dynamicTypeSize.isAccessibilitySize ? 12 : 36) }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(isLearner ? strings.voiceTutorYou : strings.voiceTutorTeacher)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
                 Text(caption.text)
                     .font(.body)
                     .foregroundStyle(.primary)
@@ -2792,6 +2685,11 @@ private struct VoiceTutorCaptionBubble: View {
         }
         .frame(maxWidth: .infinity, alignment: isLearner ? .trailing : .leading)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel((isLearner ? strings.voiceTutorYou : strings.voiceTutorTeacher) + ". " + caption.text)
+        .accessibilityValue([
+            caption.isInterrupted ? strings.voiceTutorInterruptedResponse : nil,
+            caption.isUnsubmittedAnswer ? strings.voiceTutorUnsubmittedAnswer : nil
+        ].compactMap { $0 }.joined(separator: ". "))
     }
 }
 

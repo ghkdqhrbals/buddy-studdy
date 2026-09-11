@@ -62,6 +62,8 @@ data class VoiceTutorMcpToolResult(
     val questionReadbackRecovery: VoiceTutorQuestionReadback? = null,
     /** Server-owned saved direct-child choice. No provider form can invent its focus targets. */
     val curriculumInput: VoiceTutorCurriculumUserInput? = null,
+    /** Stop call-local automatic learning only; never clear persisted focus, questions or drafts. */
+    val learningContinuationCancelled: Boolean = false,
 )
 
 data class VoiceTutorCurriculumUserInput(val proposalId: String, val title: String, val prompt: String,

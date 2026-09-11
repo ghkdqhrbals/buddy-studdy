@@ -72,7 +72,7 @@ runtime comparison or rollback does not fork application behavior.
   - Use `BackendVoiceTutorStatus`, `BackendVoiceTutorQuota`, `BackendVoiceTutorSessionStart`, `BackendVoiceTutorSessionListItem`, `BackendVoiceTutorSessionPage`, `BackendVoiceTutorSessionDetail`, `BackendVoiceTutorSessionResult`, and `BackendVoiceTutorTranscriptTurn` as additive backend contracts.
   - Open only the authenticated BuddyStudy WebSocket with subprotocol `buddystudy.voice.v1`; the iOS process never receives the server's OpenAI Realtime credential.
   - Own microphone/audio-route and interruption state for the lifetime of a user-started call. The active play-and-record voice-chat audio session and UIBackgroundModes audio entry preserve microphone, media and control through app backgrounding and device locking. Explicit dismissal, end, audio interruption, logout or account replacement still closes the stream and requests idempotent session finalization.
-  - `buddystudy.voice.operation` carries a session-monotonic sequence, safe operation ID/function name, started/completed/failed phase and server-measured `elapsedMs`. Native tool work and automatic question/grading reads emit their actual operation boundaries. iOS maintains at most eight active timers per connection attempt, measures ongoing elapsed time with uptime, retains up to 512 completed/failed entries for the conversation and closes the event gate at termination. Provider-authored metadata, arguments and results never enter this status display.
+  - `buddystudy.voice.operation` carries a session-monotonic sequence, safe operation ID/function name, started/completed/failed phase and server-measured `elapsedMs`. Native tool work and automatic question/grading reads emit their actual operation boundaries. iOS retains bounded operation state (eight active and 512 completed/failed entries) for diagnostics and exact choice-card correlation, closing the event gate at termination. The live UI does not render operation rows or run a display timer for them. Provider-authored metadata, arguments and results never become visible status text.
   - Manual canonical-question capture reads and saves the existing record-ID draft through AppState/SettingsStore. Finish, reviewed Submit and Skip travel as typed authenticated control events; the backend owns canonical submission, generation and quota operations.
 
 - `Services/SettingsStore.swift`
@@ -413,6 +413,16 @@ Public community feed
   old focus. Live operation/learner fences prevent a superseded recommendation
   from starting an automatic write. Form display strings obey the common wire
   bounds while saved IDs and topic names remain exact.
+- Native automatic question delivery has a call-local learning intent separate
+  from an acoustic turn. A short acknowledgement or progress question defers
+  delivery to a quiet response boundary instead of revoking the accepted study.
+  The native-only `cancel_voice_learning` tool takes no arguments and returns
+  typed `learningContinuationCancelled` metadata after call authorization and
+  current-turn validation. The controller stops automatic delivery from that
+  intent without deleting or updating saved focus, records, drafts or accepted
+  generation/grading jobs. Provider JSON cannot manufacture this cancellation;
+  topic/revision changes, GUI cancellation and terminal session fences also
+  retire the old continuation.
 - During manual answer capture, a separate pause/continue control sits directly
   below the Finish Answer orb. It invokes the existing `pause-v1` path, never
   answer finish/submit. Pending acknowledgments disable repeated actions; the

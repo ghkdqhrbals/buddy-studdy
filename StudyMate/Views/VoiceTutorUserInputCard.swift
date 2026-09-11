@@ -63,10 +63,11 @@ struct VoiceTutorUserInputCard: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(entry.request.title)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if entry.isWaiting {
+                Text(entry.request.title)
+                    .font(.subheadline.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer(minLength: 0)
             Label(statusLabel, systemImage: entry.isWaiting ? "pause.circle" :
                     (entry.status == .submitted ? "checkmark.circle" : "minus.circle"))
@@ -102,19 +103,8 @@ struct VoiceTutorUserInputCard: View {
                 .font(.body.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
             if question.selectionMode != .text {
-                HStack {
-                    Text(strings.voiceTutorInputSelectionHelp(multiple: question.selectionMode == .multiple))
-                    Spacer(minLength: 8)
-                    if !answer.selectedOptionIds.isEmpty {
-                        Text(strings.voiceTutorInputSelectedCount(answer.selectedOptionIds.count))
-                            .foregroundStyle(accent)
-                            .contentTransition(.numericText())
-                    }
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .accessibilityElement(children: .combine)
                 options(question, answer: answer)
+                    .accessibilityHint(strings.voiceTutorInputSelectionHelp(multiple: question.selectionMode == .multiple))
             }
             if question.allowFreeText { customInput(question, answer: answer) }
         }
@@ -184,11 +174,13 @@ struct VoiceTutorUserInputCard: View {
                     Text(strings.voiceTutorInputCustom)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.primary)
-                    Text(verbatim: answer.text.isEmpty ? strings.voiceTutorInputCustomHint : answer.text)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(answer.text.isEmpty ? 1 : 2)
-                        .multilineTextAlignment(.leading)
+                    if !answer.text.isEmpty {
+                        Text(verbatim: answer.text)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
@@ -240,19 +232,17 @@ struct VoiceTutorUserInputCard: View {
     private var completedAnswers: some View {
         let displayedAnswers = entry.status == .submitted ? entry.submittedAnswers ?? [] : entry.answers
         return VStack(alignment: .leading, spacing: 14) {
-            if displayedAnswers.contains(where: { !$0.selectedOptionIds.isEmpty || !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                Text(entry.status == .submitted ? strings.voiceTutorInputSubmittedAnswers : strings.voiceTutorInputUnsubmittedDraft)
+            if entry.status != .submitted,
+               displayedAnswers.contains(where: { !$0.selectedOptionIds.isEmpty || !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                Text(strings.voiceTutorInputUnsubmittedDraft)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier(entry.status == .submitted
-                        ? "voiceConversation.submittedAnswers" : "voiceConversation.unsubmittedDraft")
+                    .accessibilityIdentifier("voiceConversation.unsubmittedDraft")
             }
             ForEach(entry.request.questions) { question in
                 let answer = displayedAnswers.first { $0.questionId == question.id } ?? .init(questionId: question.id)
                 let labels = question.options.filter { answer.selectedOptionIds.contains($0.id) }.map(\.label)
                 if !labels.isEmpty || !answer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(question.prompt).font(.caption).foregroundStyle(.secondary)
                         if !labels.isEmpty {
                             Text(labels.joined(separator: " · "))
                                 .font(.subheadline.weight(.medium))
@@ -260,17 +250,20 @@ struct VoiceTutorUserInputCard: View {
                                 .accessibilityIdentifier("voiceConversation.inputResultOptions.\(question.id)")
                         }
                         if !answer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(strings.voiceTutorInputCustom).font(.caption).foregroundStyle(.secondary)
                             Text(verbatim: answer.text).font(.subheadline)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                                 .accessibilityIdentifier("voiceConversation.inputResultText.\(question.id)")
                         }
                     }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(question.prompt)
                 }
             }
         }
-        .foregroundStyle(entry.status == .submitted ? Color.primary : Color.secondary)
+        .foregroundStyle(.primary)
+        .accessibilityIdentifier(entry.status == .submitted
+            ? "voiceConversation.submittedAnswers" : "voiceConversation.cancelledAnswers")
     }
 }
 
@@ -289,28 +282,16 @@ struct VoiceTutorUserInputEditor: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text(question.prompt)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
                     .lineLimit(4)
                     .accessibilityLabel(question.prompt)
-                ZStack(alignment: .topLeading) {
-                    if text.isEmpty {
-                        Text(strings.voiceTutorInputPlaceholder)
-                            .font(.body)
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 8)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-                    TextEditor(text: $text)
-                        .font(.body)
-                        .scrollContentBackground(.hidden)
-                        .scrollDismissesKeyboard(.never)
-                        .focused($isFocused)
-                        .disabled(!isEditable)
-                        .accessibilityLabel(question.prompt + ". " + strings.voiceTutorInputCustom)
-                        .accessibilityIdentifier("voiceConversation.inputEditor")
-                }
+                TextEditor(text: $text)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .scrollDismissesKeyboard(.never)
+                    .focused($isFocused)
+                    .disabled(!isEditable)
+                    .accessibilityLabel(question.prompt + ". " + strings.voiceTutorInputCustom)
+                    .accessibilityIdentifier("voiceConversation.inputEditor")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .padding(.horizontal, 24)

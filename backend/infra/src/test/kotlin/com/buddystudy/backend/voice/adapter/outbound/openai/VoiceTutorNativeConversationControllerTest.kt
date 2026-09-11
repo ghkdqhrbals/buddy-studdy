@@ -33,6 +33,7 @@ class VoiceTutorNativeConversationControllerTest {
     private var beginToolsImmediately = false
     private val calls = mutableListOf<VoiceTutorMcpCall>()
     private val watches = mutableListOf<VoiceTutorNativeConversationController.LearningWatch>()
+    private val requestedQuestions = mutableMapOf<String, String>()
 
     init {
         controller.providerEvents().subscribe { outbound.add(mapper.readTree(it)) }
@@ -718,6 +719,167 @@ class VoiceTutorNativeConversationControllerTest {
         val operations = ui.filter { it.path("type").asText() == Contract.OPERATION_EVENT && it.path("name").asText() == "question_generation" }
         assertThat(operations.map { it.path("phase").asText() }).containsExactly("started", "completed")
         assertThat(calls.map { it.name }).containsExactly("request_question")
+    }
+
+    @Test
+    fun `completed generation status speech cannot replace the saved question or open answer capture`() {
+        val question = "결제 서비스는 승인됐지만 재고 서비스 호출이 네트워크 장애로 실패했다면, 어느 쪽인가요?\n" +
+            "- **A.** 로컬 트랜잭션만 성공해도 전체 비즈니스 상태는 자동으로 일관적이다.\n" +
+            "- **B.** 보상 작업이나 후속 조정이 없으면 전체 상태가 불일치할 수 있다."
+        val waiting = "좋아요. 지금 질문 생성이 요청된 상태라, 저장된 질문이 도착하면 그대로 읽어 드릴게요. 잠깐만 기다려 주세요."
+        opening(); speech(1); committed("start-study"); created("generation-request")
+        toolDone("generation-request", "request", "request_question")
+        controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "saved-generation")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{\"notice\":\"Generation was requested; wait for its result.\"}", false,
+            learningProgress = progress))
+        val watch = watches.single()
+        ackToolOutput()
+        time += Duration.ofSeconds(23).toNanos()
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            questionChange = VoiceTutorQuestionChange(7, "124"),
+            questionReadback = VoiceTutorQuestionReadback(7, "124", question),
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "124")))
+        val requested = responses().last().path("response")
+        assertThat(requested.path("input").isArray).isTrue()
+        assertThat(requested.path("input")).isEmpty()
+        assertThat(requested.path("instructions").asText()).contains(mapper.writeValueAsString(question))
+        val responseCount = responses().size
+
+        created("wrong-readback"); audio("wrong-readback", "waiting-notice", waiting)
+        assertThat(answerStates()).isEmpty()
+        done("wrong-readback", "waiting-notice", waiting)
+        event("output_audio_buffer.stopped", "response_id" to "wrong-readback")
+        assertThat(answerStates()).isEmpty()
+        assertThat(sessionStates().map { it.path("phase").asText() }).doesNotContain("answering")
+        assertThat(stored.none { it.itemId == "waiting-notice" }).isTrue()
+        assertThat(failures.last().kind).isEqualTo(VoiceTutorProviderTurnFailureKind.RESPONSE_QUESTION_CONTENT_MISMATCH)
+        assertThat(responses()).hasSize(responseCount + 1)
+        assertThat(responses().last().path("response").path("instructions")).isEqualTo(requested.path("instructions"))
+        assertThat(calls.map { it.name }).containsExactly("request_question")
+
+        created("saved-readback"); audio("saved-readback", "actual-question", question.replace("- **A.**", "에이.").replace("- **B.**", "비."))
+        done("saved-readback", "actual-question", question.replace("- **A.**", "에이.").replace("- **B.**", "비."))
+        event("output_audio_buffer.stopped", "response_id" to "saved-readback")
+        assertThat(answerStates().last().path("recordId").asText()).isEqualTo("124")
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("listening")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("answering")
+        assertThat(stored.single { it.itemId == "actual-question" }.raw).contains("actual-question")
+        assertThat(responses()).hasSize(responseCount + 1)
+    }
+
+    @Test
+    fun `two unrelated audible readbacks fail the question without another generation or answer lock`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        val responseCount = responses().size
+        repeat(2) { index ->
+            val id = "unrelated-$index"
+            created(id); audio(id, "notice-$index", "질문이 도착하면 읽어 드릴게요.")
+            done(id, "notice-$index", "질문이 도착하면 읽어 드릴게요.")
+            event("output_audio_buffer.stopped", "response_id" to id)
+        }
+        assertThat(answerStates()).isEmpty()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+        assertThat(responses()).hasSize(responseCount + 1)
+        assertThat(failures.map { it.action }).containsExactly(
+            VoiceTutorProviderTurnFailureAction.RETRY_SCHEDULED, VoiceTutorProviderTurnFailureAction.TURN_ABANDONED)
+        assertThat(calls.map { it.name }).containsExactly("list_pending_questions")
+        speech(2); committed("new-direction")
+        assertThat(responses()).hasSize(responseCount + 2)
+        assertThat(responses().last().path("response").has("input")).isFalse()
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+    }
+
+    @Test
+    fun `audio start without saved question content cannot classify a new request as an answer`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        created("wrong-readback"); audio("wrong-readback", "waiting", "잠깐만 기다려 주세요.")
+        speech(2); committed("cancel-request"); transcript("cancel-request", "공부는 취소하고 다른 이야기를 하자.")
+        cancelled("wrong-readback")
+        event("output_audio_buffer.cleared", "response_id" to "wrong-readback")
+        assertThat(answerStates()).isEmpty()
+        assertThat(answerSegments()).isEmpty()
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        assertThat(stored.single { it.itemId == "cancel-request" }.raw).doesNotContain("canonicalAnswerSource")
+    }
+
+    @Test
+    fun `acknowledgement during generation defers the ready question until the ordinary turn then reads automatically`() {
+        opening(); speech(1); committed("start-study"); created("start-response")
+        toolDone("start-response", "request", "request_question"); controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generation")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single(); ackToolOutput()
+        client(Contract.SPEECH_STARTED_EVENT, 2)
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            questionReadback = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION),
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
+        assertThat(responses()).hasSize(2)
+        client(Contract.SPEECH_STOPPED_EVENT, 2); committed("acknowledgement"); transcript("acknowledgement", "좋아요.")
+        assertThat(responses().last().path("response").has("instructions")).isFalse()
+        created("ack-response"); audio("ack-response", "ack-text"); done("ack-response", "ack-text")
+        event("output_audio_buffer.stopped", "response_id" to "ack-response")
+        assertThat(responses().last().path("response").path("instructions").asText()).contains(SAVED_QUESTION)
+        created("question"); audio("question", "question-text"); done("question", "question-text")
+        event("output_audio_buffer.stopped", "response_id" to "question")
+        assertThat(answerStates().single().path("phase").asText()).isEqualTo("listening")
+        assertThat(calls.map { it.name }).containsExactly("request_question")
+    }
+
+    @Test
+    fun `a side question tool result receives its ordinary response before the ready study question`() {
+        opening(); speech(1); committed("start-study"); created("start-response")
+        toolDone("start-response", "request", "request_question"); controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generation")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single(); ackToolOutput()
+        speech(2); committed("side-question"); created("side-lookup")
+        toolDone("side-lookup", "lookup", "get_study"); controller.beginTool("lookup")
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            questionReadback = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION),
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
+        controller.completeTool("lookup", VoiceTutorMcpToolResult("{\"difficultyLevel\":8}", false)); ackToolOutput()
+        assertThat(responses().last().path("response").has("input")).isFalse()
+        created("side-answer"); audio("side-answer", "level-answer", "레벨은 팔이에요.")
+        done("side-answer", "level-answer", "레벨은 팔이에요.")
+        event("output_audio_buffer.stopped", "response_id" to "side-answer")
+        assertThat(responses().last().path("response").path("instructions").asText()).contains(SAVED_QUESTION)
+        assertThat(calls.map { it.name }).containsExactly("request_question", "get_study")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["ready", "generating"])
+    fun `explicit typed learning cancellation fences a ready or future question while preserving focus`(phase: String) {
+        opening(); speech(1); committed("start-study"); created("start-response")
+        toolDone("start-response", "request", "request_question"); controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generation")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single(); ackToolOutput()
+        speech(2); committed("cancel-learning"); created("cancel-response")
+        val ready = VoiceTutorMcpToolResult("{}", false,
+            questionReadback = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION),
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42"))
+        if (phase == "ready") controller.completeLearningPoll(watch, ready)
+        toolDone("cancel-response", "cancel", "cancel_voice_learning"); controller.beginTool("cancel")
+        controller.completeTool("cancel", VoiceTutorMcpToolResult("{}", false, learningContinuationCancelled = true))
+        ackToolOutput()
+        if (phase == "generating") controller.completeLearningPoll(watch, ready)
+        assertThat(responses().last().path("response").has("input")).isFalse()
+        created("cancel-ack"); audio("cancel-ack", "cancel-ack-text"); done("cancel-ack", "cancel-ack-text")
+        event("output_audio_buffer.stopped", "response_id" to "cancel-ack")
+        val count = responses().size; time += Duration.ofSeconds(30).toNanos(); controller.tick()
+        assertThat(responses()).hasSize(count)
+        assertThat(answerStates()).isEmpty()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
+        assertThat(sessionStates().last().path("studyId").asLong()).isEqualTo(7)
+        assertThat(controller.learningWatchIsCurrent(watch)).isFalse()
+        speech(3); committed("status-only"); created("status-query")
+        toolDone("status-query", "query", "list_pending_questions"); controller.beginTool("query")
+        controller.completeTool("query", VoiceTutorMcpToolResult("{}", false,
+            questionReadbackRecovery = VoiceTutorQuestionReadback(7, "42", SAVED_QUESTION)))
+        ackToolOutput()
+        assertThat(responses().last().path("response").has("input")).isFalse()
+        assertThat(answerStates()).isEmpty()
     }
 
     @Test
@@ -1981,6 +2143,10 @@ class VoiceTutorNativeConversationControllerTest {
             .doesNotContain("invent a different instant quiz")
         assertThat(options.path("tool_choice").asText()).isEqualTo("none")
         assertThat(options.path("output_modalities").single().asText()).isEqualTo("audio")
+        assertThat(options.has("input")).isTrue()
+        assertThat(options.path("input").isArray).isTrue()
+        assertThat(options.path("input")).isEmpty()
+        assertThat(options.has("conversation")).isFalse()
         created("readback"); audio("readback", "saved-question"); done("readback", "saved-question")
         event("output_audio_buffer.stopped", "response_id" to "readback")
         speech(2); committed("answer")
@@ -2601,7 +2767,7 @@ class VoiceTutorNativeConversationControllerTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["select_voice_study", "advance_voice_study"])
-    fun `fresh speech cancels an older selection followup while retaining its committed focus and revision`(tool: String) {
+    fun `fresh speech defers an older selection until a semantic cancellation while retaining committed focus and revision`(tool: String) {
         opening(); speech(1); committed("u1"); created("selection-response"); toolDone("selection-response", "selection", tool)
         assertThat(controller.beginTool("selection")).isTrue()
         client(Contract.SPEECH_STARTED_EVENT, 2)
@@ -2609,17 +2775,15 @@ class VoiceTutorNativeConversationControllerTest {
         controller.completeTool("selection", selectedQuestionResult())
         val output = outbound.single { it.path("item").path("type").asText() == "function_call_output" }
         val body = mapper.readTree(output.path("item").path("output").asText())
-        assertThat(body.path("followupCancelled").asBoolean()).isTrue()
+        assertThat(body.has("followupCancelled")).isFalse()
         assertThat(body.path("selected").asBoolean()).isTrue()
         assertThat(body.path("voiceLessonFocus").path("revision").asLong()).isEqualTo(1)
         assertThat(body.has("error")).isFalse()
-        assertThat(body.path("notice").asText()).contains("no committed change was rolled back", "there is no selection still running",
-            "Follow the latest learner request", "If the latest request is to switch but gives no new target, ask which topic")
-        assertThat(sessionStates().drop(phasesBefore).map { it.path("phase").asText() }).containsExactly("conversation")
+        assertThat(sessionStates().drop(phasesBefore).map { it.path("phase").asText() }).contains("conversation", "question_ready")
         assertThat(sessionStates().last().path("studyId").asLong()).isEqualTo(7)
         assertThat(sessionStates().last().path("revision").asLong()).isEqualTo(1)
         assertThat(ui.single { it.path("type").asText() == Contract.STUDY_FOCUSED_EVENT }.path("focus").path("studyId").asLong()).isEqualTo(7)
-        assertThat(ui.none { it.path("type").asText() == Contract.QUESTION_CHANGED_EVENT }).isTrue()
+        assertThat(ui.count { it.path("type").asText() == Contract.QUESTION_CHANGED_EVENT }).isEqualTo(1)
         assertThat(answerStates()).isEmpty()
         assertThat(watches).isEmpty()
         ackToolOutput(); ackToolOutput()
@@ -2627,10 +2791,15 @@ class VoiceTutorNativeConversationControllerTest {
         client(Contract.SPEECH_STOPPED_EVENT, 2); committed("new-topic-request")
         assertThat(responses()).hasSize(3)
         assertThat(responses().last().path("response").has("instructions")).isFalse()
-        created("latest-response"); toolDone("latest-response", "browse-latest", "list_studies")
-        assertThat(controller.toolRevision("browse-latest")).isEqualTo(1)
-        assertThat(controller.toolBoundary("browse-latest")?.latestAcceptedLearnerProviderItemId).isEqualTo("new-topic-request")
-        assertThat(calls.map { it.name }).containsExactly(tool, "list_studies")
+        created("latest-response"); toolDone("latest-response", "cancel-latest", "cancel_voice_learning")
+        assertThat(controller.toolRevision("cancel-latest")).isEqualTo(1)
+        assertThat(controller.toolBoundary("cancel-latest")?.latestAcceptedLearnerProviderItemId).isEqualTo("new-topic-request")
+        controller.beginTool("cancel-latest")
+        controller.completeTool("cancel-latest", VoiceTutorMcpToolResult("{}", false, learningContinuationCancelled = true))
+        ackToolOutput()
+        assertThat(responses().last().path("response").has("input")).isFalse()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
+        assertThat(calls.map { it.name }).containsExactly(tool, "cancel_voice_learning")
     }
 
     @ParameterizedTest
@@ -2664,7 +2833,7 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
-    fun `newer topic request cancels an earlier pending question lookup followup and its ready state`() {
+    fun `newer speech defers an earlier pending question lookup without discarding its ready result`() {
         questionTool(); speech(2); committed("new-topic-request")
         val before = sessionStates().toList()
         controller.completeTool("question-call", readbackResult().copy(
@@ -2673,11 +2842,11 @@ class VoiceTutorNativeConversationControllerTest {
             learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_READY, 7, "42")))
         val output = outbound.single { it.path("item").path("type").asText() == "function_call_output" }
         val body = mapper.readTree(output.path("item").path("output").asText())
-        assertThat(body.path("followupCancelled").asBoolean()).isTrue()
+        assertThat(body.has("followupCancelled")).isFalse()
         assertThat(body.path("pendingQuestion").path("id").asText()).isEqualTo("42")
-        assertThat(body.path("notice").asText()).contains("This invocation has finished", "Follow the latest learner request")
-        assertThat(sessionStates()).isEqualTo(before)
-        assertThat(ui.none { it.path("type").asText() in setOf(Contract.QUESTION_CHANGED_EVENT, Contract.STUDY_FOCUSED_EVENT) }).isTrue()
+        assertThat(sessionStates().size).isGreaterThan(before.size)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_ready")
+        assertThat(ui.count { it.path("type").asText() == Contract.QUESTION_CHANGED_EVENT }).isEqualTo(1)
         ackToolOutput()
         assertThat(responses()).hasSize(3)
         assertThat(responses().last().path("response").has("instructions")).isFalse()
@@ -2765,6 +2934,20 @@ class VoiceTutorNativeConversationControllerTest {
         ackAllToolOutputs()
         assertThat(responses().last().path("response").path("instructions").asText())
             .contains("새 주제에 저장된 문제를 설명하세요.").doesNotContain(SAVED_QUESTION)
+    }
+
+    @Test
+    fun `late same revision read metadata cannot clear a question owned by a newer focus intent`() {
+        questionTools()
+        val focus = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(7, 0), VoiceTutorStudySnapshot(7, null, "Redis", 8, 1))
+        controller.completeTool("first-question", readbackResult("현재 선택한 문제를 설명하세요.", "43").copy(
+            lessonRevision = 0, lessonFocus = focus))
+        controller.completeTool("second-question", readbackResult().copy(
+            lessonRevision = 0, questionChange = VoiceTutorQuestionChange(7, "42")))
+        ackAllToolOutputs()
+        assertThat(responses().last().path("response").path("instructions").asText())
+            .contains("현재 선택한 문제를 설명하세요.").doesNotContain(SAVED_QUESTION)
+        assertThat(ui.none { it.path("type").asText() == Contract.QUESTION_CHANGED_EVENT && it.path("recordId").asText() == "42" }).isTrue()
     }
 
     @Test
@@ -2992,16 +3175,17 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
-    fun `empty correction cannot restore old question readback authority from an in flight tool`() {
+    fun `empty acoustic correction preserves the accepted question without asking to start twice`() {
         questionTool()
         speech(2)
         val commitId = outbound.last().path("event_id").asText()
         event("error", "error" to mapOf("code" to "input_audio_buffer_commit_empty", "event_id" to commitId))
         controller.completeTool("question-call", readbackResult()); ackToolOutput()
         settleQuiet()
-        assertThat(responses()).hasSize(2)
-        speech(3); committed("latest")
         assertThat(responses()).hasSize(3)
+        assertThat(responses().last().path("response").path("instructions").asText()).contains(SAVED_QUESTION)
+        created("readback"); speech(3); committed("latest"); cancelled("readback")
+        assertThat(responses()).hasSize(4)
         assertThat(responses().last().path("response").has("instructions")).isFalse()
     }
 
@@ -3307,14 +3491,19 @@ class VoiceTutorNativeConversationControllerTest {
         return forward
     }
     private fun transcript(id: String, text: String) = event("conversation.item.input_audio_transcription.completed", "item_id" to id, "transcript" to text)
-    private fun created(id: String, request: JsonNode = responses().last()) = event("response.created", "response" to mapOf("id" to id, "metadata" to request.path("response").path("metadata")))
-    private fun audio(r: String, t: String) {
+    private fun created(id: String, request: JsonNode = responses().last()): Boolean {
+        val instructions = request.path("response").path("instructions").asText()
+        val marker = "Saved question (JSON string): "
+        if (marker in instructions) requestedQuestions[id] = mapper.readTree(instructions.substringAfter(marker)).asText()
+        return event("response.created", "response" to mapOf("id" to id, "metadata" to request.path("response").path("metadata")))
+    }
+    private fun audio(r: String, t: String, text: String = requestedQuestions[r] ?: "어떤 주제로 이야기할까요?") {
         event("response.output_item.added", "response_id" to r, "item" to mapOf("id" to t, "type" to "message"))
         event("output_audio_buffer.started", "response_id" to r)
-        event("response.output_audio_transcript.done", "response_id" to r, "item_id" to t, "transcript" to "어떤 주제로 이야기할까요?")
+        event("response.output_audio_transcript.done", "response_id" to r, "item_id" to t, "transcript" to text)
     }
-    private fun done(r: String, t: String) = event("response.done", "response" to mapOf("id" to r, "status" to "completed", "output" to listOf(
-        mapOf("id" to t, "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to "어떤 주제로 이야기할까요?"))))))
+    private fun done(r: String, t: String, text: String = requestedQuestions[r] ?: "어떤 주제로 이야기할까요?") = event("response.done", "response" to mapOf("id" to r, "status" to "completed", "output" to listOf(
+        mapOf("id" to t, "type" to "message", "content" to listOf(mapOf("type" to "audio", "transcript" to text))))))
     private fun toolDone(r: String, id: String, name: String, arguments: String = "{}") = event("response.done", "response" to mapOf("id" to r, "status" to "completed", "output" to listOf(
         mapOf("id" to "item-$id", "type" to "function_call", "status" to "completed", "call_id" to id, "name" to name, "arguments" to arguments))))
     private fun ackToolOutput() {

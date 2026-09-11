@@ -1,6 +1,7 @@
 package com.buddystudy.backend.mcp.adapter.inbound
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.backend.learningcontext.application.model.LearningContextPatchCommand
 import com.buddystudy.backend.mcp.application.port.inbound.BuddyStudyMcpUseCase
@@ -633,7 +634,13 @@ class BuddyStudyMcpAdapter(
                         .filter(::canRetryRead)
                         .doBeforeRetry { failure -> logFailure(name, failure.failure(), retrying = true) }
                         .onRetryExhaustedThrow { _, failure -> failure.failure() },
-                )
+                ).timeout(READ_TIMEOUT, Mono.defer {
+                    // The complete read, including its single retry, must finish
+                    // before the native tool's 15-second boundary. A blocked DB
+                    // queue must become a real error result, not a pending turn.
+                    log.warn("mcp_read_timed_out operation={} timeoutSeconds={}", name, READ_TIMEOUT.seconds)
+                    Mono.error(ApiRuntimeException(ApiErrorCode.SERVER_BUSY))
+                })
             } else operation
             val completed = result
                 .map(::successResult)
@@ -892,6 +899,7 @@ class BuddyStudyMcpAdapter(
 
     private companion object {
         const val APPLICATION_JSON = "application/json"
+        val READ_TIMEOUT: Duration = Duration.ofSeconds(10)
 
         fun objectSchema(
             properties: Map<String, Map<String, Any>> = emptyMap(),

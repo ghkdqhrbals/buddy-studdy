@@ -65,6 +65,42 @@ import java.time.ZoneOffset
 
 class McpVoiceTutorToolAdapterTest {
     @Test
+    fun `native learning cancellation stops only the authorized call continuation without any study or question write`() = runBlocking<Unit> {
+        val fixture = Fixture()
+        val definition = fixture.adapter.realtimeDefinitions().single { it.name == "cancel_voice_learning" }
+        assertThat(definition.parameters).containsEntry("additionalProperties", false)
+        assertThat(definition.parameters["properties"]).isEqualTo(emptyMap<String, Any>())
+        assertThat(fixture.adapter.definitions().map { it.name }).doesNotContain("cancel_voice_learning")
+        val result = fixture.adapter.execute(nativeContext().copy(operationStillCurrent = { true }),
+            "cancel_voice_learning", emptyMap())
+        assertThat(result.isError).isFalse()
+        assertThat(result.learningContinuationCancelled).isTrue()
+        assertThat(result.lessonFocusCleared).isFalse()
+        assertThat(result.lessonRevision).isNull()
+        assertThat(result.questionChange).isNull()
+        assertThat(result.studyTreeChanged).isFalse()
+        assertThat(json(result).path("cancelled").asBoolean()).isTrue()
+        assertThat(fixture.calls).isEmpty()
+        assertThat(fixture.focusSelections).isEmpty()
+        assertThat(fixture.persistedSession).isEqualTo(session())
+    }
+
+    @Test
+    fun `learning cancellation rejects legacy calls extra arguments revoked sessions and superseded turns`() = runBlocking<Unit> {
+        val fixture = Fixture()
+        assertCode(fixture.adapter.execute(context(), "cancel_voice_learning", emptyMap()), "TOOL_NOT_ALLOWED")
+        assertCode(fixture.adapter.execute(nativeContext(), "cancel_voice_learning", mapOf("study_id" to 101L)), "INVALID_ARGUMENTS")
+        assertCode(fixture.adapter.execute(nativeContext().copy(operationStillCurrent = { false }),
+            "cancel_voice_learning", emptyMap()), "STALE_TURN")
+        fixture.authorized = false
+        val denied = fixture.adapter.execute(nativeContext(), "cancel_voice_learning", emptyMap())
+        assertCode(denied, "CALL_NOT_AUTHORIZED")
+        assertThat(denied.learningContinuationCancelled).isFalse()
+        assertThat(fixture.calls).isEmpty()
+        assertThat(fixture.focusSelections).isEmpty()
+    }
+
+    @Test
     fun `native question arguments are rejected before any curriculum lookup or creation`() = runBlocking<Unit> {
         for (tool in listOf("request_question", "list_pending_questions")) {
             for (args in listOf(emptyMap(), mapOf("study_id" to 101.5), mapOf("study_id" to "101"),

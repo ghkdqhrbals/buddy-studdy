@@ -164,9 +164,12 @@ class VoiceTutorNativeSessionRelayTest {
             f.await("saved result is reconciled without starting its lesson") { f.outputs().size == 1 }
             val oldResult = mapper.readTree(f.outputs().single().path("item").path("output").asText())
             assertThat(oldResult.path("selected").asBoolean()).isTrue()
-            assertThat(oldResult.path("followupCancelled").asBoolean()).isTrue()
+            // Speech itself defers the accepted study; the following explicit
+            // selection changes its focus. A ready result is retained meanwhile,
+            // but it must neither speak over the new request nor open an answer.
+            assertThat(oldResult.has("followupCancelled")).isFalse()
             assertThat(f.ui.none { it.path("type").asText() == Contract.SESSION_STATE_EVENT &&
-                it.path("phase").asText() in setOf("question_ready", "question_reading") }).isTrue()
+                it.path("phase").asText() == "question_reading" }).isTrue()
             assertThat(f.answerStates()).isEmpty()
             assertThat(f.responses()).hasSize(2)
             f.ack(f.outputs().single())
@@ -583,7 +586,7 @@ class VoiceTutorNativeSessionRelayTest {
                 questionReadback = VoiceTutorQuestionReadback(7, "42", "저장된 문제를 설명하세요.")))
             f.await("completion event starts exact readback") { f.responses().size == beforeReady + 1 }
             assertThat(f.responses().last().path("response").path("instructions").asText()).contains("저장된 문제를 설명하세요.")
-            f.completeAudioResponse("generated-readback", "generated-question")
+            f.completeAudioResponse("generated-readback", "generated-question", "저장된 문제를 설명하세요.")
             f.await("canonical answer card opens") { f.answerStates().lastOrNull()?.path("phase")?.asText() == "listening" }
             assertThat(tools.invocations.map { it.name }).containsExactly("select_voice_study", "list_pending_questions", "request_question")
             assertThat(tools.polled).isEmpty()
@@ -1353,7 +1356,7 @@ class VoiceTutorNativeSessionRelayTest {
             await("saved question tool result") { outputs().size == 1 }
             ack(outputs().single())
             await("saved question readback response") { responses().size == 3 }
-            completeAudioResponse("readback", "saved-question")
+            completeAudioResponse("readback", "saved-question", "저장된 문제를 설명하세요.")
             await("readback drained and manual capture open") { answerStates().lastOrNull()?.path("phase")?.asText() == "listening" }
             return answerStates().last()
         }

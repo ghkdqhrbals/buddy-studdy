@@ -337,6 +337,18 @@ class VoiceTutorServiceTest {
     }
 
     @Test
+    fun `native learning persists through acknowledgements while spoken cancellation uses its typed action`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val instructions = service(persistence).connect(principal, persistence.session.id).instructions
+        assertThat(instructions)
+            .contains("call cancel_voice_learning first", "A spoken promise to cancel is not the cancellation action")
+            .contains("learning direction persists across short acknowledgements", "These do not cancel learning")
+            .contains("allow the server to deliver that exact question at the next quiet response boundary")
+            .contains("never for ordinary acknowledgements, silence or elapsed time")
+            .contains("already stop their own learning continuation", "without issuing another cancellation")
+    }
+
+    @Test
     fun `native question policy waits for mandatory curriculum choices and uses only the final focus ID`() = runBlocking<Unit> {
         val persistence = FakePersistence(now)
         val instructions = service(persistence).connect(principal, persistence.session.id).instructions

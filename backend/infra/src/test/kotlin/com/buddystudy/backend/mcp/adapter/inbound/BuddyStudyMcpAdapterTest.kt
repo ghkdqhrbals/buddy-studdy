@@ -35,14 +35,24 @@ import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
 import io.modelcontextprotocol.spec.McpSchema
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.AccessDeniedException
+import reactor.test.StepVerifier
+import reactor.test.scheduler.VirtualTimeScheduler
 import java.lang.reflect.Proxy
+import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.LockSupport
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.intrinsics.startCoroutineUninterceptedOrReturn
 
 class BuddyStudyMcpAdapterTest {
     @Test
@@ -485,6 +495,93 @@ class BuddyStudyMcpAdapterTest {
     }
 
     @Test
+    fun `blocked pending question read returns server busy within its total deadline and cancels the query`() {
+        val entered = CountDownLatch(1)
+        val cancelled = CountDownLatch(1)
+        val invocations = AtomicInteger()
+        val useCase = suspendingUseCase { method, arguments ->
+            assertThat(method).isEqualTo("listPendingQuestions")
+            assertThat(arguments.take(4)).containsExactly(principal, 3, 0, 74L)
+            invocations.incrementAndGet()
+            entered.countDown()
+            try {
+                awaitCancellation()
+            } finally {
+                cancelled.countDown()
+            }
+        }
+
+        StepVerifier.withVirtualTime {
+            val specification = adapter(useCase).tools().single { it.tool().name() == "list_pending_questions" }
+            specification.callHandler().apply(
+                authenticatedContext,
+                McpSchema.CallToolRequest.builder("list_pending_questions")
+                    .arguments(mapOf("study_id" to 74L, "limit" to 3)).build(),
+            )
+        }
+            .expectSubscription()
+            .then { assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue() }
+            .expectNoEvent(Duration.ofSeconds(9))
+            .thenAwait(Duration.ofSeconds(1))
+            .assertNext { result ->
+                assertThat(result.isError()).isTrue()
+                assertThat(errorDetails(result)).containsEntry("code", "SERVER_BUSY").containsEntry("status", 503)
+            }
+            .expectComplete()
+            .verify(Duration.ofSeconds(5))
+
+        assertThat(cancelled.await(3, TimeUnit.SECONDS)).isTrue()
+        assertThat(invocations.get()).isEqualTo(1)
+    }
+
+    @Test
+    fun `queue failure then blocked read retry shares the original ten second deadline`() {
+        val secondEntered = CountDownLatch(1)
+        val cancelled = CountDownLatch(1)
+        val invocations = AtomicInteger()
+        val useCase = suspendingUseCase { method, _ ->
+            assertThat(method).isEqualTo("listPendingQuestions")
+            if (invocations.incrementAndGet() == 1) throw IllegalStateException("Synthetic queue failure")
+            secondEntered.countDown()
+            try {
+                awaitCancellation()
+            } finally {
+                cancelled.countDown()
+            }
+        }
+
+        StepVerifier.withVirtualTime {
+            val specification = adapter(useCase).tools().single { it.tool().name() == "list_pending_questions" }
+            specification.callHandler().apply(
+                authenticatedContext,
+                McpSchema.CallToolRequest.builder("list_pending_questions").arguments(emptyMap()).build(),
+            )
+        }
+            .expectSubscription()
+            .then {
+                // Wait until the async coroutine has scheduled its retry as well
+                // as the total deadline before advancing Reactor's virtual time.
+                val wallDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+                while (VirtualTimeScheduler.get().scheduledTaskCount < 2 && System.nanoTime() < wallDeadline) {
+                    LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1))
+                }
+                assertThat(VirtualTimeScheduler.get().scheduledTaskCount).isGreaterThanOrEqualTo(2)
+            }
+            .thenAwait(Duration.ofMillis(250))
+            .then { assertThat(secondEntered.await(3, TimeUnit.SECONDS)).isTrue() }
+            .expectNoEvent(Duration.ofSeconds(9))
+            .thenAwait(Duration.ofMillis(750))
+            .assertNext { result ->
+                assertThat(errorDetails(result)).containsEntry("code", "SERVER_BUSY").containsEntry("status", 503)
+            }
+            .expectComplete()
+            .verify(Duration.ofSeconds(5))
+
+        assertThat(cancelled.await(3, TimeUnit.SECONDS)).isTrue()
+        assertThat(invocations.get()).isEqualTo(2)
+    }
+
+    @Test
     fun `response serialization failure does not repeat a completed read`() {
         var invocations = 0
         val mapper = jacksonObjectMapper().findAndRegisterModules().registerModule(
@@ -699,9 +796,11 @@ class BuddyStudyMcpAdapterTest {
             "difficultyLevel",
             "enabled",
             "activeForQuestions",
+            "curriculumTerminal",
         )
         assertThat(payload["parentStudyId"]).isNull()
         assertThat(payload["difficultyLevel"]).isEqualTo(8)
+        assertThat(payload["curriculumTerminal"]).isEqualTo(false)
     }
 
     @Test
@@ -864,6 +963,13 @@ class BuddyStudyMcpAdapterTest {
                 else -> handler(method.name, arguments?.toList().orEmpty())
             }
         } as BuddyStudyMcpUseCase
+
+    @Suppress("UNCHECKED_CAST")
+    private fun suspendingUseCase(handler: suspend (String, List<Any?>) -> Any?): BuddyStudyMcpUseCase =
+        proxyUseCase { method, arguments ->
+            val invocation: suspend () -> Any? = { handler(method, arguments.dropLast(1)) }
+            invocation.startCoroutineUninterceptedOrReturn(arguments.last() as Continuation<Any?>)
+        }
 
     private fun expectedToolContracts(): List<ToolContract> = listOf(
         ToolContract(

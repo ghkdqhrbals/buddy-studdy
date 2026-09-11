@@ -14,9 +14,11 @@ import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.dao.TransientDataAccessException
 import org.springframework.stereotype.Service
 import java.time.Duration
 import java.time.Instant
@@ -72,7 +74,9 @@ class AnswerGradingService(
                     language = event.responseLanguage,
                     rubric = question.gradingRubric(),
                     onProgress = { stage ->
-                        writer.transition(event, AnswerGradingStatus.valueOf(stage.name), Instant.now())
+                        retryTransientWrite("transition") {
+                            writer.transition(event, AnswerGradingStatus.valueOf(stage.name), Instant.now())
+                        }
                     },
                 )
             }
@@ -103,7 +107,7 @@ class AnswerGradingService(
             return
         }
 
-        val completed = writer.complete(event, grade, Instant.now())
+        val completed = retryTransientWrite("complete") { writer.complete(event, grade, Instant.now()) }
         if (completed.outboxes.isNotEmpty()) {
             runCatching { publisher.publishNow(completed.outboxes) }
                 .onFailure {
@@ -124,8 +128,27 @@ class AnswerGradingService(
         claim: com.buddystudy.backend.study.application.model.StreamInboxClaim,
         message: String,
     ) {
-        writer.fail(event, message, Instant.now())
+        retryTransientWrite("fail") { writer.fail(event, message, Instant.now()) }
         succeed(claim)
+    }
+
+    private suspend fun <T> retryTransientWrite(operation: String, action: suspend () -> T): T {
+        var retry = 0
+        while (true) {
+            try {
+                return action()
+            } catch (error: TransientDataAccessException) {
+                if (retry >= MAX_WRITE_RETRIES) throw error
+                retry++
+                // The writer is a separate transactional use case: its failed
+                // transaction has already rolled back before control returns here.
+                // Repeat that whole idempotent request, never just the projection
+                // statement, and never repeat the provider's grading operation.
+                log.warn("answer_grading_write_retry operation={} retry={} errorType={}",
+                    operation, retry, error.javaClass.name)
+                delay(WRITE_RETRY_DELAY_MILLIS * retry)
+            }
+        }
     }
 
     private suspend fun succeed(claim: com.buddystudy.backend.study.application.model.StreamInboxClaim) {
@@ -139,5 +162,7 @@ class AnswerGradingService(
         const val MAX_TIMEOUT_SECONDS = 270L
         const val CLAIM_GRACE_SECONDS = 15L
         const val TIMEOUT_MESSAGE = "채점 시간이 초과되었습니다. 다시 시도해 주세요."
+        const val MAX_WRITE_RETRIES = 2
+        const val WRITE_RETRY_DELAY_MILLIS = 100L
     }
 }
