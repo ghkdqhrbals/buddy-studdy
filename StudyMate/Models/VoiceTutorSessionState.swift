@@ -86,6 +86,128 @@ struct VoiceTutorSessionState: Equatable, Sendable {
     }
 }
 
+/// A saved grade belongs to one authenticated call and one exact lesson epoch.
+/// A record ID alone is insufficient when the account, call, or lesson changes.
+struct VoiceTutorGradingResultTarget: Equatable, Sendable {
+    let sessionID: String
+    let attemptID: UUID
+    let ownerUserID: Int64
+    let revision: Int64
+    let studyID: Int
+    let recordID: String
+
+    init?(snapshot: VoiceTutorSessionStateEvent?, sessionID: String, attemptID: UUID,
+          ownerUserID: Int64, minimumRevision: Int64 = 0) {
+        guard let snapshot, snapshot.isValid, snapshot.phase == .graded,
+              snapshot.revision >= minimumRevision,
+              let studyID = snapshot.studyID, let recordID = snapshot.recordID,
+              !sessionID.isEmpty, ownerUserID > 0 else { return nil }
+        self.sessionID = sessionID
+        self.attemptID = attemptID
+        self.ownerUserID = ownerUserID
+        revision = snapshot.revision
+        self.studyID = studyID
+        self.recordID = recordID
+    }
+
+    func matches(_ snapshot: VoiceTutorSessionStateEvent?) -> Bool {
+        guard let snapshot, snapshot.isValid else { return false }
+        return snapshot.phase == .graded && snapshot.revision == revision
+            && snapshot.studyID == studyID && snapshot.recordID == recordID
+    }
+}
+
+/// Transient presentation state only. The authenticated record endpoint supplies
+/// the grade; existing SettingsStore reconciliation remains the persistence path.
+struct VoiceTutorGradingResultState: Equatable {
+    enum Phase: Equatable { case idle, loading, ready, failed }
+    enum Failure: Equatable { case unavailable, mismatchedRecord, incompleteResult, timedOut }
+    struct Request: Equatable, Sendable {
+        let target: VoiceTutorGradingResultTarget
+        let id: UUID
+    }
+
+    private(set) var phase: Phase = .idle
+    private(set) var target: VoiceTutorGradingResultTarget?
+    private(set) var result: GradingResult?
+    private(set) var failure: Failure?
+    private var activeRequest: Request?
+
+    func matches(_ snapshot: VoiceTutorSessionStateEvent?) -> Bool {
+        target?.matches(snapshot) == true
+    }
+
+    func accepts(_ request: Request) -> Bool {
+        phase == .loading && activeRequest == request && target == request.target
+    }
+
+    @discardableResult
+    mutating func reconcile(snapshot: VoiceTutorSessionStateEvent?, sessionID: String,
+                            attemptID: UUID, ownerUserID: Int64,
+                            minimumRevision: Int64 = 0) -> Request? {
+        reconcile(target: VoiceTutorGradingResultTarget(snapshot: snapshot, sessionID: sessionID,
+            attemptID: attemptID, ownerUserID: ownerUserID, minimumRevision: minimumRevision))
+    }
+
+    @discardableResult
+    mutating func reconcile(target next: VoiceTutorGradingResultTarget?) -> Request? {
+        guard let next else { clear(); return nil }
+        // Pause snapshots and duplicate completion receipts do not reload an
+        // already saved grade or retry a failed request without a user action.
+        guard target != next else { return nil }
+        target = next
+        return beginRequest(for: next)
+    }
+
+    mutating func retry() -> Request? {
+        guard phase == .failed, let target else { return nil }
+        return beginRequest(for: target)
+    }
+
+    @discardableResult
+    mutating func resolve(_ record: StudyRecord?, for request: Request) -> Bool {
+        guard accepts(request) else { return false }
+        guard let record else { return fail(for: request) }
+        guard record.isQuestion, record.studyID == request.target.studyID,
+              record.id == request.target.recordID else {
+            return fail(for: request, reason: .mismatchedRecord)
+        }
+        guard record.questionStatus == .graded,
+              record.gradingStatus == nil || record.gradingStatus == .completed,
+              let grade = record.gradingResult, (0...100).contains(grade.score),
+              !grade.feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !grade.explanation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return fail(for: request, reason: .incompleteResult)
+        }
+        result = grade
+        failure = nil
+        phase = .ready
+        activeRequest = nil
+        return true
+    }
+
+    @discardableResult
+    mutating func fail(for request: Request, reason: Failure = .unavailable) -> Bool {
+        guard accepts(request) else { return false }
+        result = nil
+        failure = reason
+        phase = .failed
+        activeRequest = nil
+        return true
+    }
+
+    mutating func clear() { self = Self() }
+
+    private mutating func beginRequest(for target: VoiceTutorGradingResultTarget) -> Request {
+        let request = Request(target: target, id: UUID())
+        activeRequest = request
+        phase = .loading
+        result = nil
+        failure = nil
+        return request
+    }
+}
+
 /// Safe operation metadata from the authenticated control stream. Arguments,
 /// results, transcripts, and provider error text never enter this display state.
 struct VoiceTutorOperationEvent: Equatable, Sendable {

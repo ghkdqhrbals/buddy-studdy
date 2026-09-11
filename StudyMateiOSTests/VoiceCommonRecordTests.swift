@@ -727,7 +727,7 @@ final class VoiceCommonRecordTests: XCTestCase {
 }
 
 @MainActor
-private final class CommonRecordHTTPFixture {
+final class CommonRecordHTTPFixture {
     let suite = "VoiceCommonRecordTests.\(UUID().uuidString)"
     let host = "\(UUID().uuidString.lowercased()).common-records.test"
     let defaults: UserDefaults

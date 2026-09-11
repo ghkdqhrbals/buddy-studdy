@@ -64,7 +64,8 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
             XCTAssertFalse(state.apply(legacy, existingDraft: "보존할 초안"))
             XCTAssertFalse(presentation.canFinishAnswer(state, userInputState: .init()))
             XCTAssertNotEqual(presentation.orbState, .capturingAnswer)
-            XCTAssertNotEqual(presentation.lessonSymbolName, "mic.fill")
+            XCTAssertNotEqual(presentation.statusText(AppStrings(language: .korean)),
+                AppStrings(language: .korean).voiceTutorAnswerListening)
             if phase == .answering {
                 XCTAssertEqual(presentation.orbState, .questionReady)
                 XCTAssertEqual(presentation.statusText(AppStrings(language: .korean)),
@@ -84,7 +85,8 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
         let readyPresentation = VoiceTutorCallPresentation(phase: .listening, sessionState: answering,
             hasCanonicalAnswerQuestion: state.belongsToCurrentLesson(answering.snapshot))
         XCTAssertEqual(readyPresentation.orbState, .capturingAnswer)
-        XCTAssertEqual(readyPresentation.lessonSymbolName, "mic.fill")
+        XCTAssertEqual(readyPresentation.statusText(AppStrings(language: .korean)),
+            AppStrings(language: .korean).voiceTutorAnswerListening)
         XCTAssertTrue(readyPresentation.canFinishAnswer(state, userInputState: .init()))
         XCTAssertTrue(state.apply(event(.cancelled)))
         XCTAssertFalse(state.apply(ready), "A delayed ready must not reopen a cancelled answer")

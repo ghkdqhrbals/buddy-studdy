@@ -641,7 +641,9 @@ struct VoiceTutorSessionView: View {
             canSkipAnswer: viewModel.canSkipReviewedQuestion,
             onSkipAnswer: { Task { await viewModel.skipReviewedQuestion() } },
             canCancelLearning: viewModel.canCancelLearning,
-            onCancelLearning: { Task { await viewModel.cancelLearning() } }
+            onCancelLearning: { Task { await viewModel.cancelLearning() } },
+            gradingResultState: viewModel.gradingResultState,
+            onGradingResultRetry: { viewModel.retryGradingResult() }
         )
         .navigationTitle(strings.voiceTutorCallTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -820,23 +822,6 @@ struct VoiceTutorCallPresentation {
 
     func canPresentAnswer(_ draft: VoiceTutorAnswerDraftState) -> Bool {
         canDisplayActiveAnswer && draft.belongsToCurrentLesson(sessionState.snapshot)
-    }
-
-    var lessonSymbolName: String? {
-        guard pauseState.mode == .active, !isServerPaused else { return nil }
-        switch lessonPhase {
-        case .questionLoading: return "tray.and.arrow.down"
-        case .questionGenerating: return "sparkles"
-        case .questionReady: return "book.closed"
-        case .questionReading: return showsQuestionReadRetry ? nil : "speaker.wave.2.fill"
-        case .answering: return hasCanonicalAnswerQuestion ? "mic.fill" : "book.closed"
-        case .answerFinalizing, .answerSubmitting, .grading: return "ellipsis"
-        case .answerReview: return "text.cursor"
-        case .graded: return "checkmark"
-        case .questionFailed, .gradingFailed, .answerFailed, .failed: return "exclamationmark"
-        case .ending, .ended: return "phone.down.fill"
-        case .conversation, nil: return nil
-        }
     }
 
     var remainingTime: RemainingTime? {
@@ -1189,6 +1174,7 @@ struct VoiceTutorCallScreen: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @ScaledMetric(relativeTo: .largeTitle) private var preferredOrbDiameter: CGFloat = 184
+    @ScaledMetric(relativeTo: .headline) private var preferredCompactOrbDiameter: CGFloat = 128
     @State private var transcriptContentFrame = CGRect.null
     @State private var transcriptViewportHeight: CGFloat = 0
     @State private var transcriptFollowState = VoiceTutorTranscriptFollowState()
@@ -1232,6 +1218,8 @@ struct VoiceTutorCallScreen: View {
     var onSkipAnswer: () -> Void = {}
     var canCancelLearning = false
     var onCancelLearning: () -> Void = {}
+    var gradingResultState = VoiceTutorGradingResultState()
+    var onGradingResultRetry: () -> Void = {}
 
     private var usesAccessibilityChrome: Bool {
         VoiceTutorCallAdaptiveLayout.usesAccessibilityChrome(for: dynamicTypeSize)
@@ -1384,7 +1372,7 @@ struct VoiceTutorCallScreen: View {
                 VStack(spacing: 6) {
                     Text(displayTopic)
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
                     callTime
                 }
@@ -1396,6 +1384,7 @@ struct VoiceTutorCallScreen: View {
                     if hasAnswerDraft && userInputState.pending == nil { canonicalAnswerQuestion }
                     answerOrbPlaceholder(.call, diameter: compactOrbDiameter(in: geometry))
                     callNotices
+                    if showsGradingResult { gradingResultCard }
                     if let pending = userInputState.pending {
                         VoiceTutorUserInputCard(entry: pending, strings: strings, isCompact: true,
                             onChange: { onUserInputChange(pending.id, $0) },
@@ -1565,7 +1554,7 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var showsAnswerPauseControl: Bool {
-        answerDraftState.phase == .listening && presentation.showsPauseControl
+        hasAnswerDraft && answerDraftState.phase == .listening && presentation.showsPauseControl
             && (presentation.phase == .listening || presentation.phase == .speaking)
             && !userInputState.holdsMicrophone
             && presentation.lessonPhase != .ending && presentation.lessonPhase != .ended
@@ -1584,15 +1573,6 @@ struct VoiceTutorCallScreen: View {
             onPause()
         } label: {
             HStack(spacing: 8) {
-                ZStack {
-                    if presentation.pauseState.isAwaitingAcknowledgement {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: orbRepresentsResume ? "play.fill" : "pause.fill")
-                            .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
-                    }
-                }
-                .frame(width: 20)
                 Text(orbRepresentsResume ? strings.voiceTutorResumeLesson : strings.voiceTutorTakeBreak)
                     .contentTransition(.opacity)
             }
@@ -1637,71 +1617,47 @@ struct VoiceTutorCallScreen: View {
                 }
             }
             .overlay {
-                if let pending = userInputState.pending, orbInteraction.stage == .idle {
-                    VStack(spacing: diameter < 112 ? 3 : 10) {
-                        if pending.status == .submitting {
-                            ProgressView().tint(Color.black.opacity(0.75))
-                        } else {
-                            Image(systemName: pending.canSubmit ? "checkmark" : "list.bullet")
-                                .font(diameter < 112 ? .caption : .title3)
-                            Text(pending.canSubmit ? strings.voiceTutorInputSubmit : strings.voiceTutorInputWaitingShort)
-                                .font(diameter < 112 ? .caption2.weight(.semibold) : .headline)
-                                .multilineTextAlignment(.center)
-                        }
-                        if presentation.lessonPhase == .graded {
-                            Text(strings.voiceTutorAnswerGraded)
-                                .font(.caption2.weight(.medium))
-                        }
-                    }
-                    .foregroundStyle(Color.black.opacity(0.8))
-                    .padding(.horizontal, diameter < 112 ? 7 : 16)
-                } else if hasAnswerDraft, presentation.canPresentAnswer(answerDraftState), orbInteraction.stage == .idle {
-                    if answerDraftIsBusy {
-                        ProgressView()
-                            .tint(Color.black.opacity(0.75))
-                    } else if let label = answerOrbLabel {
-                        VStack(spacing: diameter < 112 ? 3 : 10) {
-                            Image(systemName: answerCaptureIsListening ? "mic.fill" : "mic.slash.fill")
-                                .font(diameter < 112 ? .caption2 : .title3)
-                            Text(label)
-                                .font(diameter < 112 ? .caption2.weight(.semibold) : .headline)
-                                .opacity(answerDraftState.phase == .listening || canSubmitAnswer ? 1 : 0.45)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .foregroundStyle(Color.black.opacity(0.8))
-                        .padding(.horizontal, diameter < 112 ? 7 : 20)
-                    }
-                } else if showsAnswerPauseControl, presentation.pauseState.holdsMicrophone, orbInteraction.stage == .idle {
-                    VStack(spacing: diameter < 112 ? 3 : 10) {
-                        if presentation.pauseState.isAwaitingAcknowledgement {
-                            ProgressView().tint(pausedAnswerForeground)
-                        } else {
-                            Image(systemName: "play.fill")
-                                .font(diameter < 112 ? .caption2 : .title3)
-                        }
-                        if !presentation.pauseState.isAwaitingAcknowledgement {
-                            Text(strings.voiceTutorAnswerResume)
-                                .font(diameter < 112 ? .caption2.weight(.semibold) : .headline)
-                                .multilineTextAlignment(.center)
-                        }
-                    }
-                    .foregroundStyle(pausedAnswerForeground)
-                    .padding(.horizontal, diameter < 112 ? 7 : 20)
-                    .transition(.opacity)
-                } else if orbInteraction.stage == .idle, let symbol = presentation.lessonSymbolName {
+                if orbInteraction.stage == .idle {
                     VStack(spacing: diameter < 112 ? 4 : 10) {
-                        Image(systemName: symbol)
-                            .font(diameter < 112 ? .caption : .title2.weight(.medium))
-                        if presentation.lessonPhase == .graded || presentation.lessonPhase == .grading {
-                            Text(presentation.statusText(strings))
-                                .font(diameter < 112 ? .caption2.weight(.semibold) : .headline)
-                                .multilineTextAlignment(.center)
+                        if let pending = userInputState.pending {
+                            Text(pending.status == .submitting ? strings.voiceTutorAnswerSubmitting
+                                 : pending.canSubmit ? strings.voiceTutorInputSubmit : strings.voiceTutorInputWaitingShort)
+                                .font(.system(size: max(10, diameter * 0.133), weight: .semibold))
+                        } else if hasAnswerDraft, presentation.canPresentAnswer(answerDraftState) {
+                            Text(orbStatusText)
+                                .font(.system(size: max(10, diameter * 0.117), weight: .medium))
+                            if let label = answerOrbLabel, !answerDraftIsBusy {
+                                Text(label)
+                                    .font(.system(size: max(10, diameter * 0.133), weight: .semibold))
+                                    .opacity(answerDraftState.phase == .listening || canSubmitAnswer ? 1 : 0.55)
+                            }
+                        } else if showsAnswerPauseControl, presentation.pauseState.holdsMicrophone {
+                            Text(presentation.pauseState.isAwaitingAcknowledgement
+                                 ? orbStatusText : strings.voiceTutorAnswerResume)
+                                .font(.system(size: max(10, diameter * 0.133), weight: .semibold))
+                        } else if let result = visibleGradingResult,
+                                  presentation.pauseState.mode == .active, !presentation.isServerPaused {
+                            Text(strings.voiceTutorLessonScore(result.score))
+                                .font(.system(size: diameter * 0.28125, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                                .minimumScaleFactor(0.7)
+                                .lineLimit(1)
+                            Text(strings.voiceTutorAnswerGraded)
+                                .font(.system(size: max(10, diameter * 0.117), weight: .medium))
+                        } else {
+                            Text(orbStatusText)
+                                .font(.system(size: max(10, diameter * 0.133), weight: .semibold))
                                 .accessibilityIdentifier("voiceCall.orbGradingStatus")
                         }
                     }
-                    .foregroundStyle(Color.black.opacity(0.75))
-                    .padding(.horizontal, diameter < 112 ? 6 : 18)
+                    // The circle grows with Dynamic Type; its text scales with
+                    // that actual diameter so it cannot overflow into the
+                    // question or answer. Full labels remain in VoiceOver.
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(orbForegroundColor)
+                    .frame(width: diameter * 0.75, height: diameter * 0.68)
                 }
             }
             .frame(width: diameter, height: diameter)
@@ -1714,6 +1670,10 @@ struct VoiceTutorCallScreen: View {
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: orbInteraction.stage)
             .animation(answerControlAnimation, value: presentation.pauseState.mode)
             .contentShape(Circle())
+    }
+
+    private var orbForegroundColor: Color {
+        [.paused, .pausing, .resuming].contains(presentation.orbState) ? pausedAnswerForeground : Color.black.opacity(0.85)
     }
 
     private var pausedAnswerForeground: Color {
@@ -1764,9 +1724,12 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var orbStatusText: String {
-        if userInputState.holdsMicrophone { return strings.voiceTutorInputStatus }
         if orbInteraction.stage == .warning { return strings.voiceTutorOrbKeepHoldingToEnd }
         if orbInteraction.stage == .committed { return strings.voiceTutorCallEnding }
+        if userInputState.holdsMicrophone { return strings.voiceTutorInputStatus }
+        if answerCaptureIsListening && answerDraftText.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return strings.voiceTutorAnswerWaiting
+        }
         return presentation.statusText(
             strings, errorMessage: errorMessage, answerDraftState: answerDraftState
         )
@@ -1774,7 +1737,7 @@ struct VoiceTutorCallScreen: View {
 
     private var orbStatusColor: Color {
         if orbInteraction.stage == .warning { return .red }
-        return answerCaptureIsListening ? answerCaptureAccent : .secondary
+        return answerCaptureIsListening ? answerCaptureAccent : .primary
     }
 
     private var answerCaptureAccent: Color {
@@ -1813,12 +1776,7 @@ struct VoiceTutorCallScreen: View {
         .animation(answerControlAnimation, value: presentation.pauseState.mode)
     }
 
-    private var compactOrbShowsStatus: Bool {
-        guard orbInteraction.stage == .idle else { return false }
-        if userInputState.pending != nil { return true }
-        return presentation.pauseState.mode == .active && !presentation.isServerPaused
-            && [.grading, .graded].contains(presentation.lessonPhase)
-    }
+    private var compactOrbShowsStatus: Bool { orbInteraction.stage == .idle }
 
     private func userInputCards(_ entries: [VoiceTutorUserInputState.Entry],
                                 operations: [String: [VoiceTutorOperationState.Entry]] = [:]) -> some View {
@@ -1847,20 +1805,21 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var recordingIndicator: some View {
-        Label(strings.voiceTutorCallRecording, systemImage: "record.circle.fill")
+        Text(strings.voiceTutorCallRecording)
             .font(.caption.weight(.medium))
             .foregroundStyle(.red)
             .accessibilityIdentifier("voiceCall.recording")
     }
 
     private var hasAnswerDraft: Bool {
+        guard answerDraftState.belongsToCurrentLesson(presentation.sessionState.snapshot) else { return false }
         switch answerDraftState.phase {
         case .listening, .finalizing, .review, .submitting, .failed: return true
         case .inactive, .submitted, .cancelled: return false
         }
     }
 
-    private var hasCompactInteraction: Bool { userInputState.pending != nil || hasAnswerDraft }
+    private var hasCompactInteraction: Bool { userInputState.pending != nil || hasAnswerDraft || showsGradingResult }
 
     private var hasLessonOrbContent: Bool {
         hasCompactInteraction || [.grading, .graded, .gradingFailed].contains(presentation.lessonPhase)
@@ -1910,77 +1869,138 @@ struct VoiceTutorCallScreen: View {
         answerEditorSession = VoiceTutorAnswerEditorSession(id: answerID)
     }
 
+    private var answerPanelForeground: Color { colorScheme == .dark ? .black : .white }
+    private var answerPanelBackground: Color { colorScheme == .dark ? .white : .black }
+
+    private func answerDraftContent(lineLimit: Int) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(strings.voiceTutorAnswerDraftTitle)
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                if answerDraftIsEditable {
+                    Text(answerDraftText.wrappedValue.isEmpty ? strings.voiceTutorAnswerEnter : strings.voiceTutorAnswerEdit)
+                        .font(.subheadline.weight(.medium))
+                        .underline()
+                }
+            }
+            if !answerDraftText.wrappedValue.isEmpty {
+                Text(verbatim: answerDraftText.wrappedValue)
+                    .font(.body)
+                    .lineSpacing(4)
+                    .lineLimit(lineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .foregroundStyle(answerPanelForeground)
+        .multilineTextAlignment(.leading)
+        .padding(20)
+        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+        .background(answerPanelBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 20))
+    }
+
     private var answerDraftPreview: some View {
-        Button {
-            if answerDraftIsEditable {
-                openAnswerEditor()
-            } else {
-                setTranscriptExpanded(true)
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text(strings.voiceTutorAnswerDraftTitle)
-                    Spacer(minLength: 8)
-                    Image(systemName: answerDraftIsEditable ? "pencil" : "chevron.right")
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                if !answerDraftText.wrappedValue.isEmpty {
-                    Text(answerDraftText.wrappedValue)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-                }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondary.opacity(0.065), in: RoundedRectangle(cornerRadius: 16))
-            .contentShape(RoundedRectangle(cornerRadius: 16))
+        Button(action: openAnswerEditor) {
+            answerDraftContent(lineLimit: 6)
         }
         .buttonStyle(.plain)
+        .disabled(!answerDraftIsEditable)
         .accessibilityLabel(strings.voiceTutorAnswerEdit)
         .accessibilityValue(answerDraftText.wrappedValue)
         .accessibilityIdentifier("voiceCall.answerPreview")
     }
 
     private var canonicalAnswerQuestion: some View {
-        Text(verbatim: answerDraftState.questionText)
-            .font(.body)
-            .foregroundStyle(.primary)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
-            .accessibilityIdentifier("voiceCall.answerQuestion")
+        VStack(alignment: .leading, spacing: 12) {
+            Text(strings.voiceTutorQuestionHeading)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(voiceAccent)
+            Text(verbatim: answerDraftState.questionText)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineSpacing(5)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .accessibilityIdentifier("voiceCall.answerQuestion")
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(voiceAccent.opacity(colorScheme == .dark ? 0.08 : 0.035),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(voiceAccent.opacity(0.25), lineWidth: 1)
+        }
+    }
+
+    private var showsGradingResult: Bool { presentation.lessonPhase == .graded }
+
+    private var visibleGradingResult: GradingResult? {
+        guard showsGradingResult, gradingResultState.matches(presentation.sessionState.snapshot) else { return nil }
+        return gradingResultState.result
+    }
+
+    private var gradingResultCard: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            if let result = visibleGradingResult {
+                if userInputState.pending != nil {
+                    Text(strings.voiceTutorLessonScore(result.score))
+                        .font(.title.weight(.semibold))
+                        .monospacedDigit()
+                }
+                if !result.feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    gradingSection(title: strings.voiceTutorGradingFeedbackTitle,
+                        text: result.feedback, identifier: "voiceCall.gradingFeedback")
+                }
+                if !result.explanation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    gradingSection(title: strings.explanation,
+                        text: result.explanation, identifier: "voiceCall.gradingExplanation")
+                }
+            } else if gradingResultState.matches(presentation.sessionState.snapshot), gradingResultState.phase == .failed {
+                Text(strings.voiceTutorGradingResultFailed)
+                    .font(.body.weight(.medium))
+                Button(strings.retry, action: onGradingResultRetry)
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.borderedProminent)
+                    .tint(voiceAccent)
+                    .accessibilityIdentifier("voiceCall.gradingRetry")
+            } else {
+                Text(strings.voiceTutorGradingResultLoading)
+                    .font(.body.weight(.medium))
+            }
+        }
+        .foregroundStyle(.primary)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(voiceAccent.opacity(colorScheme == .dark ? 0.08 : 0.035),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(voiceAccent.opacity(0.25), lineWidth: 1)
+        }
+        .accessibilityIdentifier("voiceCall.gradingResult")
+    }
+
+    private func gradingSection(title: String, text: String, identifier: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.headline)
+            MarkdownMessageText(markdown: text)
+                .font(.body)
+                .lineSpacing(5)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .accessibilityIdentifier(identifier)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var answerDraftCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             canonicalAnswerQuestion
             Button(action: openAnswerEditor) {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(strings.voiceTutorAnswerDraftTitle)
-                            .font(.subheadline.weight(.semibold))
-                        Spacer(minLength: 8)
-                        if answerDraftIsEditable {
-                            Label(strings.voiceTutorAnswerEdit, systemImage: "pencil")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(voiceAccent)
-                        }
-                    }
-                    if !answerDraftText.wrappedValue.isEmpty {
-                        Text(answerDraftText.wrappedValue)
-                            .font(.body)
-                            .foregroundStyle(.primary)
-                            .lineLimit(6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .multilineTextAlignment(.leading)
-                .contentShape(Rectangle())
+                answerDraftContent(lineLimit: 8)
             }
             .buttonStyle(.plain)
             .disabled(!answerDraftIsEditable)
@@ -1991,7 +2011,7 @@ struct VoiceTutorCallScreen: View {
                 Text(answerDraftState.failureCode == "ANSWER_TOO_LONG"
                      ? strings.voiceTutorAnswerTooLong : strings.voiceTutorAnswerFailedHelp)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if answerDraftState.phase == .listening && presentation.canPresentAnswer(answerDraftState) {
@@ -2027,7 +2047,7 @@ struct VoiceTutorCallScreen: View {
                     ProgressView().controlSize(.small)
                     Text(answerDraftStatus).font(.caption)
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
             }
             if canSkipAnswer || canCancelLearning {
                 HStack(spacing: 20) {
@@ -2042,14 +2062,12 @@ struct VoiceTutorCallScreen: View {
                     if canCancelLearning { cancelLearningButton }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
                 .buttonStyle(.plain)
                 .frame(minHeight: 44)
             }
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.065), in: RoundedRectangle(cornerRadius: 16))
         .id("voiceCall.answerDraft")
         .accessibilityIdentifier("voiceCall.answerCard")
     }
@@ -2061,7 +2079,7 @@ struct VoiceTutorCallScreen: View {
             onCancelLearning()
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.primary)
         .padding(.vertical, 10)
         .frame(minHeight: 44)
         .buttonStyle(.plain)
@@ -2134,20 +2152,20 @@ struct VoiceTutorCallScreen: View {
         Group {
             switch presentation.remainingTime {
             case .call(let seconds):
-                Label(strings.voiceTutorCallRemaining(seconds), systemImage: "clock")
+                Text(strings.voiceTutorCallRemaining(seconds))
                     .accessibilityIdentifier("voiceCall.remainingTime")
             case .monthly(let seconds):
-                Label(strings.voiceTutorCallMonthlyRemaining(seconds), systemImage: "clock")
+                Text(strings.voiceTutorCallMonthlyRemaining(seconds))
                     .accessibilityIdentifier("voiceCall.remainingTime")
             case .monthlyUnlimited:
-                Label(strings.voiceTutorUnlimited, systemImage: "infinity")
+                Text(strings.voiceTutorUnlimited)
                     .accessibilityIdentifier("voiceCall.remainingTime")
             case nil:
                 EmptyView()
             }
         }
         .font(.caption.monospacedDigit())
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.primary)
     }
 
     private var transcriptPanel: some View {
@@ -2209,7 +2227,7 @@ struct VoiceTutorCallScreen: View {
                         }
                     } else if presentation.orbState == .thinking && !captions.isEmpty && !hasAnswerDraft
                         && (presentation.lessonPhase == nil || presentation.lessonPhase == .conversation) {
-                        Label(strings.voiceTutorCallThinking, systemImage: "ellipsis")
+                        Text(strings.voiceTutorCallThinking)
                             .font(.subheadline)
                             .foregroundStyle(voiceAccent)
                             .padding(.vertical, 8)
@@ -2525,7 +2543,7 @@ struct VoiceTutorCallScreen: View {
 
     private func compactOrbDiameter(in geometry: GeometryProxy) -> CGFloat {
         let available = min(geometry.size.width - 112, geometry.size.height * 0.3)
-        let preferred = userInputState.pending == nil ? preferredOrbDiameter : 128
+        let preferred = hasCompactInteraction ? preferredCompactOrbDiameter : preferredOrbDiameter
         return max(112, min(preferred, 192, available))
     }
 
@@ -2695,6 +2713,7 @@ struct VoiceTutorCallScreen: View {
 
     private var orbAccessibilityValue: String {
         var parts = [displayTopic, orbStatusText]
+        if let result = visibleGradingResult { parts.append(strings.voiceTutorLessonScore(result.score)) }
         if presentation.lessonPhase == .graded, orbStatusText != strings.voiceTutorAnswerGraded {
             parts.append(strings.voiceTutorAnswerGraded)
         }

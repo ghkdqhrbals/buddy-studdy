@@ -166,6 +166,27 @@ extension AppStrings {
     var voiceTutorAnswerGraded: String {
         voiceTutorPauseText("채점 완료", "Answer graded", "採点完了")
     }
+    var voiceTutorAnswerWaiting: String {
+        voiceTutorPauseText("답변 대기", "Awaiting your answer", "回答待ち")
+    }
+    var voiceTutorQuestionHeading: String {
+        voiceTutorPauseText("질문", "Question", "問題")
+    }
+    var voiceTutorAnswerEnter: String {
+        voiceTutorPauseText("직접 입력", "Type answer", "直接入力")
+    }
+    var voiceTutorGradingFeedbackTitle: String {
+        voiceTutorPauseText("채점 이유", "Why this score", "採点の理由")
+    }
+    func voiceTutorLessonScore(_ score: Int) -> String {
+        voiceTutorPauseText("\(score)점", "\(score) / 100", "\(score)点")
+    }
+    var voiceTutorGradingResultLoading: String {
+        voiceTutorPauseText("채점 결과를 불러오는 중", "Loading your result", "採点結果を読み込み中")
+    }
+    var voiceTutorGradingResultFailed: String {
+        voiceTutorPauseText("채점 결과를 불러오지 못했어요.", "Couldn't load your result.", "採点結果を読み込めませんでした。")
+    }
     var voiceTutorQuestionFailed: String {
         voiceTutorPauseText("질문을 준비하지 못했어요", "Couldn't prepare the question", "問題を準備できませんでした")
     }

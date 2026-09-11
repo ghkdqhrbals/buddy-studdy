@@ -16,6 +16,7 @@
 		F8B000000000000000000001 /* VoiceTutorSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000002 /* VoiceTutorSessionState.swift */; };
 		F8A000000000000000000003 /* VoiceTutorAnswerDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A000000000000000000004 /* VoiceTutorAnswerDraftTests.swift */; };
 		F8B000000000000000000003 /* VoiceTutorSessionStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000004 /* VoiceTutorSessionStateTests.swift */; };
+		F8D000000000000000000001 /* VoiceTutorGradingResultTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D000000000000000000002 /* VoiceTutorGradingResultTests.swift */; };
 		F89000000000000000000001 /* VoiceTutorStudyFocus.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89000000000000000000002 /* VoiceTutorStudyFocus.swift */; };
 		F89000000000000000000003 /* AppStrings+VoiceTutorDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89000000000000000000004 /* AppStrings+VoiceTutorDiscovery.swift */; };
 		F89000000000000000000005 /* VoiceTutorDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89000000000000000000006 /* VoiceTutorDiscoveryTests.swift */; };
@@ -342,6 +343,7 @@
 		F8B000000000000000000002 /* VoiceTutorSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorSessionState.swift; sourceTree = "<group>"; };
 		F8A000000000000000000004 /* VoiceTutorAnswerDraftTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorAnswerDraftTests.swift; sourceTree = "<group>"; };
 		F8B000000000000000000004 /* VoiceTutorSessionStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorSessionStateTests.swift; sourceTree = "<group>"; };
+		F8D000000000000000000002 /* VoiceTutorGradingResultTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorGradingResultTests.swift; sourceTree = "<group>"; };
 		F89000000000000000000002 /* VoiceTutorStudyFocus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorStudyFocus.swift; sourceTree = "<group>"; };
 		F89000000000000000000004 /* AppStrings+VoiceTutorDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStrings+VoiceTutorDiscovery.swift"; sourceTree = "<group>"; };
 		F89000000000000000000006 /* VoiceTutorDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorDiscoveryTests.swift; sourceTree = "<group>"; };
@@ -1010,6 +1012,7 @@
 				F89000000000000000000006 /* VoiceTutorDiscoveryTests.swift */,
 				F8A000000000000000000004 /* VoiceTutorAnswerDraftTests.swift */,
 				F8B000000000000000000004 /* VoiceTutorSessionStateTests.swift */,
+				F8D000000000000000000002 /* VoiceTutorGradingResultTests.swift */,
 				F8C00000000000000000000A /* VoiceTutorInterruptionBoundaryTests.swift */,
 				F8C000000000000000000008 /* VoiceTutorUserInputTests.swift */,
 				F8600000000000000000000A /* VoiceTutorVoiceSettingsTests.swift */,
@@ -1482,6 +1485,7 @@
 				F89000000000000000000005 /* VoiceTutorDiscoveryTests.swift in Sources */,
 				F8A000000000000000000003 /* VoiceTutorAnswerDraftTests.swift in Sources */,
 				F8B000000000000000000003 /* VoiceTutorSessionStateTests.swift in Sources */,
+				F8D000000000000000000001 /* VoiceTutorGradingResultTests.swift in Sources */,
 				F8C000000000000000000009 /* VoiceTutorInterruptionBoundaryTests.swift in Sources */,
 				F8C000000000000000000007 /* VoiceTutorUserInputTests.swift in Sources */,
 				F86000000000000000000009 /* VoiceTutorVoiceSettingsTests.swift in Sources */,

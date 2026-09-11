@@ -830,6 +830,7 @@ final class VoiceTutorViewModel: ObservableObject {
     @Published private(set) var serverEndReason: String?
     @Published private(set) var answerDraftState = VoiceTutorAnswerDraftState()
     @Published private(set) var sessionState = VoiceTutorSessionState()
+    @Published private var retainedGradingResultState = VoiceTutorGradingResultState()
     @Published private(set) var operationState = VoiceTutorOperationState()
     @Published private(set) var userInputState = VoiceTutorUserInputState()
 
@@ -845,6 +846,11 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     var answerDraftText: String { answerDraftState.text }
+    var gradingResultState: VoiceTutorGradingResultState {
+        guard let target = currentGradingResultTarget,
+              retainedGradingResultState.target == target else { return VoiceTutorGradingResultState() }
+        return retainedGradingResultState
+    }
     var isAnswerCaptureActive: Bool { answerDraftState.phase == .listening }
     var isAnswerReviewAvailable: Bool { [.review, .failed].contains(answerDraftState.phase) }
     var isAnswerSubmitting: Bool { answerDraftState.phase == .submitting }
@@ -883,6 +889,8 @@ final class VoiceTutorViewModel: ObservableObject {
     private var serverEndContinuation: AsyncStream<VoiceTutorRealtimeEnded>.Continuation?
     private var heartbeatTask: Task<Void, Never>?
     private var countdownTask: Task<Void, Never>?
+    private var gradingResultTask: Task<Void, Never>?
+    private var gradingResultTimeoutTask: Task<Void, Never>?
     private var activeConnection: VoiceTutorLiveConnection?
     private var sessionID: String?
     private var hardEndsAt: Date?
@@ -930,6 +938,7 @@ final class VoiceTutorViewModel: ObservableObject {
         changedQuestions = []
         answerDraftState = VoiceTutorAnswerDraftState()
         sessionState = VoiceTutorSessionState()
+        clearGradingResult()
         operationState = VoiceTutorOperationState()
         userInputState = VoiceTutorUserInputState()
         learnerCaptionIDsByItemID = [:]
@@ -1154,6 +1163,70 @@ final class VoiceTutorViewModel: ObservableObject {
         guard phase.isLive, !isFinalizing, activeConnection?.isCurrent() == true,
               answerDraftState.edit(text) else { return }
         persistVoiceAnswerDraft(force: true)
+    }
+
+    /// Retry only the current saved grade. This never resubmits an answer or
+    /// starts grading again, and repeated completion snapshots do not poll.
+    func retryGradingResult() {
+        guard let target = currentGradingResultTarget,
+              retainedGradingResultState.target == target,
+              let request = retainedGradingResultState.retry() else { return }
+        startGradingResultRequest(request)
+    }
+
+    private var currentGradingResultTarget: VoiceTutorGradingResultTarget? {
+        guard usesWebRTC, phase.isLive, !isFinalizing,
+              let connection = activeConnection, connection.isCurrent(),
+              let sessionID, sessionID == connection.session.sessionId,
+              studyFocus.revision == 0 || studyFocus.focus != nil,
+              studyFocus.focus.map({ $0.studyID == sessionState.snapshot?.studyID }) ?? true else { return nil }
+        return VoiceTutorGradingResultTarget(snapshot: sessionState.snapshot, sessionID: sessionID,
+            attemptID: connectionAttemptFence.currentID, ownerUserID: connection.ownerUserID,
+            minimumRevision: studyFocus.revision)
+    }
+
+    private func reconcileGradingResult() {
+        let target = currentGradingResultTarget
+        if target == nil { clearGradingResult(); return }
+        guard let request = retainedGradingResultState.reconcile(target: target) else { return }
+        startGradingResultRequest(request)
+    }
+
+    private func startGradingResultRequest(_ request: VoiceTutorGradingResultState.Request) {
+        gradingResultTask?.cancel()
+        gradingResultTimeoutTask?.cancel()
+        gradingResultTask = Task { [weak self] in
+            guard let self, self.isCurrentGradingResultRequest(request) else { return }
+            // loadStudyRecordDetail uses the authenticated records use case and
+            // fences account, backend and language changes before and after GET.
+            // It does not replace the active answer or write a parallel cache.
+            let record = await self.appState.loadStudyRecordDetail(recordID: request.target.recordID)
+            guard !Task.isCancelled, self.isCurrentGradingResultRequest(request) else { return }
+            _ = self.retainedGradingResultState.resolve(record, for: request)
+            self.gradingResultTimeoutTask?.cancel()
+            self.gradingResultTimeoutTask = nil
+            self.gradingResultTask = nil
+        }
+        gradingResultTimeoutTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(20)) } catch { return }
+            guard let self, !Task.isCancelled, self.isCurrentGradingResultRequest(request) else { return }
+            _ = self.retainedGradingResultState.fail(for: request, reason: .timedOut)
+            self.gradingResultTask?.cancel()
+            self.gradingResultTask = nil
+            self.gradingResultTimeoutTask = nil
+        }
+    }
+
+    private func isCurrentGradingResultRequest(_ request: VoiceTutorGradingResultState.Request) -> Bool {
+        currentGradingResultTarget == request.target && retainedGradingResultState.accepts(request)
+    }
+
+    private func clearGradingResult() {
+        gradingResultTask?.cancel()
+        gradingResultTask = nil
+        gradingResultTimeoutTask?.cancel()
+        gradingResultTimeoutTask = nil
+        retainedGradingResultState.clear()
     }
 
     func finishAnswerCapture() async {
@@ -1381,6 +1454,7 @@ final class VoiceTutorViewModel: ObservableObject {
             preserveInterruptedAssistantTranscript(responseID: duplexPlaybackState.activeResponseID)
         }
         sessionState.endLocally()
+        clearGradingResult()
         operationState.endLocally()
         userInputState.endLocally()
         learnerTranscriptState.endLocally()
@@ -1458,6 +1532,7 @@ final class VoiceTutorViewModel: ObservableObject {
         answerDraftState = VoiceTutorAnswerDraftState()
         userInputState = VoiceTutorUserInputState()
         sessionState.endLocally()
+        clearGradingResult()
         operationState.endLocally()
         userInputState.endLocally()
         learnerTranscriptState.endLocally()
@@ -1818,7 +1893,9 @@ final class VoiceTutorViewModel: ObservableObject {
             guard usesWebRTC, phase.isLive, !isFinalizing else { break }
             // Only the current authenticated control receive loop reaches this
             // path. Display snapshots never act as microphone or submit commands.
-            _ = sessionState.apply(event, minimumRevision: studyFocus.revision)
+            if sessionState.apply(event, minimumRevision: studyFocus.revision) {
+                reconcileGradingResult()
+            }
         case .sessionReady(let hardEndsAt, let remainingSeconds, let pauseProtocol, let turnProtocol):
             if usesWebRTC, !VoiceTutorTurnProtocol.acceptsReady(turnProtocol) {
                 // Keep capture closed unless the server has accepted this
@@ -1867,6 +1944,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 )
             )
         case .sessionEnding(let reason, let hardEndsAt):
+            clearGradingResult()
             serverEndReason = reason ?? serverEndReason
             if VoiceTutorServerEndReasonPolicy.isMonthlyQuotaExhausted(serverEndReason) {
                 errorMessage = nil
@@ -1965,7 +2043,9 @@ final class VoiceTutorViewModel: ObservableObject {
             phase = .listening
         case .studyFocused(let focus):
             guard phase.isLive, !isFinalizing else { break }
-            if studyFocus.apply(focus, attemptID: attemptID), answerDraftState.isActive,
+            guard studyFocus.apply(focus, attemptID: attemptID) else { break }
+            reconcileGradingResult()
+            if answerDraftState.isActive,
                focus?.studyID != answerDraftState.studyID || focus?.revision != answerDraftState.revision {
                 preserveUnsubmittedAnswerDraft(VoiceTutorUnsubmittedAnswerSnapshot(answerDraftState))
                 if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
@@ -2055,6 +2135,9 @@ final class VoiceTutorViewModel: ObservableObject {
             // return. This is not a hang-up or a request to discard an answer draft.
             appState.applyVoiceTutorDeletedStudies(studyIDs: studyIDs)
             studyFocus.remove(studyIDs: studyIDs, attemptID: attemptID)
+            if retainedGradingResultState.target.map({ studyIDs.contains($0.studyID) }) == true {
+                clearGradingResult()
+            }
         case .serviceError(let code, _, _):
             switch code?.uppercased() {
             case "VOICE_TUTOR_PRO_REQUIRED":
@@ -2406,6 +2489,7 @@ final class VoiceTutorViewModel: ObservableObject {
         }
         logDiagnostic("event=server_ended")
         sessionState.endLocally()
+        clearGradingResult()
         operationState.endLocally()
         userInputState.endLocally()
         learnerTranscriptState.endLocally()

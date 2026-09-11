@@ -2788,33 +2788,32 @@ final class VoiceTutorContractTests: XCTestCase {
         }
     }
 
-    func testBackendLessonPhasesHaveDistinctLocalizedStatusesAndOrbCues() {
+    func testBackendLessonPhasesHaveDistinctLocalizedStatuses() {
         for language in [AppLanguage.korean, .english, .japanese] {
             let strings = AppStrings(language: language)
-            let cases: [(VoiceTutorSessionStateEvent.Phase, String, String)] = [
-                (.questionLoading, strings.voiceTutorQuestionLoading, "tray.and.arrow.down"),
-                (.questionGenerating, strings.voiceTutorQuestionGenerating, "sparkles"),
-                (.questionReady, strings.voiceTutorQuestionReady, "book.closed"),
-                (.questionReading, strings.voiceTutorQuestionReading, "speaker.wave.2.fill"),
-                (.answering, strings.voiceTutorAnswerListening, "mic.fill"),
-                (.answerFinalizing, strings.voiceTutorAnswerFinalizing, "ellipsis"),
-                (.answerReview, strings.voiceTutorAnswerReview, "text.cursor"),
-                (.answerSubmitting, strings.voiceTutorAnswerSubmitting, "ellipsis"),
-                (.grading, strings.voiceTutorAnswerGrading, "ellipsis"),
-                (.graded, strings.voiceTutorAnswerGraded, "checkmark"),
-                (.questionFailed, strings.voiceTutorQuestionFailed, "exclamationmark"),
-                (.gradingFailed, strings.voiceTutorGradingFailed, "exclamationmark"),
-                (.answerFailed, strings.voiceTutorAnswerFailed, "exclamationmark"),
-                (.ending, strings.voiceTutorCallEnding, "phone.down.fill"),
-                (.ended, strings.voiceTutorCallEnded, "phone.down.fill"),
-                (.failed, strings.voiceTutorCallFailed, "exclamationmark")
+            let cases: [(VoiceTutorSessionStateEvent.Phase, String)] = [
+                (.questionLoading, strings.voiceTutorQuestionLoading),
+                (.questionGenerating, strings.voiceTutorQuestionGenerating),
+                (.questionReady, strings.voiceTutorQuestionReady),
+                (.questionReading, strings.voiceTutorQuestionReading),
+                (.answering, strings.voiceTutorAnswerListening),
+                (.answerFinalizing, strings.voiceTutorAnswerFinalizing),
+                (.answerReview, strings.voiceTutorAnswerReview),
+                (.answerSubmitting, strings.voiceTutorAnswerSubmitting),
+                (.grading, strings.voiceTutorAnswerGrading),
+                (.graded, strings.voiceTutorAnswerGraded),
+                (.questionFailed, strings.voiceTutorQuestionFailed),
+                (.gradingFailed, strings.voiceTutorGradingFailed),
+                (.answerFailed, strings.voiceTutorAnswerFailed),
+                (.ending, strings.voiceTutorCallEnding),
+                (.ended, strings.voiceTutorCallEnded),
+                (.failed, strings.voiceTutorCallFailed)
             ]
-            for (phase, label, symbol) in cases {
+            for (phase, label) in cases {
                 let presentation = VoiceTutorCallPresentation(
                     phase: .listening, sessionState: makeLessonPresentationState(phase), hasCanonicalAnswerQuestion: true
                 )
                 XCTAssertEqual(presentation.statusText(strings), label, "\(language) / \(phase)")
-                XCTAssertEqual(presentation.lessonSymbolName, symbol, "\(phase)")
                 XCTAssertTrue(presentation.needsVisibleStatus(strings, errorMessage: nil))
                 if phase == .questionReady {
                     XCTAssertFalse(presentation.orbAnimates, "A ready question must stop the generation pulse")
@@ -2834,7 +2833,6 @@ final class VoiceTutorContractTests: XCTestCase {
             )
             XCTAssertEqual(withSnapshot.statusText(strings), plain.statusText(strings))
             XCTAssertEqual(withSnapshot.orbState, plain.orbState)
-            XCTAssertNil(withSnapshot.lessonSymbolName)
             XCTAssertFalse(withSnapshot.canDisplayActiveAnswer)
         }
         var pause = VoiceTutorCallPauseState()
@@ -2898,7 +2896,6 @@ final class VoiceTutorContractTests: XCTestCase {
             )
             XCTAssertEqual(conversation.statusText(strings), plain.statusText(strings))
             XCTAssertEqual(conversation.orbState, plain.orbState)
-            XCTAssertNil(conversation.lessonSymbolName)
         }
     }
 
@@ -2916,13 +2913,11 @@ final class VoiceTutorContractTests: XCTestCase {
                 sessionState: snapshot)
             XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorInputRepeat)
             XCTAssertEqual(presentation.orbState, .listening)
-            XCTAssertNil(presentation.lessonSymbolName, "A rejected turn must not retain the stale speaker icon")
             XCTAssertEqual(presentation.lessonPhase, .questionReading)
             XCTAssertEqual(presentation.sessionState, snapshot, "Presentation cannot complete or discard the server's question")
 
             presentation.phase = .speaking
             XCTAssertEqual(presentation.orbState, .speaking, "Actual playback retains priority over the retry hint")
-            XCTAssertEqual(presentation.lessonSymbolName, "speaker.wave.2.fill")
             presentation.phase = .listening
             presentation.inputNeedsRepeat = false
             XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorQuestionReading)
@@ -2939,7 +2934,6 @@ final class VoiceTutorContractTests: XCTestCase {
             pauseState: pause, sessionState: makeLessonPresentationState(.questionReading))
         XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorPausing)
         XCTAssertEqual(presentation.orbState, .pausing)
-        XCTAssertNil(presentation.lessonSymbolName)
         XCTAssertTrue(pause.acknowledge(sequence: pauseCommand.sequence, paused: true))
         presentation.pauseState = pause
         XCTAssertEqual(presentation.statusText(strings), strings.voiceTutorPaused)
@@ -2954,7 +2948,6 @@ final class VoiceTutorContractTests: XCTestCase {
             sessionState: makeLessonPresentationState(.questionReading, paused: true))
         XCTAssertEqual(serverPaused.statusText(strings), strings.voiceTutorPaused)
         XCTAssertEqual(serverPaused.orbState, .paused)
-        XCTAssertNil(serverPaused.lessonSymbolName)
 
         for phase in [VoiceTutorSessionStateEvent.Phase.answering, .answerFinalizing, .answerReview,
                       .answerSubmitting, .grading, .graded, .answerFailed, .gradingFailed, .ending, .ended, .failed] {
@@ -2963,7 +2956,6 @@ final class VoiceTutorContractTests: XCTestCase {
             retry.inputNeedsRepeat = true
             XCTAssertEqual(retry.statusText(strings), baseline.statusText(strings), "\(phase)")
             XCTAssertEqual(retry.orbState, baseline.orbState, "\(phase)")
-            XCTAssertEqual(retry.lessonSymbolName, baseline.lessonSymbolName, "\(phase)")
         }
         for phase in [VoiceTutorSessionPhase.ending, .ended, .failed] {
             let baseline = VoiceTutorCallPresentation(phase: phase, sessionState: makeLessonPresentationState(.questionReading))
