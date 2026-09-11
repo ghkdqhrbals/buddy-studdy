@@ -59,6 +59,7 @@
 		F8700000000000000000000D /* AppStrings+VoiceTutorPause.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8700000000000000000000E /* AppStrings+VoiceTutorPause.swift */; };
 		F8700000000000000000000F /* VoiceTutorPauseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F87000000000000000000010 /* VoiceTutorPauseTests.swift */; };
 		F82000000000000000000001 /* VoiceTutorWebRTCTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000002 /* VoiceTutorWebRTCTransport.swift */; };
+		F82000000000000000000009 /* VoiceTutorOutputDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8200000000000000000000A /* VoiceTutorOutputDiagnostics.swift */; };
 		F82000000000000000000003 /* VoiceTutorRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000004 /* VoiceTutorRecording.swift */; };
 		F82000000000000000000005 /* LiveKitWebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = F82000000000000000000006 /* LiveKitWebRTC */; };
 		B90000000000000000000002 /* StudyMateDev.storekit in Resources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000001 /* StudyMateDev.storekit */; };
@@ -435,6 +436,7 @@
 		F81000000000000000000006 /* VoiceTutorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorViewModel.swift; sourceTree = "<group>"; };
 		F81000000000000000000008 /* VoiceTutorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorView.swift; sourceTree = "<group>"; };
 		F82000000000000000000002 /* VoiceTutorWebRTCTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorWebRTCTransport.swift; sourceTree = "<group>"; };
+		F8200000000000000000000A /* VoiceTutorOutputDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorOutputDiagnostics.swift; sourceTree = "<group>"; };
 		F82000000000000000000004 /* VoiceTutorRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTutorRecording.swift; sourceTree = "<group>"; };
 		110000000000000000000180 /* NotificationLandingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationLandingCoordinator.swift; sourceTree = "<group>"; };
 		11000000000000000000001A /* KeyboardDoneToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDoneToolbar.swift; sourceTree = "<group>"; };
@@ -953,6 +955,7 @@
 				F81000000000000000000004 /* VoiceTutorAudioEngine.swift */,
 				F81000000000000000000002 /* VoiceTutorRealtimeClient.swift */,
 				F82000000000000000000002 /* VoiceTutorWebRTCTransport.swift */,
+				F8200000000000000000000A /* VoiceTutorOutputDiagnostics.swift */,
 				F84000000000000000000002 /* VoiceTutorSileroSpeechScorer.swift */,
 				F84000000000000000000004 /* VoiceTutorSileroAudioPipeline.swift */,
 				F82000000000000000000004 /* VoiceTutorRecording.swift */,
@@ -1527,6 +1530,7 @@
 				F84000000000000000000003 /* VoiceTutorSileroAudioPipeline.swift in Sources */,
 				F84000000000000000000005 /* silero-vad-unified-v6.0.0.mlpackage in Sources */,
 				F82000000000000000000001 /* VoiceTutorWebRTCTransport.swift in Sources */,
+				F82000000000000000000009 /* VoiceTutorOutputDiagnostics.swift in Sources */,
 				F82000000000000000000003 /* VoiceTutorRecording.swift in Sources */,
 				A10000000000000000000003 /* AdMobNativeAdvertising.swift in Sources */,
 				120000000000000000000101 /* StudyMateiOSApp.swift in Sources */,

@@ -242,6 +242,19 @@ private struct VoiceTutorUncheckedSendable<Value>: @unchecked Sendable {
 }
 
 enum VoiceTutorEchoCancellationPolicy {
+    static func configureAudioSession(_ session: AVAudioSession) throws {
+        // Chat modes reduce speaker gain when Apple's Voice Processing I/O is
+        // absent. This transport uses WebRTC software AEC, so preserve normal
+        // playback gain with .default while retaining duplex input and routing.
+        try session.setCategory(
+            .playAndRecord,
+            mode: .default,
+            options: [.defaultToSpeaker, .allowBluetoothHFP]
+        )
+        try session.setPreferredIOBufferDuration(0.01)
+        try session.setActive(true)
+    }
+
     static func communicationOptions() -> LKRTCAudioProcessingOptions {
         // Use WebRTC's render-reference AEC for native duplex audio. Automatic
         // mode prefers Apple VPIO and leaves this software echo canceller off.
@@ -946,6 +959,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private let remoteRenderer = VoiceTutorRemoteAudioRenderer()
     private var captureTap: VoiceTutorLocalSpeechCaptureTap?
     private var renderTap: VoiceTutorAudioProcessingTap?
+    private var outputDiagnostics: VoiceTutorOutputDiagnostics?
     private var audioProcessingModule: LKRTCDefaultAudioProcessingModule?
     private var factory: LKRTCPeerConnectionFactory?
     private var peerConnection: LKRTCPeerConnection?
@@ -1059,6 +1073,17 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             decoderFactory: nil,
             audioProcessingModule: processingModule
         )
+        let nextOutputDiagnostics = VoiceTutorOutputDiagnostics { [weak self] in
+            self?.emitMediaDiagnostic("first_mixer_output")
+        }
+        factory.audioDeviceModule.observer = nextOutputDiagnostics
+        var resourcesInstalled = false
+        defer {
+            if !resourcesInstalled {
+                nextOutputDiagnostics.close()
+                factory.audioDeviceModule.observer = nil
+            }
+        }
         try VoiceTutorEchoCancellationPolicy.prepareDevice(factory.audioDeviceModule)
         try ensureOpen()
 
@@ -1075,7 +1100,6 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         ) else {
             throw VoiceTutorWebRTCError.peerConnectionCreationFailed
         }
-        var resourcesInstalled = false
         defer {
             if !resourcesInstalled {
                 peer.delegate = nil
@@ -1093,6 +1117,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         try installConnectionResources(
             captureTap: nextCaptureTap,
             renderTap: nextRenderTap,
+            outputDiagnostics: nextOutputDiagnostics,
             processingModule: processingModule,
             factory: factory,
             peerConnection: peer,
@@ -1365,6 +1390,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         let processingModule: LKRTCDefaultAudioProcessingModule?
         let nextCaptureTap: VoiceTutorLocalSpeechCaptureTap?
         let nextRenderTap: VoiceTutorAudioProcessingTap?
+        let nextOutputDiagnostics: VoiceTutorOutputDiagnostics?
         let observer: NSObjectProtocol?
         let configurationObservers: [NSObjectProtocol]
         let shouldDeactivateAudioSession: Bool
@@ -1400,6 +1426,8 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         captureTap = nil
         nextRenderTap = renderTap
         renderTap = nil
+        nextOutputDiagnostics = outputDiagnostics
+        outputDiagnostics = nil
         observer = interruptionObserver
         interruptionObserver = nil
         configurationObservers = audioConfigurationObservers
@@ -1414,8 +1442,10 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         Self.audioSessionOwnershipLock.unlock()
 
         withExtendedLifetime(
-            (localTrack, peerFactory, processingModule, nextCaptureTap, nextRenderTap)
+            (localTrack, peerFactory, processingModule, nextCaptureTap, nextRenderTap, nextOutputDiagnostics)
         ) {
+            nextOutputDiagnostics?.close()
+            peerFactory?.audioDeviceModule.observer = nil
             // Recording was started explicitly while the sender was disabled;
             // teardown must also cover failure before the sender ever opens.
             _ = peerFactory?.audioDeviceModule.stopRecording()
@@ -1438,13 +1468,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             throw CancellationError()
         }
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
-            .playAndRecord,
-            mode: .voiceChat,
-            options: [.defaultToSpeaker, .allowBluetoothHFP]
-        )
-        try session.setPreferredIOBufferDuration(0.01)
-        try session.setActive(true)
+        try VoiceTutorEchoCancellationPolicy.configureAudioSession(session)
         Self.activeAudioSessionOwnerID = audioSessionOwnerID
     }
 
@@ -1513,6 +1537,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
     private func installConnectionResources(
         captureTap: VoiceTutorLocalSpeechCaptureTap?,
         renderTap: VoiceTutorAudioProcessingTap?,
+        outputDiagnostics: VoiceTutorOutputDiagnostics,
         processingModule: LKRTCDefaultAudioProcessingModule,
         factory: LKRTCPeerConnectionFactory,
         peerConnection: LKRTCPeerConnection,
@@ -1527,6 +1552,7 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         self.captureTap = captureTap
         captureTap?.updateGate(mediaReady: sessionMediaReady, muted: microphoneMuted)
         self.renderTap = renderTap
+        self.outputDiagnostics = outputDiagnostics
         audioProcessingModule = processingModule
         self.factory = factory
         self.peerConnection = peerConnection
@@ -1763,7 +1789,8 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             buffers: renderedBufferCount,
             frames: renderedFrameCount,
             nonzero: nonzeroBufferCount,
-            capture: captureSnapshot ?? captureTap?.snapshot()
+            capture: captureSnapshot ?? captureTap?.snapshot(),
+            output: outputDiagnostics?.snapshot()
         ))
         diagnosticLock.unlock()
         stateLock.unlock()
@@ -1789,6 +1816,10 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
                 "playing=\(flag(device?.isPlaying))", "engineRunning=\(flag(device?.isEngineRunning))",
                 "recordingInitialized=\(flag(device?.isRecordingInitialized))", "recording=\(flag(device?.isRecording))",
                 "remoteEnabled=\(flag(snapshot.track?.isEnabled))",
+                // Track renderer callbacks precede the receive source gain;
+                // these counters alone do not prove audible speaker output.
+                "pcmStage=remote_source_before_gain",
+                "sourceVolume=\(snapshot.track.map { String(format: "%.3f", $0.source.volume) } ?? "unknown")",
                 "category=\(category)", "mode=\(mode)",
                 "ports=\(ports.isEmpty ? "none" : ports)", "inputPorts=\(inputPorts.isEmpty ? "none" : inputPorts)",
                 "zeroVolume=\(zeroVolume ? 1 : 0)",
@@ -1812,6 +1843,16 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
                     "captureGeneration=\(capture.processingGeneration)",
                     "captureGate=\(capture.gateEnabled ? 1 : 0)",
                     "captureClosed=\(capture.isClosed ? 1 : 0)"
+                ]
+            }
+            if let output = snapshot.output {
+                fields += [
+                    "mixerBuffers=\(output.buffers)", "mixerFrames=\(output.frames)",
+                    "mixerMaxRMS=\(String(format: "%.5f", output.maxRMS))",
+                    "mixerMaxPeak=\(String(format: "%.5f", output.maxPeak))",
+                    "mixerVolume=\(output.mixerVolume.map { String(format: "%.3f", $0) } ?? "unknown")",
+                    "outputSampleRate=\(Int(output.outputSampleRate))", "outputChannels=\(output.outputChannelCount)",
+                    "outputConnected=\(output.outputConnected ? 1 : 0)", "outputTap=\(output.tapInstalled ? 1 : 0)"
                 ]
             }
             callback(fields.joined(separator: " "))

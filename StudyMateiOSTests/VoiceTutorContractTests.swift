@@ -6263,9 +6263,12 @@ final class VoiceTutorContractTests: XCTestCase {
             try? audioSession.setCategory(previousCategory, mode: previousMode, options: previousOptions)
             try? audioSession.setPreferredIOBufferDuration(previousIODuration)
         }
-        try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
-        try audioSession.setPreferredIOBufferDuration(0.01)
-        try audioSession.setActive(true)
+        try VoiceTutorEchoCancellationPolicy.configureAudioSession(audioSession)
+        XCTAssertEqual(audioSession.category, .playAndRecord)
+        XCTAssertEqual(audioSession.mode, .default,
+                       "Software AEC must use the media gain instead of the chat mode's VPIO-dependent loudness")
+        XCTAssertTrue(audioSession.categoryOptions.contains(.defaultToSpeaker))
+        XCTAssertTrue(audioSession.categoryOptions.contains(.allowBluetoothHFP))
         preflight.append(nativeVoiceCapturePreflight(phase: "session_activated"))
         guard audioSession.isInputAvailable else {
             throw XCTSkip("No microphone input route is available for the native capture probe.")
@@ -6289,6 +6292,13 @@ final class VoiceTutorContractTests: XCTestCase {
             audioProcessingModule: module
         )
         let device = factory.audioDeviceModule
+        let outputDiagnostics = VoiceTutorOutputDiagnostics()
+        device.observer = outputDiagnostics
+        defer {
+            outputDiagnostics.close()
+            device.observer = nil
+            withExtendedLifetime(outputDiagnostics) {}
+        }
         try VoiceTutorEchoCancellationPolicy.prepareDevice(device)
         preflight.append(nativeVoiceCapturePreflight(phase: "factory_created", device: device))
         let source = factory.audioSource(with: nil)
@@ -6362,13 +6372,15 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(device.isRecording, "Adding output must retain the already prepared input path")
         let deadline = ProcessInfo.processInfo.systemUptime + 3
         while (tap.snapshot().validInputBufferCount < inputBuffersBeforePlayout + 5
-                || !VoiceTutorEchoCancellationPolicy.isActive(factory: factory))
+                || !VoiceTutorEchoCancellationPolicy.isActive(factory: factory)
+                || outputDiagnostics.snapshot().buffers == 0)
                 && ProcessInfo.processInfo.systemUptime < deadline {
             try await Task.sleep(for: .milliseconds(50))
         }
         preflight.append(nativeVoiceCapturePreflight(phase: "capture_complete", device: device))
         let snapshot = tap.snapshot()
         let observed = diagnostics.snapshot()
+        let output = outputDiagnostics.snapshot()
         let processing = factory.audioProcessingState
         let platform = device.platformAudioProcessingState
         let attachment = XCTAttachment(string: """
@@ -6382,6 +6394,15 @@ final class VoiceTutorContractTests: XCTestCase {
         engineRunning=\(device.isEngineRunning)
         nativeRecording=\(device.isRecording)
         nativePlaying=\(device.isPlaying)
+        mixerTapInstalled=\(output.tapInstalled)
+        mixerOutputConnected=\(output.outputConnected)
+        mixerBuffers=\(output.buffers)
+        mixerFrames=\(output.frames)
+        mixerMaxRMS=\(output.maxRMS)
+        mixerMaxPeak=\(output.maxPeak)
+        mixerVolume=\(output.mixerVolume.map { String($0) } ?? "unknown")
+        outputHardwareSampleRate=\(output.outputSampleRate)
+        outputHardwareChannels=\(output.outputChannelCount)
         inputBuffersBeforePlayout=\(inputBuffersBeforePlayout)
         speechInferenceCount=\(snapshot.speechInferenceCount)
         initializedDiagnosticCount=\(observed.initializationEvents)
@@ -6413,6 +6434,21 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(device.isEngineRunning)
         XCTAssertTrue(device.isRecording)
         XCTAssertTrue(device.isPlaying)
+        XCTAssertTrue(output.tapInstalled)
+        XCTAssertTrue(output.outputConnected, "The observer must preserve the native mixer-to-output connection")
+        XCTAssertGreaterThan(output.outputSampleRate, 0)
+        XCTAssertGreaterThan(output.outputChannelCount, 0)
+        XCTAssertGreaterThan(try XCTUnwrap(output.mixerVolume), 0)
+        XCTAssertGreaterThan(output.buffers, 0, "The final native mixer must deliver actual output callbacks")
+        XCTAssertGreaterThan(output.frames, 0)
+        // This fixture supplies no remote signal. Silence is valid; RMS/peak
+        // are recorded as diagnostics without claiming audible speaker output.
+        XCTAssertEqual(audioSession.category, .playAndRecord)
+        XCTAssertEqual(audioSession.mode, .default,
+                       "Starting native duplex I/O must preserve the production software-AEC session mode")
+        XCTAssertTrue(audioSession.categoryOptions.contains(.defaultToSpeaker),
+                      "Default mode must retain the speaker preference after output starts")
+        XCTAssertTrue(audioSession.categoryOptions.contains(.allowBluetoothHFP))
         XCTAssertEqual(snapshot.speechInferenceCount, 0, "Closed readiness gating must not process learner speech")
         XCTAssertEqual(observed.initializationEvents, 1)
         XCTAssertEqual(observed.firstInputEvents, 1)

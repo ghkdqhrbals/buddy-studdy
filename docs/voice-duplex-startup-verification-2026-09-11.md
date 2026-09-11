@@ -1,5 +1,9 @@
 # Voice duplex startup — 2026-09-11
 
+Follow-up: [speaker output verification](voice-speaker-output-verification-2026-09-11.md)
+corrects the distinction between remote PCM reception and audible hardware
+output after a user reported that these connected calls were inaudible.
+
 ## Incident and cause
 
 The previous capture-start fix (`1a1032e1`) passed a standalone microphone probe
