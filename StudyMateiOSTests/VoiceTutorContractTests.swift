@@ -688,7 +688,7 @@ final class VoiceTutorContractTests: XCTestCase {
                 strings: strings
             )
             XCTAssertEqual(coded.cause, .providerUnavailable)
-            XCTAssertEqual(coded.message, strings.serviceTemporarilyUnavailable)
+            XCTAssertEqual(coded.message, strings.voiceTutorFailureMessage(.providerUnavailable))
             XCTAssertNotEqual(coded.message, backendFailure.message)
 
             let statusOnly = VoiceTutorStartupFailurePolicy.presentation(
@@ -699,7 +699,7 @@ final class VoiceTutorContractTests: XCTestCase {
                 strings: strings
             )
             XCTAssertEqual(statusOnly.cause, .providerUnavailable)
-            XCTAssertEqual(statusOnly.message, strings.serviceTemporarilyUnavailable)
+            XCTAssertEqual(statusOnly.message, strings.voiceTutorFailureMessage(.providerUnavailable))
         }
     }
 
@@ -763,6 +763,85 @@ final class VoiceTutorContractTests: XCTestCase {
                 XCTAssertEqual(VoiceTutorCallPresentation(phase: .failed, failureCause: transient.cause).primaryAction, .retry)
             }
         }
+    }
+
+    func testVoiceRESTAndSDPErrorsShareActionableMessagesWithoutTrustingServerProse() {
+        let cases: [(Int, String?, VoiceTutorFailureCause, VoiceTutorCallPresentation.PrimaryAction)] = [
+            (401, "AUTH_INVALID_ACCESS_TOKEN", .signInRequired, .dismiss),
+            (403, "VOICE_TUTOR_PRO_REQUIRED", .proRequired, .dismiss),
+            (403, "VOICE_TUTOR_QUOTA_EXCEEDED", .monthlyQuota, .dismiss),
+            (403, "TERMS_REAGREEMENT_REQUIRED", .termsRequired, .dismiss),
+            (403, "PERMISSION_DENIED", .accountUnavailable, .dismiss),
+            (404, "DEVICE_NOT_FOUND", .accountUnavailable, .dismiss),
+            (409, "VOICE_TUTOR_SESSION_CONFLICT", .sessionConflict, .dismiss),
+            (429, nil, .rateLimited, .retry),
+            (503, "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED", .providerQuotaUnavailable, .dismiss),
+            (503, "SERVER_BUSY", .providerUnavailable, .retry),
+            (426, "APP_VERSION_UNSUPPORTED", .updateRequired, .dismiss),
+            (408, nil, .timeout, .retry), (504, nil, .timeout, .retry),
+            (502, nil, .providerUnavailable, .retry),
+            (422, "VALIDATION_ERROR", .requestRejected, .dismiss),
+            // Unscoped or unrecognized quota errors cannot claim voice allowance exhaustion.
+            (403, "QUOTA_EXCEEDED", .accountUnavailable, .dismiss),
+            (429, "UNKNOWN", .rateLimited, .retry)
+        ]
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            for (status, code, cause, action) in cases {
+                let raw = "private server detail credit_balance_exhausted https://private.test/token"
+                let rest = RemotePushBackendError.httpStatus(status, raw,
+                    code.map { BackendAPIError(code: $0, message: raw) })
+                let sdp = VoiceTutorWebRTCError.sdpExchangeFailed(statusCode: status,
+                    backendFailure: .init(code: code, message: raw))
+                let mapped = VoiceTutorStartupFailurePolicy.presentation(for: rest, strings: strings)
+                XCTAssertEqual(mapped, VoiceTutorStartupFailurePolicy.presentation(for: sdp, strings: strings))
+                XCTAssertEqual(mapped.cause, cause)
+                XCTAssertFalse(mapped.message.contains("private"))
+                XCTAssertFalse(mapped.message.contains("credit_balance_exhausted"))
+                XCTAssertFalse(mapped.message.isEmpty)
+                let screen = VoiceTutorCallPresentation(phase: .failed, failureCause: mapped.cause)
+                XCTAssertEqual(screen.primaryAction, action)
+                XCTAssertEqual(screen.statusText(strings), strings.voiceTutorFailureTitle(cause))
+            }
+        }
+    }
+
+    func testVoiceLocalFailuresOfferNetworkRecoveryOrMicrophoneSettings() {
+        let cases: [(Error, VoiceTutorFailureCause, VoiceTutorCallPresentation.PrimaryAction)] = [
+            (URLError(.notConnectedToInternet), .offline, .retry),
+            (URLError(.dataNotAllowed), .offline, .retry),
+            (URLError(.timedOut), .timeout, .retry),
+            (URLError(.networkConnectionLost), .connection, .retry),
+            (VoiceTutorWebRTCError.mediaConnectionTimedOut, .timeout, .retry),
+            (VoiceTutorWebRTCError.echoCancellationUnavailable, .inputPreparation, .dismiss),
+            (VoiceTutorAudioEngine.AudioError.microphonePermissionDenied, .microphone, .openSettings),
+            (VoiceTutorPreparationError.signInRequired, .signInRequired, .dismiss),
+            (RemotePushBackendError.invalidResponse, .invalidResponse, .retry)
+        ]
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            for (error, cause, action) in cases {
+                let mapped = VoiceTutorStartupFailurePolicy.presentation(for: error, strings: strings)
+                XCTAssertEqual(mapped.cause, cause)
+                XCTAssertEqual(VoiceTutorCallPresentation(phase: .failed, failureCause: mapped.cause).primaryAction, action)
+                XCTAssertFalse(mapped.message.isEmpty)
+            }
+        }
+    }
+
+    func testControlFailuresRespectRetryabilityAndAuthorizationIsNotANetworkFailure() {
+        let strings = AppStrings(language: .korean)
+        let nonretryable = VoiceTutorStartupFailurePolicy.servicePresentation(code: "UNRECOGNIZED", retryable: false, strings: strings)
+        XCTAssertEqual(VoiceTutorCallPresentation(phase: .failed, failureCause: nonretryable.cause).primaryAction, .dismiss)
+        let finalization = VoiceTutorStartupFailurePolicy.servicePresentation(code: "VOICE_TUTOR_FINALIZATION_FAILED", retryable: true, strings: strings)
+        XCTAssertEqual(finalization.cause, .finalization)
+        XCTAssertEqual(VoiceTutorCallPresentation(phase: .failed, failureCause: finalization.cause).primaryAction, .dismiss)
+        XCTAssertEqual(VoiceTutorServerEndReasonPolicy.failureCause("AUTH_REVOKED"), .accountUnavailable)
+        XCTAssertEqual(VoiceTutorServerEndReasonPolicy.failureCause("AUTH_REVOKED", isPaused: true), .accountUnavailable)
+        XCTAssertEqual(VoiceTutorServerEndReasonPolicy.failureCause("CLIENT_DISCONNECTED", isPaused: true), .localControl)
+        XCTAssertEqual(VoiceTutorSessionPhase.completed(outcome: .ended, serverState: nil, serverReason: "AUTH_REVOKED"), .failed)
+        XCTAssertTrue(VoiceTutorServerEndReasonPolicy.isGracefulServerCompletion("QUOTA_EXHAUSTED"))
+        XCTAssertFalse(VoiceTutorServerEndReasonPolicy.isGracefulServerCompletion("AUTH_REVOKED"))
     }
 
     func testSDPDiagnosticsKeepSafeStatusAndKnownCodeWithoutProviderBodyOrUnknownIdentifiers() {
@@ -3286,7 +3365,7 @@ final class VoiceTutorContractTests: XCTestCase {
 
             let unavailable = VoiceTutorCallPresentation(phase: .failed, failureCause: .providerUnavailable)
             XCTAssertFalse(unavailable.showsConnectionFailure(strings, errorMessage: strings.serviceTemporarilyUnavailable))
-            XCTAssertEqual(unavailable.statusText(strings), strings.voiceTutorCallUnavailable)
+            XCTAssertEqual(unavailable.statusText(strings), strings.voiceTutorFailureTitle(.providerUnavailable))
 
             let connection = VoiceTutorCallPresentation(phase: .failed, failureCause: .connection)
             XCTAssertTrue(connection.showsConnectionFailure(strings, errorMessage: strings.voiceTutorConnectionFailed))
@@ -3298,7 +3377,7 @@ final class VoiceTutorContractTests: XCTestCase {
             ] {
                 let stopped = VoiceTutorCallPresentation(phase: .failed, failureCause: cause)
                 XCTAssertFalse(stopped.showsConnectionFailure(strings, errorMessage: nil))
-                XCTAssertEqual(stopped.statusText(strings), strings.voiceTutorCallEnded)
+                XCTAssertEqual(stopped.statusText(strings), strings.voiceTutorFailureTitle(cause))
             }
 
             let update = VoiceTutorCallPresentation(phase: .failed, failureCause: .updateRequired)

@@ -511,6 +511,20 @@ typed error. iOS displays service-restoration guidance with dismissal instead of
 immediate reconnect; generic transient failures retain retry. See
 [provider-credit failure verification](voice-provider-credit-failure-verification-2026-09-11.md).
 
+The iOS failure presentation policy is shared by session-creation REST, SDP and
+control-stream failures. Exact safe codes precede HTTP status fallbacks; URL
+errors distinguish offline access and timeouts. The orb and transcript show one
+localized reason and recovery instruction in the main text style. Microphone
+denial opens app Settings; account/terms/plan/quota/conflict/setup/finalization
+conditions offer dismissal rather than starting another call. An explicit
+`AUTH_REVOKED` wins over pause failure and does not imply expired login. Unknown
+errors never expose server prose or infer a provider/account quota. A saved-grade
+retry only reloads the same result, and partial ASR warns during answer review
+without changing or submitting the draft. Question/grading phases lacking cause
+metadata use generic recovery instructions, not a guessed diagnosis. See
+[actionable error verification](voice-actionable-error-verification-2026-09-11.md).
+
+
 `realtime-native-v1` is the current iOS SDP/control capability. Its native sideband controller keeps OpenAI's realtime conversation as the conversational authority: that model interprets context, replies, chooses saved topics, and calls the native tool catalog. It does not run `VoiceTutorInputTurnCoordinator`, live meaningful-input/intent/consent classifiers, or separate question/feedback assessments. The legacy classifier/lease implementation described later in this section remains compatibility-only for `local-vad-v1`/PCM; it must not silently become a gate on a native reply.
 
 - Native silent completion settles the exact frozen client speech sequence whenever no audio or tool continuation remains. Nonempty text-only assistant output violates the requested audio modality and receives at most one response retry for the unchanged input/revision; empty/noise output stays silent. Exhaustion sends `buddystudy.voice.input.retry` with an additive nonnegative `sequence` and optional exact `abandonedResponseId`. Zero is opening-only. iOS accepts it only for that pending input or matching active response; unannounced failures can therefore clear preparation without abandoning a newer turn. Native late ASR does not clear the retry hint. A premature output-clear retry hint is no longer emitted before automatic recovery is exhausted. The server-only `buddystudy.voice.response.recovering` event carries an exact response ID and client speech sequence to preserve interrupted text, clear stale playback and restore only that turn's response wait; for older servers, iOS clears a hint only when the exact replacement response starts audio in the same acoustic epoch. Diagnostics include bounded response IDs/sequences and disposition, never transcript text. Legacy unscoped retry events remain compatible.

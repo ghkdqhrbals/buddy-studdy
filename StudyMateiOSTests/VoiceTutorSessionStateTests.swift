@@ -1033,11 +1033,11 @@ final class VoiceTutorLessonContentPresentationTests: XCTestCase {
         try await harness.settle()
         try assertNoGrade(in: harness)
         _ = try harness.logicalTextRow(strings.voiceTutorGradingResultLoading)
-        XCTAssertNil(harness.button(label: strings.retry))
+        XCTAssertNil(harness.button(label: strings.voiceTutorGradingResultReloadTitle))
         XCTAssertTrue(harness.probe.gradingResult.fail(for: request))
         try await harness.settle()
-        _ = try harness.logicalTextRow(strings.voiceTutorGradingResultFailed)
-        XCTAssertTrue(try XCTUnwrap(harness.button(label: strings.retry)).accessibilityActivate())
+        _ = try harness.logicalTextRow(strings.voiceTutorGradingResultFailureHelp(.unavailable))
+        XCTAssertTrue(try XCTUnwrap(harness.button(label: strings.voiceTutorGradingResultReloadTitle)).accessibilityActivate())
         try await harness.settle()
         XCTAssertEqual(harness.probe.gradingRetryCount, 1)
         XCTAssertEqual(harness.probe.gradingResult.phase, .loading)
@@ -1186,6 +1186,70 @@ final class VoiceTutorLessonContentPresentationTests: XCTestCase {
 
 @MainActor
 final class VoiceTutorProviderFailurePresentationTests: XCTestCase {
+    func testIncompleteTranscriptWarningIsVisibleBeforeSubmissionInBothViews() async throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Hosted accessibility assertions run on simulator")
+        #else
+        let strings = AppStrings(language: .korean)
+        let harness = try OperationTranscriptHarness(captions: [], showsTranscript: false)
+        defer { harness.close() }
+        XCTAssertTrue(harness.probe.receiveQuestion("트랜잭션의 격리 수준을 설명해 주세요."))
+        XCTAssertTrue(harness.probe.answerDraft.apply(.init(answerID: OperationTranscriptProbe.answerID,
+            studyID: 101, recordID: "202", revision: 1, phase: .review, text: "격리 수준은",
+            code: "ANSWER_TRANSCRIPT_INCOMPLETE")))
+        let help = try XCTUnwrap(strings.voiceTutorAnswerFailureHelp(phase: .review, code: "ANSWER_TRANSCRIPT_INCOMPLETE"))
+        for transcript in [false, true] {
+            harness.probe.showsTranscript = transcript
+            try await harness.settle()
+            _ = try harness.logicalTextRow(help)
+            XCTAssertEqual(harness.probe.answerDraft.text, "격리 수준은")
+            XCTAssertTrue(harness.probe.answerControls.isEmpty)
+        }
+        #endif
+    }
+
+    func testActionableConnectionErrorsRemainVisibleInOrbAndConversation() async throws {
+        let capture = ProcessInfo.processInfo.environment["BUDDYSTUDY_VOICE_UI_RENDER_SMOKE"] == "1"
+        #if !targetEnvironment(simulator)
+        guard capture else { throw XCTSkip("Opt in to native error rendering on iPhone") }
+        #endif
+        let strings = AppStrings(language: .korean)
+        for cause in [VoiceTutorFailureCause.offline, .microphone, .sessionConflict] {
+            for appearance in [UIUserInterfaceStyle.light, .dark] {
+                let caption = VoiceTutorCaption(speaker: .learner, text: "지금까지의 답변")
+                let harness = try OperationTranscriptHarness(captions: [caption], appearance: appearance,
+                    showsTranscript: false, useDeviceBounds: true, usePortraitViewport: true)
+                defer { harness.close() }
+                harness.probe.errorMessage = strings.voiceTutorFailureMessage(cause)
+                harness.probe.presentation = VoiceTutorCallPresentation(phase: .failed, failureCause: cause)
+                try await harness.settle()
+                #if targetEnvironment(simulator)
+                _ = try harness.logicalTextRow(strings.voiceTutorFailureMessage(cause))
+                XCTAssertNotNil(harness.button(label: strings.done))
+                XCTAssertEqual(harness.button(label: strings.voiceTutorCallReconnect) != nil, cause == .offline)
+                XCTAssertEqual(harness.button(label: strings.voiceTutorOpenMicrophoneSettings) != nil, cause == .microphone)
+                #endif
+                if capture {
+                    harness.layout()
+                    let image = UIGraphicsImageRenderer(bounds: harness.window.bounds).image { _ in
+                        XCTAssertTrue(harness.window.drawHierarchy(in: harness.window.bounds, afterScreenUpdates: true))
+                    }
+                    let attachment = XCTAttachment(image: image)
+                    attachment.name = "voice-actionable-\(cause)-\(appearance == .light ? "light" : "dark")"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                }
+                harness.probe.showsTranscript = true
+                try await harness.settle()
+                XCTAssertEqual(harness.probe.captions.map(\.id), [caption.id])
+                #if targetEnvironment(simulator)
+                _ = try harness.logicalTextRow(caption.text)
+                _ = try harness.logicalTextRow(strings.voiceTutorFailureMessage(cause))
+                #endif
+            }
+        }
+    }
+
     func testProviderCreditsFailureShowsServiceExplanationAndDismissWithoutReconnect() async throws {
         let capture = ProcessInfo.processInfo.environment["BUDDYSTUDY_VOICE_UI_RENDER_SMOKE"] == "1"
         #if !targetEnvironment(simulator)

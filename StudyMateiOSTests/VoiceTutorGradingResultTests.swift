@@ -6,6 +6,48 @@ import XCTest
 final class VoiceTutorGradingResultTests: XCTestCase {
     private let attemptID = UUID()
 
+    func testSavedResultFailuresExplainExactReadProblemAndKeepReloadScopedToTheSameResult() throws {
+        let failures: [VoiceTutorGradingResultState.Failure] = [.unavailable, .mismatchedRecord, .incompleteResult, .timedOut]
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            var messages = Set<String>()
+            for failure in failures {
+                var state = VoiceTutorGradingResultState()
+                let first = try XCTUnwrap(state.reconcile(snapshot: Self.snapshot(), sessionID: "call-1",
+                    attemptID: attemptID, ownerUserID: 7))
+                XCTAssertTrue(state.fail(for: first, reason: failure))
+                let failedState = state
+                let explanation = strings.voiceTutorGradingResultFailureHelp(state.failure)
+                XCTAssertFalse(explanation.isEmpty)
+                messages.insert(explanation)
+                XCTAssertEqual(state, failedState, "Showing the cause cannot implicitly retry")
+                let reload = try XCTUnwrap(state.retry())
+                XCTAssertEqual(reload.target, first.target, "Reload only the existing authenticated result")
+                XCTAssertNotEqual(reload.id, first.id)
+            }
+            XCTAssertEqual(messages.count, failures.count, "Each known result-read failure needs its own explanation")
+            XCTAssertFalse(strings.voiceTutorGradingResultReloadTitle.isEmpty)
+            XCTAssertNotEqual(strings.voiceTutorGradingResultReloadTitle, strings.voiceTutorAnswerSubmit)
+            XCTAssertEqual(strings.voiceTutorGradingResultFailureHelp(nil),
+                strings.voiceTutorGradingResultFailureHelp(.unavailable))
+        }
+    }
+
+    func testLessonRecoveryInstructionsOnlyAppearForQuestionAndGradingFailure() throws {
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            let questionHelp = try XCTUnwrap(strings.voiceTutorLessonFailureHelp(.questionFailed))
+            let gradingHelp = try XCTUnwrap(strings.voiceTutorLessonFailureHelp(.gradingFailed))
+            XCTAssertNotEqual(questionHelp, strings.voiceTutorQuestionFailed)
+            XCTAssertNotEqual(gradingHelp, strings.voiceTutorGradingFailed)
+            XCTAssertNotEqual(questionHelp, gradingHelp)
+            XCTAssertNil(strings.voiceTutorLessonFailureHelp(nil))
+            for phase in VoiceTutorSessionStateEvent.Phase.allCases where phase != .questionFailed && phase != .gradingFailed {
+                XCTAssertNil(strings.voiceTutorLessonFailureHelp(phase))
+            }
+        }
+    }
+
     func testExactSavedGradeIncludesScoreReasonAndExplanation() throws {
         var state = VoiceTutorGradingResultState()
         let snapshot = Self.snapshot()

@@ -12,6 +12,80 @@ extension AppStrings {
             "AI提供元の利用上限に達したため、会話を開始できません。サービス復旧後にもう一度お試しください。"
         )
     }
+    func voiceTutorFailureTitle(_ cause: VoiceTutorFailureCause) -> String {
+        switch cause {
+        case .offline: return voiceTutorPauseText("인터넷 연결 필요", "Internet connection needed", "インターネット接続が必要です")
+        case .timeout: return voiceTutorPauseText("연결 시간 초과", "Connection timed out", "接続がタイムアウトしました")
+        case .signInRequired: return voiceTutorPauseText("로그인 확인 필요", "Sign-in needed", "ログインが必要です")
+        case .accountUnavailable: return voiceTutorPauseText("계정 상태 확인 필요", "Check your account", "アカウントの確認が必要です")
+        case .termsRequired: return voiceTutorPauseText("약관 확인 필요", "Review the terms", "規約の確認が必要です")
+        case .sessionConflict: return voiceTutorPauseText("기존 대화 확인 필요", "Check the previous conversation", "前の対話の確認が必要です")
+        case .proRequired: return voiceTutorProRequired
+        case .monthlyQuota: return voiceTutorCallQuotaEnded
+        case .providerQuotaUnavailable: return voiceTutorProviderQuotaUnavailableTitle
+        case .providerUnavailable: return voiceTutorPauseText("서비스 연결 지연", "Service temporarily unavailable", "サービスに接続できません")
+        case .rateLimited: return voiceTutorPauseText("잠시 후 다시 시도", "Try again shortly", "しばらくしてから再試行")
+        case .microphone: return voiceTutorPauseText("마이크 권한 필요", "Microphone access needed", "マイクの許可が必要です")
+        case .inputPreparation: return voiceTutorPauseText("음성 준비 오류", "Audio setup unavailable", "音声を準備できません")
+        case .audio: return voiceTutorPauseText("음성 사용 중단", "Audio interrupted", "音声が中断されました")
+        case .localControl: return voiceTutorPauseText("대화 상태 확인 필요", "Conversation state unavailable", "対話状態を確認できません")
+        case .invalidResponse: return voiceTutorPauseText("응답 확인 불가", "Response could not be verified", "応答を確認できません")
+        case .finalization: return voiceTutorPauseText("대화 결과 확인 필요", "Conversation result pending", "対話結果の確認が必要です")
+        case .provider: return voiceTutorProviderCallFailed
+        case .updateRequired: return updateRequired
+        case .requestRejected: return voiceTutorCallUnavailable
+        case .connection: return voiceTutorCallFailed
+        case .service, .unknown: return voiceTutorPauseText("대화를 계속할 수 없어요", "Conversation unavailable", "対話を続けられません")
+        }
+    }
+
+    func voiceTutorFailureMessage(_ cause: VoiceTutorFailureCause) -> String {
+        switch cause {
+        case .offline:
+            return voiceTutorPauseText("인터넷에 연결할 수 없어요. Wi-Fi나 셀룰러 데이터 연결을 확인한 뒤 다시 연결해 주세요.", "Internet access is unavailable. Check Wi-Fi or cellular data, then reconnect.", "インターネットに接続できません。Wi-Fiまたはモバイル通信を確認してから接続し直してください。")
+        case .timeout:
+            return voiceTutorPauseText("제한 시간 안에 응답을 받지 못했어요. 연결 상태를 확인하고 잠시 후 다시 연결해 주세요.", "No response arrived in time. Check your connection and reconnect shortly.", "時間内に応答が届きませんでした。通信状態を確認し、しばらくしてから接続し直してください。")
+        case .signInRequired:
+            return voiceTutorPauseText("로그인 상태를 확인할 수 없어요. 프로필에서 다시 로그인한 뒤 대화를 시작해 주세요.", "Your sign-in could not be verified. Sign in again from Profile, then start a conversation.", "ログイン状態を確認できません。プロフィールで再度ログインしてから対話を始めてください。")
+        case .accountUnavailable:
+            return voiceTutorPauseText("현재 계정으로 대화를 이용할 수 없어요. 프로필에서 계정과 이용 권한을 확인해 주세요.", "This account cannot use conversations right now. Check your account and access in Profile.", "現在のアカウントでは対話を利用できません。プロフィールでアカウントと利用権限を確認してください。")
+        case .termsRequired:
+            return voiceTutorPauseText("대화를 시작하려면 약관 확인이 필요해요. 프로필의 약관에서 확인한 뒤 다시 시작해 주세요.", "The terms need your review. Open Terms in Profile, then start again.", "対話を始めるには規約の確認が必要です。プロフィールの規約を確認してから再開してください。")
+        case .sessionConflict:
+            return voiceTutorPauseText("기존 대화가 진행 중이거나 연결 상태가 바뀌었어요. 진행 중인 대화를 마친 뒤 잠시 후 다시 시작해 주세요.", "A previous conversation is active or its connection state has changed. End any active conversation, then try again shortly.", "前の対話が進行中か、接続状態が変わりました。進行中の対話を終了し、しばらくしてから再開してください。")
+        case .proRequired:
+            return voiceTutorPauseText("음성 대화는 Pro에서 이용할 수 있어요. 프로필에서 멤버십 상태를 확인해 주세요.", "Voice conversations require Pro. Check your membership in Profile.", "音声対話にはProが必要です。プロフィールでメンバーシップを確認してください。")
+        case .monthlyQuota:
+            return voiceTutorPauseText("이번 달 대화 시간을 모두 사용했어요. 대화 화면의 월간 사용량에서 다음 갱신일을 확인해 주세요.", "You have used this month's conversation time. Check monthly usage on the conversation screen for the next reset.", "今月の対話時間を使い切りました。対話画面の月間使用量で次回更新日を確認してください。")
+        case .providerQuotaUnavailable: return voiceTutorProviderQuotaUnavailableMessage
+        case .providerUnavailable, .provider:
+            return voiceTutorPauseText("서비스에서 응답을 받지 못했어요. 잠시 후 다시 연결해 주세요.", "The service could not respond. Please reconnect shortly.", "サービスから応答を受け取れませんでした。しばらくしてから接続し直してください。")
+        case .rateLimited:
+            return voiceTutorPauseText("요청이 일시적으로 몰려 있어요. 잠시 기다린 뒤 다시 연결해 주세요.", "Requests are temporarily limited. Wait a moment, then reconnect.", "リクエストが一時的に制限されています。少し待ってから接続し直してください。")
+        case .microphone: return voiceTutorMicrophoneDenied
+        case .inputPreparation:
+            return voiceTutorPauseText("마이크와 음성 처리를 준비하지 못했어요. 다른 오디오 사용을 마치고 앱을 다시 열어 주세요.", "The microphone and audio processing could not be prepared. Finish other audio activity and reopen the app.", "マイクと音声処理を準備できませんでした。他の音声利用を終了し、アプリを開き直してください。")
+        case .audio:
+            return voiceTutorPauseText("음성 재생이나 마이크 사용이 중단됐어요. 다른 오디오 사용을 마친 뒤 다시 연결해 주세요.", "Audio playback or microphone use was interrupted. Finish other audio activity, then reconnect.", "音声再生またはマイクの使用が中断されました。他の音声利用を終了してから接続し直してください。")
+        case .localControl: return voiceTutorPauseFailed
+        case .invalidResponse:
+            return voiceTutorPauseText("서버 응답을 확인하지 못했어요. 잠시 후 다시 연결하고, 계속되면 앱을 업데이트해 주세요.", "The server response could not be verified. Reconnect shortly; if it continues, update the app.", "サーバー応答を確認できませんでした。しばらくしてから再接続し、続く場合はアプリを更新してください。")
+        case .finalization:
+            return voiceTutorPauseText("대화 결과 처리가 완료됐는지 확인하지 못했어요. 대화 기록에서 결과를 다시 확인해 주세요.", "We could not confirm that the conversation result finished processing. Check the result in conversation history.", "対話結果の処理完了を確認できませんでした。対話履歴で結果を確認してください。")
+        case .updateRequired: return voiceTutorUpdateRequiredMessage
+        case .requestRejected: return voiceTutorRequestRejected
+        case .connection: return voiceTutorConnectionFailed
+        case .unknown:
+            return voiceTutorPauseText("대화를 계속하지 못했어요. 잠시 후 다시 연결해 주세요.", "The conversation could not continue. Please reconnect shortly.", "対話を続けられませんでした。しばらくしてから接続し直してください。")
+        case .service:
+            return voiceTutorPauseText("대화를 계속하지 못했어요. 이 화면을 닫고 잠시 후 다시 시작해 주세요.", "The conversation could not continue. Close this screen and try again shortly.", "対話を続けられませんでした。この画面を閉じ、しばらくしてから再開してください。")
+        }
+    }
+
+    var voiceTutorOpenMicrophoneSettings: String {
+        voiceTutorPauseText("마이크 설정", "Microphone settings", "マイク設定")
+    }
+
     var voiceTutorUnsubmittedAnswer: String {
         voiceTutorPauseText("미제출 답변", "Unsubmitted answer", "未送信の回答")
     }

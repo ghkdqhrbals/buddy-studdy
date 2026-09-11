@@ -8935,31 +8935,7 @@ final class AppState: ObservableObject {
     }
 
     private func voiceTutorDisplayMessage(for error: Error) -> String {
-        if let preparationError = error as? VoiceTutorPreparationError {
-            switch preparationError {
-            case .signInRequired:
-                return strings.voiceTutorSignInRequired
-            case .missingRegistration:
-                return strings.voiceTutorAccountNotReady
-            case .invalidWebSocketURL:
-                return strings.voiceTutorInvalidConnection
-            }
-        }
-        if let backendError = error as? RemotePushBackendError {
-            switch backendError.backendCode?.uppercased() {
-            case "VOICE_TUTOR_PRO_REQUIRED":
-                return strings.voiceTutorProRequiredMessage
-            case "VOICE_TUTOR_QUOTA_EXCEEDED":
-                return strings.voiceTutorQuotaReached
-            case "VOICE_TUTOR_PROVIDER_UNAVAILABLE":
-                return strings.serviceTemporarilyUnavailable
-            case "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED":
-                return strings.voiceTutorProviderQuotaUnavailableMessage
-            default:
-                break
-            }
-        }
-        return strings.serviceTemporarilyUnavailable
+        VoiceTutorStartupFailurePolicy.presentation(for: error, strings: strings).message
     }
 
     private func makeVoiceTutorWebSocketRequest(

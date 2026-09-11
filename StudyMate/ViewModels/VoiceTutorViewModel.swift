@@ -43,17 +43,12 @@ enum VoiceTutorSessionPhase: Equatable {
 }
 
 enum VoiceTutorFailureCause: Equatable {
-    case connection
-    case provider
-    case providerUnavailable
-    case providerQuotaUnavailable
-    case updateRequired
-    case requestRejected
-    case microphone
-    case audio
-    case localControl
-    case service
-    case unknown
+    case connection, offline, timeout
+    case provider, providerUnavailable, providerQuotaUnavailable, rateLimited
+    case signInRequired, accountUnavailable, termsRequired, sessionConflict, proRequired, monthlyQuota
+    case finalization
+    case updateRequired, requestRejected, invalidResponse
+    case microphone, audio, inputPreparation, localControl, service, unknown
 }
 
 struct VoiceTutorStartupFailurePresentation: Equatable {
@@ -61,82 +56,95 @@ struct VoiceTutorStartupFailurePresentation: Equatable {
     let message: String
 }
 
+/// REST session creation, SDP negotiation and control-stream failures share the
+/// same public vocabulary. Only typed codes/statuses are trusted, never prose.
 enum VoiceTutorStartupFailurePolicy {
-    static func presentation(
-        for error: Error,
-        strings: AppStrings
-    ) -> VoiceTutorStartupFailurePresentation {
-        if let webRTCPresentation = webRTCFailurePresentation(for: error, strings: strings) {
-            return webRTCPresentation
-        }
-        if error is VoiceTutorSileroError {
-            return VoiceTutorStartupFailurePresentation(
-                cause: .unknown,
-                message: strings.voiceTutorInputPreparationFailed
-            )
-        }
-        if let preparationError = error as? VoiceTutorPreparationError {
-            let message: String
-            switch preparationError {
-            case .signInRequired:
-                message = strings.voiceTutorSignInRequired
-            case .missingRegistration:
-                message = strings.voiceTutorAccountNotReady
-            case .invalidWebSocketURL:
-                message = strings.voiceTutorInvalidConnection
+    static func presentation(for error: Error, strings: AppStrings) -> VoiceTutorStartupFailurePresentation {
+        if let backend = error as? RemotePushBackendError {
+            switch backend {
+            case .httpStatus(let status, _, _):
+                return servicePresentation(code: backend.backendCode, statusCode: status, strings: strings)
+            case .invalidResponse: return failure(.invalidResponse, strings)
             }
-            return VoiceTutorStartupFailurePresentation(cause: .unknown, message: message)
         }
-        if let audioError = error as? VoiceTutorAudioEngine.AudioError {
-            let message: String
-            switch audioError {
-            case .microphonePermissionDenied:
-                message = strings.voiceTutorMicrophoneDenied
-            case .unsupportedInputFormat, .invalidOutputAudio:
-                message = strings.voiceTutorConnectionFailed
+        if let webRTC = error as? VoiceTutorWebRTCError {
+            switch webRTC {
+            case .sdpExchangeFailed(let status, let backend):
+                return servicePresentation(code: backend?.code, statusCode: status, strings: strings)
+            case .mediaConnectionTimedOut: return failure(.timeout, strings)
+            case .mediaConnectionFailed: return failure(.connection, strings)
+            case .invalidSDPResponse: return failure(.invalidResponse, strings)
+            case .speechActivityUnavailable, .audioProcessingDelegateInstallationFailed,
+                 .echoCancellationUnavailable, .localTrackCreationFailed:
+                return failure(.inputPreparation, strings)
+            case .peerConnectionCreationFailed, .offerCreationFailed:
+                return failure(.connection, strings)
             }
-            return VoiceTutorStartupFailurePresentation(cause: .unknown, message: message)
         }
-        return VoiceTutorStartupFailurePresentation(
-            cause: .unknown,
-            message: strings.voiceTutorConnectionFailed
-        )
+        let network = error as NSError
+        if network.domain == NSURLErrorDomain {
+            switch network.code {
+            case NSURLErrorNotConnectedToInternet, NSURLErrorDataNotAllowed,
+                 NSURLErrorInternationalRoamingOff, NSURLErrorCallIsActive:
+                return failure(.offline, strings)
+            case NSURLErrorTimedOut: return failure(.timeout, strings)
+            default: return failure(.connection, strings)
+            }
+        }
+        if error is VoiceTutorSileroError { return failure(.inputPreparation, strings) }
+        if let preparation = error as? VoiceTutorPreparationError {
+            switch preparation {
+            case .signInRequired: return failure(.signInRequired, strings)
+            case .missingRegistration: return failure(.accountUnavailable, strings)
+            case .invalidWebSocketURL: return failure(.requestRejected, strings)
+            }
+        }
+        if let audio = error as? VoiceTutorAudioEngine.AudioError {
+            switch audio {
+            case .microphonePermissionDenied: return failure(.microphone, strings)
+            case .unsupportedInputFormat, .invalidOutputAudio: return failure(.inputPreparation, strings)
+            }
+        }
+        return failure(.unknown, strings)
     }
 
-    private static func webRTCFailurePresentation(
-        for error: Error,
-        strings: AppStrings
-    ) -> VoiceTutorStartupFailurePresentation? {
-        guard let webRTCError = error as? VoiceTutorWebRTCError,
-              case let .sdpExchangeFailed(statusCode, backendFailure) = webRTCError else {
-            return nil
+    static func servicePresentation(code: String?, statusCode: Int? = nil,
+                                    retryable: Bool? = nil, strings: AppStrings) -> VoiceTutorStartupFailurePresentation {
+        let cause: VoiceTutorFailureCause
+        switch code?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED": cause = .providerQuotaUnavailable
+        case "VOICE_TUTOR_PROVIDER_UNAVAILABLE": cause = .providerUnavailable
+        case "VOICE_TUTOR_PRO_REQUIRED": cause = .proRequired
+        case "VOICE_TUTOR_QUOTA_EXCEEDED": cause = .monthlyQuota
+        case "VOICE_TUTOR_SESSION_CONFLICT": cause = .sessionConflict
+        case "AUTH_ACCESS_TOKEN_REQUIRED", "AUTH_DEVICE_CREDENTIALS_REQUIRED", "AUTH_DEVICE_MISMATCH",
+             "AUTH_GOOGLE_REQUIRED", "AUTH_INVALID_ACCESS_TOKEN", "AUTH_INVALID_DEVICE_CREDENTIALS",
+             "AUTH_INVALID_EMAIL_CREDENTIALS": cause = .signInRequired
+        case "ACCOUNT_FORBIDDEN", "PERMISSION_DENIED", "USER_INACTIVE", "EMAIL_NOT_VERIFIED",
+             "AUTH_EMAIL_VERIFICATION_REQUIRED", "DEVICE_NOT_REGISTERED", "DEVICE_NOT_FOUND",
+             "AUTH_REVOKED": cause = .accountUnavailable
+        case "TERMS_AGREEMENT_REQUIRED", "TERMS_REAGREEMENT_REQUIRED": cause = .termsRequired
+        case "APP_VERSION_UNSUPPORTED": cause = .updateRequired
+        case "SERVER_BUSY", "SERVICE_UNDER_MAINTENANCE": cause = .providerUnavailable
+        case "VOICE_TUTOR_PROVIDER_ERROR", "VOICE_TUTOR_PROVIDER_PROTOCOL_ERROR": cause = .provider
+        case "VOICE_TUTOR_FINALIZATION_FAILED": cause = .finalization
+        default:
+            switch statusCode {
+            case 401: cause = .signInRequired
+            case 403: cause = .accountUnavailable
+            case 408, 504: cause = .timeout
+            case 429: cause = .rateLimited
+            case 426: cause = .updateRequired
+            case 400, 413, 415, 422: cause = .requestRejected
+            case 500, 502, 503: cause = .providerUnavailable
+            default: cause = retryable == false ? .service : .unknown
+            }
         }
-        if backendFailure?.code?.uppercased() == "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED" {
-            return VoiceTutorStartupFailurePresentation(
-                cause: .providerQuotaUnavailable,
-                message: strings.voiceTutorProviderQuotaUnavailableMessage
-            )
-        }
-        if statusCode == 503
-            || backendFailure?.code?.uppercased() == "VOICE_TUTOR_PROVIDER_UNAVAILABLE" {
-            return VoiceTutorStartupFailurePresentation(
-                cause: .providerUnavailable,
-                message: strings.serviceTemporarilyUnavailable
-            )
-        }
-        if statusCode == 426 {
-            return VoiceTutorStartupFailurePresentation(
-                cause: .updateRequired,
-                message: strings.voiceTutorUpdateRequiredMessage
-            )
-        }
-        if [400, 413, 415, 422].contains(statusCode) {
-            return VoiceTutorStartupFailurePresentation(
-                cause: .requestRejected,
-                message: strings.voiceTutorRequestRejected
-            )
-        }
-        return nil
+        return failure(cause, strings)
+    }
+
+    private static func failure(_ cause: VoiceTutorFailureCause, _ strings: AppStrings) -> VoiceTutorStartupFailurePresentation {
+        .init(cause: cause, message: strings.voiceTutorFailureMessage(cause))
     }
 }
 
@@ -151,6 +159,15 @@ private enum VoiceTutorStopSource: String {
 /// unknown reason must never turn a transport failure into a successful call.
 enum VoiceTutorServerEndReasonPolicy {
     static let quotaExhausted = "QUOTA_EXHAUSTED"
+
+    static func failureCause(_ reason: String?, isPaused: Bool = false) -> VoiceTutorFailureCause {
+        switch normalized(reason) {
+        case "AUTH_REVOKED": return .accountUnavailable
+        case "PROVIDER_ERROR": return .provider
+        case "SESSION_TIMEOUT", "PROVIDER_TIMEOUT": return .timeout
+        default: return isPaused ? .localControl : .connection
+        }
+    }
 
     static func isMonthlyQuotaExhausted(_ reason: String?) -> Bool {
         switch normalized(reason) {
@@ -1862,10 +1879,9 @@ final class VoiceTutorViewModel: ObservableObject {
                 isWarning: true
             )
             audioEngine.stop()
-            errorMessage = pauseState.holdsMicrophone
-                ? appState.strings.voiceTutorPauseFailed
-                : appState.strings.voiceTutorConnectionFailed
-            failureCause = pauseState.holdsMicrophone ? .localControl : .connection
+            let failure = VoiceTutorStartupFailurePolicy.presentation(for: error, strings: appState.strings)
+            errorMessage = pauseState.holdsMicrophone ? appState.strings.voiceTutorPauseFailed : failure.message
+            failureCause = pauseState.holdsMicrophone ? .localControl : failure.cause
             await stop(shouldNotifyServerOverSocket: false, outcome: .failed, source: .controlReceiveFailure)
         }
     }
@@ -2159,25 +2175,14 @@ final class VoiceTutorViewModel: ObservableObject {
             if retainedGradingResultState.target.map({ studyIDs.contains($0.studyID) }) == true {
                 clearGradingResult()
             }
-        case .serviceError(let code, _, _):
-            switch code?.uppercased() {
-            case "VOICE_TUTOR_PRO_REQUIRED":
-                errorMessage = appState.strings.voiceTutorProRequiredMessage
-                failureCause = .service
-            case "VOICE_TUTOR_QUOTA_EXCEEDED":
-                errorMessage = appState.strings.voiceTutorQuotaReached
-                failureCause = .service
-            case "VOICE_TUTOR_PROVIDER_UNAVAILABLE":
-                errorMessage = appState.strings.serviceTemporarilyUnavailable
-                failureCause = .provider
-            case "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED":
-                errorMessage = appState.strings.voiceTutorProviderQuotaUnavailableMessage
-                failureCause = .providerQuotaUnavailable
-            default:
-                errorMessage = pauseState.holdsMicrophone
-                    ? appState.strings.voiceTutorPauseFailed
-                    : appState.strings.serviceTemporarilyUnavailable
-                failureCause = pauseState.holdsMicrophone ? .localControl : .provider
+        case .serviceError(let code, _, let retryable):
+            let failure = VoiceTutorStartupFailurePolicy.servicePresentation(
+                code: code, retryable: retryable, strings: appState.strings)
+            errorMessage = failure.message
+            failureCause = failure.cause
+            if pauseState.holdsMicrophone && failure.cause == .unknown {
+                errorMessage = appState.strings.voiceTutorPauseFailed
+                failureCause = .localControl
             }
             await stop(shouldNotifyServerOverSocket: false, outcome: .failed, source: .providerError)
         case .audioDelta(let delta):
@@ -2505,11 +2510,12 @@ final class VoiceTutorViewModel: ObservableObject {
             serverState: nil,
             serverReason: effectiveServerEndReason
         )
-        if outcome == .failed, pauseState.holdsMicrophone, errorMessage == nil {
-            errorMessage = appState.strings.voiceTutorPauseFailed
-            failureCause = .localControl
-        } else if outcome == .failed, failureCause == nil {
-            failureCause = ended.reason?.uppercased() == "PROVIDER_ERROR" ? .provider : .connection
+        if outcome == .failed,
+           failureCause == nil || effectiveServerEndReason?.uppercased() == "AUTH_REVOKED" {
+            let cause = VoiceTutorServerEndReasonPolicy.failureCause(
+                effectiveServerEndReason, isPaused: pauseState.holdsMicrophone)
+            failureCause = cause
+            errorMessage = appState.strings.voiceTutorFailureMessage(cause)
         }
         logDiagnostic("event=server_ended")
         sessionState.endLocally()
@@ -2667,9 +2673,7 @@ final class VoiceTutorViewModel: ObservableObject {
         phase = .completed(outcome: outcome, serverState: detail?.state)
         if phase == .failed, errorMessage == nil {
             failureCause = failureCause ?? .unknown
-            errorMessage = failureCause == .provider
-                ? appState.strings.serviceTemporarilyUnavailable
-                : appState.strings.voiceTutorConnectionFailed
+            errorMessage = appState.strings.voiceTutorFailureMessage(failureCause ?? .unknown)
         }
         activeConnection = nil
     }

@@ -10,6 +10,44 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
     private let answerID = "11111111-2222-3333-4444-555555555555"
     private let savedQuestion = "Redis의 TTL을 설명하고 예시를 2개 드세요."
 
+    func testIncompleteTranscriptReviewExplainsMissingSpeechWithoutChangingEditedDraftOrSubmitting() throws {
+        var state = listening(existing: "기존 답변")
+        XCTAssertTrue(state.edit("내가 수정한 답변과 아직 설명할 부분"))
+        XCTAssertTrue(state.apply(event(.review, text: "일부만 받아쓴 내용", code: "ANSWER_TRANSCRIPT_INCOMPLETE")))
+        let reviewedState = state
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            let warning = try XCTUnwrap(strings.voiceTutorAnswerFailureHelp(phase: state.phase, code: state.failureCode))
+            XCTAssertFalse(warning.isEmpty)
+            XCTAssertNotEqual(warning, strings.voiceTutorAnswerFailedHelp,
+                "Incomplete transcription is a review warning, not a failed submission")
+            XCTAssertFalse(warning.contains("ANSWER_TRANSCRIPT_INCOMPLETE"))
+        }
+        XCTAssertEqual(state, reviewedState)
+        XCTAssertEqual(state.text, "내가 수정한 답변과 아직 설명할 부분")
+        XCTAssertEqual(state.phase, .review)
+        XCTAssertTrue(state.canSubmit)
+        XCTAssertNil(state.pendingControl, "Presenting a warning cannot send the answer")
+    }
+
+    func testAnswerFailureCopyUsesExactSafeCodeAndDoesNotLeakIntoCompletedOrInFlightStates() {
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            XCTAssertEqual(strings.voiceTutorAnswerFailureHelp(phase: .failed, code: "ANSWER_TOO_LONG"),
+                strings.voiceTutorAnswerTooLong)
+            for code in ["ANSWER_SUBMISSION_FAILED", "provider raw error", "ANSWER_TOO_LONG details"] {
+                XCTAssertEqual(strings.voiceTutorAnswerFailureHelp(phase: .failed, code: code),
+                    strings.voiceTutorAnswerFailedHelp)
+                XCTAssertNil(strings.voiceTutorAnswerFailureHelp(phase: .review, code: code))
+            }
+            XCTAssertNil(strings.voiceTutorAnswerFailureHelp(phase: .review, code: nil))
+            for phase in [VoiceTutorAnswerDraftState.Phase.inactive, .listening, .finalizing, .submitting, .submitted, .cancelled] {
+                XCTAssertNil(strings.voiceTutorAnswerFailureHelp(phase: phase, code: "ANSWER_TRANSCRIPT_INCOMPLETE"))
+                XCTAssertNil(strings.voiceTutorAnswerFailureHelp(phase: phase, code: "ANSWER_TOO_LONG"))
+            }
+        }
+    }
+
     func testAnswerStateRequiresExactOwnedQuestionIdentityAndKnownPhase() throws {
         var legacy = event(.listening); legacy.question = nil
         XCTAssertEqual(try parse(fields()), .answerState(legacy))

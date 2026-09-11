@@ -714,7 +714,7 @@ struct VoiceTutorCallPresentation {
     }
 
     enum PrimaryAction: Equatable {
-        case end, retry, dismiss, wait
+        case end, retry, dismiss, openSettings, wait
     }
 
     enum OrbState: Equatable {
@@ -848,7 +848,10 @@ struct VoiceTutorCallPresentation {
         switch phase {
         case .failed:
             switch failureCause {
-            case .updateRequired, .requestRejected, .providerQuotaUnavailable: return .dismiss
+            case .microphone: return .openSettings
+            case .updateRequired, .requestRejected, .providerQuotaUnavailable, .inputPreparation,
+                 .signInRequired, .accountUnavailable, .termsRequired, .sessionConflict,
+                 .proRequired, .monthlyQuota, .finalization, .service: return .dismiss
             default: return .retry
             }
         case .ended: return .dismiss
@@ -924,16 +927,7 @@ struct VoiceTutorCallPresentation {
         case .ending: return strings.voiceTutorCallEnding
         case .ended: return strings.voiceTutorCallEnded
         case .failed:
-            switch failureCause {
-            case .provider: return strings.voiceTutorProviderCallFailed
-            case .providerUnavailable: return strings.voiceTutorCallUnavailable
-            case .providerQuotaUnavailable: return strings.voiceTutorProviderQuotaUnavailableTitle
-            case .updateRequired: return strings.updateRequired
-            case .requestRejected: return strings.voiceTutorCallUnavailable
-            case .connection, .none: return strings.voiceTutorCallFailed
-            case .microphone, .audio, .localControl, .service, .unknown:
-                return strings.voiceTutorCallEnded
-            }
+            return failureCause.map { strings.voiceTutorFailureTitle($0) } ?? strings.voiceTutorCallFailed
         }
     }
 
@@ -1170,6 +1164,7 @@ struct VoiceTutorAnswerEditor: View {
 
 /// The same non-networking surface is rendered by device visual tests.
 struct VoiceTutorCallScreen: View {
+    @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
@@ -1395,6 +1390,7 @@ struct VoiceTutorCallScreen: View {
                     } else if hasAnswerDraft {
                         VStack(spacing: 8) {
                             answerDraftPreview
+                            answerFailureNotice
                             HStack {
                                 if canSkipAnswer {
                                     Button(strings.voiceTutorAnswerSkip) {
@@ -1764,13 +1760,15 @@ struct VoiceTutorCallScreen: View {
                     .multilineTextAlignment(.center)
             } else if presentation.phase == .failed {
                 Text(callExplanation)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .accessibilityIdentifier("voiceCall.failureExplanation")
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                 supplementaryErrorNotice
             }
 
+            lessonFailureNotice
             if presentation.isRecording { recordingIndicator }
         }
         .frame(maxWidth: .infinity)
@@ -1960,9 +1958,9 @@ struct VoiceTutorCallScreen: View {
                         text: result.explanation, identifier: "voiceCall.gradingExplanation")
                 }
             } else if gradingResultState.matches(presentation.sessionState.snapshot), gradingResultState.phase == .failed {
-                Text(strings.voiceTutorGradingResultFailed)
+                Text(strings.voiceTutorGradingResultFailureHelp(gradingResultState.failure))
                     .font(.body.weight(.medium))
-                Button(strings.retry, action: onGradingResultRetry)
+                Button(strings.voiceTutorGradingResultReloadTitle, action: onGradingResultRetry)
                     .font(.subheadline.weight(.semibold))
                     .buttonStyle(.borderedProminent)
                     .tint(voiceAccent)
@@ -1997,6 +1995,28 @@ struct VoiceTutorCallScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    @ViewBuilder
+    private var lessonFailureNotice: some View {
+        if presentation.phase.isLive, let help = strings.voiceTutorLessonFailureHelp(presentation.lessonPhase) {
+            Text(help)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("voiceCall.lessonFailureHelp")
+        }
+    }
+
+    @ViewBuilder
+    private var answerFailureNotice: some View {
+        if let help = strings.voiceTutorAnswerFailureHelp(phase: answerDraftState.phase, code: answerDraftState.failureCode) {
+            Text(help)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("voiceCall.answerFailureHelp")
+        }
+    }
+
     private var answerDraftCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             canonicalAnswerQuestion
@@ -2008,13 +2028,7 @@ struct VoiceTutorCallScreen: View {
             .accessibilityLabel(strings.voiceTutorAnswerEdit)
             .accessibilityValue(answerDraftText.wrappedValue)
             .accessibilityIdentifier("voiceCall.answerEdit")
-            if answerDraftState.phase == .failed {
-                Text(answerDraftState.failureCode == "ANSWER_TOO_LONG"
-                     ? strings.voiceTutorAnswerTooLong : strings.voiceTutorAnswerFailedHelp)
-                    .font(.caption)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            answerFailureNotice
             if answerDraftState.phase == .listening && presentation.canPresentAnswer(answerDraftState) {
                 Button {
                     guard presentation.canFinishAnswer(answerDraftState, userInputState: userInputState),
@@ -2091,7 +2105,8 @@ struct VoiceTutorCallScreen: View {
 
     @ViewBuilder
     private var supplementaryErrorNotice: some View {
-        if let error = presentation.supplementaryError(strings, errorMessage: errorMessage),
+        if !(presentation.phase == .failed && presentation.failureCause != nil),
+           let error = presentation.supplementaryError(strings, errorMessage: errorMessage),
            error != callExplanation {
             Text(error)
                 .font(.caption)
@@ -2129,7 +2144,7 @@ struct VoiceTutorCallScreen: View {
         case .reviewingAnswer:
             return strings.voiceTutorAnswerReviewHelp
         case .questionReady, .graded, .learningFailed:
-            return presentation.statusText(strings)
+            return strings.voiceTutorLessonFailureHelp(presentation.lessonPhase) ?? presentation.statusText(strings)
         case .pausing:
             return strings.voiceTutorCallPausingHelp
         case .resuming:
@@ -2141,11 +2156,9 @@ struct VoiceTutorCallScreen: View {
         case .ended:
             return captions.isEmpty ? strings.voiceTutorCallEndedWithoutCaptions : strings.voiceTutorCallEndedHelp
         case .failed:
-            if presentation.primaryAction != .retry {
-                return presentation.supplementaryError(strings, errorMessage: errorMessage)
-                    ?? strings.voiceTutorCallInterruptedHelp
-            }
-            return hasTutorReply ? strings.voiceTutorCallInterruptedHelp : strings.voiceTutorCallNoReplyHelp
+            if let cause = presentation.failureCause { return strings.voiceTutorFailureMessage(cause) }
+            return presentation.supplementaryError(strings, errorMessage: errorMessage)
+                ?? (hasTutorReply ? strings.voiceTutorCallInterruptedHelp : strings.voiceTutorCallNoReplyHelp)
         }
     }
 
@@ -2234,12 +2247,14 @@ struct VoiceTutorCallScreen: View {
                             .padding(.vertical, 8)
                             .accessibilityIdentifier("voiceCall.pendingReply")
                     }
+                    lessonFailureNotice
                     if presentation.phase == .failed || presentation.phase == .ended {
                         VStack(alignment: .leading, spacing: 10) {
                             if presentation.phase == .failed {
                                 Text(callExplanation)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                                    .accessibilityIdentifier("voiceCall.failureExplanation")
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             supplementaryErrorNotice
@@ -2416,7 +2431,7 @@ struct VoiceTutorCallScreen: View {
 
     @ViewBuilder
     private var interactionDock: some View {
-        if presentation.primaryAction == .retry || presentation.primaryAction == .dismiss {
+        if [.retry, .dismiss, .openSettings].contains(presentation.primaryAction) {
             stableCallControls
                 .padding(.horizontal, 24)
                 .padding(.vertical, 16)
@@ -2427,7 +2442,7 @@ struct VoiceTutorCallScreen: View {
     @ViewBuilder
     private var stableCallControls: some View {
         switch presentation.primaryAction {
-        case .retry, .dismiss: terminalControls
+        case .retry, .dismiss, .openSettings: terminalControls
         case .end, .wait: EmptyView()
         }
     }
@@ -2450,6 +2465,15 @@ struct VoiceTutorCallScreen: View {
                     identifier: "voiceCall.done",
                     action: onDismiss
                 )
+            }
+        case .openSettings:
+            responsiveControlLayout {
+                primaryControl(title: strings.voiceTutorOpenMicrophoneSettings, symbol: "gearshape",
+                    tint: voiceAccent, identifier: "voiceCall.microphoneSettings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                }
+                neutralControl(title: strings.done, symbol: "checkmark",
+                    identifier: "voiceCall.done", action: onDismiss)
             }
         case .dismiss:
             primaryControl(
