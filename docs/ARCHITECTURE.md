@@ -502,6 +502,15 @@ of in-flight cleanup, and `.failed` retains its visible error/retry controls.
 
 ### Active realtime-native conversation path
 
+WebRTC negotiation distinguishes structured provider-credit exhaustion from the
+app user's voice allowance. HTTP 429 `insufficient_quota` or
+`credit_balance_exhausted` keeps the existing no-retry policy and is translated
+to safe HTTP 503 `VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED` after bounded diagnostics.
+Session finalization and provider cleanup run normally before returning the
+typed error. iOS displays service-restoration guidance with dismissal instead of
+immediate reconnect; generic transient failures retain retry. See
+[provider-credit failure verification](voice-provider-credit-failure-verification-2026-09-11.md).
+
 `realtime-native-v1` is the current iOS SDP/control capability. Its native sideband controller keeps OpenAI's realtime conversation as the conversational authority: that model interprets context, replies, chooses saved topics, and calls the native tool catalog. It does not run `VoiceTutorInputTurnCoordinator`, live meaningful-input/intent/consent classifiers, or separate question/feedback assessments. The legacy classifier/lease implementation described later in this section remains compatibility-only for `local-vad-v1`/PCM; it must not silently become a gate on a native reply.
 
 - Native silent completion settles the exact frozen client speech sequence whenever no audio or tool continuation remains. Nonempty text-only assistant output violates the requested audio modality and receives at most one response retry for the unchanged input/revision; empty/noise output stays silent. Exhaustion sends `buddystudy.voice.input.retry` with an additive nonnegative `sequence` and optional exact `abandonedResponseId`. Zero is opening-only. iOS accepts it only for that pending input or matching active response; unannounced failures can therefore clear preparation without abandoning a newer turn. Native late ASR does not clear the retry hint. A premature output-clear retry hint is no longer emitted before automatic recovery is exhausted. The server-only `buddystudy.voice.response.recovering` event carries an exact response ID and client speech sequence to preserve interrupted text, clear stale playback and restore only that turn's response wait; for older servers, iOS clears a hint only when the exact replacement response starts audio in the same acoustic epoch. Diagnostics include bounded response IDs/sequences and disposition, never transcript text. Legacy unscoped retry events remain compatible.

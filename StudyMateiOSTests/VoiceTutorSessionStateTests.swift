@@ -1185,6 +1185,46 @@ final class VoiceTutorLessonContentPresentationTests: XCTestCase {
 }
 
 @MainActor
+final class VoiceTutorProviderFailurePresentationTests: XCTestCase {
+    func testProviderCreditsFailureShowsServiceExplanationAndDismissWithoutReconnect() async throws {
+        let capture = ProcessInfo.processInfo.environment["BUDDYSTUDY_VOICE_UI_RENDER_SMOKE"] == "1"
+        #if !targetEnvironment(simulator)
+        guard capture else { throw XCTSkip("Opt in to native provider-error rendering on iPhone") }
+        #endif
+        let strings = AppStrings(language: .korean)
+        let error = VoiceTutorWebRTCError.sdpExchangeFailed(statusCode: 503,
+            backendFailure: .init(code: "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED", message: "private provider detail"))
+        let failure = VoiceTutorStartupFailurePolicy.presentation(for: error, strings: strings)
+        for appearance in [UIUserInterfaceStyle.light, .dark] {
+            let harness = try OperationTranscriptHarness(captions: [], appearance: appearance,
+                showsTranscript: false, useDeviceBounds: true, usePortraitViewport: true)
+            defer { harness.close() }
+            harness.probe.errorMessage = failure.message
+            harness.probe.presentation = VoiceTutorCallPresentation(phase: .failed, failureCause: failure.cause)
+            try await harness.settle()
+            #if targetEnvironment(simulator)
+            XCTAssertTrue(try XCTUnwrap(harness.orbElements.first).accessibilityValue?
+                .contains(strings.voiceTutorProviderQuotaUnavailableTitle) == true)
+            _ = try harness.logicalTextRow(strings.voiceTutorProviderQuotaUnavailableMessage)
+            XCTAssertNotNil(harness.button(label: strings.done))
+            XCTAssertNil(harness.button(label: strings.voiceTutorCallReconnect))
+            XCTAssertFalse(harness.semanticTextElements().contains { $0.accessibilityLabel?.contains("private provider detail") == true })
+            #endif
+            if capture {
+                harness.layout()
+                let image = UIGraphicsImageRenderer(bounds: harness.window.bounds).image { _ in
+                    XCTAssertTrue(harness.window.drawHierarchy(in: harness.window.bounds, afterScreenUpdates: true))
+                }
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "voice-provider-credits-failure-\(appearance == .light ? "light" : "dark")"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
+    }
+}
+
+@MainActor
 private final class OperationTranscriptProbe: ObservableObject {
     static let answerID = "66666666-6666-4666-a666-666666666666"
     @Published var captions: [VoiceTutorCaption]
@@ -1192,6 +1232,7 @@ private final class OperationTranscriptProbe: ObservableObject {
     @Published var userInputs: VoiceTutorUserInputState
     @Published var showsTranscript: Bool
     @Published var presentation = VoiceTutorCallPresentation(phase: .listening)
+    @Published var errorMessage: String?
     @Published var answerDraft = VoiceTutorAnswerDraftState()
     @Published var gradingResult = VoiceTutorGradingResultState()
     private(set) var controls: [VoiceTutorUserInputControl] = []
@@ -1247,7 +1288,8 @@ private struct OperationTranscriptTestParent: View {
             userInputState: probe.userInputs,
             onUserInputChange: { probe.userInputs.update(requestID: $0, answer: $1) },
             onUserInputSubmit: { probe.send(requestID: $0, cancel: $1) },
-            captions: probe.captions, showsTranscript: $probe.showsTranscript, showsSummary: .constant(false),
+            captions: probe.captions, errorMessage: probe.errorMessage,
+            showsTranscript: $probe.showsTranscript, showsSummary: .constant(false),
             answerDraftState: probe.answerDraft,
             answerDraftText: Binding(get: { probe.answerDraft.text }, set: { _ = probe.answerDraft.edit($0) }),
             canSubmitAnswer: probe.answerDraft.canSubmit,

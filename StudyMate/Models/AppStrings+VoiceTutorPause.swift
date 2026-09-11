@@ -2,6 +2,16 @@
 import Foundation
 
 extension AppStrings {
+    var voiceTutorProviderQuotaUnavailableTitle: String {
+        voiceTutorPauseText("AI 서비스 이용 불가", "AI service unavailable", "AIサービスを利用できません")
+    }
+    var voiceTutorProviderQuotaUnavailableMessage: String {
+        voiceTutorPauseText(
+            "AI 제공사의 사용 한도에 도달해 대화를 시작할 수 없어요. 서비스가 복구된 뒤 다시 시도해 주세요.",
+            "The service's AI provider has reached its usage limit. Please try again after service is restored.",
+            "AI提供元の利用上限に達したため、会話を開始できません。サービス復旧後にもう一度お試しください。"
+        )
+    }
     var voiceTutorUnsubmittedAnswer: String {
         voiceTutorPauseText("미제출 답변", "Unsubmitted answer", "未送信の回答")
     }

@@ -1,6 +1,8 @@
 package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
 import com.buddystudy.backend.voice.application.model.VoiceTutorInputAssessmentRequest
@@ -186,6 +188,81 @@ class OpenAIVoiceTutorWebRtcAdapterTest {
                 retryAfter = "3",
             ),
         )
+    }
+
+    @Test
+    fun `structured permanent quota becomes a safe service error after one diagnostic without retry`() = runBlocking<Unit> {
+        for (fields in listOf(
+            "\"type\":\"insufficient_quota\"",
+            "\"code\":\"credit_balance_exhausted\"",
+            "\"type\":\"rate_limit_error\",\"code\":\"credit_balance_exhausted\"",
+            "\"type\":\"INSUFFICIENT_QUOTA\",\"code\":\"rate_limit_exceeded\"",
+        )) {
+            val attempts = mutableListOf<Int>()
+            val sleeps = mutableListOf<Duration>()
+            val failures = mutableListOf<VoiceTutorWebRtcNegotiationFailure>()
+            val calls = mutableListOf<String>()
+            val failure = runCatching {
+                retryVoiceTutorWebRtcNegotiation(
+                    callIdObserved = { false }, sleeper = { sleeps += it }, onFailure = { failures += it },
+                ) { attempt ->
+                    attempts += attempt
+                    val response = ClientResponse.create(HttpStatus.TOO_MANY_REQUESTS)
+                        .header("x-request-id", "req_quota_fixture")
+                        .header(HttpHeaders.RETRY_AFTER, "3")
+                        .body("""{"error":{$fields,"message":"private provider account detail"}}""")
+                        .build()
+                    adapter.readNegotiationResponse(response) { calls += it }.awaitSingle()
+                }
+            }.exceptionOrNull()
+
+            assertThat(failure).describedAs(fields).isInstanceOf(ApiException::class.java)
+            val api = failure as ApiException
+            assertThat(api.code).isEqualTo(ApiErrorCode.VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED)
+            assertThat(api.status).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+            assertThat(api.message).doesNotContain("private provider account detail", "req_quota_fixture")
+            assertThat(api.code).isNotEqualTo(ApiErrorCode.VOICE_TUTOR_QUOTA_EXCEEDED)
+            assertThat(attempts).containsExactly(1)
+            assertThat(sleeps).isEmpty()
+            assertThat(calls).isEmpty()
+            assertThat(failures).hasSize(1)
+            assertThat(failures.single().retry).isFalse()
+            assertThat(failures.single().error).isInstanceOf(VoiceTutorWebRtcProviderException::class.java)
+            assertThat(failures.single().provider?.status).isEqualTo(429)
+            assertThat(failures.single().provider?.openAiRequestId).isEqualTo("req_quota_fixture")
+            assertThat(failures.single().provider?.retryAfter).isEqualTo("3")
+            assertThat(failures.single().provider.toString()).doesNotContain("private provider account detail")
+        }
+    }
+
+    @Test
+    fun `transient ambiguous malformed and other status errors never become provider quota exhausted`() = runBlocking<Unit> {
+        val cases = listOf(
+            Triple(HttpStatus.TOO_MANY_REQUESTS, """{"error":{"type":"rate_limit_error"}}""", 3),
+            Triple(HttpStatus.TOO_MANY_REQUESTS, """{"error":{"code":"rate_limit_exceeded"}}""", 3),
+            Triple(HttpStatus.TOO_MANY_REQUESTS, "", 1),
+            Triple(HttpStatus.TOO_MANY_REQUESTS, "<html>insufficient_quota credit_balance_exhausted</html>", 1),
+            Triple(HttpStatus.TOO_MANY_REQUESTS, """{"error":{"message":"insufficient_quota credit_balance_exhausted"}}""", 1),
+            Triple(HttpStatus.TOO_MANY_REQUESTS, """{"error":{"type":["insufficient_quota"],"code":true}}""", 1),
+            Triple(HttpStatus.TOO_MANY_REQUESTS, """{"type":"insufficient_quota"}""", 1),
+            Triple(HttpStatus.TOO_MANY_REQUESTS, """{"error":{"type":"insufficient_quota_extra"}}""", 1),
+            Triple(HttpStatus.BAD_REQUEST, """{"error":{"type":"insufficient_quota"}}""", 1),
+            Triple(HttpStatus.FORBIDDEN, """{"error":{"code":"credit_balance_exhausted"}}""", 1),
+            Triple(HttpStatus.SERVICE_UNAVAILABLE, """{"error":{"type":"insufficient_quota"}}""", 1),
+        )
+        for ((status, body, expectedAttempts) in cases) {
+            val attempts = mutableListOf<Int>()
+            val failure = runCatching {
+                retryVoiceTutorWebRtcNegotiation(callIdObserved = { false }, sleeper = {}) { attempt ->
+                    attempts += attempt
+                    adapter.readNegotiationResponse(ClientResponse.create(status).body(body).build()) {
+                        error("A rejected provider request cannot create a call.")
+                    }.awaitSingle()
+                }
+            }.exceptionOrNull()
+            assertThat(failure).describedAs("$status / $body").isInstanceOf(VoiceTutorWebRtcProviderException::class.java)
+            assertThat(attempts).hasSize(expectedAttempts)
+        }
     }
 
     @Test

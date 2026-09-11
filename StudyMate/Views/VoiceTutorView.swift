@@ -848,7 +848,7 @@ struct VoiceTutorCallPresentation {
         switch phase {
         case .failed:
             switch failureCause {
-            case .updateRequired, .requestRejected: return .dismiss
+            case .updateRequired, .requestRejected, .providerQuotaUnavailable: return .dismiss
             default: return .retry
             }
         case .ended: return .dismiss
@@ -927,6 +927,7 @@ struct VoiceTutorCallPresentation {
             switch failureCause {
             case .provider: return strings.voiceTutorProviderCallFailed
             case .providerUnavailable: return strings.voiceTutorCallUnavailable
+            case .providerQuotaUnavailable: return strings.voiceTutorProviderQuotaUnavailableTitle
             case .updateRequired: return strings.updateRequired
             case .requestRejected: return strings.voiceTutorCallUnavailable
             case .connection, .none: return strings.voiceTutorCallFailed

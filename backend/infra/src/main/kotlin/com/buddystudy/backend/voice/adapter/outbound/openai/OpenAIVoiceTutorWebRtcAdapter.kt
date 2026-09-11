@@ -1,6 +1,8 @@
 package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.config.VoiceTutorInputAssessmentProperties
 import com.buddystudy.backend.voice.VoiceTutorRealtimeContract
@@ -725,7 +727,15 @@ internal suspend fun <T> retryVoiceTutorWebRtcNegotiation(
                     error = error,
                 ),
             )
-            if (!retry) throw error
+            if (!retry) {
+                // Keep bounded provider diagnostics in the attempt log, then
+                // expose only the stable service-owned quota error to clients.
+                if (provider?.isPermanentQuotaFailure() == true) {
+                    val code = ApiErrorCode.VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED
+                    throw ApiException(code.status, code, code.debugDescription)
+                }
+                throw error
+            }
             sleeper(requireNotNull(retryDelay))
             attempt += 1
         }

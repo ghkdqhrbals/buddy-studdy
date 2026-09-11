@@ -127,6 +127,12 @@ enum class ApiErrorCode(
         "error.study.tree_changed",
         "The study subtree changed. Review its current nodes and confirm again before deleting.",
     ),
+    VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        516,
+        "error.voice_tutor.provider_quota_exhausted",
+        "The service's AI provider credits are exhausted, so Voice Tutor cannot start. Please contact support.",
+    ),
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),

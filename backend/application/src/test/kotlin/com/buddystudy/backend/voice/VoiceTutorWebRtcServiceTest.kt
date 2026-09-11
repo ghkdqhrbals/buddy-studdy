@@ -29,6 +29,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
 import java.lang.reflect.Proxy
 import java.time.Clock
 import java.time.Instant
@@ -155,6 +156,39 @@ class VoiceTutorWebRtcServiceTest {
             assertThat(request.model).isEqualTo(context.session.model)
             assertThat(request.voice).isEqualTo(context.session.voice)
             assertThat(calls.connect).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `provider quota API error survives session finalization and any observed call cleanup`() = runBlocking<Unit> {
+        for (callWasCreated in listOf(false, true)) {
+            val calls = Calls()
+            val cleanup = FakeCleanup(calls)
+            val code = ApiErrorCode.VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED
+            val providerQuota = ApiException(code.status, code, code.debugDescription)
+            val service = service(
+                calls = calls,
+                connectContext = VoiceTutorRelayContext(activeSession().copy(providerSessionId = null), "instructions"),
+                negotiatedAnswer = if (callWasCreated) VoiceTutorWebRtcAnswer("unused-answer", "rtc_quota-cleanup") else null,
+                negotiationFailure = providerQuota,
+                cleanup = cleanup,
+            )
+
+            val failure = runCatching { service.negotiate(principal, SESSION_ID, validSdp()) }.exceptionOrNull()
+
+            assertThat(failure).isSameAs(providerQuota)
+            assertThat(providerQuota.status).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+            assertThat(providerQuota.code).isEqualTo(ApiErrorCode.VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED)
+            assertThat(calls.connect).isEqualTo(1)
+            assertThat(calls.finish).isEqualTo(1)
+            if (callWasCreated) {
+                assertThat(calls.lifecycle).containsExactly("provider-negotiate", "marker-record", "provider-hangup")
+                assertThat(cleanup.completedCalls).containsExactly("rtc_quota-cleanup")
+            } else {
+                assertThat(calls.lifecycle).containsExactly("provider-negotiate")
+                assertThat(cleanup.recordAttempts).isZero()
+                assertThat(cleanup.completedCalls).isEmpty()
+            }
         }
     }
 
@@ -493,6 +527,7 @@ class VoiceTutorWebRtcServiceTest {
             ): VoiceTutorWebRtcAnswer {
                 calls.lifecycle += "provider-negotiate"
                 calls.negotiationRequest = request
+                if (negotiatedAnswer == null) negotiationFailure?.let { throw it }
                 val answer = negotiatedAnswer ?: error("Unexpected VoiceTutorWebRtcPort negotiation.")
                 onProviderCallCreated(answer.callId)
                 negotiationFailure?.let { throw it }

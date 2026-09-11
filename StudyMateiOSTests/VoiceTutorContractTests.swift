@@ -734,6 +734,52 @@ final class VoiceTutorContractTests: XCTestCase {
         )
     }
 
+    func testProviderCreditExhaustionKeepsItsOwnLocalizedFailureAndDoesNotOfferImmediateRetry() throws {
+        let rawMessage = "private provider billing detail"
+        let data = Data(#"{"error":{"errorCode":"VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED","code":516,"message":"private provider billing detail"}}"#.utf8)
+        let failure = try XCTUnwrap(VoiceTutorWebRTCBackendFailure.decode(from: data))
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            let mapped = VoiceTutorStartupFailurePolicy.presentation(
+                for: VoiceTutorWebRTCError.sdpExchangeFailed(statusCode: 503, backendFailure: failure),
+                strings: strings)
+            XCTAssertEqual(mapped.cause, .providerQuotaUnavailable)
+            XCTAssertEqual(mapped.message, strings.voiceTutorProviderQuotaUnavailableMessage)
+            XCTAssertFalse(mapped.message.contains(rawMessage))
+            let screen = VoiceTutorCallPresentation(phase: .failed, failureCause: mapped.cause)
+            XCTAssertEqual(screen.statusText(strings), strings.voiceTutorProviderQuotaUnavailableTitle)
+            XCTAssertEqual(screen.supplementaryError(strings, errorMessage: mapped.message), mapped.message)
+            XCTAssertEqual(screen.primaryAction, .dismiss)
+            XCTAssertFalse(screen.isMonthlyQuotaExhausted)
+            XCTAssertFalse(screen.showsConnectionFailure(strings, errorMessage: mapped.message))
+
+            // A generic 503, an unknown code, or message text cannot assert
+            // provider credit exhaustion or remove ordinary connection retry.
+            for other in [nil, VoiceTutorWebRTCBackendFailure(code: "UNRECOGNIZED", message: rawMessage),
+                          VoiceTutorWebRTCBackendFailure(code: nil, message: "credit_balance_exhausted")] {
+                let transient = VoiceTutorStartupFailurePolicy.presentation(
+                    for: VoiceTutorWebRTCError.sdpExchangeFailed(statusCode: 503, backendFailure: other), strings: strings)
+                XCTAssertEqual(transient.cause, .providerUnavailable)
+                XCTAssertEqual(VoiceTutorCallPresentation(phase: .failed, failureCause: transient.cause).primaryAction, .retry)
+            }
+        }
+    }
+
+    func testSDPDiagnosticsKeepSafeStatusAndKnownCodeWithoutProviderBodyOrUnknownIdentifiers() {
+        let known = VoiceTutorDiagnosticError.fields(for: VoiceTutorWebRTCError.sdpExchangeFailed(
+            statusCode: 503, backendFailure: .init(code: "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED",
+                message: "private provider body https://private.test/token")))
+        XCTAssertTrue(known.contains("httpStatus=503"))
+        XCTAssertTrue(known.contains("backendCode=VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED"))
+        XCTAssertFalse(known.contains("private"))
+        let unknown = VoiceTutorDiagnosticError.fields(for: VoiceTutorWebRTCError.sdpExchangeFailed(
+            statusCode: 700, backendFailure: .init(code: "PRIVATE_ACCOUNT_IDENTIFIER", message: "private")))
+        XCTAssertTrue(unknown.contains("httpStatus=0"))
+        XCTAssertTrue(unknown.contains("backendCode=unknown"))
+        XCTAssertFalse(unknown.contains("PRIVATE_ACCOUNT_IDENTIFIER"))
+        XCTAssertFalse(unknown.contains("private"))
+    }
+
     func testMediaReadinessWaitsForCombinedICEAndDTLSConnection() {
         XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .new, elapsedSeconds: 0), .waiting)
         XCTAssertEqual(VoiceTutorWebRTCTransport.mediaReadiness(state: .connecting, elapsedSeconds: 14.9), .waiting)

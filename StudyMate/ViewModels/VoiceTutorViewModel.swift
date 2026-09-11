@@ -46,6 +46,7 @@ enum VoiceTutorFailureCause: Equatable {
     case connection
     case provider
     case providerUnavailable
+    case providerQuotaUnavailable
     case updateRequired
     case requestRejected
     case microphone
@@ -109,6 +110,12 @@ enum VoiceTutorStartupFailurePolicy {
         guard let webRTCError = error as? VoiceTutorWebRTCError,
               case let .sdpExchangeFailed(statusCode, backendFailure) = webRTCError else {
             return nil
+        }
+        if backendFailure?.code?.uppercased() == "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED" {
+            return VoiceTutorStartupFailurePresentation(
+                cause: .providerQuotaUnavailable,
+                message: strings.voiceTutorProviderQuotaUnavailableMessage
+            )
         }
         if statusCode == 503
             || backendFailure?.code?.uppercased() == "VOICE_TUTOR_PROVIDER_UNAVAILABLE" {
@@ -188,8 +195,22 @@ enum VoiceTutorDiagnosticError {
             kind = String(describing: type(of: error))
         }
         // Never interpolate Error itself, userInfo, URLs, or descriptions.
-        return "errorKind=\(kind) errorDomain=\(domain) errorCode=\(value.code)"
+        var fields = "errorKind=\(kind) errorDomain=\(domain) errorCode=\(value.code)"
+        if let webRTCError = error as? VoiceTutorWebRTCError,
+           case let .sdpExchangeFailed(statusCode, backendFailure) = webRTCError {
+            let safeStatus = (100...599).contains(statusCode) ? statusCode : 0
+            let code = backendFailure?.code?.uppercased()
+            let safeCode = code.flatMap { knownBackendCodes.contains($0) ? $0 : nil } ?? "unknown"
+            fields += " httpStatus=\(safeStatus) backendCode=\(safeCode)"
+        }
+        return fields
     }
+
+    private static let knownBackendCodes: Set<String> = [
+        "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED", "VOICE_TUTOR_PROVIDER_UNAVAILABLE",
+        "VOICE_TUTOR_PRO_REQUIRED", "VOICE_TUTOR_QUOTA_EXCEEDED", "VOICE_TUTOR_SESSION_CONFLICT",
+        "VALIDATION_ERROR", "ACCOUNT_FORBIDDEN", "RESOURCE_NOT_FOUND"
+    ]
 }
 
 struct VoiceTutorSessionQuotaState: Equatable {
@@ -2149,6 +2170,9 @@ final class VoiceTutorViewModel: ObservableObject {
             case "VOICE_TUTOR_PROVIDER_UNAVAILABLE":
                 errorMessage = appState.strings.serviceTemporarilyUnavailable
                 failureCause = .provider
+            case "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED":
+                errorMessage = appState.strings.voiceTutorProviderQuotaUnavailableMessage
+                failureCause = .providerQuotaUnavailable
             default:
                 errorMessage = pauseState.holdsMicrophone
                     ? appState.strings.voiceTutorPauseFailed

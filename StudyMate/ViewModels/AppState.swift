@@ -8953,6 +8953,8 @@ final class AppState: ObservableObject {
                 return strings.voiceTutorQuotaReached
             case "VOICE_TUTOR_PROVIDER_UNAVAILABLE":
                 return strings.serviceTemporarilyUnavailable
+            case "VOICE_TUTOR_PROVIDER_QUOTA_EXHAUSTED":
+                return strings.voiceTutorProviderQuotaUnavailableMessage
             default:
                 break
             }
