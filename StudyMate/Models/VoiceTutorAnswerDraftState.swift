@@ -9,6 +9,7 @@ struct VoiceTutorAnswerStateEvent: Equatable, Sendable {
     let phase: VoiceTutorAnswerDraftState.Phase
     let text: String?
     let code: String?
+    var question: String? = nil
 }
 
 struct VoiceTutorAnswerTranscriptEvent: Equatable, Sendable {
@@ -39,12 +40,14 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
         case inactive, listening, finalizing, review, submitting, submitted, failed, cancelled
     }
     static let maximumTextLength = 8_000
+    static let maximumQuestionLength = 8_000
     private(set) var phase: Phase = .inactive
     private(set) var answerID: String?
     private(set) var recordID: String?
     private(set) var studyID: Int?
     private(set) var revision: Int64 = -1
     private(set) var text = ""
+    private(set) var questionText = ""
     private(set) var failureCode: String?
     private(set) var pendingControl: VoiceTutorAnswerControl.Kind?
     private(set) var awaitingCancellationChoices = false
@@ -69,16 +72,46 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
             && [.listening, .finalizing, .review, .failed].contains(phase)
     }
     var shouldPersistAutomatically: Bool { !hadExistingDraft || hasUserEdited }
+    var hasCanonicalQuestion: Bool { Self.isValidQuestion(questionText) }
+
+    static func isValidQuestion(_ value: String) -> Bool {
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && value.utf16.count <= maximumQuestionLength
+    }
+
+    func belongsToCurrentLesson(_ snapshot: VoiceTutorSessionStateEvent?) -> Bool {
+        guard hasCanonicalQuestion else { return false }
+        guard let snapshot else { return true }
+        guard snapshot.revision <= revision else { return false }
+        if snapshot.revision < revision { return true }
+        guard snapshot.studyID.map({ $0 == studyID }) ?? true,
+              snapshot.recordID.map({ $0 == recordID }) ?? true,
+              snapshot.answerID.map({ $0 == answerID }) ?? true else { return false }
+        return ![.conversation, .questionLoading, .questionGenerating, .questionFailed,
+                 .grading, .graded, .gradingFailed, .ending, .ended, .failed].contains(snapshot.phase)
+    }
 
     static func isValidSubmission(_ text: String) -> Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && text.utf16.count <= maximumTextLength
     }
 
     @discardableResult
-    mutating func apply(_ event: VoiceTutorAnswerStateEvent, existingDraft: String = "") -> Bool {
+    mutating func apply(_ event: VoiceTutorAnswerStateEvent, existingDraft: String = "", minimumRevision: Int64 = 0,
+                        currentLesson: VoiceTutorSessionStateEvent? = nil) -> Bool {
+        guard event.question.map(Self.isValidQuestion) ?? true else { return false }
         let wasCancelled = phase == .cancelled
         if answerID != event.answerID {
+            if let currentLesson {
+                guard event.revision >= currentLesson.revision else { return false }
+                if event.revision == currentLesson.revision {
+                    guard currentLesson.studyID.map({ $0 == event.studyID }) ?? true,
+                          currentLesson.recordID.map({ $0 == event.recordID }) ?? true,
+                          currentLesson.answerID.map({ $0 == event.answerID }) ?? true else { return false }
+                }
+            }
             guard event.phase == .listening, event.revision >= revision,
+                  event.revision >= minimumRevision,
+                  let question = event.question,
                   !retiredAnswerIDs.contains(event.answerID), !isActive else { return false }
             if let answerID { retiredAnswerIDs.insert(answerID) }
             guard retiredAnswerIDs.count <= 64 else { return false }
@@ -86,6 +119,7 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
             recordID = event.recordID
             studyID = event.studyID
             revision = event.revision
+            questionText = question
             text = existingDraft
             hadExistingDraft = !existingDraft.isEmpty
             hasUserEdited = false
@@ -98,6 +132,7 @@ struct VoiceTutorAnswerDraftState: Equatable, Sendable {
             awaitingCancellationChoices = false
         } else {
             guard recordID == event.recordID, studyID == event.studyID, revision == event.revision,
+                  event.question.map({ $0 == questionText }) ?? true,
                   !isCancelling || event.phase == .cancelled,
                   permits(event.phase) else { return false }
         }

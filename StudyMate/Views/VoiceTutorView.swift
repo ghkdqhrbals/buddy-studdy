@@ -603,6 +603,7 @@ struct VoiceTutorSessionView: View {
                 isAwaitingTutorResponse: viewModel.isAwaitingTutorResponse,
                 pauseState: viewModel.pauseState,
                 sessionState: viewModel.sessionState,
+                hasCanonicalAnswerQuestion: viewModel.answerDraftState.belongsToCurrentLesson(viewModel.sessionState.snapshot),
                 sessionSecondsRemaining: viewModel.sessionSecondsRemaining,
                 quotaRemainingSeconds: viewModel.quotaRemainingSeconds,
                 quotaReservedSeconds: viewModel.quotaReservedSeconds,
@@ -731,6 +732,7 @@ struct VoiceTutorCallPresentation {
     var isAwaitingTutorResponse = false
     var pauseState = VoiceTutorCallPauseState()
     var sessionState = VoiceTutorSessionState()
+    var hasCanonicalAnswerQuestion = false
     var sessionSecondsRemaining: Int?
     var quotaRemainingSeconds = 0
     var quotaReservedSeconds = 0
@@ -759,7 +761,7 @@ struct VoiceTutorCallPresentation {
                 return .thinking
             case .questionReady: return .questionReady
             case .questionReading: return showsQuestionReadRetry ? .listening : .speaking
-            case .answering: return .capturingAnswer
+            case .answering: return hasCanonicalAnswerQuestion ? .capturingAnswer : .questionReady
             case .answerReview: return .reviewingAnswer
             case .graded: return .graded
             case .questionFailed, .gradingFailed, .answerFailed: return .learningFailed
@@ -813,7 +815,11 @@ struct VoiceTutorCallPresentation {
     }
 
     func canFinishAnswer(_ draft: VoiceTutorAnswerDraftState, userInputState: VoiceTutorUserInputState) -> Bool {
-        canDisplayActiveAnswer && draft.phase == .listening && !userInputState.holdsMicrophone
+        canPresentAnswer(draft) && draft.phase == .listening && !userInputState.holdsMicrophone
+    }
+
+    func canPresentAnswer(_ draft: VoiceTutorAnswerDraftState) -> Bool {
+        canDisplayActiveAnswer && draft.belongsToCurrentLesson(sessionState.snapshot)
     }
 
     var lessonSymbolName: String? {
@@ -823,7 +829,7 @@ struct VoiceTutorCallPresentation {
         case .questionGenerating: return "sparkles"
         case .questionReady: return "book.closed"
         case .questionReading: return showsQuestionReadRetry ? nil : "speaker.wave.2.fill"
-        case .answering: return "mic.fill"
+        case .answering: return hasCanonicalAnswerQuestion ? "mic.fill" : "book.closed"
         case .answerFinalizing, .answerSubmitting, .grading: return "ellipsis"
         case .answerReview: return "text.cursor"
         case .graded: return "checkmark"
@@ -912,7 +918,7 @@ struct VoiceTutorCallPresentation {
             case .active: break
             }
             if isServerPaused { return strings.voiceTutorPaused }
-            if canDisplayActiveAnswer {
+            if canPresentAnswer(answerDraftState) {
                 switch answerDraftState.phase {
                 case .listening: return strings.voiceTutorAnswerListening
                 case .finalizing: return answerDraftState.isCancelling ? strings.voiceTutorLearningCancelling : strings.voiceTutorAnswerFinalizing
@@ -951,7 +957,7 @@ struct VoiceTutorCallPresentation {
         case .questionGenerating: return strings.voiceTutorQuestionGenerating
         case .questionReady: return strings.voiceTutorQuestionReady
         case .questionReading: return showsQuestionReadRetry ? strings.voiceTutorInputRepeat : strings.voiceTutorQuestionReading
-        case .answering: return strings.voiceTutorAnswerListening
+        case .answering: return hasCanonicalAnswerQuestion ? strings.voiceTutorAnswerListening : strings.voiceTutorQuestionReady
         case .answerFinalizing: return strings.voiceTutorAnswerFinalizing
         case .answerReview: return strings.voiceTutorAnswerReview
         case .answerSubmitting: return strings.voiceTutorAnswerSubmitting
@@ -1299,7 +1305,7 @@ struct VoiceTutorCallScreen: View {
         .onChange(of: answerDraftState.phase) { _, phase in
             cancelOrbInteraction()
             updateOrbAnimation()
-            if phase == .review {
+            if phase == .review || (phase == .listening && answerDraftState.hasCanonicalQuestion) {
                 setTranscriptExpanded(true)
             }
             if !answerDraftIsEditable { answerEditorSession = nil }
@@ -1383,6 +1389,7 @@ struct VoiceTutorCallScreen: View {
 
                 Spacer(minLength: 44)
                 VStack(spacing: 28) {
+                    if hasAnswerDraft { canonicalAnswerQuestion }
                     answerOrbPlaceholder(.call, diameter: compactOrbDiameter(in: geometry))
                     callNotices
                     if hasAnswerDraft {
@@ -1609,7 +1616,7 @@ struct VoiceTutorCallScreen: View {
                 }
             }
             .overlay {
-                if hasAnswerDraft, presentation.canDisplayActiveAnswer, orbInteraction.stage == .idle {
+                if hasAnswerDraft, presentation.canPresentAnswer(answerDraftState), orbInteraction.stage == .idle {
                     if answerDraftIsBusy {
                         ProgressView()
                             .tint(Color.black.opacity(0.75))
@@ -1778,7 +1785,7 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var answerCaptureIsListening: Bool {
-        presentation.canDisplayActiveAnswer && answerDraftState.phase == .listening
+        presentation.canPresentAnswer(answerDraftState) && answerDraftState.phase == .listening
     }
 
     private var answerDraftIsEditable: Bool {
@@ -1791,7 +1798,7 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var answerOrbLabel: String? {
-        guard presentation.canDisplayActiveAnswer else { return nil }
+        guard presentation.canPresentAnswer(answerDraftState) else { return nil }
         switch answerDraftState.phase {
         case .listening: return strings.voiceTutorAnswerFinish
         case .review, .failed: return strings.voiceTutorAnswerSubmit
@@ -1856,8 +1863,20 @@ struct VoiceTutorCallScreen: View {
         .accessibilityIdentifier("voiceCall.answerPreview")
     }
 
+    private var canonicalAnswerQuestion: some View {
+        Text(verbatim: answerDraftState.questionText)
+            .font(.body)
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+            .accessibilityIdentifier("voiceCall.answerQuestion")
+    }
+
     private var answerDraftCard: some View {
         VStack(alignment: .leading, spacing: 12) {
+            canonicalAnswerQuestion
             Button(action: openAnswerEditor) {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -1893,7 +1912,7 @@ struct VoiceTutorCallScreen: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if answerDraftState.phase == .listening {
+            if answerDraftState.phase == .listening && presentation.canPresentAnswer(answerDraftState) {
                 Button {
                     guard presentation.canFinishAnswer(answerDraftState, userInputState: userInputState),
                           !didRequestEnd else { return }
@@ -2087,6 +2106,7 @@ struct VoiceTutorCallScreen: View {
                             answerDraftCard
                             userInputCards(inputs.afterAnswerDraft)
                         }
+                        .id("voiceCall.answerQuestion")
                     }
                     if !assistantTranscriptDraft.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
@@ -2228,7 +2248,8 @@ struct VoiceTutorCallScreen: View {
 
     private func scheduleTranscriptAutoScroll(using proxy: ScrollViewProxy, animated: Bool = false) {
         // The mounted, hidden transcript follows too, so the first drag already
-        // reveals the latest turn instead of jumping there only after release.
+        // reveals the latest turn. A fresh answer first reveals its saved
+        // question, before the draft and Finish button, including at large type.
         guard answerEditorSession == nil, transcriptFollowState.shouldAutoScrollForContentChange else { return }
         transcriptScrollAnimates = transcriptScrollAnimates || (animated && showsTranscript)
         transcriptAutoScrollTask?.cancel()
@@ -2242,8 +2263,17 @@ struct VoiceTutorCallScreen: View {
             let animate = transcriptScrollAnimates && !reduceMotion
             transcriptScrollAnimates = false
             withAnimation(animate ? .easeOut(duration: 0.18) : nil) {
-                proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom)
+                scrollToTranscriptFocus(using: proxy)
             }
+        }
+    }
+
+    private func scrollToTranscriptFocus(using proxy: ScrollViewProxy) {
+        if hasAnswerDraft, answerDraftState.phase == .listening,
+           answerDraftState.recognizedText.isEmpty, !answerDraftState.hasUserEdited {
+            proxy.scrollTo("voiceCall.answerQuestion", anchor: .top)
+        } else {
+            proxy.scrollTo("voiceCall.latestCaption", anchor: .bottom)
         }
     }
 
@@ -2536,6 +2566,7 @@ struct VoiceTutorCallScreen: View {
         if hasAnswerDraft, presentation.pauseState.mode == .active {
             switch answerDraftState.phase {
             case .listening:
+                guard presentation.canFinishAnswer(answerDraftState, userInputState: userInputState) else { return }
                 answerEditorSession = nil
                 onFinishAnswer()
             case .review, .failed:

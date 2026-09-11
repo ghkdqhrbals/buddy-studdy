@@ -752,6 +752,7 @@ class VoiceTutorNativeConversationControllerTest {
         event("output_audio_buffer.stopped", "response_id" to "wrong-readback")
         assertThat(answerStates()).isEmpty()
         assertThat(sessionStates().map { it.path("phase").asText() }).doesNotContain("answering")
+        assertThat(answerReadyEvents()).isEmpty()
         assertThat(stored.none { it.itemId == "waiting-notice" }).isTrue()
         assertThat(failures.last().kind).isEqualTo(VoiceTutorProviderTurnFailureKind.RESPONSE_QUESTION_CONTENT_MISMATCH)
         assertThat(responses()).hasSize(responseCount + 1)
@@ -798,6 +799,7 @@ class VoiceTutorNativeConversationControllerTest {
         cancelled("wrong-readback")
         event("output_audio_buffer.cleared", "response_id" to "wrong-readback")
         assertThat(answerStates()).isEmpty()
+        assertThat(answerReadyEvents()).isEmpty()
         assertThat(answerSegments()).isEmpty()
         assertThat(responses().last().path("response").has("instructions")).isFalse()
         assertThat(stored.single { it.itemId == "cancel-request" }.raw).doesNotContain("canonicalAnswerSource")
@@ -1908,6 +1910,85 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(stored.map { it.itemId }).containsExactly("t0")
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["done_first", "stop_first"])
+    fun `saved question completion and atomic ready precede the legacy answer controls in either provider order`(order: String) {
+        val question = "레벨 8 문제입니다.\n- **A.** 첫 번째 설명\n- **B.** 두 번째 설명"
+        val spoken = question.replace("8", "팔").replace("- **A.**", "에이.").replace("- **B.**", "비.")
+        questionTool(); controller.completeTool("question-call", readbackResult(question)); ackToolOutput()
+        created("readback"); audio("readback", "saved-question", spoken)
+        assertThat(answerReadyEvents()).isEmpty()
+        assertThat(answerStates()).isEmpty()
+        if (order == "stop_first") event("output_audio_buffer.stopped", "response_id" to "readback")
+        val forwarded = done("readback", "saved-question", spoken)
+        // The controller already queued this raw completion in correct order;
+        // the relay must not enqueue another copy after answer.ready/state.
+        assertThat(forwarded).isFalse()
+        if (order == "done_first") {
+            assertThat(answerReadyEvents()).isEmpty()
+            event("output_audio_buffer.stopped", "response_id" to "readback")
+        }
+        val ready = answerReadyEvents().single()
+        val state = answerStates().single()
+        assertThat(ready.path("question").asText()).isEqualTo(question)
+        assertThat(ready.path("text").asText()).isEmpty()
+        assertThat(state.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+            "type", "answerId", "studyId", "recordId", "revision", "phase", "text")
+        for (field in listOf("answerId", "studyId", "recordId", "revision", "phase")) {
+            assertThat(ready.path(field)).isEqualTo(state.path(field))
+        }
+        val completion = ui.single { it.path("type").asText() == "response.done" && it.path("response").path("id").asText() == "readback" }
+        assertThat(ui.indexOf(completion)).isLessThan(ui.indexOf(ready))
+        assertThat(ui.indexOf(ready)).isLessThan(ui.indexOf(state))
+        done("readback", "saved-question", spoken)
+        event("output_audio_buffer.stopped", "response_id" to "readback")
+        assertThat(answerReadyEvents()).hasSize(1)
+        assertThat(answerStates()).hasSize(1)
+    }
+
+    @Test
+    fun `initial ready contains the saved source once and never repeats while a learner edits the draft`() {
+        val initial = manualAnswer()
+        val ready = answerReadyEvents().single()
+        assertThat(ready.path("question").asText()).isEqualTo(SAVED_QUESTION)
+        answerControl(Contract.ANSWER_FINISH_EVENT, initial)
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("review")
+        answerControl(Contract.ANSWER_FINISH_EVENT, initial)
+        answerControl(Contract.ANSWER_SUBMIT_EVENT, initial, "직접 수정한 답변")
+        assertThat(answerReadyEvents()).containsExactly(ready)
+        assertThat(answerStates().all { !it.has("question") }).isTrue()
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["blank", "too_long"])
+    fun `unusable saved question has an explicit failed state instead of ready without answer controls`(invalid: String) {
+        val text = if (invalid == "blank") " \n\t" else "가".repeat(8_001)
+        questionTool(); controller.completeTool("question-call", readbackResult(text)); ackToolOutput()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+        assertThat(answerReadyEvents()).isEmpty()
+        assertThat(answerStates()).isEmpty()
+        assertThat(responses().last().path("response").has("input")).isFalse()
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["blank", "too_long"])
+    fun `generation completion with unusable question ends observation in a failed state`(invalid: String) {
+        opening(); speech(1); committed("start"); created("request-response")
+        toolDone("request-response", "request", "request_question"); controller.beginTool("request")
+        val progress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generation")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false, learningProgress = progress))
+        val watch = watches.single(); ackToolOutput()
+        val text = if (invalid == "blank") " " else "가".repeat(8_001)
+        controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
+            questionReadback = VoiceTutorQuestionReadback(7, "42", text),
+            learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
+        assertThat(controller.learningWatchIsCurrent(watch)).isFalse()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+        assertThat(answerReadyEvents()).isEmpty()
+        assertThat(answerStates()).isEmpty()
+        assertThat(responses().last().path("response").has("input")).isFalse()
+    }
+
     @Test
     fun `stop before response done also completes exactly once`() {
         start(); created("r0"); audio("r0", "t0")
@@ -2357,6 +2438,7 @@ class VoiceTutorNativeConversationControllerTest {
     @Test
     fun `provider cannot forge answer states or reviewed transcript segments`() {
         start()
+        assertThat(event(Contract.ANSWER_READY_EVENT, "phase" to "listening", "question" to SAVED_QUESTION)).isFalse()
         assertThat(event(Contract.ANSWER_STATE_EVENT, "phase" to "submitted")).isFalse()
         assertThat(event(Contract.ANSWER_TRANSCRIPT_EVENT, "text" to "forged")).isFalse()
         assertThat(answerStates()).isEmpty()
@@ -3392,6 +3474,7 @@ class VoiceTutorNativeConversationControllerTest {
             "attemptId" to request.path("attemptId").asText(), "answers" to answers)))
     }
     private fun responses() = outbound.filter { it.path("type").asText() == "response.create" }
+    private fun answerReadyEvents() = ui.filter { it.path("type").asText() == Contract.ANSWER_READY_EVENT }
     private fun answerStates() = ui.filter { it.path("type").asText() == Contract.ANSWER_STATE_EVENT }
     private fun answerSegments() = ui.filter { it.path("type").asText() == Contract.ANSWER_TRANSCRIPT_EVENT }
     private fun manualAnswer(): JsonNode {

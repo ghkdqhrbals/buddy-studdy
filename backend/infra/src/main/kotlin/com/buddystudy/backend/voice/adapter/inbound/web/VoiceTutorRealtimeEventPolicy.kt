@@ -280,7 +280,8 @@ internal class VoiceTutorRealtimeEventPolicy(
                 if (hasAnswer) payload["answerId"] = answer.asText()
                 ProviderEventDecision(mapper.writeValueAsString(payload))
             }
-            VoiceTutorRealtimeContract.ANSWER_STATE_EVENT, VoiceTutorRealtimeContract.ANSWER_TRANSCRIPT_EVENT -> {
+            VoiceTutorRealtimeContract.ANSWER_READY_EVENT, VoiceTutorRealtimeContract.ANSWER_STATE_EVENT,
+            VoiceTutorRealtimeContract.ANSWER_TRANSCRIPT_EVENT -> {
                 if (transport != VoiceTutorProviderTransport.WEBRTC_SIDEBAND ||
                     !validAnswerId(node.path("answerId")) || !validRecordId(node.path("recordId")) ||
                     !validProviderText(node, "text", 8_000)) return ProviderEventDecision(payload = null)
@@ -299,6 +300,12 @@ internal class VoiceTutorRealtimeEventPolicy(
                     if (!studyId.isIntegralNumber || !studyId.canConvertToLong() || studyId.longValue() <= 0 ||
                         !revision.isIntegralNumber || !revision.canConvertToLong() || revision.longValue() < 0 ||
                         phase !in ANSWER_PHASES) return ProviderEventDecision(payload = null)
+                    if (type == VoiceTutorRealtimeContract.ANSWER_READY_EVENT) {
+                        if (phase != "listening" || node.path("text").asText().isNotEmpty() ||
+                            !validProviderText(node, "question", 8_000) ||
+                            node.path("question").asText().isBlank()) return ProviderEventDecision(payload = null)
+                        payload["question"] = node.path("question").asText()
+                    }
                     payload["studyId"] = studyId.longValue(); payload["revision"] = revision.longValue(); payload["phase"] = phase
                     node.path("code").asText().takeIf { it in ANSWER_CODES }?.let { payload["code"] = it }
                 }

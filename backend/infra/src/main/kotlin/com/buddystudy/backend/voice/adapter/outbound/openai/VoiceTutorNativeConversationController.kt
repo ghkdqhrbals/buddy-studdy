@@ -168,7 +168,7 @@ internal class VoiceTutorNativeConversationController(
             // Only our completed response state can settle or abandon the app's pending input.
             Contract.INPUT_SETTLED_EVENT, Contract.INPUT_RETRY_EVENT, Contract.RESPONSE_INTERRUPTED_EVENT, Contract.RESPONSE_RECOVERING_EVENT -> return false
             Contract.QUESTION_CHANGED_EVENT, Contract.SESSION_STATE_EVENT -> return false
-            Contract.ANSWER_STATE_EVENT, Contract.ANSWER_TRANSCRIPT_EVENT -> return false
+            Contract.ANSWER_READY_EVENT, Contract.ANSWER_STATE_EVENT, Contract.ANSWER_TRANSCRIPT_EVENT -> return false
             Contract.OPERATION_EVENT, Contract.OPERATION_CONTEXT_EVENT -> return false
             Contract.USER_INPUT_REQUEST_EVENT, Contract.USER_INPUT_STATE_EVENT -> return false
             Metadata.STRUCTURED_USER_INPUT_EVENT -> return false
@@ -353,8 +353,14 @@ internal class VoiceTutorNativeConversationController(
                 if (!response.failed && !response.superseded) armAnswerCapture(response)
                 if (response.expectsAudio && !response.superseded) announceResponse(response)
                 if (response.superseded && response.expectsAudio) clearInterruptedOutput(response)
+                // When provider stop precedes done, finishing below can publish
+                // answer controls immediately. Commit the validated question to
+                // the ordered client stream before those controls become visible.
+                val forwardQuestionCompletion = response.questionReadback != null && !response.failed &&
+                    !response.superseded && !response.archiveFrozen && response.expectsAudio
+                if (forwardQuestionCompletion) publish(client, raw)
                 finishResponseIfReady()
-                if (!response.expectsAudio || response.superseded || response.archiveFrozen) return false
+                if (forwardQuestionCompletion || !response.expectsAudio || response.superseded || response.archiveFrozen) return false
             }
             "response.output_audio.delta", "response.output_audio.done" -> {
                 val response = matchingResponse(node) ?: return false
@@ -953,13 +959,18 @@ internal class VoiceTutorNativeConversationController(
             }
             if (!studyFollowupSuperseded && currentRevision && call != null && (result.lessonRevision ?: call.revision) == revision &&
                 !closed && !draining && !quotaRequested && !endingAfterResponse) {
-                result.learningProgress?.let { applyLearningProgress(it, call.operationContext, allowConversation = stateIsCurrent, requestedBoundary = call.boundary) }
+                result.learningProgress?.let {
+                    val progress = if (questionReadback != null && !readableQuestionContent(questionReadback) &&
+                        it.phase == VoiceTutorLearningPhase.QUESTION_READY) it.copy(phase = VoiceTutorLearningPhase.QUESTION_FAILED) else it
+                    applyLearningProgress(progress, call.operationContext, allowConversation = stateIsCurrent, requestedBoundary = call.boundary)
+                }
                 questionReadback?.takeIf { answerCapture == null && it.studyId > 0 &&
                     (sessionState.current.studyId == null || sessionState.current.studyId == it.studyId) &&
                     (sessionState.current.recordId == null || sessionState.current.recordId == it.recordId)
                 }?.let {
                     cancelLearningWatch()
-                    sessionState.update("question_ready", revision, it.studyId, it.recordId, answerId = null)
+                    sessionState.update(if (readableQuestionContent(it)) "question_ready" else "question_failed",
+                        revision, it.studyId, it.recordId, answerId = null)
                 }
             }
             voiceTutorLessonFocusEvent(result)?.let { publish(client, it) }
@@ -1413,8 +1424,16 @@ internal class VoiceTutorNativeConversationController(
         }
     }
 
+    private fun readableQuestionContent(question: VoiceTutorQuestionReadback): Boolean =
+        question.question.isNotBlank() && question.question.length <= 8_000
+
     private fun armAnswerCapture(response: Response) {
         val readback = response.questionReadback ?: return
+        if (!readableQuestionContent(readback.value)) {
+            response.unexpectedReadbackContent = true
+            response.failed = true
+            return
+        }
         if (answerCapture != null || response.failed || response.superseded || response.archiveFrozen || draining || quotaRequested || endingAfterResponse ||
             readback.revision != revision || !response.audioStarted || !questionReadbackMatches(response)) return
         val floor = response.tutors.values.minOfOrNull { it.sequence } ?: sequence
@@ -1603,6 +1622,14 @@ internal class VoiceTutorNativeConversationController(
             "studyId" to capture.question.studyId, "recordId" to capture.question.recordId,
             "revision" to capture.revision, "phase" to capture.phase, "text" to capture.text)
         code?.let { event["code"] = it }
+        // Additive readiness preserves the exact legacy state shape. New apps
+        // can atomically install the immutable saved question before showing the
+        // answer action; old apps ignore this event and still accept state.
+        if (capture.phase == "listening" && !capture.readyPublished) {
+            capture.readyPublished = true
+            publish(client, json(event + mapOf("type" to Contract.ANSWER_READY_EVENT,
+                "question" to capture.question.question, "text" to "")))
+        }
         publish(client, json(event))
         val phase = when (capture.phase) {
             "listening" -> "answering"
@@ -1827,7 +1854,13 @@ internal class VoiceTutorNativeConversationController(
             publish(client, json(mapOf("type" to Contract.QUESTION_CHANGED_EVENT, "studyId" to it.studyId, "recordId" to it.recordId)))
         }
         val canContinue = learningContinuationIsCurrent(watch)
-        val readback = (result.questionReadback ?: result.questionReadbackRecovery)?.takeIf {
+        val candidate = result.questionReadback ?: result.questionReadbackRecovery
+        val invalidQuestionContent = candidate?.let {
+            progress.phase == VoiceTutorLearningPhase.QUESTION_READY && it.studyId == progress.studyId &&
+                it.recordId == progress.recordId && !readableQuestionContent(it)
+        } == true
+        val effectiveProgress = if (invalidQuestionContent) progress.copy(phase = VoiceTutorLearningPhase.QUESTION_FAILED) else progress
+        val readback = candidate?.takeIf {
             progress.phase == VoiceTutorLearningPhase.QUESTION_READY && it.studyId == progress.studyId &&
                 it.recordId == progress.recordId && it.recordId.matches(Regex("[1-9][0-9]{0,18}")) &&
                 it.recordId.toLongOrNull() != null && it.question.isNotBlank() && it.question.length <= 8_000
@@ -1835,12 +1868,12 @@ internal class VoiceTutorNativeConversationController(
         // A semantic cancellation fences delivery. Mere speech keeps the saved
         // question queued until its ordinary turn and any GUI input have settled.
         if (readback != null && !canContinue) failedQuestionReadback = QuestionReadback(readback, revision, questionReadbackEpoch, watch.boundary.latestAcceptedLearnerSpeechStartedOrder)
-        applyLearningProgress(progress, watch.operationContext)
+        applyLearningProgress(effectiveProgress, watch.operationContext)
         if (canContinue && readback != null) {
             pendingQuestionReadback = QuestionReadback(readback, revision, questionReadbackEpoch, watch.boundary.latestAcceptedLearnerSpeechStartedOrder)
             queuedInput = true
             scheduleResponse()
-        } else if (canContinue && learningNoticeIsCurrent(watch) && progress.phase in setOf(VoiceTutorLearningPhase.QUESTION_FAILED, VoiceTutorLearningPhase.GRADING_FAILED)) {
+        } else if (canContinue && learningNoticeIsCurrent(watch) && effectiveProgress.phase in setOf(VoiceTutorLearningPhase.QUESTION_FAILED, VoiceTutorLearningPhase.GRADING_FAILED)) {
             queueLearningNotice(failed = true)
         }
     }
@@ -1951,6 +1984,7 @@ internal class VoiceTutorNativeConversationController(
         val responseToken: String, val sequenceFloor: Long) {
         var phase = "listening"
         var questionDrained = false
+        var readyPublished = false
         var tutorItemId: String? = null
         var finalizingAt = 0L
         var skip = false

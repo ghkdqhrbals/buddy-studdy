@@ -190,7 +190,7 @@ final class VoiceTutorPauseTests: XCTestCase {
         let recordID = "101"
         var draft = VoiceTutorAnswerDraftState()
         XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: recordID,
-            revision: 7, phase: .listening, text: nil, code: nil), existingDraft: "직접 작성한 첫 문장"))
+            revision: 7, phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요."), existingDraft: "직접 작성한 첫 문장"))
         var pauseState = supportedState()
         var detector = VoiceTutorLocalSpeechDetector()
         let controls = VoiceTutorCallControlEventStream()
@@ -261,13 +261,14 @@ final class VoiceTutorPauseTests: XCTestCase {
         let answerID = "11111111-2222-3333-4444-555555555555"
         var draft = VoiceTutorAnswerDraftState()
         XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101",
-            revision: 7, phase: .listening, text: nil, code: nil), existingDraft: "생각 중인 답변\n두 번째 문장"))
+            revision: 7, phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요."), existingDraft: "생각 중인 답변\n두 번째 문장"))
         let originalDraft = draft
         var pause = supportedState()
         var session = VoiceTutorSessionState()
         XCTAssertTrue(session.apply(.init(sequence: 1, phase: .answering, paused: false,
             revision: 7, studyID: 42, recordID: "101", answerID: answerID)))
-        var presentation = VoiceTutorCallPresentation(phase: .listening, pauseState: pause, sessionState: session)
+        var presentation = VoiceTutorCallPresentation(phase: .listening, pauseState: pause, sessionState: session,
+            hasCanonicalAnswerQuestion: draft.belongsToCurrentLesson(session.snapshot))
         XCTAssertTrue(presentation.canDisplayActiveAnswer)
         XCTAssertEqual(presentation.orbState, .capturingAnswer)
 
@@ -472,7 +473,11 @@ final class VoiceTutorAnswerPausePresentationTests: XCTestCase {
             let pauseButtons = harness.buttons(label: strings.voiceTutorTakeBreak)
             XCTAssertEqual(pauseButtons.count, 1, "Compact and transcript placeholders must share one interactive pause button")
             let pauseButton = try XCTUnwrap(pauseButtons.first)
-            let finish = try XCTUnwrap(harness.buttons(label: strings.voiceTutorAnswerFinish).first)
+            // The expanded question card also has a Finish button. The pause
+            // companion belongs to the header circle, which is the first one
+            // on screen, not whichever AX node traversal happens to return.
+            let finish = try XCTUnwrap(harness.buttons(label: strings.voiceTutorAnswerFinish)
+                .min { $0.accessibilityFrame.minY < $1.accessibilityFrame.minY })
             XCTAssertGreaterThan(pauseButton.accessibilityFrame.height, 0)
             XCTAssertGreaterThanOrEqual(pauseButton.accessibilityFrame.minY, finish.accessibilityFrame.maxY - 1,
                 "The companion belongs below the Answer Finish circle")
@@ -521,7 +526,8 @@ final class VoiceTutorAnswerPausePresentationTests: XCTestCase {
             XCTAssertEqual(harness.probe.draft.phase, .listening)
             XCTAssertEqual(harness.probe.finishCount, 0)
             XCTAssertEqual(harness.buttons(label: strings.voiceTutorTakeBreak).count, 1)
-            XCTAssertEqual(harness.buttons(label: strings.voiceTutorAnswerFinish).count, 1)
+            XCTAssertEqual(harness.buttons(label: strings.voiceTutorAnswerFinish).count, fixture.transcript ? 2 : 1,
+                "The expanded card and header circle both retain their explicit Finish action")
             attach(harness, name: "answer-pause-\(fixture.name)-resumed-actions")
         }
     }
@@ -592,7 +598,7 @@ private final class AnswerPauseProbe: ObservableObject {
         pause.isSupported = true
         let answerID = "11111111-2222-3333-4444-555555555555"
         _ = draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 7,
-            phase: .listening, text: nil, code: nil), existingDraft: Self.originalText)
+            phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요."), existingDraft: Self.originalText)
         _ = session.apply(.init(sequence: 1, phase: .answering, paused: false,
             revision: 7, studyID: 42, recordID: "101", answerID: answerID))
     }
@@ -620,7 +626,9 @@ private struct AnswerPauseTestParent: View {
     var body: some View {
         VoiceTutorCallScreen(topic: "스프링",
             presentation: VoiceTutorCallPresentation(phase: .listening, pauseState: probe.pause,
-                sessionState: probe.session, sessionSecondsRemaining: 3_000),
+                sessionState: probe.session,
+                hasCanonicalAnswerQuestion: probe.draft.belongsToCurrentLesson(probe.session.snapshot),
+                sessionSecondsRemaining: 3_000),
             strings: AppStrings(language: .korean), errorMessage: nil,
             showsTranscript: $probe.showsTranscript, showsSummary: $probe.showsSummary,
             onPause: { probe.requestPauseOrResume() }, answerDraftState: probe.draft,

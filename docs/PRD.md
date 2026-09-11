@@ -147,6 +147,14 @@ to cancel learning or change direction stops this automatic continuation while
 preserving the call, saved focus, accepted generation jobs, questions and drafts.
 It must not require repeating either the start request or the cancellation.
 
+The answer controls must not appear before the saved question itself is
+available in the conversation. A server question-ready receipt carries the
+canonical question and its exact answer, record, study and revision identities.
+The app opens a new answer draft only from that receipt and displays the
+question with the answer controls. Generation progress, an answering-phase
+update, or a bare answer-start signal cannot open Finish answer. Existing drafts
+remain intact; delayed or cancelled receipts cannot restart an old exercise.
+
 #### Current conversation contract — `realtime-native-v1`
 
 Speaker output must not become learner input. The iOS transport explicitly

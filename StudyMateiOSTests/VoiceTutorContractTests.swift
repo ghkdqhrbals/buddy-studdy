@@ -2811,7 +2811,7 @@ final class VoiceTutorContractTests: XCTestCase {
             ]
             for (phase, label, symbol) in cases {
                 let presentation = VoiceTutorCallPresentation(
-                    phase: .listening, sessionState: makeLessonPresentationState(phase)
+                    phase: .listening, sessionState: makeLessonPresentationState(phase), hasCanonicalAnswerQuestion: true
                 )
                 XCTAssertEqual(presentation.statusText(strings), label, "\(language) / \(phase)")
                 XCTAssertEqual(presentation.lessonSymbolName, symbol, "\(phase)")
@@ -2869,7 +2869,7 @@ final class VoiceTutorContractTests: XCTestCase {
         var draft = VoiceTutorAnswerDraftState()
         let answerID = "d2a27b1e-8924-4c5f-a668-0405b4f50d00"
         XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
-                                        phase: .listening, text: nil, code: nil), existingDraft: "B, because"))
+                                        phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요."), existingDraft: "B, because"))
         var presentation = VoiceTutorCallPresentation(
             phase: .listening, sessionState: makeLessonPresentationState(.questionReading)
         )
@@ -2979,7 +2979,7 @@ final class VoiceTutorContractTests: XCTestCase {
         var draft = VoiceTutorAnswerDraftState()
         let answerID = "d2a27b1e-8924-4c5f-a668-0405b4f50d00"
         XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
-            phase: .listening, text: nil, code: nil), existingDraft: "지켜야 하는 답변 초안"))
+            phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요."), existingDraft: "지켜야 하는 답변 초안"))
         let presentation = VoiceTutorCallPresentation(phase: .listening, inputNeedsRepeat: true,
             sessionState: makeLessonPresentationState(.questionReading))
         XCTAssertEqual(presentation.statusText(strings, answerDraftState: draft), strings.voiceTutorAnswerListening)
@@ -3005,7 +3005,7 @@ final class VoiceTutorContractTests: XCTestCase {
                        "A question-reading snapshot alone cannot invent an answer ID or Finish action")
         let answerID = "d2a27b1e-8924-4c5f-a668-0405b4f50d00"
         XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
-            phase: .listening, text: nil, code: nil), existingDraft: "직접 작성한 답변"))
+            phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요."), existingDraft: "직접 작성한 답변"))
         XCTAssertTrue(presentation.canFinishAnswer(draft, userInputState: noInput))
         let finish = try XCTUnwrap(draft.requestFinish())
         XCTAssertEqual(finish.kind, .finish)
@@ -3031,7 +3031,7 @@ final class VoiceTutorContractTests: XCTestCase {
     func testAnswerCardFinishPreservesPauseAndStructuredInputAcknowledgementHolds() throws {
         var draft = VoiceTutorAnswerDraftState()
         XCTAssertTrue(draft.apply(.init(answerID: "d2a27b1e-8924-4c5f-a668-0405b4f50d00", studyID: 42,
-            recordID: "101", revision: 1, phase: .listening, text: nil, code: nil)))
+            recordID: "101", revision: 1, phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요.")))
         var presentation = VoiceTutorCallPresentation(phase: .listening,
             sessionState: makeLessonPresentationState(.questionReading))
         var userInput = VoiceTutorUserInputState()
@@ -4117,7 +4117,7 @@ final class VoiceTutorContractTests: XCTestCase {
         var draft = VoiceTutorAnswerDraftState()
         let answerID = "11111111-2222-3333-4444-555555555555"
         XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
-                                        phase: .listening, text: nil, code: nil)))
+                                        phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요.")))
         XCTAssertTrue(draft.append(.init(answerID: answerID, recordID: "101", itemID: "spoken_part", sequence: 1,
                                         text: "말로만 남긴 답변\n생각 중인 내용")))
         XCTAssertFalse(draft.hasUserEdited, "This is the previously unsaved speech-only teardown path")
@@ -4154,7 +4154,7 @@ final class VoiceTutorContractTests: XCTestCase {
         let oldID = "11111111-2222-3333-4444-555555555555"
         let newID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         XCTAssertTrue(draft.apply(.init(answerID: oldID, studyID: 42, recordID: "101", revision: 1,
-                                        phase: .listening, text: nil, code: nil), existingDraft: "저장돼 있던 초안"))
+                                        phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요."), existingDraft: "저장돼 있던 초안"))
         XCTAssertTrue(draft.append(.init(answerID: oldID, recordID: "101", itemID: "old_part", sequence: 1, text: "음성 원문")))
         XCTAssertTrue(draft.edit("사용자가 최종 수정한 답변"))
         let snapshot = try XCTUnwrap(VoiceTutorUnsubmittedAnswerSnapshot(draft))
@@ -4168,7 +4168,7 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(retained.answerID, oldID)
         XCTAssertTrue(retained.containsProviderItemID("old_part"))
         XCTAssertTrue(draft.apply(.init(answerID: newID, studyID: 42, recordID: "102", revision: 2,
-                                        phase: .listening, text: nil, code: nil)))
+                                        phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요.")))
         XCTAssertTrue(draft.edit("다음 질문의 별도 초안"))
         XCTAssertFalse(draft.apply(.init(answerID: oldID, studyID: 42, recordID: "101", revision: 1,
                                          phase: .cancelled, text: nil, code: nil)))
@@ -4191,7 +4191,7 @@ final class VoiceTutorContractTests: XCTestCase {
         let answerID = "11111111-2222-3333-4444-555555555555"
         XCTAssertNil(VoiceTutorUnsubmittedAnswerSnapshot(draft))
         XCTAssertTrue(draft.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
-                                        phase: .listening, text: nil, code: nil)))
+                                        phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요.")))
         XCTAssertNil(VoiceTutorUnsubmittedAnswerSnapshot(draft), "An empty capture must not create a blank chat row")
         XCTAssertTrue(draft.edit("제출 결과를 아직 확인하지 못한 답변"))
         XCTAssertNotNil(draft.requestFinish())
@@ -4569,7 +4569,7 @@ final class VoiceTutorContractTests: XCTestCase {
         func makeState(_ phase: VoiceTutorAnswerDraftState.Phase, text: String) -> VoiceTutorAnswerDraftState {
             var state = VoiceTutorAnswerDraftState()
             state.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,
-                              phase: .listening, text: nil, code: nil), existingDraft: text)
+                              phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요."), existingDraft: text)
             if phase != .listening {
                 _ = state.requestFinish()
                 state.apply(.init(answerID: answerID, studyID: 42, recordID: "101", revision: 1,

@@ -555,7 +555,7 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
         var draft = VoiceTutorAnswerDraftState()
         let answerID = UUID().uuidString
         XCTAssertTrue(draft.apply(VoiceTutorAnswerStateEvent(answerID: answerID, studyID: 99, recordID: "901",
-            revision: 1, phase: .listening, text: nil, code: nil), existingDraft: existing))
+            revision: 1, phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요."), existingDraft: existing))
         XCTAssertTrue(draft.append(VoiceTutorAnswerTranscriptEvent(answerID: answerID, recordID: "901", itemID: "voice-part",
             sequence: 1, text: "새롭게 인식된 문장")))
         XCTAssertFalse(draft.shouldPersistAutomatically)

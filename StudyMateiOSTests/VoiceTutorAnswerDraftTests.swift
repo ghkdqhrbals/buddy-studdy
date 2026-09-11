@@ -8,9 +8,11 @@ import XCTest
 /// Protocol and draft state only: no microphone, provider, account or device IO.
 final class VoiceTutorAnswerDraftTests: XCTestCase {
     private let answerID = "11111111-2222-3333-4444-555555555555"
+    private let savedQuestion = "Redis의 TTL을 설명하고 예시를 2개 드세요."
 
     func testAnswerStateRequiresExactOwnedQuestionIdentityAndKnownPhase() throws {
-        XCTAssertEqual(try parse(fields()), .answerState(event(.listening)))
+        var legacy = event(.listening); legacy.question = nil
+        XCTAssertEqual(try parse(fields()), .answerState(legacy))
         for key in ["answerId", "studyId", "recordId", "revision", "phase"] {
             var invalid = fields(); invalid.removeValue(forKey: key)
             XCTAssertEqual(try parse(invalid), .ignored(type: "buddystudy.voice.answer.state"), key)
@@ -26,6 +28,113 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
         XCTAssertEqual(try parse(oversized), .ignored(type: "buddystudy.voice.answer.state"))
         var extra = fields(); extra["answer"] = "unexpected"
         XCTAssertEqual(try parse(extra), .ignored(type: "buddystudy.voice.answer.state"))
+    }
+
+    func testReadyRequiresCanonicalQuestionEmptyAnswerAndListeningPhaseWithinUTF16Bound() throws {
+        XCTAssertEqual(try parse(readyFields()), .answerState(event(.listening, text: "")))
+        for key in ["question", "text", "answerId", "recordId", "revision"] {
+            var invalid = readyFields(); invalid.removeValue(forKey: key)
+            XCTAssertEqual(try parse(invalid), .ignored(type: "buddystudy.voice.answer.ready"), key)
+        }
+        for value in [NSNull(), 1, "", " \n\t", String(repeating: "가", count: 8_001),
+                      String(repeating: "😀", count: 4_001)] as [Any] {
+            var invalid = readyFields(); invalid["question"] = value
+            XCTAssertEqual(try parse(invalid), .ignored(type: "buddystudy.voice.answer.ready"))
+        }
+        for (key, value) in [("text", "invented answer"), ("phase", "review")] {
+            var invalid = readyFields(); invalid[key] = value
+            XCTAssertEqual(try parse(invalid), .ignored(type: "buddystudy.voice.answer.ready"))
+        }
+        var boundary = readyFields(); boundary["question"] = String(repeating: "😀", count: 4_000)
+        guard case .answerState(let parsed) = try parse(boundary) else { return XCTFail("8,000 UTF-16 units must be accepted") }
+        XCTAssertEqual(parsed.question?.utf16.count, 8_000)
+        var legacyWithExtra = fields(); legacyWithExtra["question"] = savedQuestion
+        XCTAssertEqual(try parse(legacyWithExtra), .ignored(type: "buddystudy.voice.answer.state"), "The legacy event keeps its exact original shape")
+    }
+
+    func testLegacyListeningBeforeReadyCannotShowFinishButLaterReadyRecoversWithoutAnotherTurn() throws {
+        var state = VoiceTutorAnswerDraftState()
+        guard case .answerState(let legacy) = try parse(fields()),
+              case .answerState(let ready) = try parse(readyFields()) else { return XCTFail("Expected typed answer events") }
+        for phase in [VoiceTutorSessionStateEvent.Phase.questionLoading, .questionGenerating, .answering] {
+            var session = VoiceTutorSessionState()
+            XCTAssertTrue(session.apply(.init(sequence: 1, phase: phase, paused: false, revision: 1,
+                studyID: 42, recordID: "101", answerID: answerID)))
+            let presentation = VoiceTutorCallPresentation(phase: .listening, sessionState: session)
+            XCTAssertFalse(state.apply(legacy, existingDraft: "보존할 초안"))
+            XCTAssertFalse(presentation.canFinishAnswer(state, userInputState: .init()))
+            XCTAssertNotEqual(presentation.orbState, .capturingAnswer)
+            XCTAssertNotEqual(presentation.lessonSymbolName, "mic.fill")
+            if phase == .answering {
+                XCTAssertEqual(presentation.orbState, .questionReady)
+                XCTAssertEqual(presentation.statusText(AppStrings(language: .korean)),
+                    AppStrings(language: .korean).voiceTutorQuestionReady)
+            }
+            XCTAssertEqual(state.phase, .inactive)
+            XCTAssertEqual(state.questionText, "")
+        }
+        XCTAssertTrue(state.apply(ready, existingDraft: "보존할 초안"))
+        XCTAssertEqual(state.questionText, savedQuestion)
+        XCTAssertEqual(state.text, "보존할 초안")
+        XCTAssertTrue(state.apply(legacy))
+        XCTAssertTrue(VoiceTutorCallPresentation(phase: .listening).canFinishAnswer(state, userInputState: .init()))
+        var answering = VoiceTutorSessionState()
+        XCTAssertTrue(answering.apply(.init(sequence: 2, phase: .answering, paused: false, revision: 1,
+            studyID: 42, recordID: "101", answerID: answerID)))
+        let readyPresentation = VoiceTutorCallPresentation(phase: .listening, sessionState: answering,
+            hasCanonicalAnswerQuestion: state.belongsToCurrentLesson(answering.snapshot))
+        XCTAssertEqual(readyPresentation.orbState, .capturingAnswer)
+        XCTAssertEqual(readyPresentation.lessonSymbolName, "mic.fill")
+        XCTAssertTrue(readyPresentation.canFinishAnswer(state, userInputState: .init()))
+        XCTAssertTrue(state.apply(event(.cancelled)))
+        XCTAssertFalse(state.apply(ready), "A delayed ready must not reopen a cancelled answer")
+        XCTAssertEqual(state.text, "보존할 초안")
+        XCTAssertEqual(state.questionText, savedQuestion)
+    }
+
+    func testQuestionIsImmutableAndStaleReadyCannotReplaceAnEditedDraft() {
+        var state = listening(existing: "기존 초안")
+        XCTAssertTrue(state.edit("직접 수정한 초안"))
+        var changed = event(.listening); changed.question = "다른 문제"
+        let original = state
+        XCTAssertFalse(state.apply(changed))
+        XCTAssertEqual(state, original)
+        for question in ["", " \n", String(repeating: "가", count: 8_001)] {
+            var invalid = event(.listening); invalid.question = question
+            XCTAssertFalse(state.apply(invalid))
+            XCTAssertEqual(state, original)
+        }
+        var empty = VoiceTutorAnswerDraftState()
+        XCTAssertFalse(empty.apply(event(.listening), minimumRevision: 2))
+        XCTAssertEqual(empty.phase, .inactive)
+        let newer = VoiceTutorSessionStateEvent(sequence: 3, phase: .questionGenerating, paused: false,
+            revision: 2, studyID: 42)
+        XCTAssertFalse(state.belongsToCurrentLesson(newer))
+        XCTAssertTrue(state.apply(event(.cancelled), minimumRevision: 2), "An exact old cancellation receipt still closes its preserved draft")
+        XCTAssertEqual(state.text, "직접 수정한 초안")
+    }
+
+    func testSameRevisionForeignReadyDoesNotOccupyTheCurrentAnswerSlot() {
+        let ready = event(.listening)
+        for snapshot in [
+            VoiceTutorSessionStateEvent(sequence: 2, phase: .questionReading, paused: false,
+                revision: 1, studyID: 99, recordID: "101", answerID: answerID),
+            VoiceTutorSessionStateEvent(sequence: 2, phase: .questionReading, paused: false,
+                revision: 1, studyID: 42, recordID: "102", answerID: answerID),
+            VoiceTutorSessionStateEvent(sequence: 2, phase: .questionReading, paused: false,
+                revision: 1, studyID: 42, recordID: "101", answerID: "22222222-2222-3333-4444-555555555555")
+        ] {
+            var state = VoiceTutorAnswerDraftState()
+            let original = state
+            XCTAssertFalse(state.apply(ready, existingDraft: "절대 덮어쓰지 않을 초안", currentLesson: snapshot))
+            XCTAssertEqual(state, original)
+            let current = VoiceTutorAnswerStateEvent(answerID: snapshot.answerID!, studyID: snapshot.studyID!,
+                recordID: snapshot.recordID!, revision: 1, phase: .listening, text: "", code: nil,
+                question: savedQuestion)
+            XCTAssertTrue(state.apply(current, existingDraft: "해당 문제의 초안", currentLesson: snapshot))
+            XCTAssertEqual(state.text, "해당 문제의 초안")
+            XCTAssertEqual(state.questionText, savedQuestion)
+        }
     }
 
     func testFinalAnswerPartsRequireAnItemIdentityAndPositiveIntegerSequence() throws {
@@ -163,7 +272,7 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
         XCTAssertFalse(state.apply(VoiceTutorAnswerStateEvent(answerID: answerID, studyID: 42, recordID: "102",
             revision: 1, phase: .review, text: "다른 문제", code: nil)))
         XCTAssertFalse(state.apply(VoiceTutorAnswerStateEvent(answerID: UUID().uuidString, studyID: 42, recordID: "102",
-            revision: 2, phase: .listening, text: nil, code: nil)))
+            revision: 2, phase: .listening, text: nil, code: nil, question: "합성 저장 질문을 설명하세요.")))
         state.endLocally()
         XCTAssertFalse(state.apply(event(.listening)))
         XCTAssertEqual(state.text, "현재 초안")
@@ -269,13 +378,21 @@ final class VoiceTutorAnswerDraftTests: XCTestCase {
         return state
     }
     private func event(_ phase: VoiceTutorAnswerDraftState.Phase, text: String? = nil, code: String? = nil) -> VoiceTutorAnswerStateEvent {
-        VoiceTutorAnswerStateEvent(answerID: answerID, studyID: 42, recordID: "101", revision: 1, phase: phase, text: text, code: code)
+        VoiceTutorAnswerStateEvent(answerID: answerID, studyID: 42, recordID: "101", revision: 1, phase: phase,
+            text: text, code: code, question: phase == .listening ? savedQuestion : nil)
     }
     private func segment(_ sequence: Int64, _ text: String) -> VoiceTutorAnswerTranscriptEvent {
         VoiceTutorAnswerTranscriptEvent(answerID: answerID, recordID: "101", itemID: "item-\(sequence)", sequence: sequence, text: text)
     }
     private func fields() -> [String: Any] {
         ["type": "buddystudy.voice.answer.state", "answerId": answerID, "studyId": 42, "recordId": "101", "revision": 1, "phase": "listening"]
+    }
+    private func readyFields() -> [String: Any] {
+        var ready = fields()
+        ready["type"] = "buddystudy.voice.answer.ready"
+        ready["question"] = savedQuestion
+        ready["text"] = ""
+        return ready
     }
     private func parse(_ value: [String: Any]) throws -> VoiceTutorRealtimeEvent {
         try VoiceTutorRealtimeEventParser.parse(data: JSONSerialization.data(withJSONObject: value))
@@ -429,6 +546,57 @@ final class VoiceTutorAnswerEditorTests: XCTestCase {
 /// Hosts the production call surface without a microphone, account, or network.
 @MainActor
 final class VoiceTutorLearningCancelPresentationTests: XCTestCase {
+    func testCanonicalReadyDisplaysQuestionBeforeFinishWithoutWaitingForTutorCaption() async throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Native SwiftUI accessibility-node traversal is verified on simulator")
+        #endif
+        for dynamicType in [DynamicTypeSize.large, .accessibility3] {
+            let harness = try VoiceTutorLearningCancelHarness(transcript: false, paused: false,
+                ready: false, dynamicType: dynamicType)
+            defer { harness.close() }
+            try await harness.settle()
+            let finishLabel = AppStrings(language: .korean).voiceTutorAnswerFinish
+            XCTAssertTrue(harness.elements { $0.accessibilityLabel == finishLabel }.isEmpty)
+            XCTAssertFalse(harness.probe.receiveListening(), "The legacy state cannot invent an unseen question")
+            try await harness.settle()
+            XCTAssertTrue(harness.elements { $0.accessibilityLabel == finishLabel }.isEmpty)
+
+            XCTAssertTrue(harness.probe.receiveReady())
+            XCTAssertTrue(harness.probe.receiveListening())
+            try await harness.settle()
+            XCTAssertTrue(harness.probe.showsTranscript, "A new canonical answer opens the question automatically")
+            for expanded in [true, false] {
+                harness.probe.showsTranscript = expanded
+                try await harness.settle()
+                // SwiftUI's private selectable-text nodes need not conform to
+                // UIAccessibilityIdentification. Check the rendered source and
+                // its position, rather than casting the node to that protocol.
+                let questions = harness.elements {
+                    $0.accessibilityLabel?.contains(VoiceTutorLearningCancelProbe.question) == true
+                }
+                let screenFrame = harness.window.convert(harness.window.bounds, to: nil)
+                let visibleQuestions = questions.filter {
+                    let frame = $0.accessibilityFrame
+                    return !frame.isEmpty && frame.minY >= screenFrame.minY
+                        && frame.maxY <= screenFrame.maxY && frame.intersects(screenFrame)
+                }
+                let finish = harness.elements { $0.accessibilityLabel == finishLabel }
+                if visibleQuestions.isEmpty || finish.isEmpty {
+                    let diagnostic = XCTAttachment(string: harness.accessibilityDiagnostic())
+                    diagnostic.name = "canonical-question-\(dynamicType)-expanded-\(expanded)"
+                    diagnostic.lifetime = .keepAlways
+                    add(diagnostic)
+                }
+                XCTAssertFalse(visibleQuestions.isEmpty, "The full saved question must be visible before scrolling to Finish, even without a tutor caption")
+                XCTAssertFalse(finish.isEmpty)
+                XCTAssertTrue(visibleQuestions.contains { question in
+                    finish.contains { question.accessibilityFrame.maxY <= $0.accessibilityFrame.minY + 1 }
+                }, "The saved question precedes the answer action")
+                XCTAssertEqual(harness.probe.draft.text, VoiceTutorLearningCancelProbe.originalText)
+            }
+        }
+    }
+
     func testLearningCancelNativeActionPreservesDraftWhilePendingInActiveAndPausedCalls() async throws {
         #if !targetEnvironment(simulator)
         throw XCTSkip("Native SwiftUI accessibility-node activation is verified on simulator; physical call rendering is covered separately")
@@ -476,6 +644,7 @@ final class VoiceTutorLearningCancelPresentationTests: XCTestCase {
 
 @MainActor
 private final class VoiceTutorLearningCancelProbe: ObservableObject {
+    static let question = "Redis의 TTL을 설명하고 예시를 2개 드세요."
     static let answerID = "11111111-2222-3333-4444-555555555555"
     static let originalText = "  작성 중인 답변입니다.\n다른 학습을 해도 이 초안은 보존합니다.  "
     @Published var draft = VoiceTutorAnswerDraftState()
@@ -487,16 +656,28 @@ private final class VoiceTutorLearningCancelProbe: ObservableObject {
     private(set) var otherActionCount = 0
     private(set) var commands: [VoiceTutorAnswerControl] = []
 
-    init(transcript: Bool, paused: Bool) {
+    let dynamicType: DynamicTypeSize
+
+    init(transcript: Bool, paused: Bool, ready: Bool = true, dynamicType: DynamicTypeSize = .large) {
         showsTranscript = transcript
+        self.dynamicType = dynamicType
         pause.isSupported = true
         if paused, let command = pause.requestPause() {
             _ = pause.acknowledge(sequence: command.sequence, paused: true)
         }
-        _ = draft.apply(.init(answerID: Self.answerID, studyID: 42, recordID: "101", revision: 7,
-            phase: .listening, text: nil, code: nil), existingDraft: Self.originalText)
+        if ready { _ = receiveReady() }
         _ = session.apply(.init(sequence: 1, phase: .answering, paused: paused,
             revision: 7, studyID: 42, recordID: "101", answerID: Self.answerID))
+    }
+
+    func receiveReady() -> Bool {
+        draft.apply(.init(answerID: Self.answerID, studyID: 42, recordID: "101", revision: 7,
+            phase: .listening, text: "", code: nil, question: Self.question), existingDraft: Self.originalText)
+    }
+
+    func receiveListening() -> Bool {
+        draft.apply(.init(answerID: Self.answerID, studyID: 42, recordID: "101", revision: 7,
+            phase: .listening, text: nil, code: nil), existingDraft: Self.originalText)
     }
 
     func cancelLearning() {
@@ -518,7 +699,8 @@ private struct VoiceTutorLearningCancelTestParent: View {
     var body: some View {
         VoiceTutorCallScreen(topic: "스프링",
             presentation: VoiceTutorCallPresentation(phase: .listening, pauseState: probe.pause,
-                sessionState: probe.session, sessionSecondsRemaining: 3_000),
+                sessionState: probe.session, hasCanonicalAnswerQuestion: probe.draft.belongsToCurrentLesson(probe.session.snapshot),
+                sessionSecondsRemaining: 3_000),
             strings: AppStrings(language: .korean), errorMessage: nil,
             showsTranscript: $probe.showsTranscript, showsSummary: $probe.showsSummary,
             onPause: { probe.otherAction() }, onEnd: { probe.otherAction() },
@@ -529,7 +711,7 @@ private struct VoiceTutorLearningCancelTestParent: View {
             canSkipAnswer: !probe.pause.holdsMicrophone && probe.draft.canSkip,
             onSkipAnswer: { probe.otherAction() }, canCancelLearning: probe.draft.canCancel,
             onCancelLearning: { probe.cancelLearning() })
-            .dynamicTypeSize(.large)
+            .dynamicTypeSize(probe.dynamicType)
             .environment(\.locale, Locale(identifier: "ko_KR"))
             .environment(\.scenePhase, .active)
     }
@@ -541,11 +723,11 @@ private final class VoiceTutorLearningCancelHarness {
     let window: UIWindow
     private let previousKeyWindow: UIWindow?
 
-    init(transcript: Bool, paused: Bool) throws {
+    init(transcript: Bool, paused: Bool, ready: Bool = true, dynamicType: DynamicTypeSize = .large) throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try XCTUnwrap(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
         previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
-        probe = VoiceTutorLearningCancelProbe(transcript: transcript, paused: paused)
+        probe = VoiceTutorLearningCancelProbe(transcript: transcript, paused: paused, ready: ready, dynamicType: dynamicType)
         window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         window.overrideUserInterfaceStyle = .dark
@@ -562,12 +744,24 @@ private final class VoiceTutorLearningCancelHarness {
     }
 
     func cancelButtons() -> [NSObject] {
+        let label = AppStrings(language: .korean).voiceTutorLearningCancel
+        return elements { $0.accessibilityLabel == label && $0.accessibilityTraits.contains(.button) }
+    }
+
+    func accessibilityDiagnostic() -> String {
+        // Only this synthetic, account-free fixture is traversed; keep a bounded
+        // dump for distinguishing virtualized text from an offscreen source.
+        elements { $0.accessibilityLabel?.isEmpty == false }.prefix(80).map {
+            "\(type(of: $0)) frame=\($0.accessibilityFrame) label=\(($0.accessibilityLabel ?? "").prefix(240))"
+        }.joined(separator: "\n")
+    }
+
+    func elements(matching predicate: (NSObject) -> Bool) -> [NSObject] {
         var visited = Set<ObjectIdentifier>()
         var result: [NSObject] = []
-        let label = AppStrings(language: .korean).voiceTutorLearningCancel
         func visit(_ object: NSObject) {
             guard visited.insert(ObjectIdentifier(object)).inserted else { return }
-            if object.accessibilityLabel == label && object.accessibilityTraits.contains(.button) { result.append(object) }
+            if predicate(object) { result.append(object) }
             if #available(iOS 17.0, *) {
                 for child in (object.automationElements ?? []).compactMap({ $0 as? NSObject }) { visit(child) }
             }

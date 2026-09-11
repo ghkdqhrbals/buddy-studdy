@@ -30,6 +30,7 @@ internal object VoiceTutorRealtimeContract {
     const val USER_INPUT_CANCEL_EVENT = "buddystudy.voice.user_input.cancel"
     const val USER_INPUT_PROTOCOL_HEADER = "X-Voice-User-Input-Protocol"
     const val USER_INPUT_PROTOCOL = "user-input-v1"
+    const val ANSWER_READY_EVENT = "buddystudy.voice.answer.ready"
     const val ANSWER_STATE_EVENT = "buddystudy.voice.answer.state"
     const val SESSION_STATE_EVENT = "buddystudy.voice.session.state"
     val ANSWER_SESSION_PHASES = setOf("answering", "answer_finalizing", "answer_review", "answer_submitting", "answer_failed")

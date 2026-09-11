@@ -191,6 +191,52 @@ class VoiceTutorRealtimeEventPolicyTest {
     }
 
     @Test
+    fun `answer readiness delivers the exact question without changing the legacy state shape`() {
+        val question = "결제가 승인됐지만 재고 갱신이 실패했다면?\n- A. 무시한다.\n- B. 보상한다."
+        val fields = mapOf("type" to VoiceTutorRealtimeContract.ANSWER_READY_EVENT,
+            "answerId" to "00112233-4455-6677-8899-aabbccddeeff", "recordId" to "42", "studyId" to 7,
+            "revision" to 0, "phase" to "listening", "text" to "", "question" to question,
+            "private" to "discard")
+        val raw = mapper.writeValueAsString(fields)
+        val payload = mapper.readTree(policy.providerDecision(raw, "s1", Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
+        assertThat(payload.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+            "type", "answerId", "recordId", "studyId", "revision", "phase", "text", "question")
+        assertThat(payload.path("question").asText()).isEqualTo(question)
+        val legacy = mapper.readTree(policy.providerDecision(mapper.writeValueAsString(fields +
+            ("type" to VoiceTutorRealtimeContract.ANSWER_STATE_EVENT)), "s1", Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload)
+        assertThat(legacy.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+            "type", "answerId", "recordId", "studyId", "revision", "phase", "text")
+        assertThat(policy.providerDecision(raw, "s1", Instant.EPOCH).payload).isNull()
+        assertThatThrownBy { policy.shouldForwardClientEvent(raw) }
+            .isInstanceOf(VoiceTutorClientProtocolException::class.java)
+    }
+
+    @Test
+    fun `answer readiness rejects missing blank oversized or nontext questions and noninitial phases`() {
+        val fields = mapOf("type" to VoiceTutorRealtimeContract.ANSWER_READY_EVENT,
+            "answerId" to "00112233-4455-6677-8899-aabbccddeeff", "recordId" to "42", "studyId" to 7,
+            "revision" to 0, "phase" to "listening", "text" to "", "question" to "저장된 질문")
+        val invalid = listOf(fields - "question") + listOf(null, "", " \n\t", 42, "가".repeat(8_001),
+            "😀".repeat(4_001)).map { fields + ("question" to it) } +
+            listOf("review", "cancelled", "submitted").map { fields + ("phase" to it) } +
+            listOf(fields + ("text" to "이전 답변"))
+        for (value in invalid) {
+            assertThat(policy.providerDecision(mapper.writeValueAsString(value), "s1", Instant.EPOCH,
+                VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).isNull()
+        }
+        val maximum = mapper.writeValueAsString(fields + ("question" to "가".repeat(8_000)))
+        assertThat(mapper.readTree(policy.providerDecision(maximum, "s1", Instant.EPOCH,
+            VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload).path("question").asText()).hasSize(8_000)
+        val escapedQuestion = "\u0001".repeat(8_000)
+        val escaped = policy.providerDecision(mapper.writeValueAsString(fields + ("question" to escapedQuestion)),
+            "s1", Instant.EPOCH, VoiceTutorProviderTransport.WEBRTC_SIDEBAND).payload!!
+        assertThat(mapper.readTree(escaped).path("question").asText()).isEqualTo(escapedQuestion)
+        assertThat(escaped.toByteArray(Charsets.UTF_8).size).isLessThan(65_536)
+    }
+
+    @Test
     fun `answer cancellation receipt survives public filtering and private capture provenance does not leak`() {
         for (code in listOf("ANSWER_CANCELLED", "ANSWER_CANCEL_UNAVAILABLE")) {
             val raw = mapper.writeValueAsString(mapOf("type" to VoiceTutorRealtimeContract.ANSWER_STATE_EVENT,

@@ -859,7 +859,9 @@ final class VoiceTutorViewModel: ObservableObject {
         return captions.filter { !hidden.contains($0.id) }
     }
     private var canControlAnswer: Bool {
-        usesWebRTC && phase.isLive && !isFinalizing && !pauseState.holdsMicrophone && !userInputState.holdsMicrophone && activeConnection?.isCurrent() == true
+        usesWebRTC && phase.isLive && !isFinalizing && !pauseState.holdsMicrophone && !userInputState.holdsMicrophone
+            && activeConnection?.isCurrent() == true && answerDraftState.belongsToCurrentLesson(sessionState.snapshot)
+            && answerDraftState.revision >= studyFocus.revision
     }
 
     @Published private(set) var studyFocus = VoiceTutorStudyFocusState()
@@ -2003,7 +2005,9 @@ final class VoiceTutorViewModel: ObservableObject {
             let existing = isNewAnswer
                 ? appState.voiceTutorAnswerDraft(for: change, validity: { connection.isCurrent() }) ?? ""
                 : ""
-            guard answerDraftState.apply(event, existingDraft: existing) else { break }
+            guard answerDraftState.apply(event, existingDraft: existing,
+                minimumRevision: max(studyFocus.revision, sessionState.snapshot?.revision ?? 0),
+                currentLesson: sessionState.snapshot) else { break }
             knownAnswerRecordIDs[event.answerID] = event.recordID
             inputNeedsRepeat = false
             if [.review, .failed].contains(answerDraftState.phase) {

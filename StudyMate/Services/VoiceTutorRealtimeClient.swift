@@ -242,21 +242,27 @@ enum VoiceTutorRealtimeEventParser {
                 studyID: exactInteger("studyId", in: object).flatMap({ Int(exactly: $0) }),
                 recordID: string("recordId", in: object), answerID: string("answerId", in: object))
             return event.isValid ? .sessionState(event) : .ignored(type: type)
-        case "buddystudy.voice.answer.state":
-            let required: Set<String> = ["type", "answerId", "studyId", "recordId", "revision", "phase"]
-            guard required.isSubset(of: Set(object.keys)), Set(object.keys).isSubset(of: required.union(["text", "code"])),
+        case "buddystudy.voice.answer.state", "buddystudy.voice.answer.ready":
+            let isReady = type == "buddystudy.voice.answer.ready"
+            let required: Set<String> = Set(["type", "answerId", "studyId", "recordId", "revision", "phase"])
+                .union(isReady ? ["question", "text"] : [])
+            let allowed = required.union(["text", "code"])
+            guard required.isSubset(of: Set(object.keys)), Set(object.keys).isSubset(of: allowed),
                   let answerID = answerIdentifier(in: object),
                   let studyID = exactInteger("studyId", in: object).flatMap({ Int(exactly: $0) }),
                   let recordID = string("recordId", in: object), VoiceTutorQuestionChange(studyID: studyID, recordID: recordID) != nil,
                   let revision = exactInteger("revision", in: object), revision >= 0,
                   let rawPhase = string("phase", in: object), let phase = VoiceTutorAnswerDraftState.Phase(rawValue: rawPhase), phase != .inactive,
+                  !isReady || (phase == .listening && string("text", in: object) == ""
+                    && string("question", in: object).map(VoiceTutorAnswerDraftState.isValidQuestion) == true),
                   object["text"] == nil || (object["text"] as? String).map({ $0.utf16.count <= VoiceTutorAnswerDraftState.maximumTextLength }) == true,
                   object["code"] == nil || (object["code"] as? String).map({
                       ["ANSWER_TRANSCRIPT_INCOMPLETE", "ANSWER_SUBMISSION_FAILED", "ANSWER_TOO_LONG",
                        "ANSWER_CANCELLED", "ANSWER_CANCEL_UNAVAILABLE"].contains($0)
                   }) == true else { return .ignored(type: type) }
             return .answerState(VoiceTutorAnswerStateEvent(answerID: answerID, studyID: studyID, recordID: recordID,
-                revision: revision, phase: phase, text: string("text", in: object), code: string("code", in: object)))
+                revision: revision, phase: phase, text: string("text", in: object), code: string("code", in: object),
+                question: isReady ? string("question", in: object) : nil))
         case "buddystudy.voice.answer.transcript":
             guard Set(object.keys) == ["type", "answerId", "recordId", "itemId", "sequence", "text"],
                   let answerID = answerIdentifier(in: object), let recordID = string("recordId", in: object),
