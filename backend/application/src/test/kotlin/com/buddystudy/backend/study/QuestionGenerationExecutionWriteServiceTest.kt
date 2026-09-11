@@ -38,6 +38,57 @@ import org.mockito.Mockito
 import java.time.Instant
 
 class QuestionGenerationExecutionWriteServiceTest {
+    @Test
+    fun `completion retry after an observed commit reuses saved question without another quota or outbox write`() = runBlocking<Unit> {
+        val now = Instant.parse("2026-09-12T00:00:00Z")
+        for (status in listOf(QuestionGenerationStatus.TRANSLATING, QuestionGenerationStatus.COMPLETED)) {
+            val storedSaga = saga(now).copy(status = status, questionId = 42)
+            val saved = QuestionEntity(id = 42, userId = storedSaga.userId, studyId = storedSaga.topicId)
+            val sagas = Mockito.mock(QuestionGenerationSagaPort::class.java)
+            val questions = Mockito.mock(QuestionPort::class.java)
+            val memberships = Mockito.mock(QuestionMembershipPort::class.java)
+            val outbox = Mockito.mock(RedisEventOutboxAppendPort::class.java)
+            Mockito.`when`(sagas.findByCorrelationId(storedSaga.correlationId)).thenReturn(storedSaga)
+            Mockito.`when`(questions.findQuestionById(42)).thenReturn(saved)
+            val result = writer(sagas, Mockito.mock(StreamInboxPort::class.java), memberships, outbox, questions)
+                .complete(event(storedSaga, now), PreparedQuestionGeneration(
+                    QuestionEntity(userId = storedSaga.userId, studyId = storedSaga.studyId), emptyList(), null,
+                    OpenAIQuestionKey("test-key", user = null)), now)
+            assertThat(result.question).isSameAs(saved)
+            assertThat(result.outboxes).isEmpty()
+            Mockito.verify(questions).findQuestionById(42)
+            Mockito.verifyNoMoreInteractions(questions)
+            Mockito.verifyNoInteractions(memberships, outbox)
+        }
+    }
+
+    @Test
+    fun `generation failure after an ambiguous commit cannot roll back translating or completed questions`() = runBlocking<Unit> {
+        val now = Instant.parse("2026-09-12T00:00:00Z")
+        for (status in listOf(QuestionGenerationStatus.TRANSLATING, QuestionGenerationStatus.COMPLETED)) {
+            val committed = saga(now).copy(status = status, questionId = 42)
+            val saved = QuestionEntity(id = 42, userId = committed.userId, studyId = committed.topicId)
+            val sagas = Mockito.mock(QuestionGenerationSagaPort::class.java)
+            val questions = Mockito.mock(QuestionPort::class.java)
+            val memberships = Mockito.mock(QuestionMembershipPort::class.java)
+            val outbox = Mockito.mock(RedisEventOutboxAppendPort::class.java)
+            Mockito.`when`(sagas.findByCorrelationId(committed.correlationId)).thenReturn(committed)
+            Mockito.`when`(questions.findQuestionById(42)).thenReturn(saved)
+            val writer = writer(sagas, Mockito.mock(StreamInboxPort::class.java), memberships, outbox, questions)
+
+            val rollback = writer.fail(event(committed, now), "QUESTION_GENERATION_FAILED", "Commit reply lost.", now)
+            val recovered = writer.findCommitted(event(committed, now))
+
+            assertThat(rollback).isNull()
+            assertThat(recovered?.question).isSameAs(saved)
+            assertThat(recovered?.outboxes).isEmpty()
+            Mockito.verify(sagas, Mockito.times(2)).findByCorrelationId(committed.correlationId)
+            Mockito.verifyNoMoreInteractions(sagas)
+            Mockito.verify(questions).findQuestionById(42)
+            Mockito.verifyNoMoreInteractions(questions)
+            Mockito.verifyNoInteractions(memberships, outbox)
+        }
+    }
     @ParameterizedTest
     @EnumSource(QuestionGenerationSource::class)
     fun `completed manual or scheduled generation appends localization outboxes`(
@@ -72,6 +123,7 @@ class QuestionGenerationExecutionWriteServiceTest {
             questionKey = OpenAIQuestionKey("test-key", user = null),
         )
         Mockito.`when`(questions.save(saved)).thenReturn(saved)
+        Mockito.`when`(sagas.findByCorrelationId(event.correlationId)).thenReturn(saga(now, source))
         Mockito.`when`(sagas.markTranslating(event.correlationId, saved.id, now)).thenReturn(true)
         val writer = QuestionGenerationExecutionWriteService(
             sagas = sagas,
@@ -211,10 +263,11 @@ class QuestionGenerationExecutionWriteServiceTest {
         inbox: StreamInboxPort,
         memberships: QuestionMembershipPort,
         outbox: RedisEventOutboxAppendPort = Mockito.mock(RedisEventOutboxAppendPort::class.java),
+        questions: QuestionPort = Mockito.mock(QuestionPort::class.java),
     ) = QuestionGenerationExecutionWriteService(
         sagas = sagas,
         inbox = inbox,
-        questions = Mockito.mock(QuestionPort::class.java),
+        questions = questions,
         questionStats = Mockito.mock(QuestionStatsPort::class.java),
         questionEmbeddings = Mockito.mock(QuestionEmbeddingPort::class.java),
         questionCoverage = Mockito.mock(QuestionCoveragePort::class.java),

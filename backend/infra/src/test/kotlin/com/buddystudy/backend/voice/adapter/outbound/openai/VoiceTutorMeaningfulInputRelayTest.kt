@@ -1331,6 +1331,9 @@ class VoiceTutorMeaningfulInputRelayTest {
                     }
                 }
             }
+            // This fixture's discovery is completed manually before the live worker
+            // owns update/selection calls, avoiding two competing beginExecution claims.
+            f.offerCandidate(1, "browse-before-split-update", 101, null, null)
             val worker = voiceTutorMcpToolRelay(
                 f.controller,
                 controlContext(),
@@ -1338,7 +1341,6 @@ class VoiceTutorMeaningfulInputRelayTest {
                 { _, _, _ -> },
             ).subscribe({}, f.errors::add)
             try {
-                f.offerCandidate(1, "browse-before-split-update", 101, null, null)
                 val responseCountBeforeUpdate = f.responses().size
                 val updateCommand = "Redis 이름을 Redis 기초로 바꾸고 레벨 7로 해 줘."
                 f.utterance(2, "split-update", updateCommand)

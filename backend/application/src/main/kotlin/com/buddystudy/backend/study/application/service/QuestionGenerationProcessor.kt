@@ -9,6 +9,7 @@ import com.buddystudy.backend.study.application.model.PreparedQuestionGeneration
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystudy.backend.study.application.openai.OpenAIRequestRetryPolicy
 import com.buddystudy.backend.study.application.port.inbound.ProcessQuestionGenerationUseCase
 import com.buddystudy.backend.study.application.port.inbound.QuestionGenerationExecutionWriteUseCase
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
@@ -27,6 +28,8 @@ import com.buddystudy.study.domain.entity.StudyEntity
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import org.springframework.dao.TransientDataAccessException
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Service
@@ -53,7 +56,11 @@ class QuestionGenerationProcessor(
 
     override suspend fun process(event: QuestionGenerationRequestedEvent, streamKey: String) {
         val claimed = writer.claim(event, Instant.now(), streamKey) ?: return
+        var providerPreparationCompleted = false
+        var candidateRequests = 0
+        var receivedCandidate = false
         val result = try {
+            check(claimed.inbox.attempt <= MAX_ATTEMPTS) { "Question generation attempt budget was exhausted." }
             val saga = claimed.saga
             val user = checkNotNull(users.findById(saga.userId)) {
                 "Question owner was not found."
@@ -77,13 +84,20 @@ class QuestionGenerationProcessor(
                 topicStudy = topicStudy,
                 appLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue),
                 questionKey = questionKey,
+                candidateBudget = (MAX_ATTEMPTS - claimed.inbox.attempt + 1).coerceIn(1, MAX_ATTEMPTS),
+                onCandidateRequest = { candidateRequests++ },
+                onCandidateReceived = { receivedCandidate = true },
             )
-            writer.complete(event, prepared, Instant.now())
+            providerPreparationCompleted = true
+            // Retry the separate rolled-back write transaction with the same
+            // generated value, never its upstream paid provider operation.
+            completePrepared(event, prepared)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             val message = error.message ?: error.javaClass.simpleName
-            if (claimed.inbox.attempt < MAX_ATTEMPTS) {
+            if (!providerPreparationCompleted && !receivedCandidate && candidateRequests <= 1 && claimed.inbox.attempt < MAX_ATTEMPTS &&
+                OpenAIRequestRetryPolicy.isRetryable(error)) {
                 writer.retry(claimed.inbox, message, Instant.now())
                 throw StreamRetryScheduledException(message, error)
             }
@@ -136,12 +150,57 @@ class QuestionGenerationProcessor(
         )
     }
 
+    private suspend fun completePrepared(
+        event: QuestionGenerationRequestedEvent,
+        prepared: PreparedQuestionGeneration,
+    ): com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult {
+        var retry = 0
+        val originalQuestionID = prepared.question.id
+        while (true) {
+            try {
+                return writer.complete(event, prepared, Instant.now())
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                // The transaction may have committed before its response was
+                // lost. Read the durable result before any retry or rollback.
+                findCommittedWithRetry(event)?.let { return it }
+                if (error !is TransientDataAccessException || retry >= MAX_WRITE_RETRIES) throw error
+                retry++
+                prepared.question.id = originalQuestionID
+                log.warn("question_generation_write_retry operation=complete retry={} errorType={}",
+                    retry, error.javaClass.simpleName)
+                delay(WRITE_RETRY_DELAY_MILLIS * retry)
+            }
+        }
+    }
+
+    private suspend fun findCommittedWithRetry(
+        event: QuestionGenerationRequestedEvent,
+    ): com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult? {
+        var retry = 0
+        while (true) {
+            try {
+                return writer.findCommitted(event)
+            } catch (error: TransientDataAccessException) {
+                if (retry >= MAX_WRITE_RETRIES) throw error
+                retry++
+                log.warn("question_generation_write_retry operation=find_committed retry={} errorType={}",
+                    retry, error.javaClass.simpleName)
+                delay(WRITE_RETRY_DELAY_MILLIS * retry)
+            }
+        }
+    }
+
     private suspend fun prepare(
         event: QuestionGenerationRequestedEvent,
         rootStudy: StudyEntity,
         topicStudy: StudyEntity,
         appLanguage: String,
         questionKey: OpenAIQuestionKey,
+        candidateBudget: Int,
+        onCandidateRequest: () -> Unit,
+        onCandidateReceived: () -> Unit,
     ): PreparedQuestionGeneration = coroutineScope {
         val room = StudyRoom.of(
             topicStudy.toStudyRoomSchedule(
@@ -177,6 +236,9 @@ class QuestionGenerationProcessor(
             recentQuestions = recentQuestionsDeferred.await(),
             recentEmbeddings = recentEmbeddingsDeferred.await(),
             coverageSelection = coverage,
+            candidateBudget = candidateBudget,
+            onCandidateRequest = onCandidateRequest,
+            onCandidateReceived = onCandidateReceived,
         )
         val now = Instant.now()
         PreparedQuestionGeneration(
@@ -232,8 +294,11 @@ class QuestionGenerationProcessor(
         recentQuestions: List<String>,
         recentEmbeddings: List<QuestionEmbeddingCandidate>,
         coverageSelection: QuestionCoverageSelection?,
+        candidateBudget: Int,
+        onCandidateRequest: () -> Unit,
+        onCandidateReceived: () -> Unit,
     ): GeneratedQuestionWithEmbedding {
-        val maxAttempts = properties.openai.questionSimilarityMaxAttempts.coerceAtLeast(1)
+        val maxAttempts = minOf(properties.openai.questionSimilarityMaxAttempts.coerceIn(1, MAX_ATTEMPTS), candidateBudget)
         val rejectedQuestions = mutableListOf<String>()
         repeat(maxAttempts) { attempt ->
             val history = recentQuestions + rejectedQuestions
@@ -248,7 +313,9 @@ class QuestionGenerationProcessor(
                     QuestionCoverageGuide(it.conceptName, it.angleName, it.conceptPath)
                 },
             )
+            onCandidateRequest()
             val generated = openAI.generateQuestion(apiKey, model, prompt)
+            onCandidateReceived()
             if (!QuestionLanguage.matches(generated.question, language)) {
                 rejectedQuestions += generated.question
                 if (attempt == maxAttempts - 1) {
@@ -256,7 +323,7 @@ class QuestionGenerationProcessor(
                 }
                 return@repeat
             }
-            val embedding = openAI.embedText(apiKey, generated.question)
+            val embedding = embedGeneratedQuestion(apiKey, generated.question)
             if (
                 questionSimilarity.findSimilar(
                     embedding,
@@ -272,6 +339,20 @@ class QuestionGenerationProcessor(
             }
         }
         error("Question generation attempts were exhausted.")
+    }
+
+    private suspend fun embedGeneratedQuestion(apiKey: String, question: String): List<Float> {
+        repeat(MAX_ATTEMPTS) { attempt ->
+            try {
+                return openAI.embedText(apiKey, question)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (attempt == MAX_ATTEMPTS - 1 || !OpenAIRequestRetryPolicy.isRetryable(error)) throw error
+                delay(WRITE_RETRY_DELAY_MILLIS * (attempt + 1))
+            }
+        }
+        error("Embedding retry budget exhausted.")
     }
 
     private suspend fun selectCoverage(
@@ -314,6 +395,8 @@ class QuestionGenerationProcessor(
 
     private companion object {
         const val MAX_ATTEMPTS = 3
+        const val MAX_WRITE_RETRIES = 2
+        const val WRITE_RETRY_DELAY_MILLIS = 50L
         const val RECENT_EMBEDDING_LIMIT = 200
     }
 }

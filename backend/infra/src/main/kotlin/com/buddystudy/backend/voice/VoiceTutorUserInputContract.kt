@@ -117,27 +117,17 @@ internal object VoiceTutorUserInputContract {
         allowedFields(node, required) && node.size() == required.size
 
     val definition = VoiceTutorMcpToolDefinition(TOOL,
-        "Use a blocking choice form ONLY for a necessary unresolved decision that materially changes the study curriculum or action, " +
-            "such as ambiguous saved topics or selecting several subtopics, or when the learner explicitly requests selectable options. " +
-            "Study and curriculum learning are the default purpose. Never ask the learner to choose a mode such as saved study, new study or free conversation. " +
-            "For a greeting, microphone check, one simple missing fact, a recommendation request, a clear topic/start agreement, " +
-            "readiness or a routine next step, respond briefly or continue the agreed study without this tool. " +
-            "If the learner asks what to study, read real saved topics and recommend a concrete direction aloud; do not invent a blocking decision. " +
-            "Before opening a form, check whether the conversation or saved state already answers it, or a reversible recommendation will suffice. " +
-            "When a necessary decision remains, show concrete selectable options with this tool instead of only speaking a list. " +
-            "A server-owned curriculum card from select_voice_study already collects the necessary branch choice: never duplicate it with this tool. " +
-            "Use exactly one argument shape: ordinary choices contain only title and questions (both required), or a topic-creation proposal contains only studyTopicProposal. Never mix these shapes or send an empty object. " +
-            "Each ordinary question needs id, prompt, selectionMode, options and allowFreeText. Question IDs and option IDs use only A-Z, a-z, 0-9, underscore and hyphen, and must be unique within their question/request. " +
-            "Bundle only necessary unresolved decisions in one request with 1-5 questions and single, multiple or text selection; allowFreeText=true accompanies ordinary choices so the learner can type an alternative. " +
-            "Single and multiple modes require 1-8 options; text mode requires options=[] and allowFreeText=true. " +
-            "Call this tool alone in its response. No option is preselected and nothing is applied until Submit. " +
-            "Wait for the exact tool result; never keep speaking, call more tools, or infer answers while it is pending. " +
-            "Cancellation is no consent and no answer. Ordinary questions collect preferences only and never authorize writes. " +
-            "For adding several subtopics, first use suggest_study_topics for an exact saved parent, then set studyTopicProposal with parentStudyId, " +
-            "the desired candidate topics. The server resolves the original main root and inherits its difficulty, even when the selected parent has a different level. Omit difficultyLevel; it is an optional legacy hint only and cannot override that saved root level. " +
-            "The server replaces all form text with an exact immutable multi-selection proposal; " +
-            "its explicit Submit creates only selected topics without another spoken confirmation. Do not call create_study_topics directly. " +
-            "For typed alternatives first collect preferences with free text, then request a new studyTopicProposal. Other mutations retain prepare/confirm.",
+        "Ask only a necessary unresolved curriculum/action choice or learner-requested options. Learning is the default; " +
+            "never ask for a mode, greeting, readiness, clear start agreement or routine next step. Check conversation and saved state first. " +
+            "Use concrete options; do not duplicate a server curriculum card. Call alone and wait silently for its result. " +
+            "Cancellation is not consent. Ordinary choices collect preferences, never authorize writes. " +
+            "Use exactly one shape: {title,questions} or {studyTopicProposal}; never mix them. " +
+            "Each ordinary question requires id,prompt,selectionMode,options,allowFreeText. Use 1-5 questions; " +
+            "single/multiple require 1-8 options and allowFreeText=true; text requires options=[] and allowFreeText=true. " +
+            "IDs use A-Z,a-z,0-9,underscore,hyphen and are unique. Nothing is preselected or applied before Submit. " +
+            "For several new subtopics, use suggest_study_topics first, then studyTopicProposal with exact parentStudyId and candidate topics. " +
+            "Omit difficultyLevel: the server inherits the original root level. Its immutable multi-select Submit creates only selected topics, " +
+            "without another confirmation or create_study_topics call. Typed alternatives need a new proposal; other mutations retain prepare/confirm.",
         // Keep a root object for provider compatibility. Exclusive flat argument shapes
         // are enforced by validToolArguments; do not introduce a root anyOf/oneOf.
         mapOf("type" to "object", "additionalProperties" to false, "minProperties" to 1,
@@ -152,20 +142,21 @@ internal object VoiceTutorUserInputContract {
                     "required" to listOf("parentStudyId", "topics")),
                 "questions" to mapOf("type" to "array", "minItems" to 1, "maxItems" to 5,
                     "description" to "Required with title for ordinary choices. Omit for studyTopicProposal.",
-                    "items" to mapOf("anyOf" to listOf(questionSchema("single"), questionSchema("multiple"), questionSchema("text"))))),
+                    "items" to questionSchema())),
             "required" to emptyList<String>()))
 
     private fun stringSchema(maximum: Int) = mapOf("type" to "string", "minLength" to 1, "maxLength" to maximum)
 
-    private fun questionSchema(mode: String): Map<String, Any> = mapOf(
+    // Share ordinary question structure once. request() still enforces mode-specific
+    // option counts and text entry before a provider call can present any form.
+    private fun questionSchema(): Map<String, Any> = mapOf(
         "type" to "object", "additionalProperties" to false,
         "properties" to mapOf(
             "id" to (stringSchema(80) + ("pattern" to "^[A-Za-z0-9_-]{1,80}$")),
             "prompt" to stringSchema(500),
-            "selectionMode" to mapOf("type" to "string", "enum" to listOf(mode)),
-            "allowFreeText" to if (mode == "text") mapOf("type" to "boolean", "enum" to listOf(true)) else mapOf("type" to "boolean"),
-            "options" to mapOf("type" to "array", "minItems" to if (mode == "text") 0 else 1,
-                "maxItems" to if (mode == "text") 0 else 8,
+            "selectionMode" to mapOf("type" to "string", "enum" to listOf("single", "multiple", "text")),
+            "allowFreeText" to mapOf("type" to "boolean"),
+            "options" to mapOf("type" to "array", "minItems" to 0, "maxItems" to 8,
                 "items" to mapOf("type" to "object", "additionalProperties" to false,
                     "properties" to mapOf("id" to (stringSchema(80) + ("pattern" to "^[A-Za-z0-9_-]{1,80}$")),
                         "label" to stringSchema(200)), "required" to listOf("id", "label")))),

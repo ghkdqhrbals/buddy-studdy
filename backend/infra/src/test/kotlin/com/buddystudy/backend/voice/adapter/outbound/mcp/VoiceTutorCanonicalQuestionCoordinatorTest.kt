@@ -623,6 +623,18 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
     }
 
     @Test
+    fun `automatic continuation replaced during pending lookup cannot spend question quota`(): Unit = runBlocking {
+        val fixture = Fixture().apply { records = emptyList() }
+        var current = true
+        fixture.afterInvoke = { if (it == "list_pending_questions") current = false }
+        val result = fixture.coordinator.execute(fixture.context().copy(operationStillCurrent = { current }),
+            "request_question", mapOf("study_id" to STUDY))
+        assertCode(fixture, result, "STALE_TURN")
+        assertThat(fixture.calls.map { it.name }).containsExactly("list_pending_questions")
+        assertThat(result.learningProgress).isNull()
+    }
+
+    @Test
     fun `owner loss or focus change while pending read returns no late question`(): Unit = runBlocking {
         for (loseOwner in listOf(true, false)) {
             val fixture = Fixture()

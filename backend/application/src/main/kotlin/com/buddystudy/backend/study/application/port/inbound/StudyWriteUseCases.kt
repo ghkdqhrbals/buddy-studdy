@@ -66,6 +66,8 @@ interface QuestionGenerationExecutionWriteUseCase {
         now: Instant,
     ): QuestionWriteResult
 
+    suspend fun findCommitted(event: QuestionGenerationRequestedEvent): QuestionWriteResult?
+
     suspend fun succeed(claim: StreamInboxClaim, now: Instant)
 
     suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant)

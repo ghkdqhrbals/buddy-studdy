@@ -52,7 +52,7 @@ The recorder removes authentication headers, cookies, passwords, secrets, API ke
 ## Consistency and Failure Handling
 
 - The request row is written in a new transaction before the network side effect. If that insert fails, the provider is not called.
-- Completion is retried three times. If the response cannot be persisted, the operation fails loudly; the existing row remains `STARTED` for incident review.
+- Completion is retried three times. If that audit update still fails, a bounded error log identifies the call, lifecycle status, and exception type; the existing row remains `STARTED` for incident review. The recorder returns an already successful provider result, or rethrows the original provider failure, rather than turning an audit-storage outage into another paid provider call. Coroutine cancellation remains cancellation. This does not synthesize a successful history receipt or silently retry a provider side effect.
 - A process crash after the provider responds but before the completion update can also leave `STARTED`. Cross-system atomicity is not possible, so `STARTED` is an explicit incomplete-observation state rather than a false success.
 - Provider retry libraries may make more than one physical transport attempt inside one logical adapter call. The row records the complete logical request and the final response observed by BuddyStudy.
 
@@ -69,7 +69,7 @@ Flyway migration `V80__external_api_call_history.sql` creates the additive table
 
 ## Test Plan
 
-- Recorder tests verify start-before-call, success/failure completion, and credential redaction.
+- Recorder tests verify start-before-call, success/failure completion, credential redaction, retained provider outcomes after audit-update failure, and cancellation propagation.
 - A source coverage test prevents implemented external provider adapters from bypassing the recorder.
 - Backend compilation and provider adapter tests verify constructor and behavior compatibility.
 - Monitoring tests verify cursor pagination and on-demand detail loading.

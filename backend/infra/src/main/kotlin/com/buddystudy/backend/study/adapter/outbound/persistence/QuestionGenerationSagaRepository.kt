@@ -193,6 +193,7 @@ class QuestionGenerationSagaRepository(
                 updated_at = :updatedAt
             where correlation_id = :correlationId
               and status not in ('COMPLETED', 'FAILED')
+              and (:failedStep <> 'GENERATING' or status in ('QUEUED', 'GENERATING'))
             """.trimIndent(),
         )
             .bind("status", QuestionGenerationStatus.FAILED.name)

@@ -55,7 +55,7 @@ internal class VoiceTutorNativeConversationController(
     private var displayOperationId: String? = null
     private val failure = Sinks.one<Throwable>()
     private val quotaDone = Sinks.one<Void>()
-    private val toolCoordinator = VoiceTutorMcpTurnCoordinator()
+    private val toolCoordinator = VoiceTutorMcpTurnCoordinator(compactRepeatedReads = true)
     private val pause = VoiceTutorPauseCoordinator(responseTimeout)
     private val sessionState = VoiceTutorSessionStatePublisher(initialLessonRevision, initialStudyId) { publish(client, json(it)) }
     private var closed = false
@@ -110,6 +110,7 @@ internal class VoiceTutorNativeConversationController(
     private val inputs = linkedMapOf<String, Input>()
     private val transcripts = linkedMapOf<String, TranscriptState>()
     private val pendingTools = linkedMapOf<String, ToolBoundary>()
+    private var pendingSelectedLesson: SelectedLessonContinuation? = null
     private val seenResponses = linkedSetOf<String>()
     private val responseRequests = linkedSetOf<String>()
     private val earlyTranscripts = linkedMapOf<String, String>()
@@ -999,6 +1000,17 @@ internal class VoiceTutorNativeConversationController(
                 "select_voice_study", "advance_voice_study", "list_pending_questions", "request_question", "get_question_process" -> sessionState.update("question_failed", revision, answerId = null)
             }
         }
+        // Synchronize the committed focus first; question work starts only after
+        // this output is acknowledged. A timeout cannot hide a committed revision.
+        if (!result.isError && result.continueSelectedLesson && result.lessonFocus != null &&
+            !studyFollowupSuperseded && call != null && result.lessonRevision == revision &&
+            (stateIsCurrent || acknowledgedUserInputBoundaries[callId]?.input != null) &&
+            !draining && !quotaRequested && !endingAfterResponse) {
+            val accepted = acknowledgedUserInputBoundaries[callId]?.input
+            pendingSelectedLesson = SelectedLessonContinuation(requireNotNull(result.lessonFocus).studyId, revision,
+                learningIntentEpoch, accepted?.id ?: call.boundary.latestAcceptedLearnerProviderItemId,
+                latestSpeechStartedOrder, call.operationContext)
+        }
         emit(output)
     }
 
@@ -1049,6 +1061,7 @@ internal class VoiceTutorNativeConversationController(
         failedQuestionReadback = null
         cancelledQuestionReadback = null
         closed = true
+        pendingSelectedLesson = null
         pause.close()
         toolCoordinator.close()
         operations.clear()
@@ -1070,6 +1083,21 @@ internal class VoiceTutorNativeConversationController(
                 VoiceTutorUserInputContract.TOOL, OperationContext(), learningIntentEpoch)
             emit(scheduled.providerEvent)
             return
+        }
+        pendingSelectedLesson?.let { continuation ->
+            if (continuation.revision != revision || continuation.epoch != learningIntentEpoch ||
+                continuation.learnerItemId != latestLearner?.id || continuation.speechOrder != latestSpeechStartedOrder ||
+                learningExplicitlyCancelled || quotaRequested || endingAfterResponse) {
+                pendingSelectedLesson = null
+            } else if (!speaking && pendingSpeech == null && commits.isEmpty() && !pause.blocksResponses && answerCapture == null) {
+                pendingSelectedLesson = null
+                val scheduled = toolCoordinator.scheduleServerCall("request_question",
+                    mapOf("study_id" to continuation.studyId), nanoTime(), beginsLearnerTurn = false)
+                pendingTools[scheduled.callId] = ToolBoundary(boundary(latestLearner), revision,
+                    "request_question", continuation.operationContext, learningIntentEpoch)
+                emit(scheduled.providerEvent)
+                return
+            } else return
         }
         val quota = quotaRequested
         // A process subscription owns completion. Do not ask the model to issue
@@ -1134,7 +1162,17 @@ internal class VoiceTutorNativeConversationController(
         val options = linkedMapOf<String, Any>(
             "output_modalities" to listOf("audio"), "tool_choice" to if (quota || endingAfterResponse || isOpening || cancellationNotice || learningNotice != null || readback != null || confirmation != null) "none" else toolCoordinator.toolChoice,
             // Realtime response metadata accepts string values only, including boolean flags.
-            "metadata" to mapOf(Contract.RESPONSE_TOKEN_METADATA_KEY to token, Contract.QUOTA_NOTICE_METADATA_KEY to quota.toString()),
+            "metadata" to mapOf(Contract.RESPONSE_TOKEN_METADATA_KEY to token, Contract.QUOTA_NOTICE_METADATA_KEY to quota.toString(),
+                "buddystudy_usage_operation" to when {
+                    quota -> "voice-quota-notice"
+                    endingAfterResponse -> "voice-goodbye"
+                    isOpening -> "voice-opening"
+                    learningNotice != null -> "voice-learning-notice"
+                    cancellationNotice -> "voice-cancellation-notice"
+                    readback != null -> "voice-question-readback"
+                    confirmation != null -> "voice-mutation-confirmation"
+                    else -> "voice-response"
+                }),
         )
         instructions?.let { options["instructions"] = VoiceTutorLanguagePolicy.responseInstructions(language, it) }
         // A saved-question delivery is a bounded readback, not a continuation
@@ -1388,6 +1426,7 @@ internal class VoiceTutorNativeConversationController(
     )
 
     private fun cancelLearningIntent(requireNewSelection: Boolean = false) {
+        pendingSelectedLesson = null
         if (requireNewSelection) learningExplicitlyCancelled = true
         learningIntentEpoch++
         val undelivered = pendingQuestionReadback ?: failedQuestionReadback ?: cancelledQuestionReadback
@@ -1974,6 +2013,8 @@ internal class VoiceTutorNativeConversationController(
         val commitEventId: String = "buddystudy-internal-native-commit-${UUID.randomUUID()}", val answerId: String? = null)
     private data class TutorTranscript(val sequence: Long, val acceptedAt: Instant, var raw: String? = null,
         var partial: String = "", var partialTruncated: Boolean = false)
+    private data class SelectedLessonContinuation(val studyId: Long, val revision: Long, val epoch: Long,
+        val learnerItemId: String?, val speechOrder: Long, val operationContext: OperationContext)
     private data class ToolBoundary(val boundary: VoiceTutorDialogueBoundary, val revision: Long, val name: String,
         val operationContext: OperationContext, val learningIntentEpoch: Long)
     private data class QuestionReadback(val value: VoiceTutorQuestionReadback, val revision: Long, val epoch: Long, val requestedSpeechOrder: Long = 0)

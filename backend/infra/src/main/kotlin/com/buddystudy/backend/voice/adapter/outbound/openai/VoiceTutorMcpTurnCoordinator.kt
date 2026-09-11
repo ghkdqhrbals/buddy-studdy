@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.time.Duration
 import java.util.Base64
 import java.util.UUID
@@ -47,8 +48,10 @@ internal enum class VoiceTutorDiscardedResponseReason {
 internal class VoiceTutorMcpTurnCoordinator(
     private val mapper: ObjectMapper = JsonMapperProvider.mapper,
     private val acknowledgementTimeout: Duration = Duration.ofSeconds(15),
+    private val compactRepeatedReads: Boolean = false,
 ) {
     private val seenCallIds = linkedSetOf<String>()
+    private val acknowledgedReads = linkedMapOf<String, AcknowledgedRead>()
     private val pending = linkedMapOf<String, Pending>()
     private val rejectedServerCallsByEventId = linkedMapOf<String, RejectedServerCall>()
     private var roundCount = 0
@@ -65,6 +68,7 @@ internal class VoiceTutorMcpTurnCoordinator(
     fun beginLearnerTurn() {
         check(!hasPending && !continuationReady)
         roundCount = 0
+        acknowledgedReads.clear()
         continuationSuperseded = false
         continuationAcknowledged = false
     }
@@ -112,6 +116,7 @@ internal class VoiceTutorMcpTurnCoordinator(
             pending[call.callId] = Pending(
                 outputItemId = "vtmcp_${UUID.randomUUID().toString().replace("-", "").take(26)}",
                 toolName = call.name,
+                readKey = readKey(call),
             )
         }
         return calls
@@ -171,6 +176,7 @@ internal class VoiceTutorMcpTurnCoordinator(
         name: String,
         arguments: Map<String, Any>,
         nowNanos: Long,
+        beginsLearnerTurn: Boolean = true,
     ): VoiceTutorScheduledMcpCall {
         if (closed || !TOOL_NAME.matches(name) || seenCallIds.size >= MAX_CALLS_PER_SESSION) {
             throw VoiceTutorMcpProtocolException()
@@ -191,9 +197,13 @@ internal class VoiceTutorMcpTurnCoordinator(
         val providerCallEventId = "buddystudy-internal-server-tool-call-${UUID.randomUUID()}"
         val call = VoiceTutorMcpCall(callId, name, frozenArguments)
         if (!seenCallIds.add(callId)) throw VoiceTutorMcpProtocolException()
-        // This is the first tool round for the newly persisted learner turn.
+        // UI answer/choice actions start a new human turn; a selected lesson's
+        // automatic continuation stays within its existing model round budget.
+        if (beginsLearnerTurn) {
+            roundCount = 0
+            acknowledgedReads.clear()
+        }
         // Fold any already-ACKed prior result into the eventual continuation.
-        roundCount = 0
         continuationSuperseded = false
         continuationReady = false
         continuationAcknowledged = false
@@ -289,7 +299,17 @@ internal class VoiceTutorMcpTurnCoordinator(
         val maximum = if (call.toolName == VoiceTutorUserInputContract.TOOL) MAX_USER_INPUT_BYTES else MAX_OUTPUT_BYTES
         val validOutput = result.output.toByteArray(Charsets.UTF_8).size <= maximum &&
             runCatching { mapper.readTree(result.output)?.isObject == true }.getOrDefault(false)
-        val output = if (validOutput) result.output else INVALID_RESULT_OUTPUT
+        val fullOutput = if (validOutput) result.output else INVALID_RESULT_OUTPUT
+        val readHash = if (validOutput && !result.isError && call.readKey != null) digest(fullOutput) else null
+        val previousRead = call.readKey?.let(acknowledgedReads::get)?.takeIf { it.resultHash == readHash }
+        // Only an exactly acknowledged prior result in this same human turn can
+        // supply context. Always execute and authorize the fresh read first.
+        val receipt = if (previousRead != null) mapper.writeValueAsString(mapOf(
+            "unchanged" to true, "previousCallId" to previousRead.callId,
+            "notice" to "Reuse the previous successful result for this same read; no values changed.",
+        )) else null
+        val output = receipt?.takeIf { it.toByteArray(Charsets.UTF_8).size < fullOutput.toByteArray(Charsets.UTF_8).size } ?: fullOutput
+        call.readResultHash = readHash
         val event = linkedMapOf<String, Any?>(
             "event_id" to "buddystudy-internal-tool-output-${UUID.randomUUID()}",
             "type" to "conversation.item.create",
@@ -322,7 +342,18 @@ internal class VoiceTutorMcpTurnCoordinator(
         ) return false
         if (item.has("status") && item.path("status").asText() != "completed") return false
         pending.remove(callId)
-        if (call.resetsHumanRoundBudget) roundCount = 0
+        if (call.readKey != null && call.readResultHash != null) {
+            // Keep the first full output as the reference; receipts never form a chain.
+            val previous = acknowledgedReads[call.readKey]
+            if (previous?.resultHash != call.readResultHash) {
+                acknowledgedReads[call.readKey] = AcknowledgedRead(callId, requireNotNull(call.readResultHash))
+                while (acknowledgedReads.size > 32) acknowledgedReads.remove(acknowledgedReads.keys.first())
+            }
+        }
+        if (call.resetsHumanRoundBudget) {
+            roundCount = 0
+            acknowledgedReads.clear()
+        }
         if (!call.discardedResponse) continuationAcknowledged = true
         if (pending.isEmpty() && !continuationSuperseded && continuationAcknowledged) continuationReady = true
         return true
@@ -342,10 +373,21 @@ internal class VoiceTutorMcpTurnCoordinator(
         closed = true
         pending.clear()
         seenCallIds.clear()
+        acknowledgedReads.clear()
         rejectedServerCallsByEventId.clear()
         continuationReady = false
         continuationAcknowledged = false
     }
+
+    private fun readKey(call: VoiceTutorMcpCall): String? {
+        if (!compactRepeatedReads || call.name !in COMPACTABLE_READS || call.arguments == null) return null
+        return digest(call.name + ":" + mapper.writeValueAsString(call.arguments.toSortedMap()))
+    }
+
+    private fun digest(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+    private data class AcknowledgedRead(val callId: String, val resultHash: String)
 
     private fun parseArguments(node: JsonNode, maximumBytes: Int = MAX_ARGUMENT_BYTES): Map<String, Any>? {
         if (!node.isTextual || node.textValue().toByteArray(Charsets.UTF_8).size > maximumBytes) return null
@@ -369,6 +411,8 @@ internal class VoiceTutorMcpTurnCoordinator(
     private data class Pending(
         val outputItemId: String,
         val toolName: String,
+        val readKey: String? = null,
+        var readResultHash: String? = null,
         val providerCallItemId: String? = null,
         val providerCallEventId: String? = null,
         val serverCall: VoiceTutorMcpCall? = null,
@@ -387,6 +431,7 @@ internal class VoiceTutorMcpTurnCoordinator(
     )
 
     companion object {
+        private val COMPACTABLE_READS = setOf("list_studies", "get_study", "get_topic_stats", "get_study_growth")
         const val MAX_CALLS_PER_RESPONSE = 8
         const val MAX_CALLS_PER_SESSION = 256
         // A legal catalog path can contain one root plus five descendants.

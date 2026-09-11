@@ -38,6 +38,10 @@ internal fun relayVoiceTutorNativeSession(
     onProviderEvent: suspend (String, Boolean, Boolean) -> Boolean,
 ): Mono<Void> {
     val diagnostics = VoiceTutorSidebandDiagnostics(context.callId)
+    val usage = VoiceTutorRealtimeUsageTracker(
+        context.callId, context.session.model,
+        requireNotNull(voiceTutorInputTranscription(context.session.language)["model"]),
+    )
     val controller = VoiceTutorNativeConversationController(responseTimeout, context.initialLessonRevision, context.session.language,
         onProviderTurnFailure = diagnostics::observeProviderTurnFailure, initialStudyId = context.session.studyId,
         sessionId = context.session.id, userInputEnabled = context.userInputEnabled)
@@ -72,6 +76,7 @@ internal fun relayVoiceTutorNativeSession(
     val receive = providerSession.receive().filter { it.type == WebSocketMessage.Type.TEXT }
         .map { it.payloadAsText }
         .concatMap { raw ->
+            usage.observe(raw)
             diagnostics.observeProviderEvent(raw)
             if (handshake.observeProviderEvent(raw)) Mono.empty<Void>() else {
                 val forward = controller.observeProviderEvent(raw)
@@ -144,7 +149,7 @@ internal fun relayVoiceTutorNativeSession(
         // the outer handler then persists INCOMPLETE_TRANSCRIPT before finalization.
         if (error is VoiceTutorTranscriptIntegrityException || !controller.hasUnsettledTranscriptEvidence()) error
         else VoiceTutorTranscriptIntegrityException()
-    }.doFinally { controller.close() }
+    }.doFinally { usage.close(); controller.close() }
 }
 
 internal fun nativeVoiceTutorDefinitions(mcp: VoiceTutorMcpToolPort, userInputEnabled: Boolean = false) =
@@ -216,7 +221,8 @@ internal fun nativeVoiceTutorToolRelay(
                 } else {
                     val executionContext = context.copy(realtimeModelTools = true,
                         initialLessonRevision = controller.toolRevision(call.callId),
-                        dialogueBoundary = controller.toolBoundary(call.callId))
+                        dialogueBoundary = controller.toolBoundary(call.callId),
+                        operationStillCurrent = { controller.toolCanExecute(call.callId) })
                     var result = mcp.execute(executionContext, call.name, call.arguments)
                     val retryDeadline = System.nanoTime() + Duration.ofSeconds(3).toNanos()
                     // This named error is emitted before any write/lease consumption.

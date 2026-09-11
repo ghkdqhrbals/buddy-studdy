@@ -5,6 +5,8 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
 import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
 import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
+import com.buddystudy.backend.externalapi.adapter.outbound.usage.OpenAIUsageRecorder
+import com.buddystudy.backend.externalapi.adapter.outbound.usage.OpenAISdkUsageCall
 import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import com.buddystudy.backend.study.application.port.outbound.AiCriterionAssessment
 import com.buddystudy.backend.study.application.port.outbound.AiGradingAssessment
@@ -30,6 +32,7 @@ import org.springframework.beans.factory.DisposableBean
 import org.springframework.ai.chat.messages.SystemMessage
 import org.springframework.ai.chat.messages.UserMessage
 import org.springframework.ai.chat.prompt.Prompt
+import org.springframework.ai.embedding.EmbeddingRequest
 import org.springframework.ai.openai.OpenAiChatModel
 import org.springframework.ai.openai.OpenAiChatOptions
 import org.springframework.ai.openai.OpenAiEmbeddingModel
@@ -48,6 +51,7 @@ import kotlin.math.roundToInt
 class OpenAIRequestExecutor(
     private val properties: BuddyStudyProperties,
     private val history: ExternalApiHistoryRecorder,
+    private val usageRecorder: OpenAIUsageRecorder = OpenAIUsageRecorder(),
 ) : DisposableBean {
     private val mapper = JsonMapperProvider.mapper
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -92,6 +96,7 @@ class OpenAIRequestExecutor(
                 topic = prompt.fallbackTopic,
                 level = prompt.level,
                 language = prompt.language,
+                usageOperation = "question",
             )
         return GeneratedQuestion(
             question = question,
@@ -169,16 +174,19 @@ class OpenAIRequestExecutor(
             body = history.json(mapOf("model" to properties.openai.embeddingModel, "input" to text)),
         ),
     ) {
-        val embedding = OpenAiEmbeddingModel.builder()
-            .options(
-                OpenAiEmbeddingOptions.builder()
-                    .apiKey(apiKey)
-                    .model(properties.openai.embeddingModel)
-                    .build(),
-            )
+        val options = OpenAiEmbeddingOptions.builder()
+            .apiKey(apiKey)
+            .model(properties.openai.embeddingModel)
             .build()
-            .embed(text)
-            .toList()
+        val observed = OpenAISdkUsageCall(usageRecorder, "embedding", "request", properties.openai.embeddingModel, options.maxRetries)
+        val response = observed.execute(usage = { it: org.springframework.ai.embedding.EmbeddingResponse -> it.metadata.usage.nativeUsage }) {
+            OpenAiEmbeddingModel.builder()
+                .options(options)
+                .httpClientBuilderCustomizer(observed.httpClientCustomizer)
+                .build()
+                .call(EmbeddingRequest(listOf(text), options))
+        }
+        val embedding = response.results.first().output.toList()
         ExternalApiResponse(embedding, body = history.json(mapOf("embedding" to embedding)))
     }
 
@@ -480,6 +488,7 @@ class OpenAIRequestExecutor(
         topic: String,
         level: Int,
         language: String,
+        usageOperation: String = "grading",
     ): AiGradingRubric {
         val payload = mapper.writeValueAsString(
             mapOf(
@@ -494,6 +503,8 @@ class OpenAIRequestExecutor(
             model = model,
             system = RUBRIC_SYSTEM_PROMPT,
             user = payload,
+            stage = "rubric",
+            usageOperation = usageOperation,
         )
         return parseGradingRubric(parsed["rubric"] ?: parsed)
             ?: error("OpenAI returned an invalid grading rubric.")
@@ -520,6 +531,7 @@ class OpenAIRequestExecutor(
             model = model,
             system = RUBRIC_SYSTEM_PROMPT,
             user = payload,
+            stage = "rubric",
         )
         return parseGradingRubric(parsed["rubric"] ?: parsed)
             ?: error("OpenAI returned an invalid grading rubric.")
@@ -539,7 +551,7 @@ class OpenAIRequestExecutor(
                 "rubric" to rubric,
             )
         )
-        val parsed = gradingJsonCall(apiKey, model, EVIDENCE_SYSTEM_PROMPT, payload)
+        val parsed = gradingJsonCall(apiKey, model, EVIDENCE_SYSTEM_PROMPT, payload, stage = "evidence")
         val rawCriteria = parsed["criteria"] as? List<*> ?: emptyList<Any>()
         val byId = rawCriteria.mapNotNull(::parseCriterionAssessment).associateBy { it.criterionId }
         return rubric.criteria.map { criterion ->
@@ -566,7 +578,7 @@ class OpenAIRequestExecutor(
                 "rubric" to rubric,
             )
         )
-        val parsed = gradingJsonCall(apiKey, model, CRITIC_SYSTEM_PROMPT, payload)
+        val parsed = gradingJsonCall(apiKey, model, CRITIC_SYSTEM_PROMPT, payload, stage = "critic")
         return AnswerCritique(
             contradictions = parsed.stringList("contradictions"),
             misconceptions = parsed.stringList("misconceptions"),
@@ -605,6 +617,7 @@ class OpenAIRequestExecutor(
             model,
             buildJudgeSystemPrompt(adjudication),
             payload,
+            stage = if (adjudication) "adjudication" else "judge",
         )
         val score = parsed.intValue("score")?.coerceIn(0, 100)
             ?: error("OpenAI final judge did not return a score.")
@@ -623,9 +636,11 @@ class OpenAIRequestExecutor(
         )
     }
 
-    private fun jsonCall(apiKey: String, model: String, system: String, user: String): Map<String, Any?> {
+    private fun jsonCall(apiKey: String, model: String, system: String, user: String, stage: String, usageOperation: String = "grading"): Map<String, Any?> {
         val text = chatText(
             operation = "grade-answer",
+            stage = stage,
+            usageOperation = usageOperation,
             apiKey = apiKey,
             model = model,
             json = true,
@@ -643,6 +658,18 @@ class OpenAIRequestExecutor(
         user: String,
         system: String? = null,
         maxCompletionTokens: Int? = null,
+        stage: String = when (operation) {
+            "generate-coverage-blueprint" -> "coverage"
+            "suggest-study-topics" -> "suggest_topics"
+            else -> "request"
+        },
+        usageOperation: String = when (operation) {
+            "generate-question", "generate-coverage-blueprint" -> "question"
+            "suggest-study-topics" -> "curriculum"
+            "translate-question" -> "translation"
+            "validate-api-key" -> "validation"
+            else -> "grading"
+        },
     ): String {
         val messages = buildList {
             system?.let { add(SystemMessage(it)) }
@@ -668,9 +695,12 @@ class OpenAIRequestExecutor(
                 body = history.json(requestBody),
             ),
         ) {
-            val response = OpenAiChatModel.builder().options(requestOptions).build().call(
-                Prompt(messages, requestOptions),
-            )
+            val observed = OpenAISdkUsageCall(usageRecorder, usageOperation, stage, model, requestOptions.maxRetries)
+            val response = observed.execute(usage = { it: org.springframework.ai.chat.model.ChatResponse -> it.metadata.usage.nativeUsage }) {
+                OpenAiChatModel.builder().options(requestOptions)
+                    .httpClientBuilderCustomizer(observed.httpClientCustomizer)
+                    .build().call(Prompt(messages, requestOptions))
+            }
             val text = response.result?.output?.text ?: "{}"
             val responseBody = runCatching { history.json(response) }.getOrNull()
                 ?: history.json(mapOf("output" to text, "metadata" to response.metadata.toString()))
@@ -683,8 +713,9 @@ class OpenAIRequestExecutor(
         model: String,
         system: String,
         user: String,
+        stage: String,
     ): Map<String, Any?> = runInterruptible(Dispatchers.IO) {
-        jsonCall(apiKey, model, system, user)
+        jsonCall(apiKey, model, system, user, stage)
     }
 
     internal fun gradingTimeoutMillis(): Long =

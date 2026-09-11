@@ -64,6 +64,8 @@ data class VoiceTutorMcpToolResult(
     val curriculumInput: VoiceTutorCurriculumUserInput? = null,
     /** Stop call-local automatic learning only; never clear persisted focus, questions or drafts. */
     val learningContinuationCancelled: Boolean = false,
+    /** A verified accepted selection may schedule one server-owned question continuation after focus ACK. */
+    val continueSelectedLesson: Boolean = false,
 )
 
 data class VoiceTutorCurriculumUserInput(val proposalId: String, val title: String, val prompt: String,

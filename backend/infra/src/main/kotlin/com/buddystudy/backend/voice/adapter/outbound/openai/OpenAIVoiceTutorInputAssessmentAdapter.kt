@@ -1,6 +1,7 @@
 package com.buddystudy.backend.voice.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.externalapi.adapter.outbound.usage.OpenAIUsageRecorder
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.config.VoiceTutorInputAssessmentProperties
 import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
@@ -45,6 +46,7 @@ class OpenAIVoiceTutorInputAssessmentAdapter private constructor(
     properties: BuddyStudyProperties,
     assessmentProperties: VoiceTutorInputAssessmentProperties,
     private val client: WebClient,
+    private val usageRecorder: OpenAIUsageRecorder,
 ) : VoiceTutorInputAssessmentPort {
     private val assessmentModel = assessmentProperties.model?.trim()?.takeIf { it.isNotEmpty() }
         ?: properties.voiceTutor.summaryModel
@@ -54,14 +56,16 @@ class OpenAIVoiceTutorInputAssessmentAdapter private constructor(
         keys: UserContentOpenAIKeyProvider,
         properties: BuddyStudyProperties,
         assessmentProperties: VoiceTutorInputAssessmentProperties = VoiceTutorInputAssessmentProperties(),
-    ) : this(keys, properties, assessmentProperties, client())
+        usageRecorder: OpenAIUsageRecorder = OpenAIUsageRecorder(),
+    ) : this(keys, properties, assessmentProperties, client(), usageRecorder)
 
     internal constructor(
         keys: UserContentOpenAIKeyProvider,
         properties: BuddyStudyProperties,
         exchange: ExchangeFunction,
         assessmentProperties: VoiceTutorInputAssessmentProperties = VoiceTutorInputAssessmentProperties(),
-    ) : this(keys, properties, assessmentProperties, client(exchange))
+        usageRecorder: OpenAIUsageRecorder = OpenAIUsageRecorder(),
+    ) : this(keys, properties, assessmentProperties, client(exchange), usageRecorder)
 
     override suspend fun assess(request: VoiceTutorInputAssessmentRequest): VoiceTutorInputAssessmentResult {
         return try {
@@ -80,7 +84,7 @@ class OpenAIVoiceTutorInputAssessmentAdapter private constructor(
                 ) + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(request.userId, key))
                 val attestations = VoiceTutorRootCreationAttestationPromptProvider.parseResponse(
                     attestation,
-                    completion(key, attestationBody),
+                    completion(key, attestationBody, stage = "root_creation"),
                 )
                 verified = verified.copy(decisions = verified.decisions.map { decision ->
                     if (decision.intent == VoiceTutorInputIntent.CREATE_ROOT_STUDY) {
@@ -106,7 +110,7 @@ class OpenAIVoiceTutorInputAssessmentAdapter private constructor(
                 ) + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(request.userId, key))
                 val attestations = VoiceTutorStudyMutationAttestationPromptProvider.parseResponse(
                     attestation,
-                    completion(key, attestationBody),
+                    completion(key, attestationBody, stage = "study_mutation"),
                 )
                 verified = verified.copy(decisions = verified.decisions.map { decision ->
                     if (decision.intent in setOf(
@@ -146,7 +150,7 @@ class OpenAIVoiceTutorInputAssessmentAdapter private constructor(
                     attestation,
                     completion(key, VoiceTutorStudyMutationConfirmationPromptProvider.requestBody(
                         attestation, assessmentModel,
-                    ) + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(request.userId, key))),
+                    ) + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(request.userId, key)), stage = "mutation_confirmation"),
                 )
                 verified = verified.copy(decisions = verified.decisions.map { decision ->
                     if (decision.mutationProposalId != null && attestations[decision.itemId] != decision.intent) {
@@ -171,20 +175,7 @@ class OpenAIVoiceTutorInputAssessmentAdapter private constructor(
                 request,
                 assessmentModel,
             ) + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(request.userId, key))
-            client.post()
-                .uri("/v1/chat/completions")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $key")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(body)
-                .exchangeToMono { result ->
-                    if (result.statusCode().is2xxSuccessful) {
-                        result.bodyToMono(String::class.java)
-                            .switchIfEmpty(Mono.error(failure(VoiceTutorInputAssessmentFailure.INVALID_RESULT)))
-                    } else {
-                        result.releaseBody().then(Mono.error(failure(VoiceTutorInputAssessmentFailure.UNAVAILABLE)))
-                    }
-                }
-                .awaitSingle()
+            completion(key, body, stage = "spoken_question")
         } catch (error: CancellationException) {
             throw error
         } catch (error: VoiceTutorInputAssessmentException) {
@@ -202,20 +193,7 @@ class OpenAIVoiceTutorInputAssessmentAdapter private constructor(
                 request,
                 assessmentModel,
             ) + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(request.userId, key))
-            client.post()
-                .uri("/v1/chat/completions")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $key")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(body)
-                .exchangeToMono { result ->
-                    if (result.statusCode().is2xxSuccessful) {
-                        result.bodyToMono(String::class.java)
-                            .switchIfEmpty(Mono.error(failure(VoiceTutorInputAssessmentFailure.INVALID_RESULT)))
-                    } else {
-                        result.releaseBody().then(Mono.error(failure(VoiceTutorInputAssessmentFailure.UNAVAILABLE)))
-                    }
-                }
-                .awaitSingle()
+            completion(key, body, stage = "spoken_feedback")
         } catch (error: CancellationException) {
             throw error
         } catch (error: VoiceTutorInputAssessmentException) {
@@ -226,23 +204,43 @@ class OpenAIVoiceTutorInputAssessmentAdapter private constructor(
         return VoiceTutorSpokenFeedbackPromptProvider.parseResponse(response)
     }
 
-    private suspend fun completion(key: String, body: Map<String, Any>): String = client.post()
-        .uri("/v1/chat/completions")
-        .header(HttpHeaders.AUTHORIZATION, "Bearer $key")
-        .contentType(MediaType.APPLICATION_JSON)
-        .bodyValue(body)
-        .exchangeToMono { result ->
-            if (result.statusCode().is2xxSuccessful) {
-                result.bodyToMono(String::class.java)
-                    .switchIfEmpty(Mono.error(failure(VoiceTutorInputAssessmentFailure.INVALID_RESULT)))
-            } else {
-                // Never retain an error body which may echo learner evidence or credentials.
-                result.releaseBody().then(Mono.error(failure(VoiceTutorInputAssessmentFailure.UNAVAILABLE)))
-            }
+    private suspend fun completion(key: String, body: Map<String, Any>, stage: String = "assess"): String {
+        val startedAt = System.nanoTime()
+        var status: Int? = null
+        var outcome = "failed"
+        var usage: JsonNode? = null
+        try {
+            return client.post()
+                .uri("/v1/chat/completions")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer $key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .exchangeToMono { result ->
+                    status = result.statusCode().value()
+                    if (result.statusCode().is2xxSuccessful) {
+                        result.bodyToMono(String::class.java)
+                            .switchIfEmpty(Mono.error(failure(VoiceTutorInputAssessmentFailure.INVALID_RESULT)))
+                    } else {
+                        // Never retain an error body which may echo learner evidence or credentials.
+                        result.releaseBody().then(Mono.error(failure(VoiceTutorInputAssessmentFailure.UNAVAILABLE)))
+                    }
+                }
+                // The application owns one total deadline. No transport retries are added here.
+                .awaitSingle().also { response ->
+                    usage = runCatching { JsonMapperProvider.mapper.readTree(response)?.get("usage") }.getOrNull()
+                    outcome = "succeeded"
+                }
+        } catch (error: CancellationException) {
+            outcome = "cancelled"
+            throw error
+        } finally {
+            usageRecorder.record(
+                operation = "voice_input_assessment", stage = stage, model = assessmentModel,
+                outcome = outcome, usageJson = usage, durationMs = (System.nanoTime() - startedAt) / 1_000_000,
+                attempt = 1, maxRetries = 0, httpStatus = status,
+            )
         }
-        // VoiceTutorInputAssessmentService owns one total deadline across the
-        // primary decision and this create-only attestation. Neither call retries.
-        .awaitSingle()
+    }
 
     private companion object {
         fun client(exchange: ExchangeFunction? = null): WebClient = WebClient.builder()

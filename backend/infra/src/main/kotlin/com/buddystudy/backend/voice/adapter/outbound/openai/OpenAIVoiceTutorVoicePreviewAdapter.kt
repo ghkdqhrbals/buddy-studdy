@@ -3,6 +3,7 @@ package com.buddystudy.backend.voice.adapter.outbound.openai
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.externalapi.adapter.outbound.usage.OpenAIUsageRecorder
 import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
 import com.buddystudy.backend.voice.application.model.VoiceTutorVoicePreviewAudio
 import com.buddystudy.backend.voice.application.model.VoiceTutorVoicePreviewRequest
@@ -24,20 +25,26 @@ class OpenAIVoiceTutorVoicePreviewAdapter private constructor(
     private val keys: UserContentOpenAIKeyProvider,
     private val properties: BuddyStudyProperties,
     private val client: WebClient,
+    private val usageRecorder: OpenAIUsageRecorder,
 ) : VoiceTutorVoicePreviewPort {
     @Autowired
-    constructor(keys: UserContentOpenAIKeyProvider, properties: BuddyStudyProperties) :
-        this(keys, properties, client())
+    constructor(keys: UserContentOpenAIKeyProvider, properties: BuddyStudyProperties, usageRecorder: OpenAIUsageRecorder = OpenAIUsageRecorder()) :
+        this(keys, properties, client(), usageRecorder)
 
     internal constructor(
         keys: UserContentOpenAIKeyProvider,
         properties: BuddyStudyProperties,
         exchange: ExchangeFunction,
-    ) : this(keys, properties, client(exchange))
+        usageRecorder: OpenAIUsageRecorder = OpenAIUsageRecorder(),
+    ) : this(keys, properties, client(exchange), usageRecorder)
 
     override suspend fun synthesize(request: VoiceTutorVoicePreviewRequest): VoiceTutorVoicePreviewAudio {
+        var startedAt: Long? = null
+        var outcome = "failed"
+        var status: Int? = null
         try {
             val key = keys.requireApiKey()
+            startedAt = System.nanoTime()
             return client.post()
                 .uri("/v1/audio/speech")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer $key")
@@ -45,6 +52,7 @@ class OpenAIVoiceTutorVoicePreviewAdapter private constructor(
                 .accept(PREVIEW_MEDIA_TYPE)
                 .bodyValue(VoiceTutorVoicePreviewSpeechContract.requestBody(request))
                 .exchangeToMono { response ->
+                    status = response.statusCode().value()
                     val contentLength = response.headers().contentLength().orElse(-1L)
                     val contentType = response.headers().contentType().orElse(null)
                     when {
@@ -65,8 +73,9 @@ class OpenAIVoiceTutorVoicePreviewAdapter private constructor(
                     }
                 }
                 .timeout(Duration.ofSeconds(properties.openai.requestTimeoutSeconds.coerceIn(2, 30)))
-                .awaitSingle()
+                .awaitSingle().also { outcome = "succeeded" }
         } catch (error: CancellationException) {
+            outcome = "cancelled"
             throw error
         } catch (error: ApiException) {
             throw error
@@ -74,6 +83,15 @@ class OpenAIVoiceTutorVoicePreviewAdapter private constructor(
             // Provider bodies and decoder details may contain sensitive data.
             // They are deliberately neither retained nor reflected to callers.
             throw unavailable()
+        } finally {
+            startedAt?.let { started ->
+                // Binary speech responses do not supply token usage; never infer it from audio bytes.
+                usageRecorder.record(
+                    operation = "voice_preview", stage = "request", model = VoiceTutorVoicePreviewSpeechContract.MODEL,
+                    outcome = outcome, durationMs = (System.nanoTime() - started) / 1_000_000,
+                    attempt = 1, maxRetries = 0, httpStatus = status,
+                )
+            }
         }
     }
 

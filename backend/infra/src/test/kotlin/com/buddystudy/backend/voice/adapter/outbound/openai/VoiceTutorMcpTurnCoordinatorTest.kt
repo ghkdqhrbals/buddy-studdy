@@ -173,6 +173,85 @@ internal class VoiceTutorMcpTurnCoordinatorTest {
             VoiceTutorDiscardedResponseReason.RESPONSE_FAILED, 3)).isEmpty()
     }
 
+    @Test
+    fun `server lesson continuation cannot reopen an exhausted model tool budget`() {
+        val coordinator = VoiceTutorMcpTurnCoordinator()
+        repeat(VoiceTutorMcpTurnCoordinator.MAX_TOOL_ROUNDS) { index ->
+            val id = "call-$index"
+            coordinator.completedResponse(response(function(id)))
+            coordinator.beginExecution(id)
+            val output = requireNotNull(coordinator.complete(id, VoiceTutorMcpToolResult("{}", false), 0))
+            coordinator.acknowledge(ack(output), 1); coordinator.consumeContinuation()
+        }
+        val scheduled = coordinator.scheduleServerCall("request_question", mapOf("study_id" to 7), 0, beginsLearnerTurn = false)
+        assertThat(coordinator.toolChoice).isEqualTo("none")
+        coordinator.acknowledgeServerCall(ack(scheduled.providerEvent), 1)
+        coordinator.beginExecution(scheduled.callId)
+        val output = requireNotNull(coordinator.complete(scheduled.callId, VoiceTutorMcpToolResult("{}", false), 1))
+        coordinator.acknowledge(ack(output), 2)
+        assertThat(coordinator.toolChoice).isEqualTo("none")
+    }
+
+    @Test
+    fun `native repeat reads remain executed and only exact acknowledged results become shorter receipts`() {
+        val coordinator = VoiceTutorMcpTurnCoordinator(compactRepeatedReads = true)
+        val full = mapper.writeValueAsString(mapOf("study" to "saved topic".repeat(100)))
+        fun complete(id: String, args: String = "{\"study_id\":7,\"limit\":10}", output: String = full): Map<String, Any?> {
+            coordinator.completedResponse(response(function(id, args) + ("name" to "get_study")))
+            assertThat(coordinator.beginExecution(id)).isTrue() // Fresh authorized adapter execution is still required.
+            return requireNotNull(coordinator.complete(id, VoiceTutorMcpToolResult(output, false), 0))
+        }
+        val first = complete("first")
+        assertThat(ack(first).path("item").path("output").asText()).isEqualTo(full)
+        val forged = ack(first).deepCopy<ObjectNode>()
+        (forged.path("item") as ObjectNode).put("output", "{}")
+        assertThat(coordinator.acknowledge(forged, 1)).isFalse()
+        assertThat(coordinator.acknowledge(ack(first), 1)).isTrue()
+        coordinator.consumeContinuation()
+        val second = complete("second", "{\"limit\":10,\"study_id\":7}")
+        val receipt = ack(second).path("item").path("output").asText()
+        assertThat(mapper.readTree(receipt).path("unchanged").asBoolean()).isTrue()
+        assertThat(mapper.readTree(receipt).path("previousCallId").asText()).isEqualTo("first")
+        assertThat(receipt.toByteArray().size).isLessThan(full.toByteArray().size)
+        coordinator.acknowledge(ack(second), 1); coordinator.consumeContinuation()
+        val third = complete("third")
+        assertThat(mapper.readTree(ack(third).path("item").path("output").asText()).path("previousCallId").asText()).isEqualTo("first")
+        coordinator.acknowledge(ack(third), 1); coordinator.consumeContinuation()
+        val changed = complete("changed", output = full.replace("saved", "newer"))
+        assertThat(ack(changed).path("item").path("output").asText()).contains("newer").doesNotContain("unchanged")
+        coordinator.acknowledge(ack(changed), 1); coordinator.consumeContinuation(); coordinator.beginLearnerTurn()
+        assertThat(ack(complete("new-turn")).path("item").path("output").asText()).isEqualTo(full)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["legacy", "error", "arguments", "tiny", "write", "progress", "question"])
+    fun `read compaction never hides changed authority arguments failures stateful tools or expands short results`(case: String) {
+        val coordinator = VoiceTutorMcpTurnCoordinator(compactRepeatedReads = case != "legacy")
+        val full = if (case == "tiny") "{}" else mapper.writeValueAsString(mapOf("data" to "saved value".repeat(100)))
+        val name = when (case) { "write" -> "select_voice_study"; "progress" -> "get_question_process"; "question" -> "list_pending_questions"; else -> "get_study" }
+        repeat(2) { index ->
+            val id = "call-$index"
+            val arguments = if (case == "arguments" && index == 1) "{\"study_id\":8}" else "{\"study_id\":7}"
+            coordinator.completedResponse(response(function(id, arguments) + ("name" to name)))
+            coordinator.beginExecution(id)
+            val output = requireNotNull(coordinator.complete(id, VoiceTutorMcpToolResult(full, case == "error" && index == 1), 0))
+            assertThat(ack(output).path("item").path("output").asText()).isEqualTo(full)
+            coordinator.acknowledge(ack(output), 1); coordinator.consumeContinuation()
+        }
+    }
+
+    @Test
+    fun `parallel repeated reads cannot use an unacknowledged sibling result`() {
+        val coordinator = VoiceTutorMcpTurnCoordinator(compactRepeatedReads = true)
+        val full = mapper.writeValueAsString(mapOf("data" to "saved value".repeat(100)))
+        coordinator.completedResponse(response(*listOf("first", "second").map { function(it) + ("name" to "get_study") }.toTypedArray()))
+        listOf("first", "second").forEach { id ->
+            coordinator.beginExecution(id)
+            val output = requireNotNull(coordinator.complete(id, VoiceTutorMcpToolResult(full, false), 0))
+            assertThat(ack(output).path("item").path("output").asText()).isEqualTo(full)
+        }
+    }
+
     private fun function(id: String, arguments: String = "{}") = mapOf(
         "type" to "function_call", "call_id" to id, "name" to "select_voice_study", "arguments" to arguments,
         "status" to "completed",

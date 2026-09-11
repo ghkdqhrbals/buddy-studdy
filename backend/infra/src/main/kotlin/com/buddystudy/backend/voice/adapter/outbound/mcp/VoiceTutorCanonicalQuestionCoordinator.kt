@@ -218,6 +218,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
     }
 
     private suspend fun request(context: VoiceTutorWebRtcControlContext, state: State): VoiceTutorMcpToolResult {
+        if (context.operationStillCurrent?.invoke() == false) return staleQuestionRequest()
         if (learnerTurn(context, state.scope.revision) == null) return persistencePending()
         if (!current(context, state)) return unavailable()
         state.generation?.let { return output(mapOf("generation" to it, "notice" to "This generation is already requested. The server subscribes to its completion and will deliver the saved question; do not poll, request another question or ask the learner to start again."))
@@ -228,6 +229,9 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         if (!state.checked || !current(context, state)) return unavailable()
         val turn = learnerTurn(context, state.scope.revision) ?: return persistencePending()
         if (!current(context, state)) return unavailable()
+        // The pending lookup can suspend. Re-check the owning accepted turn before
+        // spending quota; accepted jobs after the write remain idempotent and saved.
+        if (context.operationStillCurrent?.invoke() == false) return staleQuestionRequest()
         // Model-generated retry keys cannot spend quota twice for the same learner request.
         val key = "voice-" + UUID.nameUUIDFromBytes("${context.session.id}:${state.scope.study}:$turn".toByteArray())
         val result = invoke(context, "request_question", mapOf("study_id" to state.scope.study, "idempotency_key" to key))
@@ -239,6 +243,9 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         return output(mapOf("generation" to body, "notice" to "Generation was requested through the normal question allowance. The server subscribes to completion and delivers the saved question. Do not poll or ask the learner to repeat the start request."))
             .copy(learningProgress = progress(state, VoiceTutorLearningPhase.QUESTION_GENERATING))
     }
+
+    private fun staleQuestionRequest() = error("STALE_TURN",
+        "A newer learner request replaced this unstarted question continuation. No new question was requested; follow the latest request.")
 
     private suspend fun generation(context: VoiceTutorWebRtcControlContext, state: State, correlationId: String): VoiceTutorMcpToolResult {
         if (state.generation?.path("correlationId")?.asText() != correlationId &&
@@ -312,7 +319,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         val record = mapper.readTree(result.output)
         if (recordId(record) != recordId(question) || id(record.path("studyId")) != state.scope.study || record.path("answer").asText().trim() != answer.trim()) return invalidResult()
         rememberSubmission(state, record, answer)
-        return output(mapOf("record" to feedbackRecord(record), "notice" to "The learner explicitly finished, reviewed and submitted their edited answer. Earlier microphone transcripts may be superseded; never assess them. Call get_grading_process with gradingRequestId and read only its verified score and feedback. Do not submit again."))
+        return output(mapOf("record" to feedbackRecord(record), "notice" to "The reviewed answer is saved; prior microphone text may be superseded. Grading completion arrives automatically. Do not poll, resubmit or invent feedback."))
             .copy(questionChange = change(state, record), learningProgress = gradingProgress(state, record))
     }
 

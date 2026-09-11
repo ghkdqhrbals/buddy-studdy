@@ -8,6 +8,7 @@ import com.buddystudy.backend.study.application.model.ClaimedQuestionGeneration
 import com.buddystudy.backend.study.application.model.PreparedQuestionGeneration
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
+import com.buddystudy.backend.study.application.model.QuestionGenerationSaga
 import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
 import com.buddystudy.backend.study.application.model.QuestionGenerationStep
 import com.buddystudy.backend.study.application.model.StreamInboxClaim
@@ -96,6 +97,16 @@ class QuestionGenerationExecutionWriteService(
         prepared: PreparedQuestionGeneration,
         now: Instant,
     ): QuestionWriteResult {
+        val saga = checkNotNull(sagas.findByCorrelationId(event.correlationId)) {
+            "Question generation Saga was not found before completion."
+        }
+        check(saga.userId == event.userId && saga.studyId == event.studyId && saga.topicId == event.topicId) {
+            "Question generation completion does not match its Saga."
+        }
+        committedResult(event, saga)?.let { return it }
+        check(saga.status == QuestionGenerationStatus.GENERATING) {
+            "Question generation Saga no longer permits completion."
+        }
         val saved = questions.save(prepared.question)
         questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
         prepared.coverage?.let { questionCoverage.markAsked(it, now) }
@@ -132,6 +143,30 @@ class QuestionGenerationExecutionWriteService(
         )
     }
 
+    @Transactional(readOnly = true)
+    override suspend fun findCommitted(event: QuestionGenerationRequestedEvent): QuestionWriteResult? {
+        val saga = sagas.findByCorrelationId(event.correlationId) ?: return null
+        return committedResult(event, saga)
+    }
+
+    private suspend fun committedResult(
+        event: QuestionGenerationRequestedEvent,
+        saga: QuestionGenerationSaga,
+    ): QuestionWriteResult? {
+        check(saga.userId == event.userId && saga.studyId == event.studyId && saga.topicId == event.topicId) {
+            "Question generation completion does not match its Saga."
+        }
+        if (saga.status !in setOf(QuestionGenerationStatus.TRANSLATING, QuestionGenerationStatus.COMPLETED)) return null
+        val saved = checkNotNull(saga.questionId?.let { questions.findQuestionById(it) }) {
+            "Completed question generation has no saved question."
+        }
+        check(saved.userId == event.userId && saved.studyId == event.topicId) {
+            "Completed question generation ownership does not match."
+        }
+        // The committed transaction already owns its outboxes and quota.
+        return QuestionWriteResult(saved, emptyList())
+    }
+
     @Transactional
     override suspend fun succeed(claim: StreamInboxClaim, now: Instant) {
         check(inbox.markSucceeded(claim, now)) {
@@ -155,7 +190,9 @@ class QuestionGenerationExecutionWriteService(
     ): OutboxReference? {
         val saga = sagas.findByCorrelationId(event.correlationId)
         var rollbackOutbox: OutboxReference? = null
-        if (saga != null && saga.status !in setOf(QuestionGenerationStatus.COMPLETED, QuestionGenerationStatus.FAILED)) {
+        // A committed generation belongs to translation. A late/ambiguous
+        // generation write error must never delete its question or refund it.
+        if (saga != null && saga.status in setOf(QuestionGenerationStatus.QUEUED, QuestionGenerationStatus.GENERATING)) {
             check(
                 sagas.markFailed(
                     correlationId = saga.correlationId,

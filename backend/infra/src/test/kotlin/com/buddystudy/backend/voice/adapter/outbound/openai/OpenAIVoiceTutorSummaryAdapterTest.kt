@@ -8,9 +8,12 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
+import com.buddystudy.backend.study.application.openai.OpenAIRequestFailure
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
 import com.buddystudy.backend.voice.application.model.VoiceTutorFocusAuthorization
+import com.buddystudy.backend.voice.application.model.VoiceTutorSummaryRetryContext
+import com.buddystudy.backend.study.application.openai.OpenAIRequestRetryPolicy
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
 import com.buddystudy.voice.domain.VoiceTutorLessonFocus
 import com.buddystudy.voice.domain.VoiceTutorResultStatus
@@ -25,6 +28,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
@@ -43,6 +47,83 @@ import java.util.concurrent.atomic.AtomicBoolean
 class OpenAIVoiceTutorSummaryAdapterTest {
     private val mapper = JsonMapperProvider.mapper
     private val now = Instant.parse("2026-08-31T10:00:00Z")
+
+    @Test
+    fun `retry after extraction failure reuses verified classification only within its exact retry scope`() = runBlocking<Unit> {
+        var classifications = 0
+        var extractions = 0
+        val properties = properties()
+        val provider = OpenAIVoiceTutorSummaryAdapter(UserContentOpenAIKeyProvider(properties), properties,
+            ExchangeFunction { request ->
+                val output = MockClientHttpRequest(request.method(), request.url())
+                request.writeTo(output, ExchangeStrategies.withDefaults()).then(Mono.defer {
+                    output.bodyAsString.map {
+                        val body = mapper.readTree(it)
+                        if (body.path("response_format").path("json_schema").path("name").asText() == "voice_tutor_post_call_evidence") {
+                            classifications++
+                            response(envelope(nativeEvidence()))
+                        } else {
+                            extractions++
+                            if (extractions == 1) ClientResponse.create(HttpStatus.SERVICE_UNAVAILABLE).body("{}").build()
+                            else response(envelope(lessonResult()))
+                        }
+                    }
+                })
+            }, immutableContext(listOf(VoiceTutorStudySnapshot(43, 42, "Redis eviction", 7, 1))),
+            immutableFocuses(listOf(VoiceTutorLessonFocus(43, 1))))
+        val source = nativeTurns().map { it.copy(lessonRevision = 1) }
+        withContext(VoiceTutorSummaryRetryContext()) {
+            assertProviderFailure(runCatching { provider.summarize(session(), source) }.exceptionOrNull())
+            val result = provider.summarize(session(), source)
+            assertThat(result.explorations.single().exchanges.single().score).isEqualTo(85)
+        }
+        assertThat(classifications).isEqualTo(1)
+        assertThat(extractions).isEqualTo(2)
+        withContext(VoiceTutorSummaryRetryContext()) { provider.summarize(session(), source) }
+        assertThat(classifications).isEqualTo(2)
+        assertThat(source.all { !it.isStudyQuestion && it.studyQuestionTurnId == null }).isTrue()
+    }
+
+    @Test
+    fun `retry checkpoint is fenced by exact source owner and prompt version`() = runBlocking<Unit> {
+        var calls = 0
+        val properties = properties()
+        val provider = adapter(properties, ExchangeFunction {
+            calls++
+            Mono.just(response(envelope("""{"exchanges":[],"learnerQuestions":[]}""")))
+        })
+        val source = nativeTurns()
+        withContext(VoiceTutorSummaryRetryContext()) {
+            provider.summarize(session(), source)
+            provider.summarize(session(), source)
+            assertThat(calls).isEqualTo(1)
+            provider.summarize(session().copy(userId = 8), source)
+            assertThat(calls).isEqualTo(2)
+            provider.summarize(session().copy(userId = 8), source.map { it.copy(transcript = it.transcript + " 추가") })
+            assertThat(calls).isEqualTo(3)
+            properties.voiceTutor.summaryPromptVersion = "new-summary-version"
+            provider.summarize(session(), source)
+            assertThat(calls).isEqualTo(4)
+        }
+    }
+
+    @Test
+    fun `permanent summary provider failure retains safe API error without allowing another paid attempt`() = runBlocking<Unit> {
+        for ((status, body, retryable) in listOf(
+            Triple(HttpStatus.TOO_MANY_REQUESTS, """{"error":{"code":"credit_balance_exhausted"}}""", false),
+            Triple(HttpStatus.TOO_MANY_REQUESTS, """{"error":{"type":"insufficient_quota"}}""", false),
+            Triple(HttpStatus.TOO_MANY_REQUESTS, """{"error":{"code":"insufficient_quota"}}""", false),
+            Triple(HttpStatus.UNAUTHORIZED, "PRIVATE_PROVIDER_BODY", false),
+            Triple(HttpStatus.TOO_MANY_REQUESTS, """{"error":{"code":"rate_limit_exceeded"}}""", true),
+            Triple(HttpStatus.SERVICE_UNAVAILABLE, "credit_balance_exhausted", true),
+        )) {
+            val provider = adapter(exchange = ExchangeFunction { Mono.just(ClientResponse.create(status).body(body).build()) })
+            val error = runCatching { provider.summarize(session(), nativeTurns()) }.exceptionOrNull()!!
+            assertProviderFailure(error)
+            assertThat(OpenAIRequestRetryPolicy.isRetryable(error)).isEqualTo(retryable)
+            assertThat(error.cause?.cause?.message).doesNotContain("PRIVATE_", "credit_balance_exhausted")
+        }
+    }
 
     @Test
     fun `summary uses configured GPT and regular key with bounded private chat completions request`() = runBlocking<Unit> {
@@ -128,7 +209,16 @@ class OpenAIVoiceTutorSummaryAdapterTest {
             })
             val error = runCatching { adapter.summarize(session(), transcript()) }.exceptionOrNull()
             assertProviderFailure(error)
-            assertThat(error!!.cause).isNull()
+            val failure = requireNotNull(error)
+            assertThat(failure.cause).isInstanceOf(OpenAIRequestFailure::class.java)
+            assertThat((failure.cause as OpenAIRequestFailure).retryable).isTrue()
+            assertThat(generateSequence(failure) { it.cause }.map { it.message }.toList()).containsExactly(
+                "Voice Tutor summary provider failed.",
+                "OpenAI request failed.",
+                "Provider rejected summary request.",
+            )
+            assertThat(failure.stackTraceToString())
+                .doesNotContain("PRIVATE_PROVIDER_TRANSCRIPT_AND_KEY", "private-test-regular-key")
             assertThat(logs.list.map { it.formattedMessage }.joinToString("\n"))
                 .contains("status=429").doesNotContain("PRIVATE_PROVIDER_TRANSCRIPT_AND_KEY", "private-test-regular-key")
             assertThat(logs.list).allSatisfy { assertThat(it.throwableProxy).isNull() }

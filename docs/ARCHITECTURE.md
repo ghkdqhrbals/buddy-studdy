@@ -268,6 +268,7 @@ User opens Pro Voice Tutor without selecting a study
 -> the realtime model selects the learner's exact saved topic through select_voice_study
 -> one owner-locked transaction verifies the current call, latest source USER, exact candidate, full parent path and current revision
 -> the returned frozen focus/level controls subsequent questions; guided advance moves one actual direct-child edge
+-> after that result is acknowledged, a revision/learner/cancellation-fenced server continuation reuses or requests the saved question without another model planning round
 -> for a requested create/edit/delete, the model calls prepare_voice_study_mutation
 -> the server freezes one expiring session-bound action/target/patch and returns its natural confirmation question; no write occurs
 -> tutor asks once; after actual playout and a new natural learner reply, the model calls confirm_voice_study_mutation with only proposal_id and confirm
@@ -281,6 +282,11 @@ User opens Pro Voice Tutor without selecting a study
 -> setup and topic-management talk never becomes scored progress; verified exchanges use the existing canonical VOICE_TUTOR record/tree/publication path
 -> paginated session history remains private source evidence; no ordinary question quota or active answer draft is changed
 ```
+
+Provider usage measurement, bounded same-result retries, compact native MCP
+schemas/results and acknowledged selection continuation are documented in
+[OpenAI cost controls](OPENAI_COST_CONTROLS.md). These controls keep model choice,
+grading quality stages and persisted learner content unchanged.
 
 ```text
 User answer

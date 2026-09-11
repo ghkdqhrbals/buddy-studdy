@@ -1,5 +1,7 @@
 package com.buddystudy.backend.voice.application.service
 
+import kotlin.coroutines.coroutineContext
+
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
@@ -10,6 +12,8 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.voice.application.model.ReserveVoiceTutorSessionResult
 import com.buddystudy.backend.voice.application.model.VoiceTutorCreateSessionResponse
 import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
+import com.buddystudy.backend.voice.application.model.VoiceTutorSummaryRetryContext
+import com.buddystudy.backend.study.application.openai.OpenAIRequestFailure
 import com.buddystudy.backend.voice.application.model.VoiceTutorLessonTreeContext
 import com.buddystudy.backend.voice.application.model.VoiceTutorLanguagePolicy
 import com.buddystudy.backend.voice.application.model.VoiceTutorRelayContext
@@ -641,18 +645,42 @@ class VoiceTutorService(
         session: VoiceTutorSession,
         transcript: List<VoiceTutorTranscriptTurn>,
     ): VoiceTutorGeneratedResult {
+        var originalCancellation: CancellationException? = null
+        return try {
+            withContext(VoiceTutorSummaryRetryContext()) {
+                try {
+                    summarizeAttempts(session, transcript)
+                } catch (error: CancellationException) {
+                    originalCancellation = error
+                    throw error
+                }
+            }
+        } catch (error: CancellationException) {
+            // The checkpoint context can add a coroutine stack-trace recovery
+            // copy. Preserve the worker cancellation rather than replacing it.
+            throw originalCancellation ?: error
+        }
+    }
+
+    private suspend fun summarizeAttempts(
+        session: VoiceTutorSession,
+        transcript: List<VoiceTutorTranscriptTurn>,
+    ): VoiceTutorGeneratedResult {
         val maxAttempts = properties.voiceTutor.summaryMaxAttempts.coerceIn(1, MAX_SUMMARY_ATTEMPTS)
         val initialDelayMs = properties.voiceTutor.summaryRetryInitialDelayMs.coerceIn(0, MAX_SUMMARY_RETRY_DELAY_MS)
         val maximumDelayMs = properties.voiceTutor.summaryRetryMaxDelayMs
             .coerceIn(initialDelayMs, MAX_SUMMARY_RETRY_DELAY_MS)
         var lastFailure: Exception? = null
         repeat(maxAttempts) { zeroBasedAttempt ->
+            coroutineContext[VoiceTutorSummaryRetryContext]?.beginAttempt(zeroBasedAttempt + 1)
             try {
                 return summaries.summarize(session, transcript)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 lastFailure = error
+                if (generateSequence<Throwable>(error) { it.cause }.take(8)
+                        .filterIsInstance<OpenAIRequestFailure>().any { !it.retryable }) throw error
                 val attempt = zeroBasedAttempt + 1
                 if (attempt >= maxAttempts) return@repeat
                 val retryDelayMs = voiceTutorSummaryRetryDelayMillis(

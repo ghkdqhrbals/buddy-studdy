@@ -51,6 +51,104 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = ["select_voice_study", "advance_voice_study"])
+    fun `accepted leaf continues once after focus output and exact server call ACK without model lookup round`(tool: String) {
+        opening(); speech(1); committed("u1"); created("selection-response")
+        toolDone("selection-response", "selection", tool); controller.beginTool("selection")
+        controller.completeTool("selection", automaticSelectionResult())
+        assertThat(sessionStates().last().path("revision").asLong()).isEqualTo(1)
+        assertThat(ui.count { it.path("type").asText() == Contract.STUDY_FOCUSED_EVENT }).isEqualTo(1)
+        assertThat(serverCalls()).isEmpty()
+        assertThat(responses()).hasSize(2)
+        val focusOutput = outbound.last { it.path("item").path("type").asText() == "function_call_output" }
+        event("conversation.item.created", "item" to focusOutput.path("item"))
+        val scheduled = serverCalls().single()
+        assertThat(scheduled.path("item").path("name").asText()).isEqualTo("request_question")
+        assertThat(mapper.readTree(scheduled.path("item").path("arguments").asText()).path("study_id").asLong()).isEqualTo(7)
+        assertThat(calls.map { it.name }).containsExactly(tool)
+        event("conversation.item.created", "item" to focusOutput.path("item"))
+        assertThat(serverCalls()).hasSize(1)
+        val id = scheduled.path("item").path("call_id").asText()
+        assertThat(controller.beginTool(id)).isFalse()
+        event("conversation.item.created", "item" to scheduled.path("item"))
+        event("conversation.item.created", "item" to scheduled.path("item"))
+        assertThat(calls.map { it.name }).containsExactly(tool, "request_question")
+        assertThat(controller.toolCanExecute(id)).isTrue()
+        assertThat(controller.toolRevision(id)).isEqualTo(1)
+        assertThat(controller.beginTool(id)).isTrue()
+        controller.completeTool(id, readbackResult())
+        assertThat(responses()).hasSize(2)
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+        assertThat(responses().last().path("response").path("instructions").asText()).contains(SAVED_QUESTION)
+        assertThat(answerStates()).isEmpty() // No answer controls until actual saved question audio.
+        assertThat(serverCalls()).hasSize(1)
+    }
+
+    @Test
+    fun `untrusted output flag cannot authorize an automatic lesson`() {
+        opening(); speech(1); committed("u1"); created("selection-response")
+        toolDone("selection-response", "selection", "select_voice_study"); controller.beginTool("selection")
+        controller.completeTool("selection", automaticSelectionResult().copy(
+            output = "{\"continueSelectedLesson\":true}", continueSelectedLesson = false))
+        ackToolOutput()
+        assertThat(serverCalls()).isEmpty()
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `new speech before selection completion or ACK prevents automatic work without losing committed focus`(beforeCompletion: Boolean) {
+        opening(); speech(1); committed("u1"); created("selection-response")
+        toolDone("selection-response", "selection", "select_voice_study"); controller.beginTool("selection")
+        if (beforeCompletion) client(Contract.SPEECH_STARTED_EVENT, 2)
+        controller.completeTool("selection", automaticSelectionResult())
+        if (!beforeCompletion) client(Contract.SPEECH_STARTED_EVENT, 2)
+        ackToolOutput()
+        assertThat(serverCalls()).isEmpty()
+        assertThat(sessionStates().last().path("revision").asLong()).isEqualTo(1)
+        client(Contract.SPEECH_STOPPED_EVENT, 2); committed("latest-request")
+        assertThat(serverCalls()).isEmpty()
+        assertThat(responses()).hasSize(3)
+    }
+
+    @Test
+    fun `durable curriculum choice immediately continues final leaf using the accepted GUI evidence`() {
+        val submissions = mutableListOf<VoiceTutorNativeConversationController.UserInputSubmission>()
+        controller.userInputActions().subscribe { submissions += it }
+        val request = curriculumForm()
+        inputControl(Contract.USER_INPUT_SUBMIT_EVENT, request, curriculumAnswers())
+        event("input_audio_buffer.cleared", "event_id" to "choice-clear")
+        val evidence = stored.last { mapper.readTree(it.raw).path("type").asText() == Metadata.STRUCTURED_USER_INPUT_EVENT }
+        controller.completeUserInputMutation(submissions.single().id, automaticSelectionResult())
+        assertThat(serverCalls()).isEmpty()
+        ackToolOutput()
+        val scheduled = serverCalls().single()
+        event("conversation.item.created", "item" to scheduled.path("item"))
+        val id = scheduled.path("item").path("call_id").asText()
+        assertThat(controller.toolBoundary(id)?.latestAcceptedLearnerProviderItemId).isEqualTo(evidence.itemId)
+        assertThat(controller.toolRevision(id)).isEqualTo(1)
+        assertThat(controller.toolCanExecute(id)).isTrue()
+        assertThat(responses()).hasSize(2)
+        assertThat(userInputStates().last().path("phase").asText()).isEqualTo("submitted")
+    }
+
+    @Test
+    fun `cancelling curriculum cannot be revived by late accepted selection completion`() {
+        val request = curriculumForm()
+        inputControl(Contract.USER_INPUT_CANCEL_EVENT, request)
+        event("input_audio_buffer.cleared", "event_id" to "cancel-clear")
+        controller.completeUserInputMutation(request.path("requestId").asText(), automaticSelectionResult())
+        ackToolOutput()
+        assertThat(serverCalls()).isEmpty()
+        assertThat(userInputStates().last().path("phase").asText()).isEqualTo("cancelled")
+    }
+
+    private fun automaticSelectionResult() = VoiceTutorMcpToolResult("{\"selected\":true}", false,
+        lessonRevision = 1, continueSelectedLesson = true,
+        lessonFocus = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(7, 1), VoiceTutorStudySnapshot(7, 1, "Selected leaf", 8, 1)))
+    private fun serverCalls() = outbound.filter { it.path("item").path("type").asText() == "function_call" }
+
+    @ParameterizedTest
     @ValueSource(strings = ["select_voice_study", "advance_voice_study", "list_pending_questions", "request_question"])
     fun `server curriculum gate presents an actual single and free text card and holds the original tool`(tool: String) {
         val request = curriculumForm(tool)

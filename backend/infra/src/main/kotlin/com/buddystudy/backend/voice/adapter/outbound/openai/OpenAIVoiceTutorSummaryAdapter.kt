@@ -5,9 +5,12 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
+import com.buddystudy.backend.study.application.openai.OpenAIRequestFailure
+import com.buddystudy.backend.externalapi.adapter.outbound.usage.OpenAIUsageRecorder
 import com.buddystudy.backend.voice.adapter.outbound.InvalidVoiceTutorExploration
 import com.buddystudy.backend.voice.adapter.outbound.VoiceTutorExplorationJsonCodec
 import com.buddystudy.backend.voice.application.model.VoiceTutorGeneratedResult
+import com.buddystudy.backend.voice.application.model.VoiceTutorSummaryRetryContext
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorStudyContextPort
 import com.buddystudy.backend.voice.application.port.outbound.UnavailableVoiceTutorLessonFocusPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusPort
@@ -33,6 +36,8 @@ import org.springframework.web.reactive.function.client.ExchangeFunction
 import org.springframework.web.reactive.function.client.WebClient
 import reactor.core.publisher.Mono
 import java.time.Duration
+import java.security.MessageDigest
+import kotlin.coroutines.coroutineContext
 
 @Component
 class OpenAIVoiceTutorSummaryAdapter private constructor(
@@ -62,6 +67,7 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
         .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val usage = OpenAIUsageRecorder()
 
     override suspend fun summarize(
         session: VoiceTutorSession,
@@ -134,6 +140,8 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
                 )
             },
         )
+        val startedAt = System.nanoTime()
+        var providerStatus: Int? = null
         val response = try {
             val key = keys.requireApiKey()
             client.post()
@@ -142,23 +150,30 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(session.userId, key)))
                 .exchangeToMono { result ->
+                    providerStatus = result.statusCode().value()
                     if (result.statusCode().is2xxSuccessful) {
                         result.bodyToMono(String::class.java)
                     } else {
                         logger.warn("voice_tutor_summary_provider_rejected status={}", result.statusCode().value())
-                        // Provider bodies can echo private transcript or key
-                        // material. Discard rather than retain them in errors.
-                        result.releaseBody().then(Mono.error(providerFailure()))
+                        // Read only exact retry metadata; provider body and
+                        // private content never enter errors, history, or logs.
+                        result.bodyToMono(String::class.java).defaultIfEmpty("")
+                            .flatMap { Mono.error<String>(providerFailure(providerStatus!!, it)) }
                     }
                 }
                 .timeout(Duration.ofSeconds(properties.openai.requestTimeoutSeconds.coerceIn(5, 180)))
                 .awaitSingle()
         } catch (error: CancellationException) {
+            recordUsage("extract_result", "cancelled", startedAt, providerStatus)
             throw error
         } catch (error: Exception) {
+            recordUsage("extract_result", "failed", startedAt, providerStatus)
             logger.warn("voice_tutor_summary_provider_failed errorType={}", error.javaClass.simpleName)
+            if (error is ApiException) throw error
             throw providerFailure()
         }
+        recordUsage("extract_result", "succeeded", startedAt, providerStatus,
+            runCatching { mapper.readTree(response).path("usage") }.getOrNull())
         val root = runCatching { mapper.readTree(response) }.getOrNull()
             ?: invalidResponse("INVALID_JSON")
         val choices = root.path("choices")
@@ -233,6 +248,16 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
             properties.voiceTutor.summaryModel, session, transcript, focuses, snapshots,
             properties.voiceTutor.transcriptMaxCharacters.coerceIn(1, 1_000_000),
         )
+        val retry = coroutineContext[VoiceTutorSummaryRetryContext]
+        // The full immutable sources, including omitted/truncated turns, fence
+        // reuse. Keep only a digest and verified IDs in the current retry scope.
+        val fingerprint = MessageDigest.getInstance("SHA-256").digest(mapper.writeValueAsBytes(listOf(
+            session.userId, session.id, session.acceptedStudyId, properties.voiceTutor.summaryPromptVersion,
+            body, transcript, focuses, snapshots,
+        ))).joinToString("") { "%02x".format(it) }
+        retry?.find(fingerprint)?.let { return it }
+        val startedAt = System.nanoTime()
+        var providerStatus: Int? = null
         val response = try {
             val key = keys.requireApiKey()
             client.post().uri("/v1/chat/completions")
@@ -240,19 +265,26 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body + ("safety_identifier" to VoiceTutorSafetyIdentifier.create(session.userId, key)))
                 .exchangeToMono { result ->
+                    providerStatus = result.statusCode().value()
                     if (result.statusCode().is2xxSuccessful) result.bodyToMono(String::class.java) else {
                         logger.warn("voice_tutor_post_call_evidence_rejected status={}", result.statusCode().value())
-                        result.releaseBody().then(Mono.error(providerFailure()))
+                        result.bodyToMono(String::class.java).defaultIfEmpty("")
+                            .flatMap { Mono.error<String>(providerFailure(providerStatus!!, it)) }
                     }
                 }
                 .timeout(Duration.ofSeconds(properties.openai.requestTimeoutSeconds.coerceIn(5, 180)))
                 .awaitSingle()
         } catch (error: CancellationException) {
+            recordUsage("classify_evidence", "cancelled", startedAt, providerStatus)
             throw error
         } catch (error: Exception) {
+            recordUsage("classify_evidence", "failed", startedAt, providerStatus)
             logger.warn("voice_tutor_post_call_evidence_failed errorType={}", error.javaClass.simpleName)
+            if (error is ApiException) throw error
             throw providerFailure()
         }
+        recordUsage("classify_evidence", "succeeded", startedAt, providerStatus,
+            runCatching { mapper.readTree(response).path("usage") }.getOrNull())
         return try {
             val root = mapper.readTree(response)
             val choices = root.path("choices")
@@ -263,7 +295,10 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
             require(!message.hasNonNull("refusal") && message.path("content").isTextual)
             VoiceTutorPostCallEvidencePrompt.parse(
                 mapper.readTree(message.path("content").textValue()), session, transcript, focuses,
-            )
+            ).also { evidence ->
+                require(evidence.attestedTranscript(session.id, transcript, focuses, session.acceptedStudyId) != null)
+                retry?.remember(fingerprint, evidence)
+            }
         } catch (error: Exception) {
             // Do not retain invalid provider/source contents in a cause or diagnostics.
             invalidResponse("INVALID_POST_CALL_EVIDENCE")
@@ -292,6 +327,26 @@ class OpenAIVoiceTutorSummaryAdapter private constructor(
             HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.VOICE_TUTOR_PROVIDER_UNAVAILABLE,
             "Voice Tutor summary response was invalid.",
         )
+    }
+
+    private suspend fun recordUsage(stage: String, outcome: String, startedAt: Long, status: Int?, tokens: com.fasterxml.jackson.databind.JsonNode? = null) {
+        val attempt = coroutineContext[VoiceTutorSummaryRetryContext]?.attempt ?: 1
+        runCatching {
+            usage.record("voice_summary", stage, properties.voiceTutor.summaryModel, outcome,
+                usageJson = tokens, durationMs = (System.nanoTime() - startedAt) / 1_000_000,
+                attempt = attempt, maxRetries = properties.voiceTutor.summaryMaxAttempts.coerceIn(1, 5) - 1,
+                httpStatus = status, granularity = "provider_response")
+        }
+    }
+
+    private fun providerFailure(status: Int, body: String): ApiException {
+        val error = runCatching { mapper.readTree(body).path("error") }.getOrNull()
+        val quota = status == 429 && (error?.path("code")?.asText() in setOf("credit_balance_exhausted", "insufficient_quota") ||
+            error?.path("type")?.asText() == "insufficient_quota")
+        val retryable = !quota && (status == 408 || status == 429 || status in 500..599)
+        return providerFailure().also {
+            it.initCause(OpenAIRequestFailure(retryable, IllegalStateException("Provider rejected summary request.")))
+        }
     }
 
     private companion object {

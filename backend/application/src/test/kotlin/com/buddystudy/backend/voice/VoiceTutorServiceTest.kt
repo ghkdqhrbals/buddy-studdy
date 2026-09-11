@@ -1290,6 +1290,23 @@ class VoiceTutorServiceTest {
     }
 
     @Test
+    fun `structured permanent provider failure is terminal without exhausting summary retries`() = runBlocking<Unit> {
+        val persistence = summaryFixture()
+        var calls = 0
+        val service = service(persistence, summaries = object : VoiceTutorSummaryPort {
+            override suspend fun summarize(session: VoiceTutorSession, transcript: List<VoiceTutorTranscriptTurn>): VoiceTutorGeneratedResult {
+                calls++
+                throw com.buddystudy.backend.study.application.openai.OpenAIRequestFailure(false,
+                    IllegalStateException("PRIVATE_PROVIDER_DETAIL"))
+            }
+        })
+        service.recoverPendingResults(10)
+        assertThat(calls).isEqualTo(1)
+        assertThat(persistence.session.resultStatus).isEqualTo(VoiceTutorResultStatus.FAILED)
+        assertThat(persistence.storedResult?.errorMessage).doesNotContain("PRIVATE_PROVIDER_DETAIL")
+    }
+
+    @Test
     fun `an exhausted summary provider failure is terminal and never copies private exception content`() = runBlocking<Unit> {
         val persistence = summaryFixture()
         var calls = 0

@@ -11,12 +11,51 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.slf4j.MDC
 
 class ExternalApiHistoryRecorderTest {
+    @Test
+    fun `failed history finish cannot turn a paid successful response into retry`() = runBlocking<Unit> {
+        val history = RecordingHistoryUseCase().apply { finishFailure = IllegalStateException("database unavailable") }
+        var calls = 0
+        val result = recorder(history).record(
+            ExternalApiRequest("openai", "generate-question", "POST", "https://api.openai.com/v1/chat/completions"),
+        ) { calls++; ExternalApiResponse("paid result", body = "private result") }
+        assertThat(result).isEqualTo("paid result")
+        assertThat(calls).isEqualTo(1)
+        assertThat(history.started).hasSize(1)
+        assertThat(history.finished.size).isGreaterThan(1)
+    }
+
+    @Test
+    fun `history failure does not replace the original provider error or cancellation`() = runBlocking<Unit> {
+        for (original in listOf(IllegalArgumentException("provider rejected"), CancellationException("cancelled"))) {
+            val history = RecordingHistoryUseCase().apply { finishFailure = IllegalStateException("database unavailable") }
+            val thrown = runCatching {
+                recorder(history).record<String>(
+                    ExternalApiRequest("openai", "generate-question", "POST", "https://api.openai.com/v1/chat/completions"),
+                ) { throw original }
+            }.exceptionOrNull()
+            assertThat(thrown).isSameAs(original)
+        }
+    }
+
+    @Test
+    fun `cancellation while finishing history stays cancelled and is never retried`() = runBlocking<Unit> {
+        val cancelled = CancellationException("worker stopped")
+        val history = RecordingHistoryUseCase().apply { finishFailure = cancelled }
+        val thrown = runCatching {
+            recorder(history).record(
+                ExternalApiRequest("openai", "generate-question", "POST", "https://api.openai.com/v1/chat/completions"),
+            ) { ExternalApiResponse("paid result") }
+        }.exceptionOrNull()
+        assertThat(thrown).isSameAs(cancelled)
+        assertThat(history.finished).hasSize(1)
+    }
     @Test
     fun `private learning scope bypasses provider history across child dispatchers and restores normal logging`() = runBlocking<Unit> {
         val history = RecordingHistoryUseCase()
@@ -137,6 +176,7 @@ class ExternalApiHistoryRecorderTest {
     private class RecordingHistoryUseCase : ExternalApiCallHistoryUseCase {
         val started = mutableListOf<StartExternalApiCallCommand>()
         val finished = mutableListOf<FinishExternalApiCallCommand>()
+        var finishFailure: Exception? = null
 
         override suspend fun start(command: StartExternalApiCallCommand) {
             started += command
@@ -144,6 +184,7 @@ class ExternalApiHistoryRecorderTest {
 
         override suspend fun finish(command: FinishExternalApiCallCommand) {
             finished += command
+            finishFailure?.let { throw it }
         }
     }
 }

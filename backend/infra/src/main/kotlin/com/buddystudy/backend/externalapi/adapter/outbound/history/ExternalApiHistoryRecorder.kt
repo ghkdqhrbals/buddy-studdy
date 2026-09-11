@@ -59,7 +59,7 @@ class ExternalApiHistoryRecorder(
             call()
         } catch (error: Throwable) {
             val httpError = httpFailure(error)
-            finish(
+            finishAfterProviderResult(
                 callId = callId,
                 status = when {
                     error is CancellationException -> "CANCELLED"
@@ -74,7 +74,7 @@ class ExternalApiHistoryRecorder(
             )
             throw error
         }
-        finish(
+        finishAfterProviderResult(
             callId = callId,
             status = if (response.statusCode in 200..299) "SUCCEEDED" else "HTTP_ERROR",
             responseStatus = response.statusCode,
@@ -155,13 +155,36 @@ class ExternalApiHistoryRecorder(
             try {
                 history.finish(command)
                 return
-            } catch (error: Throwable) {
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
                 lastFailure = error
                 if (attempt + 1 < FINISH_ATTEMPTS) delay(FINISH_RETRY_DELAY_MS)
             }
         }
-        logger.error("external_api_history_finish_failed callId={} status={}", callId, status, lastFailure)
+        logger.error("external_api_history_finish_failed callId={} status={} errorType={}",
+            callId, status, lastFailure?.javaClass?.simpleName)
         throw IllegalStateException("External API response history could not be persisted for call $callId.", lastFailure)
+    }
+
+    /** A successful paid provider operation must not be replayed because its
+     * audit receipt could not be updated. The STARTED history row is retained. */
+    private suspend fun finishAfterProviderResult(
+        callId: String,
+        status: String,
+        responseStatus: Int?,
+        responseHeaders: Map<String, String>,
+        responseBody: String?,
+        errorType: String? = null,
+        errorMessage: String? = null,
+    ) {
+        try {
+            finish(callId, status, responseStatus, responseHeaders, responseBody, errorType, errorMessage)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // finish already emits bounded metadata. Never log the body here.
+        }
     }
 
     private companion object {

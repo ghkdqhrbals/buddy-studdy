@@ -3317,15 +3317,15 @@ class McpVoiceTutorToolAdapterTest {
             .doesNotContain("create_root_study", "create_study_topic", "update_study", "delete_study", "submit_answer")
         assertThat(catalog.joinToString { it.description }).doesNotContain("server-owned: never originate", "one-shot target attested")
         assertThat(catalog.single { it.name == "select_voice_study" }.description)
-            .contains("curriculumTerminal", "original root", "form is pending", "final voiceLessonFocus.studyId", "list_pending_questions separately", "On cancellation", "does not roll back")
+            .contains("curriculumTerminal", "original root", "form is pending", "final voiceLessonFocus", "automatically", "On cancellation", "does not roll back")
         assertThat(catalog.single { it.name == "advance_voice_study" }.description)
-            .contains("curriculum gate", "wait for the app choice", "final voiceLessonFocus.studyId", "list_pending_questions separately", "cancellation or topic switch")
-        assertThat(catalog.single { it.name == "list_studies" }.description).contains("No questions", "limit 10", "curriculumTerminal")
+            .contains("curriculum gate", "wait for the app choice", "final voiceLessonFocus", "automatically", "cancellation or topic switch")
+        assertThat(catalog.single { it.name == "list_studies" }.description).contains("no questions", "limit 10", "curriculumTerminal")
             .doesNotContain("including pending")
         assertThat(jacksonObjectMapper().valueToTree<JsonNode>(catalog.single { it.name == "list_studies" }.parameters)
             .path("properties").path("limit").path("default").asInt()).isEqualTo(10)
         assertThat(catalog.single { it.name == "prepare_voice_study_mutation" }.description)
-            .contains("new root defaults to 5", "Child creation always inherits the original main root level")
+            .contains("new root defaults to 5", "child creation always inherits the original main root level")
         val denied = fixture.adapter.execute(nativeContext(), "create_root_study", mapOf("topic" to "Spring", "difficulty_level" to 7))
         assertThat(json(denied).path("error").path("code").asText()).isEqualTo("PROPOSAL_REQUIRED")
         assertThat(fixture.calls).isEmpty()
@@ -3368,6 +3368,27 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(store.remembered).isEmpty()
         assertThat(store.revised).isEmpty()
         assertThat(rawPage.toString()).contains("PRIVATE_ANSWER_HINT")
+    }
+
+    @Test
+    fun `native single topic lookup projects metadata before output bounds while retaining verified candidate evidence`() = runBlocking<Unit> {
+        val full = mapOf("id" to 201L, "parentStudyId" to 101L, "topic" to "Redis", "difficultyLevel" to 8,
+            "sortOrder" to 0, "enabled" to true, "activeForQuestions" to false, "curriculumTerminal" to true,
+            "customPrompt" to "PRIVATE_PROMPT".repeat(2_000),
+            "pendingQuestion" to mapOf("question" to "PRIVATE_QUESTION", "expectedAnswerHint" to "PRIVATE_HINT"),
+            "latestQuestion" to mapOf("answer" to "PRIVATE_ANSWER", "gradingResult" to "PRIVATE_GRADE"))
+        val fixture = Fixture(studyContexts = ContextStore()).apply { handler = { _, _ -> success(full) } }
+        val result = fixture.adapter.execute(nativeContext(), "get_study", mapOf("study_id" to 201L))
+        assertThat(result.isError).isFalse()
+        assertThat(json(result).fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+            "id", "parentStudyId", "topic", "difficultyLevel", "sortOrder", "enabled", "activeForQuestions", "curriculumTerminal")
+        assertThat(json(result).path("parentStudyId").asLong()).isEqualTo(101L)
+        assertThat(json(result).path("curriculumTerminal").asBoolean()).isTrue()
+        assertThat(result.candidateDiscovery?.candidates).containsExactly(VoiceTutorStudyTargetCandidate(201, 101, "Redis"))
+        assertThat(result.output).doesNotContain("PRIVATE_", "pendingQuestion", "latestQuestion", "customPrompt")
+        assertThat(result.output.toByteArray().size).isLessThan(300)
+        assertThat(fixture.calls.map { it.name }).containsExactly("get_study")
+        assertThat(fixture.focusSelections).isEmpty()
     }
 
     @Test
@@ -3548,7 +3569,7 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `native focus returns committed revision before a separate pending lookup preserves the saved question`() = runBlocking<Unit> {
+    fun `native focus returns committed revision before automatic continuation reuses the saved question`() = runBlocking<Unit> {
         val contexts = ContextStore()
         val fixture = Fixture(studyContexts = contexts).apply {
             focusResult = focusSelection(101, 1)
@@ -3574,12 +3595,13 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(selected.questionChange).isNull()
         assertThat(selected.questionReadback).isNull()
         assertThat(selected.learningProgress).isNull()
-        assertThat(json(selected).path("voiceQuestion")).isEqualTo(mapper.readTree("""{"lookupRequired":true}"""))
-        assertThat(json(selected).path("notice").asText()).contains("selection is complete", "No selection operation is running")
+        assertThat(selected.continueSelectedLesson).isTrue()
+        assertThat(json(selected).path("voiceQuestion")).isEqualTo(mapper.readTree("""{"automaticContinuation":true}"""))
+        assertThat(json(selected).path("notice").asText()).contains("Selection is complete", "no extra tool or confirmation is needed")
         assertThat(fixture.calls.map { it.name }).containsExactly("get_study", "get_study")
 
         val pending = fixture.adapter.execute(nativeContext(currentRevision = selected.lessonRevision!!),
-            "list_pending_questions", mapOf("study_id" to 101L))
+            "request_question", mapOf("study_id" to 101L))
         assertThat(pending.isError).isFalse()
         assertThat(pending.questionReadback?.question).isEqualTo("Redis가 무엇인가요?")
         assertThat(pending.questionChange?.recordId).isEqualTo("301")
@@ -3634,7 +3656,7 @@ class McpVoiceTutorToolAdapterTest {
     }
 
     @Test
-    fun `native child advance completes its committed focus without starting question work`() = runBlocking<Unit> {
+    fun `native child advance commits focus before scheduling question continuation`() = runBlocking<Unit> {
         val contexts = ContextStore()
         val fixture = Fixture(studyContexts = contexts).apply {
             focusResult = VoiceTutorLessonFocusSelection(VoiceTutorLessonFocus(102, 1),
@@ -3653,7 +3675,8 @@ class McpVoiceTutorToolAdapterTest {
         assertThat(result.lessonFocus).isEqualTo(fixture.focusResult)
         assertThat(result.questionReadback).isNull()
         assertThat(result.learningProgress).isNull()
-        assertThat(json(result).path("voiceQuestion").path("lookupRequired").asBoolean()).isTrue()
+        assertThat(json(result).path("voiceQuestion").path("automaticContinuation").asBoolean()).isTrue()
+        assertThat(result.continueSelectedLesson).isTrue()
         assertThat(fixture.calls.map { it.name }).containsExactly("get_study", "get_study", "get_study")
         assertThat(fixture.focusSelections).containsExactly(102L)
     }

@@ -14,20 +14,24 @@ class VoiceTutorUserInputContractTest {
     @Test
     fun `tool guidance reserves blocking forms for necessary study decisions without duplicating curriculum cards`() {
         assertThat(VoiceTutorUserInputContract.definition.description)
-            .contains("ONLY for a necessary unresolved decision", "ambiguous saved topics", "selecting several subtopics")
-            .contains("learner explicitly requests selectable options", "Study and curriculum learning are the default purpose")
-            .contains("Never ask the learner to choose a mode", "one simple missing fact", "clear topic/start agreement")
-            .contains("read real saved topics and recommend a concrete direction aloud")
-            .contains("never duplicate it with this tool", "Wait for the exact tool result", "Cancellation is no consent")
+            .contains("necessary unresolved", "learner-requested options", "Learning is the default")
+            .contains("never ask for a mode", "clear start agreement", "routine next step")
+            .contains("do not duplicate a server curriculum card", "wait silently for its result", "Cancellation is not consent")
+            .contains("never authorize writes", "original root level", "creates only selected topics", "prepare/confirm")
             .doesNotContain("REQUIRED whenever", "ordinary preference choices")
     }
 
     @Test
-    fun `provider schema stays a root object with nested supported mode alternatives`() {
+    fun `provider schema keeps one compact question structure and a root object`() {
         assertThat(validator.validateSchema(schema).valid()).isTrue()
         assertThat(schema["type"]).isEqualTo("object")
         assertThat(schema).doesNotContainKeys("anyOf", "oneOf", "allOf", "if", "then", "else")
         assertThat(validator.validate(schema, emptyMap<String, Any>()).valid()).isFalse()
+        val item = node(schema).path("properties").path("questions").path("items")
+        assertThat(item.has("anyOf")).isFalse()
+        assertThat(item.path("properties").path("selectionMode").path("enum").map { it.asText() })
+            .containsExactly("single", "multiple", "text")
+        assertThat(mapper.writeValueAsBytes(schema).size).isLessThan(2_200)
     }
 
     @Test
@@ -45,7 +49,7 @@ class VoiceTutorUserInputContractTest {
     }
 
     @Test
-    fun `SDK and runtime reject incompatible mode options free text and identifiers`() {
+    fun `runtime rejects conditional mode mismatches and SDK still rejects malformed structure`() {
         val invalidQuestions = listOf(
             question("single") + ("options" to emptyList<Any>()),
             question("multiple") + ("options" to emptyList<Any>()),
@@ -60,7 +64,9 @@ class VoiceTutorUserInputContractTest {
         )
         invalidQuestions.forEachIndexed { index, question ->
             val arguments = form(question)
-            assertThat(validator.validate(schema, arguments).valid()).describedAs("schema case %s", index).isFalse()
+            // The compact provider schema shares three modes; their conditional
+            // rules remain mandatory at the server boundary, not in duplicated schemas.
+            assertThat(validator.validate(schema, arguments).valid()).describedAs("schema case %s", index).isEqualTo(index < 4)
             assertThat(VoiceTutorUserInputContract.validToolArguments(node(arguments)))
                 .describedAs("runtime case %s", index).isFalse()
         }

@@ -284,10 +284,10 @@ class VoiceTutorNativeSessionRelayTest {
                 val definition = f.outgoing.first { it.path("type").asText() == "session.update" }
                     .path("session").path("tools").single { it.path("name").asText() == "request_user_input" }
                 val questionSchema = definition.path("parameters").path("properties").path("questions").path("items")
-                val alternatives = questionSchema.path("anyOf")
-                alternatives.forEach { schema -> assertThat(schema.path("required").map { it.asText() })
-                    .contains("id", "prompt", "selectionMode", "options", "allowFreeText") }
-                assertThat(alternatives.map { it.path("properties").path("selectionMode").path("enum")[0].asText() })
+                assertThat(questionSchema.has("anyOf")).isFalse()
+                assertThat(questionSchema.path("required").map { it.asText() })
+                    .contains("id", "prompt", "selectionMode", "options", "allowFreeText")
+                assertThat(questionSchema.path("properties").path("selectionMode").path("enum").map { it.asText() })
                     .containsExactly("single", "multiple", "text")
                 f.toolResponse("ordinary-$mode", "form-$mode", "request_user_input", json(arguments))
                 f.await("ordinary $mode form is shown") { f.inputRequests().size == 1 }
