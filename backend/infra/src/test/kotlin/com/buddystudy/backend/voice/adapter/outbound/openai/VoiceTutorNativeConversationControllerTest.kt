@@ -1167,6 +1167,15 @@ class VoiceTutorNativeConversationControllerTest {
                         .contains("Do not automatically switch languages", "return to $name on this reply")
                         .contains("# Current response", "Say exactly this one")
                     assertThat(response.path("tool_choice").asText()).isEqualTo("none")
+                    if (!quota) {
+                        val opening = when (language) {
+                            "en" -> "What would you like to study today?"
+                            "ja" -> "今日はどのテーマを勉強しましょうか？"
+                            else -> "오늘은 어떤 주제를 공부할까요?"
+                        }
+                        assertThat(response.path("instructions").asText()).contains(opening)
+                            .doesNotContain("어떤 주제로 이야기해", "like to talk about", "テーマについて話し")
+                    }
                 } finally {
                     selected.close()
                     subscription.dispose()

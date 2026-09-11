@@ -430,6 +430,8 @@ Public community feed
   existing answer ID, recognized tail and edited draft survive the break. One
   rendered control follows compact/transcript anchor interpolation alongside
   the orb, with coordinated color/content transitions and Reduce Motion support.
+- The provider session policy defaults to curriculum-based study, including unselected discovery calls. Shared localized opening copy is used by both native and legacy response overrides; iOS displays the same study question. Recommendation requests inspect actual saved topics rather than creating generic mode menus or unrelated small talk. The model chooses tools semantically from the conversation; no keyword classifier or extra permission model is introduced.
+- The session instructions and `request_user_input` tool description both reserve blocking forms for necessary unresolved study/action decisions, multi-selection, or explicitly requested options. Simple missing facts, greetings, microphone checks, clear start agreements and routine progression remain conversational. Mandatory server-owned curriculum and topic-creation cards keep their existing authority and cancellation semantics, without duplicate preference forms.
 - `request_user_input` is an asynchronous, server-owned provider-tool continuation.
   Only a control connection advertising `X-Voice-User-Input-Protocol: user-input-v1`
   can enable it; old native clients retain the prior catalog and cannot enter

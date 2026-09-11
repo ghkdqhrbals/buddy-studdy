@@ -139,7 +139,7 @@ class VoiceTutorMcpRelayTest {
                 .contains("Do not greet the learner")
                 .contains("Do not", "introduce or name yourself", "AI/tutor/teacher")
                 .contains("Do not translate it")
-                .contains("어떤 주제로 이야기해 볼까요?")
+                .contains("오늘은 어떤 주제를 공부할까요?")
             val token = create.path("event_id").asText()
             controller.observeProviderEvent(response("response.created", emptyList(), token, "in_progress"))
             assertThatThrownBy {
@@ -152,9 +152,9 @@ class VoiceTutorMcpRelayTest {
     @Test
     fun `opening response pins one exact sentence to the authenticated session language`() {
         val openings = linkedMapOf(
-            "ko" to "어떤 주제로 이야기해 볼까요?",
-            "en" to "What topic would you like to talk about?",
-            "ja" to "どんなテーマについて話しましょうか？",
+            "ko" to "오늘은 어떤 주제를 공부할까요?",
+            "en" to "What would you like to study today?",
+            "ja" to "今日はどのテーマを勉強しましょうか？",
         )
 
         openings.forEach { (language, expected) ->

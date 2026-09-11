@@ -19,9 +19,9 @@ object VoiceTutorLanguagePolicy {
     }
 
     fun openingQuestion(language: String): String = when (language) {
-        "ko" -> "어떤 주제로 이야기해 볼까요?"
-        "en" -> "What topic would you like to talk about?"
-        "ja" -> "どんなテーマについて話しましょうか？"
+        "ko" -> "오늘은 어떤 주제를 공부할까요?"
+        "en" -> "What would you like to study today?"
+        "ja" -> "今日はどのテーマを勉強しましょうか？"
         else -> throw IllegalArgumentException("Unsupported Voice Tutor conversation language.")
     }
 

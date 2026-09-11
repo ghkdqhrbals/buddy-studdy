@@ -117,10 +117,18 @@ internal object VoiceTutorUserInputContract {
         allowedFields(node, required) && node.size() == required.size
 
     val definition = VoiceTutorMcpToolDefinition(TOOL,
-        "REQUIRED whenever you ask the learner to choose recommendations, preferences, topics, a learning direction or the next step: show selectable options in the app instead of just speaking a list or asking which one aloud. " +
+        "Use a blocking choice form ONLY for a necessary unresolved decision that materially changes the study curriculum or action, " +
+            "such as ambiguous saved topics or selecting several subtopics, or when the learner explicitly requests selectable options. " +
+            "Study and curriculum learning are the default purpose. Never ask the learner to choose a mode such as saved study, new study or free conversation. " +
+            "For a greeting, microphone check, one simple missing fact, a recommendation request, a clear topic/start agreement, " +
+            "readiness or a routine next step, respond briefly or continue the agreed study without this tool. " +
+            "If the learner asks what to study, read real saved topics and recommend a concrete direction aloud; do not invent a blocking decision. " +
+            "Before opening a form, check whether the conversation or saved state already answers it, or a reversible recommendation will suffice. " +
+            "When a necessary decision remains, show concrete selectable options with this tool instead of only speaking a list. " +
+            "A server-owned curriculum card from select_voice_study already collects the necessary branch choice: never duplicate it with this tool. " +
             "Use exactly one argument shape: ordinary choices contain only title and questions (both required), or a topic-creation proposal contains only studyTopicProposal. Never mix these shapes or send an empty object. " +
             "Each ordinary question needs id, prompt, selectionMode, options and allowFreeText. Question IDs and option IDs use only A-Z, a-z, 0-9, underscore and hyphen, and must be unique within their question/request. " +
-            "Use one request with 1-5 questions and single, multiple or text selection; allowFreeText=true accompanies ordinary preference choices so the learner can type an alternative. " +
+            "Bundle only necessary unresolved decisions in one request with 1-5 questions and single, multiple or text selection; allowFreeText=true accompanies ordinary choices so the learner can type an alternative. " +
             "Single and multiple modes require 1-8 options; text mode requires options=[] and allowFreeText=true. " +
             "Call this tool alone in its response. No option is preselected and nothing is applied until Submit. " +
             "Wait for the exact tool result; never keep speaking, call more tools, or infer answers while it is pending. " +

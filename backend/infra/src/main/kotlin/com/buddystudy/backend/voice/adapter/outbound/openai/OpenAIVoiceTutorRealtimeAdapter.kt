@@ -6423,11 +6423,11 @@ internal class VoiceTutorDuplexTurnController(
             SELECT_VOICE_STUDY_TOOL,
         )
         fun openingResponseInstructions(language: String): String {
-            val exactOpening = when (QuestionLanguage.normalize(language)) {
-                QuestionLanguage.ENGLISH -> "What topic would you like to talk about?"
-                QuestionLanguage.JAPANESE -> "どんなテーマについて話しましょうか？"
-                else -> "어떤 주제로 이야기해 볼까요?"
-            }
+            val exactOpening = VoiceTutorLanguagePolicy.openingQuestion(when (QuestionLanguage.normalize(language)) {
+                QuestionLanguage.ENGLISH -> "en"
+                QuestionLanguage.JAPANESE -> "ja"
+                else -> "ko"
+            })
             return "Say exactly this one sentence and nothing else: $exactOpening " +
                 "Do not translate it. Do not greet the learner, use a lead-in, introduce or name yourself, " +
                 "describe your role, say that you are an AI/tutor/teacher, mention readiness, or call any tool."

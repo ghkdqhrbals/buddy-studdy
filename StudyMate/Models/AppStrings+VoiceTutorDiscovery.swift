@@ -11,9 +11,9 @@ extension AppStrings {
 
     var voiceTutorDiscoveryPrompt: String {
         switch language {
-        case .korean: "어떤 주제로 이야기해 볼까요?"
-        case .english: "What topic would you like to talk about?"
-        case .japanese: "どのテーマについて話しましょうか？"
+        case .korean: "오늘은 어떤 주제를 공부할까요?"
+        case .english: "What would you like to study today?"
+        case .japanese: "今日はどのテーマを勉強しましょうか？"
         }
     }
 }

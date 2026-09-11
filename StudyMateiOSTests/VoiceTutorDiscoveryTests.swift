@@ -233,9 +233,9 @@ final class VoiceTutorDiscoveryTests: XCTestCase {
 
     func testDiscoveryLabelsAreLocalizedWithoutInventingATopic() {
         let expected: [AppLanguage: (String, String)] = [
-            .korean: ("AI 선생님", "어떤 주제로 이야기해 볼까요?"),
-            .english: ("AI tutor", "What topic would you like to talk about?"),
-            .japanese: ("AI先生", "どのテーマについて話しましょうか？")
+            .korean: ("AI 선생님", "오늘은 어떤 주제를 공부할까요?"),
+            .english: ("AI tutor", "What would you like to study today?"),
+            .japanese: ("AI先生", "今日はどのテーマを勉強しましょうか？")
         ]
         for language in AppLanguage.allCases {
             let strings = AppStrings(language: language)

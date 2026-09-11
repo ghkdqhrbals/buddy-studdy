@@ -98,9 +98,9 @@ class VoiceTutorServiceTest {
             assertThat(requests.single().language).isEqualTo(language)
             val expectedLanguage = mapOf("ko" to "Korean", "en" to "English", "ja" to "Japanese").getValue(language)
             val expectedOpening = mapOf(
-                "ko" to "어떤 주제로 이야기해 볼까요?",
-                "en" to "What topic would you like to talk about?",
-                "ja" to "どんなテーマについて話しましょうか？",
+                "ko" to "오늘은 어떤 주제를 공부할까요?",
+                "en" to "What would you like to study today?",
+                "ja" to "今日はどのテーマを勉強しましょうか？",
             ).getValue(language)
             assertThat(requests.single().instructions)
                 .contains("# Language", "app-selected conversation language is $expectedLanguage ($language)")
@@ -291,7 +291,7 @@ class VoiceTutorServiceTest {
         assertThat(instructions)
             .contains("You, the realtime model hearing this conversation, decide its meaning")
             .contains("When request_user_input is available", "If this tool is absent, use the existing spoken interaction")
-            .contains("you MUST call it", "a spoken list", "allowFreeText=true")
+            .contains("When a request_user_input form is necessary", "a spoken list", "allowFreeText=true")
             .contains("The server subscribes to that saved process", "Do not repeatedly call get_question_process")
             .contains("An already clear ordinary preference needs no redundant form", "Only the server-controlled readback")
             .contains("답변 종료", "답변 제출")
@@ -318,6 +318,58 @@ class VoiceTutorServiceTest {
             .contains("Never interrupt an unfinished learner answer")
             .doesNotContain("Never originate create_root_study yourself", "never originate update_study yourself",
                 "server independently assesses", "one-shot server attestation", "confirmation_token")
+    }
+
+    // These assertions cover the trusted provider contract, not live-model compliance.
+    @Test
+    fun `discovery prompt makes study the default and grounds vague recommendations in saved topics`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now).apply { session = session.copy(studyId = null, acceptedStudyId = null) }
+        val instructions = service(persistence).connect(principal, persistence.session.id).instructions.substringBeforeLast('\n')
+        assertThat(instructions)
+            .contains("Study and curriculum-guided practice are the default purpose")
+            .contains("even when no topic has been selected")
+            .contains("Do not ask the learner to choose a conversation mode")
+            .contains("'뭐가 좋을까?' or 'what should I study?'")
+            .contains("inspect actual saved topics with list_studies/get_study and recommend one concrete topic conversationally")
+            .contains("a short reason grounded in the saved context")
+            .contains("an unrelated question about the learner's day")
+            .contains("a single missing topic name does not need a form")
+            .contains("A recommendation by itself does not authorize selecting or creating a study")
+            .doesNotContain("you MUST call it whenever YOU ask")
+    }
+
+    @Test
+    fun `input prompt reserves blocking forms for substantive unresolved choices and explicit requests`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val instructions = service(persistence).connect(principal, persistence.session.id).instructions.substringBeforeLast('\n')
+        assertThat(instructions)
+            .contains("use it only when the learner explicitly requests selectable or written input")
+            .contains("a genuinely unresolved study decision blocks progress")
+            .contains("multiple substantive alternatives or several related setup answers that need one form")
+            .contains("Greetings, microphone checks, a single simple missing fact, factual questions, thinking pauses, clear agreements, readiness and routine next steps do not require a form")
+            .contains("For a simple clarification, ask one short spoken question and accept its natural answer")
+            .contains("do not manufacture a blocking decision to justify a form")
+            .contains("does not bypass a mandatory server-owned curriculum card for a nonterminal topic")
+            .contains("the exact studyTopicProposal form for selected topic creation")
+            .contains("Put related questions in the same form")
+            .contains("wait silently for the exact submitted/cancelled result")
+            .doesNotContain("you MUST call it whenever YOU ask")
+    }
+
+    @Test
+    fun `study first prompt advances clear choices once while preserving explicit cancellation and breaks`() = runBlocking<Unit> {
+        val persistence = FakePersistence(now)
+        val instructions = service(persistence).connect(principal, persistence.session.id).instructions.substringBeforeLast('\n')
+        assertThat(instructions)
+            .contains("agrees to the concrete recommendation, continue select_voice_study and its curriculum flow immediately")
+            .contains("Apply the actual submitted choice to the existing study flow without asking for the same choice or another readiness confirmation")
+            .contains("A contextual agreement to your offer to start, such as '그렇게 하자'")
+            .contains("await any mandatory curriculum GUI choices")
+            .contains("call cancel_voice_learning first")
+            .contains("Do not resume the old question automatically")
+            .contains("then listen without repeating that form, making a new selection or automatically restarting study")
+            .contains("Explicit requests to rest or chat are respected while learning remains stopped")
+            .contains("they are not the default opening mode")
     }
 
     @Test
@@ -763,9 +815,9 @@ class VoiceTutorServiceTest {
             val persistence = FakePersistence(now).apply { session = session.copy(language = language) }
             val trusted = service(persistence).connect(principal, persistence.session.id).instructions.substringBeforeLast('\n')
             val opening = mapOf(
-                "ko" to "어떤 주제로 이야기해 볼까요?",
-                "en" to "What topic would you like to talk about?",
-                "ja" to "どんなテーマについて話しましょうか？",
+                "ko" to "오늘은 어떤 주제를 공부할까요?",
+                "en" to "What would you like to study today?",
+                "ja" to "今日はどのテーマを勉強しましょうか？",
             ).getValue(language)
             assertThat(trusted)
                 .contains("Start with one short question: '$opening'")

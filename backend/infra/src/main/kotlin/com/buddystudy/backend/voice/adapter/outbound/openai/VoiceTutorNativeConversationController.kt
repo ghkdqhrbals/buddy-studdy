@@ -1115,11 +1115,8 @@ internal class VoiceTutorNativeConversationController(
                 "ja" -> "またお話ししましょう。"
                 else -> "다음에 또 이야기해요."
             }
-            isOpening -> "Say exactly this one question, without a greeting, self-introduction, name, AI title or readiness ceremony: " + when (language) {
-                "en" -> "What topic would you like to talk about?"
-                "ja" -> "どんなテーマについて話しましょうか？"
-                else -> "어떤 주제로 이야기해 볼까요?"
-            }
+            isOpening -> "Say exactly this one study question, without a greeting, self-introduction, name, AI title or readiness ceremony: " +
+                VoiceTutorLanguagePolicy.openingQuestion(language)
             learningNotice != null -> "Say exactly this short status notice once, then listen. No question, tool, retry or claim that saved work was cancelled: " + json(learningNotice)
             cancellationNotice -> VoiceTutorLearningCancellation.noticeInstructions(language)
             readback != null -> "Read only the exact saved question below verbatim aloud, then wait for the learner's answer. " +

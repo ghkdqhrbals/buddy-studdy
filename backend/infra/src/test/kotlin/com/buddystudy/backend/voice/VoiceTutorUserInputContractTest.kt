@@ -12,6 +12,17 @@ class VoiceTutorUserInputContractTest {
     private val schema = VoiceTutorUserInputContract.definition.parameters.mapValues { requireNotNull(it.value) }
 
     @Test
+    fun `tool guidance reserves blocking forms for necessary study decisions without duplicating curriculum cards`() {
+        assertThat(VoiceTutorUserInputContract.definition.description)
+            .contains("ONLY for a necessary unresolved decision", "ambiguous saved topics", "selecting several subtopics")
+            .contains("learner explicitly requests selectable options", "Study and curriculum learning are the default purpose")
+            .contains("Never ask the learner to choose a mode", "one simple missing fact", "clear topic/start agreement")
+            .contains("read real saved topics and recommend a concrete direction aloud")
+            .contains("never duplicate it with this tool", "Wait for the exact tool result", "Cancellation is no consent")
+            .doesNotContain("REQUIRED whenever", "ordinary preference choices")
+    }
+
+    @Test
     fun `provider schema stays a root object with nested supported mode alternatives`() {
         assertThat(validator.validateSchema(schema).valid()).isTrue()
         assertThat(schema["type"]).isEqualTo("object")

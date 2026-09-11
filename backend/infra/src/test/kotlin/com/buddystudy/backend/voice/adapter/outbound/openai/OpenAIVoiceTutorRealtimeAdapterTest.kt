@@ -2773,7 +2773,7 @@ class OpenAIVoiceTutorRealtimeAdapterTest {
     private fun assertDirectTopicOpening(node: JsonNode) {
         val instructions = node.path("response").path("instructions").asText()
         assertThat(instructions)
-            .contains("어떤 주제로 이야기해 볼까요?")
+            .contains("오늘은 어떤 주제를 공부할까요?")
             .contains("Do not greet the learner")
             .contains("introduce or name yourself")
             .doesNotContain("AI 선생님이에요")
