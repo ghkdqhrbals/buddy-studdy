@@ -509,7 +509,9 @@ final class VoiceTutorUserInputCardTests: XCTestCase {
         XCTAssertTrue(harness.hasAccessibilityLabel("개념 정리 · 연습 문제"), harness.accessibilityDescription())
         XCTAssertFalse(harness.hasAccessibilityLabel("실제 예시"), "Completed cards omit unselected choices")
         XCTAssertTrue(harness.hasAccessibilityLabel(draft), "The compact completed card retains custom text")
-        XCTAssertTrue(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputSubmittedAnswers))
+        XCTAssertTrue(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputSubmitted))
+        XCTAssertFalse(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputSubmittedAnswers),
+                       "Completed cards use the submitted status without repeating auxiliary answer labels")
         XCTAssertFalse(harness.hasAccessibilityLabel(AppStrings(language: .korean).voiceTutorInputUnsubmittedDraft))
         XCTAssertEqual(harness.probe.state.entries.first?.submittedAnswers, harness.probe.controls.first?.answers)
         attach(harness, name: "voice-input-compact-completed-card")

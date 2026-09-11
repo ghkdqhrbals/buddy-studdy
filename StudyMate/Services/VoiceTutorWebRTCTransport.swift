@@ -446,8 +446,9 @@ struct VoiceTutorLocalSpeechCaptureSnapshot: Equatable, Sendable {
 }
 
 /// Installed for every WebRTC call, even without optional recording consent.
-/// Copies bounded mono input to an off-thread, local-only acoustic pipeline.
-/// Original native media and the explicitly consented recorder stay unchanged.
+/// Gates outgoing PCM after software AEC, then forwards open input to the
+/// consented recorder and bounded local speech pipeline. Native capture/AEC
+/// remain continuous while a choice, answer review or pause holds the input.
 final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessingDelegate,
     @unchecked Sendable {
     private let lock = NSLock()
@@ -521,7 +522,6 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
     }
 
     func audioProcessingProcess(audioBuffer: LKRTCAudioBuffer) {
-        recordingTap?.audioProcessingProcess(audioBuffer: audioBuffer)
         var firstInputSnapshot: VoiceTutorLocalSpeechCaptureSnapshot?
         lock.lock()
         defer {
@@ -529,6 +529,16 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
             // At most one diagnostic per kind for this tap's entire lifetime.
             // Production only enqueues this metadata onto its diagnostic queue.
             if let firstInputSnapshot { onDiagnostic?(.firstValidInputFrame, firstInputSnapshot) }
+        }
+        // This callback runs after AEC and before WebRTC encodes/sends capture.
+        // The SDK's default voiceProcessing mute is a no-op with VPIO disabled:
+        // its readback reports the requested flag even while samples still flow.
+        // Apply the real hold here, on every channel, under the same lock as VAD.
+        // Keep earlier AEC input/reference processing alive throughout the hold.
+        defer {
+            if isClosed || didReportSpeechFailure || !detector.isEnabled {
+                Self.silence(audioBuffer)
+            }
         }
         guard !isClosed else { return }
         processedBufferCount += 1
@@ -565,6 +575,8 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
             firstInputSnapshot = snapshotLocked()
         }
         guard detector.isEnabled else { return }
+        // Never send held microphone samples to optional recording either.
+        recordingTap?.audioProcessingProcess(audioBuffer: audioBuffer)
         // A scorer-less tap is supported for metadata-only native probes with
         // their gate closed. Live input must never silently fall back to RMS.
         guard let speechPipeline else { failLocked(.bundledModelMissing); return }
@@ -590,15 +602,25 @@ final class VoiceTutorLocalSpeechCaptureTap: NSObject, LKRTCAudioCustomProcessin
         }
     }
 
-    func updateGate(mediaReady: Bool, muted: Bool) {
+    private static func silence(_ buffer: LKRTCAudioBuffer) {
+        // Native buffer storage is callback-scoped and initialized by WebRTC.
+        // Zero in place; no queued copy may escape the input hold.
+        for channel in 0..<Int(buffer.channels) {
+            buffer.rawBuffer(forChannel: channel).update(repeating: 0, count: Int(buffer.frames))
+        }
+    }
+
+    @discardableResult
+    func updateGate(mediaReady: Bool, muted: Bool) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard !isClosed, !didReportSpeechFailure else { return }
+        guard !isClosed, !didReportSpeechFailure else { return false }
         let wasEnabled = detector.isEnabled
         if let event = detector.updateGate(mediaReady: mediaReady, muted: muted) {
             onActivity(event)
         }
         if wasEnabled != detector.isEnabled { resetPipelineLocked() }
+        return detector.isEnabled == (mediaReady && !muted)
     }
 
     private func resetPipelineLocked() {
@@ -1207,19 +1229,18 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
             return false
         }
         microphoneMuted = muted
-        captureTap?.updateGate(mediaReady: sessionMediaReady, muted: muted)
-        let peerFactory = factory
+        let applied = captureTap?.updateGate(mediaReady: sessionMediaReady, muted: muted) == true
         stateLock.unlock()
-        guard let device = peerFactory?.audioDeviceModule else { return false }
-        // Pausing must verify the native capture state, not merely the Silero
-        // gate. Never touch the tutor track or stop the continuous output engine.
-        return device.setMicrophoneMuted(muted) == 0 && device.isMicrophoneMuted == muted
+        // The production post-AEC gate silences the actual outgoing samples and
+        // recording, not just speech detection. Do not mute the input mixer or
+        // native device: AEC needs continuous microphone/reference adaptation.
+        return applied
     }
 
     /// Permanently closes only this call's learner-input path while preserving
     /// the remote tutor track. Disabling the sender track is the fail-closed
-    /// boundary when the native audio-device mute operation is unavailable or
-    /// fails during a terminal server transition.
+    /// boundary in addition to the post-AEC PCM gate during a terminal server
+    /// transition; neither changes the tutor output path.
     @discardableResult
     func closeMicrophoneInput() -> Bool {
         stateLock.lock()
@@ -1229,11 +1250,9 @@ final class VoiceTutorWebRTCTransport: NSObject, @unchecked Sendable {
         sessionMediaReady = false
         captureTap?.updateGate(mediaReady: false, muted: true)
         let track = localAudioTrack
-        let device = factory?.audioDeviceModule
         stateLock.unlock()
 
         track?.isEnabled = false
-        _ = device?.setMicrophoneMuted(true)
         return track?.isEnabled != true
     }
 

@@ -164,7 +164,11 @@ processing and actual recording before opening capture. Keep genuine learner bar
 playback; do not replace echo cancellation with playback-wide microphone mute
 or transcript similarity filtering. The PCM audio graph also uses actual Voice
 Processing I/O. Diagnostics report processing state and audio routes, without
-recording audio or speech content.
+recording audio or speech content. While a choice, pause, answer review or
+readiness gate holds the microphone, zero every outgoing capture channel after
+AEC and before RTP, local speech detection or optional recording. Keep native
+capture and the AEC render reference running so adaptation is preserved across
+those holds. A native mute flag alone cannot establish that audio was blocked.
 
 The conversation keeps the learner's words, tutor responses, choices and answer controls visually prominent. Do not render MCP execution logs, repeated speaker labels, answer placeholders or supplementary pause instructions on either conversation surface. Keep the current lesson stage, remaining time, actionable errors, interruption/draft state and recording indicator. Completed choice cards retain the actual selections or text and submitted/cancelled state beneath the originating turn, without repeating the original question or topic metadata. Speaker and input guidance remain available to accessibility. Authenticated operation metadata and exact response/input identities remain internal state for diagnostics and delayed choice-card correlation; hiding the logs must not discard that state or move cards to newer turns. UI labels call the experience a conversation.
 

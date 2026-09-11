@@ -6514,6 +6514,231 @@ final class VoiceTutorContractTests: XCTestCase {
         #endif
     }
 
+    /// Emits only locally generated speech through the real speaker. Run with
+    /// nobody speaking near the iPhone; a detected onset is reported as a test
+    /// failure, not silently discarded as "environment noise". No provider,
+    /// SDP, learner recording, transcript or question submission is involved.
+    @MainActor
+    func testOptInNativeEchoDoesNotCreateLearnerTurnsAfterInputHold() async throws {
+        guard ProcessInfo.processInfo.environment["BUDDYSTUDY_NATIVE_ECHO_TEST"] == "1" else {
+            throw XCTSkip("Physical speaker echo probe requires BUDDYSTUDY_NATIVE_ECHO_TEST=1 and explicit selection.")
+        }
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Speaker-to-microphone echo must be measured on a physical iPhone.")
+        #else
+        guard AVAudioApplication.shared.recordPermission == .granted else {
+            throw XCTSkip("Microphone permission is not granted; the echo probe never requests permission.")
+        }
+        let foregroundDeadline = ProcessInfo.processInfo.systemUptime + 2
+        while UIApplication.shared.applicationState != .active,
+              ProcessInfo.processInfo.systemUptime < foregroundDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        guard UIApplication.shared.applicationState == .active else {
+            throw XCTSkip("The echo probe needs the foreground test host.")
+        }
+        // write() synthesizes a known fixture in memory; it does not speak via
+        // a second AVAudioEngine that would bypass the AEC render reference.
+        let syntheticSpeech = try await VoiceTutorEchoSyntheticSpeech.make()
+        let scorer = try await VoiceTutorSileroSpeechScorer.prepareBundled()
+        let session = AVAudioSession.sharedInstance()
+        let previousCategory = session.category
+        let previousMode = session.mode
+        let previousOptions = session.categoryOptions
+        let previousIODuration = session.preferredIOBufferDuration
+        defer {
+            try? session.setActive(false, options: [.notifyOthersOnDeactivation])
+            try? session.setCategory(previousCategory, mode: previousMode, options: previousOptions)
+            try? session.setPreferredIOBufferDuration(previousIODuration)
+        }
+        try VoiceTutorEchoCancellationPolicy.configureAudioSession(session)
+        guard session.isInputAvailable,
+              session.currentRoute.outputs.contains(where: { $0.portType == .builtInSpeaker }),
+              session.outputVolume > 0 else {
+            throw XCTSkip("The physical echo probe needs an available microphone and a nonzero built-in speaker route; it never changes volume or forces a route.")
+        }
+
+        let measurements = VoiceTutorEchoProbeMeasurements()
+        let productionTap = VoiceTutorLocalSpeechCaptureTap(
+            recordingTap: nil,
+            speechScorer: scorer,
+            onActivity: { measurements.observeActivity($0) },
+            onFailure: { measurements.observeFailure($0.rawValue) }
+        )
+        let capture = VoiceTutorEchoProbeCaptureDelegate(tap: productionTap, measurements: measurements)
+        let render = VoiceTutorEchoProbeRenderDelegate(speech: syntheticSpeech)
+        let module = try VoiceTutorAudioProcessingModuleFactory.make(
+            captureDelegate: capture, renderDelegate: render
+        )
+        let factory = LKRTCPeerConnectionFactory(
+            audioDeviceModuleType: .audioEngine, bypassVoiceProcessing: false,
+            encoderFactory: nil, decoderFactory: nil, audioProcessingModule: module
+        )
+        let device = factory.audioDeviceModule
+        let output = VoiceTutorOutputDiagnostics()
+        device.observer = output
+        var peer: LKRTCPeerConnection?
+        defer {
+            render.stop()
+            productionTap.close()
+            _ = device.stopRecording()
+            _ = device.stopPlayout()
+            peer?.close()
+            output.close()
+            device.observer = nil
+            module.capturePostProcessingDelegate = nil
+            module.renderPreProcessingDelegate = nil
+            withExtendedLifetime((factory, module, capture, render, productionTap, output, peer)) {}
+        }
+        try VoiceTutorEchoCancellationPolicy.prepareDevice(device)
+        let track = factory.audioTrack(with: factory.audioSource(with: nil), trackId: "synthetic-echo-probe")
+        try VoiceTutorEchoCancellationPolicy.configure(track)
+        track.isEnabled = false
+        productionTap.updateGate(mediaReady: true, muted: true)
+        let configuration = LKRTCConfiguration()
+        configuration.sdpSemantics = .unifiedPlan
+        configuration.iceServers = []
+        configuration.iceTransportPolicy = .none
+        configuration.iceCandidatePoolSize = 0
+        let constraints = LKRTCMediaConstraints(
+            mandatoryConstraints: ["OfferToReceiveAudio": "false", "OfferToReceiveVideo": "false"],
+            optionalConstraints: nil
+        )
+        peer = factory.peerConnection(with: configuration, constraints: constraints, delegate: nil)
+        let initializedPeer = try XCTUnwrap(peer)
+        _ = try XCTUnwrap(initializedPeer.add(track, streamIds: ["synthetic-echo-probe"]))
+        try VoiceTutorEchoCancellationPolicy.startCaptureForReadiness(factory: factory, track: track)
+        XCTAssertEqual(device.initPlayout(), 0)
+        XCTAssertEqual(device.startPlayout(), 0)
+        let readinessDeadline = ProcessInfo.processInfo.systemUptime + 3
+        while (productionTap.snapshot().validInputBufferCount < 5 || render.snapshot().callbacks < 5),
+              ProcessInfo.processInfo.systemUptime < readinessDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(VoiceTutorEchoCancellationPolicy.isActive(factory: factory))
+        XCTAssertGreaterThanOrEqual(productionTap.snapshot().validInputBufferCount, 5)
+        XCTAssertGreaterThanOrEqual(render.snapshot().callbacks, 5)
+        guard session.currentRoute.outputs.contains(where: { $0.portType == .builtInSpeaker }),
+              session.outputVolume > 0 else {
+            throw XCTSkip("The speaker route became unavailable during native startup; no echo result is claimed.")
+        }
+
+        // Verify the actual LKRTCAudioBuffer path with deterministic nonzero
+        // samples, not just the microphone's possibly silent ambient input.
+        // The sender remains disabled. Reset VAD after this synthetic input so
+        // it contributes no evidence to the subsequent acoustic measurement.
+        capture.setSyntheticGateProbe(.held)
+        try await Task.sleep(for: .milliseconds(160))
+        capture.setSyntheticGateProbe(nil)
+        productionTap.updateGate(mediaReady: true, muted: false)
+        capture.setSyntheticGateProbe(.open)
+        try await Task.sleep(for: .milliseconds(160))
+        capture.setSyntheticGateProbe(nil)
+        productionTap.updateGate(mediaReady: true, muted: true)
+
+        // Positive control: the same synthesized voice must produce speech
+        // through this native callback and the real scorer when placed directly
+        // at capture. It is never sent or played and is not a double-talk test.
+        measurements.beginPhase("speech_pipeline_control")
+        capture.setSyntheticSpeechProbe(syntheticSpeech)
+        productionTap.updateGate(mediaReady: true, muted: false)
+        try await Task.sleep(for: .seconds(3))
+        productionTap.updateGate(mediaReady: true, muted: true)
+        capture.setSyntheticSpeechProbe(nil)
+
+        // Nine seconds of acoustic observation: the first three exercise a
+        // form hold, the next four reopen while tutor speech keeps playing,
+        // and the last two expose a delayed physical echo tail. The renderer
+        // uses the same sample stream throughout the hold/resume transition.
+        measurements.beginPhase("held")
+        let renderBeforeHold = render.snapshot()
+        let outputBeforeHold = output.snapshot()
+        render.start()
+        try await Task.sleep(for: .seconds(3))
+        let renderAfterHold = render.snapshot()
+        let outputAfterHold = output.snapshot()
+        measurements.beginPhase("resumed")
+        productionTap.updateGate(mediaReady: true, muted: false)
+        try await Task.sleep(for: .seconds(4))
+        render.stop()
+        let renderAfterResume = render.snapshot()
+        let outputAfterResume = output.snapshot()
+        measurements.beginPhase("tail")
+        try await Task.sleep(for: .seconds(2))
+        productionTap.updateGate(mediaReady: true, muted: true)
+
+        let phases = measurements.snapshot()
+        let renderSnapshot = render.snapshot()
+        let outputSnapshot = output.snapshot()
+        let gateProbe = capture.gateProbeSnapshot()
+        let payload: [String: Any] = [
+            "phases": phases.mapValues { $0.json },
+            "syntheticGateProbe": gateProbe,
+            "failures": measurements.failures(),
+            "renderCallbacks": renderSnapshot.callbacks,
+            "renderedSpeechFrames": renderSnapshot.speechFrames,
+            "renderSampleRate": renderSnapshot.sampleRate,
+            "renderPeak": renderSnapshot.peak,
+            "mixerFrames": outputSnapshot.frames,
+            "mixerPeak": outputSnapshot.maxPeak,
+            "mixerRMS": outputSnapshot.maxRMS,
+            "heldRenderedSpeechFrames": renderAfterHold.speechFrames - renderBeforeHold.speechFrames,
+            "resumedRenderedSpeechFrames": renderAfterResume.speechFrames - renderAfterHold.speechFrames,
+            "heldMixerFrames": outputAfterHold.frames - outputBeforeHold.frames,
+            "resumedMixerFrames": outputAfterResume.frames - outputAfterHold.frames,
+            "systemOutputVolume": session.outputVolume,
+            "finalBuiltInSpeaker": session.currentRoute.outputs.contains(where: { $0.portType == .builtInSpeaker }),
+            "softwareAECActive": factory.audioProcessingState.echoCancellation.isSoftwareActive,
+            "platformAECActive": factory.audioProcessingState.echoCancellation.isPlatformActive,
+            "speechInferences": productionTap.snapshot().speechInferenceCount,
+            "providerConnection": false,
+            "learnerAudioStored": false,
+            "syntheticSpeechStored": false
+        ]
+        let attachment = XCTAttachment(data: try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+                                       uniformTypeIdentifier: "public.json")
+        attachment.name = "native-speaker-echo-hold-resume-metadata-only"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertTrue(measurements.failures().isEmpty, "Native capture/Silero errors must not be mistaken for echo-free silence")
+        XCTAssertGreaterThan(gateProbe["heldSamples"] ?? 0, 480)
+        XCTAssertGreaterThan(gateProbe["openSamples"] ?? 0, 480)
+        XCTAssertEqual(gateProbe["heldMismatches"], 0, "Every held sample must be zero after the production tap")
+        XCTAssertEqual(gateProbe["openMismatches"], 0, "The open production tap must preserve every injected PCM sample")
+        XCTAssertGreaterThan(renderSnapshot.speechFrames, 48_000)
+        XCTAssertGreaterThan(renderSnapshot.peak, 0.01)
+        XCTAssertGreaterThan(outputSnapshot.maxPeak, 0.001, "Synthesized speech must reach the final native mixer")
+        XCTAssertGreaterThan(renderAfterHold.speechFrames - renderBeforeHold.speechFrames, 16_000)
+        XCTAssertGreaterThan(renderAfterResume.speechFrames - renderAfterHold.speechFrames, 16_000)
+        XCTAssertGreaterThan(outputAfterHold.frames - outputBeforeHold.frames, 16_000)
+        XCTAssertGreaterThan(outputAfterResume.frames - outputAfterHold.frames, 16_000)
+        XCTAssertTrue(session.currentRoute.outputs.contains(where: { $0.portType == .builtInSpeaker }))
+        XCTAssertGreaterThan(session.outputVolume, 0)
+        XCTAssertTrue(device.isPlaying)
+        XCTAssertTrue(device.isRecording)
+        XCTAssertTrue(device.isEngineRunning)
+        XCTAssertTrue(VoiceTutorEchoCancellationPolicy.isActive(factory: factory))
+        XCTAssertGreaterThan(productionTap.snapshot().speechInferenceCount, 10)
+        let control = try XCTUnwrap(phases["speech_pipeline_control"])
+        XCTAssertGreaterThan(control.speechStarts, 0, "The same synthetic voice must be recognized by the actual capture/scorer path without acoustic cancellation")
+        let held = try XCTUnwrap(phases["held"])
+        let resumed = try XCTUnwrap(phases["resumed"])
+        let tail = try XCTUnwrap(phases["tail"])
+        XCTAssertGreaterThan(held.frames, 5_000)
+        XCTAssertEqual(held.postGatePeak, 0, "A form hold must zero actual outgoing PCM after AEC, not only set a mute flag")
+        XCTAssertEqual(held.speechStarts, 0, "A held microphone must not publish learner speech")
+        XCTAssertGreaterThan(resumed.frames, 5_000)
+        XCTAssertEqual(resumed.speechStarts, 0, "Tutor-only speaker playback must not become a learner turn after reopening the gate; environmental speech also fails this controlled probe")
+        XCTAssertGreaterThan(tail.frames, 5_000)
+        XCTAssertEqual(tail.speechStarts, 0, "A tutor playback tail must not become a new learner turn")
+        XCTAssertFalse(track.isEnabled)
+        XCTAssertNil(initializedPeer.localDescription)
+        XCTAssertNil(initializedPeer.remoteDescription)
+        XCTAssertEqual(initializedPeer.iceGatheringState, .new)
+        XCTAssertTrue(initializedPeer.senders.allSatisfy { $0.track?.isEnabled == false })
+        #endif
+    }
+
     @MainActor
     func testOptInLegacyVoiceProcessingConfiguresAnUnbypassedDuplexGraph() throws {
         guard ProcessInfo.processInfo.environment["BUDDYSTUDY_NATIVE_VOICE_CAPTURE_TEST"] == "1" else {
@@ -6877,6 +7102,366 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertEqual(fixture.store.loadRemotePushRegistration()?.accessToken, recovered.accessToken)
         XCTAssertTrue(fixture.appState.voiceTutorSessionDetails.isEmpty)
     }
+}
+
+private struct VoiceTutorEchoSyntheticSpeech: Sendable {
+    let samples: [Float]
+    let sampleRate: Double
+
+    @MainActor
+    static func make() async throws -> Self {
+        guard let voice = AVSpeechSynthesisVoice.speechVoices().first(where: { $0.language == "ko-KR" }) else {
+            throw XCTSkip("The offline echo fixture needs an installed Korean system voice.")
+        }
+        let collector = VoiceTutorEchoSynthesisCollector()
+        let synthesizer = AVSpeechSynthesizer()
+        let utterance = AVSpeechUtterance(string: "취소했어요. 편하게 이야기해 주세요. 다음 주제로 계속 공부할게요.")
+        utterance.voice = voice
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        defer { synthesizer.stopSpeaking(at: .immediate) }
+        synthesizer.write(utterance) { collector.append($0) }
+        let deadline = ProcessInfo.processInfo.systemUptime + 6
+        while !collector.isComplete, ProcessInfo.processInfo.systemUptime < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        return try collector.result()
+    }
+}
+
+/// Holds generated fixture audio only. Live microphone data never enters this
+/// collector, an attachment, a log or a file.
+private final class VoiceTutorEchoSynthesisCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var samples: [Float] = []
+    private var sampleRate = 0.0
+    private var complete = false
+    private var failure: String?
+
+    var isComplete: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return complete
+    }
+
+    func append(_ buffer: AVAudioBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !complete else { return }
+        guard let pcm = buffer as? AVAudioPCMBuffer else {
+            failure = "System speech synthesis returned a non-PCM buffer"
+            complete = true
+            return
+        }
+        let frames = Int(pcm.frameLength)
+        guard frames > 0 else { complete = true; return }
+        let rate = pcm.format.sampleRate
+        let channels = Int(pcm.format.channelCount)
+        guard rate.isFinite, (8_000...96_000).contains(rate), channels > 0, channels <= 8,
+              sampleRate == 0 || sampleRate == rate,
+              samples.count + frames <= Int(rate * 12) else {
+            failure = "System speech synthesis exceeded the bounded fixture format or duration"
+            complete = true
+            return
+        }
+        let interleaved = pcm.format.isInterleaved
+        for frame in 0..<frames {
+            var mono = 0.0
+            for channel in 0..<channels {
+                let index = interleaved ? frame * channels + channel : frame
+                let channelIndex = interleaved ? 0 : channel
+                if let pointer = pcm.floatChannelData {
+                    mono += Double(pointer[channelIndex][index])
+                } else if let pointer = pcm.int16ChannelData {
+                    mono += Double(pointer[channelIndex][index]) / 32_768
+                } else {
+                    failure = "System speech synthesis returned an unsupported PCM format"
+                    complete = true
+                    return
+                }
+            }
+            guard mono.isFinite else {
+                failure = "System speech synthesis returned non-finite samples"
+                complete = true
+                return
+            }
+            samples.append(Float(max(-1, min(1, mono / Double(channels)))))
+        }
+        sampleRate = rate
+    }
+
+    func result() throws -> VoiceTutorEchoSyntheticSpeech {
+        lock.lock()
+        defer { lock.unlock() }
+        guard complete, failure == nil, sampleRate > 0,
+              samples.count >= Int(sampleRate / 2),
+              samples.contains(where: { abs($0) > 0.01 }) else {
+            throw NSError(domain: "VoiceTutorEchoProbe", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: failure ?? "System speech synthesis did not produce bounded nonzero speech within six seconds"
+            ])
+        }
+        return VoiceTutorEchoSyntheticSpeech(samples: samples, sampleRate: sampleRate)
+    }
+}
+
+private struct VoiceTutorEchoProbePhase {
+    var frames = 0
+    var buffers = 0
+    var preGatePeak = 0.0
+    var postGatePeak = 0.0
+    var preGateRMS = 0.0
+    var postGateRMS = 0.0
+    var speechStarts = 0
+    var speechStops = 0
+
+    var json: [String: Any] {
+        ["frames": frames, "buffers": buffers, "preGatePeak": preGatePeak,
+         "postGatePeak": postGatePeak, "maxPreGateRMS": preGateRMS,
+         "maxPostGateRMS": postGateRMS, "speechStarts": speechStarts,
+         "speechStops": speechStops]
+    }
+}
+
+private final class VoiceTutorEchoProbeMeasurements: @unchecked Sendable {
+    private let lock = NSLock()
+    private var phase = "preflight"
+    private var phases: [String: VoiceTutorEchoProbePhase] = [:]
+    private var errors: [String] = []
+
+    func beginPhase(_ name: String) {
+        lock.lock()
+        phase = name
+        phases[name] = VoiceTutorEchoProbePhase()
+        lock.unlock()
+    }
+
+    func observeActivity(_ activity: VoiceTutorLocalSpeechEvent) {
+        lock.lock()
+        defer { lock.unlock() }
+        var value = phases[phase, default: VoiceTutorEchoProbePhase()]
+        if activity.activity == .started { value.speechStarts += 1 }
+        else { value.speechStops += 1 }
+        phases[phase] = value
+    }
+
+    func observeFailure(_ code: String) {
+        lock.lock()
+        if errors.count < 4 { errors.append(code) }
+        lock.unlock()
+    }
+
+    func observe(frames: Int, before: (Double, Double), after: (Double, Double)) {
+        lock.lock()
+        defer { lock.unlock() }
+        var value = phases[phase, default: VoiceTutorEchoProbePhase()]
+        value.buffers += 1
+        value.frames += frames
+        value.preGatePeak = max(value.preGatePeak, before.0)
+        value.postGatePeak = max(value.postGatePeak, after.0)
+        value.preGateRMS = max(value.preGateRMS, before.1)
+        value.postGateRMS = max(value.postGateRMS, after.1)
+        phases[phase] = value
+    }
+
+    func snapshot() -> [String: VoiceTutorEchoProbePhase] {
+        lock.lock()
+        defer { lock.unlock() }
+        return phases
+    }
+
+    func failures() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return errors
+    }
+}
+
+/// Measures only aggregate levels around the production post-AEC gate. The
+/// underlying LKRTCAudioBuffer is never retained and raw microphone samples
+/// are never copied. The short synthetic probe is separate from acoustic VAD.
+private final class VoiceTutorEchoProbeCaptureDelegate: NSObject, LKRTCAudioCustomProcessingDelegate, @unchecked Sendable {
+    enum SyntheticGateProbe: Equatable { case held, open }
+    private let lock = NSLock()
+    private let tap: VoiceTutorLocalSpeechCaptureTap
+    private let measurements: VoiceTutorEchoProbeMeasurements
+    private var probe: SyntheticGateProbe?
+    private var syntheticSpeech: VoiceTutorEchoSyntheticSpeech?
+    private var speechPosition = 0.0
+    private var sampleRate = 0.0
+    private var counts = ["heldSamples": 0, "openSamples": 0, "heldMismatches": 0, "openMismatches": 0]
+
+    init(tap: VoiceTutorLocalSpeechCaptureTap, measurements: VoiceTutorEchoProbeMeasurements) {
+        self.tap = tap
+        self.measurements = measurements
+        super.init()
+    }
+
+    func setSyntheticGateProbe(_ value: SyntheticGateProbe?) {
+        lock.lock()
+        probe = value
+        lock.unlock()
+    }
+
+    func setSyntheticSpeechProbe(_ value: VoiceTutorEchoSyntheticSpeech?) {
+        lock.lock()
+        syntheticSpeech = value
+        speechPosition = 0
+        lock.unlock()
+    }
+
+    func gateProbeSnapshot() -> [String: Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return counts
+    }
+
+    func audioProcessingInitialize(sampleRate: Int, channels: Int) {
+        lock.lock()
+        self.sampleRate = Double(sampleRate)
+        lock.unlock()
+        tap.audioProcessingInitialize(sampleRate: sampleRate, channels: channels)
+    }
+
+    func audioProcessingProcess(audioBuffer: LKRTCAudioBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
+        let frames = Int(audioBuffer.frames)
+        let channels = Int(audioBuffer.channels)
+        guard frames > 0, frames <= 48_000, channels > 0, channels <= 32 else {
+            measurements.observeFailure("invalid_native_capture_buffer")
+            tap.audioProcessingProcess(audioBuffer: audioBuffer)
+            return
+        }
+        if probe != nil {
+            for channel in 0..<channels {
+                audioBuffer.rawBuffer(forChannel: channel).update(repeating: 4_096, count: frames)
+            }
+        }
+        if let speech = syntheticSpeech, sampleRate > 0 {
+            let step = speech.sampleRate / sampleRate
+            for frame in 0..<frames {
+                let first = Int(speechPosition) % speech.samples.count
+                let second = (first + 1) % speech.samples.count
+                let fraction = Float(speechPosition - floor(speechPosition))
+                let value = speech.samples[first] * (1 - fraction) + speech.samples[second] * fraction
+                for channel in 0..<channels {
+                    audioBuffer.rawBuffer(forChannel: channel)[frame] = value * 32_768
+                }
+                speechPosition += step
+                if speechPosition >= Double(speech.samples.count) { speechPosition -= Double(speech.samples.count) }
+            }
+        }
+        let before = Self.level(audioBuffer, frames: frames, channels: channels)
+        tap.audioProcessingProcess(audioBuffer: audioBuffer)
+        let after = Self.level(audioBuffer, frames: frames, channels: channels)
+        measurements.observe(frames: frames, before: before, after: after)
+        if let probe {
+            let prefix = probe == .held ? "held" : "open"
+            let expected: Float = probe == .held ? 0 : 4_096
+            counts[prefix + "Samples", default: 0] += frames * channels
+            for channel in 0..<channels {
+                let samples = audioBuffer.rawBuffer(forChannel: channel)
+                for frame in 0..<frames where samples[frame] != expected {
+                    counts[prefix + "Mismatches", default: 0] += 1
+                }
+            }
+        }
+    }
+
+    private static func level(_ audio: LKRTCAudioBuffer, frames: Int, channels: Int) -> (Double, Double) {
+        var peak = 0.0
+        var squared = 0.0
+        for channel in 0..<channels {
+            let samples = audio.rawBuffer(forChannel: channel)
+            for frame in 0..<frames {
+                let value = Double(samples[frame]) / 32_768
+                guard value.isFinite else { return (.infinity, .infinity) }
+                peak = max(peak, abs(value))
+                squared += value * value
+            }
+        }
+        return (peak, (squared / Double(frames * channels)).squareRoot())
+    }
+
+    func audioProcessingRelease() { tap.audioProcessingRelease() }
+}
+
+/// SDK m144 audio_processing_impl.cc invokes render_pre_processor before
+/// QueueNonbandedRenderAudio/AnalyzeRender. Injecting here supplies the same
+/// known waveform to software AEC and the physical output. AVAudioPlayer or a
+/// separate synthesis speaker would omit that reference and invalidate this
+/// measurement. This is test-only; the production renderer stays untouched.
+private final class VoiceTutorEchoProbeRenderDelegate: NSObject, LKRTCAudioCustomProcessingDelegate, @unchecked Sendable {
+    struct Snapshot {
+        var callbacks = 0
+        var speechFrames = 0
+        var sampleRate = 0.0
+        var peak = 0.0
+    }
+    private let lock = NSLock()
+    private let speech: VoiceTutorEchoSyntheticSpeech
+    private var state = Snapshot()
+    private var position = 0.0
+    private var playing = false
+
+    init(speech: VoiceTutorEchoSyntheticSpeech) {
+        self.speech = speech
+        super.init()
+    }
+
+    func start() {
+        lock.lock()
+        playing = true
+        lock.unlock()
+    }
+
+    func stop() {
+        lock.lock()
+        playing = false
+        lock.unlock()
+    }
+
+    func snapshot() -> Snapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return state
+    }
+
+    func audioProcessingInitialize(sampleRate: Int, channels: Int) {
+        lock.lock()
+        state.sampleRate = Double(sampleRate)
+        lock.unlock()
+    }
+
+    func audioProcessingProcess(audioBuffer: LKRTCAudioBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
+        state.callbacks += 1
+        let frames = Int(audioBuffer.frames)
+        let channels = Int(audioBuffer.channels)
+        guard frames > 0, frames <= 48_000, channels > 0, channels <= 32 else { return }
+        guard playing, state.sampleRate > 0, !speech.samples.isEmpty else {
+            for channel in 0..<channels {
+                audioBuffer.rawBuffer(forChannel: channel).update(repeating: 0, count: frames)
+            }
+            return
+        }
+        let step = speech.sampleRate / state.sampleRate
+        for frame in 0..<frames {
+            let first = Int(position) % speech.samples.count
+            let second = (first + 1) % speech.samples.count
+            let fraction = Float(position - floor(position))
+            let sample = speech.samples[first] * (1 - fraction) + speech.samples[second] * fraction
+            for channel in 0..<channels {
+                audioBuffer.rawBuffer(forChannel: channel)[frame] = sample * 32_768
+            }
+            state.peak = max(state.peak, Double(abs(sample)))
+            position += step
+            if position >= Double(speech.samples.count) { position -= Double(speech.samples.count) }
+        }
+        state.speechFrames += frames
+    }
+
+    func audioProcessingRelease() {}
 }
 
 private final class VoiceTutorContractNativeAudioDelegate: NSObject, LKRTCAudioCustomProcessingDelegate {
