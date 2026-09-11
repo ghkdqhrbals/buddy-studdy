@@ -623,7 +623,10 @@ struct VoiceTutorSessionView: View {
             showsTranscript: $disclosureState.showsTranscript,
             showsSummary: $disclosureState.showsSummary,
             onPause: { Task { await viewModel.togglePause() } },
-            onEnd: { Task { await viewModel.stopForUser() } },
+            onEnd: {
+                viewModel.stopForUser()
+                dismiss()
+            },
             onRetry: {
                 disclosureState.resetForNewAttempt()
                 Task { await viewModel.start() }
@@ -671,15 +674,14 @@ struct VoiceTutorSessionView: View {
             // App switching/locking can remove the rendered surface without
             // dismissing the user's call. Only foreground navigation ends it.
             guard scenePhase == .active else { return }
-            Task {
-                await viewModel.stopForDismissal()
-            }
+            viewModel.stopForDismissal()
         }
     }
 }
 
-/// Return only after final audio, recording and server settlement have finished.
-/// A call that ends while the app is inactive returns when it becomes active.
+/// Server-driven completion returns after its final audio and settlement.
+/// Explicit End dismisses synchronously while the model retains its cleanup.
+/// A server-ended call returns when the app becomes active again.
 struct VoiceTutorCallCompletionNavigation: ViewModifier {
     let phase: VoiceTutorSessionPhase
     @Environment(\.scenePhase) private var scenePhase

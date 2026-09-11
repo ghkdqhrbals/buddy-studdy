@@ -203,7 +203,8 @@ final class VoiceTutorAudioEngine {
     func start(
         onAudioChunk: @escaping @Sendable (Data) -> Void,
         onPlaybackCompleted: @escaping @Sendable (String) -> Void,
-        onInterruption: @escaping @Sendable () -> Void
+        onInterruption: @escaping @Sendable () -> Void,
+        isCurrent: @MainActor () -> Bool = { true }
     ) async throws {
         guard !isRunning else {
             return
@@ -211,6 +212,9 @@ final class VoiceTutorAudioEngine {
         guard await Self.requestMicrophonePermission() else {
             throw AudioError.microphonePermissionDenied
         }
+        // A dismissed call can finish its permission await after another call
+        // has opened. Never activate shared audio for that abandoned attempt.
+        guard isCurrent() else { throw CancellationError() }
         playbackCompletionState.reset()
         self.onPlaybackCompleted = onPlaybackCompleted
 

@@ -7,6 +7,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearning
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorPersistencePort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionChange
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionContinuation
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
 import com.buddystudy.voice.domain.VoiceTutorTranscriptRole
@@ -34,6 +35,7 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         var checked = false
         @Volatile var generation: JsonNode? = null
         @Volatile var completedGeneration: String? = null
+        @Volatile var reviewedSkipActionId: String? = null
         val gradings = linkedMapOf<String, Submitted>()
         @Volatile var activeGradingCorrelationId: String? = null
     }
@@ -122,7 +124,11 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         if (reviewed.text.isNotEmpty()) return unavailable()
         if (!excludeReviewedSource(context, state, reviewed)) return persistencePending()
         if (!current(context, state)) return unavailable()
-        return skipBoundQuestion(context, state)
+        val result = skipBoundQuestion(context, state)
+        if (result.isError || !current(context, state)) return if (result.isError) result else unavailable()
+        state.reviewedSkipActionId = reviewed.answerId
+        return result.copy(questionContinuation = VoiceTutorQuestionContinuation(
+            reviewed.answerId, reviewed.studyId, reviewed.recordId))
     }
 
     private suspend fun reviewedState(context: VoiceTutorWebRtcControlContext, reviewed: VoiceTutorReviewedAnswer): State? {
@@ -232,7 +238,9 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
 
     private suspend fun request(context: VoiceTutorWebRtcControlContext, state: State): VoiceTutorMcpToolResult {
         if (context.operationStillCurrent?.invoke() == false) return staleQuestionRequest()
-        if (learnerTurn(context, state.scope.revision) == null) return persistencePending()
+        val actionId = context.questionContinuationActionId
+        if (actionId != null && actionId != state.reviewedSkipActionId) return unavailable()
+        if (actionId == null && learnerTurn(context, state.scope.revision) == null) return persistencePending()
         if (!current(context, state)) return unavailable()
         state.generation?.let { return output(mapOf("generation" to it, "notice" to "This generation is already requested. The server subscribes to its completion and will deliver the saved question; do not poll, request another question or ask the learner to start again."))
             .copy(learningProgress = progress(state, VoiceTutorLearningPhase.QUESTION_GENERATING)) }
@@ -240,13 +248,19 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         if (checked.isError) return checked
         if (state.question != null) return checked
         if (!state.checked || !current(context, state)) return unavailable()
-        val turn = learnerTurn(context, state.scope.revision) ?: return persistencePending()
+        // An authenticated app skip is already a complete learner action. Its
+        // continuation must not wait for a new microphone turn that will never
+        // arrive while the app is waiting for the next question.
+        val requestIdentity = if (actionId != null) {
+            if (actionId != state.reviewedSkipActionId) return unavailable()
+            "skip:$actionId"
+        } else (learnerTurn(context, state.scope.revision) ?: return persistencePending()).toString()
         if (!current(context, state)) return unavailable()
         // The pending lookup can suspend. Re-check the owning accepted turn before
         // spending quota; accepted jobs after the write remain idempotent and saved.
         if (context.operationStillCurrent?.invoke() == false) return staleQuestionRequest()
         // Model-generated retry keys cannot spend quota twice for the same learner request.
-        val key = "voice-" + UUID.nameUUIDFromBytes("${context.session.id}:${state.scope.study}:$turn".toByteArray())
+        val key = "voice-" + UUID.nameUUIDFromBytes("${context.session.id}:${state.scope.study}:$requestIdentity".toByteArray())
         val result = invoke(context, "request_question", mapOf("study_id" to state.scope.study, "idempotency_key" to key))
         if (result.isError || !current(context, state)) return if (result.isError) result else unavailable()
         val body = mapper.readTree(result.output)
@@ -300,6 +314,8 @@ internal class VoiceTutorCanonicalQuestionCoordinator(
         state.question = null
         state.checked = false
         state.generation = null
+        state.completedGeneration = null
+        state.reviewedSkipActionId = null
         return output(mapOf("skipped" to true, "recordId" to recordId(record).toString(),
             "notice" to "This exact unanswered question was skipped. Check list_pending_questions for the next arrived question. If none remains and the learner wants another, use request_question; skipping itself creates no question and costs no question allowance."))
             .copy(questionChange = change(state, record), learningProgress = progress(state, VoiceTutorLearningPhase.CONVERSATION))

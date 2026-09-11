@@ -521,6 +521,71 @@ class VoiceTutorCanonicalQuestionCoordinatorTest {
         assertThat(fixture.calls.last().arguments).isEqualTo(mapOf("record_id" to 101L))
         assertThat(fixture.persistenceCalls).isEmpty()
         assertThat(fixture.excluded).isEmpty()
+        assertThat(result.questionContinuation?.actionId).isEqualTo(reviewed.answerId)
+        assertThat(result.questionContinuation?.studyId).isEqualTo(STUDY)
+        assertThat(result.questionContinuation?.skippedRecordId).isEqualTo("101")
+        assertThat(fixture.json(result).has("questionContinuation")).isFalse()
+    }
+
+    @Test
+    fun `successful app skip authorizes one separately requested next question without another speech turn`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.learner = null
+        val reviewed = fixture.reviewed("").copy(precedingTutorProviderItemId = null, learnerProviderItemIds = emptyList())
+        val skipped = fixture.coordinator.skipReviewedQuestion(fixture.answerContext(), reviewed)
+        val continuation = requireNotNull(skipped.questionContinuation)
+        fixture.records = emptyList()
+        val nextContext = fixture.context().copy(questionContinuationActionId = continuation.actionId)
+
+        val next = fixture.coordinator.execute(nextContext, "request_question", mapOf("study_id" to STUDY))
+
+        assertThat(next.isError).isFalse()
+        assertThat(next.learningProgress?.phase).isEqualTo(VoiceTutorLearningPhase.QUESTION_GENERATING)
+        repeat(3) {
+            val repeated = fixture.coordinator.execute(nextContext, "request_question", mapOf("study_id" to STUDY))
+            assertThat(repeated.learningProgress?.correlationId).isEqualTo(next.learningProgress?.correlationId)
+        }
+        assertThat(fixture.calls.count { it.name == "request_question" }).isEqualTo(1)
+        assertThat(fixture.calls.filter { it.name == "request_question" }.single().arguments.keys)
+            .containsExactlyInAnyOrder("study_id", "idempotency_key")
+    }
+
+    @Test
+    fun `skip continuation cannot be forged through MCP arguments or reused after focus replacement`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        val reviewed = fixture.reviewed("").copy(precedingTutorProviderItemId = null, learnerProviderItemIds = emptyList())
+        fixture.coordinator.skipReviewedQuestion(fixture.context(), reviewed)
+        fixture.learner = null
+        fixture.records = emptyList()
+        val nextContext = fixture.context().copy(questionContinuationActionId = reviewed.answerId)
+
+        assertCode(fixture, fixture.coordinator.execute(fixture.context(), "request_question", mapOf("study_id" to STUDY)), "INPUT_PERSISTENCE_PENDING")
+        assertCode(fixture, fixture.coordinator.execute(fixture.context(), "request_question",
+            mapOf("study_id" to STUDY, "questionContinuationActionId" to reviewed.answerId)), "QUESTION_SCOPE_MISMATCH")
+        assertThat(fixture.coordinator.execute(nextContext.copy(questionContinuationActionId = "wrong-action"),
+            "request_question", mapOf("study_id" to STUDY)).isError).isTrue()
+        assertCode(fixture, fixture.coordinator.execute(nextContext.copy(operationStillCurrent = { false }),
+            "request_question", mapOf("study_id" to STUDY)), "STALE_TURN")
+        fixture.focus = STUDY to (REVISION + 1)
+        assertThat(fixture.coordinator.execute(nextContext.copy(initialLessonRevision = REVISION + 1),
+            "request_question", mapOf("study_id" to STUDY)).isError).isTrue()
+        assertThat(fixture.calls.none { it.name == "request_question" }).isTrue()
+    }
+
+    @Test
+    fun `failed skip cannot authorize a next question without a persisted learner turn`(): Unit = runBlocking {
+        val fixture = Fixture()
+        fixture.coordinator.selected(fixture.context())
+        fixture.exclusionAccepted = false
+        val reviewed = fixture.reviewed("")
+        assertThat(fixture.coordinator.skipReviewedQuestion(fixture.answerContext(), reviewed).isError).isTrue()
+        fixture.learner = null
+        fixture.records = emptyList()
+        assertThat(fixture.coordinator.execute(fixture.context().copy(questionContinuationActionId = reviewed.answerId),
+            "request_question", mapOf("study_id" to STUDY)).isError).isTrue()
+        assertThat(fixture.calls.none { it.name == "request_question" || it.name == "skip_question" }).isTrue()
     }
 
     @Test

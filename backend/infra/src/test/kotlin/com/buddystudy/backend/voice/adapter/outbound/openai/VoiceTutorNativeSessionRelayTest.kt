@@ -11,6 +11,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolD
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolPort
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionContinuation
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorReviewedAnswer
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorRelayTermination
@@ -790,6 +791,32 @@ class VoiceTutorNativeSessionRelayTest {
     }
 
     @Test
+    fun `successful app skip passes trusted next question action through relay without another microphone turn`() {
+        val tools = FakeTools { VoiceTutorMcpToolResult("{}", false,
+            questionReadback = VoiceTutorQuestionReadback(7, "42", "저장된 문제를 설명하세요.")) }
+            .apply { continueAfterSkip = true }
+        Fixture(tools = tools).use { f ->
+            val answer = f.manualQuestion()
+            f.answerControl(Contract.ANSWER_SKIP_EVENT, answer)
+            f.await("app skip is scheduled") { f.serverCalls().size == 1 }
+            f.ack(f.serverCalls().single())
+            f.await("skip result is ready") { f.outputs().size == 2 }
+            assertThat(tools.invocations.none { it.name == "request_question" }).isTrue()
+            f.ack(f.outputs().last())
+            f.await("server schedules exact next question separately") { f.serverCalls().size == 2 }
+            val next = f.serverCalls().last()
+            assertThat(next.path("item").path("name").asText()).isEqualTo("request_question")
+            f.ack(next)
+            f.await("next question needs no new saved speech") { tools.invocations.any { it.name == "request_question" } }
+            val invocation = tools.invocations.single { it.name == "request_question" }
+            assertThat(invocation.context.questionContinuationActionId).isEqualTo(tools.skipped.single().second.answerId)
+            assertThat(invocation.arguments).isEqualTo(mapOf("study_id" to 7))
+            assertThat(tools.reviewed).isEmpty()
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
     fun `renewed speech cancels an unstarted reply and the relay tick answers only the latest committed input`() {
         Fixture().use { f ->
             f.opening(); f.learner(1, "learner-1"); f.created("superseded")
@@ -1454,6 +1481,7 @@ class VoiceTutorNativeSessionRelayTest {
         }
         val reviewed = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
         val skipped = CopyOnWriteArrayList<Pair<VoiceTutorWebRtcControlContext, VoiceTutorReviewedAnswer>>()
+        var continueAfterSkip = false
         override fun definitions(): List<VoiceTutorMcpToolDefinition> = error("The legacy classified tool catalog must not be used")
         override fun realtimeDefinitions() = listOf("list_studies", "prepare_voice_study_mutation", "confirm_voice_study_mutation", "request_question", "select_voice_study", "list_pending_questions").map { name ->
             VoiceTutorMcpToolDefinition(name, "Synthetic native tool", mapOf("type" to "object",
@@ -1469,7 +1497,9 @@ class VoiceTutorNativeSessionRelayTest {
         }
         override suspend fun skipReviewedQuestion(context: VoiceTutorWebRtcControlContext, answer: VoiceTutorReviewedAnswer): VoiceTutorMcpToolResult {
             skipped += context to answer
-            return VoiceTutorMcpToolResult("""{"skipped":true,"recordId":"42"}""", false)
+            return VoiceTutorMcpToolResult("""{"skipped":true,"recordId":"42"}""", false,
+                questionContinuation = if (continueAfterSkip) VoiceTutorQuestionContinuation(
+                    answer.answerId, answer.studyId, answer.recordId) else null)
         }
     }
 

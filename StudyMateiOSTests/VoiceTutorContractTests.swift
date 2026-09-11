@@ -1103,6 +1103,186 @@ final class VoiceTutorContractTests: XCTestCase {
         XCTAssertTrue(teardown.contains("outcome: .completed(outcome: outcome"))
     }
 
+    @MainActor
+    func testExplicitEndClosesLocallyBeforeSlowFinalizationAndIgnoresDuplicateDismissal() async {
+        let finalization = VoiceTutorBackgroundFinalization()
+        let releaseServer = VoiceTutorContractResponseGate()
+        let serverStarted = expectation(description: "Old call finalization started")
+        var events: [String] = []
+        let caller = Task { @MainActor in
+            XCTAssertTrue(finalization.begin(prepare: {
+                events.append("audio-closed-and-draft-retained")
+                return true
+            }, operation: {
+                serverStarted.fulfill()
+                await releaseServer.wait()
+                XCTAssertFalse(Task.isCancelled, "View task cancellation must not cancel durable cleanup")
+                events.append("old-call-settled")
+            }))
+            events.append("dismissed")
+        }
+        await caller.value
+        caller.cancel()
+        XCTAssertEqual(events, ["audio-closed-and-draft-retained", "dismissed"])
+        XCTAssertTrue(finalization.isRunning)
+        XCTAssertFalse(finalization.begin(prepare: {
+            XCTFail("onDisappear must not close audio again or rewrite the retained draft")
+            return true
+        }, operation: { XCTFail("Repeated end must not settle quota twice") }))
+        let started = await XCTWaiter.fulfillment(of: [serverStarted], timeout: 2)
+        XCTAssertEqual(started, .completed)
+        releaseServer.open()
+        await finalization.waitForCompletion()
+        XCTAssertEqual(events, ["audio-closed-and-draft-retained", "dismissed", "old-call-settled"])
+        XCTAssertFalse(finalization.isRunning)
+        XCTAssertTrue(finalization.hasStarted)
+        XCTAssertFalse(finalization.begin(prepare: { true }, operation: {
+            XCTFail("A completed call must not be finalized again")
+        }))
+    }
+
+    @MainActor
+    func testSocketFinalizationDeadlineClosesStalledOldConnectionBeforeFallback() async {
+        let stalledSend = VoiceTutorContractResponseGate()
+        var events: [String] = []
+        let result = await VoiceTutorSocketFinalization.run(timeout: .milliseconds(25), disconnect: {
+            events.append("old-socket-closed")
+            stalledSend.open() // Model URLSession cancellation resuming its pending send.
+        }, operation: {
+            events.append("old-send-started")
+            await stalledSend.wait()
+            events.append("rest-fallback-ready")
+            return false
+        })
+        XCTAssertFalse(result)
+        XCTAssertEqual(events, ["old-send-started", "old-socket-closed", "rest-fallback-ready"])
+    }
+
+    @MainActor
+    func testSuccessfulSocketFinalizationCancelsItsDeadlineBeforeAnotherCall() async throws {
+        var didCloseSocket = false
+        let result = await VoiceTutorSocketFinalization.run(timeout: .milliseconds(25), disconnect: {
+            didCloseSocket = true
+        }, operation: { "server-acknowledged" })
+        XCTAssertEqual(result, "server-acknowledged")
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertFalse(didCloseSocket, "A completed old call must not retain a close timer")
+    }
+
+    @MainActor
+    func testBackgroundLeaseExpirationReleasesOnceWithoutCancellingRetainedCleanup() async {
+        let finalization = VoiceTutorBackgroundFinalization()
+        let releaseRecording = VoiceTutorContractResponseGate()
+        var expirationCount = 0
+        var didSave = false
+        XCTAssertTrue(finalization.begin(prepare: { true }, onExpiration: {
+            expirationCount += 1
+        }, operation: {
+            await releaseRecording.wait()
+            XCTAssertFalse(Task.isCancelled)
+            didSave = true
+        }))
+        finalization.expireBackgroundTime()
+        finalization.expireBackgroundTime()
+        XCTAssertEqual(expirationCount, 1)
+        XCTAssertTrue(finalization.isRunning)
+        releaseRecording.open()
+        await finalization.waitForCompletion()
+        XCTAssertTrue(didSave)
+        XCTAssertFalse(finalization.isRunning)
+        finalization.expireBackgroundTime()
+        XCTAssertEqual(expirationCount, 1)
+    }
+
+    @MainActor
+    func testDismissalCanLeaseExistingServerFinalizationWithoutStartingAnotherSettlement() {
+        let finalization = VoiceTutorBackgroundFinalization()
+        var expirationCount = 0
+        finalization.acquireBackgroundTime { expirationCount += 1 }
+        finalization.acquireBackgroundTime { XCTFail("Repeated dismissal cannot replace the original lease") }
+        XCTAssertFalse(finalization.hasStarted, "Server cleanup already owns settlement; acquiring time must not launch another task")
+        XCTAssertFalse(finalization.isRunning)
+        finalization.endBackgroundTime()
+        finalization.expireBackgroundTime()
+        XCTAssertEqual(expirationCount, 0, "Completed server cleanup releases its lease without expiring the socket")
+    }
+
+    @MainActor
+    func testDismissedCallOwnerSurvivesUntilCleanupWithoutMutatingItsReplacement() async {
+        let releaseServer = VoiceTutorContractResponseGate()
+        let completed = expectation(description: "Retained old call saved and settled")
+        var oldOwner: VoiceTutorFinalizationOwnerFixture? = VoiceTutorFinalizationOwnerFixture()
+        weak var retainedOldOwner = oldOwner
+        weak var retainedFinalization = oldOwner?.finalization
+        var oldCallSaved = false
+        oldOwner?.end(after: releaseServer) {
+            oldCallSaved = true
+            completed.fulfill()
+        }
+        oldOwner = nil // SwiftUI's dismissed StateObject has no remaining UI owner.
+        let replacement = VoiceTutorFinalizationOwnerFixture()
+        XCTAssertNotNil(retainedOldOwner)
+        XCTAssertTrue(retainedFinalization?.isRunning == true)
+        XCTAssertFalse(replacement.finalization.hasStarted)
+        XCTAssertFalse(replacement.mediaClosed)
+        releaseServer.open()
+        let result = await XCTWaiter.fulfillment(of: [completed], timeout: 2)
+        XCTAssertEqual(result, .completed)
+        XCTAssertTrue(oldCallSaved)
+        XCTAssertFalse(replacement.mediaClosed, "Old cleanup only owns its captured call")
+        for _ in 0..<20 where retainedOldOwner != nil { await Task.yield() }
+        XCTAssertNil(retainedOldOwner, "The retained cleanup owner must be released on completion")
+        XCTAssertNil(retainedFinalization, "Finalization must not leave a task/owner retain cycle")
+    }
+
+    func testExplicitEndWiresSynchronousMediaClosureBeforeDismissalAndKeepsCleanupSeparate() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let modelURL = root.appendingPathComponent("StudyMate/ViewModels/VoiceTutorViewModel.swift")
+        guard FileManager.default.fileExists(atPath: modelURL.path) else {
+            throw XCTSkip("Source wiring requires the repository; cleanup behavior also runs on iPhone.")
+        }
+        let source = try String(contentsOf: modelURL, encoding: .utf8)
+        let prepareStart = try XCTUnwrap(source.range(of: "private func prepareStop("))
+        let finalizeStart = try XCTUnwrap(source.range(of: "private func finalizeStop("))
+        let prepare = String(source[prepareStart.lowerBound..<finalizeStart.lowerBound])
+        XCTAssertFalse(prepare.contains("await "), "Audio closure and the terminal gate cannot await REST, upload or a summary")
+        XCTAssertTrue(prepare.contains("closeLocalMedia()"))
+        XCTAssertTrue(prepare.contains("isFinalizing = true"))
+        let privacyStart = try XCTUnwrap(source.range(of: "private func stopForInvalidatedContext"))
+        let finalize = String(source[finalizeStart.lowerBound..<privacyStart.lowerBound])
+        XCTAssertTrue(finalize.contains("activeConnection.endSession()"))
+        let localRecording = try XCTUnwrap(finalize.range(of: "async let pendingRecording = finalizeRecordingIfNeeded()"))
+        let socketWait = try XCTUnwrap(finalize.range(of: "VoiceTutorSocketFinalization.run"))
+        XCTAssertLessThan(localRecording.lowerBound, socketWait.lowerBound)
+        XCTAssertTrue(finalize.contains("await uploadFinalizedRecording(await pendingRecording)"))
+        XCTAssertTrue(finalize.contains("await finishSession("))
+        XCTAssertTrue(finalize.contains("VoiceTutorSocketFinalization.run"))
+        XCTAssertTrue(finalize.contains("finishingTransport.disconnect(closeCode: .goingAway)"))
+        XCTAssertTrue(finalize.contains("self?.clearServerEndWaiter()"))
+        XCTAssertFalse(finalize.contains("audioEngine.stop()"), "Late cleanup cannot deactivate a new call's audio")
+        XCTAssertFalse(finalize.contains("webRTCTransport?.close()"))
+        let view = try String(contentsOf: root.appendingPathComponent("StudyMate/Views/VoiceTutorView.swift"), encoding: .utf8)
+        let endStart = try XCTUnwrap(view.range(of: "onEnd: {\n                viewModel.stopForUser()"))
+        let retryStart = try XCTUnwrap(view.range(of: "onRetry:", range: endStart.upperBound..<view.endIndex))
+        let end = String(view[endStart.lowerBound..<retryStart.lowerBound])
+        XCTAssertTrue(end.contains("dismiss()"))
+        XCTAssertFalse(end.contains("Task"))
+        XCTAssertFalse(end.contains("await"))
+        XCTAssertTrue(source.contains("!backgroundFinalization.isRunning"), "The same model cannot restart while old cleanup can still mutate it")
+        XCTAssertTrue(source.contains("guard !didRequestLocalEnd else { return }"))
+        let dismissStart = try XCTUnwrap(source.range(of: "func stopForDismissal()"))
+        let mediaStart = try XCTUnwrap(source.range(of: "private func closeLocalMedia()"))
+        let dismissal = String(source[dismissStart.lowerBound..<mediaStart.lowerBound])
+        XCTAssertTrue(dismissal.contains("acquireFinalizationBackgroundTime()"))
+        XCTAssertTrue(source.contains("backgroundFinalization.endBackgroundTime()"))
+        XCTAssertTrue(source.contains("if !isFinalizing && !backgroundFinalization.hasStarted {\n                    await finishRecordingIfNeeded()"),
+                      "A cancelled startup cannot steal the recorder from retained end cleanup")
+        let audio = try String(contentsOf: root.appendingPathComponent("StudyMate/Services/VoiceTutorAudioEngine.swift"), encoding: .utf8)
+        let validity = try XCTUnwrap(audio.range(of: "guard isCurrent() else { throw CancellationError() }"))
+        let activation = try XCTUnwrap(audio.range(of: "try session.setActive(true)", range: validity.upperBound..<audio.endIndex))
+        XCTAssertLessThan(validity.lowerBound, activation.lowerBound)
+    }
+
     func testConnectionIdentityFenceAllowsOnlyCurrentSignedInOwnerDeviceAndSecret() {
         var communityState = CommunitySessionStateStore(isSignedIn: true)
         let registration = RemotePushRegistration(
@@ -4344,7 +4524,7 @@ final class VoiceTutorContractTests: XCTestCase {
         }
         #endif
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        for start in ["    private func stop(\n", "    private func finishFromServer(\n"] {
+        for start in ["    private func prepareStop(", "    private func finishFromServer(\n"] {
             let body = try XCTUnwrap(source.range(of: start)).upperBound
             let cancelled = try XCTUnwrap(source.range(of: "answerDraftState.endLocally()", range: body..<source.endIndex))
             let beforeCancellation = String(source[body..<cancelled.lowerBound])
@@ -7842,6 +8022,23 @@ private final class VoiceTutorContractRenderDurationObservation: @unchecked Send
         storedFrames = frames
         storedDuration = duration
         lock.unlock()
+    }
+}
+
+@MainActor
+private final class VoiceTutorFinalizationOwnerFixture {
+    let finalization = VoiceTutorBackgroundFinalization()
+    private(set) var mediaClosed = false
+
+    func end(after gate: VoiceTutorContractResponseGate, didFinish: @escaping @MainActor () -> Void) {
+        finalization.begin(prepare: {
+            mediaClosed = true
+            return true
+        }, operation: { [self] in
+            await gate.wait()
+            XCTAssertTrue(mediaClosed)
+            didFinish()
+        })
     }
 }
 

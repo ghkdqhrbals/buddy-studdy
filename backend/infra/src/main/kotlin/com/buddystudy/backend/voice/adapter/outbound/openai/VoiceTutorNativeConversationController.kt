@@ -633,6 +633,9 @@ internal class VoiceTutorNativeConversationController(
     fun toolRevision(callId: String): Long = pendingTools[callId]?.revision ?: revision
 
     @Synchronized
+    fun toolQuestionContinuationActionId(callId: String): String? = pendingTools[callId]?.questionContinuationActionId
+
+    @Synchronized
     fun toolCanExecute(callId: String): Boolean {
         val call = pendingTools[callId] ?: return false
         reviewedAnswerCalls[callId]?.let { answer ->
@@ -640,6 +643,8 @@ internal class VoiceTutorNativeConversationController(
                 answerCapture?.phase == "submitting" && answer.lessonRevision == revision
         }
         if (answerCapture != null) return false
+        if (call.questionContinuationActionId != null &&
+            (learningExplicitlyCancelled || call.learningIntentEpoch != learningIntentEpoch)) return false
         // A saved grading read cannot submit or change an answer. New speech may
         // supersede its spoken continuation, but must not turn the accepted
         // submission into a STALE_TURN failure reported to the learner.
@@ -653,7 +658,9 @@ internal class VoiceTutorNativeConversationController(
     /** Mutations/selection may await their exact audit rows; normal voice never calls this gate. */
     @Synchronized
     fun toolTranscriptReady(callId: String): Boolean {
-        val boundary = pendingTools[callId]?.boundary ?: return false
+        val call = pendingTools[callId] ?: return false
+        if (call.questionContinuationActionId != null) return true
+        val boundary = call.boundary
         return listOfNotNull(boundary.latestAcceptedLearnerProviderItemId, boundary.precedingTutorProviderItemId)
             .all { transcripts[it]?.complete == true }
     }
@@ -1011,7 +1018,7 @@ internal class VoiceTutorNativeConversationController(
             // ordinary turn gets priority; explicit cancellation/focus changes fence it out.
             questionReadback?.takeIf {
                 !studyFollowupSuperseded && currentRevision && call != null &&
-                    call.boundary.latestAcceptedLearnerProviderItemId != null &&
+                    (call.boundary.latestAcceptedLearnerProviderItemId != null || call.questionContinuationActionId != null) &&
                     !draining && !quotaRequested && !endingAfterResponse &&
                     it.studyId > 0 && it.recordId.matches(Regex("[1-9][0-9]{0,18}")) &&
                     it.recordId.toLongOrNull() != null && it.question.isNotBlank() && it.question.length <= 8_000
@@ -1041,6 +1048,18 @@ internal class VoiceTutorNativeConversationController(
             pendingSelectedLesson = SelectedLessonContinuation(requireNotNull(result.lessonFocus).studyId, revision,
                 learningIntentEpoch, accepted?.id ?: call.boundary.latestAcceptedLearnerProviderItemId,
                 latestSpeechStartedOrder, call.operationContext)
+        }
+        result.questionContinuation?.takeIf {
+            !result.isError && reviewedAnswer != null && call?.name == "skip_question" &&
+                it.actionId == reviewedAnswer.answerId && it.studyId == reviewedAnswer.studyId &&
+                it.skippedRecordId == reviewedAnswer.recordId && reviewedAnswer.text.isEmpty() &&
+                call.revision == revision && call.learningIntentEpoch == learningIntentEpoch &&
+                stateIsCurrent && !learningExplicitlyCancelled && answerCapture == null &&
+                !draining && !quotaRequested && !endingAfterResponse
+        }?.let { continuation ->
+            pendingSelectedLesson = SelectedLessonContinuation(continuation.studyId, revision,
+                learningIntentEpoch, latestLearner?.id, latestSpeechStartedOrder,
+                requireNotNull(call).operationContext, continuation.actionId)
         }
         emit(output)
     }
@@ -1135,8 +1154,10 @@ internal class VoiceTutorNativeConversationController(
                 pendingSelectedLesson = null
                 val scheduled = toolCoordinator.scheduleServerCall("request_question",
                     mapOf("study_id" to continuation.studyId), nanoTime(), beginsLearnerTurn = false)
-                pendingTools[scheduled.callId] = ToolBoundary(boundary(latestLearner), revision,
-                    "request_question", continuation.operationContext, learningIntentEpoch)
+                pendingTools[scheduled.callId] = ToolBoundary(boundary(latestLearner).copy(
+                    latestAcceptedLearnerSpeechStartedOrder = continuation.speechOrder), revision,
+                    "request_question", continuation.operationContext, learningIntentEpoch,
+                    continuation.questionContinuationActionId)
                 emit(scheduled.providerEvent)
                 return
             } else return
@@ -2144,9 +2165,11 @@ internal class VoiceTutorNativeConversationController(
     private data class TutorTranscript(val sequence: Long, val acceptedAt: Instant, var raw: String? = null,
         var partial: String = "", var partialTruncated: Boolean = false)
     private data class SelectedLessonContinuation(val studyId: Long, val revision: Long, val epoch: Long,
-        val learnerItemId: String?, val speechOrder: Long, val operationContext: OperationContext)
+        val learnerItemId: String?, val speechOrder: Long, val operationContext: OperationContext,
+        val questionContinuationActionId: String? = null)
     private data class ToolBoundary(val boundary: VoiceTutorDialogueBoundary, val revision: Long, val name: String,
-        val operationContext: OperationContext, val learningIntentEpoch: Long)
+        val operationContext: OperationContext, val learningIntentEpoch: Long,
+        val questionContinuationActionId: String? = null)
     private data class QuestionReadback(val value: VoiceTutorQuestionReadback, val revision: Long, val epoch: Long, val requestedSpeechOrder: Long = 0)
     private data class QuestionSource(val responseId: String, val itemIds: List<String>)
     private class AnswerCapture(val id: String, val question: VoiceTutorQuestionReadback, val revision: Long,

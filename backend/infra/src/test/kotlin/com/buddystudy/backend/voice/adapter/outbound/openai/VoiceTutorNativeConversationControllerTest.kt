@@ -9,6 +9,7 @@ import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLearning
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorLessonFocusSelection
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorMcpToolResult
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionChange
+import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionContinuation
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorQuestionReadback
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorStudyTopicUserInput
 import com.buddystudy.backend.voice.application.port.outbound.VoiceTutorCurriculumUserInput
@@ -2585,6 +2586,58 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(reviewed.text).isEmpty()
         assertThat(reviewed.learnerProviderItemIds).containsExactly("a1")
         assertThat(answerStates().last().path("text").asText()).isEqualTo("이 초안은 보존")
+    }
+
+    @Test
+    fun `successful app skip schedules next question after acknowledgement with its exact action authority`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_SKIP_EVENT, answer)
+        val skip = serverQuestionCall()
+        event("conversation.item.created", "item" to skip.path("item"))
+        val skipId = skip.path("item").path("call_id").asText()
+        controller.beginTool(skipId)
+        val reviewed = requireNotNull(controller.reviewedAnswer(skipId))
+        controller.completeTool(skipId, VoiceTutorMcpToolResult("{\"skipped\":true}", false,
+            questionChange = VoiceTutorQuestionChange(reviewed.studyId, reviewed.recordId),
+            learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.CONVERSATION, reviewed.studyId),
+            questionContinuation = VoiceTutorQuestionContinuation(reviewed.answerId, reviewed.studyId, reviewed.recordId)))
+        assertThat(serverQuestionCall().path("item").path("call_id").asText()).isEqualTo(skipId)
+        assertThat(responses()).hasSize(3)
+
+        ackToolOutput()
+
+        val next = serverQuestionCall()
+        val nextId = next.path("item").path("call_id").asText()
+        assertThat(next.path("item").path("name").asText()).isEqualTo("request_question")
+        assertThat(nextId).isNotEqualTo(skipId)
+        assertThat(controller.toolQuestionContinuationActionId(nextId)).isEqualTo(reviewed.answerId)
+        assertThat(controller.toolTranscriptReady(nextId)).isTrue()
+        assertThat(controller.toolCanExecute(nextId)).isTrue()
+        assertThat(next.path("item").path("arguments").asText()).doesNotContain(reviewed.answerId)
+        event("conversation.item.created", "item" to next.path("item"))
+        controller.beginTool(nextId)
+        controller.completeTool(nextId, readbackResult(recordId = "43"))
+        ackToolOutput()
+        assertThat(responses()).hasSize(4)
+        assertThat(responses().last().path("response").path("metadata").path("buddystudy_usage_operation").asText())
+            .isEqualTo("voice-question-readback")
+    }
+
+    @Test
+    fun `new speech before skip acknowledgement cancels its unstarted next question`() {
+        val answer = manualAnswer()
+        answerControl(Contract.ANSWER_SKIP_EVENT, answer)
+        val skip = serverQuestionCall()
+        event("conversation.item.created", "item" to skip.path("item"))
+        val skipId = skip.path("item").path("call_id").asText()
+        controller.beginTool(skipId)
+        val reviewed = requireNotNull(controller.reviewedAnswer(skipId))
+        controller.completeTool(skipId, VoiceTutorMcpToolResult("{\"skipped\":true}", false,
+            questionContinuation = VoiceTutorQuestionContinuation(reviewed.answerId, reviewed.studyId, reviewed.recordId)))
+        speech(2)
+        ackToolOutput()
+        assertThat(outbound.filter { it.path("item").path("name").asText() == "request_question" }).isEmpty()
+        assertThat(answerStates().last().path("phase").asText()).isEqualTo("cancelled")
     }
 
     @Test

@@ -1,6 +1,7 @@
 #if os(iOS)
 import AVFoundation
 import Foundation
+import UIKit
 
 enum VoiceTutorSessionPhase: Equatable {
     case idle
@@ -152,6 +153,90 @@ private enum VoiceTutorStopSource: String {
     case startupFailure, user, dismissal, audioInterruption, mediaFailure
     case identityInvalidated, controlReceiveFailure, providerError, pcmPlaybackFailure
     case localSpeechDeliveryFailure, pauseControlFailure
+}
+
+/// Explicit navigation must not own (or cancel) durable call finalization.
+/// The task retains its operation until it finishes, even after the call view
+/// and its StateObject have been released. Each call admits only one local end.
+@MainActor
+final class VoiceTutorBackgroundFinalization {
+    private(set) var hasStarted = false
+    private(set) var isRunning = false
+    private var task: Task<Void, Never>?
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var onExpiration: (@MainActor () -> Void)?
+    private var didRequestBackgroundTime = false
+
+    @discardableResult
+    func begin(
+        prepare: () -> Bool,
+        onExpiration: @escaping @MainActor () -> Void = {},
+        operation: @escaping @MainActor () async -> Void
+    ) -> Bool {
+        guard !hasStarted, prepare() else { return false }
+        hasStarted = true
+        isRunning = true
+        acquireBackgroundTime(onExpiration: onExpiration)
+        task = Task { @MainActor in
+            await operation()
+            self.endBackgroundTime()
+            self.isRunning = false
+            self.task = nil
+        }
+        return true
+    }
+
+    func waitForCompletion() async {
+        await task?.value
+    }
+
+    func acquireBackgroundTime(onExpiration: @escaping @MainActor () -> Void) {
+        guard !didRequestBackgroundTime else { return }
+        didRequestBackgroundTime = true
+        self.onExpiration = onExpiration
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Voice Tutor finalization") { [weak self] in
+            Task { @MainActor in self?.expireBackgroundTime() }
+        }
+    }
+
+    func expireBackgroundTime() {
+        guard let onExpiration else { return }
+        // Release the OS lease first, even if a network send is unresponsive.
+        // Consented recordings that already have a manifest retain their
+        // existing protected-file retry path; no cleanup task is cancelled.
+        endBackgroundTime()
+        onExpiration()
+    }
+
+    func endBackgroundTime() {
+        onExpiration = nil
+        let identifier = backgroundTask
+        backgroundTask = .invalid
+        if identifier != .invalid { UIApplication.shared.endBackgroundTask(identifier) }
+    }
+}
+
+/// A task-group cancellation alone cannot release a URLSession send that is
+/// still waiting for connectivity. Close the captured socket at the deadline
+/// so both its audio pump and end send actually resume before REST fallback.
+@MainActor
+enum VoiceTutorSocketFinalization {
+    static func run<Value>(
+        timeout: Duration = .seconds(3),
+        disconnect: @escaping @MainActor () async -> Void,
+        operation: @MainActor () async -> Value
+    ) async -> Value {
+        let deadline = Task { @MainActor in
+            do { try await Task.sleep(for: timeout) } catch { return }
+            await disconnect()
+        }
+        let result = await operation()
+        deadline.cancel()
+        // If expiration already entered disconnect, join that synchronous
+        // socket-close operation before this model can start another attempt.
+        await deadline.value
+        return result
+    }
 }
 
 /// Exact server protocol reasons, kept separate from natural-language intent.
@@ -1033,6 +1118,9 @@ final class VoiceTutorViewModel: ObservableObject {
     private var sessionID: String?
     private var hardEndsAt: Date?
     private var isFinalizing = false
+    private var backgroundFinalization = VoiceTutorBackgroundFinalization()
+    private var didCloseLocalMedia = false
+    private var didRequestLocalEnd = false
     @Published private var duplexPlaybackState = VoiceTutorDuplexPlaybackState()
     private var webRTCResponseState = VoiceTutorWebRTCResponseState()
     private var pendingSpokenEndPlayoutTail: VoiceTutorLocalPlayoutTailToken?
@@ -1064,10 +1152,14 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     func start() async {
-        guard !isFinalizing, phase == .idle || phase == .failed else {
+        guard !isFinalizing, !backgroundFinalization.isRunning,
+              phase == .idle || phase == .failed else {
             return
         }
         let attemptID = connectionAttemptFence.begin()
+        backgroundFinalization = VoiceTutorBackgroundFinalization()
+        didCloseLocalMedia = false
+        didRequestLocalEnd = false
         learnerTranscriptState.beginAttempt(attemptID)
         studyFocus.beginAttempt(attemptID)
         summaryRequestID = UUID()
@@ -1255,6 +1347,11 @@ final class VoiceTutorViewModel: ObservableObject {
                             guard self?.connectionAttemptFence.isCurrent(attemptID) == true else { return }
                             await self?.handleAudioSessionInterruption()
                         }
+                    },
+                    isCurrent: { [weak self] in
+                        self?.connectionAttemptFence.isCurrent(attemptID) == true
+                            && self?.phase == .connecting
+                            && self?.didCloseLocalMedia == false && connection.isCurrent()
                     }
                 )
             }
@@ -1264,14 +1361,17 @@ final class VoiceTutorViewModel: ObservableObject {
             startReceivingEvents(attemptID: attemptID)
             startHeartbeat()
             guard phase == .connecting || phase == .listening || phase == .speaking else {
-                audioEngine.stop()
-                webRTCTransport?.close()
-                webRTCTransport = nil
+                closeLocalMedia()
                 stopAudioSendPump()
                 stopLocalSpeechEventPump()
                 stopHeartbeat()
                 await transport.disconnect(closeCode: .goingAway)
-                await finishRecordingIfNeeded()
+                // A dismissed SwiftUI startup task may already be cancelled.
+                // It must not take the recorder away from retained cleanup,
+                // whose uncancelled task owns manifest creation.
+                if !isFinalizing && !backgroundFinalization.hasStarted {
+                    await finishRecordingIfNeeded()
+                }
                 return
             }
             startCountdown()
@@ -1588,8 +1688,8 @@ final class VoiceTutorViewModel: ObservableObject {
         await stop(shouldNotifyServerOverSocket: true, outcome: .failed, source: .pauseControlFailure)
     }
 
-    func stopForUser() async {
-        await stop(shouldNotifyServerOverSocket: true, source: .user)
+    func stopForUser() {
+        stopLocallyAndFinalizeInBackground(source: .user)
     }
 
     func updateUserInput(requestID: String, answer: VoiceTutorUserInputAnswer) {
@@ -1618,15 +1718,14 @@ final class VoiceTutorViewModel: ObservableObject {
         logDiagnostic("event=app_foregrounded callContinues=1")
     }
 
-    func stopForDismissal() async {
+    func stopForDismissal() {
         if phase.shouldCloseFinalizingMediaForDismissal(isFinalizing: isFinalizing) {
+            didRequestLocalEnd = true
+            acquireFinalizationBackgroundTime()
             // A server-spoken-end tail may be awaiting its short local render
             // fence. Explicit dismissal wins: invalidate playout while the
             // already-running control/REST settlement continues on its own.
-            recorder?.stopAcceptingFrames()
-            audioEngine.stop()
-            webRTCTransport?.close()
-            webRTCTransport = nil
+            closeLocalMedia()
             stopAudioSendPump()
             stopLocalSpeechEventPump()
             return
@@ -1634,7 +1733,49 @@ final class VoiceTutorViewModel: ObservableObject {
         guard phase.isLive || phase == .ending, !isFinalizing else {
             return
         }
-        await stop(shouldNotifyServerOverSocket: true, source: .dismissal)
+        stopLocallyAndFinalizeInBackground(source: .dismissal)
+    }
+
+    private func stopLocallyAndFinalizeInBackground(source: VoiceTutorStopSource) {
+        guard phase.isLive || phase == .ending else { return }
+        didRequestLocalEnd = true
+        if isFinalizing {
+            // A server-driven finalization already owns settlement. Dismissal
+            // only closes its remaining local playout; never send a second end.
+            acquireFinalizationBackgroundTime()
+            closeLocalMedia()
+            return
+        }
+        backgroundFinalization.begin(
+            prepare: { prepareStop(outcome: .ended, source: source) },
+            onExpiration: { [weak self, transport] in
+                self?.clearServerEndWaiter()
+                Task { await transport.disconnect(closeCode: .goingAway) }
+            },
+            operation: { [self] in
+                await finalizeStop(shouldNotifyServerOverSocket: true, outcome: .ended)
+            }
+        )
+    }
+
+    private func acquireFinalizationBackgroundTime() {
+        // A server-ended receive task already retains this model and owns
+        // settlement. Add only background time when its UI is dismissed.
+        backgroundFinalization.acquireBackgroundTime { [weak self, transport] in
+            self?.clearServerEndWaiter()
+            Task { await transport.disconnect(closeCode: .goingAway) }
+        }
+    }
+
+    private func closeLocalMedia() {
+        // A late completion from this call must not deactivate a newer call's
+        // shared AVAudioSession. Teardown is synchronous and once per attempt.
+        guard !didCloseLocalMedia else { return }
+        didCloseLocalMedia = true
+        recorder?.stopAcceptingFrames()
+        audioEngine.stop()
+        webRTCTransport?.close()
+        webRTCTransport = nil
     }
 
     private func handleAudioSessionInterruption() async {
@@ -1670,10 +1811,18 @@ final class VoiceTutorViewModel: ObservableObject {
         outcome: VoiceTutorSessionPhase = .ended,
         source: VoiceTutorStopSource
     ) async {
+        guard prepareStop(outcome: outcome, source: source) else { return }
+        await finalizeStop(shouldNotifyServerOverSocket: shouldNotifyServerOverSocket, outcome: outcome)
+    }
+
+    private func prepareStop(outcome: VoiceTutorSessionPhase, source: VoiceTutorStopSource) -> Bool {
         guard !isFinalizing, phase.isLive || phase == .ending else {
-            return
+            return false
         }
-        logDiagnostic("event=stop_requested source=\(source.rawValue) socketEnd=\(shouldNotifyServerOverSocket ? 1 : 0)", isWarning: outcome == .failed)
+        logDiagnostic("event=stop_requested source=\(source.rawValue)", isWarning: outcome == .failed)
+        isFinalizing = true
+        phase = .ending
+        closeLocalMedia()
         if source == .user || source == .dismissal, activeConnection?.isCurrent() == true {
             preserveInterruptedAssistantTranscript(responseID: duplexPlaybackState.activeResponseID)
         }
@@ -1686,43 +1835,47 @@ final class VoiceTutorViewModel: ObservableObject {
         if answerDraftState.hasUserEdited { persistVoiceAnswerDraft(force: true) }
         answerDraftState.endLocally()
         cancelTerminalPlayoutDrain()
-        recorder?.stopAcceptingFrames()
-        isFinalizing = true
-        phase = .ending
-        let shouldNotifyServerOverSocket = shouldNotifyServerOverSocket
-            && activeConnection?.isCurrent() == true
-        if activeConnection?.isCurrent() == false {
-            audioEngine.stop()
-            webRTCTransport?.close()
-        }
-        if usesWebRTC {
-            webRTCTransport?.closeMicrophoneInput()
-        } else {
-            audioEngine.stop()
-        }
         stopLocalSpeechEventPump()
-        await finishAudioSendPump()
         stopHeartbeat()
         clearSessionCountdown()
+        return true
+    }
 
-        let serverEndStream = shouldNotifyServerOverSocket ? makeServerEndStream() : nil
-        var didSendSocketEnd = false
-        if shouldNotifyServerOverSocket {
-            do {
-                try await transport.sendSessionEnd()
-                didSendSocketEnd = true
-            } catch {
-                didSendSocketEnd = false
+    private func finalizeStop(
+        shouldNotifyServerOverSocket: Bool,
+        outcome: VoiceTutorSessionPhase
+    ) async {
+        // Start sealing the local consented recording immediately. A stalled
+        // socket/REST call must not leave only raw audio without a retryable
+        // manifest. Upload is deferred until after the end request is sent.
+        async let pendingRecording = finalizeRecordingIfNeeded()
+        let shouldNotifyServerOverSocket = shouldNotifyServerOverSocket
+            && activeConnection?.isCurrent() == true
+        let finishingTransport = transport
+        let serverEnded = await VoiceTutorSocketFinalization.run(disconnect: { [weak self] in
+            await finishingTransport.disconnect(closeCode: .goingAway)
+            self?.clearServerEndWaiter()
+        }, operation: {
+            await finishAudioSendPump()
+            let serverEndStream = shouldNotifyServerOverSocket ? makeServerEndStream() : nil
+            var didSendSocketEnd = false
+            if shouldNotifyServerOverSocket {
+                do {
+                    try await finishingTransport.sendSessionEnd()
+                    didSendSocketEnd = true
+                } catch {
+                    didSendSocketEnd = false
+                }
             }
-        }
-
-        let serverEnded: VoiceTutorRealtimeEnded?
-        if didSendSocketEnd, let serverEndStream {
-            serverEnded = await waitForServerEnd(from: serverEndStream)
-        } else {
-            serverEnded = nil
-        }
-        clearServerEndWaiter()
+            let ended: VoiceTutorRealtimeEnded?
+            if didSendSocketEnd, let serverEndStream {
+                ended = await waitForServerEnd(from: serverEndStream)
+            } else {
+                ended = nil
+            }
+            clearServerEndWaiter()
+            return ended
+        })
 
         var endedDetail: BackendVoiceTutorSessionDetail?
         if serverEnded == nil, let activeConnection {
@@ -1732,10 +1885,8 @@ final class VoiceTutorViewModel: ObservableObject {
         // A socket failure reaches this method from receiveTask itself. Closing
         // the socket ends the receive loop without cancelling REST settlement.
         receiveTask = nil
-        webRTCTransport?.close()
-        webRTCTransport = nil
         await transport.disconnect()
-        await finishRecordingIfNeeded()
+        await uploadFinalizedRecording(await pendingRecording)
         await finishSession(
             initialDetail: endedDetail,
             pollAfterMilliseconds: serverEnded?.pollAfterMilliseconds
@@ -1768,8 +1919,7 @@ final class VoiceTutorViewModel: ObservableObject {
         submittedAnswerIDs = []
         assistantTranscriptState.discard()
         cancelTerminalPlayoutDrain()
-        audioEngine.stop()
-        webRTCTransport?.close()
+        closeLocalMedia()
         stopAudioSendPump()
         stopLocalSpeechEventPump()
         if isFinalizing {
@@ -2071,7 +2221,7 @@ final class VoiceTutorViewModel: ObservableObject {
                 "event=control_receive_failed \(VoiceTutorDiagnosticError.fields(for: error)) wsCloseCode=\(closeCode.map(String.init) ?? "unknown")",
                 isWarning: true
             )
-            audioEngine.stop()
+            closeLocalMedia()
             let failure = VoiceTutorStartupFailurePolicy.presentation(for: error, strings: appState.strings)
             errorMessage = pauseState.holdsMicrophone ? appState.strings.voiceTutorPauseFailed : failure.message
             failureCause = pauseState.holdsMicrophone ? .localControl : failure.cause
@@ -2831,10 +2981,7 @@ final class VoiceTutorViewModel: ObservableObject {
         if outcome == .ended, activeConnection?.isCurrent() == true {
             preserveInterruptedAssistantTranscript(responseID: duplexPlaybackState.activeResponseID)
         }
-        recorder?.stopAcceptingFrames()
-        audioEngine.stop()
-        webRTCTransport?.close()
-        webRTCTransport = nil
+        closeLocalMedia()
         stopAudioSendPump()
         // This method runs inside receiveTask. Cancelling it here would also cancel
         // the result polling and leave the completed learning summary unloaded.
@@ -2849,19 +2996,26 @@ final class VoiceTutorViewModel: ObservableObject {
     }
 
     private func finishRecordingIfNeeded() async {
+        await uploadFinalizedRecording(await finalizeRecordingIfNeeded())
+    }
+
+    private func finalizeRecordingIfNeeded() async -> VoiceTutorPendingRecording? {
         guard let recorder else {
             isRecording = false
-            return
+            return nil
         }
         self.recorder = nil
         isRecording = false
-        let pending: VoiceTutorPendingRecording
         do {
-            pending = try await recorder.finish()
+            return try await recorder.finish()
         } catch {
             errorMessage = appState.strings.voiceTutorRecordingUnavailable
-            return
+            return nil
         }
+    }
+
+    private func uploadFinalizedRecording(_ pending: VoiceTutorPendingRecording?) async {
+        guard let pending else { return }
         do {
             try await appState.uploadVoiceTutorRecording(pending)
         } catch {
@@ -2934,6 +3088,7 @@ final class VoiceTutorViewModel: ObservableObject {
             errorMessage = appState.strings.voiceTutorFailureMessage(failureCause ?? .unknown)
         }
         activeConnection = nil
+        backgroundFinalization.endBackgroundTime()
     }
 
     /// This refresh never opens another call or asks the server to regenerate a
@@ -3061,6 +3216,10 @@ final class VoiceTutorViewModel: ObservableObject {
 
     private func applyServerQuota(_ quota: BackendVoiceTutorQuota) {
         sessionQuota.apply(quota)
+        // The dismissed call may settle after a new call has reserved time.
+        // Its historical quota belongs only to its detail; the fresh status
+        // refresh in finishSession updates the shared admission display.
+        guard !didRequestLocalEnd else { return }
         appState.applyVoiceTutorQuota(quota)
     }
 

@@ -21,6 +21,8 @@ data class VoiceTutorWebRtcControlContext(
     val userInputEnabled: Boolean = false,
     /** Native execution-only live source fence; never derived from provider fields or serialized. */
     val operationStillCurrent: (() -> Boolean)? = null,
+    /** Exact successful app skip authorizing its next question; never accepted from MCP arguments. */
+    val questionContinuationActionId: String? = null,
 )
 
 /** Tutor boundaries are frozen at the last accepted learner item's speech start, not tool completion. */

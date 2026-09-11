@@ -68,6 +68,8 @@ data class VoiceTutorMcpToolResult(
     val continueSelectedLesson: Boolean = false,
     /** Verified saved grade for this exact submitted record, never model-authored feedback. */
     val gradingReadback: VoiceTutorGradingReadback? = null,
+    /** A completed authenticated skip permits one separately scheduled next-question lookup/request. */
+    val questionContinuation: VoiceTutorQuestionContinuation? = null,
 )
 
 data class VoiceTutorCurriculumUserInput(val proposalId: String, val title: String, val prompt: String,
@@ -93,6 +95,7 @@ data class VoiceTutorGradingReadback(
 
 data class VoiceTutorQuestionChange(val studyId: Long, val recordId: String)
 data class VoiceTutorQuestionReadback(val studyId: Long, val recordId: String, val question: String)
+data class VoiceTutorQuestionContinuation(val actionId: String, val studyId: Long, val skippedRecordId: String)
 data class VoiceTutorLearningProgress(
     val phase: VoiceTutorLearningPhase,
     val studyId: Long,

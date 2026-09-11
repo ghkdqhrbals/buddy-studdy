@@ -222,6 +222,7 @@ internal fun nativeVoiceTutorToolRelay(
                     val executionContext = context.copy(realtimeModelTools = true,
                         initialLessonRevision = controller.toolRevision(call.callId),
                         dialogueBoundary = controller.toolBoundary(call.callId),
+                        questionContinuationActionId = controller.toolQuestionContinuationActionId(call.callId),
                         operationStillCurrent = { controller.toolCanExecute(call.callId) })
                     var result = mcp.execute(executionContext, call.name, call.arguments)
                     val retryDeadline = System.nanoTime() + Duration.ofSeconds(3).toNanos()
