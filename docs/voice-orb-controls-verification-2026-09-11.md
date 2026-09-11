@@ -25,8 +25,9 @@ row. The bounded history remains scoped to one connection attempt; this does
 not add a new durable history store.
 
 Learner bubbles in light mode are black with white text, including the
-learner's retained draft marker. Dark mode keeps white text on a restrained
-dark bubble. Tutor text remains on the conversation background.
+learner's retained draft marker. Following the same-day dark-mode request,
+dark mode uses white bubbles with black text and matching dark draft markers.
+Tutor text remains on the conversation background.
 
 Both surfaces and the single interpolated orb remain mounted. Disclosure now
 uses one shared background and one crossfade, with a short content offset.
@@ -103,3 +104,20 @@ images are time samples, not frame-by-frame animation verification. Live
 provider speech interruption and perceived word endings were not acoustically
 tested in this pass; the deterministic tests verify the boundary/fade timing
 and stale-response fencing only.
+
+## Dark-mode palette follow-up
+
+The learner bubble now reverses with the theme: white/black in dark mode and
+black/white in light mode. Retained draft and interrupted-response markers use
+the same theme-aware foreground at reduced opacity. No transcript data or
+control behavior changed.
+
+The generic iOS build and signed device build passed
+(`build/voice-dark-bubble-generic.log`,
+`build/voice-dark-bubble-device-build.log`). The existing native portrait render
+test passed on iPhone with no skips (`build/voice-dark-bubble-device.xcresult`).
+Both transcript images were visually inspected: the dark learner bubble has a
+white fill and black text, and the light learner bubble retains its black fill
+and white text. Synthetic fixture limitations above still apply. The installed
+app was relaunched without the test environment after the active-session gate
+returned zero.

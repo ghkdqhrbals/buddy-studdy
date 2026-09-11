@@ -2776,6 +2776,8 @@ private struct VoiceTutorCaptionBubble: View {
     var strings: AppStrings
 
     private var isLearner: Bool { caption.speaker == .learner }
+    private var learnerTextColor: Color { colorScheme == .dark ? .black : .white }
+    private var learnerBubbleColor: Color { colorScheme == .dark ? .white : .black }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -2784,24 +2786,24 @@ private struct VoiceTutorCaptionBubble: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(caption.text)
                     .font(.body)
-                    .foregroundStyle(isLearner ? Color.white : Color.primary)
+                    .foregroundStyle(isLearner ? learnerTextColor : Color.primary)
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                 if caption.isInterrupted {
                     Text(strings.voiceTutorInterruptedResponse)
                         .font(.caption2)
-                        .foregroundStyle(isLearner ? Color.white.opacity(0.75) : Color.secondary)
+                        .foregroundStyle(isLearner ? learnerTextColor.opacity(0.75) : Color.secondary)
                 }
                 if caption.isUnsubmittedAnswer {
                     Text(strings.voiceTutorUnsubmittedAnswer)
                         .font(.caption2)
-                        .foregroundStyle(isLearner ? Color.white.opacity(0.75) : Color.secondary)
+                        .foregroundStyle(isLearner ? learnerTextColor.opacity(0.75) : Color.secondary)
                 }
             }
             .padding(isLearner ? 16 : 0)
             .background(
-                isLearner ? (colorScheme == .light ? Color.black : Color.white.opacity(0.13)) : .clear,
+                isLearner ? learnerBubbleColor : .clear,
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
             )
 
