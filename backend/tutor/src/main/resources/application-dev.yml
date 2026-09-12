@@ -32,6 +32,9 @@ springdoc:
     url: /v3/api-docs
 
 buddystudy:
+  voice-tutor:
+    # Development voice cost/quality trial; explicit model overrides still win.
+    model: ${OPENAI_REALTIME_MODEL:gpt-realtime-2.1-mini}
   logging:
     api:
       detail: ${API_LOG_DETAIL:compact}
