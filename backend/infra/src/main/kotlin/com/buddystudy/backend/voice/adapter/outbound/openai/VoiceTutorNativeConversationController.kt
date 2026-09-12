@@ -1243,8 +1243,10 @@ internal class VoiceTutorNativeConversationController(
                 "The server will deliver the question exactly once after this response; its tool-result notice is not permission to read it here."
             else -> null
         }
+        val standaloneSpeech = quota || endingAfterResponse || isOpening || cancellationNotice ||
+            learningNotice != null || gradingNotice != null || readback != null || confirmation != null
         val options = linkedMapOf<String, Any>(
-            "output_modalities" to listOf("audio"), "tool_choice" to if (quota || endingAfterResponse || isOpening || cancellationNotice || learningNotice != null || gradingNotice != null || readback != null || confirmation != null) "none" else toolCoordinator.toolChoice,
+            "output_modalities" to listOf("audio"), "tool_choice" to if (standaloneSpeech) "none" else toolCoordinator.toolChoice,
             // Realtime response metadata accepts string values only, including boolean flags.
             "metadata" to mapOf(Contract.RESPONSE_TOKEN_METADATA_KEY to token, Contract.QUOTA_NOTICE_METADATA_KEY to quota.toString(),
                 "buddystudy_usage_operation" to when {
@@ -1259,11 +1261,9 @@ internal class VoiceTutorNativeConversationController(
                 }),
         )
         instructions?.let { options["instructions"] = VoiceTutorLanguagePolicy.responseInstructions(language, it) }
-        // A saved-question delivery is a bounded readback, not a continuation
-        // of the earlier pending-generation tool result. Empty custom input
-        // removes that stale context without deleting the actual conversation;
-        // the spoken response still belongs to its normal conversation.
-        if (readback != null || gradingNotice != null) options["input"] = emptyList<Any>()
+        // Exact source is already in per-response instructions. Omitting tools
+        // would inherit the full session catalog even when tool_choice is none.
+        if (standaloneSpeech) VoiceTutorInputBudget.standaloneSpeech(options)
         emit(mapOf("type" to "response.create", "event_id" to response.createEventId, "response" to options))
     }
 

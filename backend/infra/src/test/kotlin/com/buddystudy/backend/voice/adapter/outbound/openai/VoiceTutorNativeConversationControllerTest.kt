@@ -52,6 +52,43 @@ class VoiceTutorNativeConversationControllerTest {
         controller.learningPollEvents().subscribe { it.watch?.let { watch -> watches += watch } }
     }
 
+    @Test
+    fun `opening omits inherited catalog and history but subsequent learner response keeps both`() {
+        opening()
+        val opening = responses().single().path("response")
+        assertThat(opening.path("tools").isArray).isTrue()
+        assertThat(opening.path("tools").size()).isZero()
+        assertThat(opening.path("input").isArray).isTrue()
+        assertThat(opening.path("input").size()).isZero()
+        assertThat(opening.has("conversation")).isFalse()
+        speech(1); committed("learner")
+        val conversational = responses().last().path("response")
+        assertThat(conversational.has("tools")).isFalse()
+        assertThat(conversational.has("input")).isFalse()
+        assertThat(conversational.path("tool_choice").asText()).isEqualTo("auto")
+        assertThat(outbound.none { it.path("type").asText() == "conversation.item.delete" }).isTrue()
+    }
+
+    @Test
+    fun `saved question and its retry omit catalog while retaining exact question and answer readiness`() {
+        questionTool(); controller.completeTool("question-call", readbackResult()); ackToolOutput()
+        val first = responses().last()
+        rejected(first)
+        val retry = responses().last()
+        for (response in listOf(first, retry)) {
+            val body = response.path("response")
+            assertThat(body.path("tools").isArray).isTrue()
+            assertThat(body.path("tools").size()).isZero()
+            assertThat(body.path("input").isArray).isTrue()
+            assertThat(body.path("input").size()).isZero()
+            assertThat(body.has("conversation")).isFalse()
+            assertThat(body.path("instructions")).isEqualTo(first.path("response").path("instructions"))
+        }
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_ready")
+        assertThat(answerStates()).isEmpty()
+        assertThat(outbound.none { it.path("type").asText() == "conversation.item.delete" }).isTrue()
+    }
+
     @ParameterizedTest
     @ValueSource(strings = ["select_voice_study", "advance_voice_study"])
     fun `accepted leaf continues once after focus output and exact server call ACK without model lookup round`(tool: String) {
@@ -2137,7 +2174,13 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
         assertThat(answerReadyEvents()).isEmpty()
         assertThat(answerStates()).isEmpty()
-        assertThat(responses().last().path("response").has("input")).isFalse()
+        val notice = responses().last().path("response")
+        assertThat(notice.path("input").isArray).isTrue()
+        assertThat(notice.path("input").size()).isZero()
+        assertThat(notice.path("tools").isArray).isTrue()
+        assertThat(notice.path("tools").size()).isZero()
+        assertThat(notice.path("metadata").path("buddystudy_usage_operation").asText()).isEqualTo("voice-learning-notice")
+        assertThat(notice.path("instructions").asText()).contains("status notice")
     }
 
     @Test

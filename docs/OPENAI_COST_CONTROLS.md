@@ -121,3 +121,14 @@ this is not a new polling-to-SSE migration.
 
 Provider field references: [Realtime usage and cost](https://developers.openai.com/api/docs/guides/voice-latency-cost),
 [prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
+
+## Bounded voice inputs (2026-09-13)
+
+Server-prepared readbacks/notices now explicitly override both `tools: []` and
+`input: []`, in addition to `tool_choice: none`. Ordinary learner responses keep
+the session catalog and history. Realtime transports configure an 8,000-token
+post-instructions conversation window with 0.8 retention. App transcripts/drafts
+remain untouched; this is not an 8,000-token limit including fixed instructions.
+A two-response synthetic live API comparison reduced input from 1,357 to 28
+while reading the same question. It is not an overall session savings claim.
+See [verification and limitations](voice-input-budget-verification-2026-09-13.md).

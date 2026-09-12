@@ -199,6 +199,7 @@ class OpenAIVoiceTutorRealtimeAdapter(
                 "type" to "realtime",
                 "model" to request.model,
                 "instructions" to request.instructions,
+                "truncation" to VoiceTutorInputBudget.truncation(),
                 "output_modalities" to listOf("audio"),
                 "audio" to mapOf(
                     "input" to mapOf(

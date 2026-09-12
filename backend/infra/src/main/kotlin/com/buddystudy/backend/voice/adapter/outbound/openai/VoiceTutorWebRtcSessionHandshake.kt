@@ -50,6 +50,7 @@ internal class VoiceTutorWebRtcSessionHandshake(
                             "type" to "realtime",
                             "tools" to tools,
                             "tool_choice" to "auto",
+                            "truncation" to VoiceTutorInputBudget.truncation(),
                             "audio" to mapOf(
                                 "input" to mapOf(
                                     "transcription" to transcription,

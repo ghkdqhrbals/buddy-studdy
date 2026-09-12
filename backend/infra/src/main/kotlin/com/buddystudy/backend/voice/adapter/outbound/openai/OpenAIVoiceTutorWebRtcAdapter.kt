@@ -400,6 +400,7 @@ class OpenAIVoiceTutorWebRtcAdapter(
             "type" to "realtime",
             "model" to request.model,
             "instructions" to request.instructions,
+            "truncation" to VoiceTutorInputBudget.truncation(),
             "output_modalities" to listOf("audio"),
             "tools" to voiceTutorRealtimeFunctionTools(nativeVoiceTutorDefinitions(mcpTools)),
             "tool_choice" to "auto",

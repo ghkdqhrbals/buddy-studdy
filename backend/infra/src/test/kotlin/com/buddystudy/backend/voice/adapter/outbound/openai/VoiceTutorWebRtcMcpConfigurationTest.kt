@@ -74,6 +74,9 @@ class VoiceTutorWebRtcMcpConfigurationTest {
             transcriptionLanguage = "ko", realtimeNative = true)
         val sideband = dispatch(handshake).path("session")
 
+        assertThat(sdpConfiguration.path("truncation")).isEqualTo(sideband.path("truncation"))
+        assertThat(sideband.path("truncation").path("token_limits").path("post_instructions").asInt()).isEqualTo(8_000)
+        assertThat(sideband.path("truncation").path("retention_ratio").asDouble()).isEqualTo(0.8)
         assertThat(sdpConfiguration.path("tools")).isEqualTo(sideband.path("tools"))
         assertThat(sdpConfiguration.path("tools").size()).isEqualTo(3)
         assertThat(sdpConfiguration.path("tool_choice").asText()).isEqualTo("auto")
