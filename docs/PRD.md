@@ -401,3 +401,12 @@ Both orb and transcript views expose **점수와 해설 보기** (View score and
 for the current retained result. It opens a scrollable result sheet with score,
 grading reason and explanation. The compact orb view continues to show the result
 card directly. Viewing a grade never resubmits an answer or advances the lesson.
+
+
+### 실무 적용 중심 질문 (2026-09-13)
+
+- 새 질문은 선택한 주제와 세부 개념의 실제 작업·증상·판단에서 시작한다. 단순 정의 암기와 이름 맞히기보다 행동과 이유를 묻는다.
+- 레벨 1–3은 명확한 사용 상황, 4–6은 제약이 있는 진단·판단, 7–8은 상호작용하는 제약과 주요 절충점, 9–10은 충돌하는 조건과 핵심 가정 검증을 다룬다. 어려움은 문제 길이나 생소한 용어로 만들지 않는다.
+- 질문은 400자 이내의 한 가지 중심 문제로 유지한다. 언어 학습은 답변에 사용할 언어를 명시하며, 비개발 주제에 개발 용어를 강제하지 않는다.
+- 최초·보완 생성 채점표 모두 질문에서 요구한 내용만 평가한다. 짧아도 정확하고 근거가 충분한 답은 만점을 받을 수 있고, 주어진 조건에 맞는 대안도 인정한다.
+- 음성 설명도 같은 실무 맥락을 유지하며 저장된 문제를 임의로 바꾸거나 새로운 즉석 문제로 대체하지 않는다.

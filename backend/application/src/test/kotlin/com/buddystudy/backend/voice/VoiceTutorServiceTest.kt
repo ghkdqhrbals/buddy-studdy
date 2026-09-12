@@ -108,6 +108,7 @@ class VoiceTutorServiceTest {
                 .contains("foreign technical terms", "quoting or translating a passage does not switch")
                 .contains("The server owns the opening as a separate first-response instruction", "Never restart the opening")
                 .contains("Acknowledgements such as okay or understood do not end", "never internal record IDs")
+                .contains("realistic task, symptom or decision", "read its question unchanged")
                 .doesNotContain(expectedOpening, "Start with one short question")
                 .doesNotContain("in Korean, without a greeting")
             val data = JsonMapperProvider.mapper.readTree(context.instructions.substringAfterLast('\n'))

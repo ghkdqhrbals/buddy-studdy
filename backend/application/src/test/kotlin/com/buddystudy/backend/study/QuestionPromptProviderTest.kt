@@ -8,6 +8,8 @@ import com.buddystudy.backend.study.application.prompt.QuestionDiversityGuide
 import com.buddystudy.backend.study.application.prompt.QuestionPromptDefaults
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 
 class QuestionPromptProviderTest {
     @Test
@@ -108,6 +110,32 @@ class QuestionPromptProviderTest {
         assertThat(prompt.userPrompt).contains("Focus concept path: Persistence > AOF > Recovery")
         assertThat(prompt.userPrompt).contains("Focus concept: Recovery")
         assertThat(prompt.userPrompt).contains("Question angle: Failure Mode")
+    }
+
+    @ParameterizedTest
+    @CsvSource("-1, 1, Beginner", "3, 3, Beginner", "4, 4, Practitioner", "6, 6, Practitioner",
+        "7, 7, Advanced", "8, 8, Advanced", "9, 9, Expert", "20, 10, Expert")
+    fun `practical complexity follows the same clamped level as grading`(requested: Int, effective: Int, target: String) {
+        val prompt = QuestionPromptProvider().buildQuestionGenerationPrompt(
+            topic = "Redis", level = requested, language = "ko", customPrompt = "",
+            recentQuestions = emptyList(), diversity = testDiversity,
+        )
+        assertThat(prompt.level).isEqualTo(effective)
+        assertThat(prompt.userPrompt).contains("Level: $effective/10", "Difficulty target: $target:")
+    }
+
+    @Test
+    fun `practical question contract preserves nontechnical topic and only grades asked requirements`() {
+        val prompt = QuestionPromptProvider().buildQuestionGenerationPrompt(
+            topic = "영어 고객 응대", level = 2, language = "ja", customPrompt = "친절한 어조",
+            recentQuestions = listOf("배송 지연을 어떻게 알릴까요?"), diversity = testDiversity,
+            coverage = QuestionCoverageGuide("환불 안내", "설명", "고객 응대 > 환불 안내"),
+        )
+        assertThat(prompt.fallbackTopic).isEqualTo("영어 고객 응대")
+        assertThat(prompt.userPrompt).contains("Language: Japanese", "고객 응대 > 환불 안내", "친절한 어조")
+        assertThat(prompt.systemPrompt).contains("do not force software jargon", "within 400 characters")
+        assertThat(prompt.userPrompt).contains("only requirements explicitly asked", "concise correct answer can",
+            "earn full marks", "constraint-consistent alternatives")
     }
 
     private val testDiversity = QuestionDiversityGuide(
