@@ -47,6 +47,25 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** In-memory WebSocket frames and suspended coroutines only: no provider, audio, database or classifier. */
 class VoiceTutorNativeSessionRelayTest {
     @Test
+    fun `prewrite persistence recovery remains one user-visible tool operation`() {
+        var attempts = 0
+        val tools = FakeTools {
+            if (++attempts == 1) nativeToolError("INPUT_PERSISTENCE_PENDING", "source write pending") else success()
+        }
+        Fixture(tools = tools).use { f ->
+            f.opening(); f.learner(1, "start-topic"); f.transcript("start-topic")
+            f.toolResponse("create-response", "create-call", "prepare_voice_study_mutation")
+            f.await("source persistence retry recovers") { f.outputs().size == 1 }
+            assertThat(tools.invocations).hasSize(2)
+            assertThat(f.outputs().single().path("item").path("output").asText()).doesNotContain("INPUT_PERSISTENCE_PENDING")
+            assertThat(f.ui.filter { it.path("type").asText() == Contract.OPERATION_EVENT &&
+                it.path("operationId").asText() == "create-call" }.map { it.path("phase").asText() })
+                .containsExactly("started", "completed")
+            assertThat(f.errors).isEmpty()
+        }
+    }
+
+    @Test
     fun `malformed or mixed preference arguments never open a form or prepare topics`() {
         val proposal = mapOf("studyTopicProposal" to mapOf("parentStudyId" to 7, "topics" to listOf("Redis")))
         for (arguments in listOf(emptyMap(), mapOf("title" to "Incomplete"), ordinaryInputArguments("single") + proposal)) {

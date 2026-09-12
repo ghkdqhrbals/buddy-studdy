@@ -1174,12 +1174,13 @@ class VoiceTutorNativeConversationControllerTest {
     }
 
     @Test
-    fun `initial request failure during newer speech clears loading without requiring another learner turn`() {
+    fun `newer speech clears unaccepted question loading before its old failure arrives`() {
         opening(); speech(1); committed("u1"); created("r1"); toolDone("r1", "request", "request_question")
         controller.beginTool("request")
         client(Contract.SPEECH_STARTED_EVENT, 2)
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
         controller.completeTool("request", VoiceTutorMcpToolResult("{}", true))
-        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_failed")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
         assertThat(watches).isEmpty()
     }
 
@@ -1219,6 +1220,34 @@ class VoiceTutorNativeConversationControllerTest {
         controller.completeLearningPoll(watch, VoiceTutorMcpToolResult("{}", false,
             learningProgress = progress.copy(phase = VoiceTutorLearningPhase.QUESTION_READY, recordId = "42")))
         assertThat(sessionStates().last()).isEqualTo(current)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["list_pending_questions", "request_question", "select_voice_study"])
+    fun `late abandoned question error remains in history without replacing newer speech`(tool: String) {
+        opening(); speech(1); committed("old-input"); created("old-response")
+        toolDone("old-response", "old-work", tool); controller.beginTool("old-work")
+        assertThat(sessionStates().last().path("phase").asText()).isIn("question_loading", "question_generating")
+        speech(2); committed("new-input")
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
+        controller.completeTool("old-work", nativeToolError("TOOL_TIMEOUT", "Synthetic old failure"))
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("conversation")
+        assertThat(ui.filter { it.path("type").asText() == Contract.OPERATION_EVENT &&
+            it.path("operationId").asText() == "old-work" }.last().path("phase").asText()).isEqualTo("failed")
+        ackToolOutput()
+        assertThat(responses()).hasSize(3)
+    }
+
+    @Test
+    fun `new speech does not hide an already accepted generation or stop its subscription`() {
+        opening(); speech(1); committed("u1"); created("r1")
+        toolDone("r1", "request", "request_question"); controller.beginTool("request")
+        controller.completeTool("request", VoiceTutorMcpToolResult("{}", false,
+            learningProgress = VoiceTutorLearningProgress(VoiceTutorLearningPhase.QUESTION_GENERATING, 7, correlationId = "generation")))
+        val watch = watches.single()
+        ackToolOutput(); speech(2)
+        assertThat(controller.learningWatchIsCurrent(watch)).isTrue()
+        assertThat(sessionStates().last().path("phase").asText()).isEqualTo("question_generating")
     }
 
     @Test

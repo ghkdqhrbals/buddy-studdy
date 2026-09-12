@@ -430,7 +430,8 @@ internal class VoiceTutorNativeConversationController(
                     if (answerCapture == null) active?.questionReadback?.takeIf {
                         it.revision == revision && it.epoch == questionReadbackEpoch
                     }?.let { pendingQuestionReadback = it }
-                    if (answerCapture == null && sessionState.current.phase in setOf("question_ready", "question_reading", "question_loading", "question_failed")) {
+                    if (answerCapture == null && (sessionState.current.phase in setOf("question_ready", "question_reading", "question_loading", "question_failed") ||
+                        (sessionState.current.phase == "question_generating" && learningWatch == null))) {
                         sessionState.update("conversation", revision, recordId = null, answerId = null)
                     }
                     pendingChoiceCancellationNotice = false
@@ -1029,7 +1030,11 @@ internal class VoiceTutorNativeConversationController(
             sessionState.current.phase in GRADING_PHASES && sessionState.current.phase != "graded" && learningWatch == null) {
             sessionState.update("grading_unavailable", revision, answerId = null)
         }
-        if (displayOperationIsCurrent && result.isError && reviewedAnswer == null && learningWatch == null &&
+        // Keep the historical operation failure, but do not replace the latest
+        // conversation with an error from an abandoned learner/lesson boundary.
+        if (displayOperationIsCurrent && stateIsCurrent && call?.learningIntentEpoch == learningIntentEpoch &&
+            (!learningExplicitlyCancelled || call.name in setOf("select_voice_study", "advance_voice_study")) &&
+            result.isError && reviewedAnswer == null && learningWatch == null &&
             sessionState.current.phase !in GRADING_PHASES &&
             sessionState.current.phase !in setOf("question_ready", "question_reading", "graded")) {
             when (call?.name) {

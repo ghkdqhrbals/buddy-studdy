@@ -224,18 +224,10 @@ internal fun nativeVoiceTutorToolRelay(
                         dialogueBoundary = controller.toolBoundary(call.callId),
                         questionContinuationActionId = controller.toolQuestionContinuationActionId(call.callId),
                         operationStillCurrent = { controller.toolCanExecute(call.callId) })
-                    var result = mcp.execute(executionContext, call.name, call.arguments)
-                    val retryDeadline = System.nanoTime() + Duration.ofSeconds(3).toNanos()
-                    // This named error is emitted before any write/lease consumption.
-                    // Never replay timeouts, unknown results, or generic mutation errors.
-                    while (mutating && result.isError &&
-                        JsonMapperProvider.mapper.readTree(result.output).path("error").path("code").asText() == "INPUT_PERSISTENCE_PENDING" &&
-                        controller.toolCanExecute(call.callId) && System.nanoTime() < retryDeadline
-                    ) {
-                        delay(50)
-                        result = mcp.execute(executionContext, call.name, call.arguments)
+                    VoiceTutorPersistenceRetry.execute(retryPending = mutating,
+                        isCurrent = { controller.toolCanExecute(call.callId) }) {
+                        mcp.execute(executionContext, call.name, call.arguments)
                     }
-                    result
                 }
             }
         } catch (_: TimeoutCancellationException) {
