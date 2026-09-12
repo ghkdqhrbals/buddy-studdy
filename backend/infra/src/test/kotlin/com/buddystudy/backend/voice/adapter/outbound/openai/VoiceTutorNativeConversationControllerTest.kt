@@ -3783,7 +3783,7 @@ class VoiceTutorNativeConversationControllerTest {
         assertThat(cancellations()).anyMatch { it.path("response_id").asText() == "waiting" }
         cancelled("waiting"); event("output_audio_buffer.cleared", "response_id" to "waiting"); settleQuiet()
         val next = responses().last().path("response")
-        assertThat(next.path("instructions").asText()).contains("now graded", "87", "검증된 이유")
+        assertThat(next.path("instructions").asText()).contains("now graded", "87", "검증된 이유", "at most two short sentences", "never mention record IDs", "Do not say goodbye")
         assertThat(next.path("tool_choice").asText()).isEqualTo("none")
         assertThat(next.path("input").isArray).isTrue()
         assertThat(next.path("input").isEmpty).isTrue()

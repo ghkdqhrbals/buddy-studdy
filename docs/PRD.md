@@ -380,3 +380,24 @@ Tapping a public-question row opens its detail. The options and long-press menus
 - Add export for records and topic stats.
 - Add explicit conflict UI when two devices edit the same answer draft.
 - Add service-error compensation that does not invent scores: missed scheduled question catch-up, streak freeze for backend/API outages, and automatic retry priority after failed grading.
+
+
+### Voice lesson continuity and mute terminology (2026-09-13)
+
+The opening study question belongs only to the server's first-response command,
+not the reusable session instructions. Corrections and interruptions during a
+lesson keep the current topic. After grading, brief acknowledgements do not end
+the conversation or initiate an unrequested next question. Spoken grading gives
+the saved score and main educational reason without record IDs or storage details.
+
+The connected pause control is labeled **대화 음소거 / 음소거 해제** (Mute conversation /
+Unmute). It silences the conversation's microphone and tutor output while keeping
+the connection, monthly usage accounting and session deadline active. It is not
+a billing pause. The existing pause-v1 acknowledgment and draft preservation
+contracts remain unchanged; recording playback controls retain their ordinary
+Pause terminology. A muted-time disclosure accompanies the countdown.
+
+Both orb and transcript views expose **점수와 해설 보기** (View score and explanation)
+for the current retained result. It opens a scrollable result sheet with score,
+grading reason and explanation. The compact orb view continues to show the result
+card directly. Viewing a grade never resubmits an answer or advances the lesson.

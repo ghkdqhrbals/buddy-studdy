@@ -9,9 +9,9 @@ import XCTest
 final class VoiceTutorPauseTests: XCTestCase {
     func testPauseCopyUsesDirectCallControlsInEveryLanguage() {
         let expected = [
-            (AppLanguage.korean, "일시정지", "계속하기", "일시정지됨"),
-            (AppLanguage.english, "Pause", "Continue", "Paused"),
-            (AppLanguage.japanese, "一時停止", "続ける", "一時停止中")
+            (AppLanguage.korean, "대화 음소거", "음소거 해제", "대화 음소거됨"),
+            (AppLanguage.english, "Mute conversation", "Unmute", "Conversation muted"),
+            (AppLanguage.japanese, "対話をミュート", "ミュート解除", "対話ミュート中")
         ]
         for (language, pause, resume, paused) in expected {
             let strings = AppStrings(language: language)

@@ -1190,6 +1190,7 @@ struct VoiceTutorCallScreen: View {
     @State private var orbHoldTask: Task<Void, Never>?
     @State private var didRequestEnd = false
     @State private var showsEndConfirmation = false
+    @State private var showsGradingDetails = false
     @GestureState private var orbDragIsActive = false
     @State private var answerEditorSession: VoiceTutorAnswerEditorSession?
     let topic: String
@@ -1364,6 +1365,20 @@ struct VoiceTutorCallScreen: View {
             named: Text(showsTranscript ? strings.voiceTutorCallCollapseConversation : strings.voiceTutorCallRevealConversation)
         ) {
             setTranscriptExpanded(!showsTranscript)
+        }
+        .sheet(isPresented: $showsGradingDetails) {
+            NavigationStack {
+                ScrollView { gradingResultCard.padding(20) }
+                    .navigationTitle(strings.voiceTutorAnswerGraded)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button(strings.done) { showsGradingDetails = false }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .confirmationDialog(
             strings.voiceTutorOrbEndConfirmation,
@@ -1982,10 +1997,12 @@ struct VoiceTutorCallScreen: View {
     private var gradingResultCard: some View {
         VStack(alignment: .leading, spacing: 24) {
             if let result = visibleGradingResult {
-                if userInputState.pending != nil {
+                HStack(alignment: .firstTextBaseline) {
                     Text(strings.voiceTutorLessonScore(result.score))
                         .font(.title.weight(.semibold))
                         .monospacedDigit()
+                    Spacer()
+                    Text(strings.voiceTutorAnswerGraded).font(.subheadline.weight(.medium))
                 }
                 if !result.feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     gradingSection(title: strings.voiceTutorGradingFeedbackTitle,
@@ -2203,7 +2220,7 @@ struct VoiceTutorCallScreen: View {
     }
 
     private var callTime: some View {
-        Group {
+        VStack(alignment: showsTranscript ? .leading : .center, spacing: 8) {
             switch presentation.remainingTime {
             case .call(let seconds):
                 Text(strings.voiceTutorCallRemaining(seconds))
@@ -2216,6 +2233,17 @@ struct VoiceTutorCallScreen: View {
                     .accessibilityIdentifier("voiceCall.remainingTime")
             case nil:
                 EmptyView()
+            }
+            if presentation.orbState == .paused {
+                Text(strings.voiceTutorPauseUsesTime)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("voiceCall.mutedTimeNotice")
+            }
+            if showsGradingResultCard {
+                Button(strings.voiceTutorGradingDetails) { showsGradingDetails = true }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(voiceAccent)
+                    .accessibilityIdentifier("voiceCall.showGradingDetails")
             }
         }
         .font(.caption.monospacedDigit())

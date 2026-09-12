@@ -4825,6 +4825,41 @@ final class VoiceTutorContractTests: XCTestCase {
     }
 
     @MainActor
+    func testGradedResultAndConversationMuteScreensRenderWithoutNetwork() async throws {
+        let lesson = makeLessonPresentationState(.graded)
+        var grade = VoiceTutorGradingResultState()
+        let request = try XCTUnwrap(grade.reconcile(snapshot: lesson.snapshot, sessionID: "fixture",
+            attemptID: UUID(), ownerUserID: 7))
+        let record = StudyRecord(id: "101", studyID: 42,
+            question: QuestionItem(question: "중복 이벤트를 안전하게 처리하려면 무엇이 필요한가요?",
+                expectedAnswerHint: nil, createdAt: Date()), answer: "멱등성을 보장합니다.",
+            gradingResult: GradingResult(score: 44, isCorrect: false,
+                feedback: "멱등성의 필요성은 맞지만, 중복 소비가 발생하는 상황의 설명이 부족했어요.",
+                explanation: "이벤트 ID를 저장하고 같은 ID의 재처리를 막아 같은 결과를 보장합니다."),
+            topic: "Saga", difficulty: Difficulty(level: 8), gradingStatus: .completed, questionStatus: .graded)
+        XCTAssertTrue(grade.resolve(record, for: request))
+        for (name, transcript, muted, scheme) in [
+            ("graded-orb-dark", false, false, ColorScheme.dark),
+            ("graded-chat-light", true, false, ColorScheme.light),
+            ("muted-orb-dark", false, true, ColorScheme.dark)
+        ] {
+            var pause = VoiceTutorCallPauseState()
+            pause.isSupported = true
+            if muted {
+                let control = try XCTUnwrap(pause.requestPause())
+                XCTAssertTrue(pause.acknowledge(sequence: control.sequence, paused: true))
+            }
+            let image = try await renderCompactCallSnapshot(.init(name: name, phase: .listening,
+                pauseState: pause, showsTranscript: transcript, topic: "분산 트랜잭션과 Saga 패턴",
+                colorScheme: scheme, sessionState: lesson, gradingResultState: grade))
+            let attachment = XCTAttachment(data: try XCTUnwrap(image.pngData()), uniformTypeIdentifier: "public.png")
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    @MainActor
     func testBackendLessonProgressScreensRenderWithoutStartingAnAudioSession() async throws {
         let fixtures: [VoiceTutorCompactCallSnapshot] = [
             .init(name: "lesson-question-loading", phase: .listening, topic: "스프링",
@@ -7226,7 +7261,8 @@ final class VoiceTutorContractTests: XCTestCase {
                 canSkipAnswer: fixture.answerDraftState.canSkip,
                 onSkipAnswer: { XCTFail("A visual fixture must never skip a saved question") },
                 canCancelLearning: fixture.answerDraftState.canCancel,
-                onCancelLearning: { XCTFail("A visual fixture must never cancel a saved question") }
+                onCancelLearning: { XCTFail("A visual fixture must never cancel a saved question") },
+                gradingResultState: fixture.gradingResultState
             )
             .navigationTitle(strings.voiceTutorCallTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -7959,6 +7995,7 @@ private struct VoiceTutorCompactCallSnapshot {
     var colorScheme = ColorScheme.dark
     var answerDraftState = VoiceTutorAnswerDraftState()
     var sessionState = VoiceTutorSessionState()
+    var gradingResultState = VoiceTutorGradingResultState()
 }
 
 private struct VoiceTutorContractRenderFixture {

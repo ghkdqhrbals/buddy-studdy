@@ -141,36 +141,36 @@ extension AppStrings {
         )
     }
 
-    var voiceTutorTakeBreak: String { voiceTutorPauseText("일시정지", "Pause", "一時停止") }
-    var voiceTutorResumeLesson: String { voiceTutorPauseText("계속하기", "Continue", "続ける") }
+    var voiceTutorTakeBreak: String { voiceTutorPauseText("대화 음소거", "Mute conversation", "対話をミュート") }
+    var voiceTutorResumeLesson: String { voiceTutorPauseText("음소거 해제", "Unmute", "ミュート解除") }
     var voiceTutorPausing: String {
-        voiceTutorPauseText("일시정지하는 중", "Pausing", "一時停止しています")
+        voiceTutorPauseText("음소거 적용 중", "Muting", "ミュート中")
     }
-    var voiceTutorPaused: String { voiceTutorPauseText("일시정지됨", "Paused", "一時停止中") }
-    var voiceTutorResuming: String { voiceTutorPauseText("계속할 준비 중", "Getting ready to continue", "再開の準備中") }
+    var voiceTutorPaused: String { voiceTutorPauseText("대화 음소거됨", "Conversation muted", "対話ミュート中") }
+    var voiceTutorResuming: String { voiceTutorPauseText("음소거 해제 중", "Unmuting", "ミュート解除中") }
     var voiceTutorPauseUsesTime: String {
         voiceTutorPauseText(
-            "일시정지 중에도 대화 시간은 사용돼요.",
-            "Conversation time continues while paused.",
-            "一時停止中も対話時間を消費します。"
+            "음소거 중에도 연결과 이용 시간 차감은 유지돼요.",
+            "The connection and time allowance continue while muted.",
+            "ミュート中も接続と利用時間の消費は続きます。"
         )
     }
     var voiceTutorPauseFailed: String {
         voiceTutorPauseText(
-            "쉬는 상태를 확인하지 못했어요. 다시 연결해 주세요.",
-            "We couldn't confirm the break. Please reconnect.",
-            "休憩の状態を確認できませんでした。接続し直してください。"
+            "음소거 상태를 확인하지 못했어요. 다시 연결해 주세요.",
+            "We couldn't confirm mute status. Please reconnect.",
+            "ミュート状態を確認できませんでした。接続し直してください。"
         )
     }
     var voiceTutorOrbPauseHint: String {
         voiceTutorPauseText(
-            "탭하면 대화를 잠시 멈춰요.",
-            "Tap to pause the conversation.",
-            "タップすると対話を一時停止します。"
+            "탭하면 대화를 음소거해요.",
+            "Tap to mute the conversation.",
+            "タップすると対話をミュートします。"
         )
     }
     var voiceTutorAnswerResume: String {
-        voiceTutorPauseText("답변 계속", "Continue answer", "回答を続ける")
+        voiceTutorPauseText("음소거 해제", "Unmute", "ミュート解除")
     }
     var voiceTutorAnswerPauseHelp: String {
         voiceTutorPauseText(
@@ -181,9 +181,9 @@ extension AppStrings {
     }
     var voiceTutorAnswerPauseHint: String {
         voiceTutorPauseText(
-            "답변을 끝내지 않고 마이크를 잠시 멈춰요. 계속하기를 누르면 이어서 답변할 수 있어요.",
-            "Pause the microphone without finishing your answer. Continue when you are ready.",
-            "回答を終了せず、マイクを一時停止します。準備ができたら続けられます。"
+            "답변을 끝내지 않고 마이크를 잠시 멈춰요. 음소거를 해제하면 이어서 답변할 수 있어요.",
+            "Mute the microphone without finishing your answer. Unmute when ready.",
+            "回答を終了せずマイクをミュートします。準備ができたら解除してください。"
         )
     }
     var voiceTutorOrbResumeHint: String {
@@ -259,6 +259,9 @@ extension AppStrings {
     var voiceTutorAnswerEnter: String {
         voiceTutorPauseText("직접 입력", "Type answer", "直接入力")
     }
+    var voiceTutorGradingDetails: String {
+        voiceTutorPauseText("점수와 해설 보기", "View score and explanation", "点数と解説を見る")
+    }
     var voiceTutorGradingFeedbackTitle: String {
         voiceTutorPauseText("채점 이유", "Why this score", "採点の理由")
     }
@@ -317,16 +320,16 @@ extension AppStrings {
     }
     var voiceTutorCallPausedHelp: String {
         voiceTutorPauseText(
-            "준비되면 계속하기를 눌러 주세요.",
-            "Tap Continue whenever you’re ready.",
-            "準備ができたら「続ける」をタップしてください。"
+            "준비되면 음소거를 해제해 주세요.",
+            "Unmute whenever you’re ready.",
+            "準備ができたらミュートを解除してください。"
         )
     }
     var voiceTutorCallPausingHelp: String {
         voiceTutorPauseText(
-            "AI 선생님의 말이 끝나면 잠시 쉬어갈게요.",
-            "Your break will begin when your tutor finishes speaking.",
-            "先生が話し終えたら休憩に入ります。"
+            "대화를 음소거하고 있어요.",
+            "Muting the conversation.",
+            "対話をミュートしています。"
         )
     }
     var voiceTutorCallResumingHelp: String {
