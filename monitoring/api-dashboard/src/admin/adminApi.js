@@ -1,3 +1,4 @@
+import { allowsLocalMonitoring } from "./localMonitoring.js";
 const API_ROOT = "/backend/api/v1/admin";
 const TOKEN_KEY = "buddystudy.monitoring.admin.token";
 const TOKEN_EXPIRY_KEY = "buddystudy.monitoring.admin.expires-at";
@@ -16,7 +17,10 @@ function stored(key) {
   return window.sessionStorage.getItem(key) || "";
 }
 
+const localMonitoring = allowsLocalMonitoring(import.meta.env?.VITE_LOCAL_MONITORING_NO_AUTH, globalThis.location?.hostname);
+
 export function readAdminSession() {
+  if (localMonitoring) return { token: "", username: "Local monitoring", local: true };
   const token = stored(TOKEN_KEY);
   const expiresAt = stored(TOKEN_EXPIRY_KEY);
   if (!token || (expiresAt && Date.parse(expiresAt) <= Date.now())) {
@@ -73,7 +77,7 @@ export async function loginAdmin(username, password, signal) {
 
 export async function validateAdminSession() {
   const session = readAdminSession();
-  if (!session) return null;
+  if (!session || session.local) return session;
   const response = await fetch(`${API_ROOT}/session`, {
     headers: {
       Accept: "application/json",

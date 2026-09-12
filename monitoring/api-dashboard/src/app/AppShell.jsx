@@ -47,6 +47,13 @@ export function AppShell({ children, contentClassName = "" }) {
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [openGroups, setOpenGroups] = useState(() => storedJson(NAV_GROUP_KEY, {}));
 
+  const visibleNavigation = session?.local
+    ? navigationGroups.map((group) => ({
+      ...group,
+      items: group.items.filter((item) => ["/", "/performance.html", "/settings.html"].includes(item.href)),
+    })).filter((group) => group.items.length)
+    : navigationGroups;
+
   const currentPath = useMemo(() => window.location.pathname || "/", []);
   const compactVersion = useMemo(
     () => UI_VERSION.split(".").slice(-2).join("."),
@@ -104,7 +111,7 @@ export function AppShell({ children, contentClassName = "" }) {
         </div>
 
         <nav className="react-navigation" aria-label="Monitoring sections">
-          {navigationGroups.map((group) => {
+          {visibleNavigation.map((group) => {
             const isOpen = collapsed || openGroups[group.id] !== false;
             return (
               <section className="react-nav-group" key={group.id}>
@@ -139,13 +146,14 @@ export function AppShell({ children, contentClassName = "" }) {
           <button
             type="button"
             className="nav-session-button"
+            disabled={session?.local}
             onClick={() => {
               logout();
               window.location.replace("/login.html");
             }}
-            title={`Sign out ${session?.username || ""}`}
+            title={session?.local ? "Local monitoring · no sign-in required" : `Sign out ${session?.username || ""}`}
           >
-            <LogOut size={15} aria-hidden="true" />
+            {session?.local ? <Activity size={15} aria-hidden="true" /> : <LogOut size={15} aria-hidden="true" />}
             <span>{session?.username || "Administrator"}</span>
           </button>
           <div className="nav-version">
