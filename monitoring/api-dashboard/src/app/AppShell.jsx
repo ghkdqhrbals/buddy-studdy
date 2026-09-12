@@ -50,7 +50,7 @@ export function AppShell({ children, contentClassName = "" }) {
   const visibleNavigation = session?.local
     ? navigationGroups.map((group) => ({
       ...group,
-      items: group.items.filter((item) => ["/", "/performance.html", "/settings.html"].includes(item.href)),
+      items: group.items.filter((item) => ["/", "/performance.html", "/token-usage.html", "/settings.html"].includes(item.href)),
     })).filter((group) => group.items.length)
     : navigationGroups;
 

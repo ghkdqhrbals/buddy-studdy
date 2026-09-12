@@ -15,7 +15,8 @@ docker compose -f monitoring/local/compose.json up -d
 ```
 
 Open http://localhost:3000/performance.html and select Method `MCP`.
-API Logs is at http://localhost:3000/ . No username or password is needed for
+API Logs is at http://localhost:3000/ .
+Token Usage is at http://localhost:3000/token-usage.html . No username or password is needed for
 these local read-only monitoring pages. The opt-in build also requires a
 loopback browser hostname; the production build retains administrator login.
 The generated local bundle is ignored by Git and never replaces the versioned

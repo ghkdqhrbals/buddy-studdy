@@ -1,3 +1,4 @@
+import { TokenUsagePage } from "./pages/TokenUsagePage.jsx";
 import { AppShell } from "./app/AppShell.jsx";
 import { AuditPage } from "./pages/AuditPage.jsx";
 import { ApiLogsPage, ApiPerformancePage, TestZonePage } from "./pages/ObservePages.jsx";
@@ -18,6 +19,7 @@ export function MonitoringApp() {
     "/": { Page: ApiLogsPage },
     "/index.html": { Page: ApiLogsPage },
     "/performance.html": { Page: ApiPerformancePage },
+    "/token-usage.html": { Page: TokenUsagePage },
     "/testzone.html": { Page: TestZonePage, contentClassName: "react-content-workspace" },
     "/users.html": UsersPage,
     "/feedback.html": FeedbackPage,

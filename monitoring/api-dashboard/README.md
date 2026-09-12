@@ -7,6 +7,7 @@ Grafana, and the private TestZone API behind the backend administrator session.
 
 - `/`: paginated REST and MCP calls with request/response payloads, timing, and trace details
 - `/performance.html`: latency and call volume grouped by REST endpoint or MCP tool
+- `/token-usage.html`: model-reported input/output, cache, text/audio token usage by model, operation, and stage
 - `/system.html`: application, database, Redis, host, and runtime metrics
 - `/audit.html`: monitoring workspace page, authentication, and action history
 - `/users.html`: authenticated member search, membership tiers, and quota controls
@@ -144,3 +145,34 @@ service and InfluxDB are owned by
 contract suite. The generated `manage.js` and `manage.css` are committed
 because the monitoring deployment copies the versioned `public` artifact
 without compiling on the deploy host.
+
+## Token Usage
+
+`/token-usage.html` reads content-free `openai_usage` events from the same
+administrator-protected Loki proxy (or the isolated loopback local stack).
+It includes timeframe, model, operation, accounting-granularity and outcome
+filters, input/output/cache summaries, text/audio breakdowns, a time histogram,
+25-row paginated groups and events, and an event detail drawer. Refresh is manual;
+requests are cancellable and use the shared query cache.
+
+Missing usage stays unknown rather than zero. Cache counts are part of input;
+modality/reasoning counts must not be added again to totals. Cancelled/failed
+responses retain reported consumption. A stable eventRef deduplicates repeated
+log delivery. The cache hit ratio uses only rows with valid input and cache counts.
+The page retrieves at most 2,000 raw events for the selected period, explicitly
+reports truncation/invalid rows, and scopes filtering and all totals to loaded
+records. It does not claim a complete billing ledger. Accounting granularities
+remain distinct in the grouped table and can be filtered separately.
+
+MCP events and usage events currently have no shared correlation identifier.
+The page does not invent per-tool token attribution, tokenize MCP payloads, or
+estimate money. MCP latency remains on API Performance. In particular, the
+usage eventRef is an accounting identity, not an MCP call ID.
+
+Verification (2026-09-13): 143 dashboard tests passed, including parsing,
+missing/zero handling, deduplication, partial totals, cache overlap, cancelled
+usage, separate granularities, timeline boundaries, truncation, query errors,
+and abort-signal propagation. The local browser displayed 161 actual usage
+records; the realtime filter showed 77 records. A real response detail showed
+9,008 input / 252 output / 8,768 cached input tokens. Layout was checked at
+908px without page overflow; local no-login behavior remained intact.

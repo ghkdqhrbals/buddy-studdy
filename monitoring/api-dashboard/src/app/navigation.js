@@ -33,6 +33,7 @@ export const navigationGroups = [
     items: [
       { href: "/", label: "API Logs", icon: BookOpenText },
       { href: "/performance.html", label: "API Performance", icon: Activity },
+      { href: "/token-usage.html", label: "Token Usage", icon: Gauge },
       { href: serverDashboard, label: "Server Dashboard", icon: Server, external: true },
       { href: "/audit.html", label: "Access & Audit", icon: ShieldCheck },
     ],
