@@ -33,11 +33,17 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "7900",
+          "displayPrice" : "19900",
           "familyShareable" : false,
           "groupNumber" : 2,
           "internalID" : "6797527129",
-          "introductoryOffer" : null,
+          "introductoryOffer" : {
+            "displayPrice" : "9900",
+            "internalID" : "ee7a6d78-17fa-4842-afb9-5be32c35ec5d",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "payAsYouGo",
+            "subscriptionPeriod" : "P1M"
+          },
           "localizations" : [
             {
               "description" : "월 300회 질문",
@@ -71,11 +77,17 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "17900",
+          "displayPrice" : "39900",
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "6797527130",
-          "introductoryOffer" : null,
+          "introductoryOffer" : {
+            "displayPrice" : "19900",
+            "internalID" : "a6070fc0-70b4-422a-ae3b-8c835ace7d60",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "payAsYouGo",
+            "subscriptionPeriod" : "P1M"
+          },
           "localizations" : [
             {
               "description" : "월 1,000회 질문",

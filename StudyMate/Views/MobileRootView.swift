@@ -7119,7 +7119,7 @@ struct MobileMembershipManagementView: View {
                             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                         .buttonStyle(.plain)
-                        .disabled(selectedProduct == nil || billingStore.processingProductID != nil)
+                        .disabled(billingStore.isLoading || selectedProduct == nil || billingStore.processingProductID != nil)
                         .opacity(selectedProduct == nil ? 0.45 : 1)
                     }
 
@@ -7407,6 +7407,10 @@ struct MobileMembershipManagementView: View {
 
     private var subscriptionDisclosure: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let product = selectedProduct, let firstPrice = product.firstMonthDisplayPrice {
+                Text(strings.membershipIntroDisclosure(firstPrice: firstPrice, renewalPrice: product.displayPrice))
+                    .font(.subheadline)
+            }
             Text(strings.membershipAutoRenewalDisclosure)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -7469,14 +7473,17 @@ struct MobileMembershipManagementView: View {
             Spacer(minLength: 10)
 
             if let product = group.products.first {
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(product.displayPrice)
-                        .font(.body.weight(.semibold))
-                        .monospacedDigit()
-                    Text(strings.perMonth)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 4) {
+                    if let firstPrice = product.firstMonthDisplayPrice {
+                        Text(strings.membershipFirstMonth).font(.caption)
+                        Text(firstPrice).font(.body.weight(.semibold)).monospacedDigit()
+                        Text(strings.membershipRenewalPrice(product.displayPrice)).font(.caption)
+                    } else {
+                        Text(product.displayPrice).font(.body.weight(.semibold)).monospacedDigit()
+                        Text(strings.perMonth).font(.caption)
+                    }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 16)

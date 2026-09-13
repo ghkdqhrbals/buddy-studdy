@@ -3628,6 +3628,17 @@ struct AppStrings {
         )
     }
     var perMonth: String { text("/월", "/month", "/月") }
+    var membershipFirstMonth: String { text("첫 1개월", "First month", "最初の1か月") }
+    func membershipRenewalPrice(_ price: String) -> String {
+        text("이후 월 \(price)", "Then \(price)/month", "以降は月額\(price)")
+    }
+    func membershipIntroDisclosure(firstPrice: String, renewalPrice: String) -> String {
+        text(
+            "첫 1개월 \(firstPrice), 이후 매월 \(renewalPrice)으로 자동 갱신됩니다. Apple이 확인한 신규 구독 할인 대상에게 구독 그룹당 1회 적용됩니다.",
+            "\(firstPrice) for the first month, then automatically renews at \(renewalPrice)/month. Available once per subscription group to subscribers Apple confirms as eligible.",
+            "最初の1か月は\(firstPrice)、以降は月額\(renewalPrice)で自動更新されます。Appleが対象と確認した方に、サブスクリプショングループにつき1回適用されます。"
+        )
+    }
     var membershipAutoRenewalDisclosure: String {
         text(
             "구매 확인 시 Apple ID로 결제됩니다. 현재 구독 기간이 끝나기 최소 24시간 전에 취소하지 않으면 매월 자동 갱신되며, 갱신 요금은 기간 종료 전 24시간 이내에 청구됩니다. App Store 계정 설정에서 구독을 관리하거나 취소할 수 있습니다.",

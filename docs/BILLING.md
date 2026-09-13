@@ -53,8 +53,32 @@ can still be reconciled without exposing those products for a new checkout.
 | Tier | Monthly questions | Monthly Voice Tutor | Public-feed ads | Product | Period | Korea price |
 | --- | ---: | ---: | --- | --- | --- | ---: |
 | TIER1 | 30 | 0 | Eligible | Free | — | Free |
-| TIER2 | 300 | 3,600 seconds (60 minutes) | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier2.monthly` | P1M | ₩7,900 |
-| TIER3 | 1,000 | 3,600 seconds (60 minutes) | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier3.monthly` | P1M | ₩17,900 |
+| TIER2 | 300 | 3,600 seconds (60 minutes) | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier2.monthly` | P1M | ₩19,900 |
+| TIER3 | 1,000 | 3,600 seconds (60 minutes) | Ad-free | `io.github.ghkdqhrbals.StudyMate.tier3.monthly` | P1M | ₩39,900 |
+
+### First-month introductory discount (Korea)
+
+| Plan | First billing month | Regular monthly renewal |
+| --- | ---: | ---: |
+| Pro (TIER2) | ₩9,900 | ₩19,900 |
+| Plus (TIER3) | ₩19,900 | ₩39,900 |
+
+This is one paid month (`PAY_AS_YOU_GO`, `ONE_MONTH`, one period), not a
+free trial or a promotion that expires one month after account registration.
+Apple determines introductory-offer eligibility once per subscription group.
+Creating another BuddyStudy account or switching between Pro and Plus does not
+reset that eligibility. Unknown/ineligible status displays the regular price.
+The app reads localized offer/renewal prices from StoreKit or RevenueCat after
+identifying the account; eligibility is not stored in the shared product cache.
+The selected plan discloses both first-month and renewal charges before purchase.
+Apple applies the introductory offer through the normal purchase flow. Backend
+invoices continue to use verified transaction amounts, never a client discount.
+
+Korean price schedules and both introductory offers were registered and read back
+in App Store Connect on 2026-09-13. Regular price schedules preserve any existing
+subscriber prices. Other territories were not changed. Products remain
+`READY_TO_SUBMIT`: production availability still requires Apple's normal review
+and release process. See [verification](first-month-discount-2026-09-13.md).
 
 The mapping is server-owned. A client-supplied product that is absent, disabled,
 or has a different product type is rejected before an invoice is written.

@@ -3166,6 +3166,20 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(configuredProducts, serverProducts)
+        for product in products {
+            let id = try XCTUnwrap(product["productId"] as? String)
+            let subscription = try XCTUnwrap(subscriptions.first { $0["productID"] as? String == id })
+            let offer = try XCTUnwrap(subscription["introductoryOffer"] as? [String: Any])
+            let expected = try XCTUnwrap(product["introductoryOffer"] as? [String: Any])
+            XCTAssertEqual(offer["displayPrice"] as? String, expected["customerPrice"] as? String)
+            XCTAssertEqual(offer["subscriptionPeriod"] as? String, "P1M")
+            XCTAssertEqual(offer["numberOfPeriods"] as? Int, 1)
+            XCTAssertEqual(offer["paymentMode"] as? String, "payAsYouGo")
+            XCTAssertEqual(expected["duration"] as? String, "ONE_MONTH")
+            XCTAssertEqual(expected["numberOfPeriods"] as? Int, 1)
+            XCTAssertEqual(expected["paymentMode"] as? String, "PAY_AS_YOU_GO")
+        }
+
 
         let scheme = try String(
             contentsOf: root.appendingPathComponent(
@@ -3238,6 +3252,45 @@ final class ArchitecturePolicyTests: XCTestCase {
 
         XCTAssertEqual(Set(products.map(\.id)), expectedProductIDs)
         XCTAssertTrue(products.allSatisfy { $0.type == .autoRenewable })
+    }
+
+    func testFirstMonthOffersMatchStoreKitPricesAndGroupEligibility() async throws {
+        let session = try SKTestSession(configurationFileNamed: "StudyMateDev")
+        session.disableDialogs = true
+        session.clearTransactions()
+        defer { session.clearTransactions() }
+        let proID = "io.github.ghkdqhrbals.StudyMate.tier2.monthly"
+        let plusID = "io.github.ghkdqhrbals.StudyMate.tier3.monthly"
+        let products = try await Product.products(for: [proID, plusID])
+        XCTAssertEqual(products.count, 2)
+        for product in products {
+            XCTAssertEqual(product.price, product.id == proID ? 19900 : 39900)
+            let subscription = try XCTUnwrap(product.subscription)
+            let offer = try XCTUnwrap(subscription.introductoryOffer)
+            // StoreKitTest currently emits grouped priceString values ("9,900"), whose
+            // Decimal accessor truncates at the comma. Verify the localized customer price;
+            // the bundled catalog contract separately verifies the exact numeric amounts.
+            XCTAssertEqual(offer.displayPrice, product.id == proID ? "₩9,900" : "₩19,900")
+            XCTAssertEqual(offer.period.unit, .month)
+            XCTAssertEqual(offer.period.value, 1)
+            XCTAssertEqual(offer.periodCount, 1)
+            XCTAssertEqual(offer.paymentMode, .payAsYouGo)
+            let eligible = await subscription.isEligibleForIntroOffer
+            XCTAssertTrue(eligible)
+        }
+        _ = try await session.buyProduct(identifier: proID)
+        // StoreKit's transaction and eligibility updates arrive asynchronously.
+        var eligibility = [Bool]()
+        for _ in 0..<25 {
+            eligibility = []
+            for product in try await Product.products(for: [proID, plusID]) {
+                let subscription = try XCTUnwrap(product.subscription)
+                eligibility.append(await subscription.isEligibleForIntroOffer)
+            }
+            if eligibility.count == 2 && eligibility.allSatisfy({ !$0 }) { break }
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        XCTAssertEqual(eligibility, [false, false], "The introductory offer cannot be reused by switching tiers")
     }
 
     private func repositoryRoot() throws -> URL {

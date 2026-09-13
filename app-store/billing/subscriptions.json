@@ -22,7 +22,14 @@
       "monthlyQuestionLimit": 300,
       "adFree": true,
       "baseTerritory": "KOR",
-      "customerPrice": "7900"
+      "customerPrice": "19900",
+      "introductoryOffer": {
+        "customerPrice": "9900",
+        "duration": "ONE_MONTH",
+        "numberOfPeriods": 1,
+        "paymentMode": "PAY_AS_YOU_GO",
+        "territory": "KOR"
+      }
     },
     {
       "tierCode": "TIER3",
@@ -34,7 +41,14 @@
       "monthlyQuestionLimit": 1000,
       "adFree": true,
       "baseTerritory": "KOR",
-      "customerPrice": "17900"
+      "customerPrice": "39900",
+      "introductoryOffer": {
+        "customerPrice": "19900",
+        "duration": "ONE_MONTH",
+        "numberOfPeriods": 1,
+        "paymentMode": "PAY_AS_YOU_GO",
+        "territory": "KOR"
+      }
     }
   ]
 }

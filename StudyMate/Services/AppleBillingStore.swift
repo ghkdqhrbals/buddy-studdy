@@ -4,6 +4,16 @@ import StoreKit
 import RevenueCat
 import UIKit
 
+enum FirstMonthOfferPolicy {
+    nonisolated static func canDisplay(
+        eligible: Bool, monthly: Bool, periodCount: Int, periodValue: Int,
+        paid: Bool, offerPrice: Decimal, regularPrice: Decimal
+    ) -> Bool {
+        eligible && monthly && periodCount == 1 && periodValue == 1
+            && paid && offerPrice > 0 && offerPrice < regularPrice
+    }
+}
+
 struct StoreKitTransactionSyncEvidence: Equatable {
     var signedTransaction: String
     var environment: String
@@ -233,6 +243,8 @@ final class RevenueCatBillingBridge {
 
 @MainActor
 final class AppleBillingStore: ObservableObject {
+    private var loadGeneration = 0
+
     private struct ProductCacheEntry {
         var productIDs: [String]
         var usesRevenueCat: Bool
@@ -262,7 +274,7 @@ final class AppleBillingStore: ObservableObject {
         let displayPrice: String
         switch tierCode {
         case "TIER2":
-            displayPrice = "₩7,900"
+            displayPrice = "₩19,900"
             switch language {
             case .korean:
                 displayName = "티어 2 월간"
@@ -275,7 +287,7 @@ final class AppleBillingStore: ObservableObject {
                 description = "月300回の質問"
             }
         case "TIER3":
-            displayPrice = "₩17,900"
+            displayPrice = "₩39,900"
             switch language {
             case .korean:
                 displayName = "티어 3 월간"
@@ -309,6 +321,7 @@ final class AppleBillingStore: ObservableObject {
 
         var tier: BackendBillingTierProduct
         var source: StoreProductSource
+        var firstMonthDisplayPrice: String? = nil
 
         var id: String { tier.productId }
         var displayName: String {
@@ -374,6 +387,10 @@ final class AppleBillingStore: ObservableObject {
     private static let productCacheLifetime: TimeInterval = 15 * 60
 
     func load(catalog: BackendBillingCatalog) async {
+        loadGeneration += 1
+        let generation = loadGeneration
+        // Eligibility belongs to the current store account, never to the shared product cache.
+        products = []
         // Annual subscriptions are retained only as historical billing records on the backend.
         // The storefront is monthly-only, so an older or stale catalog must never surface them.
         let availableProducts = MembershipProductPolicy.monthlyProducts(catalog.products)
@@ -408,20 +425,15 @@ final class AppleBillingStore: ObservableObject {
         RevenueCatBillingBridge.shared.start()
         let usesRevenueCat = RevenueCatBillingBridge.shared.isEnabled
 
-        if let cachedSources = Self.cachedProductSources(
-            productIDs: identifiers,
-            usesRevenueCat: usesRevenueCat
-        ) {
-            applyProducts(availableProducts, sourcesByProductID: cachedSources)
-            return
-        }
-
         isLoading = true
-        defer { isLoading = false }
+        defer { if generation == loadGeneration { isLoading = false } }
         do {
             try await RevenueCatBillingBridge.shared.identify(appAccountToken: catalog.appAccountToken)
             let byIdentifier: [String: TierProduct.StoreProductSource]
-            if usesRevenueCat {
+            guard generation == loadGeneration else { return }
+            if let cachedSources = Self.cachedProductSources(productIDs: identifiers, usesRevenueCat: usesRevenueCat) {
+                byIdentifier = cachedSources
+            } else if usesRevenueCat {
                 let storeProducts = await Purchases.shared.products(identifiers)
                 byIdentifier = Dictionary(
                     uniqueKeysWithValues: storeProducts.map { ($0.productIdentifier, .revenueCat($0)) }
@@ -430,7 +442,20 @@ final class AppleBillingStore: ObservableObject {
                 let storeProducts = try await Product.products(for: identifiers)
                 byIdentifier = Dictionary(uniqueKeysWithValues: storeProducts.map { ($0.id, .appStore($0)) })
             }
+            let offers = await firstMonthOffers(sources: byIdentifier, usesRevenueCat: usesRevenueCat)
+            guard generation == loadGeneration else { return }
+            if usesRevenueCat {
+                guard RevenueCatBillingBridge.matchesExpectedAppUserID(
+                    currentAppUserID: Purchases.shared.appUserID,
+                    expectedAppAccountToken: catalog.appAccountToken
+                ) else { throw RevenueCatBillingBridgeError.identityMismatch }
+            }
             applyProducts(availableProducts, sourcesByProductID: byIdentifier)
+            products = products.map { product in
+                var product = product
+                product.firstMonthDisplayPrice = offers[product.id]
+                return product
+            }
             let missingProducts = Set(availableProducts.map(\.productId)).subtracting(byIdentifier.keys)
             errorMessage = missingProducts.isEmpty
                 ? nil
@@ -444,9 +469,46 @@ final class AppleBillingStore: ObservableObject {
                 )
             }
         } catch {
+            guard generation == loadGeneration else { return }
             products = []
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func firstMonthOffers(
+        sources: [String: TierProduct.StoreProductSource], usesRevenueCat: Bool
+    ) async -> [String: String] {
+        let eligibility = usesRevenueCat
+            ? await Purchases.shared.checkTrialOrIntroDiscountEligibility(productIdentifiers: Array(sources.keys))
+            : [:]
+        var offers: [String: String] = [:]
+        for (id, source) in sources {
+            switch source {
+            case .appStore(let product):
+                guard let subscription = product.subscription,
+                      let offer = subscription.introductoryOffer else { continue }
+                let eligible = await subscription.isEligibleForIntroOffer
+                if FirstMonthOfferPolicy.canDisplay(
+                    eligible: eligible, monthly: offer.period.unit == .month,
+                    periodCount: offer.periodCount, periodValue: offer.period.value,
+                    paid: offer.paymentMode == .payAsYouGo || offer.paymentMode == .payUpFront,
+                    offerPrice: offer.price, regularPrice: product.price
+                ) { offers[id] = offer.displayPrice }
+            case .revenueCat(let product):
+                guard let offer = product.introductoryDiscount else { continue }
+                if FirstMonthOfferPolicy.canDisplay(
+                    eligible: eligibility[id]?.status == .eligible,
+                    monthly: offer.subscriptionPeriod.unit == .month,
+                    periodCount: offer.numberOfPeriods, periodValue: offer.subscriptionPeriod.value,
+                    paid: offer.paymentMode == .payAsYouGo || offer.paymentMode == .payUpFront,
+                    offerPrice: offer.price, regularPrice: product.price
+                ) { offers[id] = offer.localizedPriceString }
+            #if DEBUG
+            case .screenshotFixture: break
+            #endif
+            }
+        }
+        return offers
     }
 
     private static func cachedProductSources(

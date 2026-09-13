@@ -4,6 +4,24 @@ import XCTest
 final class AppControlPolicyTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testFirstMonthDiscountRequiresConfirmedEligibilityAndExactlyOnePaidMonth() {
+        func display(_ eligible: Bool = true, _ monthly: Bool = true, _ count: Int = 1,
+                     _ value: Int = 1, _ paid: Bool = true, _ price: Decimal = 9900) -> Bool {
+            FirstMonthOfferPolicy.canDisplay(eligible: eligible, monthly: monthly,
+                periodCount: count, periodValue: value, paid: paid,
+                offerPrice: price, regularPrice: 19900)
+        }
+        XCTAssertTrue(display())
+        XCTAssertFalse(display(false))
+        XCTAssertFalse(display(true, false))
+        XCTAssertFalse(display(true, true, 2))
+        XCTAssertFalse(display(true, true, 1, 2))
+        XCTAssertFalse(display(true, true, 1, 1, false))
+        XCTAssertFalse(display(true, true, 1, 1, true, 0))
+        XCTAssertFalse(display(true, true, 1, 1, true, 19900))
+        XCTAssertFalse(display(true, true, 1, 1, true, 39900))
+    }
+
     #if DEBUG
     func testMembershipScreenshotFixtureUsesCurrentMonthlyProductCopy() throws {
         let tier2 = try XCTUnwrap(
@@ -21,10 +39,10 @@ final class AppControlPolicyTests: XCTestCase {
 
         XCTAssertEqual(tier2.displayName, "티어 2 월간")
         XCTAssertEqual(tier2.description, "월 300회 질문")
-        XCTAssertEqual(tier2.displayPrice, "₩7,900")
+        XCTAssertEqual(tier2.displayPrice, "₩19,900")
         XCTAssertEqual(tier3.displayName, "티어 3 월간")
         XCTAssertEqual(tier3.description, "월 1,000회 질문")
-        XCTAssertEqual(tier3.displayPrice, "₩17,900")
+        XCTAssertEqual(tier3.displayPrice, "₩39,900")
         XCTAssertNil(
             AppleBillingStore.screenshotFixtureProductCopy(
                 tierCode: "TIER1",
