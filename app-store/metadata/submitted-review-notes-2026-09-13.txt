@@ -1,0 +1,34 @@
+BuddyStudy 1.1.0 (118) App Review Information
+
+Video and device
+- Attachment: BuddyStudy-1.1.0-build118-iPhone16Pro-iOS26.6.2.mp4
+- Recorded on a physical iPhone 16 Pro, iOS 26.6.2 (23G90), using TestFlight build 118. The continuous 15-minute walkthrough starts on the Home Screen and demonstrates registration, deletion of a disposable account, review-account login, questions, grading, records, reporting/blocking and the subscription purchase sheet. The Apple account footer is masked for privacy; timing is unchanged. No audio track. Physical iPad testing is not included in this evidence.
+
+Access and setup
+- Use the active demo account supplied in the sign-in fields. No OTP, invitation, sample file or special hardware is required for that account. Apple, Google and email sign-in are available. Accept updated required terms if prompted.
+- Candidate uses https://api.ghkdqhrbals.org and Apple sandbox purchases in TestFlight.
+
+Purpose and main flow
+- For learners age 14+, BuddyStudy generates recall questions, grades answers and saves learning records by topic and difficulty.
+- Home > My Studies > open/create study or topic > generate question > answer > submit. Grading is asynchronous. View saved answers and feedback in Records; Statistics presents topic progress.
+- Study/topic creation does not consume question allowance. Active answer drafts are retained.
+
+Accounts, community and permissions
+- Settings > Account Settings > Delete Account. Please use a disposable account for deletion, not the permanent demo account.
+- Home > All Studies: public questions/comments. Signed-in users can like/comment. Question menu (...) > Report Question or Block User. Long-press a comment to block its author. Blocking hides that author's content.
+- Profile > Notification Settings controls notifications. Existing permission was already set on the recorded device. Microphone access is used for Buddy voice conversations; no camera, location, contacts, photos or ATT prompt is needed.
+
+Membership and purchases
+- Home > top-left Profile > Membership & Billing > Manage membership.
+- Free: 30 questions per monthly allowance period; Buddy voice unavailable.
+- Plus: monthly auto-renewable, 300 questions and 60 voice minutes. Pro: monthly auto-renewable, 1,000 questions and 60 voice minutes. Both remove public-feed ads.
+- Korean storefront regular monthly prices: Plus KRW 19,900; Pro KRW 39,900. Eligible new subscribers receive the first month at KRW 9,900 / 19,900 respectively. Apple determines introductory eligibility; the system purchase sheet is authoritative.
+- Membership shows price, duration, benefits, renewal disclosure, Terms, Privacy, Restore and purchase/change controls. Select Plus/Pro to open Apple's sheet; the recording cancels without purchasing.
+
+External services and regions
+- AWS Seoul: API/data and operator-managed translation. Cloudflare: DNS/proxy/security. OpenAI: questions, grading, feedback and suggestions. Apple: sign-in, purchases and APNs. RevenueCat: purchase/restore synchronization. Google: sign-in, verification email, Firebase and AdMob. Sentry: masked diagnostics.
+- Korean, English and Japanese UI; storefront prices, taxes and introductory eligibility may differ. General educational aid, not a regulated service or licensed media catalog. Terms prohibit infringing UGC; reporting/blocking are available.
+- Free public feed supports non-personalized ads; placement remains disabled until the approved build is public. No ATT/IDFA tracking.
+- Privacy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-25.html
+- Terms: https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-30.html
+- EULA: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/

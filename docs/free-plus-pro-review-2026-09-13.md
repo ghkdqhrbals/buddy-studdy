@@ -93,10 +93,13 @@ Final release result:
 - The new waiter was additionally checked against actual rejected build 117 and
   immediately returned Apple's 90683 error instead of polling until timeout.
 - Server, administrator and iOS deployment workflows have all completed
-  successfully. No App Review submission was sent. The replacement review
-  package remains a draft. The physical-iPhone video has now been attached and
-  Apple reports COMPLETE; physical-iPad evidence and the issues observed during
-  recording remain outstanding. See [recording evidence](app-review-video-2026-09-13.md).
+  successfully. At the user's explicit request, the replacement review package
+  was submitted on September 13 at 21:05:39 KST. Apple API and web UI confirm
+  WAITING_FOR_REVIEW for 1.1.0 (118), with Plus, Pro and the subscription group
+  included. Release remains MANUAL. The physical-iPhone video is attached and
+  COMPLETE; physical-iPad evidence and the issues observed during recording
+  remain outstanding and were not represented as fixed or verified.
+  See [recording and submission evidence](app-review-video-2026-09-13.md).
 
 Workflow evidence:
 - iOS: https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/34748629787

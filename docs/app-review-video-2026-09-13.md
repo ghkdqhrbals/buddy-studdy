@@ -17,8 +17,9 @@
 - Apple API readback: `assetDeliveryState.state = COMPLETE`, errors empty;
   filename, file size and checksum match the local artifact.
 - The video is attached to the review details for App Store version 1.1.0.
-  Review draft `26e49ef8-1a93-41aa-bc2e-6298f6d1d5f5` has **not** been submitted.
-  Release mode remains MANUAL.
+  Submission `26e49ef8-1a93-41aa-bc2e-6298f6d1d5f5` was submitted at the user's
+  explicit request on 2026-09-13 at 21:05:39 KST. Apple API readback and the web
+  UI confirm WAITING_FOR_REVIEW. Release mode remains MANUAL.
 
 ## Actual walkthrough
 
@@ -57,5 +58,16 @@ submitting it. No permanent review account was deleted and no purchase was made.
   entitlement attribution in the existing TestFlight receipt context; the
   recording alone does not establish the cause.
 
-The video upload is complete. These observations are evidence, not claims that
-the underlying issues have been fixed or that the final review package is ready.
+The user explicitly requested final submission after receiving the outstanding
+verification issues. The app, Plus, Pro and membership subscription group were
+submitted together. These observations remain unresolved; submission does not
+mean they were fixed. The submitted notes explicitly identify the physical
+iPhone evidence and do not claim physical-iPad testing.
+
+The outdated live review notes were replaced with the current membership names,
+allowances, voice eligibility, introductory prices, video/device evidence and
+privacy links. A credential-free API readback is saved in
+`app-store/metadata/submitted-review-notes-2026-09-13.txt`. The browser submit
+button remained disabled without an explanation; the official submission API
+accepted the authorized request and returned WAITING_FOR_REVIEW. A subsequent
+GET and browser reload confirmed the submitted state and MANUAL release mode.
