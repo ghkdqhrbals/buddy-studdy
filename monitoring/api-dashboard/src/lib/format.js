@@ -25,3 +25,7 @@ export function statusTone(value) {
   if (["PENDING", "WAITING", "RETRY", "RETRYING", "RETRY_SCHEDULED", "LEASE_EXPIRED", "PROCESSING", "CLAIMED", "ANONYMOUS", "RUNNING", "SKIPPED", "DISABLED", "PENDING_PAYMENT", "PAYMENT_VERIFIED", "FULFILLMENT_PENDING", "CANCELLATION_REQUESTED", "REFUND_REQUESTED", "REFUND_PENDING", "COMPENSATION_REQUIRED"].includes(status)) return "warning";
   return "neutral";
 }
+
+export function membershipPlanName(tierCode) {
+  return { TIER1: "Free", TIER2: "Plus", TIER3: "Pro" }[tierCode] || tierCode || "—";
+}

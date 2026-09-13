@@ -303,7 +303,7 @@ function PlacementPolicyEditor({ policy, onClose, onSaved }) {
         </section>
 
         <InlineNotice tone="info">
-          AdMob is always attempted first. A compatible house campaign is selected only after consent, no-fill, request failure, or timeout prevents an AdMob render. TIER2 and TIER3 never receive a slot.
+          AdMob is always attempted first. A compatible house campaign is selected only after consent, no-fill, request failure, or timeout prevents an AdMob render. Plus and Pro never receive a slot.
         </InlineNotice>
         {attempted && errors.length ? (
           <InlineNotice tone="danger">
@@ -328,7 +328,7 @@ function PlacementPolicyPanel({ policy, loading, error, onEdit }) {
       <div className="section-heading">
         <div>
           <h2>AdMob community-feed slot</h2>
-          <p>One server-positioned slot on the first unfiltered page for anonymous and TIER1 users.</p>
+          <p>One server-positioned slot on the first unfiltered page for anonymous and Free users.</p>
         </div>
         <div className="advertising-placement-actions">
           <StatusBadge tone={statusTone(status)}>{status}</StatusBadge>

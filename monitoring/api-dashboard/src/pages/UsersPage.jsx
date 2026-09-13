@@ -19,7 +19,7 @@ import { Button } from "../components/Button.jsx";
 import { InlineNotice } from "../components/InlineNotice.jsx";
 import { ObjectInspector } from "../components/ObjectInspector.jsx";
 import { AdminNotificationComposer } from "../components/AdminNotificationComposer.jsx";
-import { formatDateTime, statusTone } from "../lib/format.js";
+import { formatDateTime, membershipPlanName, statusTone } from "../lib/format.js";
 
 const PAGE_SIZE = 20;
 const LIMIT_PRESETS = [10, 50, 100];
@@ -74,7 +74,7 @@ function VoiceQuotaEditor({ user, onSaved }) {
           <span className="quota-eyebrow">Voice Tutor allowance</span>
           <h3>Voice time in this quota period</h3>
         </div>
-        <StatusBadge tone={user.voiceRemainingSeconds > 0 ? "success" : "warning"}>{user.tierCode}</StatusBadge>
+        <StatusBadge tone={user.voiceRemainingSeconds > 0 ? "success" : "warning"}>{membershipPlanName(user.tierCode)}</StatusBadge>
       </div>
 
       <div className="quota-stat-grid">
@@ -185,7 +185,7 @@ function CurrentPeriodQuotaEditor({ user, onSaved }) {
           <span className="quota-eyebrow">Current allowance</span>
           <h3>Questions in this quota period</h3>
         </div>
-        <StatusBadge tone={user.remainingCount > 0 ? "success" : "warning"}>{user.tierCode}</StatusBadge>
+        <StatusBadge tone={user.remainingCount > 0 ? "success" : "warning"}>{membershipPlanName(user.tierCode)}</StatusBadge>
       </div>
 
       <div className="quota-stat-grid">
@@ -289,7 +289,7 @@ function BillingLifecycle({ userId }) {
       {timeline.error || reconcile.error ? <InlineNotice tone="danger" compact>{timeline.error?.message || reconcile.error?.message}</InlineNotice> : null}
       {timeline.data?.entitlement ? (
         <div className="billing-entitlement-line">
-          <StatusBadge tone={statusTone(timeline.data.entitlement.accessStatus)}>{timeline.data.entitlement.tierCode}</StatusBadge>
+          <StatusBadge tone={statusTone(timeline.data.entitlement.accessStatus)}>{membershipPlanName(timeline.data.entitlement.tierCode)}</StatusBadge>
           <span>{timeline.data.entitlement.accessStatus}</span>
           <span>{timeline.data.entitlement.renewalStatus}</span>
           <span>Synced {formatDateTime(timeline.data.entitlement.synchronizedAt)}</span>
@@ -302,20 +302,21 @@ function BillingLifecycle({ userId }) {
 
 function TierRow({ tier, onSaved }) {
   const [limit, setLimit] = useState(tier.monthlyQuestionLimit);
+  const freePlan = tier.tierCode === "TIER1";
   const [voiceLimit, setVoiceLimit] = useState(tier.monthlyVoiceSecondsLimit || 0);
   const mutation = useMutation({
     mutationFn: () => adminFetch(`/membership-tiers/${encodeURIComponent(tier.tierCode)}`, {
       method: "PATCH",
       body: JSON.stringify({
         monthlyQuestionLimit: Number(limit),
-        monthlyVoiceSecondsLimit: Number(voiceLimit),
+        monthlyVoiceSecondsLimit: freePlan ? 0 : Number(voiceLimit),
       }),
     }),
     onSuccess: onSaved,
   });
   return (
     <tr>
-      <td><strong>{tier.tierCode}</strong><small>{tier.description || "Internal plan"}</small></td>
+      <td><strong>{membershipPlanName(tier.tierCode)}</strong><small>{tier.description || "Internal plan"}</small></td>
       <td>
         <label className="compact-input">
           <input type="number" min="0" max="1000000" value={limit} onChange={(event) => setLimit(event.target.value)} />
@@ -324,8 +325,8 @@ function TierRow({ tier, onSaved }) {
       </td>
       <td>
         <label className="compact-input">
-          <input type="number" min="0" max="31536000" value={voiceLimit} onChange={(event) => setVoiceLimit(event.target.value)} />
-          <span>voice seconds / month</span>
+          <input type="number" min="0" max="31536000" value={freePlan ? 0 : voiceLimit} disabled={freePlan} onChange={(event) => setVoiceLimit(event.target.value)} />
+          <span>{freePlan ? "Voice unavailable on Free" : "voice seconds / month"}</span>
         </label>
       </td>
       <td className="action-cell">
@@ -396,7 +397,7 @@ function UsersWorkspace() {
         </span>
       ),
     },
-    { key: "tierCode", label: "Plan", render: (user) => <StatusBadge>{user.tierCode}</StatusBadge> },
+    { key: "tierCode", label: "Plan", render: (user) => <StatusBadge>{membershipPlanName(user.tierCode)}</StatusBadge> },
     { key: "resetAt", label: "Reset", render: (user) => formatDateTime(user.resetAt) },
   ], []);
 
@@ -477,7 +478,7 @@ function UsersWorkspace() {
             <div className="detail-summary user-account-summary">
               <div><span>Status</span><StatusBadge tone={statusTone(selected.status)}>{selected.status}</StatusBadge></div>
               <div><span>Provider</span><strong>{selected.provider}</strong></div>
-              <div><span>Plan</span><strong>{selected.tierCode}</strong></div>
+              <div><span>Plan</span><strong>{membershipPlanName(selected.tierCode)}</strong></div>
               <div><span>User ID</span><strong>{selected.id}</strong></div>
             </div>
             <BillingLifecycle userId={selected.id} />

@@ -71,7 +71,7 @@ test("advertising administration manages Coupang campaigns and explains server r
   assert.match(page, /repeatGapLabel/);
   assert.match(page, /30d slot deliveries/);
   assert.match(page, /AdMob is always attempted first/);
-  assert.match(page, /TIER2 and TIER3 never receive a slot/);
+  assert.match(page, /Plus and Pro never receive a slot/);
   assert.match(page, /error \|\| !policy \? "UNKNOWN"/);
   assert.match(page, /disabled=\{!policy \|\| loading \|\| Boolean\(error\)\}/);
   assert.match(page, /method:\s*campaign \? "PUT" : "POST"/);

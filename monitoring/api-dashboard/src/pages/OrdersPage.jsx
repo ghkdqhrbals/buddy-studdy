@@ -1,3 +1,4 @@
+import { membershipPlanName } from "../lib/format.js";
 import {
   keepPreviousData,
   useMutation,
@@ -159,7 +160,7 @@ function OrderDetail({ selected, onClose }) {
           <div className="detail-summary">
             <div><span>Status</span><strong><StatusBadge tone={statusTone(invoice.status)}>{invoice.status}</StatusBadge></strong></div>
             <div><span>Type</span><strong>{invoice.type || "NORMAL"}</strong></div>
-            <div><span>Tier</span><strong>{invoice.tierCode}</strong></div>
+            <div><span>Tier</span><strong>{membershipPlanName(invoice.tierCode)}</strong></div>
             <div><span>Amount</span><strong>{amount(invoice)}</strong></div>
             <div><span>Purchased</span><strong>{formatDateTime(invoice.purchaseAt || invoice.createdAt)}</strong></div>
           </div>
@@ -217,7 +218,7 @@ function OrdersWorkspace() {
       label: "Invoice",
       render: (row) => (
         <div className="primary-cell">
-          <strong>#{row.invoice.id} · {row.invoice.type || "NORMAL"} · {row.invoice.tierCode}</strong>
+          <strong>#{row.invoice.id} · {row.invoice.type || "NORMAL"} · {membershipPlanName(row.invoice.tierCode)}</strong>
           <span className="mono">{row.invoice.invoiceNumber}</span>
         </div>
       ),
