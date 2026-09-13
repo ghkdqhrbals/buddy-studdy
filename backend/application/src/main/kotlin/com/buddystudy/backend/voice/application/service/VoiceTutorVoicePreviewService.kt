@@ -62,7 +62,7 @@ class VoiceTutorVoicePreviewService(
             throw ApiException(
                 HttpStatus.FORBIDDEN,
                 ApiErrorCode.VOICE_TUTOR_PRO_REQUIRED,
-                "A Pro membership is required for Voice Tutor voice previews.",
+                "A Plus or Pro membership is required for Voice Tutor voice previews.",
             )
         }
 

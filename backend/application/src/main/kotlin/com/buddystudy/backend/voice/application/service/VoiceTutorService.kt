@@ -182,7 +182,7 @@ class VoiceTutorService(
             is ReserveVoiceTutorSessionResult.NotEligible -> throw ApiException(
                 HttpStatus.FORBIDDEN,
                 ApiErrorCode.VOICE_TUTOR_PRO_REQUIRED,
-                "A Pro membership is required for Voice Tutor.",
+                "A Plus or Pro membership is required for Voice Tutor.",
                 metadata = quotaMetadata(result.quota),
             )
             is ReserveVoiceTutorSessionResult.Exhausted -> throw ApiException(

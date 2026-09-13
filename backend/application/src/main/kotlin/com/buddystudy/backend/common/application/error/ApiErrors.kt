@@ -101,7 +101,7 @@ enum class ApiErrorCode(
         HttpStatus.FORBIDDEN,
         511,
         "error.voice_tutor.pro_required",
-        "A Pro membership is required for Voice Tutor.",
+        "A Plus or Pro membership is required for Voice Tutor.",
     ),
     VOICE_TUTOR_QUOTA_EXCEEDED(
         HttpStatus.FORBIDDEN,

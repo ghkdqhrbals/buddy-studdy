@@ -24,12 +24,12 @@ data class RedeemReferralRequest(
 
 @RestController
 @RequestMapping("/api/v1/referrals")
-@Tag(name = "Referrals", description = "Tier 2 referral rewards for registered users.")
+@Tag(name = "Referrals", description = "Plus referral rewards for registered users.")
 class ReferralController(
     private val referrals: ReferralWebPort,
 ) {
     @GetMapping("/me")
-    @Operation(summary = "Fetch my referral code and earned Tier 2 reward months")
+    @Operation(summary = "Fetch my referral code and earned Plus reward months")
     suspend fun summary(authentication: Authentication): ReferralSummaryResponse = referrals.summary(authentication)
 
     @PostMapping("/redeem")
