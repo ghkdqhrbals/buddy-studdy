@@ -81,3 +81,25 @@ The corrected source `cbf5f09f` passed the three scoped physical-device tests
 again on iPhone 16 Pro / iOS 26.6.2 (23G90). A transient GitHub HTTP 500 prevented
 the first new dispatch; a fresh run lookup found no duplicate, and the retry
 created iOS release run `34748629787`, build 118.
+
+Final release result:
+- Branch: `codex/voice-call-continuity-20260910`; iOS build source `cbf5f09f`.
+- Run `34748629787` initially failed before compilation because GitHub could not
+  acquire a runner after five attempts. Attempt 2 succeeded through signing,
+  upload, TestFlight notes and exact App Review build selection.
+- Apple Build Upload `a7981396-3ec6-4e83-bdb2-413618425d20` is COMPLETE with
+  no errors or warnings. iOS 1.1.0 (118) is VALID and selected on App Store
+  version `f1fd5f81-f24c-46c9-be83-41f0f2406691`. Release type remains MANUAL.
+- The new waiter was additionally checked against actual rejected build 117 and
+  immediately returned Apple's 90683 error instead of polling until timeout.
+- Server, administrator and iOS deployment workflows have all completed
+  successfully. No App Review submission was sent. The replacement review
+  package remains a draft pending the physical-device recording and the
+  associated Guideline 2.1 evidence requested by Apple.
+
+Workflow evidence:
+- iOS: https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/34748629787
+- Backend image/deploy watcher: https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/34748030099
+- Backend deployment: https://github.com/ghkdqhrbals/personal-deploy/actions/runs/34748341545
+- Administrator/monitoring: https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/34747697534
+- Administrator/monitoring deployment: https://github.com/ghkdqhrbals/personal-deploy/actions/runs/34747713158
