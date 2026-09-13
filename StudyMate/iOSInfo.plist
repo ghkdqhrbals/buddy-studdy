@@ -122,8 +122,11 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- The bundled WebRTC SDK references camera APIs; Buddy conversations remain audio-only. -->
+	<key>NSCameraUsageDescription</key>
+	<string>버디 음성 대화는 카메라를 사용하지 않습니다. 카메라 접근을 허용하지 않아도 이용할 수 있습니다. Camera access is not needed for BuddyStudy’s audio-only conversations.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>AI 음성 튜터와 대화하려면 마이크 접근이 필요합니다. Microphone access is required to talk with your AI voice tutor.</string>
+	<string>버디와 음성으로 대화하려면 마이크 접근이 필요합니다. Microphone access lets you speak with Buddy.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

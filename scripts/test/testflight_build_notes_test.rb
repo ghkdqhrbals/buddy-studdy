@@ -25,6 +25,10 @@ class TestFlightBuildNotesTest < Minitest::Test
       @build_responses.shift || @build_responses.last || []
     end
 
+    def latest_build_upload(**_arguments)
+      nil
+    end
+
     def beta_build_localizations(_build_id)
       response = @localization_responses.shift
       response.nil? ? [] : Marshal.load(Marshal.dump(response))
@@ -201,6 +205,40 @@ class TestFlightBuildNotesTest < Minitest::Test
       )
     end
     assert_includes error.message, "INVALID"
+  end
+
+  def test_failed_upload_stops_before_a_build_resource_exists
+    client = FakeClient.new
+    client.define_singleton_method(:latest_build_upload) do |**|
+      {"attributes" => {"state" => {"state" => "FAILED", "errors" => [
+        {"code" => "90683", "description" => "Missing NSCameraUsageDescription"}
+      ]}}}
+    end
+    waiter = TestFlightBuildNotes::BuildWaiter.new(client: client, logger: StringIO.new,
+      sleeper: ->(*) { flunk "A failed upload must not keep polling" })
+    error = assert_raises(TestFlightBuildNotes::BuildProcessingError) do
+      waiter.wait(app_id: "app-id", marketing_version: "1.1.0", build_number: "89",
+        timeout_seconds: 10, interval_seconds: 1)
+    end
+    assert_includes error.message, "90683"
+    assert_includes error.message, "NSCameraUsageDescription"
+  end
+
+  def test_upload_lookup_uses_latest_exact_attempt
+    client = TestFlightBuildNotes::AppStoreConnectClient.allocate
+    uploads = [
+      ["old", "89", "1.1.0", "2026-09-13T08:00:00Z", "FAILED"],
+      ["retry", "89", "1.1.0", "2026-09-13T08:30:00Z", "PROCESSING"],
+      ["other", "90", "1.1.0", "2026-09-13T09:00:00Z", "FAILED"],
+      ["other-version", "89", "1.2.0", "2026-09-13T09:00:00Z", "FAILED"]
+    ].map do |id, number, version, date, state|
+      {"id" => id, "attributes" => {"platform" => "IOS", "cfBundleVersion" => number,
+        "cfBundleShortVersionString" => version, "createdDate" => date,
+        "state" => {"state" => state}}}
+    end
+    client.define_singleton_method(:request) { |*args, **kwargs| {"data" => uploads} }
+    result = client.latest_build_upload(app_id: "app-id", marketing_version: "1.1.0", build_number: "89")
+    assert_equal "retry", result["id"]
   end
 
   def test_times_out_when_the_build_never_appears

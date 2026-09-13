@@ -483,6 +483,11 @@ jobs:
           app_path="build/StudyMateiOS.xcarchive/Products/Applications/StudyMate.app"
           test -d "${app_path}"
 
+          for purpose_key in NSMicrophoneUsageDescription NSCameraUsageDescription; do
+            purpose="$(/usr/libexec/PlistBuddy -c "Print :${purpose_key}" "${app_path}/Info.plist")"
+            test -n "${purpose//[[:space:]]/}" || { echo "Missing ${purpose_key}" >&2; exit 1; }
+          done
+
           backend_base_url="$(/usr/libexec/PlistBuddy -c 'Print :BuddyStudyBackendBaseURL' "${app_path}/Info.plist")"
           if [ "${backend_base_url}" != "${PRODUCTION_BACKEND_BASE_URL}" ]; then
             echo "Archive backend URL must be ${PRODUCTION_BACKEND_BASE_URL}; found ${backend_base_url:-<missing>}." >&2
@@ -591,6 +596,11 @@ jobs:
             echo "Exported IPA does not contain an app bundle." >&2
             exit 1
           fi
+
+          for purpose_key in NSMicrophoneUsageDescription NSCameraUsageDescription; do
+            purpose="$(/usr/libexec/PlistBuddy -c "Print :${purpose_key}" "${app_path}/Info.plist")"
+            test -n "${purpose//[[:space:]]/}" || { echo "Missing ${purpose_key}" >&2; exit 1; }
+          done
 
           backend_base_url="$(/usr/libexec/PlistBuddy -c 'Print :BuddyStudyBackendBaseURL' "${app_path}/Info.plist")"
           if [ "${backend_base_url}" != "${PRODUCTION_BACKEND_BASE_URL}" ]; then

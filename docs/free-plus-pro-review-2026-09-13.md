@@ -57,3 +57,22 @@ requested by App Review.
 The media sync helper now detaches READY_FOR_REVIEW items using DELETE and
 reattaches the same subscription version even on upload failure. It refuses
 locked unresolved submissions before changing media.
+
+Deployment results:
+- Administrator/monitoring workflow `34747697534` and personal-deploy
+  `34747713158` succeeded at source `535dc5b8`.
+- Initial backend image run `34747695697` failed with Kotlin compiler
+  `OutOfMemoryError: GC overhead limit exceeded`. The JVM image build now uses
+  a 6 GiB in-process compiler heap and one Gradle worker. Local `:tutor:bootJar`
+  passed. Retry `34748030099` and backend deploy `34748341545` succeeded at
+  source `b316fa48`. Production runtime memory limits are unchanged.
+
+Apple upload `780ae096-b831-45c6-9fa9-b9120ab4f591` for build 117 failed
+processing with ITMS-90683 (missing `NSCameraUsageDescription`). The IPA transport
+job succeeded, but no valid Build resource was created. Its polling job was
+canceled after identifying the failure. The iOS plist now declares that camera
+access is not needed for audio-only Buddy conversations; no camera capture or
+permission request was introduced. Microphone copy now names Buddy. The release
+workflow validates both purpose strings in archive and exported IPA. The
+TestFlight waiter inspects Build Upload failures and preserves Apple's error
+code/details. All 13 build-note tests (46 assertions) and generic iOS build pass.

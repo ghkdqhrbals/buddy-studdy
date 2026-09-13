@@ -72,6 +72,11 @@ deployment.
   Store provisioning profile with manual signing. Archive creation must not
   ask Apple to create or revoke development certificates; the App Store
   Connect API key is reserved for upload and version-management operations.
+- iOS archives and exported IPAs must include nonempty microphone and camera
+  purpose strings because the linked realtime SDK references protected APIs.
+  Conversations remain audio-only and never request camera access. Build
+  labeling checks failed Build Upload records when a Build resource has not
+  appeared, reporting Apple validation errors without waiting for the timeout.
 - Backend image build remains in the app repository on GitHub-hosted runners.
   The JVM image compiles Kotlin in the Gradle process with a 6 GiB heap and one
   worker, avoiding the default compiler heap exhaustion in the infrastructure

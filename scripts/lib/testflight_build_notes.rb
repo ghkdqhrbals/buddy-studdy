@@ -5,6 +5,7 @@ require "json"
 require "net/http"
 require "openssl"
 require "uri"
+require "time"
 
 module TestFlightBuildNotes
   API_HOST = "api.appstoreconnect.apple.com"
@@ -114,6 +115,19 @@ module TestFlightBuildNotes
           "uploadedDate" => build.dig("attributes", "uploadedDate")
         }
       end
+    end
+
+    def latest_build_upload(app_id:, marketing_version:, build_number:)
+      response = request(:get, "/v1/apps/#{app_id}/buildUploads", query: {
+        "fields[buildUploads]" => "cfBundleShortVersionString,cfBundleVersion,createdDate,platform,state",
+        "limit" => "200"
+      })
+      response.fetch("data").select do |upload|
+        attributes = upload.fetch("attributes")
+        attributes["platform"] == "IOS" &&
+          attributes["cfBundleVersion"] == build_number &&
+          attributes["cfBundleShortVersionString"] == marketing_version
+      end.max_by { |upload| Time.iso8601(upload.fetch("attributes").fetch("createdDate")) }
     end
 
     def beta_build_localizations(build_id)
@@ -281,6 +295,21 @@ module TestFlightBuildNotes
 
         build = candidates.first
         status = build ? build.fetch("processingState") : "NOT_VISIBLE"
+        unless build
+          upload = @client.latest_build_upload(app_id: app_id,
+            marketing_version: marketing_version, build_number: build_number)
+          if upload
+            upload_state = upload.dig("attributes", "state") || {}
+            if upload_state["state"] == "FAILED"
+              details = Array(upload_state["errors"]).map do |error|
+                [error["code"], error["description"]].compact.join(": ")
+              end.join("; ")
+              raise BuildProcessingError,
+                    "TestFlight upload #{marketing_version} (#{build_number}) failed: #{details}"
+            end
+            status = "UPLOAD_#{upload_state.fetch('state', 'UNKNOWN')}"
+          end
+        end
         if status != last_status
           @logger.puts "TestFlight build #{marketing_version} (#{build_number}): #{status}"
           last_status = status
