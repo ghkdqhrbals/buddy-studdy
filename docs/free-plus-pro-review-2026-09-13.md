@@ -94,8 +94,9 @@ Final release result:
   immediately returned Apple's 90683 error instead of polling until timeout.
 - Server, administrator and iOS deployment workflows have all completed
   successfully. No App Review submission was sent. The replacement review
-  package remains a draft pending the physical-device recording and the
-  associated Guideline 2.1 evidence requested by Apple.
+  package remains a draft. The physical-iPhone video has now been attached and
+  Apple reports COMPLETE; physical-iPad evidence and the issues observed during
+  recording remain outstanding. See [recording evidence](app-review-video-2026-09-13.md).
 
 Workflow evidence:
 - iOS: https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/34748629787
