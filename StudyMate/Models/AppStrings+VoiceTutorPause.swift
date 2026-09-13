@@ -111,9 +111,9 @@ extension AppStrings {
 
     var voiceTutorProviderCallFailed: String {
         voiceTutorPauseText(
-            "AI 응답 중단됨",
-            "AI response stopped",
-            "AIの応答が中断されました"
+            "버디 응답 중단됨",
+            "Buddy’s response stopped",
+            "バディの応答が中断されました"
         )
     }
 
@@ -285,37 +285,37 @@ extension AppStrings {
     }
     var voiceTutorCallConnectingHelp: String {
         voiceTutorPauseText(
-            "마이크와 AI 선생님을 연결하고 있어요.",
-            "Connecting your microphone and AI tutor.",
-            "マイクとAI先生を接続しています。"
+            "마이크와 버디를 연결하고 있어요.",
+            "Connecting your microphone and Buddy.",
+            "マイクとバディを接続しています。"
         )
     }
     var voiceTutorCallFirstReplyHelp: String {
         voiceTutorPauseText(
-            "AI 선생님의 첫 응답을 기다리고 있어요.",
-            "Waiting for your tutor’s first reply.",
-            "AI先生の最初の返答を待っています。"
+            "버디의 첫 응답을 기다리고 있어요.",
+            "Waiting for Buddy’s first reply.",
+            "バディの最初の返答を待っています。"
         )
     }
     var voiceTutorCallThinkingHelp: String {
         voiceTutorPauseText(
             "답변을 준비하고 있어요. 잠시만 기다려 주세요.",
-            "Your tutor is preparing a reply. One moment.",
+            "Buddy is preparing a reply. One moment.",
             "返答を準備しています。少々お待ちください。"
         )
     }
     var voiceTutorCallListeningHelp: String {
         voiceTutorPauseText(
             "편하게 말해 주세요. 이야기를 듣고 있어요.",
-            "Take your time. Your tutor is listening.",
-            "ゆっくりお話しください。先生が聞いています。"
+            "Take your time. Buddy is listening.",
+            "ゆっくりお話しください。バディが聞いています。"
         )
     }
     var voiceTutorCallSpeakingHelp: String {
         voiceTutorPauseText(
             "말이 끝나면 편하게 이어서 이야기해 주세요.",
-            "When your tutor finishes, continue in your own words.",
-            "先生が話し終えたら、続けてお話しください。"
+            "When Buddy finishes, continue in your own words.",
+            "バディが話し終えたら、続けてお話しください。"
         )
     }
     var voiceTutorCallPausedHelp: String {
@@ -348,9 +348,9 @@ extension AppStrings {
     }
     var voiceTutorCallNoReplyHelp: String {
         voiceTutorPauseText(
-            "AI의 응답을 받기 전에 대화가 중단됐어요. 다시 연결해 주세요.",
-            "The conversation stopped before your tutor replied. Try reconnecting.",
-            "AIの返答が届く前に対話が中断されました。接続し直してください。"
+            "버디의 응답을 받기 전에 대화가 중단됐어요. 다시 연결해 주세요.",
+            "The conversation stopped before Buddy replied. Try reconnecting.",
+            "バディの返答が届く前に対話が中断されました。接続し直してください。"
         )
     }
     var voiceTutorCallEndingHelp: String {

@@ -3,9 +3,9 @@ import Foundation
 extension AppStrings {
     var voiceTutorDiscoveryTeacher: String {
         switch language {
-        case .korean: "AI 선생님"
-        case .english: "AI tutor"
-        case .japanese: "AI先生"
+        case .korean: "버디"
+        case .english: "Buddy"
+        case .japanese: "バディ"
         }
     }
 

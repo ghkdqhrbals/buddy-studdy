@@ -11,7 +11,7 @@ extension AppStrings {
     }
 
     var voiceTutorExplorationTutorQuestion: String {
-        voiceTutorExplorationText("선생님 질문", "Tutor question", "先生の質問")
+        voiceTutorExplorationText("버디 질문", "Buddy’s question", "バディの質問")
     }
 
     var voiceTutorExplorationLearnerQuestion: String {
@@ -23,7 +23,7 @@ extension AppStrings {
     }
 
     var voiceTutorExplorationTutorAnswer: String {
-        voiceTutorExplorationText("선생님 설명", "Tutor explanation", "先生の説明")
+        voiceTutorExplorationText("버디 설명", "Buddy’s explanation", "バディの説明")
     }
 
     var voiceTutorExplorationNoAnswer: String {

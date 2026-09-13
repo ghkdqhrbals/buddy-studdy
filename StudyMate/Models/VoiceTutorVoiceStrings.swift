@@ -29,9 +29,9 @@ extension AppStrings {
 
     var voiceTutorVoiceSetting: String {
         switch language {
-        case .korean: "AI 선생님 목소리"
-        case .english: "AI tutor voice"
-        case .japanese: "AIチューターの声"
+        case .korean: "버디 목소리"
+        case .english: "Buddy’s voice"
+        case .japanese: "バディの声"
         }
     }
 

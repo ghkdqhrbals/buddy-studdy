@@ -3081,7 +3081,7 @@ struct AppStrings {
     }
     var monthlyQuestionQuota: String { text("월간 질문", "Monthly questions") }
     var monthlyQuotaReached: String { text("이번 달 질문 한도에 도달했습니다.", "You have reached this month's question limit.") }
-    var voiceTutorTitle: String { text("AI 음성 튜터", "AI Voice Tutor", "AI音声チューター") }
+    var voiceTutorTitle: String { text("버디", "Buddy", "バディ") }
     var voiceTutorSubtitle: String {
         text(
             "선택한 주제로 말하며 배우고, 학습 요약을 기록하세요.",
@@ -3109,9 +3109,9 @@ struct AppStrings {
     var voiceTutorProRequired: String { text("Pro 전용 기능", "Available with Pro", "Pro限定機能") }
     var voiceTutorProRequiredMessage: String {
         text(
-            "Pro에서 AI 선생님과 음성으로 대화하고 학습 결과를 기록할 수 있습니다.",
-            "With Pro, you can talk with your AI tutor and save the learning result.",
-            "ProではAIチューターと音声で会話し、学習結果を保存できます。"
+            "Pro에서 버디와 음성으로 대화하고 학습 결과를 기록할 수 있습니다.",
+            "With Pro, you can talk with Buddy and save the learning result.",
+            "Proではバディと音声で会話し、学習結果を保存できます。"
         )
     }
     var voiceTutorUpgrade: String { text("Pro 살펴보기", "Explore Pro", "Proを見る") }
@@ -3130,9 +3130,9 @@ struct AppStrings {
             "前回の音声学習を終了処理中です。しばらくしてから更新してください。"
         )
     }
-    var voiceTutorConnecting: String { text("선생님과 연결하는 중", "Connecting to your tutor", "チューターに接続中") }
+    var voiceTutorConnecting: String { text("버디와 연결하는 중", "Connecting to Buddy", "バディに接続中") }
     var voiceTutorListening: String { text("듣고 있어요", "Listening", "聞いています") }
-    var voiceTutorSpeaking: String { text("선생님이 말하고 있어요", "Tutor is speaking", "チューターが話しています") }
+    var voiceTutorSpeaking: String { text("버디가 말하고 있어요", "Buddy is speaking", "バディが話しています") }
     var voiceTutorEnding: String { text("학습을 정리하는 중", "Wrapping up the session", "学習をまとめています") }
     var voiceTutorEnded: String { text("음성 학습 완료", "Voice session complete", "音声学習が完了しました") }
     var voiceTutorLiveCaptions: String { text("실시간 대화", "Live conversation", "リアルタイム会話") }
@@ -3140,7 +3140,7 @@ struct AppStrings {
         text("저장된 대화가 없습니다.", "No transcript was saved.", "保存された会話はありません。")
     }
     var voiceTutorYou: String { text("나", "You", "自分") }
-    var voiceTutorTeacher: String { text("선생님", "Tutor", "チューター") }
+    var voiceTutorTeacher: String { text("버디", "Buddy", "バディ") }
     var voiceTutorMute: String { text("음소거", "Mute", "ミュート") }
     var voiceTutorUnmute: String { text("음소거 해제", "Unmute", "ミュート解除") }
     var voiceTutorEndSession: String { text("학습 종료", "End session", "学習を終了") }
@@ -3230,9 +3230,9 @@ struct AppStrings {
     }
     var voiceTutorRecordingConsentDescription: String {
         text(
-            "나와 선생님의 음성을 학습 복습용으로 저장합니다. 동의하지 않아도 대화할 수 있으며, 저장된 녹음은 언제든 삭제할 수 있습니다.",
-            "Your voice and the tutor's voice are saved for review. You can talk without recording and delete a saved recording at any time.",
-            "自分とチューターの音声を復習用に保存します。同意しなくても対話でき、保存した録音はいつでも削除できます。"
+            "나와 버디의 음성을 학습 복습용으로 저장합니다. 동의하지 않아도 대화할 수 있으며, 저장된 녹음은 언제든 삭제할 수 있습니다.",
+            "Your voice and Buddy’s voice are saved for review. You can talk without recording and delete a saved recording at any time.",
+            "自分とバディの音声を復習用に保存します。同意しなくても対話でき、保存した録音はいつでも削除できます。"
         )
     }
     func voiceTutorRecordingRetention(_ days: Int) -> String {
@@ -3276,7 +3276,7 @@ struct AppStrings {
         )
     }
     var voiceTutorSignInRequired: String {
-        text("음성 튜터를 사용하려면 로그인해 주세요.", "Sign in to use Voice Tutor.", "音声チューターを使用するにはログインしてください。")
+        text("버디와 대화하려면 로그인해 주세요.", "Sign in to talk with Buddy.", "バディと話すにはログインしてください。")
     }
     var voiceTutorAccountNotReady: String {
         text(

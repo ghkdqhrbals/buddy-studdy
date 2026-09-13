@@ -16,9 +16,9 @@ extension AppStrings {
     var studyLearningTranslationPending: String { learningText("번역 중", "Translating", "翻訳中") }
     var studyLearningOriginal: String { learningText("원문", "Original", "原文") }
     var studyLearningLocalized: String { learningText("번역", "Translated", "翻訳") }
-    var studyLearningTeacherQuestion: String { learningText("선생님 질문", "Tutor's question", "先生の質問") }
+    var studyLearningTeacherQuestion: String { learningText("버디 질문", "Buddy’s question", "バディの質問") }
     var studyLearningLearnerQuestion: String { learningText("내 질문", "My question", "自分の質問") }
-    var studyLearningTutorAnswer: String { learningText("선생님 답변", "Tutor's answer", "先生の回答") }
+    var studyLearningTutorAnswer: String { learningText("버디 답변", "Buddy’s answer", "バディの回答") }
     var studyLearningLearnerAnswer: String { learningText("내 답변", "My answer", "自分の回答") }
     var studyLearningFeedback: String { learningText("피드백", "Feedback", "フィードバック") }
     var studyLearningDepth: String { learningText("더 알아본 내용", "What we explored", "掘り下げた内容") }
