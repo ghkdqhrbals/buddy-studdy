@@ -60,8 +60,8 @@ can still be reconciled without exposing those products for a new checkout.
 
 | Plan | First billing month | Regular monthly renewal |
 | --- | ---: | ---: |
-| Pro (TIER2) | ₩9,900 | ₩19,900 |
-| Plus (TIER3) | ₩19,900 | ₩39,900 |
+| Plus (TIER2) | ₩9,900 | ₩19,900 |
+| Pro (TIER3) | ₩19,900 | ₩39,900 |
 
 This is one paid month (`PAY_AS_YOU_GO`, `ONE_MONTH`, one period), not a
 free trial or a promotion that expires one month after account registration.
@@ -101,7 +101,7 @@ new-account onboarding contract and does not widen eligibility.
 
 The backend grants the reward when the new member accepts all required terms and
 becomes `ACTIVE`. The inviter and new member each receive one non-renewing month
-of Pro (`TIER2`). One new account can be attributed only once, self-referral is
+of Plus (`TIER2`). One new account can be attributed only once, self-referral is
 rejected, and the referral plus both reward grants commit in one transaction.
 Stable uniqueness keys and locked users make repeated activation or redemption
 idempotent and prevent a one-sided reward.
@@ -670,7 +670,7 @@ race between the job and a request cannot expose or reset an allowance twice.
 Administrative bonuses remain current-period history events and expire only at
 this natural rollover.
 
-### Monthly Pro Voice Tutor policy
+### Monthly Buddy voice policy
 
 Voice Tutor time is a separate entitlement projection from question generation.
 It never reads or mutates `user_quota`, `quota_reservations`, question counters,

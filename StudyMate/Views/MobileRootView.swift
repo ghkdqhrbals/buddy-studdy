@@ -7448,7 +7448,7 @@ struct MobileMembershipManagementView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {
-                    Text(group.products.first?.displayName ?? strings.membershipTierName(group.tierCode))
+                    Text(strings.membershipTierName(group.tierCode))
                         .font(.body.weight(.semibold))
                     if activeTierCode == group.tierCode,
                        appState.billingStatus?.isEntitlementActive == true {

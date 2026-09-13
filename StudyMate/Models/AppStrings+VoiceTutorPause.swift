@@ -54,7 +54,7 @@ extension AppStrings {
         case .sessionConflict:
             return voiceTutorPauseText("기존 대화가 진행 중이거나 연결 상태가 바뀌었어요. 진행 중인 대화를 마친 뒤 잠시 후 다시 시작해 주세요.", "A previous conversation is active or its connection state has changed. End any active conversation, then try again shortly.", "前の対話が進行中か、接続状態が変わりました。進行中の対話を終了し、しばらくしてから再開してください。")
         case .proRequired:
-            return voiceTutorPauseText("음성 대화는 Pro에서 이용할 수 있어요. 프로필에서 멤버십 상태를 확인해 주세요.", "Voice conversations require Pro. Check your membership in Profile.", "音声対話にはProが必要です。プロフィールでメンバーシップを確認してください。")
+            return voiceTutorPauseText("음성 대화는 Plus와 Pro에서 이용할 수 있어요. 프로필에서 멤버십 상태를 확인해 주세요.", "Voice conversations require Plus or Pro. Check your membership in Profile.", "音声対話にはPlusまたはProが必要です。プロフィールでメンバーシップを確認してください。")
         case .monthlyQuota:
             return voiceTutorPauseText("이번 달 대화 시간을 모두 사용했어요. 대화 화면의 월간 사용량에서 다음 갱신일을 확인해 주세요.", "You have used this month's conversation time. Check monthly usage on the conversation screen for the next reset.", "今月の対話時間を使い切りました。対話画面の月間使用量で次回更新日を確認してください。")
         case .providerQuotaUnavailable: return voiceTutorProviderQuotaUnavailableMessage

@@ -22,6 +22,14 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertFalse(display(true, true, 1, 1, true, 39900))
     }
 
+    func testPaidMembershipNamesUseProAndPlusAcrossLanguages() {
+        for language in [AppLanguage.korean, .english, .japanese] {
+            let strings = AppStrings(language: language)
+            XCTAssertEqual(strings.membershipTierName("TIER2"), "Plus")
+            XCTAssertEqual(strings.membershipTierName("TIER3"), "Pro")
+        }
+    }
+
     #if DEBUG
     func testMembershipScreenshotFixtureUsesCurrentMonthlyProductCopy() throws {
         let tier2 = try XCTUnwrap(
@@ -37,10 +45,10 @@ final class AppControlPolicyTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(tier2.displayName, "티어 2 월간")
+        XCTAssertEqual(tier2.displayName, "Plus 월간")
         XCTAssertEqual(tier2.description, "월 300회 질문")
         XCTAssertEqual(tier2.displayPrice, "₩19,900")
-        XCTAssertEqual(tier3.displayName, "티어 3 월간")
+        XCTAssertEqual(tier3.displayName, "Pro 월간")
         XCTAssertEqual(tier3.description, "월 1,000회 질문")
         XCTAssertEqual(tier3.displayPrice, "₩39,900")
         XCTAssertNil(

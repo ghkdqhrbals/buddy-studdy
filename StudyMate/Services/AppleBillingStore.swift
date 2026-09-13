@@ -277,26 +277,26 @@ final class AppleBillingStore: ObservableObject {
             displayPrice = "₩19,900"
             switch language {
             case .korean:
-                displayName = "티어 2 월간"
+                displayName = "Plus 월간"
                 description = "월 300회 질문"
             case .english:
-                displayName = "Tier 2 Monthly"
+                displayName = "Plus Monthly"
                 description = "300 questions per month"
             case .japanese:
-                displayName = "ティア2 月間"
+                displayName = "Plus 月間"
                 description = "月300回の質問"
             }
         case "TIER3":
             displayPrice = "₩39,900"
             switch language {
             case .korean:
-                displayName = "티어 3 월간"
+                displayName = "Pro 월간"
                 description = "월 1,000회 질문"
             case .english:
-                displayName = "Tier 3 Monthly"
+                displayName = "Pro Monthly"
                 description = "1,000 questions per month"
             case .japanese:
-                displayName = "ティア3 月間"
+                displayName = "Pro 月間"
                 description = "月1,000回の質問"
             }
         default:

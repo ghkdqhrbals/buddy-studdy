@@ -3106,15 +3106,15 @@ struct AppStrings {
             "保存された音声学習はまだありません。"
         )
     }
-    var voiceTutorProRequired: String { text("Pro 전용 기능", "Available with Pro", "Pro限定機能") }
+    var voiceTutorProRequired: String { text("Plus·Pro 기능", "Available with Plus and Pro", "Plus・Proの機能") }
     var voiceTutorProRequiredMessage: String {
         text(
-            "Pro에서 버디와 음성으로 대화하고 학습 결과를 기록할 수 있습니다.",
-            "With Pro, you can talk with Buddy and save the learning result.",
-            "Proではバディと音声で会話し、学習結果を保存できます。"
+            "Plus와 Pro에서 버디와 음성으로 대화하고 학습 결과를 기록할 수 있습니다.",
+            "With Plus or Pro, you can talk with Buddy and save the learning result.",
+            "PlusとProではバディと音声で会話し、学習結果を保存できます。"
         )
     }
-    var voiceTutorUpgrade: String { text("Pro 살펴보기", "Explore Pro", "Proを見る") }
+    var voiceTutorUpgrade: String { text("멤버십 살펴보기", "Explore memberships", "メンバーシップを見る") }
     var voiceTutorMonthlyUsage: String { text("월간 음성 시간", "Monthly voice time", "月間音声時間") }
     var voiceTutorQuotaReached: String {
         text(
@@ -3465,9 +3465,9 @@ struct AppStrings {
     var referAndEarnRewards: String { text("친구 추천 보상", "Refer and earn rewards", "友達紹介特典") }
     var referralBenefitDescription: String {
         text(
-            "친구에게 Pro(티어 2) 한 달을 선물하고, 추천한 친구 한 명마다 티어 2 한 달을 받으세요.",
-            "Give a month of Pro (Tier 2) and get 1 month of Tier 2 for each person you refer.",
-            "友達にPro（ティア2）を1か月贈り、紹介した友達1人につきティア2を1か月受け取れます。"
+            "친구에게 Plus 한 달을 선물하고, 추천한 친구 한 명마다 Plus 한 달을 받으세요.",
+            "Give a month of Plus and get 1 month of Plus for each person you refer.",
+            "友達にPlusを1か月贈り、紹介した友達1人につきPlusを1か月受け取れます。"
         )
     }
     var referralProgramRules: String {
@@ -3516,15 +3516,15 @@ struct AppStrings {
     }
     var referralAttributionPendingTermsNotice: String {
         text(
-            "추천 가입이 확인됐어요. 필수 약관에 동의해 가입을 마치면 Pro 한 달 혜택이 적용됩니다.",
-            "Your referred sign-up is confirmed. Accept the required terms to receive one month of Pro.",
+            "추천 가입이 확인됐어요. 필수 약관에 동의해 가입을 마치면 Plus 한 달 혜택이 적용됩니다.",
+            "Your referred sign-up is confirmed. Accept the required terms to receive one month of Plus.",
             "紹介経由の登録を確認しました。必須規約に同意して登録を完了すると、Proを1か月利用できます。"
         )
     }
     var referralRewardAppliedNotice: String {
         text(
-            "가입이 완료되어 Pro 한 달 추천 혜택이 적용됐어요.",
-            "Sign-up is complete and your one-month Pro referral benefit is now active.",
+            "가입이 완료되어 Plus 한 달 추천 혜택이 적용됐어요.",
+            "Sign-up is complete and your one-month Plus referral benefit is now active.",
             "登録が完了し、Proを1か月利用できる紹介特典が適用されました。"
         )
     }
@@ -3565,7 +3565,7 @@ struct AppStrings {
     func referralShareMessage(code: String) -> String {
         text(
             "BuddyStudy에서 함께 공부해요. 이 초대 링크로 새로 가입하면 Pro를 한 달 동안 이용할 수 있어요. (추천 코드: \(code))",
-            "Study with me on BuddyStudy. Create a new account from this invitation to get one month of Pro. (Referral code: \(code))",
+            "Study with me on BuddyStudy. Create a new account from this invitation to get one month of Plus. (Referral code: \(code))",
             "BuddyStudyで一緒に勉強しましょう。この招待から新規登録すると、Proを1か月利用できます。（紹介コード：\(code)）"
         )
     }
@@ -3693,11 +3693,11 @@ struct AppStrings {
     func membershipTierName(_ tierCode: String) -> String {
         switch tierCode.uppercased() {
         case "TIER1":
-            return text("Tier 1", "Tier 1", "ティア1")
+            return "Free"
         case "TIER2":
-            return text("Tier 2", "Tier 2", "ティア2")
+            return "Plus"
         case "TIER3":
-            return text("Tier 3", "Tier 3", "ティア3")
+            return "Pro"
         default:
             return tierCode
         }

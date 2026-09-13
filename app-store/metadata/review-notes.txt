@@ -25,8 +25,8 @@ Accounts, UGC, and permissions
 
 In-App Purchase
 - Path: Home > top-left Profile > Membership & Billing > Manage membership.
-- Tier 2: auto-renewable monthly, 300 AI questions. Tier 3: auto-renewable monthly, 1,000. Both remove public-feed ads. Each generated question uses one allowance; study/topic creation does not.
-- Offers show title, localized price, one-month duration, allowance, renewal disclosure, Terms, Privacy, Restore, and purchase/change control. Get Tier/Switch to Tier opens Apple's purchase sheet; cancel before purchase. This free account shows purchase/restore; Manage Subscription requires an active subscription.
+- Plus: auto-renewable monthly, 300 AI questions. Pro: auto-renewable monthly, 1,000. Both remove public-feed ads. Each generated question uses one allowance; study/topic creation does not.
+- Offers show title, localized price, one-month duration, allowance, renewal disclosure, Terms, Privacy, Restore, and purchase/change control. Get Plus/Pro or Switch to Plus/Pro opens Apple's purchase sheet; cancel before purchase. This free account shows purchase/restore; Manage Subscription requires an active subscription.
 
 External services
 - AWS Seoul: API, data, operator-managed LibreTranslate. Cloudflare: DNS, proxy, TLS, security. OpenAI: questions, grading, feedback, suggestions, translation fallback.
@@ -35,7 +35,7 @@ External services
 Regions and status
 - Features are consistent across regions and localized in Korean, English, and Japanese; storefront price, currency, and tax vary.
 - Not regulated and no protected third-party material: this is a general educational aid, not a medical, financial, gambling, legal, or other regulated service. It has no licensed media catalog. Questions/comments are UGC; Terms prohibit infringement, and reporting/blocking are available.
-- Advertising: the free account may receive one server-positioned native ad on Home > All Studies after two questions. AdMob is tried first; a BuddyStudy/Coupang campaign is fallback only. TIER2/3 are ad-free. Ads are non-personalized and teen-treated, without ATT or IDFA. The placement switch stays off until the approved build is public, so Review may see no ad.
+- Advertising: the free account may receive one server-positioned native ad on Home > All Studies after two questions. AdMob is tried first; a BuddyStudy/Coupang campaign is fallback only. Plus/Pro are ad-free. Ads are non-personalized and teen-treated, without ATT or IDFA. The placement switch stays off until the approved build is public, so Review may see no ad.
 - Ad controls: Home > All Studies > BuddyStudy/Coupang ad > ... exposes Why this ad is shown, Report advertisement (inappropriate or age-inappropriate), and Not interested. Google ads expose Why this ad? and Report ad through the unobstructed AdChoices control.
 - Privacy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-25.html
 - Terms: https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-30.html

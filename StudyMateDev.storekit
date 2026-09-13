@@ -47,23 +47,23 @@
           "localizations" : [
             {
               "description" : "월 300회 질문",
-              "displayName" : "티어 2 월간",
+              "displayName" : "Plus 월간",
               "locale" : "ko_KR"
             },
             {
               "description" : "300 questions per month",
-              "displayName" : "Tier 2 Monthly",
+              "displayName" : "Plus Monthly",
               "locale" : "en_US"
             },
             {
               "description" : "月300回の質問",
-              "displayName" : "ティア2 月間",
+              "displayName" : "Plus 月間",
               "locale" : "ja_JP"
             }
           ],
           "productID" : "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
           "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "BuddyStudy Tier 2 Monthly",
+          "referenceName" : "BuddyStudy Plus Monthly",
           "subscriptionGroupID" : "879D5DB9-F67F-48BC-A991-F596853EF18F",
           "type" : "RecurringSubscription",
           "winBackOffers" : [
@@ -91,23 +91,23 @@
           "localizations" : [
             {
               "description" : "월 1,000회 질문",
-              "displayName" : "티어 3 월간",
+              "displayName" : "Pro 월간",
               "locale" : "ko_KR"
             },
             {
               "description" : "1,000 questions per month",
-              "displayName" : "Tier 3 Monthly",
+              "displayName" : "Pro Monthly",
               "locale" : "en_US"
             },
             {
               "description" : "月1,000回の質問",
-              "displayName" : "ティア3 月間",
+              "displayName" : "Pro 月間",
               "locale" : "ja_JP"
             }
           ],
           "productID" : "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
           "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "BuddyStudy Tier 3 Monthly",
+          "referenceName" : "BuddyStudy Pro Monthly",
           "subscriptionGroupID" : "879D5DB9-F67F-48BC-A991-F596853EF18F",
           "type" : "RecurringSubscription",
           "winBackOffers" : [
