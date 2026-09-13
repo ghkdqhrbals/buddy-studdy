@@ -73,6 +73,9 @@ deployment.
   ask Apple to create or revoke development certificates; the App Store
   Connect API key is reserved for upload and version-management operations.
 - Backend image build remains in the app repository on GitHub-hosted runners.
+  The JVM image compiles Kotlin in the Gradle process with a 6 GiB heap and one
+  worker, avoiding the default compiler heap exhaustion in the infrastructure
+  module. This build-only budget does not change container runtime limits.
 - The stateless MCP endpoint is part of the Backend API module and remains
   disabled in production unless the repository variable
   `MCP_SERVER_ENABLED=true`. Enabling it must not add a container, route,

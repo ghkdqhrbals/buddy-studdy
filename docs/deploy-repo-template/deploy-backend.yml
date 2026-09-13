@@ -1,3 +1,5 @@
+# Source JVM images are built on GitHub-hosted runners with one Gradle worker
+# and a 6 GiB in-process compiler heap. This deploy-only workflow never compiles.
 name: Deploy BuddyStudy Backend
 
 on:

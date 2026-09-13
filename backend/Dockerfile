@@ -22,7 +22,8 @@ WORKDIR /workspace
 COPY --from=backend-source /workspace /workspace
 RUN chmod +x ./gradlew
 RUN --mount=type=cache,target=/root/.gradle \
-    ./gradlew --no-daemon clean :tutor:bootJar
+    ./gradlew --no-daemon --max-workers=1 -Dorg.gradle.jvmargs=-Xmx6g \
+    -Pkotlin.compiler.execution.strategy=in-process clean :tutor:bootJar
 
 FROM oraclelinux:9-slim AS runtime-native
 
