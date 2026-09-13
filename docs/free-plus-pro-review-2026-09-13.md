@@ -43,3 +43,17 @@ unresolved submission was canceled to unlock its items; the replacement draft
 `26e49ef8-1a93-41aa-bc2e-6298f6d1d5f5` contains the app version, both
 subscription versions, and the subscription group version. This draft has not
 been submitted and does not resolve Apple's outstanding request for evidence.
+
+The new simulator-rendered membership review screenshot shows Free, Plus and Pro,
+the Korean regular prices, paid-plan 60-minute allowances, and purchase/legal
+controls. Both Apple subscription screenshot resources are COMPLETE and match
+MD5 `49afdcf4455c3dc02b80dbc51fdc53aa`. Apple normalizes their fileName to
+`SOURCE`; verification checks the content checksum, resource identity and
+subscription-scoped relationship. The screenshot fixture now supplies the paid
+voice quota. Generic device and simulator builds pass; three review-item recovery
+tests (eight assertions) pass. This screenshot is not the physical-device video
+requested by App Review.
+
+The media sync helper now detaches READY_FOR_REVIEW items using DELETE and
+reattaches the same subscription version even on upload failure. It refuses
+locked unresolved submissions before changing media.

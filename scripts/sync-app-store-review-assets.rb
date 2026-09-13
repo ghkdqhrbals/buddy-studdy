@@ -11,13 +11,13 @@ require "uri"
 module AppStoreReviewAssets
   API_HOST = "api.appstoreconnect.apple.com"
   DEFAULT_BUNDLE_ID = "io.github.ghkdqhrbals.StudyMate"
-  DEFAULT_REVIEW_SUBMISSION_ID = "0d6aa057-848e-4b3a-b064-e55e89665328"
+  DEFAULT_REVIEW_SUBMISSION_ID = "26e49ef8-1a93-41aa-bc2e-6298f6d1d5f5"
   DEFAULT_SUBSCRIPTIONS_PATH = File.expand_path(
     "../app-store/billing/subscriptions.json",
     __dir__
   )
   DEFAULT_SCREENSHOT_PATH = File.expand_path(
-    "../app-store/review-assets/membership-review-2026-08-26-1242x2688.png",
+    "../app-store/review-assets/membership-review-2026-09-13-1242x2688.png",
     __dir__
   )
   EXPECTED_APP_ID = "6774108938"
@@ -201,9 +201,12 @@ module AppStoreReviewAssets
       end
 
       begin
+        unless submission.dig("attributes", "state") == "READY_FOR_REVIEW"
+          raise "Create an editable review draft before replacing locked subscription media"
+        end
         products.each do |product|
-          replace_subscription_screenshot(
-            product,
+          replace_draft_subscription_screenshot(
+            submission_id, product,
             current_screenshots.fetch(product.fetch("appStoreConnectId")),
             screenshot_path
           )
@@ -442,7 +445,26 @@ module AppStoreReviewAssets
                      "[#{item.fetch(:state)}], subscriptionVersion #{item.fetch(:version_id)}, " \
                      "current screenshot #{current}"
       end
-      @output.puts "Plan: replace 2 subscription screenshots in place, then verify 4 unchanged review items."
+      @output.puts "Plan: detach each draft subscription item, replace its screenshot, reattach the same version, then verify all 4 review items."
+    end
+
+    def replace_draft_subscription_screenshot(submission_id, product, existing, screenshot_path)
+      target = @target_items.find { |item| item.fetch(:subscription_id) == product.fetch("appStoreConnectId") }
+      raise "Missing subscription review item" unless target
+
+      # READY_FOR_REVIEW uses DELETE; removed:true is for an unresolved submission.
+      @client.request(:delete, "/v1/reviewSubmissionItems/#{target.fetch(:item_id)}")
+      begin
+        replace_subscription_screenshot(product, existing, screenshot_path)
+      ensure
+        # Preserve the review package even if Apple's media upload fails.
+        @client.request(:post, "/v1/reviewSubmissionItems", body: {
+          data: { type: "reviewSubmissionItems", relationships: {
+            reviewSubmission: { data: { type: "reviewSubmissions", id: submission_id } },
+            subscriptionVersion: { data: { type: "subscriptionVersions", id: target.fetch(:version_id) } }
+          } }
+        })
+      end
     end
 
     def replace_subscription_screenshot(product, existing, screenshot_path)
@@ -544,11 +566,14 @@ module AppStoreReviewAssets
         raise "Final screenshot is not COMPLETE for #{product.fetch("tierCode")}" unless
           screenshot.dig("attributes", "assetDeliveryState", "state") == "COMPLETE"
         raise "Final screenshot filename mismatch for #{product.fetch("tierCode")}" unless
-          screenshot.dig("attributes", "fileName") == File.basename(screenshot_path)
+          [File.basename(screenshot_path), "SOURCE"].include?(screenshot.dig("attributes", "fileName"))
         raise "Final screenshot checksum mismatch for #{product.fetch("tierCode")}" unless
           screenshot.dig("attributes", "sourceFileChecksum").to_s.downcase == checksum
-        raise "Final screenshot relationship mismatch for #{product.fetch("tierCode")}" unless
-          screenshot.dig("relationships", "subscription", "data", "id") == subscription_id
+        # The subscription-scoped GET is authoritative; Apple may omit the inverse linkage.
+        linked_subscription_id = screenshot.dig("relationships", "subscription", "data", "id")
+        if linked_subscription_id && linked_subscription_id != subscription_id
+          raise "Final screenshot relationship mismatch for #{product.fetch("tierCode")}"
+        end
       end
 
       final_document = list_submission_items(submission_id)
