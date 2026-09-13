@@ -76,3 +76,8 @@ permission request was introduced. Microphone copy now names Buddy. The release
 workflow validates both purpose strings in archive and exported IPA. The
 TestFlight waiter inspects Build Upload failures and preserves Apple's error
 code/details. All 13 build-note tests (46 assertions) and generic iOS build pass.
+
+The corrected source `cbf5f09f` passed the three scoped physical-device tests
+again on iPhone 16 Pro / iOS 26.6.2 (23G90). A transient GitHub HTTP 500 prevented
+the first new dispatch; a fresh run lookup found no duplicate, and the retry
+created iOS release run `34748629787`, build 118.
