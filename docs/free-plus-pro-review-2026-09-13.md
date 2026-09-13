@@ -25,8 +25,9 @@ identifies voice access as unavailable.
 
 Verification: generic iOS Debug build passed; three focused tests passed on the
 physical iPhone 16 Pro (localized public names, membership fixtures, and Japanese
-billing labels). Admin Vite production build passed. Backend free-entitlement
-and voice-preview service verification is recorded with the release results.
+billing labels). Admin Vite production build passed. All 143 administrator tests passed. All 89 backend voice service/preview tests
+passed, including Free session and preview denial even with an administrative
+allowance override. Backend infrastructure compilation also passed.
 
 App Review 1.1.0 has an existing unresolved Guideline 2.1 information request.
 Apple explicitly requires a physical-device recording of the core flows and an
@@ -34,3 +35,11 @@ accurate list of tested device/OS versions. Repository review-note/video fields
 are still placeholders; they must not be replaced with fabricated evidence.
 Release remains manual after approval. A TestFlight upload/build selection alone
 must not be reported as successful submission to Apple's review queue.
+
+Apple setup readback confirmed Korean, English and Japanese Plus/Pro product
+localizations, unchanged product IDs/group levels, Korean first-month offers and
+renewal prices. App Info, age rating, and version metadata synchronized. The old
+unresolved submission was canceled to unlock its items; the replacement draft
+`26e49ef8-1a93-41aa-bc2e-6298f6d1d5f5` contains the app version, both
+subscription versions, and the subscription group version. This draft has not
+been submitted and does not resolve Apple's outstanding request for evidence.

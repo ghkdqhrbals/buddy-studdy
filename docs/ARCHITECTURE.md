@@ -129,7 +129,7 @@ runtime comparison or rollback does not fork application behavior.
     `OPENAI_API_KEY_SYSTEM` serve only post-study child-topic suggestions.
     `OpenAIClient` and `OPENAI_API_KEY_USER` serve question generation,
     embeddings, translation, user-answer feedback, grading, and grading
-    previews, plus Pro Voice Tutor call negotiation, sideband control, PCM
+    previews, plus Buddy voice conversation call negotiation, sideband control, PCM
     fallback relay, and lesson summary. The
     same regular user-content key remains server-only for realtime work and is
     never returned to iOS or MCP clients; no third OpenAI key type is supported.
@@ -141,7 +141,7 @@ runtime comparison or rollback does not fork application behavior.
   - Stores generated questions in MySQL before sending APNs notifications.
   - Owns community profiles, public question browsing metadata, question reports, and persistent per-user block relationships. Authenticated public-question lists, detail reads, and comment lists enforce the block relationship server-side so reinstalling the app or using another device cannot restore blocked content.
   - Treats anonymous identities as installation credentials rather than administrator-visible members. Admin user and quota queries exclude `ANONYMOUS` rows.
-  - Records referral attribution only for a newly created account while it remains `PENDING_TERMS`; a retry of that unfinished sign-up may retain the same first accepted code, but an existing `ACTIVE` account is never attributed. Required-term activation is the reward boundary: when that account becomes `ACTIVE`, one transaction creates the referral and grants the inviter and new member one month of Pro (`TIER2`). A unique referred-account constraint, self-referral validation, deterministic grant identities, and row locking make retries idempotent and prevent partial two-sided rewards. Rewarded attribution is retained after an inviter withdraws: nullable inviter references anonymize the departed account without erasing the surviving member's referral, grant, or one-time redemption claim. Manual code redemption is attribution recovery within the server-defined short sign-up eligibility window, not an eligibility path for existing accounts.
+  - Records referral attribution only for a newly created account while it remains `PENDING_TERMS`; a retry of that unfinished sign-up may retain the same first accepted code, but an existing `ACTIVE` account is never attributed. Required-term activation is the reward boundary: when that account becomes `ACTIVE`, one transaction creates the referral and grants the inviter and new member one month of Plus (`TIER2`). A unique referred-account constraint, self-referral validation, deterministic grant identities, and row locking make retries idempotent and prevent partial two-sided rewards. Rewarded attribution is retained after an inviter withdraws: nullable inviter references anonymize the departed account without erasing the surviving member's referral, grant, or one-time redemption claim. Manual code redemption is attribution recovery within the server-defined short sign-up eligibility window, not an eligibility path for existing accounts.
   - Public question views, likes, unlikes, comment creation, and comment deletion are transactionally written to `redis_event_outbox` and published to dedicated Redis Streams. Reaction tables remain the source of truth. View events update the idempotent `question_stats` read model, while reaction events are durably consumed into Inbox history without applying the already-committed reaction count a second time.
   - Transactional domain writes append `PENDING` typed events to `redis_event_outbox` in the same R2DBC transaction. Notification events carry their own `shouldPush` option, so inbox creation and optional push delivery cannot diverge through separate outboxes. After commit, `OutboxPublicationService` immediately claims, publishes, and completes each row. `OutboxRecoveryScheduler` uses that same flow for failures and abandoned claims, so polling is a recovery mechanism rather than the normal delivery path. Claim failures fail the managed job and retain their stack trace instead of being reported as a successful zero-row run.
   - `RedisStreamTopicManager` is the single Redis client boundary for topic registration, Spring Data Redis consumer-group reads, acknowledgement, retention, administrator inspection, and Lettuce `XAUTOCLAIM`.
@@ -257,7 +257,7 @@ Terminal generation/translation failure
 ```
 
 ```text
-User opens Pro Voice Tutor without selecting a study
+User opens Buddy voice conversation without selecting a study
 -> status and session creation check entitlement and atomically reserve independent voice seconds
 -> iOS negotiates audio-only SDP and authenticated control using X-Voice-Turn-Protocol: realtime-native-v1
 -> backend creates the regular-key OpenAI Realtime call and confirms explicit turn_detection=null
@@ -400,7 +400,7 @@ Public community feed
 -> an explicit tap routes to the validated app destination; home/message presents the full Markdown popup
 ```
 
-## Pro Voice Tutor
+## Buddy voice conversation
 
 - Native curriculum selection resolves the selected saved node and its original
   root independently. `studies.curriculum_terminal` and the catalog's matching
@@ -718,7 +718,7 @@ The shared media, privacy, quota and persistence invariants below remain applica
 - Month-end anchors use the target month's last valid day without drift. For example, a January 31 anchor resets on February 28 (or 29) and then March 31. Question and Voice Tutor quotas apply this calendar rule independently.
 - The first verified paid purchase may replace the question quota's account-created anchor with the immutable earliest `purchasedAt`, carrying its existing counters into the recalculated window. The Voice Tutor anchor remains the account creation time. Later upgrades, downgrades, renewals, cancellations, expirations, refunds, and resubscriptions move neither established anchor.
 - Question remaining capacity is `max(0, base + current-period bonus - committed - reserved)`; Voice Tutor remaining capacity is `max(0, base - used - reserved)`. Billing fulfillment applies the question limit and its invoice-scoped history event transactionally. Voice Tutor instead reconciles the effective tier and plan-catalog base on the next voice access while preserving its used and reserved seconds. A requested downgrade keeps the higher entitlement until its renewal boundary, and either domain clamps remaining capacity to zero when preserved usage meets the later lower base.
-- An active referral grant makes Pro (`TIER2`) effective unless a higher valid tier already wins. Question quota applies that effective tier through its existing fulfillment boundary; Voice Tutor observes it through the same lazy tier/base reconciliation. Both preserve current-period usage and active reservations.
+- An active referral grant makes Plus (`TIER2`) effective unless a higher valid tier already wins. Question quota applies that effective tier through its existing fulfillment boundary; Voice Tutor observes it through the same lazy tier/base reconciliation. Both preserve current-period usage and active reservations.
 - The managed `user-quota-rollover` job remains question-only and advances due `user_quota` rows every minute with bounded locking. Voice Tutor has no separate rollover batch in this release: status, history/detail, and session-start paths reconcile expired sessions and lazily advance `user_voice_quota` to the account-anchored window containing the current UTC instant. Both domains retain request-time correctness during scheduler delay or process downtime. Legacy membership/usage and policy-v4 question quota tables are migration inputs only and are not a read authority.
 - The monitoring Users & Quotas page proxies admin APIs through the authenticated monitoring origin. It does not persist backend admin tokens outside the browser session.
 - User search is bounded to 100 rows per API call and the UI uses 20-row pages.
