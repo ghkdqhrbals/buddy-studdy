@@ -38,4 +38,15 @@ tipping strings in its executable. Apple build
 
 Review Notes were updated and read back exactly. Demo credentials and contact
 fields were preserved. Historical video attachment remains COMPLETE.
-Actual resubmission is pending.
+The Guideline 3.1.1 response was sent in Resolution Center at 05:42 KST.
+The rejected app item was marked resolved after the replacement build was
+selected. The existing four-item submission was resubmitted at
+2026-09-15 05:43:16 KST. Apple PATCH and subsequent independent GET both
+returned WAITING_FOR_REVIEW; the version also reports WAITING_FOR_REVIEW
+with build 119 selected and MANUAL release.
+
+No physical-iPhone UI walkthrough of TestFlight 119 was performed because
+the Mac remained locked; only the two documented source-build device tests
+and exported IPA checks passed. The connected iPhone was used by Xcode for
+the development test build. Historical build-118 walkthrough limitations
+remain documented in `app-review-video-2026-09-13.md`.
