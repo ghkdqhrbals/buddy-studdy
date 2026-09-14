@@ -11430,8 +11430,6 @@ private struct MobileSettingsView: View {
     @ObservedObject private var adMobPrivacyCoordinator = AdMobPrivacyCoordinator.shared
     @State private var isVoiceTutorVoicePickerPresented = false
 
-    private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
-
     var body: some View {
         let strings = appState.settingsEditorStrings
         let canEditAccountPreferences = SettingsAccessPolicy.canEditAccountBackedPreferences(
@@ -11732,18 +11730,10 @@ private struct MobileSettingsView: View {
                     }
                 }
 
-                HStack(spacing: 14) {
-                    NavigationLink {
-                        MobileFeedbackView()
-                    } label: {
-                        Text(strings.feedbackLink)
-                    }
-
-                    Text("·")
-                        .foregroundStyle(.tertiary)
-
-                    Link(strings.tipMe, destination: Self.kofiTipURL)
-                    .accessibilityLabel(strings.supportDeveloper)
+                NavigationLink {
+                    MobileFeedbackView()
+                } label: {
+                    Text(strings.feedbackLink)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

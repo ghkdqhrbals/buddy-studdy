@@ -4965,8 +4965,6 @@ struct AppStrings {
             "Google広告のプライバシー設定を確認または変更します。"
         )
     }
-    var tipMe: String { text("응원하기", "Tip Me") }
-    var supportDeveloper: String { text("개발자 응원", "Support developer") }
     var explanation: String { text("해설", "Explanation") }
     var statsByTopic: String { text("주제별 통계", "Stats by Topic") }
     func currentTopicLevel(_ level: String) -> String {
