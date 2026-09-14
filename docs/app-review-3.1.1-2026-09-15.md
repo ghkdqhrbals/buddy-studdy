@@ -17,6 +17,9 @@ Verification:
 - No Ko-fi, Tip Me or Support developer reference remains in app source.
 - Generic iOS Debug build passed with `StudyMateiOS`, generic iOS destination,
   and code signing disabled.
+- Two existing BillingLocalizationTests passed on physical iPhone 16 Pro,
+  iOS 26.6.2 (23G90): Japanese membership/billing labels and monthly-only catalog.
+  This was a development-signed build of the replacement source, not TestFlight.
 - Current physical-iPhone visual verification: pending Mac unlock.
 - Physical iPad is unavailable; no new iPad verification is claimed.
 
@@ -27,4 +30,5 @@ removal, supplementation and resubmission; do not claim the historical video
 shows the replacement binary. Keep release mode MANUAL.
 
 The focused response is `app-store/metadata/resolution-center-reply-3.1.1.txt`.
+Release run `34892803983` is building candidate 1.1.0 (119) from `5edcd932`.
 Build upload, selection, review-note update and actual resubmission are pending.
