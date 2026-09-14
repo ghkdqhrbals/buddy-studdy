@@ -77,23 +77,17 @@ class LibreTranslateQuestionTranslationProvider(
                 .uri("/translate")
                 .bodyValue(body)
                 .retrieve()
-                .toEntity(LibreTranslateResponse::class.java)
+                .toEntity(String::class.java)
                 .timeout(Duration.ofMillis(properties.translation.timeoutMs.coerceAtLeast(100)))
                 .awaitSingle()
-            val value = requireNotNull(entity.body) { "LibreTranslate returned an empty response body." }
+            val value = decodeLibreTranslateResponse(entity.body)
             ExternalApiResponse(
                 value = value,
                 statusCode = entity.statusCode.value(),
                 headers = entity.headers.toSingleValueMap(),
-                body = history.json(value),
+                body = entity.body,
             )
         }
-        return response.translatedText.trim().also {
-            require(it.isNotBlank()) { "LibreTranslate returned empty content." }
-        }
+        return response
     }
-
-    private data class LibreTranslateResponse(
-        val translatedText: String = "",
-    )
 }
