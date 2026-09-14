@@ -30,5 +30,12 @@ removal, supplementation and resubmission; do not claim the historical video
 shows the replacement binary. Keep release mode MANUAL.
 
 The focused response is `app-store/metadata/resolution-center-reply-3.1.1.txt`.
-Release run `34892803983` is building candidate 1.1.0 (119) from `5edcd932`.
-Build upload, selection, review-note update and actual resubmission are pending.
+Release run `34892803983` succeeded for 1.1.0 (119), source `5edcd932`.
+The exported IPA identifies the production API and contains no Ko-fi URL or
+tipping strings in its executable. Apple build
+`7d4799d3-195a-4497-9dec-e9e210ff81b7` is VALID and selected for version
+`f1fd5f81-f24c-46c9-be83-41f0f2406691`; release mode is MANUAL.
+
+Review Notes were updated and read back exactly. Demo credentials and contact
+fields were preserved. Historical video attachment remains COMPLETE.
+Actual resubmission is pending.
