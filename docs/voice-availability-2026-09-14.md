@@ -39,4 +39,20 @@ restriction in the existing status reason precedence.
 - Deployment source: `8f5829470d482d397f472000dc0cf58159c0b7db`.
 - Backend image: `ghcr.io/ghkdqhrbals/buddystudy-backend:b316fa48cb1466f0d7f7606f5aeb05c39d883691-jvm`.
 - Deployment run: https://github.com/ghkdqhrbals/personal-deploy/actions/runs/34819995799
-  (completion and post-deploy status are recorded below when verified).
+  completed successfully. A separate authenticated status read after deployment
+  returned HTTP 200 and `reason=PRO_REQUIRED` for the Free review account,
+  replacing UNAVAILABLE. Voice remained unavailable to Free with a zero-second
+  allowance; `recording.enabled=false`. Repository variable readback confirmed
+  `VOICE_TUTOR_ENABLED=true` and `VOICE_TUTOR_RECORDING_ENABLED=false`.
+  No paid session, audio negotiation or charge was initiated by this check.
+
+## Main integration
+
+The user also requested merging and pushing to main. Main contained its separate
+raw REST API exchange logging change. Merge resolution preserves that existing
+administrator view, this branch's MCP/voice body exclusions and logical MCP
+search, and main's external-export redaction and Sentry exclusion. The 20 scoped
+JavaScript log/search/export tests passed. Backend RequestLoggingFilter and
+SentryApiExchangeExclusionConfiguration tests passed. The initial Kotlin daemon
+ran out of compiler memory; rerunning with a 6 GiB in-process compiler and one
+Gradle worker succeeded. No new backend image is deployed for this merge.

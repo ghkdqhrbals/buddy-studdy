@@ -70,15 +70,18 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `api request and response are logged in a single exchange line with secrets redacted`(output: CapturedOutput): Unit = runBlocking {
+    fun `api request and response are logged in a single exchange line without masking`(output: CapturedOutput): Unit = runBlocking {
         val exchange = execute(
             MockServerHttpRequest.post("/api/v1/auth/google")
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("Authorization", "Bearer access-token")
+                .header("X-Client-Secret", "client-secret-value")
+                .header("Cookie", "request-session=cookie-value")
                 .header("CF-Connecting-IP", "203.0.113.10")
-                .body("""{"idToken":"google-id-token"}"""),
+                .body("""{"idToken":"google-id-token","password":"password-value"}"""),
         ) { current ->
             current.attributes[RequestLoggingFilter.AUTHENTICATED_USER_ID_ATTRIBUTE] = 42L
+            current.response.headers.add("Set-Cookie", "response-session=cookie-value")
             readBody(current).flatMap { writeJson(current, """{"accessToken":"app-token"}""") }
         }
 
@@ -86,13 +89,14 @@ class RequestLoggingFilterTest {
         assertThat(output.out).contains("api_exchange")
         assertThat(output.out).contains("\"method\":\"POST\"")
         assertThat(output.out).contains("\"path\":\"/api/v1/auth/google\"")
-        assertThat(output.out).contains("\"requestBody\":{\"idToken\":\"[REDACTED]\"}")
-        assertThat(output.out).contains("\"responseBody\":{\"accessToken\":\"[REDACTED]\"}")
+        assertThat(output.out).contains("\"requestBody\":{\"idToken\":\"google-id-token\",\"password\":\"password-value\"}")
+        assertThat(output.out).contains("\"responseBody\":{\"accessToken\":\"app-token\"}")
         assertThat(output.out).contains("\"clientIp\":\"203.0.113.10\"")
         assertThat(output.out).contains("\"userId\":\"42\"")
-        assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
-        assertThat(output.out).doesNotContain("Bearer access-token")
-        assertThat(output.out).doesNotContain("google-id-token")
+        assertThat(output.out).contains("\"Authorization\":\"Bearer access-token\"")
+        assertThat(output.out).contains("\"X-Client-Secret\":\"client-secret-value\"")
+        assertThat(output.out).contains("\"Cookie\":\"request-session=cookie-value\"")
+        assertThat(output.out).contains("\"Set-Cookie\":\"response-session=cookie-value\"")
     }
 
     @Test
@@ -159,7 +163,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `compact api log includes redacted headers and bodies but omits request identity`(output: CapturedOutput): Unit = runBlocking {
+    fun `compact api log includes unmasked headers and bodies but omits request identity`(output: CapturedOutput): Unit = runBlocking {
         val requestBody = """{"topic":"Redis","accessToken":"secret-token"}"""
         val exchange = execute(
             request = MockServerHttpRequest.post("/api/v1/studies?source=dev")
@@ -183,8 +187,8 @@ class RequestLoggingFilterTest {
         assertThat(output.out).contains("\"query\":\"source=dev\"")
         assertThat(output.out).contains("\"requestHeaders\":")
         assertThat(output.out).contains("\"X-App-Version\":\"1.0.16\"")
-        assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
-        assertThat(output.out).contains("\"requestBody\":{\"topic\":\"Redis\",\"accessToken\":\"[REDACTED]\"}")
+        assertThat(output.out).contains("\"Authorization\":\"Bearer access-token\"")
+        assertThat(output.out).contains("\"requestBody\":{\"topic\":\"Redis\",\"accessToken\":\"secret-token\"}")
         assertThat(output.out).contains("\"status\":200")
         assertThat(output.out).contains("\"responseHeaders\":")
         assertThat(output.out).contains("\"responseBody\":{\"id\":10}")
@@ -192,7 +196,6 @@ class RequestLoggingFilterTest {
         assertThat(output.out).doesNotContain("clientIp")
         assertThat(output.out).doesNotContain("userId")
         assertThat(output.out).contains("\"CF-Connecting-IP\":\"203.0.113.10\"")
-        assertThat(output.out).doesNotContain("secret-token")
     }
 
     @Test

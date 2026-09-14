@@ -100,21 +100,14 @@ internal class ApiExchangeLogFormatter(
 
     private fun headers(headers: HttpHeaders): Map<String, Any?> =
         headers.headerNames().associateWith { name ->
-            if (isSensitiveHeader(name)) {
-                "[REDACTED]"
-            } else {
-                headerValue(headers[name] ?: emptyList())
-            }
+            headerValue(headers[name] ?: emptyList())
         }
-
-    private fun isSensitiveHeader(name: String): Boolean =
-        name.trim().lowercase(Locale.US) in SENSITIVE_HEADERS
 
     private fun body(captured: CapturedBody, headers: HttpHeaders): Any? {
         val bytes = captured.bytes
         if (bytes.isEmpty()) return ""
         val charset = charsetFor(headers)
-        val value = redact(String(bytes, charset))
+        val value = String(bytes, charset)
         if (captured.truncated || value.length > MAX_BODY_CHARS) {
             return mapOf(
                 "truncated" to true,
@@ -151,23 +144,10 @@ internal class ApiExchangeLogFormatter(
     private fun charsetFor(headers: HttpHeaders) =
         headers.contentType?.charset ?: StandardCharsets.UTF_8
 
-    private fun redact(value: String): String =
-        value.replace(
-            Regex("(?i)(\"(?:openaiApiKey|apiKey|idToken|accessToken|refreshToken|clientSecret|installationId|password|verificationCode)\"\\s*:\\s*)\"[^\"]*\""),
-        ) {
-            "${it.groupValues[1]}\"[REDACTED]\""
-        }
-
     private fun buildJson(vararg fields: Pair<String, Any?>): String =
         objectMapper.writeValueAsString(linkedMapOf(*fields))
 
     private companion object {
         private const val MAX_BODY_CHARS = 2_000
-        private val SENSITIVE_HEADERS = setOf(
-            "authorization",
-            "cookie",
-            "set-cookie",
-            "x-client-secret",
-        )
     }
 }

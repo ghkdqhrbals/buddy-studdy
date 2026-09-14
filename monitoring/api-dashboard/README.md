@@ -45,6 +45,14 @@ Grafana alert queries continue to read only `api_exchange`, so MCP logical
 calls do not inflate HTTP traffic statistics. The `codex:log-search` command
 supports the same events with `--method MCP --path list_studies`.
 
+API exchange logs are intentionally rendered exactly as captured by the
+backend, including authorization, client-secret, cookie, token, password, and
+other credential fields in request/response headers and bodies. Existing body
+capture limits and MCP/Voice Tutor body suppression still apply. The administrator session
+boundary protects this raw view; Slack/Codex search output and incident
+dispatches apply their own redaction before data leaves the monitoring system,
+and API exchange log events and breadcrumbs are excluded from Sentry.
+
 ## Access Audit
 
 The monitoring Nginx gateway records page views, denied administrator-session

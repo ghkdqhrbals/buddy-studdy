@@ -57,7 +57,7 @@ wording, effective date, and any re-agreement requirement.
 | App control | Firebase Remote Config: app, device, and configuration request metadata | Google project retention settings |
 | Product analytics | Google Analytics for Firebase in release builds; coarse screen and feature events | Firebase project retention settings |
 | Error diagnostics | Sentry error and fatal events; error-session replay with all text and images masked | Sentry project retention settings |
-| API and operation logs | Loki; credentials and tokens are redacted. MCP and Voice Tutor REST bodies plus Voice Tutor WebSocket frames are excluded; only safe request/session metadata and redacted failure classifications may be logged | 7 days |
+| API and operation logs | Loki; administrator-only REST exchange headers/bodies may contain raw credentials. MCP and Voice Tutor REST bodies and WebSocket frames are excluded; MCP logical logs remain redacted. Slack/Codex exports redact credentials, and API exchange events are excluded from Sentry | 7 days |
 | Database backups | Encrypted operational backup | Up to 14 days |
 | Local app data | Settings, drafts, logs and cache. A consented Voice Tutor call temporarily uses owner-bound, protected, backup-excluded track/mixed files and a protected retry manifest until verified upload succeeds | App reset/deletion or normal cache lifecycle. Logout, authentication invalidation, account replacement, and withdrawal persist a protected purge-pending marker and advance the recording generation fence before purging files, so an older in-flight recorder cannot recreate media or a manifest afterward. A failed purge is retried on app startup and foreground entry regardless of file age. Verified uploads remove their files; the same startup/foreground cleanup removes invalid/unreferenced artifacts older than two hours and pending retries older than 30 days |
 
@@ -97,8 +97,12 @@ advertising. TIER2 and TIER3 do not receive an ad slot.
 - Sentry keeps `sendDefaultPii` disabled. Network bodies and headers,
   screenshots, and view hierarchy attachments stay disabled. Replay text and
   images remain masked.
-- Request logging must redact passwords, verification codes, access tokens,
-  Google ID tokens, APNs credentials, client secrets, and API keys.
+- API exchange logging intentionally retains captured passwords, verification
+  codes, access tokens, Google ID tokens, APNs credentials, client secrets, and
+  API keys without masking for the administrator-only API Logs view. Redis
+  Stream inspection, outbound API history, Slack/Codex output, and incident
+  dispatch keep their separate redaction boundaries, while raw API exchange
+  events and breadcrumbs are excluded from Sentry.
 - Request and response bodies on `/api/v1/mcp` must never be captured in API
   logs because they can contain resume text, interests, answers, feedback, and
   scores. The authenticated principal may be copied into tool context, but the

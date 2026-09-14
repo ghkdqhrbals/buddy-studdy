@@ -10,6 +10,10 @@ import {
   safeJson,
   statusTone,
 } from "../public/logs.js";
+import {
+  redactLogPayloadForExternalSharing,
+  redactLogTextForExternalSharing,
+} from "./log-output-redactor.mjs";
 
 const DEFAULT_LIMIT = 20;
 const DEFAULT_RANGE_MS = 60 * 60 * 1000;
@@ -178,7 +182,7 @@ function renderSlackResponse({ options, range, sort, dashboardUrl, requests, sel
     ? `${error.rootCauseType}${error.rootCauseMessage && error.rootCauseMessage !== "-" ? `: ${error.rootCauseMessage}` : ""}`
     : "";
   const connectedLogs = detail?.logs?.filter((log) => log.rawLine !== selected?.rawLine).slice(0, 6) ?? [];
-  return [
+  return redactLogTextForExternalSharing([
     "*BuddyStudy API log search*",
     `Range: ${formatKst(range.startMs)} - ${formatKst(range.endMs)}`,
     `Sort: ${sort === "desc" ? "newest first" : "oldest first"}`,
@@ -194,9 +198,9 @@ function renderSlackResponse({ options, range, sort, dashboardUrl, requests, sel
     "*Recent matches*",
     rows.length ? rows.join("\n") : "- no matching REST or MCP exchange logs",
     connectedLogs.length ? "\n*Connected logs*\n" + connectedLogs.map((log) => `- ${log.time} ${log.level} ${truncate(log.summary, 220)}`).join("\n") : "",
-    selected ? `\n*Request*\n\`\`\`json\n${truncate(safeJson(selected.request), 1800)}\n\`\`\`` : "",
-    selected ? `*Response*\n\`\`\`json\n${truncate(safeJson(selected.response), 1800)}\n\`\`\`` : "",
-  ].filter(Boolean).join("\n");
+    selected ? `\n*Request*\n\`\`\`json\n${truncate(safeJson(redactLogPayloadForExternalSharing(selected.request)), 1800)}\n\`\`\`` : "",
+    selected ? `*Response*\n\`\`\`json\n${truncate(safeJson(redactLogPayloadForExternalSharing(selected.response)), 1800)}\n\`\`\`` : "",
+  ].filter(Boolean).join("\n"));
 }
 
 function dashboardLink({ dashboardUrl, options, range, sort, selected }) {
