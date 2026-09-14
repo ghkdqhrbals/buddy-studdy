@@ -1,0 +1,11 @@
+Hello App Review,
+
+Thank you for explaining the issue under Guideline 3.1.1.
+
+We have removed the external Ko-fi tipping link and the Tip Me/Support developer action from Settings. The removal applies to all storefronts and all supported languages. The Settings footer now contains only Feedback. The app no longer offers this external tipping transaction.
+
+Our existing Plus and Pro monthly subscriptions continue to use Apple's In-App Purchase through StoreKit and RevenueCat. Their purchase location is Home > Profile > Membership & Billing > Manage membership.
+
+Please review the replacement build selected for BuddyStudy 1.1.0. The previously attached walkthrough is labeled build 118 and remains historical evidence of the core flows; it is not a recording of this replacement build.
+
+Thank you.
