@@ -412,6 +412,17 @@ deployment.
   email signup cannot deploy with an empty sender. APNs and SMTP credentials
   must not be duplicated in GitHub Actions Secrets.
 - Voice Tutor runtime configuration belongs to the Backend API module. Its
+  deployment-repository workflow must carry the same voice environment mapping
+  and scoped stream/control/SDP routes as the template. Updating this source
+  template alone does not update `personal-deploy`. On 2026-09-14, production
+  returned HTTP 200 with `reason=UNAVAILABLE` because that workflow had omitted
+  the voice variables entirely. The runtime therefore used its default-off
+  flag. Keep explicit activation in repository variables, validate boolean
+  values, and report only the non-secret activation flags in deployment output.
+  A successful status response with UNAVAILABLE is not a network failure.
+  The correction and verification are recorded in
+  [voice availability incident](../voice-availability-2026-09-14.md).
+  Its
   additive settings are `VOICE_TUTOR_ENABLED`, `OPENAI_REALTIME_MODEL`,
   `OPENAI_REALTIME_VOICE`, `VOICE_TUTOR_MAX_SESSION_SECONDS`,
   `VOICE_TUTOR_CONNECT_TIMEOUT_SECONDS`, `VOICE_TUTOR_RESPONSE_TIMEOUT_SECONDS`,

@@ -3116,6 +3116,13 @@ struct AppStrings {
     }
     var voiceTutorUpgrade: String { text("멤버십 살펴보기", "Explore memberships", "メンバーシップを見る") }
     var voiceTutorMonthlyUsage: String { text("월간 음성 시간", "Monthly voice time", "月間音声時間") }
+    var voiceTutorServiceUnavailable: String {
+        text(
+            "현재 버디 음성 대화를 이용할 수 없습니다. 서비스가 제공되면 다시 시작할 수 있어요.",
+            "Buddy voice conversations are currently unavailable. You can start again when the service is available.",
+            "現在、バディの音声会話は利用できません。サービスが利用可能になったら再開できます。"
+        )
+    }
     var voiceTutorQuotaReached: String {
         text(
             "이번 달 음성 학습 시간을 모두 사용했습니다.",

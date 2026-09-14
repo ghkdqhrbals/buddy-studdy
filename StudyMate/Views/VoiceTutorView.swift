@@ -260,7 +260,12 @@ struct VoiceTutorView: View {
 
     private var unavailableContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(strings.serviceTemporarilyUnavailable, systemImage: "exclamationmark.triangle.fill")
+            Label(
+                status?.reason?.uppercased() == "UNAVAILABLE"
+                    ? strings.voiceTutorServiceUnavailable
+                    : appState.voiceTutorErrorMessage ?? strings.serviceTemporarilyUnavailable,
+                systemImage: "exclamationmark.triangle.fill"
+            )
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

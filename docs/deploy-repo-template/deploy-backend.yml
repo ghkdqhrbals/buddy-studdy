@@ -90,6 +90,17 @@ jobs:
             echo "Missing image ref." >&2
             exit 1
           fi
+          for flag in VOICE_TUTOR_ENABLED VOICE_TUTOR_RECORDING_ENABLED; do
+            case "${!flag}" in
+              true|false) ;;
+              *) echo "${flag} must be explicitly true or false." >&2; exit 1 ;;
+            esac
+          done
+          echo "Buddy voice enabled: ${VOICE_TUTOR_ENABLED}; recording enabled: ${VOICE_TUTOR_RECORDING_ENABLED}"
+          if [ "${VOICE_TUTOR_ENABLED}" = "true" ] && [ -z "${OPENAI_REALTIME_MODEL}" ]; then
+            echo "OPENAI_REALTIME_MODEL is required for Buddy voice." >&2
+            exit 1
+          fi
           if [ "${VOICE_TUTOR_RECORDING_ENABLED}" = "true" ] && [ -z "${VOICE_TUTOR_RECORDING_BUCKET}" ]; then
             echo "VOICE_TUTOR_RECORDING_BUCKET is required when VOICE_TUTOR_RECORDING_ENABLED=true." >&2
             exit 1
