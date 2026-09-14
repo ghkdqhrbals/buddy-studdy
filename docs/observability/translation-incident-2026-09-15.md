@@ -29,6 +29,20 @@ output from decoder behavior. A decoder defect has not been established from the
 ## Verification
 
 22 focused tests passed with no failures or skips: provider (3), decoder (2),
-health probe (4), fallback (5), external history recorder (8). Production rollout
-results will be recorded after execution. These changes improve correctness
-and diagnosis; the previous timeouts are not claimed resolved by the code change.
+health probe (4), fallback (5), external history recorder (8).
+
+Implementation commit `e9082e5cb3453aa936bda3bdf4061b949728a4d0` was built and
+published by [backend image run 34893153447](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/34893153447).
+The separate [production backend deployment 34893805485](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/34893805485)
+completed successfully. No translation-container restart was required.
+
+A manual post-deployment check at 2026-09-14T20:38:48Z (05:38 KST on September 15)
+returned LibreTranslate UP in 704 ms. External history ID 868 records the actual
+POST `/translate` request: synthetic Korean `안녕하세요` returned HTTP 200 and raw
+response `{"translatedText":"Hello"}` in 687 ms. The probe's new detail confirms
+it checked translation output, rather than only the language list. OpenAI's
+connectivity-only check was UP in 1,645 ms.
+
+These changes improve correctness and diagnosis. The short synthetic request
+verifies current translation availability; it does not establish that the prior
+longer, concurrent-request timeouts are resolved.
