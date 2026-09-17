@@ -804,11 +804,22 @@ past its stored boundary until that access, but no client can reserve or observe
 stale capacity.
 
 Every five minutes the backend records `billing_lifecycle_metrics` for webhook
-lag, entitlement mismatch, exhausted reconciliation, stale question
-reservations, negative counters, duplicate active subscriptions, and ownership conflicts.
-An anomalous snapshot is emitted as `billing_lifecycle_anomaly` at ERROR; the
-existing Grafana/Loki operational-error rule owns Slack notification. The
-backend never calls Slack directly.
+lag, entitlement mismatch, exhausted reconciliation, stale question reservations,
+negative counters, duplicate active subscriptions, and ownership conflicts.
+An anomaly kind entering an unhealthy state is emitted as
+`billing_lifecycle_anomaly` at ERROR once per continuous episode in the running
+process. Later snapshots retain the metric values and log the ongoing anomaly
+without creating another ERROR. A successful snapshot clears only the anomaly
+kinds that actually recovered; a new kind or recurrence after recovery alerts
+again. Ownership conflicts are new events, so each interval with additional
+conflicts still alerts. A restart reports any existing anomaly once again.
+
+Collection failures similarly alert once until collection succeeds. Failed or
+cancelled collection never clears an active anomaly or reports it recovered.
+The existing Grafana/Loki operational-error rule owns Slack notification; its
+ERROR-log events send firing notifications only because expiry from a log
+window does not prove that the underlying condition recovered. The backend
+never calls Slack directly.
 
 ## API
 

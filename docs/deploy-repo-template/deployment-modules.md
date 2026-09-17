@@ -606,7 +606,14 @@ deployment.
   because it forces the clickable message title to the static alert-rule
   `GeneratorURL`. A custom webhook payload instead renders only the concise
   incident summary with error class, Trace / Request ID, event time, and a
-  `Grafana 로그 보기` link. The custom payload writes its Go-template locals as
+  `Grafana 로그 보기` link. These are individual log-event notifications, so the
+  Slack integration disables resolved messages and the payload selects only
+  `.Alerts.Firing`, including in mixed groups. Expiry from the Loki query window
+  is not incident recovery. Condition-based recovery alerts must use a separate
+  contact point; the internal Codex receiver retains its existing webhook
+  lifecycle contract. Deployment validates the Slack suppression settings from
+  the provisioned file without probing running services.
+  The custom payload writes its Go-template locals as
   `$$name`; Grafana provisioning reduces those to literal `$name` instead of
   interpreting them as environment-variable references. API alert links query the
   exact `requestId`; background alert links query the original
