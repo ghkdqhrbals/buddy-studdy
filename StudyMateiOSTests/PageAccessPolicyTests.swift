@@ -6,6 +6,296 @@ import UIKit
 #endif
 @testable import StudyMate
 
+final class StoreKitPurchaseAccountPolicyTests: XCTestCase {
+    private let accountToken = UUID(uuidString: "7ec4cbca-03d2-45e6-91c9-e5e8931b4e52")!
+    private let now = Date(timeIntervalSince1970: 1_789_628_288)
+    private let productID = "io.github.ghkdqhrbals.StudyMate.tier2.monthly"
+
+    func testFirstPurchaseAndCurrentPlanDoNotRequireAnExistingStoreSubscription() {
+        for action in [MembershipPrimaryAction.subscribe, .current] {
+            XCTAssertTrue(StoreKitPurchaseAccountPolicy.allowsPurchase(
+                action: action,
+                activeProductID: nil,
+                activeOriginalTransactionID: nil,
+                verifiedCurrentEntitlements: [],
+                appAccountToken: accountToken,
+                now: now
+            ))
+        }
+    }
+
+    func testPaidPlanChangeAndDowngradeRequireExistingLocalSubscription() {
+        for action in [MembershipPrimaryAction.change, .downgrade] {
+            XCTAssertFalse(allows(action, []))
+            XCTAssertTrue(allows(action, [candidate()]))
+        }
+    }
+
+    func testSameProductAndBuddyStudyAccountOnAnotherAppleChainCannotAuthorizeChange() {
+        var anotherStoreAccount = candidate()
+        anotherStoreAccount.originalTransactionID = 200_000_000_000_201
+
+        XCTAssertFalse(allows(.change, [anotherStoreAccount]))
+        XCTAssertFalse(allows(.downgrade, [anotherStoreAccount]))
+    }
+
+    func testAnotherBuddyStudyAccountOrProductCannotAuthorizeChange() {
+        var anotherAccount = candidate()
+        anotherAccount.appAccountToken = UUID()
+        var anotherProduct = candidate()
+        anotherProduct.productID = "io.github.ghkdqhrbals.StudyMate.tier3.monthly"
+
+        XCTAssertFalse(allows(.change, [anotherAccount, anotherProduct]))
+        anotherAccount.appAccountToken = nil
+        XCTAssertFalse(allows(.change, [anotherAccount]))
+    }
+
+    func testExpiredRevokedAndSupersededTransactionsCannotAuthorizeChange() {
+        var expired = candidate()
+        expired.expirationDate = now
+        var revoked = candidate()
+        revoked.revocationDate = now
+        var upgraded = candidate()
+        upgraded.isUpgraded = true
+
+        XCTAssertFalse(allows(.change, [expired, revoked, upgraded]))
+    }
+
+    func testMissingOrMalformedBackendChainFailsClosedForPaidChanges() {
+        for chain in [nil, "", "not-an-apple-transaction"] as [String?] {
+            XCTAssertFalse(StoreKitPurchaseAccountPolicy.allowsPurchase(
+                action: .change,
+                activeProductID: productID,
+                activeOriginalTransactionID: chain,
+                verifiedCurrentEntitlements: [candidate()],
+                appAccountToken: accountToken,
+                now: now
+            ))
+        }
+    }
+
+    func testMatchingChainCanBeFoundAmongOtherVerifiedEntitlements() {
+        var unrelated = candidate()
+        unrelated.originalTransactionID = 99
+        unrelated.purchaseDate = now
+        XCTAssertTrue(allows(.change, [unrelated, candidate()]))
+    }
+
+    func testExistingAnnualSubscriptionCanAuthorizeMonthlyChangeWithoutReturningToSale() {
+        for product in MembershipProductPolicy.retiredAnnualProductIDs {
+            var annual = candidate()
+            annual.productID = product
+            XCTAssertTrue(StoreKitPurchaseAccountPolicy.allowsPurchase(
+                action: .change,
+                activeProductID: product,
+                activeOriginalTransactionID: "100000000000101",
+                verifiedCurrentEntitlements: [annual],
+                appAccountToken: accountToken,
+                now: now
+            ))
+            XCTAssertFalse(MembershipProductPolicy.purchasableMonthlyProductIDs.contains(product))
+            annual.originalTransactionID = 202
+            XCTAssertFalse(StoreKitPurchaseAccountPolicy.allowsPurchase(
+                action: .change,
+                activeProductID: product,
+                activeOriginalTransactionID: "100000000000101",
+                verifiedCurrentEntitlements: [annual],
+                appAccountToken: accountToken,
+                now: now
+            ))
+        }
+    }
+
+    func testVerifiedCurrentGraceEntitlementAllowsChangeWithoutRelaxingRestore() {
+        var grace = candidate()
+        grace.expirationDate = now.addingTimeInterval(-60)
+        for action in [MembershipPrimaryAction.change, .downgrade] {
+            XCTAssertTrue(StoreKitPurchaseAccountPolicy.allowsPurchase(
+                action: action,
+                activeProductID: productID,
+                activeOriginalTransactionID: "100000000000101",
+                activeAccessStatus: "GRACE_PERIOD",
+                verifiedCurrentEntitlements: [grace],
+                appAccountToken: accountToken,
+                now: now
+            ))
+        }
+        XCTAssertFalse(allows(.change, [grace]))
+        XCTAssertNil(StoreKitRestoreCandidateSelector.latestActiveMonthly(
+            from: [grace], appAccountToken: accountToken, now: now
+        ))
+        grace.originalTransactionID = 202
+        XCTAssertFalse(StoreKitPurchaseAccountPolicy.allowsPurchase(
+            action: .change,
+            activeProductID: productID,
+            activeOriginalTransactionID: "100000000000101",
+            activeAccessStatus: "GRACE_PERIOD",
+            verifiedCurrentEntitlements: [grace],
+            appAccountToken: accountToken,
+            now: now
+        ))
+    }
+
+    @MainActor
+    func testFailedFreshStatusCannotReachSynchronizationCheckoutOrStorePurchase() async {
+        var steps: [String] = []
+        do {
+            _ = try await AppleBillingStore.preparePurchase(
+                resolveActionAfterSynchronization: {
+                    steps.append("status")
+                    throw URLError(.notConnectedToInternet)
+                },
+                synchronizeCurrentEntitlements: { steps.append("synchronize") },
+                validateStoreAccount: { _ in steps.append("validate") },
+                prepareCheckout: {
+                    steps.append("checkout")
+                    throw URLError(.unknown)
+                }
+            )
+            steps.append("purchase")
+            XCTFail("A failed status read must abort purchase preparation")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .notConnectedToInternet)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(steps, ["status"])
+    }
+
+    @MainActor
+    func testFailedStatusAfterEntitlementSyncCannotUseInitialFreeDecision() async {
+        var steps: [String] = []
+        var statusReads = 0
+        do {
+            _ = try await AppleBillingStore.preparePurchase(
+                resolveActionAfterSynchronization: {
+                    steps.append("status")
+                    statusReads += 1
+                    if statusReads == 1 { return .subscribe }
+                    throw URLError(.timedOut)
+                },
+                synchronizeCurrentEntitlements: { steps.append("synchronize") },
+                validateStoreAccount: { _ in steps.append("validate") },
+                prepareCheckout: {
+                    steps.append("checkout")
+                    throw URLError(.unknown)
+                }
+            )
+            steps.append("purchase")
+            XCTFail("A stale initial action must not authorize a purchase")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .timedOut)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(steps, ["status", "synchronize", "status"])
+    }
+
+    @MainActor
+    func testMismatchedStoreAccountAbortsBeforeCheckoutOrPurchase() async {
+        var steps: [String] = []
+        do {
+            _ = try await AppleBillingStore.preparePurchase(
+                resolveActionAfterSynchronization: { .change },
+                synchronizeCurrentEntitlements: {},
+                validateStoreAccount: { _ in
+                    steps.append("validate")
+                    throw AppleBillingStoreError.activeSubscriptionNotOnStoreAccount
+                },
+                prepareCheckout: {
+                    steps.append("checkout")
+                    throw URLError(.unknown)
+                }
+            )
+            steps.append("purchase")
+            XCTFail("Account mismatch must stop the flow")
+        } catch AppleBillingStoreError.activeSubscriptionNotOnStoreAccount {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(steps, ["validate"])
+    }
+
+    @MainActor
+    func testVerifiedDowngradeStillSchedulesWithoutCheckoutOrEntitlementReplay() async throws {
+        var steps: [String] = []
+        let result = try await AppleBillingStore.preparePurchase(
+            resolveActionAfterSynchronization: { .downgrade },
+            synchronizeCurrentEntitlements: { steps.append("synchronize") },
+            validateStoreAccount: { action in
+                XCTAssertEqual(action, .downgrade)
+                steps.append("validate")
+            },
+            prepareCheckout: {
+                steps.append("checkout")
+                throw URLError(.unknown)
+            }
+        )
+        XCTAssertEqual(result.action, .downgrade)
+        XCTAssertNil(result.checkout)
+        XCTAssertEqual(steps, ["validate"])
+    }
+
+    @MainActor
+    func testCancellationDuringStoreAccountValidationStopsCheckoutAndPurchase() async {
+        var steps: [String] = []
+        let preparation = Task { @MainActor in
+            _ = try await AppleBillingStore.preparePurchase(
+                resolveActionAfterSynchronization: { .change },
+                synchronizeCurrentEntitlements: {},
+                validateStoreAccount: { _ in
+                    steps.append("validate")
+                    withUnsafeCurrentTask { $0?.cancel() }
+                },
+                prepareCheckout: {
+                    steps.append("checkout")
+                    throw URLError(.unknown)
+                }
+            )
+            steps.append("purchase")
+        }
+        do {
+            try await preparation.value
+            XCTFail("Cancellation must stop purchase preparation")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(steps, ["validate"])
+    }
+
+    func testGuidanceExplainsAppleAccountRestoreAndManagementInSupportedLanguages() {
+        XCTAssertTrue(AppStrings(language: .english).billingStoreAccountMismatch.contains("Apple account"))
+        XCTAssertTrue(AppStrings(language: .english).billingStoreAccountMismatch.contains("restore purchases"))
+        XCTAssertTrue(AppStrings(language: .english).billingStoreAccountMismatch.contains("Manage subscription"))
+        XCTAssertTrue(AppStrings(language: .korean).billingStoreAccountMismatch.contains("구매를 복원"))
+        XCTAssertTrue(AppStrings(language: .japanese).billingStoreAccountMismatch.contains("購入を復元"))
+    }
+
+    private func allows(_ action: MembershipPrimaryAction, _ candidates: [StoreKitRestoreCandidate]) -> Bool {
+        StoreKitPurchaseAccountPolicy.allowsPurchase(
+            action: action,
+            activeProductID: productID,
+            activeOriginalTransactionID: "100000000000101",
+            verifiedCurrentEntitlements: candidates,
+            appAccountToken: accountToken,
+            now: now
+        )
+    }
+
+    private func candidate() -> StoreKitRestoreCandidate {
+        StoreKitRestoreCandidate(
+            transactionID: 100_000_000_000_102,
+            originalTransactionID: 100_000_000_000_101,
+            productID: productID,
+            appAccountToken: accountToken,
+            purchaseDate: now.addingTimeInterval(-3600),
+            expirationDate: now.addingTimeInterval(3600),
+            revocationDate: nil
+        )
+    }
+}
+
 final class BillingLocalizationTests: XCTestCase {
     func testMembershipAndBillingLabelsAreLocalizedInJapanese() {
         let strings = AppStrings(language: .japanese)
@@ -239,6 +529,7 @@ final class BillingLocalizationTests: XCTestCase {
           "accessStatus": "ACTIVE",
           "renewalStatus": "CANCELED",
           "productId": "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+          "originalTransactionId": "100000000000101",
           "startedAt": "2026-08-01T00:00:00Z",
           "expiresAt": "2026-09-01T00:00:00Z",
           "willRenew": false,
@@ -261,6 +552,7 @@ final class BillingLocalizationTests: XCTestCase {
         let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
 
         XCTAssertEqual(status.tierCode, "TIER2")
+        XCTAssertEqual(status.originalTransactionId, "100000000000101")
         XCTAssertTrue(status.adFree)
         XCTAssertTrue(status.isEntitlementActive)
         XCTAssertFalse(status.willRenew)
@@ -298,6 +590,7 @@ final class BillingLocalizationTests: XCTestCase {
         }
 
         XCTAssertTrue(try decode(accessStatus: "GRACE_PERIOD").isEntitlementActive)
+        XCTAssertNil(try decode(accessStatus: "GRACE_PERIOD").originalTransactionId)
         XCTAssertFalse(try decode(accessStatus: "EXPIRED").isEntitlementActive)
     }
 

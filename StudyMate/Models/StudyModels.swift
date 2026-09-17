@@ -3665,6 +3665,13 @@ struct AppStrings {
     }
     var billingPurchased: String { text("멤버십이 적용됐습니다.", "Your membership is active.", "メンバーシップが有効になりました。") }
     var billingRestored: String { text("구매 내역을 복원했습니다.", "Purchases restored.", "購入履歴を復元しました。") }
+    var billingStoreAccountMismatch: String {
+        text(
+            "현재 App Store 계정에서 기존 구독을 확인할 수 없어 변경을 중단했습니다. 구독을 구매한 Apple 계정으로 전환한 뒤 구매를 복원해 주세요. 기존 구독은 구독 관리에서 확인할 수 있습니다.",
+            "Your existing subscription could not be verified on the current App Store account, so the change was stopped. Switch to the Apple account used for that subscription and restore purchases. You can review it in Manage subscription.",
+            "現在のApp Storeアカウントで既存のサブスクリプションを確認できないため、変更を停止しました。購入時のAppleアカウントに切り替えて購入を復元してください。既存の契約はサブスクリプション管理で確認できます。"
+        )
+    }
     var noRestorablePurchases: String {
         text(
             "복원할 수 있는 활성 구매가 없습니다.",
@@ -5022,6 +5029,7 @@ struct MembershipProductPolicy {
         "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
         "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
     ]
+    static let recognizedSubscriptionProductIDs = purchasableMonthlyProductIDs.union(retiredAnnualProductIDs)
 
     static func isPurchasableMonthlyProduct(
         _ product: BackendBillingTierProduct

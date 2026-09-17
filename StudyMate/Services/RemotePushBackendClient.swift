@@ -3774,6 +3774,7 @@ struct BackendBillingStatus: Decodable, Equatable {
     var accessStatus: String
     var renewalStatus: String
     var productId: String?
+    var originalTransactionId: String?
     var startedAt: Date?
     var expiresAt: Date?
     var willRenew: Bool
@@ -3794,6 +3795,7 @@ struct BackendBillingStatus: Decodable, Equatable {
         case accessStatus
         case renewalStatus
         case productId
+        case originalTransactionId
         case startedAt
         case expiresAt
         case willRenew
@@ -3815,6 +3817,7 @@ struct BackendBillingStatus: Decodable, Equatable {
         accessStatus = try values.decode(String.self, forKey: .accessStatus)
         renewalStatus = try values.decode(String.self, forKey: .renewalStatus)
         productId = try values.decodeIfPresent(String.self, forKey: .productId)
+        originalTransactionId = try values.decodeIfPresent(String.self, forKey: .originalTransactionId)
         startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
         expiresAt = try values.decodeIfPresent(Date.self, forKey: .expiresAt)
         willRenew = try values.decode(Bool.self, forKey: .willRenew)

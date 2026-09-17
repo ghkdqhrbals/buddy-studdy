@@ -7887,6 +7887,39 @@ final class AppState: ObservableObject {
         billingRefreshTask = nil
     }
 
+    func refreshBillingForPurchase() async throws {
+        let refreshOrder = membershipRefreshOrder.issue()
+        let clientGeneration = backendClientGeneration
+        let sessionGeneration = communitySessionState.generation
+        billingRefreshRequestID += 1
+        let requestID = billingRefreshRequestID
+        let currentBillingUseCase = billingUseCase
+        guard isCommunitySessionActive,
+              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "billing-purchase-status"
+              ) else {
+            throw AppStateError.missingRemotePushRegistration
+        }
+        let resolvedStatus = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "billing-purchase-status",
+            operation: { recoveredRegistration in
+                try await currentBillingUseCase.status(registration: recoveredRegistration)
+            }
+        )
+        try Task.checkCancellation()
+        guard clientGeneration == backendClientGeneration,
+              isCurrentCommunitySession(sessionGeneration),
+              requestID == billingRefreshRequestID,
+              membershipRefreshOrder.isLatest(refreshOrder) else {
+            throw CancellationError()
+        }
+        applyBillingStatus(resolvedStatus)
+        billingErrorMessage = nil
+    }
+
     private func resolveNativeAdvertisingAdFreeEntitlement() async -> Bool? {
         guard isCommunitySessionActive else {
             return false

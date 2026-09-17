@@ -164,7 +164,7 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertTrue(billingStore.contains("for await verification in Transaction.currentEntitlements"))
         XCTAssertTrue(billingStore.contains("let appliedInvoice = try Self.requireApplied(invoice)"))
         XCTAssertTrue(billingStore.contains("try await synchronizeCurrentEntitlements("))
-        XCTAssertTrue(billingStore.contains("var action = await resolveActionAfterSynchronization()"))
+        XCTAssertTrue(billingStore.contains("var action = try await resolveActionAfterSynchronization()"))
         XCTAssertTrue(billingStore.contains("let checkout = Self.shouldCreateCheckout(for: action)"))
         XCTAssertFalse(billingStore.contains("return action == .downgrade ? .changeScheduled : .pending"))
         XCTAssertTrue(billingStore.contains("revenueCatTransaction.transactionIdentifier"))
@@ -278,7 +278,7 @@ final class AppControlPolicyTests: XCTestCase {
             billingStore.range(of: "try await synchronizeCurrentEntitlements(")
         )
         let actionResolution = try XCTUnwrap(
-            billingStore.range(of: "var action = await resolveActionAfterSynchronization()")
+            billingStore.range(of: "var action = try await resolveActionAfterSynchronization()")
         )
         let checkoutCreation = try XCTUnwrap(
             billingStore.range(of: "let checkout = Self.shouldCreateCheckout(for: action)")

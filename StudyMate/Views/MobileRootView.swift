@@ -7568,9 +7568,10 @@ struct MobileMembershipManagementView: View {
                     tierProduct,
                     appAccountToken: appAccountToken,
                     resolveActionAfterSynchronization: {
-                        await appState.refreshBilling()
+                        try await appState.refreshBillingForPurchase()
                         return purchaseAction(for: tierProduct)
                     },
+                    activeSubscription: { appState.billingStatus },
                     prepareCheckout: appState.createAppleBillingCheckout,
                     confirmRevenueCat: appState.confirmRevenueCatBillingTransaction,
                     synchronize: appState.syncAppleBillingTransaction,
@@ -7599,6 +7600,9 @@ struct MobileMembershipManagementView: View {
                 if let billingError = error as? AppleBillingStoreError,
                    case .membershipApplicationIncomplete = billingError {
                     isBillingRecoveryPresented = true
+                } else if let billingError = error as? AppleBillingStoreError,
+                          case .activeSubscriptionNotOnStoreAccount = billingError {
+                    billingNotice = strings.billingStoreAccountMismatch
                 } else {
                     billingNotice = error.localizedDescription
                 }
