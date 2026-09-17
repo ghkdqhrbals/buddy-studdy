@@ -153,9 +153,13 @@ class BillingLedgerPersistenceAdapter(
     override suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection? =
         database.sql(
             """
-            select tier_code, source, access_status, renewal_status, product_id, started_at,
-                   expires_at, will_renew, pending_product_id, projected_at
-            from user_entitlement_projection where user_id = :userId
+            select p.tier_code, p.source, p.access_status, p.renewal_status, p.product_id, p.started_at,
+                   p.expires_at, p.will_renew, p.pending_product_id, p.projected_at,
+                   s.original_transaction_id
+            from user_entitlement_projection p
+            left join subscriptions s on s.id = p.subscription_id and s.user_id = p.user_id
+              and s.provider = 'APPLE' and p.source = 'APP_STORE'
+            where p.user_id = :userId
             """.trimIndent(),
         ).bind("userId", userId).map { row, _ ->
             BillingEntitlementProjection(
@@ -169,6 +173,7 @@ class BillingLedgerPersistenceAdapter(
                 willRenew = row.boolean("will_renew"),
                 pendingProductId = row.nullableString("pending_product_id"),
                 synchronizedAt = row.instant("projected_at"),
+                originalTransactionId = row.nullableString("original_transaction_id"),
             )
         }.one().awaitSingleOrNull()
 

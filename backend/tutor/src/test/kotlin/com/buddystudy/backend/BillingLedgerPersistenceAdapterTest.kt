@@ -1703,6 +1703,8 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         ledger.fulfill(tier3Invoice.id, tier3PurchasedAt.plusSeconds(1))
 
         assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER3")
+        assertThat(ledger.entitlementForUser(fixture.userId)?.originalTransactionId)
+            .isEqualTo(tier3Transaction.originalTransactionId)
         val tier3Quota = requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(2)))
         assertThat(tier3Quota.usedCount).isEqualTo(1)
         assertThat(tier3Quota.baseLimit).isEqualTo(1_000)
@@ -1715,6 +1717,8 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             tier3PurchasedAt.plusSeconds(3),
         )
         assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER2")
+        assertThat(ledger.entitlementForUser(fixture.userId)?.originalTransactionId)
+            .isEqualTo(tier2Transaction.originalTransactionId)
         assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(4))).usedCount)
             .isEqualTo(1)
 
@@ -1726,6 +1730,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         )
         val expiredQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(6)))
         assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER1")
+        assertThat(ledger.entitlementForUser(fixture.userId)?.originalTransactionId).isNull()
         assertThat(expiredQuota.usedCount).isEqualTo(1)
         assertThat(expiredQuota.baseLimit).isEqualTo(30)
 
@@ -1752,8 +1757,50 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         ledger.fulfill(resubscribeInvoice.id, resubscribeAt.plusSeconds(1))
         val resubscribedQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, resubscribeAt.plusSeconds(2)))
         assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER3")
+        assertThat(ledger.entitlementForUser(fixture.userId)?.originalTransactionId)
+            .isEqualTo(resubscribeTransaction.originalTransactionId)
         assertThat(resubscribedQuota.usedCount).isEqualTo(1)
         assertThat(resubscribedQuota.periodStartedAt).isEqualTo(fixture.now)
+    }
+
+    @Test
+    fun `selected subscription identity cannot expose another user chain or a stale free association`(): Unit = runBlocking {
+        val other = fixture("chain-owner")
+        val current = fixture("chain-requester")
+        for (owner in listOf(other, current)) {
+            val invoice = ledger.recordVerifiedPayment(
+                RecordVerifiedPaymentCommand(
+                    owner.userId,
+                    owner.product,
+                    owner.transaction(),
+                    null,
+                    BillingEventSource.APPLE_NOTIFICATION,
+                    "chain-payment-${owner.suffix}",
+                    owner.now,
+                ),
+            )
+            ledger.fulfill(invoice.id, owner.now.plusSeconds(1))
+        }
+        val ownSubscriptionId = longValue(
+            "select subscription_id from user_entitlement_projection where user_id = ${current.userId}",
+        )
+        val otherSubscriptionId = longValue(
+            "select subscription_id from user_entitlement_projection where user_id = ${other.userId}",
+        )
+        execute(
+            "update user_entitlement_projection set subscription_id = $otherSubscriptionId " +
+                "where user_id = ${current.userId}",
+        )
+
+        assertThat(ledger.entitlementForUser(current.userId)?.originalTransactionId).isNull()
+        assertThat(ledger.entitlementForUser(other.userId)?.originalTransactionId)
+            .isEqualTo(other.transaction().originalTransactionId)
+
+        execute(
+            "update user_entitlement_projection set subscription_id = $ownSubscriptionId, source = 'FREE' " +
+                "where user_id = ${current.userId}",
+        )
+        assertThat(ledger.entitlementForUser(current.userId)?.originalTransactionId).isNull()
     }
 
     @Test

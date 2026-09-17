@@ -43,6 +43,8 @@ data class BillingEntitlementProjection(
     val willRenew: Boolean,
     val pendingProductId: String?,
     val synchronizedAt: Instant,
+    /** Apple subscription chain selected by the entitlement projection, if one exists. */
+    val originalTransactionId: String? = null,
 )
 
 data class BillingQuotaStatus(
@@ -72,6 +74,8 @@ data class BillingStatusResponse(
     val synchronizedAt: Instant,
     val quota: BillingQuotaStatus,
     val voiceTutor: BillingVoiceTutorStatus = BillingVoiceTutorStatus.disabled(),
+    /** Identifies the selected App Store subscription for local StoreKit ownership checks. */
+    val originalTransactionId: String? = null,
 )
 
 data class BillingVoiceTutorStatus(

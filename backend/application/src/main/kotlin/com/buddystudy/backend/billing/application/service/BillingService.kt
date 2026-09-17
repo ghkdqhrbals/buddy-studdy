@@ -119,6 +119,9 @@ class BillingService(
             pendingChange = planTransition?.nextProductId,
             planTransition = planTransition,
             synchronizedAt = entitlement?.synchronizedAt ?: now,
+            originalTransactionId = entitlement
+                ?.takeIf { it.source == EntitlementSource.APP_STORE }
+                ?.originalTransactionId,
             quota = BillingQuotaStatus(
                 periodStartedAt = periodStartedAt,
                 resetAt = resetAt,

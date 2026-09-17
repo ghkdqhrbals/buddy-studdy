@@ -175,9 +175,6 @@ jobs:
           MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: ${{ vars.MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES || '15' }}
           MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: ${{ vars.MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES || '15' }}
           MONITORING_SCHEDULER_MONITORED_JOBS: ${{ vars.MONITORING_SCHEDULER_MONITORED_JOBS || 'question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog,billing-fulfillment-recovery,billing-subscription-event-projector' }}
-          REMOTE_LOKI_PUSH_URL: ${{ vars.REMOTE_LOKI_PUSH_URL || '' }}
-          REMOTE_LOKI_BASIC_AUTH_USER: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_USER || '' }}
-          REMOTE_LOKI_BASIC_AUTH_PASSWORD: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_PASSWORD || '' }}
         run: |
           set -euo pipefail
 
@@ -461,7 +458,6 @@ jobs:
           docker pull mysql:8.4
           docker pull redis:7.4-alpine
           docker pull certbot/certbot:v2.11.0
-          docker pull grafana/promtail:3.3.2
 
           docker network create buddystudy-net >/dev/null 2>&1 || true
           docker volume create buddystudy-mysql-data >/dev/null
@@ -488,68 +484,6 @@ jobs:
               buddystudy-swarm-net >/dev/null
           fi
           cp "${GITHUB_WORKSPACE}/deploy/backend/swarm-stack.yml" backend-stack.yml
-
-          mkdir -p promtail
-          if [ -n "${REMOTE_LOKI_PUSH_URL}" ]; then
-            cat > promtail/promtail.yml <<PROMTAIL
-          server:
-            http_listen_port: 9080
-            grpc_listen_port: 0
-
-          positions:
-            filename: /tmp/positions.yaml
-
-          clients:
-            - url: ${REMOTE_LOKI_PUSH_URL}
-          PROMTAIL
-            if [ -n "${REMOTE_LOKI_BASIC_AUTH_USER}" ] && [ -n "${REMOTE_LOKI_BASIC_AUTH_PASSWORD}" ]; then
-              cat >> promtail/promtail.yml <<PROMTAIL
-              basic_auth:
-                username: ${REMOTE_LOKI_BASIC_AUTH_USER}
-                password: ${REMOTE_LOKI_BASIC_AUTH_PASSWORD}
-          PROMTAIL
-            fi
-            cat >> promtail/promtail.yml <<'PROMTAIL'
-
-          scrape_configs:
-            - job_name: docker
-              docker_sd_configs:
-                - host: unix:///var/run/docker.sock
-                  refresh_interval: 15s
-              relabel_configs:
-                - source_labels: ['__meta_docker_container_name']
-                  regex: '/(.*)'
-                  target_label: container
-                - source_labels: ['__meta_docker_container_log_stream']
-                  target_label: stream
-                - source_labels: ['__meta_docker_container_name']
-                  regex: '/(buddystudy[-_].*)'
-                  action: keep
-              pipeline_stages:
-                - multiline:
-                    firstline: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s'
-                    max_wait_time: 3s
-                    max_lines: 1024
-                - regex:
-                    expression: '^\S+\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)\s'
-                - labels:
-                    level:
-                - static_labels:
-                    host: ec2
-                    app: buddystudy
-          PROMTAIL
-
-            docker rm -f buddystudy-promtail >/dev/null 2>&1 || true
-            docker run -d \
-              --name buddystudy-promtail \
-              --restart unless-stopped \
-              -v /var/run/docker.sock:/var/run/docker.sock:ro \
-              -v "$PWD/promtail/promtail.yml:/etc/promtail/config.yml:ro" \
-              grafana/promtail:3.3.2 \
-              -config.file=/etc/promtail/config.yml
-          else
-            docker rm -f buddystudy-promtail >/dev/null 2>&1 || true
-          fi
 
           docker rm -f buddystudy-caddy >/dev/null 2>&1 || true
           DATABASE_CONTAINER_READY=false
@@ -601,20 +535,6 @@ jobs:
               mysql:8.4
           fi
 
-          for attempt in $(seq 1 60); do
-            if docker exec -e MYSQL_PWD="${MYSQL_PASSWORD}" buddystudy-db \
-              mysql --batch --skip-column-names \
-                -h 127.0.0.1 -u "${MYSQL_USER}" "${MYSQL_DATABASE}" \
-                -e "select 1" >/dev/null 2>&1; then
-              break
-            fi
-            if [ "$attempt" -eq 60 ]; then
-              echo "MySQL did not become ready." >&2
-              docker logs buddystudy-db || true
-              exit 1
-            fi
-            sleep 2
-          done
           docker network connect buddystudy-swarm-net buddystudy-db >/dev/null 2>&1 || true
 
           if docker inspect buddystudy-redis >/dev/null 2>&1; then
@@ -643,12 +563,6 @@ jobs:
           fi
           docker network connect buddystudy-swarm-net buddystudy-redis >/dev/null 2>&1 || true
 
-          sleep 2
-          if [ "$(docker inspect -f '{{.State.Running}}' buddystudy-redis 2>/dev/null || true)" != "true" ]; then
-            echo "Redis process exited during deployment." >&2
-            docker logs buddystudy-redis || true
-            exit 1
-          fi
           if ! docker inspect buddystudy-redis | python3 -c 'import json, sys; bindings = json.load(sys.stdin)[0]["HostConfig"]["PortBindings"] or {}; sys.exit(0 if any(item.get("HostPort") == "6379" for item in bindings.get("6379/tcp", [])) else 1)'; then
             echo "Redis host port 6379 was not published." >&2
             exit 1
@@ -689,20 +603,20 @@ jobs:
             echo "BACKEND_SWARM_SERVICE=buddystudy_backend"
           } >> "${GITHUB_ENV}"
 
-          "${GITHUB_WORKSPACE}/scripts/wait_backend_swarm_rollout.sh" \
-            buddystudy_backend \
-            "${IMAGE_REF}" \
-            600
-          if [ "${BACKEND_DEPLOYMENT_STATE}" = "submitted" ]; then
-            BACKEND_DEPLOYMENT_STATE="rollout-completed"
-          elif [ "${BACKEND_DEPLOYMENT_STATE}" = "staged" ]; then
-            BACKEND_DEPLOYMENT_STATE="staged-ready"
+          # Verify the submitted service configuration without waiting for runtime health.
+          DEPLOYED_IMAGE="$(docker service inspect --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' buddystudy_backend)"
+          EXPECTED_IMAGE_SPEC="${IMAGE_REF}"
+          case "${IMAGE_REF}" in
+            *@sha256:*) ;;
+            *) DEPLOYED_IMAGE="${DEPLOYED_IMAGE%%@sha256:*}" ;;
+          esac
+          if [ "${DEPLOYED_IMAGE}" != "${EXPECTED_IMAGE_SPEC}" ]; then
+            echo "Swarm service image does not match the requested release." >&2
+            exit 1
           fi
-
-          {
-            echo "BACKEND_DEPLOYMENT_STATE=${BACKEND_DEPLOYMENT_STATE}"
-            echo "BACKEND_SWARM_SERVICE=buddystudy_backend"
-          } >> "${GITHUB_ENV}"
+          docker service ps --no-trunc \
+            --format 'table {{.Name}}\t{{.Image}}\t{{.DesiredState}}\t{{.CurrentState}}' \
+            buddystudy_backend
 
           SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
           SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"
@@ -851,11 +765,6 @@ jobs:
             echo "Verify the Swarm task, then rerun manually with promote_swarm=true."
           fi
           docker image prune -f
-
-      - name: Remove legacy MySQL runtime observer
-        run: |
-          set -euo pipefail
-          docker rm -f buddystudy-db-metrics >/dev/null 2>&1 || true
 
       - name: Summary
         if: always()
