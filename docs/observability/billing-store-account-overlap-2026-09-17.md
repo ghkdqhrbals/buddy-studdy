@@ -84,5 +84,27 @@ No production purchase, cancellation, refund, or subscription expiration is part
 of verification. The backend response can be deployed independently; prevention
 reaches users only after the updated iOS binary is distributed.
 
+## Deployment record
+
+- Backend source: `8a645a54f9ee7af90812d3dfeba1ff786507e9c2`.
+  [Hosted image build](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/35195047177)
+  succeeded and published digest
+  `sha256:fedcd1383c2169fe9fe749ccc3ea74f2f1ae05c47badee1540505e4b2175cdbb`.
+- [Production backend deployment](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/35195665984)
+  succeeded using deploy workflow commit `9f49905`. Grafana independently showed
+  the replacement container starting with the `prod` profile at 07:41:52 UTC.
+- Its 07:42:52 UTC billing metrics still reported one overlapping subscription
+  account; all other lifecycle anomaly counters were zero. Both pre-existing
+  Apple subscriptions remain valid. Stopping unwanted renewal requires the
+  account holder to manage the appropriate subscription with Apple.
+- iOS source: `9ed5158bd0a230834dd85bbb947ff90b87056e45`.
+  [Release workflow](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/35195432482)
+  uploaded version `1.1.0 (120)` successfully. App Store Connect processed build
+  `d3ffae23-0a49-4d36-ade4-96e374da9c90` to `VALID`. This upload did not replace
+  the approved build 119 or publish the fix to the App Store. A replacement
+  public binary needs a new review.
+- The separate RevenueCat HMAC mismatch is not resolved by these code changes;
+  integration and deployed signing secrets still need to be aligned.
+
 Apple references: [appTransactionId](https://developer.apple.com/documentation/storekit/apptransaction/apptransactionid),
 [subscription group behavior](https://developer.apple.com/app-store/subscriptions/).
