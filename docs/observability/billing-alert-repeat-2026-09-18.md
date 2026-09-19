@@ -51,3 +51,35 @@ remain separate, and runtime checks are not added to GitHub Actions.
 - Two stale dashboard test assertions also failed at the production branch
   baseline. They now enforce the existing separation between backend Swarm
   rollout and monitoring lifecycle, retaining the Loki error and Slack checks.
+
+## Deployment
+
+- Source: `bfd1c9a81b7e209dafdc030c8e3df1f5571a18f2`, branch
+  `fix/billing-alert-repeat-20260918`.
+- [Monitoring validation and dispatch](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/35336223423)
+  and [monitoring rollout](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/35336261359)
+  succeeded. After refreshing the production Grafana contact-point view, the
+  Slack receiver's `Disable resolved message` option was checked; before the
+  rollout it was unchecked. No test Slack message was sent.
+- [Backend image build](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/35336264572)
+  succeeded on a GitHub-hosted runner and published the JVM image digest
+  `sha256:b52bdc96caa59342429ff6a7176ec92cbcbd43e42dcdb5e6d8389bf86ced1df7`.
+- [Backend rollout](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/35414148040)
+  succeeded on September 19 using that immutable image digest and the same
+  backend-only workflow revision `9f49905e6ea3a1b7a788d4d3287874d51b592d26`
+  used by the previous production rollout. Monitoring deployment completed
+  separately. The workflow did not run runtime health probes.
+
+On September 19, before the backend rollout, the 01:42:59, 01:47:59, and
+01:52:59 UTC production snapshots were all INFO with all seven anomaly
+counters zero, including `duplicateActiveSubscriptions=0`. The underlying
+overlap cleared independently of this deployment. Runtime observation of these
+healthy snapshots does not replace the unit test of sustained-anomaly
+suppression.
+
+After the successful backend rollout, Grafana showed the 01:58:37.414 UTC
+(10:58:37 KST) billing snapshot at INFO with all seven counters still zero.
+The latest 15-minute query for `BillingLifecycleMetricsReporter` contained
+only INFO snapshots and no ERROR events. Sustained-anomaly deduplication is
+verified by the 11 reporter tests; no production anomaly was introduced for
+testing.
