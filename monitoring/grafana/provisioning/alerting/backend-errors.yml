@@ -6,7 +6,9 @@ contactPoints:
     receivers:
       - uid: buddystudy-slack-errors
         type: webhook
-        disableResolveMessage: false
+        # These rules identify individual log events. Their expiry from Loki's
+        # query window is not evidence that the underlying incident recovered.
+        disableResolveMessage: true
         settings:
           # Slack app Incoming Webhooks are channel-bound. This secret must be
           # the BuddyStudy Grafana webhook installed to #error (C0BRMLFMH9V).
@@ -19,7 +21,7 @@ contactPoints:
             template: |-
               {{- $$blocks := coll.Slice -}}
               {{- $$fallback := "Backend ERROR" -}}
-              {{- range .Alerts -}}
+              {{- range .Alerts.Firing -}}
                 {{- $$errorClass := index .Annotations "error_class" -}}
                 {{- $$traceID := index .Annotations "trace_id" -}}
                 {{- $$occurredAt := index .Annotations "occurred_at" -}}
@@ -33,15 +35,11 @@ contactPoints:
                 {{- if not $$occurredAt -}}
                   {{- $$occurredAt = "-" -}}
                 {{- end -}}
-                {{- $$status := "발생" -}}
-                {{- if eq .Status "resolved" -}}
-                  {{- $$status = "해결" -}}
-                {{- end -}}
-                {{- $$message := printf "*[%s] Backend ERROR*\n*에러 클래스* `%s`\n*Trace / Request ID* `%s`\n*발생 시각* %s" $$status $$errorClass $$traceID $$occurredAt -}}
+                {{- $$message := printf "*[발생] Backend ERROR*\n*에러 클래스* `%s`\n*Trace / Request ID* `%s`\n*발생 시각* %s" $$errorClass $$traceID $$occurredAt -}}
                 {{- if $$logsURL -}}
                   {{- $$message = printf "%s\n<%s|Grafana 로그 보기>" $$message $$logsURL -}}
                 {{- end -}}
-                {{- $$fallback = printf "[%s] Backend ERROR · %s · trace %s" $$status $$errorClass $$traceID -}}
+                {{- $$fallback = printf "[발생] Backend ERROR · %s · trace %s" $$errorClass $$traceID -}}
                 {{- $$blocks = coll.Append (coll.Dict "type" "section" "text" (coll.Dict "type" "mrkdwn" "text" $$message)) $$blocks -}}
               {{- end -}}
               {{ coll.Dict "text" $$fallback "blocks" $$blocks | data.ToJSON }}

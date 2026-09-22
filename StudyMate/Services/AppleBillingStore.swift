@@ -27,6 +27,7 @@ struct StoreKitRestoreCandidate: Equatable {
     var purchaseDate: Date
     var expirationDate: Date?
     var revocationDate: Date?
+    var isUpgraded: Bool = false
 }
 
 enum StoreKitRestoreCandidateSelector {
@@ -40,6 +41,7 @@ enum StoreKitRestoreCandidateSelector {
                 candidate.appAccountToken == appAccountToken
                     && MembershipProductPolicy.purchasableMonthlyProductIDs.contains(candidate.productID)
                     && candidate.revocationDate == nil
+                    && !candidate.isUpgraded
                     && candidate.expirationDate.map { $0 > now } == true
             }
             .max { lhs, rhs in
@@ -48,6 +50,39 @@ enum StoreKitRestoreCandidateSelector {
                 }
                 return lhs.transactionID < rhs.transactionID
             }
+    }
+}
+
+enum StoreKitPurchaseAccountPolicy {
+    nonisolated static func requiresCurrentStoreEntitlement(for action: MembershipPrimaryAction) -> Bool {
+        action == .change || action == .downgrade
+    }
+
+    nonisolated static func allowsPurchase(
+        action: MembershipPrimaryAction,
+        activeProductID: String?,
+        activeOriginalTransactionID: String?,
+        activeAccessStatus: String = "ACTIVE",
+        verifiedCurrentEntitlements: [StoreKitRestoreCandidate],
+        appAccountToken: UUID,
+        now: Date = Date()
+    ) -> Bool {
+        guard requiresCurrentStoreEntitlement(for: action) else { return true }
+        guard let activeProductID,
+              let activeOriginalTransactionID,
+              let originalTransactionID = UInt64(activeOriginalTransactionID) else { return false }
+        guard activeAccessStatus == "ACTIVE" || activeAccessStatus == "GRACE_PERIOD" else { return false }
+        // currentEntitlements includes billing grace access even after the transaction expiry.
+        // This exception belongs to purchase preflight; restore selection remains expiry-strict.
+        return verifiedCurrentEntitlements.contains { candidate in
+            candidate.appAccountToken == appAccountToken
+                && candidate.productID == activeProductID
+                && candidate.originalTransactionID == originalTransactionID
+                && MembershipProductPolicy.recognizedSubscriptionProductIDs.contains(candidate.productID)
+                && candidate.revocationDate == nil
+                && !candidate.isUpgraded
+                && (candidate.expirationDate.map { $0 > now } == true || activeAccessStatus == "GRACE_PERIOD")
+        }
     }
 }
 
@@ -378,6 +413,30 @@ final class AppleBillingStore: ObservableObject {
         action == .subscribe || action == .change
     }
 
+    static func preparePurchase(
+        resolveActionAfterSynchronization: () async throws -> MembershipPrimaryAction,
+        synchronizeCurrentEntitlements: () async throws -> Void,
+        validateStoreAccount: (MembershipPrimaryAction) async throws -> Void,
+        prepareCheckout: () async throws -> BackendBillingInvoice
+    ) async throws -> (action: MembershipPrimaryAction, checkout: BackendBillingInvoice?) {
+        try Task.checkCancellation()
+        var action = try await resolveActionAfterSynchronization()
+        try Task.checkCancellation()
+        if action == .current { return (action, nil) }
+        if Self.shouldSynchronizeCurrentEntitlementsBeforePurchase(for: action) {
+            try await synchronizeCurrentEntitlements()
+            try Task.checkCancellation()
+            action = try await resolveActionAfterSynchronization()
+            try Task.checkCancellation()
+            if action == .current { return (action, nil) }
+        }
+        try await validateStoreAccount(action)
+        try Task.checkCancellation()
+        let checkout = Self.shouldCreateCheckout(for: action) ? try await prepareCheckout() : nil
+        try Task.checkCancellation()
+        return (action, checkout)
+    }
+
     @Published private(set) var products: [TierProduct] = []
     @Published private(set) var isLoading = false
     @Published private(set) var processingProductID: String?
@@ -540,7 +599,8 @@ final class AppleBillingStore: ObservableObject {
     func purchase(
         _ tierProduct: TierProduct,
         appAccountToken: UUID,
-        resolveActionAfterSynchronization: @escaping () async -> MembershipPrimaryAction,
+        resolveActionAfterSynchronization: @escaping () async throws -> MembershipPrimaryAction,
+        activeSubscription: @escaping () -> BackendBillingStatus?,
         prepareCheckout: @escaping (String) async throws -> BackendBillingInvoice,
         confirmRevenueCat: @escaping (String, UUID) async throws -> BackendBillingInvoice,
         synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice,
@@ -557,34 +617,36 @@ final class AppleBillingStore: ObservableObject {
         defer { processingProductID = nil }
 
         try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
-        var action = await resolveActionAfterSynchronization()
-        if action == .current {
-            return .alreadyCurrent
-        }
-
-        // A server-confirmed downgrade is a future Store subscription change, not a replay of the
-        // current entitlement. Replaying the active higher-tier transaction here can be rejected as
-        // already owned and must not prevent RevenueCat from scheduling the lower tier.
-        if Self.shouldSynchronizeCurrentEntitlementsBeforePurchase(for: action) {
-            try await synchronizeCurrentEntitlements(
-                appAccountToken: appAccountToken,
-                synchronize: synchronize
-            )
-
-            // StoreKit may already own an active transaction while the backend projection is stale.
-            // Re-read the server-owned status before creating an invoice so an existing transaction
-            // is never attached to a fresh checkout for the same product or a scheduled downgrade.
-            action = await resolveActionAfterSynchronization()
-            if action == .current {
-                return .alreadyCurrent
-            }
-        }
-
-        // A downgrade does not charge now. Apple schedules it for the next renewal, so creating a
-        // financial invoice here would leave a WAITING order that can never receive a transaction.
-        let checkout = Self.shouldCreateCheckout(for: action)
-            ? try await prepareCheckout(tierProduct.id)
-            : nil
+        let preparation = try await Self.preparePurchase(
+            resolveActionAfterSynchronization: resolveActionAfterSynchronization,
+            synchronizeCurrentEntitlements: {
+                try await self.synchronizeCurrentEntitlements(
+                    appAccountToken: appAccountToken,
+                    synchronize: synchronize
+                )
+            },
+            validateStoreAccount: { action in
+                // A RevenueCat customer may contain purchases from several Apple accounts.
+                guard StoreKitPurchaseAccountPolicy.requiresCurrentStoreEntitlement(for: action) else { return }
+                let subscription = activeSubscription()
+                let entitlements = await self.verifiedCurrentEntitlements()
+                guard StoreKitPurchaseAccountPolicy.allowsPurchase(
+                    action: action,
+                    activeProductID: subscription?.productId,
+                    activeOriginalTransactionID: subscription?.originalTransactionId,
+                    activeAccessStatus: subscription?.accessStatus ?? "UNKNOWN",
+                    verifiedCurrentEntitlements: entitlements.map(\.candidate),
+                    appAccountToken: appAccountToken
+                ) else {
+                    throw AppleBillingStoreError.activeSubscriptionNotOnStoreAccount
+                }
+            },
+            prepareCheckout: { try await prepareCheckout(tierProduct.id) }
+        )
+        let action = preparation.action
+        let checkout = preparation.checkout
+        if action == .current { return .alreadyCurrent }
+        try Task.checkCancellation()
         switch tierProduct.source {
         #if DEBUG
         case .screenshotFixture:
@@ -747,6 +809,25 @@ final class AppleBillingStore: ObservableObject {
         verification: StoreKit.VerificationResult<StoreKit.Transaction>,
         transaction: StoreKit.Transaction
     )? {
+        let verifiedEntitlements = await verifiedCurrentEntitlements()
+
+        guard let selected = StoreKitRestoreCandidateSelector.latestActiveMonthly(
+            from: verifiedEntitlements.map(\.candidate),
+            appAccountToken: appAccountToken,
+            now: now
+        ), let entitlement = verifiedEntitlements.first(where: {
+            $0.transaction.id == selected.transactionID
+        }) else {
+            return nil
+        }
+        return (entitlement.verification, entitlement.transaction)
+    }
+
+    private func verifiedCurrentEntitlements() async -> [(
+        verification: StoreKit.VerificationResult<StoreKit.Transaction>,
+        transaction: StoreKit.Transaction,
+        candidate: StoreKitRestoreCandidate
+    )] {
         var verifiedEntitlements: [(
             verification: StoreKit.VerificationResult<StoreKit.Transaction>,
             transaction: StoreKit.Transaction,
@@ -767,21 +848,13 @@ final class AppleBillingStore: ObservableObject {
                     appAccountToken: transaction.appAccountToken,
                     purchaseDate: transaction.purchaseDate,
                     expirationDate: transaction.expirationDate,
-                    revocationDate: transaction.revocationDate
+                    revocationDate: transaction.revocationDate,
+                    isUpgraded: transaction.isUpgraded
                 )
             ))
         }
 
-        guard let selected = StoreKitRestoreCandidateSelector.latestActiveMonthly(
-            from: verifiedEntitlements.map(\.candidate),
-            appAccountToken: appAccountToken,
-            now: now
-        ), let entitlement = verifiedEntitlements.first(where: {
-            $0.transaction.id == selected.transactionID
-        }) else {
-            return nil
-        }
-        return (entitlement.verification, entitlement.transaction)
+        return verifiedEntitlements
     }
 
     private static func shouldWaitForRevenueCatWebhook(after error: Error) -> Bool {
@@ -854,6 +927,7 @@ enum AppleBillingStoreError: LocalizedError {
     case missingRevenueCatTransaction
     case revenueCatTransactionMismatch
     case noRestorablePurchases
+    case activeSubscriptionNotOnStoreAccount
     case unknownPurchaseResult
 
     var errorDescription: String? {
@@ -878,6 +952,8 @@ enum AppleBillingStoreError: LocalizedError {
             return "이번 App Store 결제와 일치하는 거래를 확인할 수 없습니다. 구매 복원을 시도해 주세요."
         case .noRestorablePurchases:
             return "복원할 수 있는 활성 구매가 없습니다."
+        case .activeSubscriptionNotOnStoreAccount:
+            return AppStrings(language: .english).billingStoreAccountMismatch
         case .unknownPurchaseResult:
             return "알 수 없는 App Store 결제 결과입니다."
         }

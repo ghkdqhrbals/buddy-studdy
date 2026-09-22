@@ -2,8 +2,10 @@ package com.buddystudy.backend.monitoring.adapter.inbound.scheduler
 
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.reactive.awaitSingle
 import org.slf4j.LoggerFactory
+import org.slf4j.event.Level
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.scheduling.annotation.Scheduled
@@ -29,6 +31,8 @@ class BillingLifecycleMetricsReporter(
     private val negativeQuotaCounters = AtomicLong()
     private val duplicateActiveSubscriptions = AtomicLong()
     private var previousOwnershipConflictCount = 0L
+    private var activeAnomalies = emptySet<String>()
+    private var collectionFailed = false
 
     init {
         register(meterRegistry, "billing.lifecycle.webhook.lag.seconds", webhookLagSeconds)
@@ -49,6 +53,10 @@ class BillingLifecycleMetricsReporter(
             val snapshot = snapshot(
                 ownershipConflicts = (currentOwnershipConflictCount - previousOwnershipConflictCount).coerceAtLeast(0),
             )
+            if (collectionFailed) {
+                logger.info("billing_lifecycle_metrics_collection_recovered")
+                collectionFailed = false
+            }
             previousOwnershipConflictCount = currentOwnershipConflictCount
             webhookLagSeconds.set(snapshot.webhookLagSeconds)
             entitlementMismatches.set(snapshot.entitlementMismatches)
@@ -68,12 +76,18 @@ class BillingLifecycleMetricsReporter(
                 snapshot.duplicateActiveSubscriptions,
                 snapshot.ownershipConflicts,
             )
-            if (snapshot.hasOperationalAnomaly()) {
-                // Grafana/Loki owns Slack delivery. The backend only emits one structured ERROR event.
-                logger.error(
-                    "billing_lifecycle_anomaly webhookLagSeconds={} entitlementMismatches={} " +
+            val anomalies = snapshot.operationalAnomalies()
+            val newAnomalies = anomalies - activeAnomalies
+            val recoveredAnomalies = activeAnomalies - anomalies
+            if (anomalies.isNotEmpty()) {
+                // Alert when a condition starts; a persistent snapshot is not a new incident.
+                logger.atLevel(if (newAnomalies.isNotEmpty()) Level.ERROR else Level.WARN).log(
+                    "{} anomalies={} newAnomalies={} webhookLagSeconds={} entitlementMismatches={} " +
                         "exhaustedReconciliations={} staleReservations={} negativeQuotaCounters={} " +
                         "duplicateActiveSubscriptions={} ownershipConflicts={}",
+                    if (newAnomalies.isNotEmpty()) "billing_lifecycle_anomaly" else "billing_lifecycle_anomaly_ongoing",
+                    anomalies.joinToString(","),
+                    newAnomalies.joinToString(",").ifEmpty { "none" },
                     snapshot.webhookLagSeconds,
                     snapshot.entitlementMismatches,
                     snapshot.exhaustedReconciliations,
@@ -83,13 +97,27 @@ class BillingLifecycleMetricsReporter(
                     snapshot.ownershipConflicts,
                 )
             }
+            if (recoveredAnomalies.isNotEmpty()) {
+                logger.info(
+                    "billing_lifecycle_anomaly_recovered anomalies={} remainingAnomalies={}",
+                    recoveredAnomalies.joinToString(","),
+                    anomalies.joinToString(",").ifEmpty { "none" },
+                )
+            }
+            // Ownership conflicts are new events, not a persistent database condition.
+            activeAnomalies = anomalies - "ownership_conflicts"
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
-            logger.error(
-                "billing_lifecycle_metrics_collection_failed errorType={} message={}",
+            logger.atLevel(if (collectionFailed) Level.WARN else Level.ERROR).log(
+                "{} errorType={} message={}",
+                if (collectionFailed) "billing_lifecycle_metrics_collection_still_failed"
+                else "billing_lifecycle_metrics_collection_failed",
                 error.javaClass.name,
                 error.message,
                 error,
             )
+            collectionFailed = true
         }
     }
 
@@ -181,8 +209,14 @@ internal data class BillingLifecycleMetricsSnapshot(
     val duplicateActiveSubscriptions: Long,
     val ownershipConflicts: Long,
 ) {
-    fun hasOperationalAnomaly(): Boolean =
-        webhookLagSeconds > 15 * 60 || entitlementMismatches > 0 ||
-            staleReservations > 0 || negativeQuotaCounters > 0 || duplicateActiveSubscriptions > 0 ||
-            ownershipConflicts > 0
+    fun hasOperationalAnomaly(): Boolean = operationalAnomalies().isNotEmpty()
+
+    fun operationalAnomalies(): Set<String> = buildSet {
+        if (webhookLagSeconds > 15 * 60) add("webhook_lag")
+        if (entitlementMismatches > 0) add("entitlement_mismatches")
+        if (staleReservations > 0) add("stale_reservations")
+        if (negativeQuotaCounters > 0) add("negative_quota_counters")
+        if (duplicateActiveSubscriptions > 0) add("duplicate_active_subscriptions")
+        if (ownershipConflicts > 0) add("ownership_conflicts")
+    }
 }

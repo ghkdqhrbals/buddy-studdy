@@ -7,12 +7,12 @@ import com.buddystudy.backend.externalapi.application.model.StartExternalApiCall
 import com.buddystudy.backend.externalapi.application.port.inbound.ExternalApiCallHistoryUseCase
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 
-fun testExternalApiHistoryRecorder(): ExternalApiHistoryRecorder {
+fun testExternalApiHistoryRecorder(onFinish: (FinishExternalApiCallCommand) -> Unit = {}): ExternalApiHistoryRecorder {
     val mapper = jacksonObjectMapper().findAndRegisterModules()
     return ExternalApiHistoryRecorder(
         history = object : ExternalApiCallHistoryUseCase {
             override suspend fun start(command: StartExternalApiCallCommand) = Unit
-            override suspend fun finish(command: FinishExternalApiCallCommand) = Unit
+            override suspend fun finish(command: FinishExternalApiCallCommand) = onFinish(command)
         },
         redactor = SensitiveDataRedactor(mapper),
         objectMapper = mapper,

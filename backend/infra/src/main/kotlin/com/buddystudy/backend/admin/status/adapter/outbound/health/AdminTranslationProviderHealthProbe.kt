@@ -7,6 +7,8 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
 import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
 import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
+import com.buddystudy.backend.study.adapter.outbound.translation.decodeLibreTranslateResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.reactive.awaitSingle
@@ -44,17 +46,20 @@ class AdminTranslationProviderHealthProbe(
             return notConfigured(PROVIDER_LIBRETRANSLATE, enabled, "LibreTranslate base URL is not configured.")
         }
         return probe(PROVIDER_LIBRETRANSLATE, enabled) {
+            // A languages listing can succeed while translation returns empty output.
+            // Use only a fixed, non-user sample; no paid OpenAI generation is triggered.
+            val body = linkedMapOf("q" to "안녕하세요", "source" to "ko", "target" to "en", "format" to "text")
+            properties.translation.apiKey.takeIf(String::isNotBlank)?.let { body["api_key"] = it }
             history.record(
-                ExternalApiRequest(PROVIDER_LIBRETRANSLATE, "health-check", "GET", "$baseUrl/languages"),
+                ExternalApiRequest(
+                    PROVIDER_LIBRETRANSLATE, "health-check", "POST", "$baseUrl/translate",
+                    mapOf(HttpHeaders.CONTENT_TYPE to "application/json"), history.json(body),
+                ),
             ) {
-                val entity = client.get().uri("$baseUrl/languages").retrieve()
+                val entity = client.post().uri("$baseUrl/translate").bodyValue(body).retrieve()
                     .toEntity(String::class.java).timeout(timeout()).awaitSingle()
-                ExternalApiResponse(
-                    Unit,
-                    entity.statusCode.value(),
-                    entity.headers.toSingleValueMap(),
-                    entity.body,
-                )
+                decodeLibreTranslateResponse(entity.body)
+                ExternalApiResponse(Unit, entity.statusCode.value(), entity.headers.toSingleValueMap(), entity.body)
             }
         }
     }
@@ -100,8 +105,14 @@ class AdminTranslationProviderHealthProbe(
                 status = STATUS_UP,
                 enabled = enabled,
                 latencyMs = elapsedMillis(startedAt),
-                detail = "Provider API responded successfully.",
+                detail = if (provider == PROVIDER_LIBRETRANSLATE) {
+                    "Korean-to-English sample translation returned non-empty text."
+                } else {
+                    "Provider API responded successfully (connectivity only)."
+                },
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
             AdminTranslationProviderHealth(
                 provider = provider,
@@ -131,6 +142,7 @@ class AdminTranslationProviderHealthProbe(
     private fun safeFailureDetail(error: Exception): String = when (error) {
         is WebClientResponseException -> "Provider returned HTTP ${error.statusCode.value()} ${error.statusText}."
         is WebClientRequestException -> "Could not connect to the provider API."
+        is IllegalArgumentException -> "Provider returned an invalid or empty translation."
         is TimeoutException -> "Provider check timed out after ${timeout().toMillis()} ms."
         else -> if (error.cause is TimeoutException) {
             "Provider check timed out after ${timeout().toMillis()} ms."

@@ -344,22 +344,23 @@ test("server runtime dashboard separates server, database, and Redis signals", a
   }
 });
 
-test("backend deploy removes the legacy MySQL collector without replacing it", async () => {
+test("backend deploy preserves monitoring ownership and legacy profile storage", async () => {
   const [deployTemplate, swarmStackTemplate] = await Promise.all([
     fs.readFile(backendDeployTemplatePath, "utf8"),
     fs.readFile(backendSwarmStackTemplatePath, "utf8"),
   ]);
 
-  assert.match(deployTemplate, /docker rm -f buddystudy-db-metrics/);
+  // Monitoring cleanup belongs to its own module, not the backend Swarm rollout.
+  assert.doesNotMatch(deployTemplate, /buddystudy-db-metrics/);
   assert.doesNotMatch(deployTemplate, /docker pull docker:27-cli/);
-  assert.doesNotMatch(deployTemplate, /--name buddystudy-db-metrics/);
   assert.doesNotMatch(deployTemplate, /database-runtime-collector\.sh/);
+  assert.doesNotMatch(swarmStackTemplate, /db-metrics|database-runtime-collector/);
   assert.match(deployTemplate, /PROFILE_PHOTO_PUBLIC_BASE_URL=https:\/\/\$\{BACKEND_DOMAIN\}/);
   assert.match(deployTemplate, /docker volume create buddystudy-profile-photos/);
   assert.match(swarmStackTemplate, /buddystudy-profile-photos:\/app\/profile-photos/);
 });
 
-test("backend errors are one labeled Loki event and alert Slack", async () => {
+test("backend rollout preserves monitoring and labeled Loki errors alert Slack", async () => {
   const [backendDeploy, monitoringDeploy, compose, alert] = await Promise.all([
     fs.readFile(backendDeployTemplatePath, "utf8"),
     fs.readFile(deployTemplatePath, "utf8"),
@@ -367,11 +368,12 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
     fs.readFile(backendErrorAlertPath, "utf8"),
   ]);
 
-  assert.match(backendDeploy, /- multiline:/);
-  assert.match(backendDeploy, /max_lines: 1024/);
-  assert.match(backendDeploy, /\(TRACE\|DEBUG\|INFO\|WARN\|ERROR\)/);
-  assert.match(backendDeploy, /target_label: container/);
-  assert.match(backendDeploy, /level:/);
+  // EC2 Promtail is configured independently; backend deploys must preserve it.
+  assert.match(backendDeploy, /docker stack deploy/);
+  assert.doesNotMatch(
+    backendDeploy,
+    /buddystudy-(?:promtail|loki|grafana)\b|grafana\/(?:promtail|loki|grafana):|promtail\.ya?ml/,
+  );
   assert.match(monitoringDeploy, /grafana\/provisioning\/alerting/);
   assert.match(monitoringDeploy, /GRAFANA_SLACK_WEBHOOK_URL/);
   assert.match(monitoringDeploy, /LEGACY_SLACK_WEBHOOK_URL/);
@@ -405,7 +407,6 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
     "traceID",
     "occurredAt",
     "logsURL",
-    "status",
     "message",
   ]) {
     assert.doesNotMatch(
@@ -530,6 +531,36 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.equal(
     operationalPanes.backendErrors.queries[0].expr,
     '{app="buddystudy", level="ERROR"} |= "2026-08-03T09:09:23.029Z" |= "c.b.StreamConsumer"',
+  );
+});
+
+test("one-shot backend ERROR notifications never claim log-window expiry is recovery", async () => {
+  const alert = await fs.readFile(backendErrorAlertPath, "utf8");
+  const slackReceiver = alert.match(
+    /^      - uid: buddystudy-slack-errors\n([\s\S]*?)(?=^      - uid:|^groups:)/m,
+  )?.[1];
+  const incidentReceiver = alert.match(
+    /^      - uid: buddystudy-codex-incident-autofix\n([\s\S]*?)(?=^groups:)/m,
+  )?.[1];
+  assert.ok(slackReceiver, "The event-log Slack receiver must exist");
+  assert.ok(incidentReceiver, "The internal incident receiver must exist");
+  assert.match(slackReceiver, /^        disableResolveMessage: true$/m);
+  assert.match(
+    slackReceiver,
+    /\{\{- range \.Alerts\.Firing -\}\}/,
+    "Mixed notification groups must omit expired log events as well",
+  );
+  assert.doesNotMatch(slackReceiver, /range \.Alerts -|\.Alerts\.Resolved|해결/);
+  assert.match(slackReceiver, /\*\[발생\] Backend ERROR\*/);
+  assert.match(
+    incidentReceiver,
+    /^        disableResolveMessage: false$/m,
+    "Slack-only suppression must not alter the internal incident delivery contract",
+  );
+  assert.deepEqual(
+    [...alert.matchAll(/^      - uid: (buddystudy-backend-[^\n]+)$/gm)].map((match) => match[1]),
+    ["buddystudy-backend-error-log", "buddystudy-backend-operational-error-log"],
+    "This contact point is scoped to individual ERROR log events, not recovery-based condition alerts",
   );
 });
 

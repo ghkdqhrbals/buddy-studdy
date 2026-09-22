@@ -354,6 +354,10 @@ jobs:
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
           grep -Fq 'coll.Dict "text" $$fallback "blocks" $$blocks | data.ToJSON' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq 'disableResolveMessage: true' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '{{- range .Alerts.Firing -}}' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
           grep -Fq '*에러 클래스* `%s`' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
           grep -Fq '*Trace / Request ID* `%s`' \
