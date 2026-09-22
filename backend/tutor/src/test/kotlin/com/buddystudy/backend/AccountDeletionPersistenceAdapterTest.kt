@@ -60,7 +60,11 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         insertUserBlock(peerUserId, userId, withdrawnAt.minusSeconds(20))
         val voiceSessionId = insertVoiceTutorData(userId, withdrawnAt.minusSeconds(30))
 
+        client.sql("insert into user_topic_subscriptions (user_id, topic_key, topic, sort_order) values (:userId, 'swift', 'Swift', 0)")
+            .bind("userId", userId).fetch().rowsUpdated().awaitSingle()
+
         val snapshot = accountDeletion.beginWithdrawal(userId, withdrawnAt)
+        assertThat(longValue("select count(*) from user_topic_subscriptions where user_id = $userId")).isZero()
 
         assertThat(snapshot.deviceIds).containsExactly(deviceId)
         assertThat(stringValue("select status from users where id = $userId")).isEqualTo("WITHDRAWN")

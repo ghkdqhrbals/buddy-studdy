@@ -19,6 +19,9 @@ app_ads_template="$project_root/docs/app-ads.txt.template"
 plutil -lint "$privacy_manifest"
 plutil -lint "$project_root/StudyMate.xcodeproj/project.pbxproj"
 
+APP_STORE_METADATA_VALIDATE_ONLY=1 ruby "$project_root/scripts/update-app-store-metadata.rb"
+APP_STORE_METADATA_VALIDATE_ONLY=1 ruby "$project_root/scripts/update-app-store-app-info.rb"
+
 ruby -rjson -e '
   version = JSON.parse(File.read(ARGV.fetch(0)))
   app_info = JSON.parse(File.read(ARGV.fetch(1)))

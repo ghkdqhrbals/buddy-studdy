@@ -18,6 +18,8 @@ struct StudyView: View {
     @State private var isResolvingInitialAnswerState: Bool
     #if os(iOS)
     @FocusState private var isAnswerEditorFocused: Bool
+    @Environment(\.scenePhase) private var reviewScenePhase
+    @State private var isReviewScreenVisible = false
     #endif
 
     init(
@@ -162,6 +164,9 @@ struct StudyView: View {
             Text(strings.pendingQuestionLimitMessage)
         }
         .onAppear {
+            #if os(iOS)
+            isReviewScreenVisible = true
+            #endif
             draftAnswer = appState.answerDraft(for: selectedStudyRecord)
             presentPendingLimitNoticeIfNeeded()
         }
@@ -196,6 +201,9 @@ struct StudyView: View {
             }
         }
         .onDisappear {
+            #if os(iOS)
+            isReviewScreenVisible = false
+            #endif
             if let answerGradingOwnerID {
                 appState.cancelAnswerGradingPolling(
                     ownerID: answerGradingOwnerID,
@@ -224,6 +232,18 @@ struct StudyView: View {
         .onChange(of: appState.pendingQuestionLimitCategoryID) {
             presentPendingLimitNoticeIfNeeded()
         }
+        #if os(iOS)
+        .onChange(of: StudyReviewCompletion(
+            recordID: selectedStudyRecord?.id,
+            isGraded: selectedStudyRecord?.gradingResult != nil
+        )) { previous, current in
+            if current.isNewCompletion(after: previous), appState.isCommunitySessionActive,
+               isReviewScreenVisible, reviewScenePhase == .active,
+               !isResolvingInitialAnswerState, editingStudyRoom == nil, selectedTreeRootID == nil {
+                StudyReviewCoordinator.shared.recordLearningCompletion()
+            }
+        }
+        #endif
     }
 
     private func questionLoadingMessage(strings: AppStrings) -> some View {

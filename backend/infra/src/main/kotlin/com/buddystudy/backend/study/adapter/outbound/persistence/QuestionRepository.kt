@@ -1,5 +1,8 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
+import com.buddystudy.backend.community.application.model.TopicSubscriptionPolicy
+import com.buddystudy.backend.community.application.model.PublicFeedSort
+import com.buddystudy.backend.community.application.model.PublicFeedScope
 import com.buddystudy.backend.config.saveEntity
 import com.buddystudy.backend.config.selectPage
 import com.buddystudy.backend.common.adapter.outbound.persistence.bindIndexed
@@ -437,6 +440,98 @@ class QuestionRepository(
         viewerUserId = viewerUserId,
     )
 
+    override suspend fun findPersonalizedPublicAnswered(
+        viewerUserId: Long?,
+        query: String?,
+        language: String,
+        sort: PublicFeedSort,
+        scope: PublicFeedScope,
+        limit: Int,
+        offset: Int,
+    ): Page<QuestionEntity> {
+        val pageable = ExactOffsetPageable(limit, offset.toLong())
+        if (viewerUserId == null && scope == PublicFeedScope.FOLLOWING) return Page.empty(pageable)
+        val normalizedQuery = query?.trim()?.takeIf(String::isNotEmpty)
+        val searchJoin = if (normalizedQuery == null) "" else
+            "join question_search qs on qs.question_id = q.id and qs.language = :language"
+        val searchCondition = if (normalizedQuery == null) "true" else """
+            (lower(coalesce(qs.topic, '')) like :pattern
+             or lower(coalesce(qs.question, '')) like :pattern
+             or lower(coalesce(qs.answer, '')) like :pattern
+             or lower(coalesce(qs.feedback, '')) like :pattern
+             or lower(coalesce(qs.explanation, '')) like :pattern
+             or lower(u.display_name) like :pattern)
+        """.trimIndent()
+        // Match both the canonical topic and completed localized topic projections. This lets a
+        // subscription made from an English/Japanese card match its Korean canonical question.
+        val followed = if (viewerUserId == null) "false" else """
+            exists (
+                select 1 from user_topic_subscriptions subscription
+                where subscription.user_id = :viewerUserId
+                  and (subscription.topic_key = ${topicKeySql("q.topic")}
+                       or exists (
+                           select 1 from question_search topic_projection
+                           where topic_projection.question_id = q.id
+                             and subscription.topic_key = ${topicKeySql("topic_projection.topic")}
+                       ))
+            )
+        """.trimIndent()
+        val followingCondition = if (scope == PublicFeedScope.FOLLOWING) "and ($followed)" else ""
+        val blockCondition = if (viewerUserId == null) "" else BLOCKED_AUTHOR_EXCLUSION
+        val base = """
+            from questions q
+            join users u on u.id = q.user_id
+            left join question_stats stats on stats.question_id = q.id
+            $searchJoin
+            where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION
+              and u.allow_public_questions = true and $searchCondition
+              $blockCondition $followingCondition
+        """.trimIndent()
+        // Logarithmic engagement dampens runaway counts; age decay keeps fresh useful content
+        // competitive. Missing/negative counters are zero. Membership/purchases never affect rank.
+        val popularity = """
+            (1.0 + ln(1.0 + greatest(0, coalesce(stats.view_count, 0))) * 0.35
+                 + ln(1.0 + greatest(0, coalesce(stats.like_count, 0))) * 2.0)
+            / power(1.0 + greatest(0, timestampdiff(hour, coalesce(q.graded_at, q.created_at), current_timestamp)) / 24.0, 0.6)
+        """.trimIndent()
+        val order = when (sort) {
+            PublicFeedSort.RECOMMENDED -> "case when ($followed) then 1 else 0 end desc, ($popularity) desc, "
+            PublicFeedSort.LATEST -> ""
+            PublicFeedSort.VIEWS -> "greatest(0, coalesce(stats.view_count, 0)) desc, greatest(0, coalesce(stats.like_count, 0)) desc, "
+            PublicFeedSort.LIKES -> "greatest(0, coalesce(stats.like_count, 0)) desc, greatest(0, coalesce(stats.view_count, 0)) desc, "
+        } + "q.created_at desc, q.id desc"
+        var idsSpec = template.databaseClient.sql("select q.id $base order by $order limit :limit offset :offset")
+            .bind("limit", limit).bind("offset", offset)
+        var countSpec = template.databaseClient.sql("select count(*) as total $base")
+        if (viewerUserId != null) {
+            idsSpec = idsSpec.bind("viewerUserId", viewerUserId)
+            countSpec = countSpec.bind("viewerUserId", viewerUserId)
+        }
+        if (normalizedQuery != null) {
+            val normalizedLanguage = QuestionLanguage.normalize(language)
+            val pattern = "%${normalizedQuery.lowercase()}%"
+            idsSpec = idsSpec.bind("language", normalizedLanguage).bind("pattern", pattern)
+            countSpec = countSpec.bind("language", normalizedLanguage).bind("pattern", pattern)
+        }
+        val ids = idsSpec.map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
+            .all().collectList().awaitSingle()
+        val total = countSpec.map { row, _ -> row.get("total", java.lang.Long::class.java)!!.toLong() }
+            .one().awaitSingle()
+        return PageImpl(findOrdered(ids), pageable, total)
+    }
+
+    private fun topicKeySql(column: String): String {
+        // Same separators as TopicSubscriptionPolicy; char() avoids SQL backslash-mode differences.
+        var expression = "lower(coalesce($column, ''))"
+        val separators = listOf("'-'", "'_'") + TopicSubscriptionPolicy.whitespaceCodePoints.map {
+            if (it < 32) "char($it)" else "'${it.toChar()}'"
+        }
+        separators.forEach {
+            expression = "replace($expression, $it, '')"
+        }
+        return expression
+    }
+
     override suspend fun findLikedPublicAnsweredVisibleTo(
         viewerUserId: Long,
         query: String?,
@@ -825,8 +920,8 @@ class QuestionRepository(
             .apply(Update.update("deleted_at", now).set("updated_at", now))
             .awaitSingle().toInt()
 
-    private companion object {
-        const val COMPLETED_RECORD_CONDITION =
+    companion object {
+        private const val COMPLETED_RECORD_CONDITION =
             "((q.record_type = 'QUESTION' and q.score is not null) or " +
                 "(q.record_type = 'VOICE_TUTOR' and q.status = 'completed' and q.voice_record_id is not null))"
 
@@ -838,14 +933,14 @@ class QuestionRepository(
                     "and exists (select 1 from voice_study_learning_records voice_record " +
                         "where voice_record.id = q.voice_record_id and voice_record.user_id = q.user_id)))"
 
-        const val BLOCKED_AUTHOR_EXCLUSION =
+        private const val BLOCKED_AUTHOR_EXCLUSION =
             "and not exists (" +
                 "select 1 from user_blocks user_block " +
                 "where user_block.blocker_user_id = :viewerUserId " +
                 "and user_block.blocked_user_id = q.user_id" +
                 ")"
 
-        val NON_TERMINAL_GRADING_STATUSES = listOf(
+        private val NON_TERMINAL_GRADING_STATUSES = listOf(
             "QUEUED",
             "ANALYZING_EVIDENCE",
             "CRITIQUING",

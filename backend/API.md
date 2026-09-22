@@ -521,6 +521,63 @@ GET /api/v1/public/questions?topic=SwiftUI&limit=20&offset=0
 
 This endpoint is public and must not require `Authorization`.
 
+Personalized public Home feed (v2):
+
+```http
+GET /api/v2/public/questions?sort=recommended&scope=all&tl=ko&limit=20&offset=0
+GET /api/v2/public/questions/search?query=Swift&sort=likes&scope=following&tl=en&limit=20&offset=0
+GET /api/v1/me/topic-subscriptions
+PUT /api/v1/me/topic-subscriptions
+Content-Type: application/json
+
+{"topics":["Swift UI","자료 구조"]}
+```
+
+The subscription endpoints require a signed-in account and return `{"topics":[...]}`.
+PUT atomically replaces only that account's list; an empty list unsubscribes from everything.
+At most 30 topics are accepted, with 1–120 characters in both display text and the
+normalized key. Null, blank, separator-only, control-containing, and overlong topics
+are rejected before writes. Display labels retain their first entered spelling after
+whitespace collapse; matching ignores case, Unicode whitespace, hyphens, and underscores.
+Subscriptions are private account data, independent of study creation, question quota,
+and resume/learning context. Withdrawal removes them immediately.
+
+`sort` is `recommended` (default), `latest`, `views`, or `likes`;
+`scope` is `all` (default) or `following`. Unknown values return validation errors.
+Recommended places subscribed topics first, then ranks by
+`(1 + 0.35*ln(1+views) + 2*ln(1+likes)) / (1+ageHours/24)^0.6`,
+using nonnegative counters and age since grading (creation as fallback). These are
+existing recorded views, not unique-reader counts. Explicit views/likes ordering uses
+the respective counter, the other counter, creation time, and question ID as tie breaks.
+Latest uses creation time and ID. Membership/purchases have no effect on organic rank.
+Without subscriptions, recommended provides global discovery; following returns an
+empty page. Anonymous browsing remains available, with an empty following page.
+
+Topic matching checks canonical and available localized topic labels. Query searches
+only the requested language projection as before. Public completed records require
+nonempty answers and author opt-in: `QUESTION` must be graded; `VOICE_TUTOR` must be
+completed with a nonempty question and an existing extension owned by the same author.
+Deleted/private/blocked-author content is excluded before ranking, counts, and exact-offset pagination. V2 keeps the existing
+`questions`, `items`, `totalCount`, `limit`, `offset` response and first-page native-ad-slot
+eligibility; search inserts no advertisements. V1 ordering is unchanged.
+
+Public question share previews:
+
+```http
+GET /questions/{canonicalRecordId}?tl=en
+```
+
+The numeric canonical record ID is shared by ordinary and Voice Tutor public records;
+the internal voice extension ID is never a public route ID. Preview visibility uses the
+same public/completion/deletion and author opt-in conditions as public records. It exposes
+only topic and question, without answers, grades, author identity, session evidence, or a
+view increment. Ordinary questions use available translations with source fallback;
+Voice Tutor previews use the canonical source question and its source language because
+voice search projections may hold source fallback in a requested-language row. Preview
+reads never enqueue translations. Responses are noncacheable; unavailable records all
+return the same generic 404. Migration `V120__community_topic_subscriptions.sql` adds
+private account-owned subscription storage without modifying existing deployed migrations.
+
 Liked public questions:
 
 ```http
@@ -528,8 +585,8 @@ GET /api/v1/public/questions/liked?query=SwiftUI&tl=ko&view=localized&limit=20&o
 Authorization: Bearer <accessToken>
 ```
 
-This endpoint returns only the authenticated user's still-public, graded liked
-questions, ordered by the time they were liked. It excludes blocked authors and
+This endpoint returns only the authenticated user's still-public completed liked
+records, ordered by the time they were liked. It excludes blocked authors and
 never inserts native advertisements. `limit` is clamped to `1...100`, `offset`
 is clamped to zero or greater, and `tl` takes precedence over the deprecated
 `language` alias.

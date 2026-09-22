@@ -176,6 +176,32 @@ enum AppAnalytics {
         log("answer_grading_failed")
     }
 
+    static func publicFeedLoaded(sort: String, scope: String, personalized: Bool) {
+        guard ["recommended", "latest", "views", "likes"].contains(sort),
+              ["all", "following"].contains(scope) else { return }
+        log("public_feed_loaded", parameters: [
+            "sort": sort, "scope": scope, "personalized": personalized ? 1 : 0
+        ])
+    }
+
+    static func topicSubscriptionsSaved(count: Int) {
+        let bucket = count == 0 ? "none" : count <= 3 ? "1_to_3" : count <= 10 ? "4_to_10" : "11_plus"
+        log("topic_subscriptions_saved", parameters: ["count_bucket": bucket])
+    }
+
+    static func publicFeedQuestionOpened() { log("public_feed_question_opened") }
+
+    static func publicQuestionShareOpened() { log("public_question_share_opened") }
+
+    static func publicTopicFollowChanged(isFollowing: Bool) {
+        log("public_topic_follow_changed", parameters: ["following": isFollowing ? 1 : 0])
+    }
+
+    static func firstStudyStarterSelected() { log("first_study_starter_selected") }
+
+    // An API attempt only: StoreKit supplies no display or rating-conversion callback.
+    static func reviewRequested() { log("store_review_requested") }
+
     static func notificationOpened(kind: AppAnalyticsNotificationKind) {
         log("notification_opened", parameters: ["notification_kind": kind.rawValue])
     }

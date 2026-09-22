@@ -2458,6 +2458,462 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertTrue(requests.contains(questionID: "shared-question"))
     }
 
+    func testPublicQuestionShareLinksUseCanonicalHTTPSAndRejectLookalikesAndPrivateRoutes() throws {
+        for language in AppLanguage.allCases {
+            let link = try XCTUnwrap(PublicQuestionShareLink(questionID: "42", language: language))
+            XCTAssertEqual(link.url.absoluteString, "https://api.ghkdqhrbals.org/questions/42?tl=\(language.backendCode)")
+            XCTAssertEqual(AppRoute(url: link.url), .publicQuestion(id: "42"))
+            XCTAssertEqual(PublicQuestionShareLink(url: link.url), link)
+        }
+        XCTAssertEqual(AppRoute(url: try XCTUnwrap(URL(string: "https://api.ghkdqhrbals.org/questions/42"))), .publicQuestion(id: "42"))
+        let invalidURLs = [
+            "http://api.ghkdqhrbals.org/questions/42",
+            "https://api.ghkdqhrbals.org.evil.test/questions/42",
+            "https://evil.test/questions/42",
+            "https://api.ghkdqhrbals.org:443/questions/42",
+            "https://user@api.ghkdqhrbals.org/questions/42",
+            "https://api.ghkdqhrbals.org/questions/42/extra",
+            "https://api.ghkdqhrbals.org/questions/%34%32",
+            "https://api.ghkdqhrbals.org/questions/42?tl=en&tl=ko",
+            "https://api.ghkdqhrbals.org/questions/42?tl=fr",
+            "https://api.ghkdqhrbals.org/questions/42?token=secret",
+            "https://api.ghkdqhrbals.org/questions/42#answer",
+            "https://api.ghkdqhrbals.org/records/42",
+            "https://api.ghkdqhrbals.org/questions/-1",
+            "https://api.ghkdqhrbals.org/questions/0",
+            "https://api.ghkdqhrbals.org/questions/9223372036854775808"
+        ]
+        for raw in invalidURLs {
+            XCTAssertNil(AppRoute(url: try XCTUnwrap(URL(string: raw))), raw)
+        }
+        XCTAssertNil(PublicQuestionShareLink(questionID: "private-record", language: .english))
+        XCTAssertNil(PublicQuestionShareLink(questionID: "42/answer", language: .korean))
+        XCTAssertEqual(AppRoute(url: try XCTUnwrap(URL(string: "buddystudy://public/questions/42"))), .publicQuestion(id: "42"))
+    }
+
+    func testPublicShareLinksAreStampedOnlyForQuestionsFetchedFromProduction() async throws {
+        for host in ["https://api.ghkdqhrbals.org", "https://lowfidev.cloud", "https://api.ghkdqhrbals.org.evil.test"] {
+            let client = makeClient(baseURL: try XCTUnwrap(URL(string: host))) { request in
+                Self.response(for: request, statusCode: 200, body: Self.communityQuestionPageJSON(ids: ["42"], totalCount: 1, offset: 0))
+            }
+            let page = try await client.fetchPublicQuestions(registration: Self.signedInRegistration, query: nil, language: .english)
+            let question = try XCTUnwrap(page.questions.first)
+            if host == "https://api.ghkdqhrbals.org" {
+                XCTAssertEqual(question.publicShareURL?.absoluteString, "https://api.ghkdqhrbals.org/questions/42?tl=en")
+                guard case .publicQuestion(let item) = try XCTUnwrap(page.items.first) else { return XCTFail("Missing question item") }
+                XCTAssertEqual(item.publicShareURL, question.publicShareURL)
+            } else {
+                XCTAssertNil(question.publicShareURL, "Development IDs must never produce links to unrelated production questions.")
+            }
+        }
+    }
+
+    func testProductionPublicVoiceShareUsesCanonicalRecordIDAndRequiresPublishableExchange() async throws {
+        let voicePayload = #"""
+        "recordType": "VOICE_TUTOR",
+        "voiceRecord": {
+            "kind": "TUTOR_QUESTION", "score": 85, "feedback": "Synthetic feedback",
+            "strengths": [], "improvements": [], "depthSummary": "Synthetic depth",
+            "sourceLanguage": "ko", "requestedLanguage": "en", "displayLanguage": "en",
+            "translationPending": false
+        },
+        "status": "COMPLETED"
+        """#
+        let voicePage = Self.communityQuestionPageJSON(ids: ["900"], totalCount: 1, offset: 0)
+            .replacingOccurrences(of: #""status": "GRADED""#, with: voicePayload)
+        for host in ["https://api.ghkdqhrbals.org", "https://lowfidev.cloud"] {
+            for hasAnswer in [true, false] {
+                let body = hasAnswer ? voicePage : voicePage.replacingOccurrences(of: #""answer": "Answer""#, with: #""answer": """#)
+                let client = makeClient(baseURL: try XCTUnwrap(URL(string: host))) { request in
+                    Self.response(for: request, statusCode: 200, body: body)
+                }
+                let page = try await client.fetchPublicQuestions(registration: Self.signedInRegistration, query: nil, language: .english)
+                let record = try XCTUnwrap(page.questions.first)
+                XCTAssertEqual(record.recordType, .voiceTutor)
+                if host == "https://api.ghkdqhrbals.org", hasAnswer {
+                    XCTAssertEqual(record.publicShareURL?.absoluteString, "https://api.ghkdqhrbals.org/questions/900?tl=en")
+                    XCTAssertEqual(AppRoute(url: try XCTUnwrap(record.publicShareURL)), .publicQuestion(id: "900"))
+                } else {
+                    XCTAssertNil(record.publicShareURL)
+                }
+            }
+        }
+    }
+
+    func testInterestLoadFailureDoesNotPreventIndependentPublicFeed() async throws {
+        let suiteName = "InterestFailureFeedTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            switch request.url?.path {
+            case "/api/v1/me/topic-subscriptions":
+                return Self.response(for: request, statusCode: 503, body: #"{"message":"unavailable"}"#)
+            case "/api/v1/billing/status":
+                return Self.response(for: request, statusCode: 200, body: Self.tier1BillingStatusResponse)
+            case "/api/v2/public/questions":
+                return Self.response(for: request, statusCode: 200, body: Self.communityQuestionPageJSON(ids: ["recommended"], totalCount: 1, offset: 0))
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            request.url?.path == "/api/v1/me/topic-subscriptions" ? 200_000_000 : 0
+        }
+        let interests = Task { @MainActor in await appState.loadTopicSubscriptions() }
+        await appState.loadCommunityQuestions(userInitiated: true)
+        XCTAssertEqual(appState.communityQuestions.map(\.id), ["recommended"])
+        await interests.value
+        XCTAssertFalse(appState.hasLoadedTopicSubscriptions)
+        XCTAssertNotNil(appState.topicSubscriptionsErrorMessage)
+        XCTAssertNil(appState.communityErrorMessage)
+        XCTAssertEqual(appState.communityQuestions.map(\.id), ["recommended"])
+    }
+
+    func testDirectTopicFollowPreservesOtherInterestsAndSerializesMutations() async throws {
+        let suiteName = "DirectTopicFollowTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let serverTopics = LockedValue(["Redis"])
+        let failInterestRead = LockedValue(false)
+        let writes = LockedRequestCounter()
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/me/topic-subscriptions"), ("PUT", "/api/v1/me/topic-subscriptions"):
+                if request.httpMethod == "GET", failInterestRead.value {
+                    return Self.response(for: request, statusCode: 503, body: #"{"message":"offline"}"#)
+                }
+                if request.httpMethod == "PUT" {
+                    writes.increment()
+                    let body = try JSONDecoder().decode(CommunityTopicSubscriptions.self, from: Self.bodyData(from: request))
+                    serverTopics.set(body.topics)
+                }
+                let payload = try JSONEncoder().encode(CommunityTopicSubscriptions(topics: serverTopics.value))
+                return Self.response(for: request, statusCode: 200, body: String(decoding: payload, as: UTF8.self))
+            case ("GET", "/api/v1/billing/status"):
+                return Self.response(for: request, statusCode: 200, body: Self.tier1BillingStatusResponse)
+            case ("GET", "/api/v2/public/questions"):
+                return Self.response(for: request, statusCode: 200, body: Self.communityQuestionPageJSON(ids: [], totalCount: 0, offset: 0))
+            default:
+                XCTFail("Following must not create a study or generate questions: \(request.url?.path ?? "")")
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        appState.lastAnswer = "Unfinished answer"
+        await appState.loadTopicSubscriptions()
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in request.httpMethod == "PUT" ? 100_000_000 : 0 }
+        let follow = Task { @MainActor in await appState.toggleCommunityTopicSubscription("Swift UI") }
+        let saving = await waitUntil { appState.isSavingTopicSubscriptions }
+        XCTAssertTrue(saving)
+        let overlapping = await appState.toggleCommunityTopicSubscription("Another topic")
+        XCTAssertFalse(overlapping)
+        let followed = await follow.value
+        XCTAssertTrue(followed)
+        XCTAssertEqual(serverTopics.value, ["Redis", "Swift UI"])
+        XCTAssertEqual(writes.value, 1)
+        XCTAssertTrue(appState.isCommunityTopicFollowed("swift-ui"))
+        serverTopics.set(["Redis", "Swift UI", "Added on another device"])
+        let unfollowed = await appState.toggleCommunityTopicSubscription("swift_ui")
+        XCTAssertTrue(unfollowed)
+        XCTAssertEqual(serverTopics.value, ["Redis", "Added on another device"])
+        XCTAssertEqual(writes.value, 2)
+        failInterestRead.set(true)
+        let staleSave = await appState.toggleCommunityTopicSubscription("Swift")
+        XCTAssertFalse(staleSave)
+        XCTAssertEqual(writes.value, 2, "A failed refresh must never write the cached full list.")
+        XCTAssertEqual(serverTopics.value, ["Redis", "Added on another device"])
+        XCTAssertEqual(appState.lastAnswer, "Unfinished answer")
+        XCTAssertEqual(appState.studyCategoriesForDisplay.count, 1)
+    }
+
+    func testTopicSubscriptionsNormalizeMatchingWithoutCollapsingMeaningfulPunctuation() {
+        XCTAssertEqual(
+            CommunityTopicSubscriptionPolicy.uniqueTopics(["  Swift  UI ", "swift-ui", "SwiftUI", "swift_ui", "C++", "C#", "　日本語　"]),
+            ["Swift UI", "C++", "C#", "日本語"]
+        )
+        XCTAssertFalse(CommunityTopicSubscriptionPolicy.isValid([" _ - "]))
+        XCTAssertFalse(CommunityTopicSubscriptionPolicy.isValid([String(repeating: "a", count: 121)]))
+        XCTAssertFalse(CommunityTopicSubscriptionPolicy.isValid([String(repeating: "İ", count: 120)]))
+        XCTAssertFalse(CommunityTopicSubscriptionPolicy.isValid(["Swift\u{0000}UI"]))
+        XCTAssertEqual(CommunityTopicSubscriptionPolicy.displayLabel("Swift\n\tUI"), "Swift UI")
+        XCTAssertFalse(CommunityTopicSubscriptionPolicy.isValid((0...30).map { "Topic \($0)" }))
+        XCTAssertTrue(CommunityTopicSubscriptionPolicy.isValid([]))
+        XCTAssertEqual(AppStrings(language: .japanese).feedMostLiked, "いいね順")
+    }
+
+    func testTopicSubscriptionStateRejectsStaleAccountResultsAndConcurrentWrites() throws {
+        var state = CommunityTopicSubscriptionStateStore()
+        XCTAssertNil(state.beginSaving(), "Never overwrite server interests before loading them.")
+        let firstRead = try XCTUnwrap(state.beginLoading())
+        state.reset()
+        state.apply(CommunityTopicSubscriptions(topics: ["Previous account"]), requestID: firstRead)
+        XCTAssertTrue(state.topics.isEmpty)
+        XCTAssertFalse(state.hasLoaded)
+
+        let read = try XCTUnwrap(state.beginLoading())
+        state.apply(CommunityTopicSubscriptions(topics: ["Swift"]), requestID: read)
+        let save = try XCTUnwrap(state.beginSaving())
+        XCTAssertNil(state.beginSaving())
+        XCTAssertNil(state.beginLoading(), "A refresh must not overwrite an in-flight edit.")
+        state.fail("Retry", requestID: save)
+        XCTAssertEqual(state.topics, ["Swift"], "A failed save preserves the confirmed subscription list.")
+        XCTAssertFalse(state.isSaving)
+        let retry = try XCTUnwrap(state.beginSaving())
+        state.reset()
+        state.apply(CommunityTopicSubscriptions(topics: ["Delayed save"]), requestID: retry)
+        XCTAssertTrue(state.topics.isEmpty)
+        XCTAssertFalse(state.hasLoaded)
+    }
+
+    func testChangingFeedFiltersInvalidatesAnOlderPageWithoutClearingHiddenAuthorProtection() throws {
+        var state = CommunityFeedStateStore()
+        state.hideAuthor(userID: 17)
+        let oldRequest = state.beginLoading()
+        state.invalidatePage()
+        XCTAssertFalse(state.isCurrentRequest(oldRequest))
+        XCTAssertFalse(state.isLoading)
+        XCTAssertTrue(state.isAuthorHidden(17))
+        let newRequest = state.beginLoading()
+        state.finishLoading(oldRequest)
+        XCTAssertTrue(state.isCurrentRequest(newRequest))
+        XCTAssertTrue(state.isLoading)
+        state.reset()
+        XCTAssertFalse(state.isLoading)
+    }
+
+    func testPersonalizedFeedModesReachBothListAndSearchThroughUseCase() async throws {
+        let observed = LockedValue<[String]>([])
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            let items = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+            observed.set(observed.value + ["\(request.url!.path)|\(values["sort"]!)|\(values["scope"]!)|\(values["offset"]!)"])
+            XCTAssertEqual(values["tl"], "ja")
+            XCTAssertEqual(values["view"], "localized")
+            XCTAssertEqual(values["limit"], "20")
+            return Self.response(for: request, statusCode: 200, body: Self.communityQuestionPageJSON(ids: [], totalCount: 0, offset: 20))
+        }
+        let useCase = CommunityUseCase(repository: RemoteCommunityRepository(backendClient: client))
+        for sort in CommunityFeedSort.allCases {
+            for scope in CommunityFeedScope.allCases {
+                for query: String? in [nil, "Swift"] {
+                    _ = try await useCase.fetchPublicQuestions(
+                        registration: Self.signedInRegistration,
+                        query: query,
+                        limit: 20,
+                        offset: 20,
+                        excludeDeviceID: nil,
+                        language: .japanese,
+                        sort: sort,
+                        scope: scope
+                    )
+                }
+            }
+        }
+        XCTAssertEqual(Set(observed.value).count, 16)
+        XCTAssertTrue(observed.value.contains("/api/v2/public/questions/search|likes|following|20"))
+        XCTAssertTrue(observed.value.contains("/api/v2/public/questions|recommended|all|20"))
+    }
+
+    func testTopicSubscriptionReadAndWriteUseAuthenticatedAccountContract() async throws {
+        let methods = LockedValue<[String]>([])
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/me/topic-subscriptions")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(Self.signedInRegistration.accessToken!)")
+            methods.set(methods.value + [request.httpMethod ?? ""])
+            if request.httpMethod == "PUT" {
+                let body = try JSONDecoder().decode(CommunityTopicSubscriptions.self, from: Self.bodyData(from: request))
+                XCTAssertEqual(body.topics, ["Swift", "데이터베이스"])
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            }
+            return Self.response(for: request, statusCode: 200, body: #"{"topics":["Swift","데이터베이스"]}"#)
+        }
+        let useCase = CommunityUseCase(repository: RemoteCommunityRepository(backendClient: client))
+        let read = try await useCase.fetchTopicSubscriptions(registration: Self.signedInRegistration)
+        let updated = try await useCase.updateTopicSubscriptions(registration: Self.signedInRegistration, topics: read.topics)
+        XCTAssertEqual(updated.topics, ["Swift", "데이터베이스"])
+        XCTAssertEqual(methods.value, ["GET", "PUT"])
+    }
+
+    func testTopicSubscriptionSaveRefreshesFeedAndKeepsAnswerDraft() async throws {
+        let suiteName = "TopicSubscriptionSaveTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let failSave = LockedValue(false)
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/me/topic-subscriptions"):
+                return Self.response(for: request, statusCode: 200, body: #"{"topics":["Swift"]}"#)
+            case ("PUT", "/api/v1/me/topic-subscriptions"):
+                if failSave.value {
+                    return Self.response(for: request, statusCode: 503, body: #"{"message":"try later"}"#)
+                }
+                let body = try JSONDecoder().decode(CommunityTopicSubscriptions.self, from: Self.bodyData(from: request))
+                XCTAssertEqual(body.topics, ["Swift UI", "Redis"])
+                return Self.response(for: request, statusCode: 200, body: #"{"topics":["Swift UI","Redis"]}"#)
+            case ("GET", "/api/v1/billing/status"):
+                return Self.response(for: request, statusCode: 200, body: Self.tier1BillingStatusResponse)
+            case ("GET", "/api/v2/public/questions"):
+                return Self.response(for: request, statusCode: 200, body: Self.communityQuestionPageJSON(ids: ["personalized"], totalCount: 1, offset: 0))
+            default:
+                return Self.response(for: request, statusCode: 200, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        appState.lastAnswer = "Keep my unfinished answer"
+        await appState.loadTopicSubscriptions()
+        XCTAssertEqual(appState.subscribedCommunityTopics, ["Swift"])
+        let saved = await appState.saveTopicSubscriptions([" Swift  UI ", "swift-ui", "Redis"])
+        XCTAssertTrue(saved)
+        let refreshed = await waitUntil { appState.communityQuestions.first?.id == "personalized" }
+        XCTAssertTrue(refreshed)
+        XCTAssertEqual(appState.subscribedCommunityTopics, ["Swift UI", "Redis"])
+        XCTAssertEqual(appState.lastAnswer, "Keep my unfinished answer")
+        failSave.set(true)
+        let failedSave = await appState.saveTopicSubscriptions(["Changed"])
+        XCTAssertFalse(failedSave)
+        XCTAssertEqual(appState.subscribedCommunityTopics, ["Swift UI", "Redis"])
+        XCTAssertNotNil(appState.topicSubscriptionsErrorMessage)
+    }
+
+    func testDirectFollowCannotCrossAccountsWhileInitialInterestLoadIsDelayed() async throws {
+        let suiteName = "DirectFollowAccountSwitchTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let eventProvider = TestAppNotificationEventProvider()
+        let interestReads = LockedRequestCounter()
+        let writes = LockedRequestCounter()
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/api/v1/auth/google"):
+                return Self.response(for: request, statusCode: 200, body: """
+                {"profile":{"id":9,"displayName":"New Account","status":"ACTIVE","provider":"GOOGLE"},
+                 "accessToken":"\(Self.signedInRegistration.accessToken!)","accessTokenExpiresAt":"2030-08-29T00:00:00Z",
+                 "referralAttributed":false,"isNewAccount":false}
+                """)
+            case ("GET", "/api/v1/me/topic-subscriptions"):
+                return Self.response(for: request, statusCode: 200, body: #"{"topics":["Current account topic"]}"#)
+            case ("PUT", "/api/v1/me/topic-subscriptions"):
+                writes.increment()
+                return Self.response(for: request, statusCode: 200, body: #"{"topics":["Old account selection"]}"#)
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client, appNotificationEventProvider: eventProvider)
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.httpMethod == "GET", request.url?.path == "/api/v1/me/topic-subscriptions" else { return 0 }
+            interestReads.increment()
+            return interestReads.value == 1 ? 600_000_000 : 0
+        }
+        let oldToggle = Task { @MainActor in await appState.toggleCommunityTopicSubscription("Old account selection") }
+        let firstReadStarted = await waitUntil { interestReads.value == 1 }
+        XCTAssertTrue(firstReadStarted)
+        eventProvider.sendBackendUnauthorized()
+        store.saveRemotePushRegistration(Self.anonymousRegistration)
+        await appState.signInToCommunity(idToken: "new-account-token")
+        XCTAssertTrue(appState.isCommunitySessionActive)
+        await appState.loadTopicSubscriptions()
+        let currentLoaded = await waitUntil { appState.hasLoadedTopicSubscriptions }
+        XCTAssertTrue(currentLoaded)
+        let appliedOldIntent = await oldToggle.value
+        XCTAssertFalse(appliedOldIntent)
+        XCTAssertEqual(writes.value, 0)
+        XCTAssertEqual(appState.subscribedCommunityTopics, ["Current account topic"])
+    }
+
+    func testUnauthorizedSessionDiscardsDelayedSubscriptionSave() async throws {
+        let suiteName = "TopicSubscriptionIdentityTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let eventProvider = TestAppNotificationEventProvider()
+        let client = makeClient { request in
+            return Self.response(for: request, statusCode: 200, body: #"{"topics":["Old account interest"]}"#)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client, appNotificationEventProvider: eventProvider)
+        await appState.loadTopicSubscriptions()
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in request.httpMethod == "PUT" ? 200_000_000 : 0 }
+        let save = Task { @MainActor in await appState.saveTopicSubscriptions(["Old account edit"]) }
+        let saving = await waitUntil { appState.isSavingTopicSubscriptions }
+        XCTAssertTrue(saving)
+        eventProvider.sendBackendUnauthorized()
+        let saved = await save.value
+        XCTAssertFalse(saved)
+        XCTAssertTrue(appState.subscribedCommunityTopics.isEmpty)
+        XCTAssertFalse(appState.hasLoadedTopicSubscriptions)
+        XCTAssertFalse(appState.isSavingTopicSubscriptions)
+        XCTAssertEqual(appState.communityFeedScope, .all)
+        XCTAssertEqual(appState.communityFeedSort, .recommended)
+    }
+
+    func testFeedFilterChangeDiscardsDelayedPageAndPaginationRetainsSelectedMode() async throws {
+        let suiteName = "PersonalizedFeedFilterTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let offsets = LockedValue<[String]>([])
+        let client = makeClient { request in
+            if request.url?.path == "/api/v1/billing/status" {
+                return Self.response(for: request, statusCode: 200, body: Self.tier1BillingStatusResponse)
+            }
+            let items = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+            let offset = Int(values["offset"] ?? "0") ?? 0
+            offsets.set(offsets.value + ["\(values["sort"] ?? "")|\(values["scope"] ?? "")|\(offset)"])
+            let id = values["sort"] == "likes" ? "liked-\(offset)" : "stale"
+            return Self.response(for: request, statusCode: 200, body: Self.communityQuestionPageJSON(ids: [id], totalCount: 2, offset: offset))
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        appState.communitySearchText = "Swift"
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            return items.contains { $0.name == "sort" && $0.value == "recommended" } ? 250_000_000 : 0
+        }
+        let staleLoad = Task { @MainActor in await appState.loadCommunityQuestions(userInitiated: true) }
+        let loading = await waitUntil { appState.isLoadingCommunityQuestions }
+        XCTAssertTrue(loading)
+        appState.setCommunityFeedScope(.following)
+        appState.setCommunityFeedSort(.likes)
+        await staleLoad.value
+        let refreshed = await waitUntil { appState.communityQuestions.first?.id == "liked-0" && !appState.isLoadingCommunityQuestions }
+        XCTAssertTrue(refreshed)
+        await appState.loadNextCommunityPage()
+        XCTAssertEqual(appState.communityQuestions.map(\.id), ["liked-0", "liked-1"])
+        XCTAssertEqual(appState.communityOffset, 2)
+        XCTAssertTrue(offsets.value.contains("likes|following|1"))
+        XCTAssertFalse(appState.communityQuestions.contains { $0.id == "stale" })
+    }
+
     func testLikedQuestionsRequestUsesDedicatedV1URLAndLocalizedQuery() async throws {
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "GET")
@@ -4894,6 +5350,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
     }
 
     private func makeClient(
+        baseURL: URL = URL(string: "https://example.test")!,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> RemotePushBackendClient {
         let configuration = URLSessionConfiguration.ephemeral
@@ -4902,7 +5359,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         configuration.httpAdditionalHeaders = [QuestionGenerationURLProtocol.clientIDHeader: clientID]
         QuestionGenerationURLProtocol.requestHandlers[clientID] = handler
         return RemotePushBackendClient(
-            baseURL: URL(string: "https://example.test")!,
+            baseURL: baseURL,
             session: URLSession(configuration: configuration)
         )
     }

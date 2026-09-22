@@ -14,7 +14,9 @@ struct RemoteCommunityRepository: CommunityRepository {
         limit: Int,
         offset: Int,
         excludeDeviceID: String?,
-        language: AppLanguage
+        language: AppLanguage,
+        sort: CommunityFeedSort,
+        scope: CommunityFeedScope
     ) async throws -> CommunityQuestionsResponse {
         try await backendClient.fetchPublicQuestions(
             registration: registration,
@@ -22,8 +24,21 @@ struct RemoteCommunityRepository: CommunityRepository {
             limit: limit,
             offset: offset,
             excludeDeviceID: excludeDeviceID,
-            language: language
+            language: language,
+            sort: sort,
+            scope: scope
         )
+    }
+
+    func fetchTopicSubscriptions(registration: RemotePushRegistration) async throws -> CommunityTopicSubscriptions {
+        try await backendClient.fetchTopicSubscriptions(registration: registration)
+    }
+
+    func updateTopicSubscriptions(
+        registration: RemotePushRegistration,
+        topics: [String]
+    ) async throws -> CommunityTopicSubscriptions {
+        try await backendClient.updateTopicSubscriptions(registration: registration, topics: topics)
     }
 
     func fetchNativeAdvertisementFallback(

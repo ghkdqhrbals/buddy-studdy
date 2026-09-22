@@ -1,19 +1,19 @@
 {
   "ko": {
-    "name": "BuddyStudy",
-    "subtitle": "버디와 함께하는 매일의 공부",
+    "name": "버디스터디 BuddyStudy: AI 퀴즈",
+    "subtitle": "질문에 답하고 주제별 실력을 쌓아요",
     "privacyPolicyUrl": "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-25.html",
     "privacyChoicesUrl": "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-25.html#ads"
   },
   "en-US": {
-    "name": "BuddyStudy",
-    "subtitle": "Daily Study with Buddy",
+    "name": "BuddyStudy: AI Study & Quiz",
+    "subtitle": "Active Recall & Topic Progress",
     "privacyPolicyUrl": "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-25.html",
     "privacyChoicesUrl": "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-25.html#ads"
   },
   "ja": {
-    "name": "BuddyStudy",
-    "subtitle": "バディと毎日の学びを",
+    "name": "BuddyStudy: AI学習クイズ",
+    "subtitle": "回答・解説・復習で理解を深める",
     "privacyPolicyUrl": "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-25.html",
     "privacyChoicesUrl": "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-25.html#ads"
   }

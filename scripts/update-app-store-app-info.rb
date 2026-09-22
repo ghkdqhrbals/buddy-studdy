@@ -169,6 +169,14 @@ localizations = JSON.parse(File.read(localizations_path))
 age_rating = JSON.parse(File.read(age_rating_path))
 validate_localizations(localizations)
 
+if ENV["APP_STORE_METADATA_VALIDATE_ONLY"] == "1"
+  localizations.each do |locale, metadata|
+    puts "#{locale}: valid App Info (name #{metadata.fetch('name').length}/30, " \
+         "subtitle #{metadata.fetch('subtitle').length}/30 characters)"
+  end
+  exit
+end
+
 token = app_store_token
 bundle_id = ENV.fetch("APP_BUNDLE_ID", DEFAULT_BUNDLE_ID)
 app = find_app(token, bundle_id)

@@ -1,5 +1,109 @@
 import Foundation
 
+enum CommunityFeedSort: String, CaseIterable, Identifiable {
+    case recommended, latest, views, likes
+    var id: String { rawValue }
+
+    func title(strings: AppStrings) -> String {
+        switch self {
+        case .recommended: strings.feedRecommended
+        case .latest: strings.feedLatest
+        case .views: strings.feedMostViewed
+        case .likes: strings.feedMostLiked
+        }
+    }
+}
+
+enum CommunityFeedScope: String, CaseIterable, Identifiable {
+    case all, following
+    var id: String { rawValue }
+
+    func title(strings: AppStrings) -> String {
+        self == .all ? strings.feedAllTopics : strings.feedFollowingTopics
+    }
+}
+
+struct CommunityTopicSubscriptions: Codable, Equatable {
+    var topics: [String]
+}
+
+enum CommunityTopicSubscriptionPolicy {
+    static let maximumCount = 30
+    static let maximumTopicLength = 120
+
+    static func displayLabel(_ topic: String) -> String {
+        topic.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+
+    static func matchingKey(_ topic: String) -> String {
+        displayLabel(topic).lowercased().filter { !$0.isWhitespace && $0 != "-" && $0 != "_" }
+    }
+
+    static func uniqueTopics(_ topics: [String]) -> [String] {
+        var seen = Set<String>()
+        return topics.map(displayLabel).filter { topic in
+            !topic.isEmpty && !matchingKey(topic).isEmpty && seen.insert(matchingKey(topic)).inserted
+        }
+    }
+
+    static func isValid(_ topics: [String]) -> Bool {
+        topics.count <= maximumCount && topics.allSatisfy {
+            !matchingKey($0).isEmpty &&
+                displayLabel($0).utf16.count <= maximumTopicLength &&
+                matchingKey($0).utf16.count <= maximumTopicLength &&
+                !displayLabel($0).unicodeScalars.contains { $0.value < 0x20 || (0x7f...0x9f).contains($0.value) }
+        }
+    }
+}
+
+/// Account-owned interests only live in memory; the backend is the source of truth.
+struct CommunityTopicSubscriptionStateStore {
+    private(set) var topics: [String] = []
+    private(set) var hasLoaded = false
+    private(set) var isLoading = false
+    private(set) var isSaving = false
+    private(set) var errorMessage: String?
+    private var requestID = UUID()
+
+    mutating func reset() { self = Self() }
+
+    mutating func showValidationError(_ message: String) { errorMessage = message }
+
+    mutating func beginLoading() -> UUID? {
+        guard !isLoading, !isSaving else { return nil }
+        requestID = UUID()
+        isLoading = true
+        errorMessage = nil
+        return requestID
+    }
+
+    mutating func beginSaving() -> UUID? {
+        guard hasLoaded, !isLoading, !isSaving else { return nil }
+        requestID = UUID()
+        isSaving = true
+        errorMessage = nil
+        return requestID
+    }
+
+    func isCurrentRequest(_ candidate: UUID) -> Bool { requestID == candidate }
+
+    mutating func apply(_ response: CommunityTopicSubscriptions, requestID candidate: UUID) {
+        guard isCurrentRequest(candidate) else { return }
+        topics = response.topics
+        hasLoaded = true
+        isLoading = false
+        isSaving = false
+        errorMessage = nil
+    }
+
+    mutating func fail(_ message: String, requestID candidate: UUID) {
+        guard isCurrentRequest(candidate) else { return }
+        isLoading = false
+        isSaving = false
+        errorMessage = message
+    }
+}
+
 struct CommunityNativeAdvertisementEligibilityPolicy {
     static func allowsServerSlot(
         isSignedIn: Bool,
@@ -40,6 +144,7 @@ struct CommunityFeedStateStore {
         totalCount = 0
         offset = 0
         errorMessage = nil
+        isLoading = false
         requestID = UUID()
         pageSize = 0
         hiddenQuestionIDs = []
@@ -104,6 +209,13 @@ struct CommunityFeedStateStore {
         }
         totalCount = max(0, response.totalCount - hiddenResponseCount)
         offset = normalizedOffset + response.questions.count
+    }
+
+    mutating func invalidatePage() {
+        requestID = UUID()
+        isLoading = false
+        errorMessage = nil
+        clearPage()
     }
 
     mutating func clearPage() {

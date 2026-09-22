@@ -719,6 +719,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    var subscribedCommunityTopics: [String] { topicSubscriptionState.topics }
+    var hasLoadedTopicSubscriptions: Bool { topicSubscriptionState.hasLoaded }
+    var isLoadingTopicSubscriptions: Bool { topicSubscriptionState.isLoading }
+    var isSavingTopicSubscriptions: Bool { topicSubscriptionState.isSaving }
+    var topicSubscriptionsErrorMessage: String? { topicSubscriptionState.errorMessage }
+    var suggestedCommunityTopics: [String] {
+        let candidates = settings.studyCategories.map(\.title) + backendStudyRooms.map(\.topic) + communityQuestions.map(\.topic)
+        return Array(CommunityTopicSubscriptionPolicy.uniqueTopics(candidates).filter {
+            CommunityTopicSubscriptionPolicy.isValid([$0])
+        }.prefix(20))
+    }
+
     var likedCommunityQuestions: [CommunityQuestion] {
         communityRecordsCacheIdentity == commonRecordsIdentity
             ? likedQuestionsState.questions
@@ -799,7 +811,10 @@ final class AppState: ObservableObject {
             var nextState = communityProfileState
             nextState.profile = newValue
             communityProfileState = nextState
-            if changesAccount { invalidateCommonRecordReads(detachQuestionDrafts: true) }
+            if changesAccount {
+                invalidateCommonRecordReads(detachQuestionDrafts: true)
+                resetCommunityPersonalizationState()
+            }
         }
     }
 
@@ -888,6 +903,9 @@ final class AppState: ObservableObject {
     @Published var cloudSyncMessage: String?
     @Published var hasCloudSyncError = false
     @Published var cloudLastSyncedAt: Date?
+    @Published private var topicSubscriptionState = CommunityTopicSubscriptionStateStore()
+    @Published private(set) var communityFeedSort: CommunityFeedSort = .recommended
+    @Published private(set) var communityFeedScope: CommunityFeedScope = .all
     @Published private var communityFeedState = CommunityFeedStateStore()
     @Published private var likedQuestionsState = LikedQuestionsStateStore()
     @Published private var communityQuestionLikeRequestState = CommunityQuestionLikeRequestStore()
@@ -1139,6 +1157,11 @@ final class AppState: ObservableObject {
             .lowercased() == "study-tree" {
             selectedTab = .home
             homeStudyRoute = HomeStudyRoute(categoryID: "101", showsTree: true)
+            return
+        }
+        if let fixture = ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?.lowercased(),
+           ["learning-result", "result"].contains(fixture) {
+            selectedTab = .home
             return
         }
         if selectedTab == .study,
@@ -1778,6 +1801,7 @@ final class AppState: ObservableObject {
         billingRefreshRequestID += 1
         if didChangeBackend {
             invalidateCommonRecordReads(detachQuestionDrafts: true)
+            resetCommunityPersonalizationState()
             billingCatalog = nil
             billingStatus = nil
             billingInvoices = []
@@ -2411,7 +2435,7 @@ final class AppState: ObservableObject {
                 gradingResult: records[index].gradingResult,
                 topic: recordTopics[item],
                 difficultyLevel: 4 + (index % 4),
-                status: "ANSWERED",
+                status: "GRADED",
                 source: "STUDY",
                 createdAt: now.addingTimeInterval(TimeInterval(-(index + 1) * 5_400)),
                 answeredAt: now.addingTimeInterval(TimeInterval(-(index + 1) * 5_100)),
@@ -2432,6 +2456,13 @@ final class AppState: ObservableObject {
             offset: 0,
             reset: true
         )
+
+        if let requestID = topicSubscriptionState.beginLoading() {
+            topicSubscriptionState.apply(
+                CommunityTopicSubscriptions(topics: Array(CommunityTopicSubscriptionPolicy.uniqueTopics(publicQuestions.map(\.topic)).prefix(2))),
+                requestID: requestID
+            )
+        }
 
         let averages = [91, 88, 90, 85, 82, 94]
         let bestScores = [98, 96, 99, 94, 93, 100]
@@ -2622,6 +2653,17 @@ final class AppState: ObservableObject {
 
         homeStudyRoute = nil
         switch fixture {
+        case "learning-result", "result":
+            selectedTab = .home
+            currentQuestion = records[0].question
+            lastAnswer = records[0].answer ?? ""
+            gradingResult = records[0].gradingResult
+            var resultRooms = rooms
+            if let index = resultRooms.firstIndex(where: { $0.id == studyIDs[0] }) {
+                resultRooms[index].latestQuestion = records[0]
+            }
+            studyRoomState.replace(with: resultRooms)
+            homeStudyRoute = HomeStudyRoute(categoryID: String(studyIDs[0]), isContentPrepared: true)
         case "study-tree", "tree":
             selectedTab = .home
             homeStudyRoute = HomeStudyRoute(categoryID: "101", showsTree: true)
@@ -4516,6 +4558,143 @@ final class AppState: ObservableObject {
         )
     }
 
+    private func makeTopicSubscriptionRequestValidity() -> @MainActor () -> Bool {
+        let sessionGeneration = communitySessionState.generation
+        let clientGeneration = backendClientGeneration
+        let ownerID = communityProfile?.id
+        let account = try? makeVoiceTutorRequestContext()
+        return { [weak self] in
+            guard let self else { return false }
+            return self.isCurrentCommunitySession(sessionGeneration) &&
+                self.backendClientGeneration == clientGeneration &&
+                (ownerID == nil || self.communityProfile?.id == ownerID) &&
+                (account?.isCurrent() ?? true)
+        }
+    }
+
+    func loadTopicSubscriptions(force: Bool = false) async {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled { return }
+        #endif
+        guard isCommunitySessionActive, force || !topicSubscriptionState.hasLoaded else { return }
+        let isCurrent = makeTopicSubscriptionRequestValidity()
+        guard let requestID = topicSubscriptionState.beginLoading() else { return }
+        let useCase = communityUseCase
+        defer {
+            if topicSubscriptionState.isCurrentRequest(requestID), topicSubscriptionState.isLoading {
+                topicSubscriptionState.fail(strings.topicSubscriptionsRequestFailed, requestID: requestID)
+            }
+        }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "topic-subscriptions"),
+              isCurrent(),
+              topicSubscriptionState.isCurrentRequest(requestID) else {
+            topicSubscriptionState.fail(strings.topicSubscriptionsRequestFailed, requestID: requestID)
+            return
+        }
+        await actionRunner.run(
+            operation: { try await useCase.fetchTopicSubscriptions(registration: registration) },
+            onSuccess: { response in
+                guard isCurrent() else { return }
+                topicSubscriptionState.apply(response, requestID: requestID)
+            },
+            onFailure: { error in
+                guard isCurrent(),
+                      topicSubscriptionState.isCurrentRequest(requestID) else { return }
+                _ = handleAppError(error, fallback: "", target: .none)
+                topicSubscriptionState.fail(strings.topicSubscriptionsRequestFailed, requestID: requestID)
+            }
+        )
+    }
+
+    func saveTopicSubscriptions(_ topics: [String]) async -> Bool {
+        let normalizedTopics = CommunityTopicSubscriptionPolicy.uniqueTopics(topics)
+        guard isCommunitySessionActive,
+              CommunityTopicSubscriptionPolicy.isValid(normalizedTopics),
+              let requestID = topicSubscriptionState.beginSaving() else { return false }
+        let isCurrent = makeTopicSubscriptionRequestValidity()
+        let useCase = communityUseCase
+        defer {
+            if topicSubscriptionState.isCurrentRequest(requestID), topicSubscriptionState.isSaving {
+                topicSubscriptionState.fail(strings.topicSubscriptionsSaveFailed, requestID: requestID)
+            }
+        }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "topic-subscriptions-save"),
+              isCurrent(),
+              topicSubscriptionState.isCurrentRequest(requestID) else {
+            topicSubscriptionState.fail(strings.topicSubscriptionsSaveFailed, requestID: requestID)
+            return false
+        }
+        var didSave = false
+        await actionRunner.run(
+            operation: {
+                try await useCase.updateTopicSubscriptions(registration: registration, topics: normalizedTopics)
+            },
+            onSuccess: { response in
+                guard isCurrent(),
+                      topicSubscriptionState.isCurrentRequest(requestID) else { return }
+                topicSubscriptionState.apply(response, requestID: requestID)
+                AppAnalytics.topicSubscriptionsSaved(count: response.topics.count)
+                communityFeedState.invalidatePage()
+                refreshCommunityQuestions(userInitiated: true)
+                didSave = true
+            },
+            onFailure: { error in
+                guard isCurrent(),
+                      topicSubscriptionState.isCurrentRequest(requestID) else { return }
+                _ = handleAppError(error, fallback: "", target: .none)
+                topicSubscriptionState.fail(strings.topicSubscriptionsSaveFailed, requestID: requestID)
+            }
+        )
+        return didSave
+    }
+
+    func isCommunityTopicFollowed(_ topic: String) -> Bool {
+        let key = CommunityTopicSubscriptionPolicy.matchingKey(topic)
+        return subscribedCommunityTopics.contains { CommunityTopicSubscriptionPolicy.matchingKey($0) == key }
+    }
+
+    func toggleCommunityTopicSubscription(_ topic: String) async -> Bool {
+        guard isCommunitySessionActive, !isSavingTopicSubscriptions else { return false }
+        let isCurrent = makeTopicSubscriptionRequestValidity()
+        await loadTopicSubscriptions(force: true)
+        guard isCurrent(), hasLoadedTopicSubscriptions,
+              !isLoadingTopicSubscriptions, !isSavingTopicSubscriptions,
+              topicSubscriptionsErrorMessage == nil else { return false }
+        let isFollowing = !isCommunityTopicFollowed(topic)
+        let key = CommunityTopicSubscriptionPolicy.matchingKey(topic)
+        let topics = isFollowing
+            ? subscribedCommunityTopics + [topic]
+            : subscribedCommunityTopics.filter { CommunityTopicSubscriptionPolicy.matchingKey($0) != key }
+        guard CommunityTopicSubscriptionPolicy.isValid(topics) else {
+            topicSubscriptionState.showValidationError(strings.topicSubscriptionsLimitHelp)
+            return false
+        }
+        let saved = await saveTopicSubscriptions(topics)
+        if saved { AppAnalytics.publicTopicFollowChanged(isFollowing: isFollowing) }
+        return saved
+    }
+
+    func setCommunityFeedSort(_ sort: CommunityFeedSort) {
+        guard sort != communityFeedSort else { return }
+        communityFeedSort = sort
+        communityFeedState.invalidatePage()
+        refreshCommunityQuestions(userInitiated: true)
+    }
+
+    func setCommunityFeedScope(_ scope: CommunityFeedScope) {
+        guard scope != communityFeedScope else { return }
+        communityFeedScope = scope
+        communityFeedState.invalidatePage()
+        refreshCommunityQuestions(userInitiated: true)
+    }
+
+    private func resetCommunityPersonalizationState() {
+        topicSubscriptionState.reset()
+        communityFeedSort = .recommended
+        communityFeedScope = .all
+        communityFeedState.invalidatePage()
+    }
+
     func loadCommunityQuestions(
         reset: Bool = true,
         userInitiated: Bool = false,
@@ -4530,6 +4709,9 @@ final class AppState: ObservableObject {
         let isCurrent = makeRecordRequestValidity()
         let language = settings.appLanguage
         let useCase = communityUseCase
+        guard reset || !isLoadingCommunityQuestions else { return }
+        let requestedSort = communityFeedSort
+        let requestedScope = communityFeedScope
         let trimmedTopic = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedOffset = reset ? 0 : communityOffset
         let limit = Self.communityQuestionPageSize
@@ -4572,6 +4754,7 @@ final class AppState: ObservableObject {
             return
         }
 
+        guard isCurrentCommunityFeedLoad(requestID) else { return }
         await actionRunner.run(
             operation: {
                 try await useCase.fetchPublicQuestions(
@@ -4580,7 +4763,9 @@ final class AppState: ObservableObject {
                     limit: limit,
                     offset: normalizedOffset,
                     excludeDeviceID: nil,
-                    language: language
+                    language: language,
+                    sort: requestedSort,
+                    scope: requestedScope
                 )
             },
             onSuccess: { response in
@@ -4599,6 +4784,14 @@ final class AppState: ObservableObject {
                         offset: normalizedOffset
                     )
                 )
+                if reset {
+                    AppAnalytics.publicFeedLoaded(
+                        sort: requestedSort.rawValue,
+                        scope: requestedScope.rawValue,
+                        personalized: isCommunitySessionActive && !subscribedCommunityTopics.isEmpty &&
+                            (requestedScope == .following || requestedSort == .recommended)
+                    )
+                }
                 log(.info, "공개 질문 목록을 로드했습니다. count=\(response.questions.count), total=\(response.totalCount), offset=\(communityOffset)")
             },
             onFailure: { error in
@@ -4609,9 +4802,6 @@ final class AppState: ObservableObject {
                     clearCommunityFeedPage()
                 }
                 _ = handleCommunityError(error)
-                if !userInitiated {
-                    communityErrorMessage = nil
-                }
                 log(
                     .warning,
                     "공개 질문 로드 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
@@ -5270,7 +5460,9 @@ final class AppState: ObservableObject {
         guard !Task.isCancelled, isCurrentCommunitySession(sessionGeneration) else {
             return
         }
-        await loadCommunityQuestions(reset: true, userInitiated: false)
+        async let interests: Void = loadTopicSubscriptions()
+        async let questions: Void = loadCommunityQuestions(reset: true, userInitiated: false)
+        _ = await (interests, questions)
         logAuthTrace("community_sign_in_data_refresh_success", reason: reason, deduplicate: false)
     }
 
@@ -5588,6 +5780,9 @@ final class AppState: ObservableObject {
     }
 
     private func resetCommunitySignInState() {
+        #if os(iOS)
+        StudyReviewCoordinator.shared.cancelPendingRequest()
+        #endif
         logAuthTrace("community_session_reset_start", reason: "resetCommunitySignInState", deduplicate: false)
         #if os(iOS)
         do {
@@ -5675,6 +5870,7 @@ final class AppState: ObservableObject {
             nextState.signIn()
         } else {
             nextState.signOut()
+            resetCommunityPersonalizationState()
         }
         communitySessionState = nextState
         communitySessionUseCase.setSignedIn(isSignedIn)
@@ -6162,6 +6358,7 @@ final class AppState: ObservableObject {
                 log(.warning, "계정 변경 후 로컬 음성 튜터 녹음 파일 정리를 다음 실행으로 연기했습니다.")
             }
             #endif
+            resetCommunityPersonalizationState()
         }
         logAuthTrace(
             "community_profile_apply_start",

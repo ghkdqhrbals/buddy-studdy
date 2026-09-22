@@ -1,5 +1,8 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
+import com.buddystudy.backend.community.application.model.PublicFeedSort
+import com.buddystudy.backend.community.application.model.PublicFeedScope
+import com.buddystudy.backend.community.adapter.outbound.persistence.TopicSubscriptionPersistenceAdapter
 import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.study.domain.entity.QuestionSource
 import com.buddystudy.study.domain.entity.QuestionStatus
@@ -56,7 +59,7 @@ class QuestionRepositoryLikedPageTest {
 
     @BeforeEach
     fun setUp(): Unit = runBlocking {
-        listOf("question_search", "question_embeddings", "user_blocks", "question_likes", "questions", "voice_study_learning_records", "users").forEach {
+        listOf("user_topic_subscriptions", "question_stats", "question_search", "question_embeddings", "user_blocks", "question_likes", "questions", "voice_study_learning_records", "users").forEach {
             execute("drop table if exists $it")
         }
         execute(
@@ -165,6 +168,14 @@ class QuestionRepositoryLikedPageTest {
             )
             """.trimIndent(),
         )
+        execute("create table question_stats (question_id bigint primary key, view_count integer, like_count integer)")
+        execute("""
+            create table user_topic_subscriptions (
+                user_id bigint not null, topic_key varchar(120) not null, topic varchar(120) not null,
+                sort_order integer not null, primary key (user_id, topic_key),
+                foreign key (user_id) references users(id) on delete cascade
+            )
+        """.trimIndent())
         execute("insert into users values (10, 'Visible Author', true), (11, 'Hidden Author', false), (12, 'Blocked Author', true)")
         insertQuestion(101, 10, "Newest needle", "graded", "Answer", publicQuestion = true)
         insertQuestion(102, 10, "Middle", "graded", "Answer", publicQuestion = true)
@@ -444,6 +455,101 @@ class QuestionRepositoryLikedPageTest {
         )
         execute("insert into question_search values ($id, 'ko', '$topic', 'Voice question $id', 'Voice answer', 'Voice feedback', 'Voice depth')")
     }
+    @Test
+    fun `ranked following preserves canonical voice eligibility and exact page counts`(): Unit = runBlocking {
+        execute("insert into users values (7, 'Viewer', true)")
+        TopicSubscriptionPersistenceAdapter(database).replaceTopics(7, listOf("Voice record"))
+        insertVoice(301)
+        insertVoice(302, publicQuestion = false)
+        insertVoice(303, deleted = true)
+        insertVoice(304, status = "grading")
+        insertVoice(305, answer = " ")
+        insertVoice(306, persistExtension = false)
+        insertVoice(307, extensionOwner = 20)
+        insertVoice(308, userId = 12)
+        val page = feed(viewer = 7, scope = PublicFeedScope.FOLLOWING, limit = 1)
+        assertThat(page.totalElements).isEqualTo(1)
+        assertThat(page.content.map { it.id }).containsExactly(301L)
+        assertThat(page.content.single().recordType).isEqualTo(StudyRecordType.VOICE_TUTOR)
+        assertThat(feed(viewer = 7, scope = PublicFeedScope.FOLLOWING, limit = 1, offset = 1).content).isEmpty()
+    }
+
+    @Test
+    fun `recommended feed promotes subscriptions and orders their engagement before exact pagination`(): Unit = runBlocking {
+        execute("insert into users values (7, 'Viewer', true)")
+        TopicSubscriptionPersistenceAdapter(database).replaceTopics(7, listOf("Swift UI"))
+        execute("update questions set topic = 'swift-ui' where id in (101, 102, 103)")
+        execute("insert into question_stats values (101, 100, 1), (102, 10, 50), (103, 0, 0), (110, 1000000, 1000000)")
+        val first = feed(viewer = 7, limit = 2)
+        val second = feed(viewer = 7, limit = 2, offset = 2)
+        val exact = feed(viewer = 7, limit = 2, offset = 1)
+        assertThat(first.totalElements).isEqualTo(4)
+        assertThat(first.content.map { it.id }).containsExactly(102L, 101L)
+        assertThat(second.content.map { it.id }).containsExactly(103L, 110L)
+        assertThat(exact.pageable.offset).isEqualTo(1)
+        assertThat(exact.content.map { it.id }).containsExactly(101L, 103L)
+    }
+
+    @Test
+    fun `following matches normalized localized topics and keeps all visibility exclusions before counts`(): Unit = runBlocking {
+        execute("insert into users values (7, 'Viewer', true)")
+        TopicSubscriptionPersistenceAdapter(database).replaceTopics(7, listOf("Data Structures"))
+        execute("update question_search set topic = 'DATA_structures'")
+        execute("insert into question_search values (110, 'en', 'Data Structures', 'Visible english', '', '', '')")
+        execute("insert into question_stats values (104, 1000000, 1000000), (107, 1000000, 1000000)")
+        val page = feed(viewer = 7, scope = PublicFeedScope.FOLLOWING, sort = PublicFeedSort.LATEST)
+        assertThat(page.totalElements).isEqualTo(4)
+        assertThat(page.content.map { it.id }).containsExactly(110L, 103L, 102L, 101L)
+        val english = feed(viewer = 7, scope = PublicFeedScope.FOLLOWING, query = "Visible english", language = "en")
+        assertThat(english.totalElements).isEqualTo(1)
+        assertThat(english.content.map { it.id }).containsExactly(110L)
+        assertThat(feed(viewer = 7, scope = PublicFeedScope.FOLLOWING, query = "Visible english", language = "ko").content).isEmpty()
+    }
+
+    @Test
+    fun `anonymous recommendations use global popularity and following without subscriptions is empty`(): Unit = runBlocking {
+        execute("insert into question_stats values (101, 100, 1), (102, 10, 50)")
+        assertThat(feed().content.map { it.id }.take(2)).containsExactly(102L, 101L)
+        assertThat(feed(scope = PublicFeedScope.FOLLOWING).totalElements).isZero()
+        assertThat(feed(viewer = 8, scope = PublicFeedScope.FOLLOWING).totalElements).isZero()
+    }
+
+    @Test
+    fun `explicit popularity sorts rank by genuine views or likes with deterministic ties`(): Unit = runBlocking {
+        execute("insert into question_stats values (101, 100, 1), (102, 10, 50)")
+        assertThat(feed(viewer = 7, sort = PublicFeedSort.VIEWS).content.map { it.id }).containsExactly(101L, 102L, 110L, 103L)
+        assertThat(feed(viewer = 7, sort = PublicFeedSort.LIKES).content.map { it.id }).containsExactly(102L, 101L, 110L, 103L)
+        assertThat(feed(viewer = 7, sort = PublicFeedSort.LATEST).content.map { it.id }).containsExactly(110L, 103L, 102L, 101L)
+    }
+
+    @Test
+    fun `recommended freshness decay gives recent content a chance against stale engagement`(): Unit = runBlocking {
+        execute("update questions set graded_at = current_timestamp, created_at = current_timestamp where id = 101")
+        execute("update questions set graded_at = timestamp with time zone '2020-01-01 00:00:00+00:00' where id = 102")
+        execute("insert into question_stats values (101, 10, 2), (102, 1000000, 1000000)")
+        assertThat(feed(viewer = 7).content.first().id).isEqualTo(101L)
+    }
+
+    @Test
+    fun `subscriptions replace only their account and cascade on withdrawal`(): Unit = runBlocking {
+        val adapter = TopicSubscriptionPersistenceAdapter(database)
+        adapter.replaceTopics(10, listOf("Swift UI", "Kotlin"))
+        adapter.replaceTopics(11, listOf("Redis"))
+        assertThat(adapter.findTopics(10)).containsExactly("Swift UI", "Kotlin")
+        adapter.replaceTopics(10, listOf("Python"))
+        assertThat(adapter.findTopics(10)).containsExactly("Python")
+        assertThat(adapter.findTopics(11)).containsExactly("Redis")
+        adapter.replaceTopics(10, emptyList())
+        assertThat(adapter.findTopics(10)).isEmpty()
+        execute("delete from users where id = 11")
+        assertThat(adapter.findTopics(11)).isEmpty()
+    }
+
+    private suspend fun feed(
+        viewer: Long? = null, sort: PublicFeedSort = PublicFeedSort.RECOMMENDED,
+        scope: PublicFeedScope = PublicFeedScope.ALL, query: String? = null,
+        language: String = "ko", limit: Int = 20, offset: Int = 0,
+    ) = repository.findPersonalizedPublicAnswered(viewer, query, language, sort, scope, limit, offset)
 
     private suspend fun insertQuestion(
         id: Long,

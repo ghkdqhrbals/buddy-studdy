@@ -1,6 +1,8 @@
 package com.buddystudy.backend.study.application.port.outbound
 
 import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
+import com.buddystudy.backend.community.application.model.PublicFeedSort
+import com.buddystudy.backend.community.application.model.PublicFeedScope
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyRecordType
@@ -199,6 +201,15 @@ interface QuestionPort {
     suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long>
     suspend fun countPendingByStudyIdsAndLanguage(studyIds: Collection<Long>, language: String): Map<Long, Long> =
         countPendingByStudyIds(studyIds)
+    suspend fun findPersonalizedPublicAnswered(
+        viewerUserId: Long?,
+        query: String?,
+        language: String,
+        sort: PublicFeedSort,
+        scope: PublicFeedScope,
+        limit: Int,
+        offset: Int,
+    ): Page<QuestionEntity> = error("The question persistence adapter must implement ranked, visibility-filtered pagination.")
     suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity>
     suspend fun findPublicAnsweredVisibleTo(viewerUserId: Long?, pageable: Pageable): Page<QuestionEntity> =
         if (viewerUserId == null) {

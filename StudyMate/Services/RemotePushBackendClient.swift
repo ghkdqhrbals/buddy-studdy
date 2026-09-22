@@ -585,8 +585,17 @@ protocol RemotePushBackendClientProtocol {
         limit: Int,
         offset: Int,
         excludeDeviceID: String?,
-        language: AppLanguage
+        language: AppLanguage,
+        sort: CommunityFeedSort,
+        scope: CommunityFeedScope
     ) async throws -> CommunityQuestionsResponse
+
+    func fetchTopicSubscriptions(registration: RemotePushRegistration) async throws -> CommunityTopicSubscriptions
+
+    func updateTopicSubscriptions(
+        registration: RemotePushRegistration,
+        topics: [String]
+    ) async throws -> CommunityTopicSubscriptions
 
     func fetchNativeAdvertisementFallback(
         registration: RemotePushRegistration,
@@ -2314,7 +2323,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         limit: Int = 20,
         offset: Int = 0,
         excludeDeviceID: String? = nil,
-        language: AppLanguage = .korean
+        language: AppLanguage = .korean,
+        sort: CommunityFeedSort = .recommended,
+        scope: CommunityFeedScope = .all
     ) async throws -> CommunityQuestionsResponse {
         let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let apiVersion = "v2"
@@ -2327,7 +2338,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
             URLQueryItem(name: "offset", value: "\(max(0, offset))"),
             URLQueryItem(name: "tl", value: language.backendCode),
-            URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue)
+            URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue),
+            URLQueryItem(name: "sort", value: sort.rawValue),
+            URLQueryItem(name: "scope", value: scope.rawValue)
         ]
         if !normalizedQuery.isEmpty {
             queryItems.append(URLQueryItem(name: "query", value: normalizedQuery))
@@ -2344,7 +2357,30 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = authenticatedRequest(registration: registration, url: url)
         request.httpMethod = "GET"
         let data = try await perform(request)
-        return try decoder.decode(CommunityQuestionsResponse.self, from: data)
+        return publicQuestionShareLinks(in: try decoder.decode(CommunityQuestionsResponse.self, from: data), language: language)
+    }
+
+    func fetchTopicSubscriptions(registration: RemotePushRegistration) async throws -> CommunityTopicSubscriptions {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "me", "topic-subscriptions")
+        )
+        request.httpMethod = "GET"
+        return try decoder.decode(CommunityTopicSubscriptions.self, from: await perform(request))
+    }
+
+    func updateTopicSubscriptions(
+        registration: RemotePushRegistration,
+        topics: [String]
+    ) async throws -> CommunityTopicSubscriptions {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "me", "topic-subscriptions")
+        )
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(CommunityTopicSubscriptions(topics: topics))
+        return try decoder.decode(CommunityTopicSubscriptions.self, from: await perform(request))
     }
 
     func fetchLikedPublicQuestions(
@@ -2377,7 +2413,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = authenticatedRequest(registration: registration, url: url)
         request.httpMethod = "GET"
         let data = try await perform(request)
-        return try decoder.decode(CommunityQuestionsResponse.self, from: data)
+        return publicQuestionShareLinks(in: try decoder.decode(CommunityQuestionsResponse.self, from: data), language: language)
     }
 
     func fetchPublicQuestion(
@@ -2401,7 +2437,27 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = authenticatedRequest(registration: registration, url: url)
         request.httpMethod = "GET"
         let data = try await perform(request)
-        return try decoder.decode(CommunityQuestion.self, from: data)
+        return publicQuestionShareLink(for: try decoder.decode(CommunityQuestion.self, from: data), language: language)
+    }
+
+    private func publicQuestionShareLink(for question: CommunityQuestion, language: AppLanguage) -> CommunityQuestion {
+        var result = question
+        if PublicQuestionShareLink.isProductionBackend(baseURL), question.canPublish {
+            result.publicShareURL = PublicQuestionShareLink(questionID: question.id, language: language)?.url
+        }
+        return result
+    }
+
+    private func publicQuestionShareLinks(in response: CommunityQuestionsResponse, language: AppLanguage) -> CommunityQuestionsResponse {
+        var result = response
+        result.questions = response.questions.map { publicQuestionShareLink(for: $0, language: language) }
+        result.items = response.items.map { item in
+            if case .publicQuestion(let question) = item {
+                return .publicQuestion(publicQuestionShareLink(for: question, language: language))
+            }
+            return item
+        }
+        return result
     }
 
     func loginWithGoogle(
@@ -4884,6 +4940,9 @@ struct BackendStudyGrowthTrendPoint: Decodable, Equatable, Identifiable {
 }
 
 struct CommunityQuestion: Decodable, Equatable, Identifiable {
+    // Set only by the transport that actually fetched a public question from production.
+    // Never decoded from server content or synthesized for development/record fixtures.
+    var publicShareURL: URL? = nil
     var id: String
     var recordType: StudyRecordType
     var voiceRecord: VoiceRecordContent?

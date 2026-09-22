@@ -14,7 +14,9 @@ struct CommunityUseCase {
         limit: Int,
         offset: Int,
         excludeDeviceID: String?,
-        language: AppLanguage
+        language: AppLanguage,
+        sort: CommunityFeedSort,
+        scope: CommunityFeedScope
     ) async throws -> CommunityQuestionsResponse {
         try await repository.fetchPublicQuestions(
             registration: registration,
@@ -22,8 +24,21 @@ struct CommunityUseCase {
             limit: limit,
             offset: offset,
             excludeDeviceID: excludeDeviceID,
-            language: language
+            language: language,
+            sort: sort,
+            scope: scope
         )
+    }
+
+    func fetchTopicSubscriptions(registration: RemotePushRegistration) async throws -> CommunityTopicSubscriptions {
+        try await repository.fetchTopicSubscriptions(registration: registration)
+    }
+
+    func updateTopicSubscriptions(
+        registration: RemotePushRegistration,
+        topics: [String]
+    ) async throws -> CommunityTopicSubscriptions {
+        try await repository.updateTopicSubscriptions(registration: registration, topics: topics)
     }
 
     func fetchNativeAdvertisementFallback(

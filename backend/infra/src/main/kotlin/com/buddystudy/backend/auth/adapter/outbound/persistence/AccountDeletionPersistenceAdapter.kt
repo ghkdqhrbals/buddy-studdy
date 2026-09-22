@@ -72,6 +72,9 @@ class AccountDeletionPersistenceAdapter(
             .fetch()
             .rowsUpdated()
             .awaitSingle()
+        // Interests are personal account data and disappear immediately, before async cleanup.
+        client.sql("delete from user_topic_subscriptions where user_id = :userId").bind("userId", userId)
+            .fetch().rowsUpdated().awaitSingle()
         return AccountWithdrawalSnapshot(deviceIds)
     }
 

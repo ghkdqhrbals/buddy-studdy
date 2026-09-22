@@ -301,6 +301,8 @@
 		120000000000000000000153 /* study_bell.wav in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000148 /* study_bell.wav */; };
 		120000000000000000000154 /* study_tap.wav in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000149 /* study_tap.wav */; };
 		120000000000000000000155 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000014A /* Assets.xcassets */; };
+		F21C081CF06C4D93ABA68296 /* StudyReviewPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20F88A7FBAF343C99D9CD2D3 /* StudyReviewPrompt.swift */; };
+		CAFF19C57B5347DE8AF7C95B /* StudyReviewPromptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF52DE42E984B6695D4D818 /* StudyReviewPromptTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -520,6 +522,8 @@
 		F87000000000000000000010 /* VoiceTutorPauseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VoiceTutorPauseTests.swift"; sourceTree = "<group>"; };
 		B90000000000000000000001 /* StudyMateDev.storekit */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StudyMateDev.storekit; sourceTree = "<group>"; };
 		F70000000000000000000020 /* AppControlPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppControlPolicyTests.swift; sourceTree = "<group>"; };
+		20F88A7FBAF343C99D9CD2D3 /* StudyReviewPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyReviewPrompt.swift; sourceTree = "<group>"; };
+		CAF52DE42E984B6695D4D818 /* StudyReviewPromptTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyReviewPromptTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -579,6 +583,7 @@
 				120000000000000000000001 /* StudyMateiOSApp.swift */,
 				E50000000000000000000004 /* SentryMonitoring.swift */,
 				F60000000000000000000002 /* AppAnalytics.swift */,
+				20F88A7FBAF343C99D9CD2D3 /* StudyReviewPrompt.swift */,
 				F70000000000000000000002 /* AppControl.swift */,
 				11000000000000000000002A /* Core */,
 				11000000000000000000002F /* UseCases */,
@@ -1023,6 +1028,7 @@
 				120000000000000000000200 /* ArchitecturePolicyTests.swift */,
 				120000000000000000000202 /* QuestionSchedulePolicyTests.swift */,
 				F70000000000000000000020 /* AppControlPolicyTests.swift */,
+				CAF52DE42E984B6695D4D818 /* StudyReviewPromptTests.swift */,
 				120000000000000000000204 /* PageAccessPolicyTests.swift */,
 				120000000000000000000206 /* AvatarBuilderAssetTests.swift */,
 				120000000000000000000208 /* QuestionGenerationFlowTests.swift */,
@@ -1496,6 +1502,7 @@
 				120000000000000000000201 /* ArchitecturePolicyTests.swift in Sources */,
 				120000000000000000000203 /* QuestionSchedulePolicyTests.swift in Sources */,
 				F70000000000000000000021 /* AppControlPolicyTests.swift in Sources */,
+				CAFF19C57B5347DE8AF7C95B /* StudyReviewPromptTests.swift in Sources */,
 				120000000000000000000205 /* PageAccessPolicyTests.swift in Sources */,
 				120000000000000000000207 /* AvatarBuilderAssetTests.swift in Sources */,
 				120000000000000000000209 /* QuestionGenerationFlowTests.swift in Sources */,
@@ -1539,6 +1546,7 @@
 				A10000000000000000000003 /* AdMobNativeAdvertising.swift in Sources */,
 				120000000000000000000101 /* StudyMateiOSApp.swift in Sources */,
 				F60000000000000000000001 /* AppAnalytics.swift in Sources */,
+				F21C081CF06C4D93ABA68296 /* StudyReviewPrompt.swift in Sources */,
 				F70000000000000000000001 /* AppControl.swift in Sources */,
 				E50000000000000000000003 /* SentryMonitoring.swift in Sources */,
 				120000000000000000000102 /* StudyModels.swift in Sources */,

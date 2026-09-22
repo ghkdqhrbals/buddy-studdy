@@ -25,6 +25,8 @@ import com.buddystudy.backend.community.application.port.outbound.NativeAdvertis
 import com.buddystudy.backend.community.application.port.outbound.NativeAdEligibilityPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdSlotReservation
+import com.buddystudy.backend.community.application.model.PublicFeedSort
+import com.buddystudy.backend.community.application.model.PublicFeedScope
 import com.buddystudy.backend.community.application.model.NativeAdvertisementViewedEvent
 import com.buddystudy.backend.community.application.service.CommunityService
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
@@ -996,6 +998,12 @@ class CommunityServiceTest {
             query: String,
             pageable: Pageable,
         ): Page<QuestionEntity> = publicPage(viewerUserId, pageable, query)
+        override suspend fun findPersonalizedPublicAnswered(
+            viewerUserId: Long?, query: String?, language: String, sort: PublicFeedSort,
+            scope: PublicFeedScope, limit: Int, offset: Int,
+        ): Page<QuestionEntity> = publicPage(
+            viewerUserId, org.springframework.data.domain.PageRequest.of(offset / limit, limit), query,
+        )
         override suspend fun findLikedPublicAnsweredVisibleTo(
             viewerUserId: Long,
             query: String?,

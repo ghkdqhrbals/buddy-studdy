@@ -10,6 +10,10 @@ import com.buddystudy.backend.community.adapter.inbound.web.dto.ReportQuestionRe
 import com.buddystudy.backend.community.adapter.inbound.web.dto.SubmitFeedbackRequest
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
+import com.buddystudy.backend.community.application.model.PublicFeedSort
+import com.buddystudy.backend.community.application.model.PublicFeedScope
+import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.community.application.model.ReportQuestionResponse
 import com.buddystudy.backend.community.application.model.FeedbackResponse
 import com.buddystudy.backend.community.application.model.UserBlockResponse
@@ -227,8 +231,8 @@ class CommunitySearchV2Controller(
     private val community: CommunityWebPort,
 ) {
     @Operation(
-        summary = "List public completed questions with native-ad slots",
-        description = "Returns the unfiltered public feed with at most one server-governed native-ad slot.",
+        summary = "List public completed records with native-ad slots",
+        description = "Ranks the public feed by subscribed topics, views, likes and freshness. Supports recommended, latest, views and likes ordering, and all or following scope, with at most one eligible server-governed native-ad slot.",
     )
     @GetMapping("/public/questions")
     suspend fun getPublicQuestionFeedV2(
@@ -237,8 +241,10 @@ class CommunitySearchV2Controller(
         @RequestParam(required = false) tl: String?,
         @RequestParam(required = false) language: String?,
         @RequestParam(defaultValue = "localized") view: String,
+        @RequestParam(defaultValue = "recommended") sort: String,
+        @RequestParam(defaultValue = "all") scope: String,
         authentication: Authentication?,
-    ) = community.getPublicQuestionFeedV2(targetLanguage(tl, language), view, limit, offset, authentication)
+    ) = community.getPublicQuestionFeedV2(targetLanguage(tl, language), view, limit, offset, authentication, sort, scope)
 
     @Operation(
         summary = "Search public completed questions v2",
@@ -258,8 +264,10 @@ class CommunitySearchV2Controller(
         @Parameter(description = "Deprecated target-language alias kept for older clients.", example = "ko", deprecated = true)
         @RequestParam(required = false) language: String?,
         @RequestParam(defaultValue = "localized") view: String,
+        @RequestParam(defaultValue = "recommended") sort: String,
+        @RequestParam(defaultValue = "all") scope: String,
         authentication: Authentication?,
-    ) = community.getPublicQuestionsV2(query, targetLanguage(tl, language), view, limit, offset, authentication)
+    ) = community.getPublicQuestionsV2(query, targetLanguage(tl, language), view, limit, offset, authentication, sort, scope)
 
     @Operation(summary = "Resolve a native-ad slot fallback")
     @PostMapping("/native-ad-slots/{slotId}/fallback")
@@ -297,10 +305,18 @@ internal fun targetLanguage(tl: String?, legacyLanguage: String?): String =
         ?: legacyLanguage?.trim()?.takeIf(String::isNotEmpty)
         ?: "ko"
 
+private fun parseFeedSort(value: String): PublicFeedSort = PublicFeedSort.entries.firstOrNull {
+    it.name.equals(value.trim(), ignoreCase = true)
+} ?: throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid public feed sort.")
+
+private fun parseFeedScope(value: String): PublicFeedScope = PublicFeedScope.entries.firstOrNull {
+    it.name.equals(value.trim(), ignoreCase = true)
+} ?: throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid public feed scope.")
+
 interface CommunityWebPort {
     suspend fun getPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?): Any
-    suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?): Any
-    suspend fun getPublicQuestionFeedV2(language: String, view: String, limit: Int, offset: Int, authentication: Authentication?): Any
+    suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String = "recommended", scope: String = "all"): Any
+    suspend fun getPublicQuestionFeedV2(language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String = "recommended", scope: String = "all"): Any
     suspend fun getLikedPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication): Any
     suspend fun getPublicQuestion(id: Long, language: String, view: String, authentication: Authentication?): Any
     suspend fun likePublicQuestion(id: Long, authentication: Authentication): Any
@@ -342,11 +358,11 @@ class CommunityWebAdapter(
     override suspend fun getPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?) =
         community.getPublicQuestions(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset))
 
-    override suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?) =
-        community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset))
+    override suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String, scope: String) =
+        community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset), parseFeedSort(sort), parseFeedScope(scope))
 
-    override suspend fun getPublicQuestionFeedV2(language: String, view: String, limit: Int, offset: Int, authentication: Authentication?) =
-        community.getPublicQuestionFeedV2(authentication.optionalPrincipal(), language, view, safeLimit(limit, 100), max(0, offset))
+    override suspend fun getPublicQuestionFeedV2(language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String, scope: String) =
+        community.getPublicQuestionFeedV2(authentication.optionalPrincipal(), language, view, safeLimit(limit, 100), max(0, offset), parseFeedSort(sort), parseFeedScope(scope))
 
     override suspend fun getLikedPublicQuestions(
         query: String?,
