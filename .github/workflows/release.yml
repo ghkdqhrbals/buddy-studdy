@@ -25,6 +25,11 @@ on:
         required: true
         default: false
         type: boolean
+      publish_status:
+        description: "Publish release status to personal-deploy and Slack."
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -39,6 +44,7 @@ jobs:
       upload_enabled: ${{ steps.release.outputs.upload_enabled }}
       review_candidate: ${{ steps.release.outputs.review_candidate }}
       admob_test_mode: ${{ steps.release.outputs.admob_test_mode }}
+      publish_status: ${{ steps.release.outputs.publish_status }}
       artifact_name: ${{ steps.release.outputs.artifact_name }}
       deployment_targets: ${{ steps.release.outputs.deployment_targets }}
 
@@ -53,6 +59,7 @@ jobs:
           INPUT_UPLOAD_ENABLED: ${{ inputs.upload_to_app_store_connect }}
           INPUT_REVIEW_CANDIDATE: ${{ inputs.app_review_candidate }}
           INPUT_ADMOB_TEST_MODE: ${{ inputs.admob_test_mode }}
+          INPUT_PUBLISH_STATUS: ${{ inputs.publish_status }}
         run: |
           set -euo pipefail
 
@@ -108,6 +115,15 @@ jobs:
             exit 1
           fi
 
+          publish_status="${INPUT_PUBLISH_STATUS:-true}"
+          case "${publish_status}" in
+            true|false) ;;
+            *)
+              echo "Invalid release status publication setting: ${publish_status}" >&2
+              exit 1
+              ;;
+          esac
+
           build_number="${GITHUB_RUN_NUMBER}"
           artifact_name="BuddyStudy-iOS-${version}-${build_number}"
           if [ "${admob_test_mode}" = "true" ]; then
@@ -130,6 +146,7 @@ jobs:
             echo "upload_enabled=${upload_enabled}"
             echo "review_candidate=${review_candidate}"
             echo "admob_test_mode=${admob_test_mode}"
+            echo "publish_status=${publish_status}"
             echo "artifact_name=${artifact_name}"
             echo "deployment_targets=${deployment_targets}"
           } >> "${GITHUB_OUTPUT}"
@@ -142,6 +159,7 @@ jobs:
             echo "- Targets: ${deployment_targets}"
             echo "- App Review candidate: \`${review_candidate}\`"
             echo "- AdMob test mode: \`${admob_test_mode}\`"
+            echo "- Publish release status: \`${publish_status}\`"
             echo "- Backend: \`https://api.ghkdqhrbals.org\`"
             echo "- Source: \`${GITHUB_SHA}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -153,6 +171,7 @@ jobs:
   notify_ios_planned:
     name: Notify iOS Release Planned
     needs: plan_ios_release
+    if: ${{ needs.plan_ios_release.outputs.publish_status == 'true' }}
     uses: ./.github/workflows/reusable-deployment-status.yml
     with:
       module: ios
@@ -174,6 +193,10 @@ jobs:
     needs:
       - plan_ios_release
       - notify_ios_planned
+    if: >-
+      ${{ !cancelled() && needs.plan_ios_release.result == 'success' &&
+          (needs.notify_ios_planned.result == 'success' ||
+           (needs.plan_ios_release.outputs.publish_status == 'false' && needs.notify_ios_planned.result == 'skipped')) }}
     env:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
@@ -669,7 +692,10 @@ jobs:
     needs:
       - plan_ios_release
       - build_ios_ipa
-    if: ${{ needs.plan_ios_release.outputs.upload_enabled == 'true' }}
+    if: >-
+      ${{ !cancelled() && needs.plan_ios_release.result == 'success' &&
+          needs.build_ios_ipa.result == 'success' &&
+          needs.plan_ios_release.outputs.upload_enabled == 'true' }}
     env:
       APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
       APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
@@ -754,7 +780,11 @@ jobs:
     needs:
       - plan_ios_release
       - upload_testflight
-    if: ${{ needs.plan_ios_release.outputs.admob_test_mode == 'true' && needs.plan_ios_release.outputs.review_candidate == 'false' }}
+    if: >-
+      ${{ !cancelled() && needs.plan_ios_release.result == 'success' &&
+          needs.upload_testflight.result == 'success' &&
+          needs.plan_ios_release.outputs.admob_test_mode == 'true' &&
+          needs.plan_ios_release.outputs.review_candidate == 'false' }}
     env:
       APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
       APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
@@ -817,7 +847,10 @@ jobs:
     needs:
       - plan_ios_release
       - upload_testflight
-    if: ${{ needs.plan_ios_release.outputs.review_candidate == 'true' }}
+    if: >-
+      ${{ !cancelled() && needs.plan_ios_release.result == 'success' &&
+          needs.upload_testflight.result == 'success' &&
+          needs.plan_ios_release.outputs.review_candidate == 'true' }}
     env:
       APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
       APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}

@@ -21,6 +21,11 @@ on:
           - auto
           - native
           - jvm
+      notify_slack:
+        description: "Send the deployment result to Slack."
+        required: true
+        default: true
+        type: boolean
       promote_swarm:
         description: "One-time cutover after the staged Swarm task is verified."
         required: true
@@ -852,7 +857,7 @@ jobs:
             || echo "::warning::Could not publish the deployment result event."
 
       - name: Notify Slack
-        if: always()
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.notify_slack) }}
         env:
           DEPLOY_SLACK_WEBHOOK_URL: ${{ secrets.DEPLOY_SLACK_WEBHOOK_URL }}
           LEGACY_SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

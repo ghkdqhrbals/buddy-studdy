@@ -72,6 +72,14 @@ deployment.
   Store provisioning profile with manual signing. Archive creation must not
   ask Apple to create or revoke development certificates; the App Store
   Connect API key is reserved for upload and version-management operations.
+- Manual iOS releases expose `publish_status` (default `true`). Setting it to
+  `false` skips the personal-deploy status dispatch and all Slack updates from
+  its monitor. Signing, archive/export verification, artifact retention and the
+  existing upload/review controls still apply. To prepare an artifact without
+  upload or status messages, set `upload_to_app_store_connect=false`,
+  `app_review_candidate=false`, `admob_test_mode=false`, and
+  `publish_status=false`. Tags retain status publication; when enabled, a
+  failed status dispatch still blocks the build.
 - iOS archives and exported IPAs must include nonempty microphone and camera
   purpose strings because the linked realtime SDK references protected APIs.
   Conversations remain audio-only and never request camera access. Build
@@ -104,6 +112,17 @@ deployment.
   replacing the container.
 - EC2 self-hosted runners are deploy-only. They pull images and restart
   containers, but must not compile backend code or build Docker images.
+- Manual backend deployments expose `notify_slack` (default `true`). Set it to
+  `false` to omit the Slack result message while retaining deployment-history
+  events. Repository-dispatch behavior remains unchanged. When an explicit
+  deployment branch is needed, build the source image with
+  `dispatch_deploy=false`, record its immutable runtime-qualified image and
+  digest, then dispatch `deploy-backend.yml` at the reviewed deployment ref.
+  A repository dispatch always uses the deploy repository's default branch;
+  do not use that route when its workflow still contains runtime health gates.
+  For the 1.2.0 preparation, `codex/personalized-feed-rollout` starts from the
+  previously successful deployment configuration `9f49905e`, preserving its
+  removal of health gates. Keep `promote_swarm=false` for an ordinary rollout.
 - Backend administrator recovery requires the exact `RESET admin` confirmation
   and a temporary cost-12 BCrypt hash in
   `ADMIN_RECOVERY_PASSWORD_BCRYPT_HASH`. It must never accept or print a

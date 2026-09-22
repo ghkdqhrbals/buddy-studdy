@@ -22,6 +22,8 @@ The normal iOS release and tag paths reject empty, malformed, or Google sample v
 
 For AdMob fill and layout QA before the AdMob account can serve production ads, manually dispatch `Release iOS App` with `admob_test_mode=true` and `upload_to_app_store_connect=true`. The Release archive uses Google's image Native demo unit (`ca-app-pub-3940256099942544/3986624511`), never the separate Native Video demo unit (`ca-app-pub-3940256099942544/2521693316`). Production uses the `COMMUNITY_FEED` unit with its AdMob media type restricted to Image. Set `app_review_candidate=true` when the image-test-ad build must be uploaded as the App Review candidate; set it to `false` for tester-only QA, which exports with `testFlightInternalTestingOnly=true` and is added to the internal tester group. The internal-only variant cannot be submitted to App Review.
 
+For a signed artifact without TestFlight upload or release-status messages, manually dispatch an explicit `version` with `upload_to_app_store_connect=false`, `app_review_candidate=false`, `admob_test_mode=false`, and `publish_status=false`. The same signing, production AdMob checks, archive/export verification, and 14-day GitHub artifact retention still apply. `publish_status=false` skips the `personal-deploy` status dispatch and its Slack messages; it does not change upload or review selection settings. Status publication defaults to `true` for manual runs and remains enabled for release tags. When enabled, a failed status dispatch still prevents the build.
+
 ## 3. app-ads.txt
 
 1. Keep the exact issued publisher line in `docs/app-ads.txt`; never publish the placeholder from `docs/app-ads.txt.template`.
