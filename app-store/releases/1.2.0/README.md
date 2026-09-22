@@ -46,6 +46,7 @@ only in the existing secure App Store Connect fields, never in these files.
 | --- | --- |
 | Source/build | Verified 1.2.0 (121), source `ee9f96cf`, archive run `35754933809`, local upload success, Apple VALID / APP_STORE_ELIGIBLE / non-exempt encryption false. IPA SHA-256 `a93f0f1f9f48d43b7ccd5bc53e21075f601c4fef1eeb263cfaf418c10203ab06`; see [signed-candidate evidence](../../../docs/verification/2026-09-23-ios-release-candidate.md). |
 | App Store version ID | `5bb7c17c-3765-4b1b-b03c-00d8da654a2e`, 1.2.0 / PREPARE_FOR_SUBMISSION / MANUAL, selected build 121; see [draft verification](../../../docs/verification/2026-09-23-app-store-connect-draft.md). |
+| TestFlight availability | Read-only API check at 2026-09-23 02:15:38 KST: build 121 is IN_BETA_TESTING and already belongs to the existing one-tester internal group. No new invitation or group change is needed for that tester; verify the device uses the matching existing TestFlight account. |
 | Review access | Existing secure account/password fields are present and preserved. Working login and required-term state still need candidate verification. |
 | Review contact | Existing first/last name, email and phone fields are present and preserved. No values were invented or copied into this package. |
 | Paid-feature access | Confirm how the reviewer can access Plus/Pro Voice Tutor and remaining voice time. A free account alone cannot verify voice; do not fabricate an entitlement or subscription. |
@@ -54,6 +55,17 @@ only in the existing secure App Store Connect fields, never in these files.
 | Public share samples | Public QUESTION `156` returned correct ko/en/ja previews. No VOICE_TUTOR sample was present in the bounded live feed; its production sample remains pending. `{numericId}` in notes is a route pattern. |
 | Backend release | Image source `ee9f96cf`, deploy `35755734992`, digest `sha256:636d835f6b1eaaa70ea8b0f465b627b4c9946987e2177c858729234aeb8665c9`; local GET checks passed. Source contains V120, but production Flyway history was not queried. See [production evidence](../../../docs/verification/2026-09-23-personalized-feed-production.md). |
 | Advertising state | Record actual production placement switch/provider behavior. Notes describe supported behavior, not a claim that a particular ad will appear. |
+
+The follow-up device inventory found the paired iPhone 16 Pro on iOS 26.6.2
+(23G90), with BuddyStudy **1.1.0 (16)** and TestFlight **4.3.1** installed; it
+does not yet establish installation of 1.2.0 (121). No physical iPad was listed.
+iPhone Mirroring selected this same phone and requested its owner's unlock/
+connection confirmation. Candidate interaction stopped at that prompt.
+
+Do not authenticate the permanent review account from a parallel CLI/device
+just to inspect it: the current account-session policy revokes its other active
+device sessions on successful login. Continue the review checks in the intended
+candidate device session; see the [test guide](TESTFLIGHT_GUIDE.md).
 
 The September 13 physical-iPhone recording was completed and submitted for
 1.1.0 (118); see [its evidence](../../../docs/app-review-video-2026-09-13.md).

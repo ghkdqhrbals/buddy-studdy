@@ -167,6 +167,23 @@ records those separate draft-content checks.
 
 ## Scope of completion
 
+At **2026-09-23 02:15:38 KST**, a separate read-only API check established
+`internalBuildState=IN_BETA_TESTING` and
+`externalBuildState=READY_FOR_BETA_SUBMISSION`. The existing internal group
+`tester` (`5f6797bb-38a0-400b-8269-74aa6f5f3bec`) has one tester,
+`hasAccessToAllBuilds=true`, and already includes this exact build. The existing
+external group has no testers, no build-121 relationship and no enabled public
+link. No invitation, group membership, build assignment or notification write
+was performed by this check. `autoNotifyEnabled=true` was observed; the earlier
+workflow's skipped notification jobs do not prove that Apple sent no automatic
+TestFlight notification.
+
+The connected physical iPhone inventory at 02:14 KST showed BuddyStudy 1.1.0
+(16), with TestFlight 4.3.1 installed. It did not establish that the candidate
+was installed. No physical iPad was connected. Supported iPhone Mirroring
+reached the same device but required owner unlock/connection confirmation;
+no candidate interaction or credential entry occurred at that checkpoint.
+
 Archive, local transport, the exact `VALID` Build resource, custom TestFlight
 notes and selection on the explicit 1.2.0 App Store version are verified.
 `APP_STORE_ELIGIBLE` is a build-audience classification, not an App Review

@@ -10,6 +10,29 @@ Record build number/source, device model/OS, app language, account role without
 credentials, backend deployment, steps, expected/actual result and redacted
 evidence for each case. Test ko/en/ja and both physical iPhone/iPad layouts.
 
+Build **1.2.0 (121)** is already in the existing internal TestFlight group
+(`IN_BETA_TESTING`, verified 2026-09-23 02:15:38 KST). Use the existing tester's
+TestFlight account and select that exact build. Server group membership does
+not prove which account is signed into the device or that it has installed the
+candidate. Record the actual installed version/build before running cases.
+
+The backend permits one active device session per account. A successful login
+on another device revokes the prior device's session
+(`AccountSessionManager.saveSession`). Verify cross-device interest persistence
+sequentially, signing in on each intended test device; do not expect concurrent
+sessions to remain valid. Do not run a separate CLI login against the permanent
+review account while testing its candidate session.
+
+For reviewer access, use the candidate's existing review-account session where
+available. A deliberate existing-email/password login needs no verification code;
+if it instead requires account creation or a code, stop and correct the review
+access setup without creating an account or sending an email. Verify active
+account status, required-term state and topic-subscription access in that same
+session. Do not accept new terms automatically. Check paid Voice eligibility
+and remaining time separately: the normal Voice status read can reconcile quota
+and expired sessions, so it is not a purely observational database operation.
+This guide does not authorize purchases, entitlement grants or quota resets.
+
 | Case | Steps and expected result / 확인할 동작 |
 | --- | --- |
 | First study / 첫 학습 | On an account with no studies, let My Studies finish loading. Select a starter, edit its title/level, cancel, then repeat and explicitly save. No study is created on selection/cancel; no question or question-quota charge occurs on save. 기존 답변 초안이 있다면 다른 학습 생성 후에도 보존되어야 합니다. |
