@@ -1,12 +1,13 @@
 # BuddyStudy 1.2.0 candidate package
 
-Prepared on 2026-09-23 from source `4cb14b7a`. This directory contains local
-release-preparation drafts; it does not establish an upload, deployment,
-submission or approval. The existing 1.1.0 evidence and reusable templates are
-unchanged.
+Prepared on 2026-09-23 from app source `4cb14b7a`, then archived and deployed
+from `ee9f96cf9644acbcc2bab8535942d6697277d6a2`. The production backend is deployed;
+the signed iOS **1.2.0 (121)** was uploaded, processed as **VALID** and selected
+on the 1.2.0 draft. This is not review submission or approval. Existing 1.1.0
+evidence and reusable templates remain unchanged.
 
-The release operator's September 23 App Store Connect UI check confirmed a
-**1.2.0 draft in Prepare for Submission**, with **no build selected**, **manual
+The release operator's September 23 App Store Connect UI/API checks confirmed a
+**1.2.0 draft in Prepare for Submission**, with **build 121 selected**, **manual
 release**, and **existing ratings retained**. The published 1.1.0 (119) remains
 available. The updated Apple agreement banner remains; draft creation did not
 establish permission to submit. The operator subsequently saved the Korean,
@@ -16,37 +17,42 @@ English (`en-US`) and Japanese version `promotionalText`, `description`,
 Support and marketing URLs already matched. App Info names/subtitles were also
 saved for all three locales from
 [`app-store/metadata/app-info-localizations.json`](../../metadata/app-info-localizations.json).
-Screenshots and review notes remain unchanged as of this update. Saved draft
-metadata is not published store copy. See the
+The new English review notes and three-language TestFlight notes are saved and
+read back. Forty screenshots across 10 display sets are COMPLETE; see
+[the upload record](screenshots/asc-upload-verification.json).
+Saved draft metadata is not published store copy. See the
 [1.2.0 draft](https://appstoreconnect.apple.com/apps/6774108938/distribution/ios/version/inflight).
 
 ## Contents
 
 - `review-notes.en-US.txt`: proposed English App Review notes.
 - `review-notes.ko.txt`: Korean counterpart for review/preparation.
+- `review-notes.asc.en-US.txt`: the credential-free text saved on the actual
+  1.2.0 draft, replacing copied 1.1.0/118 evidence. It makes no unverified
+  device/video claims; secure sign-in/contact fields remain separate.
 - `testflight-build-localizations.json`: What to Test in the existing uploader's
   required `en-US`, `ko`, `ja` string schema, each at most 4,000 characters.
 - `TESTFLIGHT_GUIDE.md`: manual test cases and evidence to retain.
+- `FEATURING_DRAFT.md`: English/Korean editorial pitch with launch/evidence
+  fields still to finalize; no nomination has been submitted.
 
-App Review has one notes field, not separate locale resources. Choose one final
-language; do not concatenate the two drafts. Each draft is kept within the
-repository's 4,000 UTF-8-byte limit before real evidence/credentials are inserted.
-Recheck the rendered size afterward. Remove the draft instruction only when its
-prerequisites are satisfied. Do not commit credentials into either file.
+App Review has one notes field. The `asc.en-US` file is the saved text; the other
+two files are working templates, not uploaded notes. Credentials are retained
+only in the existing secure App Store Connect fields, never in these files.
 
-## Required fields still to be supplied
+## Evidence and remaining checks
 
 | Field | Required action; current state |
 | --- | --- |
-| Source/build | Record final pushed source SHA, release run, 1.2.0 build number, IPA/archive checksum and Apple VALID processing evidence. Signed candidate pending. |
-| App Store version ID | Read and record the exact 1.2.0 resource ID; the UI's `inflight` URL is not an API version ID. No build selected yet. |
-| Review access | Confirm a durable working account and required-term state. Put account name/password only in secure App Store Connect sign-in fields; the draft placeholders are not credentials. |
-| Review contact | Confirm the real review contact name, email and phone in App Store Connect; no values invented here. |
+| Source/build | Verified 1.2.0 (121), source `ee9f96cf`, archive run `35754933809`, local upload success, Apple VALID / APP_STORE_ELIGIBLE / non-exempt encryption false. IPA SHA-256 `a93f0f1f9f48d43b7ccd5bc53e21075f601c4fef1eeb263cfaf418c10203ab06`; see [signed-candidate evidence](../../../docs/verification/2026-09-23-ios-release-candidate.md). |
+| App Store version ID | `5bb7c17c-3765-4b1b-b03c-00d8da654a2e`, 1.2.0 / PREPARE_FOR_SUBMISSION / MANUAL, selected build 121; see [draft verification](../../../docs/verification/2026-09-23-app-store-connect-draft.md). |
+| Review access | Existing secure account/password fields are present and preserved. Working login and required-term state still need candidate verification. |
+| Review contact | Existing first/last name, email and phone fields are present and preserved. No values were invented or copied into this package. |
 | Paid-feature access | Confirm how the reviewer can access Plus/Pro Voice Tutor and remaining voice time. A free account alone cannot verify voice; do not fabricate an entitlement or subscription. |
 | Device evidence | Record exact physical iPhone/iPad models, OS versions, candidate version/build and actual manual results. Final signed-candidate and physical-iPad checks are pending. |
 | Video/attachment | No 1.2.0 filename, attachment ID or URL is available. If attaching evidence or answering a current Apple request, use the actual candidate recording and verify delivery/access. Do not relabel the 1.1.0 (118) video as 1.2.0. |
-| Public share samples | Record actual authorized production public QUESTION and VOICE_TUTOR IDs/URLs after deployment; `{numericId}` in notes is a route pattern, not a working sample. |
-| Backend release | Record V120 migration and compatible topic/feed/share/AASA deployment run, source SHA and digest, then manual production results. Pending. |
+| Public share samples | Public QUESTION `156` returned correct ko/en/ja previews. No VOICE_TUTOR sample was present in the bounded live feed; its production sample remains pending. `{numericId}` in notes is a route pattern. |
+| Backend release | Image source `ee9f96cf`, deploy `35755734992`, digest `sha256:636d835f6b1eaaa70ea8b0f465b627b4c9946987e2177c858729234aeb8665c9`; local GET checks passed. Source contains V120, but production Flyway history was not queried. See [production evidence](../../../docs/verification/2026-09-23-personalized-feed-production.md). |
 | Advertising state | Record actual production placement switch/provider behavior. Notes describe supported behavior, not a claim that a particular ad will appear. |
 
 The September 13 physical-iPhone recording was completed and submitted for
@@ -61,18 +67,19 @@ notes instead of inventing an artifact; retain truthful device evidence.
 - [ ] Account owner accepts the updated Apple agreement and confirms the
   App Store Connect submission restriction is cleared. The agent has not
   accepted legal terms on the owner's behalf.
-- [ ] Deploy the integrated backend, including V120 and share/AASA routes,
+- [x] Deploy the integrated backend image, including V120 and share/AASA routes,
   through the module-scoped GitHub Actions/personal-deploy path. Preserve the
   production billing/translation fixes included in this source. Do not use SSH
   or add runtime health/smoke gates to Actions; record manual checks separately.
-- [ ] Produce the signed iOS candidate from the exact pushed ref with explicit
+- [x] Produce the signed iOS candidate from the exact pushed ref with explicit
   `version=1.2.0`. Confirm production API configuration and non-demo AdMob mode.
   `.github/workflows/release.yml` uses its run number as build number; leaving
   version empty currently retains project 1.1.0.
   For archive-only work, explicitly set `upload_to_app_store_connect=false`,
   `app_review_candidate=false` and `admob_test_mode=false`. The current workflow
   also offers `publish_status=false` to suppress its release-status/Slack writes.
-- [ ] Upload/verify the intended build and keep manual release. Prefer
+- [x] Upload and verify Apple VALID processing for 1.2.0 (121), retaining manual
+  release. The local uploader reused the exact verified CI IPA. Prefer
   `app_review_candidate=false` for upload before deliberate build selection:
   that flag otherwise writes the default What to Test and selects an editable
   store version. It does not automatically select this directory's drafts.
@@ -85,13 +92,15 @@ notes instead of inventing an artifact; retain truthful device evidence.
   tests. Confirm actual paid-feature access separately.
 - [x] Save the three-language 1.2.0 version promotional text, description,
   What's New and keywords matching the source JSON; support/marketing URLs match.
-- [ ] Complete the intended App Info names/subtitles, this candidate's What to
-  Test, finalized review notes and verified screenshot display sets. The new
-  1242 × 2688 images require their matching 6.5-inch set; default uploader
-  `APP_IPHONE_67` and old iPad assets are not automatic substitutes.
-- [ ] Pin the verified 1.2.0 `APP_STORE_VERSION_ID` when selecting the exact
-  build. Read back version string, build number, manual release mode, ratings
-  retention, locale copy, screenshot sets and review access before submission.
+- [x] Save and read back all three App Info localizations, the custom 1.2.0
+  What to Test, and the current English review notes.
+- [x] Upload and read back 40 screenshots across 10 exact display groups.
+  The additional 1170 × 2532 candidates were rejected for the legacy-named
+  slot and replaced with actual 1206 × 2622 captures; failed uploads were removed.
+- [x] Select build 121 using the exact 1.2.0 version ID and read back the
+  version/build relationship. Manual release and existing ratings are retained.
+- [ ] Recheck candidate device results and working review access before
+  submitting; presence of credential fields alone is not a login check.
 - [ ] Submit only the complete candidate package; record Apple confirmation
   separately from build upload/selection. Approval and later manual release
   remain distinct operations.
@@ -119,8 +128,8 @@ For a later authorized TestFlight-note sync, retain that explicit localization
 path and supply `APP_STORE_VERSION_STRING=1.2.0`, the exact processed
 `APP_STORE_BUILD_NUMBER`, and credentials through the existing secure mechanism.
 Without `APP_STORE_APPLY=1` the script performs a remote read-only dry run;
-with it, the script writes and verifies the notes. No external sync was run
-while preparing this directory.
+with it, the script writes and verifies the notes. Initial file preparation was
+local; the later verified sync for 1.2.0 (121) is recorded above.
 
 `update-app-store-review-notes.rb` is coupled to the old resolution reply and
 resubmission guide, requires its known placeholders/evidence bundle, and does

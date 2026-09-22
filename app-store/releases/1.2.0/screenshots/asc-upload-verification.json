@@ -1,0 +1,455 @@
+{
+  "verifiedAt": "2026-09-22T17:04:18Z",
+  "appId": "6774108938",
+  "versionId": "5bb7c17c-3765-4b1b-b03c-00d8da654a2e",
+  "version": {
+    "versionString": "1.2.0",
+    "appStoreState": "PREPARE_FOR_SUBMISSION",
+    "releaseType": "MANUAL"
+  },
+  "buildId": "d7e5c8a1-a45a-4147-aca6-d2c912193d50",
+  "build": {
+    "version": "121",
+    "expired": false,
+    "processingState": "VALID",
+    "buildAudienceType": "APP_STORE_ELIGIBLE",
+    "usesNonExemptEncryption": false
+  },
+  "versionCopyMatches": true,
+  "appInfoMatches": true,
+  "reviewNotesMatch": true,
+  "testFlightNotesMatch": true,
+  "screenshotCount": 40,
+  "sets": [
+    {
+      "locale": "ko",
+      "displayType": "APP_IPHONE_67",
+      "setId": "2727be48-04fc-4ed7-9468-534eeee8a4f7",
+      "screenshots": [
+        {
+          "id": "8dee9f0f-ab80-42eb-8332-8290d449ceae",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/ko/01-learning-result.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "4dd1a26e410f1c1779732e25a777963a",
+          "localSHA256": "9a9da8ced20e43ea70fb8c327cfe3aabe85a82633d8e185102b4ee987f9662e7"
+        },
+        {
+          "id": "a74dc92f-6e98-4cd2-a123-845335a84b8d",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/ko/02-topic-progress.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "465653f66b8a881188d02669e4a68ea6",
+          "localSHA256": "0ec26efb9b02dbc924a139fd5f83844951327d7b8ad6ed87049e0ec4c21077ee"
+        },
+        {
+          "id": "af98dbc9-1c6d-428f-a92f-930f881f47cd",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/ko/03-interest-feed.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "cd09b9f7df1d4beb1f2280d9217011ba",
+          "localSHA256": "b48424ebaf913fb50f8334946ee51304b1aea093e3d92449b0274c9119a2f5a5"
+        },
+        {
+          "id": "cc5d8787-5c88-4c18-99f5-35ea093694f5",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/ko/04-interest-topics.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "b59ef9c8e7ec0029ceea29fc7c753d5b",
+          "localSHA256": "f9c6ffcdc50f98922f0dc40ad6d136994204a5901d8588b30193373904df4f2d"
+        }
+      ]
+    },
+    {
+      "locale": "ko",
+      "displayType": "APP_IPHONE_65",
+      "setId": "72c036f6-64f8-4dcc-9e93-1ea5df6bbf17",
+      "screenshots": [
+        {
+          "id": "0a9c6efd-e1d9-4256-93d5-0e563a6f02f4",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/ko/01-learning-result.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "6812278aff8f7ee5aacf44057101c1fc",
+          "localSHA256": "4bdb863578538b97d9640cf991957fea0a8e43dca0092e371d1ec3abaec5db4c"
+        },
+        {
+          "id": "da92cf1a-ee92-4bd7-a379-f5cdd29bd7f9",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/ko/02-topic-progress.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "9e484cee9b616aea501055a71209d33d",
+          "localSHA256": "d3b230b1ddc601995f21f5433916fa22ba2b9153453a466a5f9ac871dd6d0620"
+        },
+        {
+          "id": "0dc33e0e-87a7-49ed-bc11-b11af855a85a",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/ko/03-interest-feed.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "eee48be69d96034dc084fd1f3fb57d86",
+          "localSHA256": "1ba807f9439e9680da48c89841903ae1e58e960c29f0850d262be3e462ece8ef"
+        },
+        {
+          "id": "e839516c-cede-49cd-9e77-2a9031e6df79",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/ko/04-interest-topics.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "846573256e77ddef55eda34c05ff8ebe",
+          "localSHA256": "4bcf5cd29fa4bb2f03337c8871f8cef735c23cfccbed3dfe75579b22ef91fc71"
+        }
+      ]
+    },
+    {
+      "locale": "ko",
+      "displayType": "APP_IPAD_PRO_3GEN_129",
+      "setId": "77ffb59a-5d6c-49c7-96f8-137b80c3d94f",
+      "screenshots": [
+        {
+          "id": "8fd3026d-afa4-4649-9901-7490a180f4f6",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/ko/01-learning-result.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "e46fd483e2e8232527bd2279cbf204ba",
+          "localSHA256": "cdd1ad8627b72d7d672b34c7337a95f377f661a0922cd144a556d73a4c578a98"
+        },
+        {
+          "id": "33e0378d-eabc-49a5-8098-92d23439f02f",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/ko/02-topic-progress.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "8d801eceb68c57b5557b3adae800248b",
+          "localSHA256": "edf7fe45ef16a54fc24abf17ec78dd3ded4bfbb94e9e01887de47b1eec862b18"
+        },
+        {
+          "id": "0fca86f7-8eda-4d54-9a0c-445edb91548c",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/ko/03-interest-feed.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "459faf9c22ed02228bbd866458c07136",
+          "localSHA256": "dae4acfed84bf90eb4c38a0c757d47349260c557ac3d39b1e09d821bf7e9b18f"
+        },
+        {
+          "id": "d21bde72-fe15-4ce9-b0ba-73ad2778a0dc",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/ko/04-interest-topics.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "57d0bc012f3137f4e0ed4ec49a74879f",
+          "localSHA256": "5b7e5123a97decd155439ae5e8f50bf733d441ee7bd880dc0cf155d46edc9f18"
+        }
+      ]
+    },
+    {
+      "locale": "ja",
+      "displayType": "APP_IPHONE_67",
+      "setId": "f186e861-3e03-4768-9e1b-41002d18bcb9",
+      "screenshots": [
+        {
+          "id": "d7ba8521-16b1-45de-ba1f-65a0c984fd0a",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/ja/01-learning-result.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "3c622dcd67f6aa7fcb168bab6d410a24",
+          "localSHA256": "4c64272e2e4ba3fd0282b89e4f138e989ebc0368b96d933e2326feeb5dc2c75d"
+        },
+        {
+          "id": "dec81c48-6958-4d61-bcf3-1731a94d0a3e",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/ja/02-topic-progress.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "2b63dcfff5d74116da158414642db7ae",
+          "localSHA256": "4578c9ca18d22b89c9db98142b95ba6befb97a185c5598cf4db254a382bf6d26"
+        },
+        {
+          "id": "1cf82c06-92e5-497d-aecd-b87745816522",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/ja/03-interest-feed.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "7d2ac33f0a4593de7e80333ef53bc54f",
+          "localSHA256": "21540d630875334cd893b8c67a16fae10854c6a6883216956befd5dc1524ad77"
+        },
+        {
+          "id": "db8f99ba-4fb8-441d-90ff-ed15ce0eb061",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/ja/04-interest-topics.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "f539ca7a8d256dceec2367afaccabefb",
+          "localSHA256": "bd2d23479b0b0146fede12c8815c874d6630bf4e08632b29f5af8aaa39fef22d"
+        }
+      ]
+    },
+    {
+      "locale": "ja",
+      "displayType": "APP_IPHONE_65",
+      "setId": "3d9fe36a-a1b5-4aad-97c1-1d8d24984efb",
+      "screenshots": [
+        {
+          "id": "72cb5485-90cf-473d-b97b-044de0bb9817",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/ja/01-learning-result.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "d271e767654107f2eef65befab2fa9fe",
+          "localSHA256": "ccd6870ba7f4c30001aad4069231275d2569117cc9ceb83f1d711759d2ee4bbc"
+        },
+        {
+          "id": "29796bf5-9b4f-4d11-a302-fe55bc9c839b",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/ja/02-topic-progress.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "32aa79b5595288a53722d9f32143985c",
+          "localSHA256": "73cd9ac9e92135dc6a171a4a89855d114268448cbbbbec444168fbbf8cdf73b2"
+        },
+        {
+          "id": "741e53e0-968f-49b7-9548-9ddf19de26ee",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/ja/03-interest-feed.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "60fda402250f04bb7fdceb20433fb005",
+          "localSHA256": "32bad5ae45e54ccdedcc85c94318acec9430ef03bf37b5cc5c6189ca5e54ac40"
+        },
+        {
+          "id": "7e8e1e6c-aa3c-4f47-bb85-a6a1de2a08cd",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/ja/04-interest-topics.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "89088abe8f754650290abfce4561f516",
+          "localSHA256": "41f3188ef6b69b7a7b98a5ee94e61f249898932814b8953421a8349469da0245"
+        }
+      ]
+    },
+    {
+      "locale": "ja",
+      "displayType": "APP_IPAD_PRO_3GEN_129",
+      "setId": "2d33bc93-a0ec-4387-acd8-2acf84b00dae",
+      "screenshots": [
+        {
+          "id": "ccc7958a-8e7b-486e-bb78-b1ab4804c33e",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/ja/01-learning-result.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "407d53ae671a15e24edd4fb6b970a4ef",
+          "localSHA256": "5fe47e60766b46363eb3fd361fe3dffe65ae2722d5126ffd229d10cd067c5220"
+        },
+        {
+          "id": "044a6678-2e56-4072-b431-1d9ff81ef42b",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/ja/02-topic-progress.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "6ac8b3e6eec5a2e568f2642b7c507495",
+          "localSHA256": "8cf3a37af296fa82872c416f5aef1bf921ac250492f8dcad26e5dfd9f1cdef42"
+        },
+        {
+          "id": "d9d0fd43-d786-4f22-a740-ff52739df3e7",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/ja/03-interest-feed.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "f64a1e3607b766c94f2b4109e1a5b868",
+          "localSHA256": "b3c0ab05535acdea449e6751ee7393298cc36af5cb60e06ab168692dd3e7a119"
+        },
+        {
+          "id": "1178e411-f8d7-4d4c-9650-837cadac4bd3",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/ja/04-interest-topics.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "06c9367146409086d19345bbad243e0e",
+          "localSHA256": "2f5ca25c3cc054bd177f7bc834c4ce9c91db2a3d7d7dfa37f47b691cab1ef7cc"
+        }
+      ]
+    },
+    {
+      "locale": "en-US",
+      "displayType": "APP_IPHONE_67",
+      "setId": "37ddb8dc-4273-4748-a627-c6eb465b7796",
+      "screenshots": [
+        {
+          "id": "23e75a26-41b5-44e9-a83b-84cdf57b2361",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/en-US/01-learning-result.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "0d384bc2b98d1b2ed7040735cd7502b5",
+          "localSHA256": "5f033409e8ffbf5985fac7fbdc16de71df407ddb10d0ce22ae3634839409b7f9"
+        },
+        {
+          "id": "78e04e10-6fe5-475d-ba14-2eea8e8acefd",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/en-US/02-topic-progress.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "91050c9f0f0b9ec0fea063385f6d0810",
+          "localSHA256": "ec5a4a763904a80ed27feca1e939a274d85fe9ee1afb2eafd43b8300b27c147d"
+        },
+        {
+          "id": "aaa78fa7-c6f0-4a84-a731-d633705c23b0",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/en-US/03-interest-feed.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "54c4f033e81ef0ef829d745272bf509d",
+          "localSHA256": "82ecb755c131f1ddd7346bd9e9e154b7824e07a8dc6a1ca3da0e9b76aa503aaf"
+        },
+        {
+          "id": "cb75efd3-6138-444e-b0b5-5846dfa3c8e4",
+          "file": "app-store/releases/1.2.0/screenshots/6.9/en-US/04-interest-topics.png",
+          "width": 1320,
+          "height": 2868,
+          "state": "COMPLETE",
+          "sourceMD5": "031fccd371fd7de24f6efd67f30821ce",
+          "localSHA256": "18ccbd0efeb404476dc7dce1ca042e624ceac6bf985b8ce58ee2c6ca108788e4"
+        }
+      ]
+    },
+    {
+      "locale": "en-US",
+      "displayType": "APP_IPHONE_65",
+      "setId": "a235ecb2-7014-4105-87f2-c583523868f9",
+      "screenshots": [
+        {
+          "id": "d5558af4-a8db-4177-aaea-27542c0262a4",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/en-US/01-learning-result.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "0db58e02d3facb245a10636cad0685ce",
+          "localSHA256": "6b0e03a10bc827617acb196966be78649c5240cbdd9f57a01958bf4119c4671e"
+        },
+        {
+          "id": "1c0ae124-fb7e-4a66-a650-19f97e68eff7",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/en-US/02-topic-progress.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "59eb8bc05c3f164ec0ca2cb0d01295aa",
+          "localSHA256": "1dbdcc16ad7f34acafe43179a63be5203acf1c7d67cde553fd15cf70519033d1"
+        },
+        {
+          "id": "6edb341b-f35c-46da-aa0f-d5fbe9e34451",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/en-US/03-interest-feed.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "9281d9707d8ef2ca7092128a22727e58",
+          "localSHA256": "5173973f9d2acde126ea42cb3b690f1136630c5703f27b918d32f3cd39e0809e"
+        },
+        {
+          "id": "0b916b89-acd6-483c-bc77-7dd63d16dc07",
+          "file": "app-store/releases/1.2.0/screenshots/6.5/en-US/04-interest-topics.png",
+          "width": 1242,
+          "height": 2688,
+          "state": "COMPLETE",
+          "sourceMD5": "9ef805fc1ef5fb3f9274e4b120581e95",
+          "localSHA256": "f16fc61c1c66fb849076ef7cc48573ad231ae0a969dcf29cb81eaa721ed0d67a"
+        }
+      ]
+    },
+    {
+      "locale": "en-US",
+      "displayType": "APP_IPAD_PRO_3GEN_129",
+      "setId": "7ff4ad31-29aa-43bb-b5ac-f3a9152ae1dc",
+      "screenshots": [
+        {
+          "id": "78dbefee-17f6-4d5a-a0af-47a59be60102",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/en-US/01-learning-result.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "86cc7e2b6504efbd33cfe7c6ed160e08",
+          "localSHA256": "b15f36970f039c3d3cf79e5fd35b5cbdcf3af0c4ca768a7eea6d2ec7aad1c9c7"
+        },
+        {
+          "id": "6a735e60-6db7-4f64-807a-45fe44cf3584",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/en-US/02-topic-progress.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "2a2ff297d48f4f64419063ccd7a6d52f",
+          "localSHA256": "e9138b62c1f8b3456899424e7156f24fa362fddba2603642c7b9a0a81d1d62bd"
+        },
+        {
+          "id": "d09ece07-6e8f-4246-aaf8-a2b1939c62df",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/en-US/03-interest-feed.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "fc963ed7632fefa8191f50bed77db3e5",
+          "localSHA256": "e2eb7830f13c77c84c13ae5bcc3605cc83e34f543dbe85e549ba5d845dbae683"
+        },
+        {
+          "id": "27973c15-a6a1-4769-952e-24e3b586739f",
+          "file": "app-store/releases/1.2.0/screenshots/ipad-13/en-US/04-interest-topics.png",
+          "width": 2064,
+          "height": 2752,
+          "state": "COMPLETE",
+          "sourceMD5": "e81b7fa83b5c8c0323ab89e762912cef",
+          "localSHA256": "550778b337f689e90c0aa2cd76fd390feb486ec5fe9feaf53f39b7abb42c1c71"
+        }
+      ]
+    },
+    {
+      "locale": "en-US",
+      "displayType": "APP_IPHONE_61",
+      "setId": "e5a041c6-fd1c-4e65-8697-1dc660729e33",
+      "screenshots": [
+        {
+          "id": "3f76d41b-4ad0-449f-ba1c-544615506e98",
+          "file": "app-store/releases/1.2.0/screenshots/6.3/en-US/01-learning-result.png",
+          "width": 1206,
+          "height": 2622,
+          "state": "COMPLETE",
+          "sourceMD5": "feae7cb06085a3056636f453ebe06b96",
+          "localSHA256": "a6b6ec046ec8247e64f22fc898fdedec554d8efa5463f1cf02a4cdcb9fd3e89f"
+        },
+        {
+          "id": "a2828cac-2b2a-413c-8935-7729cd968e86",
+          "file": "app-store/releases/1.2.0/screenshots/6.3/en-US/02-topic-progress.png",
+          "width": 1206,
+          "height": 2622,
+          "state": "COMPLETE",
+          "sourceMD5": "eb612ffc011365e675e144392c5dc848",
+          "localSHA256": "e0a3b3b9a35013b2d4365b8cd77ba16dad53093752b3aa8c97578595af0236d0"
+        },
+        {
+          "id": "b20c0da0-cef9-4f2f-ac57-fa6094727fb4",
+          "file": "app-store/releases/1.2.0/screenshots/6.3/en-US/03-interest-feed.png",
+          "width": 1206,
+          "height": 2622,
+          "state": "COMPLETE",
+          "sourceMD5": "abd06a4eb3632af220840a15f88064e9",
+          "localSHA256": "b9d4bf5fdaddcb725971580b64abb323421d2b07be1c73bc9d6284fb79a65edd"
+        },
+        {
+          "id": "bc87fb89-78d6-4ed5-8417-25647f2bfc80",
+          "file": "app-store/releases/1.2.0/screenshots/6.3/en-US/04-interest-topics.png",
+          "width": 1206,
+          "height": 2622,
+          "state": "COMPLETE",
+          "sourceMD5": "94ea7448af2a9b62c5246b51b76606e9",
+          "localSHA256": "d7817152d648467af5c244b78ef1e419643043688ac159a57d358feee904bdc7"
+        }
+      ]
+    }
+  ]
+}

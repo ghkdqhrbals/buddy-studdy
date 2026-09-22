@@ -3,8 +3,15 @@ set -euo pipefail
 
 # Capture actual DEBUG fixture UI from an explicitly selected, booted iOS simulator.
 # Build/install StudyMateiOS first. This does not upload or modify App Store Connect.
-simulator_id="${1:?Usage: capture-growth-screenshots.sh <booted-simulator-UDID> [output-directory]}"
+simulator_id="${1:?Usage: capture-growth-screenshots.sh <booted-simulator-UDID> [output-directory] [ko|en|ja]}"
 output_directory="${2:-app-store/growth-screenshots/6.5}"
+locales=(ko en ja)
+if [[ -n "${3:-}" ]]; then
+  case "$3" in
+    ko|en|ja) locales=("$3") ;;
+    *) echo "Select ko, en or ja for a single-locale capture." >&2; exit 1 ;;
+  esac
+fi
 bundle_id="io.github.ghkdqhrbals.StudyMate"
 
 xcrun simctl list devices booted -j | python3 -c '
@@ -15,7 +22,7 @@ if not any(d["udid"] == sys.argv[1] and d["state"] == "Booted"
     raise SystemExit("Select an already booted iOS screenshot simulator.")
 ' "$simulator_id"
 
-for locale in ko en ja; do
+for locale in "${locales[@]}"; do
   destination_locale="$locale"
   if [[ "$locale" == en ]]; then destination_locale="en-US"; fi
   mkdir -p "$output_directory/$destination_locale"

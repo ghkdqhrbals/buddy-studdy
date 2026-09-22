@@ -24,6 +24,16 @@ September 22 observations and test counts below remain historical evidence; see
 [the integration report](verification/2026-09-23-app-store-growth-integration.md)
 for the current source boundary and release checks.
 
+Release preparation follow-up on September 23: the integrated backend is
+deployed, and signed iOS 1.2.0 (121) is uploaded, processed as VALID and selected
+on the editable 1.2.0 draft. Korean, English and Japanese names/subtitles,
+promotional text, descriptions, keywords and release notes match the source
+files. Forty screenshots across 10 display sets, custom TestFlight notes and
+current review notes were saved and read back. The published 1.1.0 listing has
+not been replaced. Manual release and existing ratings are retained; see the
+[candidate package](../app-store/releases/1.2.0/README.md) for the remaining
+owner-agreement, signed-candidate device and review-access checks.
+
 ## What can be influenced
 
 Apple describes search relevance using the app name, subtitle, keywords and
@@ -90,11 +100,11 @@ only the validation mode is completely local.
 The metadata JSON now contains localized interest/share feature bullets and
 `whatsNew` covering interests, sharing and first-study topic suggestions for the
 next update; use those files as the single source of release
-copy. These are unpublished candidates. Upload only after
-the exact iOS candidate and matching deployed API pass subscription, feed ranking,
-empty-state, account isolation and real-device checks. Add verified update notes
-to the next App Store version; do not rewrite release history for distributed
-version `1.1.0`. Topic following must not be confused with paid membership.
+copy. They are saved on the unpublished 1.2.0 draft. Complete the exact signed
+iOS candidate's subscription, account-isolation and real-device checks against
+the deployed API before review submission. Release history for distributed
+version `1.1.0` remains unchanged. Topic following must not be confused with
+paid membership.
 
 ## App behavior and release gates
 
@@ -119,9 +129,11 @@ rechecks public/completed/nondeleted/author-public state. Unavailable content
 returns the same generic `404` page with no question metadata. HTML escaping,
 restrictive CSP, no-referrer and no-store headers protect the landing.
 
-The AASA source now includes `/questions/*` and preserves referral links. This
-requires deployment plus an iOS release that parses the new HTTPS route before
-it is a working acquisition channel; live `1.1.0 (119)` support is not assumed.
+The deployed AASA includes `/questions/*` and preserves referral links. Local
+production GET checks verified the landing and AASA routes; see
+[production evidence](verification/2026-09-23-personalized-feed-production.md).
+The complete acquisition flow still requires an iOS release that parses the
+new HTTPS route; live `1.1.0 (119)` support is not assumed.
 After installation, visitors must return to the original link to open that
 question. Neither automatic post-install routing nor removal of previews already
 cached by external messengers is guaranteed. See [the shared-link contract](DEEPLINKS.md#공개-질문-공유-universal-link).
@@ -213,22 +225,25 @@ experiment only after that capability is live. Product Page Optimization is
 Apple's mechanism for comparing icons, screenshots and previews.
 [Apple: Product Page Optimization](https://developer.apple.com/app-store/product-page-optimization/)
 
-Twelve unpublished [screenshot candidates](../app-store/growth-screenshots/README.md)
-now capture the implemented question/feedback, topic progress, interest feed and
-interest manager in Korean, English and Japanese. They use illustrative fixture
-data rendered by the real iOS UI. See the [integrated verification record](verification/2026-09-23-app-store-growth-integration.md)
-and [backend integration results](verification/2026-09-23-personalized-feed-backend-integration.md)
-for current checks and remaining release requirements. The September 22 reports
-remain historical evidence of the earlier branch.
+Forty of the 44 [native screenshot candidates](../app-store/growth-screenshots/README.md)
+were accepted on the unpublished 1.2.0 draft. They show question/feedback, topic
+progress, the interest feed and interest management, using illustrative fixture
+data rendered by the real iOS UI. The four unused 1170-pixel images did not match
+the existing legacy-named display slot and are labelled rendering evidence only.
+The [draft verification record](verification/2026-09-23-app-store-connect-draft.md)
+and [accepted-asset manifest](../app-store/releases/1.2.0/screenshots/asc-upload-verification.json)
+record the exact files, order, dimensions and COMPLETE processing state.
 
-Remaining App Store Connect work is external to this source change: inspect the
-current review state and retain the confirmed Education/Productivity categories,
-confirm supported storefront availability, publish the verified copy with the
-matching release, gather the baseline, and configure the screenshot experiment.
-None of these actions has been performed by editing the repository.
+Read-only checks confirmed Education/Productivity categories and the existing
+eight available storefronts; those settings were preserved. Remaining work is
+owner agreement acceptance, candidate-specific physical iPhone/iPad and review
+access checks, review submission/approval, then manual publication. A screenshot
+experiment has not been configured, and the small historical baseline cannot
+establish improved acquisition or retention.
 
-Prepare a featuring nomination around the distinctive topic tree and learning
-flow once the build, screenshots and launch timing are known. Submit it through
-App Store Connect and record its status separately from charts and search. Apple
-editors decide whether to feature a nomination; submission is not selection.
+An English/Korean [featuring nomination draft](../app-store/releases/1.2.0/FEATURING_DRAFT.md)
+describes the topic tree and learning flow. Launch timing and candidate evidence
+remain to finalize; no nomination has been submitted. Record any later submission
+separately from charts and search. Apple editors decide whether to feature a
+nomination; submission is not selection.
 [Apple: Featuring nominations](https://developer.apple.com/help/app-store-connect/manage-featuring-nominations/nominate-your-app-for-featuring/)
