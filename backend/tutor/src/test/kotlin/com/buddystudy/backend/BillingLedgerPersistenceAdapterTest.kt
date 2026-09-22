@@ -1957,8 +1957,10 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             lastProviderEventAt = laterLifecycleAt,
         )
         assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER2")
+        // Only the entitlement projection was corrupted. The valid TIER3 membership still
+        // wins activePlanForUser, so a stale lower projection must not reduce its allowance.
         assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, laterLifecycleAt)).baseLimit)
-            .isEqualTo(300)
+            .isEqualTo(1_000)
 
         ledger.fulfill(tier3Invoice.id, laterLifecycleAt.plusSeconds(1))
 

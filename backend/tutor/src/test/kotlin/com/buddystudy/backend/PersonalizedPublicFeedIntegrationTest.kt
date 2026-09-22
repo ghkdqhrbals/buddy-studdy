@@ -110,6 +110,30 @@ class PersonalizedPublicFeedIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(page(0).totalElements).isZero()
     }
 
+    @Test
+    fun `mysql follows Unicode display labels without folding distinct accents`(): Unit = runBlocking {
+        val unique = UUID.randomUUID().toString()
+        val viewer = user("unicode-viewer-$unique")
+        val author = user("unicode-author-$unique")
+        val labels = listOf("İstanbul $unique", "ΟΣ $unique", "Café $unique")
+        val principal = Principal(viewer.id, "unicode-$unique", 1, false)
+        subscriptions.replace(principal, labels)
+        val dottedI = question(author.id, labels[0], unique)
+        val greek = question(author.id, "Localized source", unique)
+        database.sql("insert into question_search (question_id,language,topic,question,updated_at) values (:id,'en',:topic,:text,current_timestamp)")
+            .bind("id", greek.id).bind("topic", labels[1]).bind("text", "Greek $unique")
+            .fetch().rowsUpdated().awaitSingle()
+        val accented = question(author.id, labels[2], unique)
+        val unaccented = question(author.id, "Cafe $unique", unique)
+        val page = questions.findPersonalizedPublicAnswered(
+            viewer.id, null, "ko", PublicFeedSort.RECOMMENDED, PublicFeedScope.FOLLOWING, 20, 0,
+        )
+        assertThat(page.totalElements).isEqualTo(3)
+        assertThat(page.content.map { it.id }).containsExactlyInAnyOrder(dottedI.id, greek.id, accented.id)
+            .doesNotContain(unaccented.id)
+        assertThat(subscriptions.get(principal).topics).containsExactlyElementsOf(labels)
+    }
+
     private suspend fun user(name: String, isPublic: Boolean = true) = users.save(UserEntity(
         provider = UserProvider.EMAIL, providerId = name, status = UserStatus.ACTIVE,
         displayName = name, email = "$name@example.com", allowPublicQuestions = isPublic,

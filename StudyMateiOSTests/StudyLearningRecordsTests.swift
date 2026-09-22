@@ -720,15 +720,22 @@ private final class LearningURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        let reference = LearningProtocolReference(value: self)
         Task { @MainActor in
+            let protocolInstance = reference.value
             do {
-                guard let handler = Self.handler(host: request.url?.host ?? "") else { throw URLError(.unsupportedURL) }
-                let (response, data) = try handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
-            } catch { client?.urlProtocol(self, didFailWithError: error) }
+                guard let handler = Self.handler(host: protocolInstance.request.url?.host ?? "") else { throw URLError(.unsupportedURL) }
+                let (response, data) = try handler(protocolInstance.request)
+                protocolInstance.client?.urlProtocol(protocolInstance, didReceive: response, cacheStoragePolicy: .notAllowed)
+                protocolInstance.client?.urlProtocol(protocolInstance, didLoad: data)
+                protocolInstance.client?.urlProtocolDidFinishLoading(protocolInstance)
+            } catch { protocolInstance.client?.urlProtocol(protocolInstance, didFailWithError: error) }
         }
     }
     override func stopLoading() {}
+}
+
+// Handler and callbacks stay on MainActor; stopLoading mutates no fixture state.
+private struct LearningProtocolReference: @unchecked Sendable {
+    let value: LearningURLProtocol
 }

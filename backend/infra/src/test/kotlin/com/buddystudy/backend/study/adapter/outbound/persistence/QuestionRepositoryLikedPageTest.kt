@@ -67,6 +67,7 @@ class QuestionRepositoryLikedPageTest {
             create table users (
                 id bigint primary key,
                 display_name varchar(255) not null,
+                status varchar(24) not null default 'ACTIVE',
                 allow_public_questions boolean not null
             )
             """.trimIndent(),
@@ -176,7 +177,7 @@ class QuestionRepositoryLikedPageTest {
                 foreign key (user_id) references users(id) on delete cascade
             )
         """.trimIndent())
-        execute("insert into users values (10, 'Visible Author', true), (11, 'Hidden Author', false), (12, 'Blocked Author', true)")
+        execute("insert into users (id, display_name, allow_public_questions) values (10, 'Visible Author', true), (11, 'Hidden Author', false), (12, 'Blocked Author', true)")
         insertQuestion(101, 10, "Newest needle", "graded", "Answer", publicQuestion = true)
         insertQuestion(102, 10, "Middle", "graded", "Answer", publicQuestion = true)
         insertQuestion(103, 10, "Oldest", "graded", "Answer", publicQuestion = true)
@@ -457,7 +458,7 @@ class QuestionRepositoryLikedPageTest {
     }
     @Test
     fun `ranked following preserves canonical voice eligibility and exact page counts`(): Unit = runBlocking {
-        execute("insert into users values (7, 'Viewer', true)")
+        execute("insert into users (id, display_name, allow_public_questions) values (7, 'Viewer', true)")
         TopicSubscriptionPersistenceAdapter(database).replaceTopics(7, listOf("Voice record"))
         insertVoice(301)
         insertVoice(302, publicQuestion = false)
@@ -476,7 +477,7 @@ class QuestionRepositoryLikedPageTest {
 
     @Test
     fun `recommended feed promotes subscriptions and orders their engagement before exact pagination`(): Unit = runBlocking {
-        execute("insert into users values (7, 'Viewer', true)")
+        execute("insert into users (id, display_name, allow_public_questions) values (7, 'Viewer', true)")
         TopicSubscriptionPersistenceAdapter(database).replaceTopics(7, listOf("Swift UI"))
         execute("update questions set topic = 'swift-ui' where id in (101, 102, 103)")
         execute("insert into question_stats values (101, 100, 1), (102, 10, 50), (103, 0, 0), (110, 1000000, 1000000)")
@@ -492,7 +493,7 @@ class QuestionRepositoryLikedPageTest {
 
     @Test
     fun `following matches normalized localized topics and keeps all visibility exclusions before counts`(): Unit = runBlocking {
-        execute("insert into users values (7, 'Viewer', true)")
+        execute("insert into users (id, display_name, allow_public_questions) values (7, 'Viewer', true)")
         TopicSubscriptionPersistenceAdapter(database).replaceTopics(7, listOf("Data Structures"))
         execute("update question_search set topic = 'DATA_structures'")
         execute("insert into question_search values (110, 'en', 'Data Structures', 'Visible english', '', '', '')")

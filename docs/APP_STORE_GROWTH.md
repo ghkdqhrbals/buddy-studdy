@@ -216,8 +216,10 @@ Apple's mechanism for comparing icons, screenshots and previews.
 Twelve unpublished [screenshot candidates](../app-store/growth-screenshots/README.md)
 now capture the implemented question/feedback, topic progress, interest feed and
 interest manager in Korean, English and Japanese. They use illustrative fixture
-data rendered by the real iOS UI. See the [iOS verification record](verification/2026-09-22-app-store-growth-ios.md)
-for build, physical-device test evidence and remaining release checks.
+data rendered by the real iOS UI. See the [integrated verification record](verification/2026-09-23-app-store-growth-integration.md)
+and [backend integration results](verification/2026-09-23-personalized-feed-backend-integration.md)
+for current checks and remaining release requirements. The September 22 reports
+remain historical evidence of the earlier branch.
 
 Remaining App Store Connect work is external to this source change: inspect the
 current review state and retain the confirmed Education/Productivity categories,

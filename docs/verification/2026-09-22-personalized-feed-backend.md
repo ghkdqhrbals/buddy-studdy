@@ -1,5 +1,10 @@
 # Personalized public feed backend verification — 2026-09-22
 
+Historical result for the September 22 pre-integration implementation. The September 23
+integration uses V120 on the newer backend; see the separate
+[merged-backend verification](2026-09-23-personalized-feed-backend-integration.md).
+The V99 results below remain the record of that earlier run.
+
 Verified locally against the current implementation. No production server, deployment,
 App Store release, or chart position was changed or verified by these checks.
 

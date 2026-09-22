@@ -2830,7 +2830,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let oldToggle = Task { @MainActor in await appState.toggleCommunityTopicSubscription("Old account selection") }
         let firstReadStarted = await waitUntil { interestReads.value == 1 }
         XCTAssertTrue(firstReadStarted)
-        eventProvider.sendBackendUnauthorized()
+        try eventProvider.sendBackendUnauthorized(for: XCTUnwrap(store.loadRemotePushRegistration()))
         store.saveRemotePushRegistration(Self.anonymousRegistration)
         await appState.signInToCommunity(idToken: "new-account-token")
         XCTAssertTrue(appState.isCommunitySessionActive)
@@ -2862,7 +2862,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let save = Task { @MainActor in await appState.saveTopicSubscriptions(["Old account edit"]) }
         let saving = await waitUntil { appState.isSavingTopicSubscriptions }
         XCTAssertTrue(saving)
-        eventProvider.sendBackendUnauthorized()
+        try eventProvider.sendBackendUnauthorized(for: XCTUnwrap(store.loadRemotePushRegistration()))
         let saved = await save.value
         XCTAssertFalse(saved)
         XCTAssertTrue(appState.subscribedCommunityTopics.isEmpty)
@@ -4670,6 +4670,130 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
     }
 
+    func testPurchaseBillingDelayedUnauthorizedCannotRecoverPreviousAccountCredentials() async throws {
+        let started = LockedValue(false)
+        let tokenRequests = LockedRequestCounter()
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.url?.path == "/api/v1/billing/status" else { return 0 }
+            started.set(true)
+            return 250_000_000
+        }
+        try await withPurchaseBillingState(handler: { request in
+            if request.url?.path == "/api/v1/auth/token" { tokenRequests.increment() }
+            return Self.response(for: request, statusCode: 401, body: #"{"code":"AUTH_INVALID_ACCESS_TOKEN"}"#)
+        }) { appState, store in
+            let refresh = Task { @MainActor in try await appState.refreshBillingForPurchase() }
+            let didStart = await self.waitUntil { started.value }
+            XCTAssertTrue(didStart)
+            var replacement = Self.signedInRegistration
+            replacement.accessToken = Self.signedInRegistration.accessToken! + "replacement-account"
+            store.saveRemotePushRegistration(replacement)
+            // Owner replacement deliberately keeps the same signed-in flag and
+            // backend, so a generation-only completion guard is insufficient.
+            appState.communityProfile = CommunityUserProfile(
+                id: 8, displayName: "Account B", status: "ACTIVE", provider: "GOOGLE", bio: "", avatarURL: nil
+            )
+            do {
+                try await refresh.value
+                XCTFail("A previous owner's request must be cancelled")
+            } catch is CancellationError {
+            } catch {
+                XCTFail("Expected cancellation, got \(error)")
+            }
+            XCTAssertEqual(tokenRequests.value, 0, "A stale 401 must not start credential recovery")
+            XCTAssertEqual(store.loadRemotePushRegistration()?.accessToken, replacement.accessToken)
+            XCTAssertEqual(appState.communityProfile?.id, 8)
+            XCTAssertTrue(appState.isCommunitySessionActive)
+            XCTAssertNil(appState.billingStatus)
+        }
+    }
+
+    func testPurchaseBillingDelayedTokenBootstrapCannotOverwriteReplacementAccount() async throws {
+        let started = LockedValue(false)
+        let statusRequests = LockedRequestCounter()
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.url?.path == "/api/v1/auth/token" else { return 0 }
+            started.set(true)
+            return 250_000_000
+        }
+        try await withPurchaseBillingState(handler: { request in
+            if request.url?.path == "/api/v1/auth/token" {
+                return Self.response(for: request, statusCode: 200, body: """
+                {"accessToken":"\(Self.signedInRegistration.accessToken!)","accessTokenExpiresAt":"2030-08-29T00:00:00Z"}
+                """)
+            }
+            statusRequests.increment()
+            return Self.response(for: request, statusCode: 200, body: Self.tier1BillingStatusResponse)
+        }) { appState, store in
+            var expired = Self.signedInRegistration
+            expired.accessToken = nil
+            expired.accessTokenExpiresAt = nil
+            store.saveRemotePushRegistration(expired)
+            let refresh = Task { @MainActor in try await appState.refreshBillingForPurchase() }
+            let didStart = await self.waitUntil { started.value }
+            XCTAssertTrue(didStart)
+            var replacement = Self.signedInRegistration
+            replacement.accessToken = Self.signedInRegistration.accessToken! + "replacement-account"
+            store.saveRemotePushRegistration(replacement)
+            appState.communityProfile = CommunityUserProfile(
+                id: 8, displayName: "Account B", status: "ACTIVE", provider: "GOOGLE", bio: "", avatarURL: nil
+            )
+            do {
+                try await refresh.value
+                XCTFail("A previous owner's token bootstrap must be cancelled")
+            } catch is CancellationError {
+            } catch {
+                XCTFail("Expected cancellation, got \(error)")
+            }
+            XCTAssertEqual(statusRequests.value, 0)
+            XCTAssertEqual(store.loadRemotePushRegistration()?.accessToken, replacement.accessToken)
+            XCTAssertEqual(appState.communityProfile?.id, 8)
+            XCTAssertTrue(appState.isCommunitySessionActive)
+            XCTAssertNil(appState.billingStatus)
+        }
+    }
+
+    func testNewerPurchaseBillingRequestPreventsOldUnauthorizedCredentialRecovery() async throws {
+        let oldAuthorization = "Bearer \(Self.signedInRegistration.accessToken!)"
+        let started = LockedValue(false)
+        let tokenRequests = LockedRequestCounter()
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            guard request.url?.path == "/api/v1/billing/status",
+                  request.value(forHTTPHeaderField: "Authorization") == oldAuthorization else { return 0 }
+            started.set(true)
+            return 250_000_000
+        }
+        try await withPurchaseBillingState(handler: { request in
+            if request.url?.path == "/api/v1/auth/token" { tokenRequests.increment() }
+            if request.value(forHTTPHeaderField: "Authorization") == oldAuthorization {
+                return Self.response(for: request, statusCode: 401, body: #"{"code":"AUTH_INVALID_ACCESS_TOKEN"}"#)
+            }
+            return Self.response(for: request, statusCode: 200, body: Self.tier1BillingStatusResponse)
+        }) { appState, store in
+            let older = Task { @MainActor in try await appState.refreshBillingForPurchase() }
+            let didStart = await self.waitUntil { started.value }
+            XCTAssertTrue(didStart)
+            // Rotate only the token for the same owner/device; the captured
+            // account remains valid, but the newer request must win.
+            var current = Self.signedInRegistration
+            current.accessToken = Self.signedInRegistration.accessToken! + "refreshed-token"
+            store.saveRemotePushRegistration(current)
+            try await appState.refreshBillingForPurchase()
+            do {
+                try await older.value
+                XCTFail("A superseded purchase preflight must be cancelled")
+            } catch is CancellationError {
+            } catch {
+                XCTFail("Expected cancellation, got \(error)")
+            }
+            XCTAssertEqual(tokenRequests.value, 0)
+            XCTAssertEqual(store.loadRemotePushRegistration()?.accessToken, current.accessToken)
+            XCTAssertEqual(appState.communityProfile?.id, 7)
+            XCTAssertEqual(appState.billingStatus?.tierCode, "TIER1")
+            XCTAssertNil(appState.billingErrorMessage)
+        }
+    }
+
     func testBillingCheckoutCreatesPendingInvoiceBeforeStoreKitPurchase() async throws {
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "POST")
@@ -5255,6 +5379,29 @@ final class QuestionGenerationFlowTests: XCTestCase {
           "offset": 0
         }
         """
+
+    private func withPurchaseBillingState(
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data),
+        operation: @MainActor (AppState, SettingsStore) async throws -> Void
+    ) async throws {
+        let suiteName = "PurchaseBillingIdentityTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: makeClient(handler: handler),
+            appNotificationEventProvider: TestAppNotificationEventProvider()
+        )
+        appState.communityProfile = CommunityUserProfile(
+            id: 7, displayName: "Account A", status: "ACTIVE", provider: "GOOGLE", bio: "", avatarURL: nil
+        )
+        try await operation(appState, store)
+    }
 
     private func withProfilePageState(
         handler: ((URLRequest) throws -> (HTTPURLResponse, Data))? = nil,

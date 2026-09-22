@@ -2,7 +2,11 @@ package com.buddystudy.backend.community.adapter.outbound.persistence
 
 import com.buddystudy.backend.community.application.model.TopicSubscriptionPolicy
 import com.buddystudy.backend.community.application.port.outbound.TopicSubscriptionPort
+import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.error.ApiErrorCode
 import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.reactor.awaitSingleOrNull
+import org.springframework.http.HttpStatus
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
@@ -16,9 +20,12 @@ class TopicSubscriptionPersistenceAdapter(private val client: DatabaseClient) : 
 
     @Transactional
     override suspend fun replaceTopics(userId: Long, topics: List<String>) {
-        // Lock the account even when its subscription set is empty. Concurrent PUTs cannot interleave.
-        client.sql("select id from users where id = :userId for update").bind("userId", userId)
-            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }.one().awaitSingle()
+        // Lock and recheck the current account even when its set is empty. Concurrent PUTs cannot
+        // interleave or recreate private interests after a withdrawal wins the same user-row lock.
+        client.sql("select id from users where id = :userId and status = 'ACTIVE' for update").bind("userId", userId)
+            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }.one().awaitSingleOrNull() ?: throw ApiException(
+                HttpStatus.FORBIDDEN, ApiErrorCode.ACCOUNT_FORBIDDEN, "An active account is required.",
+            )
         client.sql("delete from user_topic_subscriptions where user_id = :userId").bind("userId", userId)
             .fetch().rowsUpdated().awaitSingle()
         topics.forEachIndexed { index, topic ->

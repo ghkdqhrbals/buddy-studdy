@@ -2232,6 +2232,11 @@ final class AppState: ObservableObject {
         hasCompletedOnboarding = true
         isCloudSyncEnabled = false
         communitySessionState = CommunitySessionStateStore(isSignedIn: true)
+        communityProfileState.profile = CommunityUserProfile(
+            id: 900,
+            displayName: isKorean ? "버디 학습자" : (isJapanese ? "Buddy学習者" : "Buddy Learner"),
+            status: "ACTIVE", provider: "SCREENSHOT", bio: "", avatarURL: nil
+        )
 
         func room(
             _ id: Int,
@@ -2393,6 +2398,7 @@ final class AppState: ObservableObject {
             )
         }
         recordsState.replace(with: records)
+        commonRecordsCacheIdentity = commonRecordsIdentity
 
         let authorNames = isKorean
             ? ["꾸준한개발자", "알고리즘메이트", "영어한스푼"]
@@ -2681,6 +2687,58 @@ final class AppState: ObservableObject {
             appRouteRequest = AppRouteRequest(route: .publicQuestions)
         }
     }
+    #if os(iOS)
+    /// Fixture history uses only synthetic in-memory content, never a stored
+    /// credential or a backend request. Production loaders keep their own fence.
+    private func makeAppStoreScreenshotLearningRecordsLoader(
+        studyID: Int,
+        scope: StudyLearningRecordScope
+    ) -> StudyLearningRecordsLoader? {
+        guard isAppStoreScreenshotFixtureEnabled, studyID > 0, let identity = studyLearningRecordsIdentity else { return nil }
+        let context = StudyLearningRecordsContext(identity: identity, studyID: studyID, scope: scope)
+        let studyIDs = scope == .node ? Set([studyID]) : backendStudySubtreeIDs(rootIDs: [studyID])
+        let records = recordsState.records.filter {
+            $0.id.hasPrefix("screenshot-record-") && $0.studyID.map(studyIDs.contains) == true
+        }
+        struct FixtureItem: Encodable {
+            let id: String
+            let source = "QUESTION"
+            let studyId: Int
+            let createdAt: Date
+            let questionRecord: StudyRecord
+            let record: StudyRecord
+        }
+        let items = records.compactMap { record -> BackendStudyLearningRecord? in
+            guard let studyID = record.studyID,
+                  let data = try? JSONEncoder().encode(FixtureItem(
+                    id: "question:\(record.id)", studyId: studyID, createdAt: record.question.createdAt,
+                    questionRecord: record, record: record
+                  )) else { return nil }
+            return try? JSONDecoder().decode(BackendStudyLearningRecord.self, from: data)
+        }
+        let page = BackendStudyLearningRecordsPage(items: items)
+        let isCurrent: @MainActor () -> Bool = { [weak self] in
+            self?.studyLearningRecordsIdentity == identity
+        }
+        return StudyLearningRecordsLoader(
+            context: context,
+            isCurrent: isCurrent,
+            cachedPage: { cursor in isCurrent() && cursor == nil ? page : nil },
+            loadPage: { cursor in
+                guard isCurrent(), cursor == nil, !Task.isCancelled else { throw CancellationError() }
+                return page
+            },
+            loadVoice: { _, _ in throw StudyLearningRecordsError.unavailable },
+            loadQuestion: { recordID, _ in
+                guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                guard let record = records.first(where: { $0.id == recordID }) else {
+                    throw StudyLearningRecordsError.unavailable
+                }
+                return record
+            }
+        )
+    }
+    #endif
     #endif
 
     deinit {
@@ -3243,6 +3301,11 @@ final class AppState: ObservableObject {
         studyID: Int,
         scope: StudyLearningRecordScope
     ) -> StudyLearningRecordsLoader? {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return makeAppStoreScreenshotLearningRecordsLoader(studyID: studyID, scope: scope)
+        }
+        #endif
         guard studyID > 0, let identity = studyLearningRecordsIdentity,
               let account = try? makeVoiceTutorRequestContext() else { return nil }
         let key = StudyLearningRecordsContext(identity: identity, studyID: studyID, scope: scope)
@@ -8086,33 +8149,35 @@ final class AppState: ObservableObject {
 
     func refreshBillingForPurchase() async throws {
         let refreshOrder = membershipRefreshOrder.issue()
-        let clientGeneration = backendClientGeneration
-        let sessionGeneration = communitySessionState.generation
         billingRefreshRequestID += 1
         let requestID = billingRefreshRequestID
         let currentBillingUseCase = billingUseCase
-        guard isCommunitySessionActive,
-              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
-              let registration = await registrationWithAccessToken(
-                storedRegistration,
-                reason: "billing-purchase-status"
-              ) else {
+        guard let account = try? makeVoiceTutorRequestContext() else {
+            throw AppStateError.missingRemotePushRegistration
+        }
+        let isCurrent: @MainActor () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return !Task.isCancelled && account.isCurrent() &&
+                requestID == self.billingRefreshRequestID &&
+                self.membershipRefreshOrder.isLatest(refreshOrder)
+        }
+        guard let registration = await registrationWithAccessToken(
+            account.registration,
+            reason: "billing-purchase-status",
+            validity: isCurrent
+        ) else {
+            guard isCurrent() else { throw CancellationError() }
             throw AppStateError.missingRemotePushRegistration
         }
         let resolvedStatus = try await performWithBackendIdentityRecovery(
             registration: registration,
             reason: "billing-purchase-status",
+            validity: isCurrent,
             operation: { recoveredRegistration in
                 try await currentBillingUseCase.status(registration: recoveredRegistration)
             }
         )
-        try Task.checkCancellation()
-        guard clientGeneration == backendClientGeneration,
-              isCurrentCommunitySession(sessionGeneration),
-              requestID == billingRefreshRequestID,
-              membershipRefreshOrder.isLatest(refreshOrder) else {
-            throw CancellationError()
-        }
+        guard isCurrent() else { throw CancellationError() }
         applyBillingStatus(resolvedStatus)
         billingErrorMessage = nil
     }

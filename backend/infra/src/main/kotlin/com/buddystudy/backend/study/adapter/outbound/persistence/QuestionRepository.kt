@@ -462,17 +462,18 @@ class QuestionRepository(
              or lower(coalesce(qs.explanation, '')) like :pattern
              or lower(u.display_name) like :pattern)
         """.trimIndent()
-        // Match both the canonical topic and completed localized topic projections. This lets a
-        // subscription made from an English/Japanese card match its Korean canonical question.
+        // Normalize both display labels in the same engine: JVM/Swift full Unicode lowercase
+        // can differ from MySQL lowercase (e.g. dotted I and Greek final sigma). The stored key
+        // still owns deduplication, while canonical/localized card labels remain followable.
         val followed = if (viewerUserId == null) "false" else """
             exists (
                 select 1 from user_topic_subscriptions subscription
                 where subscription.user_id = :viewerUserId
-                  and (subscription.topic_key = ${topicKeySql("q.topic")}
+                  and (${topicKeySql("subscription.topic")} = ${topicKeySql("q.topic")}
                        or exists (
                            select 1 from question_search topic_projection
                            where topic_projection.question_id = q.id
-                             and subscription.topic_key = ${topicKeySql("topic_projection.topic")}
+                             and ${topicKeySql("subscription.topic")} = ${topicKeySql("topic_projection.topic")}
                        ))
             )
         """.trimIndent()
@@ -529,7 +530,10 @@ class QuestionRepository(
         separators.forEach {
             expression = "replace($expression, $it, '')"
         }
-        return expression
+        // MySQL display columns are accent-insensitive by default. Keep the previous binary-key
+        // equality semantics; H2 already compares strings without accent folding and has no COLLATE expression.
+        return if (template.databaseClient.connectionFactory.metadata.name.equals("H2", ignoreCase = true)) expression
+        else "($expression collate utf8mb4_bin)"
     }
 
     override suspend fun findLikedPublicAnsweredVisibleTo(
