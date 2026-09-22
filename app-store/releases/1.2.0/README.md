@@ -1,10 +1,13 @@
 # BuddyStudy 1.2.0 candidate package
 
-Prepared on 2026-09-23 from app source `4cb14b7a`, then archived and deployed
-from `ee9f96cf9644acbcc2bab8535942d6697277d6a2`. The production backend is deployed;
-the signed iOS **1.2.0 (121)** was uploaded, processed as **VALID** and selected
+Prepared on 2026-09-23 from app source `4cb14b7a`, then archived
+from `ee9f96cf9644acbcc2bab8535942d6697277d6a2`. The production backend subsequently
+received the billing-monitoring correction recorded below; the iOS IPA is unchanged.
+The signed iOS **1.2.0 (121)** was uploaded, processed as **VALID** and selected
 on the 1.2.0 version, then **submitted for App Review at 04:15 KST**. UI and
-API readback confirm **WAITING_FOR_REVIEW**. This is not approval or public
+API readback confirm **WAITING_FOR_REVIEW**. The latest read-only API check at
+**2026-09-23 04:56:31 KST** confirms that state, manual release and the same VALID
+build 121. This is not approval or public
 release. Existing 1.1.0 evidence and reusable templates remain unchanged.
 
 The release operator's September 23 App Store Connect UI/API checks confirmed
@@ -58,7 +61,7 @@ only in the existing secure App Store Connect fields, never in these files.
 | Device evidence | Final signed-candidate iPhone checks remain unverified. The user explicitly approved proceeding without physical-iPad verification because no iPad is available; existing simulator evidence remains limited to rendering. |
 | Video/attachment | No 1.2.0 filename, attachment ID or URL is available. If attaching evidence or answering a current Apple request, use the actual candidate recording and verify delivery/access. Do not relabel the 1.1.0 (118) video as 1.2.0. |
 | Public share samples | Public QUESTION `156` returned correct ko/en/ja previews. No VOICE_TUTOR sample was present in the bounded live feed; its production sample remains pending. `{numericId}` in notes is a route pattern. |
-| Backend release | Image source `ee9f96cf`, deploy `35755734992`, digest `sha256:636d835f6b1eaaa70ea8b0f465b627b4c9946987e2177c858729234aeb8665c9`; local GET checks passed. Source contains V120, but production Flyway history was not queried. See [production evidence](../../../docs/verification/2026-09-23-personalized-feed-production.md). |
+| Backend release | Current image source `a11f14fe12469b802cb106d058f3a6caf5c34a6b`, build `35775313717`, deploy `35776237290`, digest `sha256:ec7c3ced13a0a821f927e60d477ab74de76ad675d9aba30851436b2626c39d3e`; see [billing correction and rollout evidence](../../../docs/observability/billing-entitlement-expiry-2026-09-23.md). The [05:01 KST anonymous feed/share recheck](../../../docs/verification/2026-09-23-personalized-feed-production.md) passed 23 GET requests and 65 assertions after this deployment. It does not establish authenticated personalization, iPhone behavior or webhook recovery. Source contains V120, but production Flyway history was not queried. |
 | Advertising state | Record actual production placement switch/provider behavior. Notes describe supported behavior, not a claim that a particular ad will appear. |
 
 The follow-up device inventory found the paired iPhone 16 Pro on iOS 26.6.2
