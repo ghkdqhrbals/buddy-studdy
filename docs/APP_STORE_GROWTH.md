@@ -30,9 +30,11 @@ on the editable 1.2.0 draft. Korean, English and Japanese names/subtitles,
 promotional text, descriptions, keywords and release notes match the source
 files. Forty screenshots across 10 display sets, custom TestFlight notes and
 current review notes were saved and read back. The published 1.1.0 listing has
-not been replaced. Manual release and existing ratings are retained; see the
-[candidate package](../app-store/releases/1.2.0/README.md) for the remaining
-owner-agreement, signed-candidate device and review-access checks.
+not been replaced. At 04:15 KST the user-authorized package was submitted and
+Apple reported WAITING_FOR_REVIEW. Manual release and existing ratings are
+retained; see the [submission record](verification/2026-09-23-app-store-submission.md)
+for the physical-iPad exception and remaining candidate-device/review-access
+verification limits.
 
 ## What can be influenced
 
@@ -235,9 +237,11 @@ and [accepted-asset manifest](../app-store/releases/1.2.0/screenshots/asc-upload
 record the exact files, order, dimensions and COMPLETE processing state.
 
 Read-only checks confirmed Education/Productivity categories and the existing
-eight available storefronts; those settings were preserved. Remaining work is
-owner agreement acceptance, candidate-specific physical iPhone/iPad and review
-access checks, review submission/approval, then manual publication. A screenshot
+eight available storefronts; those settings were preserved. The owner reported
+the account actions complete and Apple accepted the submission. Candidate-specific
+physical-iPhone and review-access checks remain unverified; physical-iPad
+verification is omitted at the user's explicit request. Apple approval and
+manual publication are still pending. A screenshot
 experiment has not been configured, and the small historical baseline cannot
 establish improved acquisition or retention.
 

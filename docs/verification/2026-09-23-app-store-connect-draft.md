@@ -3,6 +3,11 @@
 The next iOS version was created and its localized copy saved in App Store
 Connect. These are draft edits, not a release, approval or chart result.
 
+This report preserves the preparation checkpoint. The later 04:15 KST
+submission is now **WAITING_FOR_REVIEW**; see the
+[submission record](2026-09-23-app-store-submission.md) for current state and
+the user's physical-iPad exception.
+
 | Resource | Verified value |
 | --- | --- |
 | App | 6774108938 / io.github.ghkdqhrbals.StudyMate |
@@ -57,10 +62,11 @@ replaced it. The unused 1170-pixel candidates remain explicitly labelled as
 rendering evidence only. The [complete API read-back](../../app-store/releases/1.2.0/screenshots/asc-upload-verification.json)
 records accepted files, dimensions, checksums and the draft/build state.
 
-The Apple agreement banner remained and no agreement was accepted. App Store
+At the preparation checkpoint, the Apple agreement banner remained and no
+agreement was accepted by the agent. App Store
 Connect states that account-owner acceptance is required to update/submit apps;
 successful draft editing/upload did not establish that restriction was cleared.
-No review submission, approval or manual release was performed.
+No review submission, approval or manual release had occurred at that checkpoint.
 
 The [candidate package](../../app-store/releases/1.2.0/README.md) separates the
 completed deployment from remaining signed-candidate device checks, review

@@ -3,16 +3,18 @@
 Prepared on 2026-09-23 from app source `4cb14b7a`, then archived and deployed
 from `ee9f96cf9644acbcc2bab8535942d6697277d6a2`. The production backend is deployed;
 the signed iOS **1.2.0 (121)** was uploaded, processed as **VALID** and selected
-on the 1.2.0 draft. This is not review submission or approval. Existing 1.1.0
-evidence and reusable templates remain unchanged.
+on the 1.2.0 version, then **submitted for App Review at 04:15 KST**. UI and
+API readback confirm **WAITING_FOR_REVIEW**. This is not approval or public
+release. Existing 1.1.0 evidence and reusable templates remain unchanged.
 
-The release operator's September 23 App Store Connect UI/API checks confirmed a
-**1.2.0 draft in Prepare for Submission**, with **build 121 selected**, **manual
+The release operator's September 23 App Store Connect UI/API checks confirmed
+**1.2.0 waiting for review**, with **build 121 selected**, **manual
 release**, and **existing ratings retained**. The published 1.1.0 (119) remains
-available. The updated Apple agreement banner remains; draft creation did not
-establish permission to submit. The operator subsequently saved the Korean,
+available. After the owner reported completing the requested account actions,
+the authenticated UI no longer showed the updated-agreement banner and Apple
+accepted the submission. The agent did not accept legal terms. The Korean,
 English (`en-US`) and Japanese version `promotionalText`, `description`,
-`whatsNew` and `keywords` to match
+`whatsNew` and `keywords` were saved to match
 [`app-store/metadata/version-localizations.json`](../../metadata/version-localizations.json).
 Support and marketing URLs already matched. App Info names/subtitles were also
 saved for all three locales from
@@ -20,8 +22,9 @@ saved for all three locales from
 The new English review notes and three-language TestFlight notes are saved and
 read back. Forty screenshots across 10 display sets are COMPLETE; see
 [the upload record](screenshots/asc-upload-verification.json).
-Saved draft metadata is not published store copy. See the
-[1.2.0 draft](https://appstoreconnect.apple.com/apps/6774108938/distribution/ios/version/inflight).
+Submitted metadata is not yet published store copy. See the
+[review submission](https://appstoreconnect.apple.com/apps/6774108938/distribution/reviewsubmissions/details/7bc80e37-ea6e-4e63-9f39-a504cc216bb0)
+and [submission evidence](../../../docs/verification/2026-09-23-app-store-submission.md).
 
 ## Contents
 
@@ -33,6 +36,8 @@ Saved draft metadata is not published store copy. See the
 - `testflight-build-localizations.json`: What to Test in the existing uploader's
   required `en-US`, `ko`, `ja` string schema, each at most 4,000 characters.
 - `TESTFLIGHT_GUIDE.md`: manual test cases and evidence to retain.
+- `submission-verification.json`: credential-free API receipt for the exact
+  submission, single version item and selected build 121.
 - `FEATURING_DRAFT.md`: English/Korean editorial pitch with launch/evidence
   fields still to finalize; no nomination has been submitted.
 
@@ -45,12 +50,12 @@ only in the existing secure App Store Connect fields, never in these files.
 | Field | Required action; current state |
 | --- | --- |
 | Source/build | Verified 1.2.0 (121), source `ee9f96cf`, archive run `35754933809`, local upload success, Apple VALID / APP_STORE_ELIGIBLE / non-exempt encryption false. IPA SHA-256 `a93f0f1f9f48d43b7ccd5bc53e21075f601c4fef1eeb263cfaf418c10203ab06`; see [signed-candidate evidence](../../../docs/verification/2026-09-23-ios-release-candidate.md). |
-| App Store version ID | `5bb7c17c-3765-4b1b-b03c-00d8da654a2e`, 1.2.0 / PREPARE_FOR_SUBMISSION / MANUAL, selected build 121; see [draft verification](../../../docs/verification/2026-09-23-app-store-connect-draft.md). |
+| App Store version ID | `5bb7c17c-3765-4b1b-b03c-00d8da654a2e`, 1.2.0 / WAITING_FOR_REVIEW / MANUAL, selected build 121; submission `7bc80e37-ea6e-4e63-9f39-a504cc216bb0`. |
 | TestFlight availability | Read-only API check at 2026-09-23 02:15:38 KST: build 121 is IN_BETA_TESTING and already belongs to the existing one-tester internal group. No new invitation or group change is needed for that tester; verify the device uses the matching existing TestFlight account. |
 | Review access | Existing secure account/password fields are present and preserved. Working login and required-term state still need candidate verification. |
 | Review contact | Existing first/last name, email and phone fields are present and preserved. No values were invented or copied into this package. |
 | Paid-feature access | Confirm how the reviewer can access Plus/Pro Voice Tutor and remaining voice time. A free account alone cannot verify voice; do not fabricate an entitlement or subscription. |
-| Device evidence | Record exact physical iPhone/iPad models, OS versions, candidate version/build and actual manual results. Final signed-candidate and physical-iPad checks are pending. |
+| Device evidence | Final signed-candidate iPhone checks remain unverified. The user explicitly approved proceeding without physical-iPad verification because no iPad is available; existing simulator evidence remains limited to rendering. |
 | Video/attachment | No 1.2.0 filename, attachment ID or URL is available. If attaching evidence or answering a current Apple request, use the actual candidate recording and verify delivery/access. Do not relabel the 1.1.0 (118) video as 1.2.0. |
 | Public share samples | Public QUESTION `156` returned correct ko/en/ja previews. No VOICE_TUTOR sample was present in the bounded live feed; its production sample remains pending. `{numericId}` in notes is a route pattern. |
 | Backend release | Image source `ee9f96cf`, deploy `35755734992`, digest `sha256:636d835f6b1eaaa70ea8b0f465b627b4c9946987e2177c858729234aeb8665c9`; local GET checks passed. Source contains V120, but production Flyway history was not queried. See [production evidence](../../../docs/verification/2026-09-23-personalized-feed-production.md). |
@@ -59,8 +64,9 @@ only in the existing secure App Store Connect fields, never in these files.
 The follow-up device inventory found the paired iPhone 16 Pro on iOS 26.6.2
 (23G90), with BuddyStudy **1.1.0 (16)** and TestFlight **4.3.1** installed; it
 does not yet establish installation of 1.2.0 (121). No physical iPad was listed.
-iPhone Mirroring selected this same phone and requested its owner's unlock/
-connection confirmation. Candidate interaction stopped at that prompt.
+iPhone Mirroring selected this same phone. After owner confirmation it advanced
+to "iPhone in use; lock iPhone to connect", then timed out; a retry showed the
+same in-use condition. No candidate interaction or reviewer login was completed.
 
 Do not authenticate the permanent review account from a parallel CLI/device
 just to inspect it: the current account-session policy revokes its other active
@@ -76,9 +82,9 @@ notes instead of inventing an artifact; retain truthful device evidence.
 
 ## Release checklist
 
-- [ ] Account owner accepts the updated Apple agreement and confirms the
-  App Store Connect submission restriction is cleared. The agent has not
-  accepted legal terms on the owner's behalf.
+- [x] Owner reported the requested account actions complete; the authenticated
+  UI no longer showed the agreement blocker and Apple accepted the submission.
+  The agent did not accept legal terms on the owner's behalf.
 - [x] Deploy the integrated backend image, including V120 and share/AASA routes,
   through the module-scoped GitHub Actions/personal-deploy path. Preserve the
   production billing/translation fixes included in this source. Do not use SSH
@@ -95,10 +101,12 @@ notes instead of inventing an artifact; retain truthful device evidence.
   `app_review_candidate=false` for upload before deliberate build selection:
   that flag otherwise writes the default What to Test and selects an editable
   store version. It does not automatically select this directory's drafts.
-- [ ] Run the [signed-candidate guide](TESTFLIGHT_GUIDE.md) on physical iPhone
-  **and iPad**, including production interest persistence, account changes,
+- [ ] Run the [signed-candidate guide](TESTFLIGHT_GUIDE.md) on physical iPhone,
+  including production interest persistence, account changes,
   voice, purchases, draft protection and installed/uninstalled Universal Links.
   Capture candidate-specific results; resolve any failures.
+- [x] Record the user's release-specific exception for unavailable physical-iPad
+  verification. Do not report this exception as a passed device test.
 - [ ] Finish the required fields above. Verify the dedicated account works
   without an unavailable OTP/invitation step and preserve it during deletion
   tests. Confirm actual paid-feature access separately.
@@ -111,11 +119,13 @@ notes instead of inventing an artifact; retain truthful device evidence.
   slot and replaced with actual 1206 × 2622 captures; failed uploads were removed.
 - [x] Select build 121 using the exact 1.2.0 version ID and read back the
   version/build relationship. Manual release and existing ratings are retained.
-- [ ] Recheck candidate device results and working review access before
-  submitting; presence of credential fields alone is not a login check.
-- [ ] Submit only the complete candidate package; record Apple confirmation
-  separately from build upload/selection. Approval and later manual release
-  remain distinct operations.
+- [ ] Finish candidate-device and working-review-access checks. These were not
+  established by the submission; presence of credential fields is not a login check.
+- [x] Submit the prepared package on the user's instruction to proceed and
+  record Apple acceptance separately from upload/selection. Exact version 1.2.0
+  and build 121 are WAITING_FOR_REVIEW; see `submission-verification.json`.
+- [ ] Obtain Apple approval and perform the later manual release. Submission
+  does not establish approval, publication or chart improvement.
 
 The integrated Debug verification already recorded 278 physical-iPhone tests,
 five simulator source checks and 199 backend tests, including 62 with MySQL.

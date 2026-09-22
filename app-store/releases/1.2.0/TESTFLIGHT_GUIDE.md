@@ -8,7 +8,12 @@ test content/accounts. Preserve the permanent review account and personal drafts
 
 Record build number/source, device model/OS, app language, account role without
 credentials, backend deployment, steps, expected/actual result and redacted
-evidence for each case. Test ko/en/ja and both physical iPhone/iPad layouts.
+evidence for each case. Test ko/en/ja on the physical iPhone.
+
+For this release, the user explicitly approved proceeding without physical-iPad
+verification on 2026-09-23 because no iPad is available. Existing iPad simulator
+coverage is unchanged; it does not establish a physical-iPad pass. This exception
+does not waive the other candidate checks below.
 
 Build **1.2.0 (121)** is already in the existing internal TestFlight group
 (`IN_BETA_TESTING`, verified 2026-09-23 02:15:38 KST). Use the existing tester's
@@ -40,7 +45,7 @@ This guide does not authorize purchases, entitlement grants or quota resets.
 | Interests / 관심주제 | Sign in, open Home > All Studies > Interests, add/remove topics and Save. Up to 30 topics, each within the 120 UTF-16-unit input limit; duplicates normalize. Open another session/device and verify account-owned persistence. Saving/following must not create a study or spend quota. Cancel/failing requests must preserve the appropriate saved state/editable draft. |
 | Feed / 정렬·페이지 | Compare Recommended, newest, most-viewed and most-liked, with All/Following scopes and search. Recommended puts followed topics first, then engagement/freshness; it is not strict descending views. Scroll beyond 20 questions and change filters during loading. Do not see old-filter pages, private/incomplete/deleted records or blocked-author content. 팔로우가 없거나 결과가 없을 때 안내와 다음 행동이 보여야 합니다. |
 | Inline follow / 바로 팔로우 | Follow/unfollow from a public question menu and confirm Interests plus feed refresh after a successful save. Sign out or change accounts during a delayed request; no old account's interests/liked items should reappear. Guests receive general recommendations and sign-in entry points for account actions. |
-| Public links / 공개 링크 | Use actual production share actions for eligible QUESTION and VOICE_TUTOR records. On physical iPhone/iPad, tap links from another app with BuddyStudy cold and warm; verify the same canonical public record, saved language and draft preservation. On a device without the app, verify localized preview and App Store navigation; after installation reopen the original link. No automatic deferred link attribution is promised. |
+| Public links / 공개 링크 | Use actual production share actions for eligible QUESTION and VOICE_TUTOR records. On the physical iPhone, tap links from another app with BuddyStudy cold and warm; verify the same canonical public record, saved language and draft preservation. On a device without the app, verify localized preview and App Store navigation; after installation reopen the original link. No automatic deferred link attribution is promised. |
 | Share privacy / 공유 범위 | Web preview contains topic/question only, never answer, score, author identity, session transcript or recording. Make the owned record private/delete it and open the URL again: expect generic 404 without question metadata. Never publish private material just to test. 음성 세션 ID가 아니라 공개 기록 ID를 사용합니다. Crawlers/web landings must not raise app view counts. |
 | Voice / 음성 튜터 | Free cannot start voice; a verified Plus/Pro account with remaining time can start using Home's phone button. Verify microphone denial/recovery, speaker/headset behavior, pause/continue and explicit end. Brief background/lock follows the active-call contract; account change/interruption/terminal failure cleans up correctly. Recording is a separate per-call choice. 완료 학습 기록만 공개할 수 있고 전체 통화/녹음은 공개되지 않아야 합니다. |
 | Billing / 결제 | Profile > Membership & Billing: Free 30, Plus 300, Pro 1,000 monthly questions; paid tiers each have separate 60 voice minutes and ad-free feeds. Verify displayed price/period/renewal/legal links, restore and cancellation. Open/cancel the system sheet without purchase for presentation testing. A separately authorized sandbox transaction should verify server fulfillment, restore and correct Apple-account ownership; do not assume a new app account resets introductory eligibility. |
@@ -61,7 +66,9 @@ checks supplement, rather than prove, system prompt display in a release build.
 여부와 앱의 요청 시도는 구분해야 합니다.
 
 Capture real backend persistence/ownership/link results separately from the
-local screenshot fixtures. Check the iPad's supported orientations, sheets,
-keyboard, safe areas and long localized topic labels; iPhone evidence does not
-establish iPad verification. Record remaining failures in the
+local screenshot fixtures. Retain the existing iPad simulator evidence with its
+recorded scope and limits. Physical-iPad checks of orientations, sheets,
+keyboard, safe areas and long localized topic labels are omitted under the
+release-specific approval above; iPhone or simulator evidence must not be
+reported as a physical-iPad pass. Record remaining failures in the
 [release checklist](README.md) before selecting the candidate for submission.

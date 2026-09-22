@@ -167,6 +167,11 @@ records those separate draft-content checks.
 
 ## Scope of completion
 
+Subsequent release state: **1.2.0 (121) was submitted at 04:15 KST and is
+WAITING_FOR_REVIEW**, with manual release retained. The separate
+[submission record](2026-09-23-app-store-submission.md) records Apple acceptance,
+the user's physical-iPad exception and remaining candidate-device limits.
+
 At **2026-09-23 02:15:38 KST**, a separate read-only API check established
 `internalBuildState=IN_BETA_TESTING` and
 `externalBuildState=READY_FOR_BETA_SUBMISSION`. The existing internal group
