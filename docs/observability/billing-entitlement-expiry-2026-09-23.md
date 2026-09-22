@@ -73,6 +73,21 @@ failures. Recovery of the mismatch metric is not evidence of successful
 webhook delivery. No signature fallback, key rotation, subscription rewrite,
 or webhook retry was performed during the read-only investigation.
 
+The existing production V2 API key also returns HTTP 403 for the documented
+[integration GET API](https://www.revenuecat.com/docs/api-v2/integration),
+which requires `project_configuration:integrations:read`. Both existing project
+keys have Project configuration set to `No access`. A guarded local recovery
+procedure is prepared to query only the production integration, compare its
+returned signing key without printing it, and conditionally update only
+`REVENUECAT_WEBHOOK_SIGNING_SECRET` in the existing AWS secret. The separate
+confirmation for temporarily granting Integrations Configuration `Read only`
+and then restoring `No access` is pending; no permission or secret has changed.
+
+Once authentication is repaired, verify it with a RevenueCat `TEST` delivery.
+Do not indiscriminately replay historical renewal events without checking newer
+subscription ownership and payment state. TEST receipt processing does not
+change billing ownership or entitlements.
+
 ## Verification and rollout
 
 The original query failed two of the seven new MySQL scenarios: expired access
@@ -106,3 +121,20 @@ BUDDYSTUDY_TEST_MYSQL_PORT=33079 REDIS_HOST=127.0.0.1 REDIS_PORT=36379 \
 The rollout is scoped to the backend image and the personal-deploy backend
 workflow. Image compilation runs on GitHub-hosted runners; no production SSH,
 monitoring rollout, or GitHub Actions runtime health probes are used.
+
+- Implementation commit: `a11f14fe12469b802cb106d058f3a6caf5c34a6b`, branch
+  `codex/fix-billing-entitlement-alert-20260923`.
+- [Backend image build](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/35775313717)
+  succeeded with `backend_runtime=jvm` and `dispatch_deploy=false`.
+- Published immutable image:
+  `ghcr.io/ghkdqhrbals/buddystudy-backend@sha256:ec7c3ced13a0a821f927e60d477ab74de76ad675d9aba30851436b2626c39d3e`.
+- [Backend deployment](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/35776237290)
+  succeeded using the reviewed backend-only workflow revision
+  `1e5cdb56ceca607fe5f4c3c2d6a2a167394d1915` with `promote_swarm=false` and
+  `notify_slack=false`. The workflow confirmed the exact image in the submitted
+  Swarm service specification; runtime observation was performed separately.
+- After rollout, production Grafana showed the `19:52:16.936Z` INFO snapshot
+  with all seven counters zero, including `entitlementMismatches=0`.
+  This confirms successful collection after deployment; the local regression
+  tests establish the expiry comparison behavior without inducing a production
+  billing anomaly.
