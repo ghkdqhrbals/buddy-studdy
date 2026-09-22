@@ -132,10 +132,15 @@ class BillingLifecycleMetricsReporter(
             """.trimIndent(),
         ),
         entitlementMismatches = scalar(
+            // Compare effective access, not a historical paid tier awaiting reconciliation.
+            // BillingService ignores expired ACTIVE App Store projections. Keep the expected
+            // subscription predicate aligned with the existing entitlement projector.
             """
             select count(*) from (
                 select ids.user_id,
-                       coalesce(e.tier_code, 'TIER1') projected_tier,
+                       case when e.source = 'APP_STORE' and e.access_status = 'ACTIVE'
+                                  and e.expires_at <= utc_timestamp(6) then 'TIER1'
+                            else coalesce(e.tier_code, 'TIER1') end projected_tier,
                        coalesce((
                            select s.tier_code
                            from subscriptions s
