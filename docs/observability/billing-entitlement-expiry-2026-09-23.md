@@ -91,19 +91,37 @@ instead direct the operator to Dashboard `Rotate secret`; the existing secret
 cannot be retrieved. A sample response containing this field is not evidence
 that GET can recover it.
 
-The next step is operator rotation in the existing production integration.
-Computer-control credential-change rules require that Dashboard action to be
-performed by the user. A local owner-only input file and guarded AWS update
-procedure are prepared so the new value need not appear in chat or logs. The
-procedure changes only `REVENUECAT_WEBHOOK_SIGNING_SECRET`, checks for concurrent
-AWS changes, verifies the stored result, and removes the input after success.
-Backend redeployment must then load the new secret. Rotation, secret update,
-redeployment for this credential, and successful TEST delivery remain pending.
+### Credential recovery completed
 
-Once authentication is repaired, verify it with a RevenueCat `TEST` delivery.
-Do not indiscriminately replay historical renewal events without checking newer
-subscription ownership and payment state. TEST receipt processing does not
-change billing ownership or entitlements.
+The user rotated the secret in the existing production integration and supplied
+the replacement. The guarded AWS procedure changed only
+`REVENUECAT_WEBHOOK_SIGNING_SECRET` in `buddystudy/prod`, `ap-northeast-2`.
+It checked for concurrent changes, conditionally promoted the prepared version,
+read back the complete secret to verify all other fields were unchanged, and
+removed the local owner-only input file. No key value is retained in this report.
+
+| Evidence | Result |
+| --- | --- |
+| AWS current version | `10a477a6-0cf1-41b3-99e3-62e86f3af00f`; prior version `c3566e59-61df-4556-aefe-7334bde0ca4d` |
+| Backend configuration redeployment | [35821046597](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/35821046597), success at `2026-09-23T05:07:26Z` |
+| Packaged code | Existing `a11f14fe` image, digest `sha256:ec7c3ced13a0a821f927e60d477ab74de76ad675d9aba30851436b2626c39d3e`; no rebuild or source change |
+| Deployment scope | Same reviewed deploy ref `1e5cdb56`, JVM, `promote_swarm=false`, `notify_slack=false`; Slack step skipped |
+| RevenueCat TEST | `D8F7FAC2-90C8-4B01-8BCE-3B0A24D10C96`, correct App Store app ID, sandbox TEST event |
+| Provider response | HTTP **200**, empty body, `Date: Wed, 23 Sep 2026 05:08:21 GMT` |
+| Matching production request | `3075a02c-13d7-4594-9b9e-a33241e077ee`; Loki reports the same TEST event, status **200**, duration **186.31 ms** |
+| Subsequent lifecycle snapshot | `2026-09-23T05:08:48.416Z` INFO; all seven counters zero, including webhook lag and entitlement mismatches |
+
+The provider response and matching server log establish successful HMAC/app-ID
+validation and durable receipt acceptance with the new key. The TEST branch is
+designed to finish as `IGNORED` without changing billing ownership or entitlements;
+its individual database row was not independently queried. No historical renewal
+was replayed, and prior exhausted provider deliveries were not retroactively
+recovered by this test. Check current ownership/payment state before any replay.
+The development integration's separate 502 failure remains outside this repair.
+
+Runtime verification was performed manually after deployment. No CI health gate,
+production SSH, monitoring rollout, fallback authentication, or new API permission
+was introduced. The temporary integration read permission remains removed.
 
 ## Verification and rollout
 
