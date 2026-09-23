@@ -1799,6 +1799,63 @@ final class MobileHomeStudyPresentationPolicyTests: XCTestCase {
     }
 }
 
+final class HomeSearchUsabilityTests: XCTestCase {
+    @MainActor
+    func testErasingTheFieldStillInvalidatesTheOutstandingFilteredResponse() {
+        var state = CommunityFeedStateStore()
+        let oldRequest = state.beginLoading(query: "Swift")
+        state.offset = 20
+        state.totalCount = 42
+
+        XCTAssertTrue(state.clearSearch(draftQuery: ""))
+        XCTAssertFalse(state.isCurrentRequest(oldRequest))
+        XCTAssertEqual(state.query, "")
+        XCTAssertEqual(state.offset, 0)
+        XCTAssertEqual(state.totalCount, 0)
+        XCTAssertFalse(state.isLoading)
+    }
+
+    @MainActor
+    func testClearingPublicSearchResetsFilteredPageButPreservesScopeAndSort() {
+        let suite = "HomeSearchUsabilityTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
+        appState.communitySearchText = "  Swift  "
+        let originalScope = appState.communityFeedScope
+        let originalSort = appState.communityFeedSort
+        appState.communityOffset = 20
+        appState.communityTotalCount = 42
+        appState.isLoadingCommunityQuestions = true
+        appState.communityErrorMessage = "previous search failed"
+
+        XCTAssertTrue(appState.clearCommunitySearch())
+        XCTAssertEqual(appState.communitySearchText, "")
+        XCTAssertEqual(appState.communityOffset, 0)
+        XCTAssertEqual(appState.communityTotalCount, 0)
+        XCTAssertFalse(appState.isLoadingCommunityQuestions)
+        XCTAssertNil(appState.communityErrorMessage)
+        XCTAssertEqual(appState.communityFeedScope, originalScope)
+        XCTAssertEqual(appState.communityFeedSort, originalSort)
+    }
+
+    @MainActor
+    func testClosingAnEmptySearchDoesNotDiscardTheExistingUnfilteredPage() {
+        let suite = "HomeSearchUsabilityTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
+        appState.communitySearchText = "  "
+        appState.communityOffset = 20
+        appState.communityTotalCount = 42
+
+        XCTAssertFalse(appState.clearCommunitySearch())
+        XCTAssertEqual(appState.communitySearchText, "")
+        XCTAssertEqual(appState.communityOffset, 20)
+        XCTAssertEqual(appState.communityTotalCount, 42)
+    }
+}
+
 final class PageAccessPolicyTests: XCTestCase {
     @MainActor
     func testNotificationStudyListRouteUsesExistingHomeMyStudiesScreen() {
@@ -2255,6 +2312,43 @@ final class DeveloperAccessPolicyTests: XCTestCase {
 }
 
 final class NotificationStateStoreTests: XCTestCase {
+    @MainActor
+    func testFailedNotificationPagesPreserveRowsAndRetryModeWithoutAutomaticRetry() {
+        let notification = BackendAppNotification(
+            id: "kept", type: "QUESTION", title: "Question", body: "Saved notification",
+            isRead: false, createdAt: Date(timeIntervalSince1970: 1)
+        )
+        var store = NotificationStateStore(notifications: [notification], unreadCount: 1, totalCount: 3)
+
+        for reset in [false, true] {
+            store.beginLoading()
+            XCTAssertFalse(store.canLoadMore(current: notification))
+            store.applyError("Please try again.")
+            store.failLoading(reset: reset)
+            store.finishLoading()
+
+            XCTAssertEqual(store.notifications, [notification])
+            XCTAssertEqual(store.unreadCount, 1)
+            XCTAssertEqual(store.totalCount, 3)
+            XCTAssertEqual(store.failedLoadReset, reset)
+            XCTAssertFalse(store.canLoadMore(current: notification))
+        }
+
+        store.beginLoading()
+        XCTAssertNil(store.errorMessage)
+        XCTAssertNil(store.failedLoadReset)
+        store.applyPage(
+            BackendNotificationsPage(notifications: [notification], unreadCount: 1, totalCount: 3),
+            reset: true
+        )
+        store.finishLoading()
+        XCTAssertTrue(store.canLoadMore(current: notification))
+        store.reset()
+        XCTAssertTrue(store.notifications.isEmpty)
+        XCTAssertNil(store.failedLoadReset)
+        XCTAssertNil(store.errorMessage)
+    }
+
     @MainActor
     func testMarkAllReadUpdatesEveryLoadedNotificationAndUnreadCount() {
         let readAt = Date(timeIntervalSince1970: 100)
@@ -3066,6 +3160,140 @@ final class StudyOutlinePolicyTests: XCTestCase {
 }
 
 final class RecordsPaginationTests: XCTestCase {
+    @MainActor
+    func testDestructiveClearShowsLoadedEmptyStateWhileIdentityClearReturnsToInitialState() {
+        let record = recoveryTestRecord(id: "deleted")
+        var state = RecordsStateStore(records: [record])
+        state.applyPage(BackendRecordsPage(records: [record], totalCount: 3, limit: 30, offset: 0), reset: true)
+        state.failPageLoad(reset: false)
+
+        state.clear(loaded: true)
+
+        XCTAssertTrue(state.records.isEmpty)
+        XCTAssertTrue(state.hasLoadedPage)
+        XCTAssertFalse(state.isLoadingPage)
+        XCTAssertNil(state.failedPageReset)
+        XCTAssertEqual(state.totalCount, 0)
+        XCTAssertEqual(state.loadedBackendCount, 0)
+        XCTAssertFalse(state.canLoadMore)
+
+        state.clear()
+        XCTAssertFalse(state.hasLoadedPage)
+        XCTAssertFalse(state.isLoadingPage)
+        XCTAssertNil(state.failedPageReset)
+    }
+
+    @MainActor
+    func testInitialRecordFailureIsDistinctFromSuccessfullyLoadedEmptyPage() {
+        var state = RecordsStateStore()
+        XCTAssertFalse(state.hasLoadedPage)
+        XCTAssertTrue(state.beginPageLoad())
+        state.failPageLoad(reset: true)
+        state.finishPageLoad()
+        XCTAssertFalse(state.hasLoadedPage)
+        XCTAssertEqual(state.failedPageReset, true)
+        XCTAssertFalse(state.isLoadingPage)
+
+        XCTAssertTrue(state.beginPageLoad())
+        XCTAssertNil(state.failedPageReset)
+        state.applyPage(BackendRecordsPage(records: [], totalCount: 0, limit: 30, offset: 0), reset: true)
+        state.finishPageLoad()
+        XCTAssertTrue(state.hasLoadedPage)
+        XCTAssertFalse(state.canLoadMore)
+        state.clear()
+        XCTAssertFalse(state.hasLoadedPage)
+        XCTAssertNil(state.failedPageReset)
+    }
+
+    @MainActor
+    func testFailedRecordPagePreservesLoadedRowsAndOffsetUntilRetrySucceeds() {
+        let record = recoveryTestRecord(id: "kept")
+        var state = RecordsStateStore(records: [record])
+        state.applyPage(BackendRecordsPage(records: [record], totalCount: 3, limit: 30, offset: 0), reset: true)
+
+        XCTAssertTrue(state.beginPageLoad())
+        state.failPageLoad(reset: false)
+        state.finishPageLoad()
+        XCTAssertEqual(state.records, [record])
+        XCTAssertEqual(state.loadedBackendCount, 1)
+        XCTAssertEqual(state.totalCount, 3)
+        XCTAssertEqual(state.failedPageReset, false)
+
+        XCTAssertTrue(state.beginPageLoad())
+        state.applyPage(
+            BackendRecordsPage(records: [recoveryTestRecord(id: "next")], totalCount: 3, limit: 30, offset: 1),
+            reset: false
+        )
+        state.finishPageLoad()
+        XCTAssertEqual(state.loadedBackendCount, 2)
+        XCTAssertNil(state.failedPageReset)
+        XCTAssertTrue(state.canLoadMore)
+    }
+
+    @MainActor
+    func testSearchFailurePreservesRowsAndOffsetForAppendAndRefresh() throws {
+        var state = SearchStateStore()
+        let record = recoveryTestRecord(id: "search-kept")
+        let first = try XCTUnwrap(state.beginRecordPage(query: "Swift", reset: true))
+        state.applyRecordPage(
+            BackendRecordsPage(records: [record], totalCount: 3, limit: 30, offset: 0),
+            query: "Swift", reset: true, requestID: first
+        )
+        state.finishRecordPage(query: "Swift", requestID: first)
+
+        for reset in [false, true] {
+            let request = try XCTUnwrap(state.beginRecordPage(query: "Swift", reset: reset))
+            XCTAssertEqual(state.recordResults, [record])
+            state.failRecordPage(query: "Swift", reset: reset, requestID: request)
+            state.finishRecordPage(query: "Swift", requestID: request)
+            XCTAssertEqual(state.failedRecordPageReset, reset)
+            XCTAssertEqual(state.recordResults, [record])
+            XCTAssertEqual(state.recordLoadedCount, 1)
+            XCTAssertEqual(state.recordTotalCount, 3)
+            XCTAssertFalse(state.isLoadingRecordPage)
+        }
+
+        let retry = try XCTUnwrap(state.beginRecordPage(query: "Swift", reset: true))
+        state.applyRecordPage(
+            BackendRecordsPage(records: [], totalCount: 0, limit: 30, offset: 0),
+            query: "Swift", reset: true, requestID: retry
+        )
+        state.finishRecordPage(query: "Swift", requestID: retry)
+        XCTAssertEqual(state.recordResults, [])
+        XCTAssertNil(state.failedRecordPageReset)
+        XCTAssertFalse(state.canLoadMoreRecordResults)
+    }
+
+    @MainActor
+    func testStaleSearchFailureCannotReplaceNewQueryOrSurviveClear() throws {
+        var state = SearchStateStore()
+        let old = try XCTUnwrap(state.beginRecordPage(query: "old", reset: true))
+        let current = try XCTUnwrap(state.beginRecordPage(query: "new", reset: true))
+        state.failRecordPage(query: "old", reset: true, requestID: old)
+        state.finishRecordPage(query: "old", requestID: old)
+        XCTAssertEqual(state.recordQuery, "new")
+        XCTAssertTrue(state.isLoadingRecordPage)
+        XCTAssertNil(state.failedRecordPageReset)
+
+        state.failRecordPage(query: "new", reset: true, requestID: current)
+        state.finishRecordPage(query: "new", requestID: current)
+        XCTAssertEqual(state.failedRecordPageReset, true)
+        state.clearRecordResults()
+        state.failRecordPage(query: "new", reset: true, requestID: current)
+        XCTAssertNil(state.recordResults)
+        XCTAssertNil(state.failedRecordPageReset)
+        XCTAssertFalse(state.isLoadingRecordPage)
+    }
+
+    private func recoveryTestRecord(id: String) -> StudyRecord {
+        StudyRecord(
+            id: id,
+            question: QuestionItem(question: "Saved question", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 1)),
+            topic: "Swift",
+            difficulty: .level5
+        )
+    }
+
     func testStudyRecordsAreNotTrimmedByLegacyHistoryPreference() {
         let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3377,6 +3605,124 @@ private final class StudyPreparedPresentationRejectingURLProtocol: URLProtocol, 
 #endif
 
 #if os(iOS)
+@MainActor
+final class TopicSubscriptionEditorPolicyTests: XCTestCase {
+    func testSuggestionPreservesTypedInputAndBothAreIncludedWhenSaving() {
+        var draft = CommunityTopicSubscriptionEditorDraft()
+        draft.prepareIfNeeded(["Swift"])
+        draft.input = "  Database   design  "
+
+        XCTAssertTrue(draft.addSuggestion("C++"))
+        XCTAssertEqual(draft.input, "  Database   design  ")
+        XCTAssertEqual(draft.topicsForSaving(), ["Swift", "C++", "Database design"])
+        XCTAssertEqual(draft.input, "")
+    }
+
+    func testUnchangedOrRevertedDraftDoesNotProduceSavePayload() {
+        var draft = CommunityTopicSubscriptionEditorDraft()
+        XCTAssertFalse(draft.hasChanges)
+        XCTAssertNil(draft.topicsForSaving())
+        draft.prepareIfNeeded(["Swift"])
+        draft.input = " \n\t "
+        XCTAssertFalse(draft.hasChanges)
+        XCTAssertNil(draft.topicsForSaving())
+
+        draft.remove("Swift")
+        XCTAssertTrue(draft.hasChanges)
+        XCTAssertEqual(draft.topicsForSaving(), [])
+        XCTAssertTrue(draft.addSuggestion("Swift"))
+        XCTAssertFalse(draft.hasChanges)
+        XCTAssertNil(draft.topicsForSaving())
+    }
+
+    func testDraftSnapshotAndSavePayloadSurviveRefreshAndRetry() {
+        var draft = CommunityTopicSubscriptionEditorDraft()
+        draft.prepareIfNeeded(["Swift"])
+        draft.input = "Redis"
+        let firstAttempt = draft.topicsForSaving()
+
+        // A failed network save leaves the editor in place. A background refresh
+        // must not replace its local additions or establish a new baseline.
+        draft.prepareIfNeeded(["Server topic"])
+        XCTAssertEqual(firstAttempt, ["Swift", "Redis"])
+        XCTAssertEqual(draft.topicsForSaving(), firstAttempt)
+        XCTAssertTrue(draft.hasChanges)
+    }
+
+    func testDuplicateAtCapacityReportsDuplicateBeforeCapacityAndKeepsInput() {
+        let topics = ["Swift UI"] + (1..<30).map { "Topic \($0)" }
+        var draft = CommunityTopicSubscriptionEditorDraft()
+        draft.prepareIfNeeded(topics)
+        draft.input = "swift-ui"
+
+        XCTAssertFalse(draft.addInput())
+        XCTAssertEqual(draft.validationError, .duplicate)
+        XCTAssertEqual(draft.topics, topics)
+        XCTAssertEqual(draft.input, "swift-ui")
+        draft.input = "New topic"
+        XCTAssertNil(draft.validationError)
+        XCTAssertNil(draft.topicsForSaving())
+        XCTAssertEqual(draft.validationError, .limitReached)
+        XCTAssertEqual(draft.input, "New topic")
+
+        draft.remove("Swift UI")
+        XCTAssertNil(draft.validationError)
+        XCTAssertEqual(draft.topicsForSaving()?.count, 30)
+        XCTAssertEqual(draft.topics.last, "New topic")
+    }
+
+    func testInvalidNamesCharactersAndLengthsHaveDistinctErrorsWithoutMutation() {
+        let invalidInputs: [(String, CommunityTopicSubscriptionPolicy.AdditionError)] = [
+            (" _ - \t", .invalidName),
+            ("Swift\u{0000}UI", .invalidCharacters),
+            (String(repeating: "a", count: 121), .tooLong),
+            (String(repeating: "İ", count: 120), .tooLong)
+        ]
+        for (input, error) in invalidInputs {
+            var draft = CommunityTopicSubscriptionEditorDraft()
+            draft.prepareIfNeeded(["C++"])
+            draft.input = input
+            XCTAssertFalse(draft.addInput())
+            XCTAssertEqual(draft.validationError, error)
+            XCTAssertEqual(draft.topics, ["C++"])
+            XCTAssertEqual(draft.input, input)
+            draft.input = "C#"
+            XCTAssertNil(draft.validationError)
+            XCTAssertTrue(draft.addInput())
+            XCTAssertEqual(draft.topics, ["C++", "C#"])
+        }
+    }
+
+    func testAdditionAcceptsLengthBoundaryAndNormalizesWhitespace() {
+        var draft = CommunityTopicSubscriptionEditorDraft()
+        draft.prepareIfNeeded([])
+        draft.input = String(repeating: "a", count: 120)
+        XCTAssertTrue(draft.addInput())
+        draft.input = "　Swift\n\tUI　"
+        XCTAssertTrue(draft.addInput())
+        XCTAssertEqual(draft.topics.last, "Swift UI")
+        XCTAssertTrue(CommunityTopicSubscriptionPolicy.isValid(draft.topics))
+    }
+
+    func testSuggestionsExcludeSelectedBeforeApplyingLimit() {
+        let selected = (0..<20).map { "Selected \($0)" }
+        let available = (0..<25).map { "Available \($0)" }
+        let candidates = selected + ["selected-0", "---", "Bad\u{0000}topic"] + available
+
+        XCTAssertEqual(
+            CommunityTopicSubscriptionPolicy.suggestions(from: candidates, excluding: selected),
+            Array(available.prefix(20))
+        )
+        XCTAssertEqual(
+            CommunityTopicSubscriptionPolicy.suggestions(
+                from: [" C++ ", "C++", "C#", "Swift UI", "swift-ui"], excluding: ["SWIFT_UI"]
+            ),
+            ["C++", "C#"]
+        )
+        XCTAssertTrue(CommunityTopicSubscriptionPolicy.suggestions(from: available, excluding: [], limit: 0).isEmpty)
+    }
+}
+
 @MainActor
 final class ProfileEditorDraftTests: XCTestCase {
     func testPreparedProfileHasFinalNameAndAvatarBeforeAppearance() {

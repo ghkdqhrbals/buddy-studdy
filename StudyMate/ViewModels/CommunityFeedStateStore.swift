@@ -31,6 +31,20 @@ enum CommunityTopicSubscriptionPolicy {
     static let maximumCount = 30
     static let maximumTopicLength = 120
 
+    enum AdditionError: Equatable {
+        case invalidName, invalidCharacters, tooLong, duplicate, limitReached
+
+        func message(strings: AppStrings) -> String {
+            switch self {
+            case .invalidName: strings.topicSubscriptionsInvalidName
+            case .invalidCharacters: strings.topicSubscriptionsInvalidCharacters
+            case .tooLong: strings.topicSubscriptionsTooLong
+            case .duplicate: strings.topicSubscriptionsDuplicate
+            case .limitReached: strings.topicSubscriptionsLimitReached
+            }
+        }
+    }
+
     static func displayLabel(_ topic: String) -> String {
         topic.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
@@ -53,6 +67,82 @@ enum CommunityTopicSubscriptionPolicy {
                 matchingKey($0).utf16.count <= maximumTopicLength &&
                 !displayLabel($0).unicodeScalars.contains { $0.value < 0x20 || (0x7f...0x9f).contains($0.value) }
         }
+    }
+
+    static func additionError(for rawTopic: String, selectedTopics: [String]) -> AdditionError? {
+        let topic = displayLabel(rawTopic)
+        let key = matchingKey(topic)
+        guard !key.isEmpty else { return .invalidName }
+        guard !topic.unicodeScalars.contains(where: { $0.value < 0x20 || (0x7f...0x9f).contains($0.value) }) else {
+            return .invalidCharacters
+        }
+        guard topic.utf16.count <= maximumTopicLength, key.utf16.count <= maximumTopicLength else {
+            return .tooLong
+        }
+        guard !selectedTopics.contains(where: { matchingKey($0) == key }) else { return .duplicate }
+        guard selectedTopics.count < maximumCount else { return .limitReached }
+        return nil
+    }
+
+    static func suggestions(from candidates: [String], excluding selectedTopics: [String], limit: Int = 20) -> [String] {
+        let selected = Set(selectedTopics.map(matchingKey))
+        return Array(uniqueTopics(candidates).lazy.filter {
+            isValid([$0]) && !selected.contains(matchingKey($0))
+        }.prefix(max(0, limit)))
+    }
+}
+
+/// A sheet owns its initial snapshot and unsaved input until it is explicitly saved or cancelled.
+struct CommunityTopicSubscriptionEditorDraft {
+    private var baseline: [String]?
+    private(set) var topics: [String] = []
+    var input = "" {
+        didSet { validationError = nil }
+    }
+    private(set) var validationError: CommunityTopicSubscriptionPolicy.AdditionError?
+
+    var isPrepared: Bool { baseline != nil }
+    var hasChanges: Bool {
+        guard let baseline else { return false }
+        return topics != baseline || !CommunityTopicSubscriptionPolicy.displayLabel(input).isEmpty
+    }
+
+    mutating func prepareIfNeeded(_ topics: [String]) {
+        guard !isPrepared else { return }
+        baseline = topics
+        self.topics = topics
+    }
+
+    @discardableResult
+    mutating func addInput() -> Bool {
+        guard addTopic(input) else { return false }
+        input = ""
+        return true
+    }
+
+    @discardableResult
+    mutating func addSuggestion(_ topic: String) -> Bool {
+        addTopic(topic)
+    }
+
+    mutating func remove(_ topic: String) {
+        topics.removeAll { $0 == topic }
+        validationError = nil
+    }
+
+    mutating func topicsForSaving() -> [String]? {
+        guard isPrepared else { return nil }
+        if !CommunityTopicSubscriptionPolicy.displayLabel(input).isEmpty, !addInput() { return nil }
+        guard hasChanges, CommunityTopicSubscriptionPolicy.isValid(topics) else { return nil }
+        return topics
+    }
+
+    private mutating func addTopic(_ rawTopic: String) -> Bool {
+        guard isPrepared else { return false }
+        validationError = CommunityTopicSubscriptionPolicy.additionError(for: rawTopic, selectedTopics: topics)
+        guard validationError == nil else { return false }
+        topics.append(CommunityTopicSubscriptionPolicy.displayLabel(rawTopic))
+        return true
     }
 }
 
@@ -132,6 +222,7 @@ struct CommunityFeedStateStore {
     var isLoading = false
     var errorMessage: String?
     var requestID = UUID()
+    private(set) var query = ""
     private var pageSize = 0
     private var hiddenQuestionIDs = Set<String>()
     private var hiddenAuthorIDs = Set<Int>()
@@ -146,6 +237,7 @@ struct CommunityFeedStateStore {
         errorMessage = nil
         isLoading = false
         requestID = UUID()
+        query = ""
         pageSize = 0
         hiddenQuestionIDs = []
         hiddenAuthorIDs = []
@@ -153,9 +245,10 @@ struct CommunityFeedStateStore {
         pendingHiddenAdvertisements = [:]
     }
 
-    mutating func beginLoading() -> UUID {
+    mutating func beginLoading(query: String = "") -> UUID {
         let nextRequestID = UUID()
         requestID = nextRequestID
+        self.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         isLoading = true
         errorMessage = nil
         return nextRequestID
@@ -213,9 +306,18 @@ struct CommunityFeedStateStore {
 
     mutating func invalidatePage() {
         requestID = UUID()
+        query = ""
         isLoading = false
         errorMessage = nil
         clearPage()
+    }
+
+    mutating func clearSearch(draftQuery: String) -> Bool {
+        guard !query.isEmpty || !draftQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+        invalidatePage()
+        return true
     }
 
     mutating func clearPage() {

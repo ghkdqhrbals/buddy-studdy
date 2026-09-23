@@ -6,6 +6,9 @@ enum SentryMonitoring {
     private static let debugTestEventEnvironmentKey = "BUDDYSTUDY_SENTRY_TEST_EVENT"
 
     static func start(bundle: Bundle = .main, processInfo: ProcessInfo = .processInfo) {
+        #if DEBUG
+        guard !AppDebugFixtureConfiguration.isEnabled else { return }
+        #endif
         guard let dsn = configuredDSN(in: bundle) else {
             return
         }

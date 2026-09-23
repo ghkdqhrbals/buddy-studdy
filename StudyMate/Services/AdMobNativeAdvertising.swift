@@ -218,6 +218,12 @@ final class AdMobPrivacyCoordinator: ObservableObject {
     }
 
     func prepare(completion: @escaping (AdMobPrivacyAuthorization) -> Void) {
+        #if DEBUG
+        if AppDebugFixtureConfiguration.isEnabled {
+            completion(AdMobPrivacyAuthorization(permitsRequest: false, generation: 0))
+            return
+        }
+        #endif
         switch preparationState {
         case .prepared(let authorization):
             completion(authorization)
@@ -236,6 +242,9 @@ final class AdMobPrivacyCoordinator: ObservableObject {
     }
 
     func presentPrivacyOptions() async {
+        #if DEBUG
+        guard !AppDebugFixtureConfiguration.isEnabled else { return }
+        #endif
         await withCheckedContinuation { continuation in
             prepare { _ in
                 continuation.resume()

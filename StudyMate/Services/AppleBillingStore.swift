@@ -220,6 +220,9 @@ final class RevenueCatBillingBridge {
     }
 
     func start() {
+        #if DEBUG
+        guard !AppDebugFixtureConfiguration.isEnabled else { return }
+        #endif
         guard !Purchases.isConfigured else {
             return
         }

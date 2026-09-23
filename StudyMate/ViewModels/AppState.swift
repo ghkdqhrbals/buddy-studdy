@@ -539,6 +539,21 @@ final class AppState: ObservableObject {
         recordsState.isLoadingPage
     }
 
+    var hasLoadedRecordPage: Bool {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled { return true }
+        #endif
+        return recordsState.hasLoadedPage
+    }
+
+    var hasRecordPageError: Bool {
+        recordsState.failedPageReset != nil
+    }
+
+    var hasRecordSearchPageError: Bool {
+        searchState.failedRecordPageReset != nil
+    }
+
     var canLoadMoreRecords: Bool {
         recordsState.canLoadMore
     }
@@ -724,11 +739,9 @@ final class AppState: ObservableObject {
     var isLoadingTopicSubscriptions: Bool { topicSubscriptionState.isLoading }
     var isSavingTopicSubscriptions: Bool { topicSubscriptionState.isSaving }
     var topicSubscriptionsErrorMessage: String? { topicSubscriptionState.errorMessage }
-    var suggestedCommunityTopics: [String] {
+    func suggestedCommunityTopics(excluding selectedTopics: [String]) -> [String] {
         let candidates = settings.studyCategories.map(\.title) + backendStudyRooms.map(\.topic) + communityQuestions.map(\.topic)
-        return Array(CommunityTopicSubscriptionPolicy.uniqueTopics(candidates).filter {
-            CommunityTopicSubscriptionPolicy.isValid([$0])
-        }.prefix(20))
+        return CommunityTopicSubscriptionPolicy.suggestions(from: candidates, excluding: selectedTopics)
     }
 
     var likedCommunityQuestions: [CommunityQuestion] {
@@ -1037,8 +1050,7 @@ final class AppState: ObservableObject {
     var strings: AppStrings {
         #if DEBUG
         if isAppStoreScreenshotFixtureEnabled {
-            switch ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_LANGUAGE"]?
-                .lowercased() {
+            switch AppDebugFixtureConfiguration.language {
             case "ja", "jp", "japanese":
                 return AppStrings(language: .japanese)
             case "en", "english":
@@ -1052,15 +1064,16 @@ final class AppState: ObservableObject {
     }
 
     #if DEBUG
+    private var screenshotPublicQuestions: [CommunityQuestion] = []
+
     private var isAppStoreScreenshotFixtureEnabled: Bool {
-        ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"] != nil
+        AppDebugFixtureConfiguration.isEnabled
     }
     #endif
 
     var isMembershipScreenshotFixtureEnabled: Bool {
         #if DEBUG
-        ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?
-            .lowercased() == "membership"
+        AppDebugFixtureConfiguration.fixtureName() == "membership"
         #else
         false
         #endif
@@ -1153,13 +1166,12 @@ final class AppState: ObservableObject {
     func normalizeSelectedTabForMobile() {
         logAuthTrace("mobile_normalize_tab_start", reason: "normalizeSelectedTabForMobile")
         #if DEBUG
-        if ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?
-            .lowercased() == "study-tree" {
+        if AppDebugFixtureConfiguration.fixtureName() == "study-tree" {
             selectedTab = .home
             homeStudyRoute = HomeStudyRoute(categoryID: "101", showsTree: true)
             return
         }
-        if let fixture = ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?.lowercased(),
+        if let fixture = AppDebugFixtureConfiguration.fixtureName(),
            ["learning-result", "result"].contains(fixture) {
             selectedTab = .home
             return
@@ -2181,14 +2193,11 @@ final class AppState: ObservableObject {
 
     #if DEBUG
     private func configureAppStoreScreenshotFixtureIfNeeded() {
-        guard let fixture = ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?
-            .lowercased() else {
+        guard let fixture = AppDebugFixtureConfiguration.fixtureName() else {
             return
         }
 
-        let screenshotLanguage = ProcessInfo.processInfo
-            .environment["BUDDYSTUDY_SCREENSHOT_LANGUAGE"]?
-            .lowercased() ?? "ko"
+        let screenshotLanguage = AppDebugFixtureConfiguration.language
         let language: AppLanguage
         switch screenshotLanguage {
         case "ja", "jp", "japanese":
@@ -2452,10 +2461,11 @@ final class AppState: ObservableObject {
                 isLikedByMe: index == 0
             )
         }
+        screenshotPublicQuestions = publicQuestions
         communityFeedState.applyPage(
             CommunityQuestionsResponse(
                 questions: publicQuestions,
-                totalCount: 48,
+                totalCount: publicQuestions.count,
                 limit: 20,
                 offset: 0
             ),
@@ -2765,17 +2775,17 @@ final class AppState: ObservableObject {
         }
 
         didStart = true
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return
+        }
+        #endif
         #if os(iOS)
         await cleanupLocalVoiceTutorRecordings()
         #endif
         scheduleDeferredReferralProfileResolution()
         #if os(iOS)
         startAppleBillingTransactionListener()
-        #endif
-        #if DEBUG
-        if isAppStoreScreenshotFixtureEnabled {
-            return
-        }
         #endif
         let usesRemoteAppControl = await refreshAppControlPolicy()
         guard !isMaintenanceAccessBlocked else {
@@ -3255,6 +3265,10 @@ final class AppState: ObservableObject {
         await loadBackendRecordsPage(reset: false)
     }
 
+    func retryBackendRecordsPage() async {
+        await loadBackendRecordsPage(reset: recordsState.failedPageReset ?? true)
+    }
+
     func fetchBackendRecords(
         studyID: Int,
         limit: Int = 30,
@@ -3438,6 +3452,9 @@ final class AppState: ObservableObject {
               let registration = await registrationWithAccessToken(
                 storedRegistration, reason: "records", validity: isCurrent
               ), isCurrent() else {
+            if isCurrent(), !Task.isCancelled, commonRecordsPageRequestID == requestID {
+                recordsState.failPageLoad(reset: reset)
+            }
             if commonRecordsPageRequestID == requestID { finishBackendRecordPageLoad() }
             log(.warning, "백엔드 등록이 없어 기록 새로고침을 건너뛰었습니다.")
             return
@@ -3486,6 +3503,7 @@ final class AppState: ObservableObject {
                 if handlePageAccessError(error, page: .records) {
                     return
                 }
+                recordsState.failPageLoad(reset: reset)
                 log(.warning, "백엔드 기록 새로고침 실패: \(error.localizedDescription)")
             },
             onCompletion: {
@@ -3567,7 +3585,9 @@ final class AppState: ObservableObject {
         }
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "notifications") else {
+            guard isCurrentCommunitySession(sessionGeneration) else { return }
             notificationErrorMessage = strings.myStudyLoginHelp
+            notificationState.failLoading(reset: reset)
             return
         }
         guard isCurrentCommunitySession(sessionGeneration) else {
@@ -3608,11 +3628,15 @@ final class AppState: ObservableObject {
                     log(.info, "로그아웃 후 알림 목록 오류 처리를 건너뛰었습니다.")
                     return
                 }
+                guard !Self.isCancellationLikeError(error) else { return }
                 handleAppError(
                     error,
                     fallback: strings.notificationLoadRetryDescription,
                     target: .notification
                 )
+                if isCurrentCommunitySession(sessionGeneration) {
+                    notificationState.failLoading(reset: reset)
+                }
                 log(
                     .warning,
                     "알림 목록 조회 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
@@ -3634,6 +3658,10 @@ final class AppState: ObservableObject {
             return
         }
         await loadNotifications(reset: false)
+    }
+
+    func retryNotifications() async {
+        await loadNotifications(reset: notificationState.failedLoadReset ?? true)
     }
 
     func markNotificationRead(_ notification: BackendAppNotification) async {
@@ -4170,6 +4198,9 @@ final class AppState: ObservableObject {
         defer { finishBackendRecordSearchPage(query: trimmedQuery, requestID: requestID) }
 
         guard let registration = await prepareRecordRegistration(reason: "record-search", validity: isCurrent) else {
+            if isCurrent(), !Task.isCancelled {
+                searchState.failRecordPage(query: trimmedQuery, reset: reset, requestID: requestID)
+            }
             return
         }
 
@@ -4201,6 +4232,7 @@ final class AppState: ObservableObject {
             searchState = nextState
         } catch {
             guard isCurrent(), !Self.isCancellationLikeError(error) else { return }
+            searchState.failRecordPage(query: trimmedQuery, reset: reset, requestID: requestID)
             log(.warning, "기록 검색 실패: \(error.localizedDescription)")
         }
     }
@@ -4213,6 +4245,14 @@ final class AppState: ObservableObject {
         await searchBackendRecords(query: searchState.recordQuery, reset: false)
     }
 
+    func retryBackendRecordSearchPage() async {
+        guard !searchState.recordQuery.isEmpty else { return }
+        await searchBackendRecords(
+            query: searchState.recordQuery,
+            reset: searchState.failedRecordPageReset ?? true
+        )
+    }
+
     private func finishBackendRecordSearchPage(query: String, requestID: UUID) {
         var nextState = searchState
         nextState.finishRecordPage(query: query, requestID: requestID)
@@ -4223,9 +4263,9 @@ final class AppState: ObservableObject {
         replaceRecordSearchResults(nil)
     }
 
-    private func beginCommunityFeedLoad() -> UUID {
+    private func beginCommunityFeedLoad(query: String) -> UUID {
         var nextState = communityFeedState
-        let requestID = nextState.beginLoading()
+        let requestID = nextState.beginLoading(query: query)
         communityFeedState = nextState
         return requestID
     }
@@ -4737,6 +4777,15 @@ final class AppState: ObservableObject {
         return saved
     }
 
+    /// Clearing the field also discards the filtered page and any in-flight
+    /// response, so a collapsed search cannot leave an invisible filter behind.
+    @discardableResult
+    func clearCommunitySearch() -> Bool {
+        let hadQuery = communityFeedState.clearSearch(draftQuery: communitySearchText)
+        communitySearchText = ""
+        return hadQuery
+    }
+
     func setCommunityFeedSort(_ sort: CommunityFeedSort) {
         guard sort != communityFeedSort else { return }
         communityFeedSort = sort
@@ -4758,6 +4807,43 @@ final class AppState: ObservableObject {
         communityFeedState.invalidatePage()
     }
 
+    #if DEBUG
+    /// Local rendering behavior only; it does not reproduce server ranking or reads.
+    private func loadScreenshotCommunityQuestions(reset: Bool) {
+        let query = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let followed = Set(subscribedCommunityTopics.map(CommunityTopicSubscriptionPolicy.matchingKey))
+        var questions = screenshotPublicQuestions.filter { question in
+            let matchesScope = communityFeedScope != .following
+                || followed.contains(CommunityTopicSubscriptionPolicy.matchingKey(question.topic))
+            return matchesScope && (query.isEmpty
+                || question.topic.localizedCaseInsensitiveContains(query)
+                || question.question.localizedCaseInsensitiveContains(query))
+        }
+        switch communityFeedSort {
+        case .recommended:
+            // Keep the authored fixture order; do not imitate production scores.
+            break
+        case .latest:
+            questions.sort { $0.createdAt > $1.createdAt }
+        case .views:
+            questions.sort { $0.viewCount == $1.viewCount ? $0.createdAt > $1.createdAt : $0.viewCount > $1.viewCount }
+        case .likes:
+            questions.sort { $0.likeCount == $1.likeCount ? $0.createdAt > $1.createdAt : $0.likeCount > $1.likeCount }
+        }
+        let offset = reset ? 0 : communityOffset
+        let page = Array(questions.dropFirst(offset).prefix(Self.communityQuestionPageSize))
+        let requestID = communityFeedState.beginLoading(query: query)
+        communityFeedState.applyPage(
+            CommunityQuestionsResponse(
+                questions: page, totalCount: questions.count,
+                limit: Self.communityQuestionPageSize, offset: offset
+            ),
+            offset: offset, reset: reset
+        )
+        communityFeedState.finishLoading(requestID)
+    }
+    #endif
+
     func loadCommunityQuestions(
         reset: Bool = true,
         userInitiated: Bool = false,
@@ -4765,6 +4851,7 @@ final class AppState: ObservableObject {
     ) async {
         #if DEBUG
         if isAppStoreScreenshotFixtureEnabled {
+            loadScreenshotCommunityQuestions(reset: reset)
             return
         }
         #endif
@@ -4783,7 +4870,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        let requestID = beginCommunityFeedLoad()
+        let requestID = beginCommunityFeedLoad(query: trimmedTopic)
         let resolvedAdFreeEntitlement: Bool?
         if isCommunitySessionActive,
            trimmedTopic.isEmpty,
@@ -12454,7 +12541,7 @@ final class AppState: ObservableObject {
         removeCommunityQuestions(ids: clearedRecordIDs)
         localStudyRecordUseCase.clearRecords()
         recordsToClear.forEach { localStudyRecordUseCase.deleteAnswerDraft(recordID: $0.id) }
-        recordsState.clear()
+        recordsState.clear(loaded: true)
         replaceRecordSearchResults(nil)
         currentQuestion = nil
         lastAnswer = ""

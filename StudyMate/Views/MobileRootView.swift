@@ -1433,13 +1433,10 @@ private struct MobileHomeView: View {
         selectedHomeScope == .all && isRefreshingSelectedHomeScope
     }
 
-    var body: some View {
+    private var homeLayout: some View {
         VStack(alignment: .leading, spacing: 0) {
             homeTitleHeader
             homeScopePickerHeader
-            if selectedHomeScope == .all {
-                communityFeedControls
-            }
 
             if isSelectingStudies {
                 myStudySelectionBar
@@ -1449,6 +1446,12 @@ private struct MobileHomeView: View {
                 homeStudyTreeGraph
             } else {
                 List {
+                    if selectedHomeScope == .all {
+                        communityFeedControls
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                     homeContentSection
                 }
                 .listStyle(.plain)
@@ -1459,6 +1462,10 @@ private struct MobileHomeView: View {
             }
         }
         .background(Color(.systemBackground))
+    }
+
+    var body: some View {
+        homeLayout
         .navigationTitle("")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -1578,7 +1585,7 @@ private struct MobileHomeView: View {
         .onAppear {
             handleAppRouteRequest(appState.appRouteRequest)
             #if DEBUG
-            if ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?.lowercased() == "interests" {
+            if AppDebugFixtureConfiguration.fixtureName() == "interests" {
                 isShowingTopicSubscriptions = true
             }
             #endif
@@ -1645,6 +1652,12 @@ private struct MobileHomeView: View {
             if trimmedHomeStudySearchText != submittedHomeStudySearchText {
                 appState.clearBackendStudySearchResults()
             }
+        }
+        .onChange(of: appState.communitySearchText) { oldQuery, newQuery in
+            guard selectedHomeScope == .all,
+                  !oldQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  newQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            reloadCommunityAfterClearingSearch()
         }
         .onChange(of: appState.rootStudyCategoriesForDisplay.map(\.id)) { _, categoryIDs in
             selectedStudyCategoryIDs.formIntersection(categoryIDs)
@@ -1879,68 +1892,22 @@ private struct MobileHomeView: View {
 
     private var communityFeedControls: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 16) {
-                Menu {
-                    ForEach(CommunityFeedScope.allCases) { scope in
-                        Button {
-                            if scope == .following && !appState.isCommunitySessionActive {
-                                isHomeLoginPagePresented = true
-                            } else {
-                                appState.setCommunityFeedScope(scope)
-                            }
-                        } label: {
-                            if appState.communityFeedScope == scope {
-                                Label(scope.title(strings: strings), systemImage: "checkmark")
-                            } else {
-                                Text(scope.title(strings: strings))
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(appState.communityFeedScope.title(strings: strings))
-                        Image(systemName: "chevron.down").font(.caption2)
-                    }
-                    .frame(minHeight: 44)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) {
+                    communityScopeMenu
+                    communitySortMenu
+                    Spacer(minLength: 0)
+                    communityInterestsButton
                 }
-                .accessibilityIdentifier("community-feed-scope")
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Menu {
-                    ForEach(CommunityFeedSort.allCases) { sort in
-                        Button {
-                            appState.setCommunityFeedSort(sort)
-                        } label: {
-                            if appState.communityFeedSort == sort {
-                                Label(sort.title(strings: strings), systemImage: "checkmark")
-                            } else {
-                                Text(sort.title(strings: strings))
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(appState.communityFeedSort.title(strings: strings))
-                        Image(systemName: "chevron.down").font(.caption2)
-                    }
-                    .frame(minHeight: 44)
+                VStack(alignment: .leading, spacing: 0) {
+                    communityScopeMenu
+                    communitySortMenu
+                    communityInterestsButton
                 }
-                .accessibilityLabel(strings.feedSort)
-                .accessibilityValue(appState.communityFeedSort.title(strings: strings))
-                .accessibilityIdentifier("community-feed-sort")
-
-                Spacer(minLength: 0)
-                Button(action: showTopicSubscriptions) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus.circle")
-                        Text(strings.topicSubscriptions)
-                        if !appState.subscribedCommunityTopics.isEmpty {
-                            Text("\(appState.subscribedCommunityTopics.count)")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(minHeight: 44)
-                }
-                .accessibilityIdentifier("community-topic-subscriptions")
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .font(.subheadline)
             .buttonStyle(.plain)
@@ -1950,11 +1917,90 @@ private struct MobileHomeView: View {
                 Text(strings.feedPersonalizedHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 8)
             }
         }
         .padding(.horizontal, 2)
         .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var communityScopeMenu: some View {
+        Menu {
+            ForEach(CommunityFeedScope.allCases) { scope in
+                Button {
+                    if scope == .following && !appState.isCommunitySessionActive {
+                        isHomeLoginPagePresented = true
+                    } else {
+                        appState.setCommunityFeedScope(scope)
+                    }
+                } label: {
+                    if appState.communityFeedScope == scope {
+                        Label(scope.title(strings: strings), systemImage: "checkmark")
+                    } else {
+                        Text(scope.title(strings: strings))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(appState.communityFeedScope.title(strings: strings))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                Image(systemName: "chevron.down").font(.caption2).accessibilityHidden(true)
+            }
+            .frame(minHeight: 44)
+        }
+        .accessibilityLabel(strings.feedScope)
+        .accessibilityValue(appState.communityFeedScope.title(strings: strings))
+        .accessibilityIdentifier("community-feed-scope")
+    }
+
+    private var communitySortMenu: some View {
+        Menu {
+            ForEach(CommunityFeedSort.allCases) { sort in
+                Button {
+                    appState.setCommunityFeedSort(sort)
+                } label: {
+                    if appState.communityFeedSort == sort {
+                        Label(sort.title(strings: strings), systemImage: "checkmark")
+                    } else {
+                        Text(sort.title(strings: strings))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(appState.communityFeedSort.title(strings: strings))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                Image(systemName: "chevron.down").font(.caption2).accessibilityHidden(true)
+            }
+            .frame(minHeight: 44)
+        }
+        .accessibilityLabel(strings.feedSort)
+        .accessibilityValue(appState.communityFeedSort.title(strings: strings))
+        .accessibilityIdentifier("community-feed-sort")
+    }
+
+    private var communityInterestsButton: some View {
+        Button(action: showTopicSubscriptions) {
+            HStack(spacing: 4) {
+                Image(systemName: "plus.circle").accessibilityHidden(true)
+                Text(strings.topicSubscriptions)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                if !appState.subscribedCommunityTopics.isEmpty {
+                    Text("\(appState.subscribedCommunityTopics.count)")
+                        .fixedSize()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(minHeight: 44)
+        }
+        .accessibilityLabel(strings.topicSubscriptions)
+        .accessibilityValue("\(appState.subscribedCommunityTopics.count)/\(CommunityTopicSubscriptionPolicy.maximumCount)")
+        .accessibilityIdentifier("community-topic-subscriptions")
     }
 
     private var homeTitleHeader: some View {
@@ -1964,7 +2010,7 @@ private struct MobileHomeView: View {
     }
 
     private var homeScopePickerHeader: some View {
-        Picker("", selection: $selectedHomeScope) {
+        Picker(strings.homeFeedScope, selection: $selectedHomeScope) {
             ForEach(HomeFeedScope.allCases) { scope in
                 Text(scope.title(strings: strings))
                     .tag(scope)
@@ -2350,7 +2396,19 @@ private struct MobileHomeView: View {
                     .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
                     .listRowSeparator(.hidden)
             } else if !hasContent, appState.communityErrorMessage == nil {
-                if appState.communityFeedScope == .following {
+                if !activeTrimmedSearchText.isEmpty {
+                    ContentUnavailableView {
+                        Label(strings.noSearchResults, systemImage: "magnifyingglass")
+                    } description: {
+                        Text(strings.feedSearchEmptyHelp)
+                    } actions: {
+                        Button(strings.clearSearch) { closeHomeSearch(clearText: true) }
+                            .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 240)
+                    .listRowSeparator(.hidden)
+                    .accessibilityIdentifier("community-search-empty")
+                } else if appState.communityFeedScope == .following {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(appState.subscribedCommunityTopics.isEmpty ? strings.topicSubscriptionsNone : strings.topicSubscriptionsEmptyFeed)
                             .font(.headline)
@@ -2881,15 +2939,26 @@ private struct MobileHomeView: View {
         isSearchFocused = false
 
         if clearText {
-            setActiveSearchText("")
             submittedHomeStudySearchText = ""
             if selectedHomeScope.isPersonal {
+                homeStudySearchText = ""
                 appState.clearBackendStudySearchResults()
+            } else {
+                reloadCommunityAfterClearingSearch()
             }
         }
 
         withAnimation(.smooth(duration: 0.22)) {
             isSearchVisible = false
+        }
+    }
+
+    @MainActor
+    private func reloadCommunityAfterClearingSearch() {
+        guard appState.clearCommunitySearch() else { return }
+        hasLoadedCommunityQuestions = true
+        Task {
+            await appState.loadCommunityQuestions(reset: true, userInitiated: true)
         }
     }
 
@@ -3020,17 +3089,11 @@ private struct MobileCommunityDiscoveryActions: View {
 private struct MobileTopicSubscriptionsSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @State private var topics: [String] = []
-    @State private var newTopic = ""
-    @State private var hasPreparedDraft = false
-    @State private var validationMessage: String?
+    @State private var draft = CommunityTopicSubscriptionEditorDraft()
 
     private var strings: AppStrings { appState.strings }
     private var suggestions: [String] {
-        let selected = Set(topics.map(CommunityTopicSubscriptionPolicy.matchingKey))
-        return appState.suggestedCommunityTopics.filter {
-            !selected.contains(CommunityTopicSubscriptionPolicy.matchingKey($0))
-        }
+        appState.suggestedCommunityTopics(excluding: draft.topics)
     }
 
     var body: some View {
@@ -3041,7 +3104,7 @@ private struct MobileTopicSubscriptionsSheet: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                if !hasPreparedDraft {
+                if !draft.isPrepared {
                     Section {
                         if appState.isLoadingTopicSubscriptions {
                             ProgressView().frame(maxWidth: .infinity)
@@ -3058,58 +3121,62 @@ private struct MobileTopicSubscriptionsSheet: View {
                     }
                 } else {
                     Section {
-                        ForEach(topics, id: \.self) { topic in
-                            HStack {
-                                Text(topic)
-                                Spacer()
-                                Button {
-                                    topics.removeAll { $0 == topic }
-                                    validationMessage = nil
-                                } label: {
-                                    Image(systemName: "minus.circle.fill")
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 44, height: 44)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("\(strings.topicSubscriptionRemove): \(topic)")
-                            }
-                        }
                         HStack {
-                            TextField(strings.topicSubscriptionsPlaceholder, text: $newTopic)
+                            TextField(strings.topicSubscriptionsPlaceholder, text: $draft.input)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .submitLabel(.done)
-                                .onSubmit { addTopic(newTopic) }
+                                .onSubmit { draft.addInput() }
                                 .accessibilityIdentifier("topic-subscription-input")
-                            Button { addTopic(newTopic) } label: {
+                            Button { draft.addInput() } label: {
                                 Image(systemName: "plus.circle.fill")
                                     .frame(width: 44, height: 44)
                             }
                             .buttonStyle(.plain)
-                            .disabled(CommunityTopicSubscriptionPolicy.displayLabel(newTopic).isEmpty)
+                            .disabled(CommunityTopicSubscriptionPolicy.displayLabel(draft.input).isEmpty)
                             .accessibilityLabel(strings.topicSubscriptionAdd)
                         }
                     } header: {
-                        Text("\(strings.topicSubscriptions) \(topics.count)/\(CommunityTopicSubscriptionPolicy.maximumCount)")
+                        Text("\(strings.topicSubscriptions) \(draft.topics.count)/\(CommunityTopicSubscriptionPolicy.maximumCount)")
                     } footer: {
                         Text(strings.topicSubscriptionsLimitHelp)
                     }
                     .disabled(appState.isSavingTopicSubscriptions)
 
-                    if let error = validationMessage ?? appState.topicSubscriptionsErrorMessage {
+                    if let error = draft.validationError?.message(strings: strings) ?? appState.topicSubscriptionsErrorMessage {
                         Section { Text(error).font(.subheadline).foregroundStyle(.red) }
+                    }
+                    if !draft.topics.isEmpty {
+                        Section {
+                            ForEach(draft.topics, id: \.self) { topic in
+                                HStack {
+                                    Text(topic)
+                                    Spacer()
+                                    Button {
+                                        draft.remove(topic)
+                                    } label: {
+                                        Image(systemName: "minus.circle.fill")
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 44, height: 44)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("\(strings.topicSubscriptionRemove): \(topic)")
+                                }
+                            }
+                        }
+                        .disabled(appState.isSavingTopicSubscriptions)
                     }
                     if !suggestions.isEmpty {
                         Section(strings.topicSubscriptionsSuggestions) {
                             ForEach(suggestions, id: \.self) { topic in
-                                Button { addTopic(topic) } label: {
+                                Button { draft.addSuggestion(topic) } label: {
                                     HStack {
                                         Text(topic).foregroundStyle(.primary)
                                         Spacer()
                                         Image(systemName: "plus.circle")
                                     }
                                 }
-                                .disabled(appState.isSavingTopicSubscriptions || topics.count >= CommunityTopicSubscriptionPolicy.maximumCount)
+                                .disabled(appState.isSavingTopicSubscriptions || draft.topics.count >= CommunityTopicSubscriptionPolicy.maximumCount)
                                 .accessibilityLabel("\(strings.topicSubscriptionAdd): \(topic)")
                             }
                         }
@@ -3125,24 +3192,17 @@ private struct MobileTopicSubscriptionsSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(strings.save) {
-                        if !CommunityTopicSubscriptionPolicy.displayLabel(newTopic).isEmpty {
-                            addTopic(newTopic)
-                            guard validationMessage == nil else { return }
-                        }
+                        guard let topicsToSave = draft.topicsForSaving() else { return }
                         Task {
-                            if await appState.saveTopicSubscriptions(topics) { dismiss() }
+                            if await appState.saveTopicSubscriptions(topicsToSave) { dismiss() }
                         }
                     }
-                    .disabled(!hasPreparedDraft || appState.isSavingTopicSubscriptions || !CommunityTopicSubscriptionPolicy.isValid(topics))
+                    .disabled(!draft.isPrepared || !draft.hasChanges || appState.isSavingTopicSubscriptions || !CommunityTopicSubscriptionPolicy.isValid(draft.topics))
                     .overlay { if appState.isSavingTopicSubscriptions { ProgressView() } }
                     .accessibilityIdentifier("topic-subscription-save")
                 }
             }
-            .interactiveDismissDisabled(
-                appState.isSavingTopicSubscriptions ||
-                    (hasPreparedDraft && topics != appState.subscribedCommunityTopics) ||
-                    !newTopic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            )
+            .interactiveDismissDisabled(appState.isSavingTopicSubscriptions || draft.hasChanges)
             .task {
                 await appState.loadTopicSubscriptions(force: true)
                 prepareDraftIfNeeded()
@@ -3162,27 +3222,10 @@ private struct MobileTopicSubscriptionsSheet: View {
     }
 
     private func prepareDraftIfNeeded() {
-        guard !hasPreparedDraft, appState.hasLoadedTopicSubscriptions,
+        guard !draft.isPrepared, appState.hasLoadedTopicSubscriptions,
               !appState.isLoadingTopicSubscriptions, !appState.isSavingTopicSubscriptions,
               appState.topicSubscriptionsErrorMessage == nil else { return }
-        topics = appState.subscribedCommunityTopics
-        hasPreparedDraft = true
-    }
-
-    private func addTopic(_ rawTopic: String) {
-        let topic = CommunityTopicSubscriptionPolicy.displayLabel(rawTopic)
-        guard CommunityTopicSubscriptionPolicy.isValid(topics + [topic]) else {
-            validationMessage = strings.topicSubscriptionsLimitHelp
-            return
-        }
-        let key = CommunityTopicSubscriptionPolicy.matchingKey(topic)
-        guard !topics.contains(where: { CommunityTopicSubscriptionPolicy.matchingKey($0) == key }) else {
-            validationMessage = strings.topicSubscriptionsDuplicate
-            return
-        }
-        topics.append(topic)
-        newTopic = ""
-        validationMessage = nil
+        draft.prepareIfNeeded(appState.subscribedCommunityTopics)
     }
 }
 
@@ -3334,7 +3377,7 @@ private struct MobileNotificationsView: View {
                     if appState.notificationErrorMessage != nil {
                         Button(strings.retry) {
                             Task {
-                                await appState.loadNotifications(reset: true)
+                                await appState.retryNotifications()
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -3395,6 +3438,19 @@ private struct MobileNotificationsView: View {
                         .padding(.vertical, 12)
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
+                } else if appState.notificationErrorMessage != nil {
+                    VStack(spacing: 8) {
+                        Text(strings.notificationLoadRetryDescription)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Button(strings.retry) {
+                            Task { await appState.retryNotifications() }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
             }
         }

@@ -4782,6 +4782,9 @@ struct AppStrings {
     var feedAllTopics: String { text("전체 주제", "All topics", "すべてのトピック") }
     var feedFollowingTopics: String { text("구독 주제", "Following", "フォロー中") }
     var feedSort: String { text("질문 정렬", "Sort questions", "質問の並び順") }
+    var feedScope: String { text("질문 범위", "Question scope", "質問の範囲") }
+    var homeFeedScope: String { text("학습 보기", "Study view", "学習の表示") }
+    var feedSearchEmptyHelp: String { text("검색어를 바꾸거나 검색을 지워 다시 둘러보세요.", "Try another topic or clear your search to keep exploring.", "別のトピックで検索するか、検索をクリアしてご覧ください。") }
     var topicSubscriptions: String { text("관심주제", "Interests", "興味のあるトピック") }
     var topicSubscriptionsHelp: String {
         text(
@@ -4799,6 +4802,10 @@ struct AppStrings {
     var topicSubscriptionsRequestFailed: String { text("관심주제를 불러오지 못했습니다. 다시 시도해 주세요.", "Could not load your interests. Please try again.", "トピックを読み込めませんでした。もう一度お試しください。") }
     var topicSubscriptionsSaveFailed: String { text("관심주제를 저장하지 못했습니다. 다시 시도해 주세요.", "Could not save your interests. Please try again.", "トピックを保存できませんでした。もう一度お試しください。") }
     var topicSubscriptionsDuplicate: String { text("이미 추가한 관심주제입니다.", "You already follow this topic.", "このトピックは追加済みです。") }
+    var topicSubscriptionsInvalidName: String { text("주제 이름을 입력해 주세요. 공백이나 하이픈, 밑줄만으로는 추가할 수 없어요.", "Enter a topic name, not just spaces, hyphens or underscores.", "トピック名を入力してください。空白・ハイフン・アンダースコアだけでは追加できません。") }
+    var topicSubscriptionsInvalidCharacters: String { text("주제 이름에 사용할 수 없는 문자가 있어요. 다른 이름을 입력해 주세요.", "This topic contains unsupported characters. Try another name.", "使用できない文字が含まれています。別のトピック名を入力してください。") }
+    var topicSubscriptionsTooLong: String { text("주제 이름을 120자 이내로 줄여 주세요.", "Shorten the topic name to 120 characters or fewer.", "トピック名を120文字以内にしてください。") }
+    var topicSubscriptionsLimitReached: String { text("관심주제 30개를 모두 채웠어요. 새 주제를 추가하려면 하나를 삭제해 주세요.", "You follow 30 topics. Remove one before adding another.", "30件のトピックをフォロー中です。追加するには1件削除してください。") }
     var topicSubscriptionsEmptyFeed: String { text("구독한 주제의 공개 질문이 아직 없습니다.", "No public questions in your followed topics yet.", "フォロー中のトピックの公開質問はまだありません。") }
     var topicSubscriptionsEmptyFeedHelp: String { text("관심주제를 더 추가하거나 전체 주제를 둘러보세요.", "Add more interests or explore all topics.", "興味のあるトピックを追加するか、すべてのトピックをご覧ください。") }
     var feedPersonalizedHelp: String { text("구독한 주제의 인기 질문을 먼저 추천해 드려요.", "Popular questions from your interests appear first.", "フォロー中のトピックの人気の質問を優先しておすすめします。") }

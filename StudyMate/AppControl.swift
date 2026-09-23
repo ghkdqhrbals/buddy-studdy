@@ -368,6 +368,9 @@ enum FirebaseBootstrap {
     private static var configured = false
 
     static func configureIfPossible(bundle: Bundle = .main) -> Bool {
+        #if DEBUG
+        guard !AppDebugFixtureConfiguration.isEnabled else { return false }
+        #endif
         #if canImport(FirebaseCore)
         if FirebaseApp.app() != nil {
             configured = true

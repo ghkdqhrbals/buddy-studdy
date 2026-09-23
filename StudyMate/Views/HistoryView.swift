@@ -74,6 +74,17 @@ struct HistoryView: View {
         return appState.isLoadingRecordPage
     }
 
+    private var hasPageError: Bool {
+        isBackendRecordSearchActive ? appState.hasRecordSearchPageError : appState.hasRecordPageError
+    }
+
+    private var isLoadingEmptyPage: Bool {
+        if isBackendRecordSearchActive {
+            return appState.isLoadingRecordSearchPage
+        }
+        return appState.isLoadingRecordPage || (!appState.hasLoadedRecordPage && !hasPageError)
+    }
+
     private var weeklyRecords: [StudyRecord] {
         guard let interval = Self.weekCalendar.dateInterval(of: .weekOfYear, for: Date()) else {
             return []
@@ -124,13 +135,36 @@ struct HistoryView: View {
 
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    if orderedRecords.isEmpty {
-                        ContentUnavailableView(
-                            strings.noRecords,
-                            systemImage: "clock.arrow.circlepath",
-                            description: Text(strings.noRecordsDescription)
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 360)
+                    if displayedRecords.isEmpty {
+                        if isLoadingEmptyPage {
+                            ProgressView(strings.loading)
+                                .frame(maxWidth: .infinity, minHeight: 360)
+                        } else if hasPageError {
+                            ContentUnavailableView {
+                                Label(strings.unableToLoadRecords, systemImage: "wifi.exclamationmark")
+                            } description: {
+                                Text(strings.recordLoadRetryDescription)
+                            } actions: {
+                                Button(strings.retry) { retryRecordsPage() }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 360)
+                        } else if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            ContentUnavailableView {
+                                Label(strings.noSearchResults, systemImage: "magnifyingglass")
+                            } description: {
+                                Text(strings.noSearchResultsDescription)
+                            } actions: {
+                                Button(strings.clearSearch) { closeRecordSearch(clearText: true) }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 360)
+                        } else {
+                            ContentUnavailableView(
+                                strings.noRecords,
+                                systemImage: "clock.arrow.circlepath",
+                                description: Text(strings.noRecordsDescription)
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 360)
+                        }
                     } else {
                         if !isRecordSearchActive {
                             HistoryWeeklySummaryCard(
@@ -155,14 +189,7 @@ struct HistoryView: View {
                                 .lineLimit(1)
                         }
 
-                        if displayedRecords.isEmpty {
-                            ContentUnavailableView(
-                                strings.noSearchResults,
-                                systemImage: "magnifyingglass",
-                                description: Text(strings.noSearchResultsDescription)
-                            )
-                            .frame(maxWidth: .infinity, minHeight: 320)
-                        } else {
+                        Group {
                             ForEach(displayedVisibleRecords) { record in
                                 HistoryRow(
                                     record: record,
@@ -196,16 +223,29 @@ struct HistoryView: View {
                                 }
                             }
 
-                            if hasMoreRecords || isLoadingNextPage {
+                            if isLoadingNextPage {
                                 HStack {
                                     Spacer()
 
-                                    ProgressView()
+                                    ProgressView(strings.loading)
                                         .controlSize(.small)
 
                                     Spacer()
                                 }
                                 .padding(.vertical, 8)
+                            } else if hasPageError {
+                                VStack(spacing: 8) {
+                                    Text(strings.recordLoadRetryDescription)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    Button(strings.retry) { retryRecordsPage() }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                            } else if hasMoreRecords {
+                                Button(strings.more) { loadNextRecordsPage() }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
                             }
                         }
                     }
@@ -451,17 +491,31 @@ struct HistoryView: View {
     }
 
     private func loadNextPageIfNeeded(for record: StudyRecord) {
-        guard hasMoreRecords, !isLoadingNextPage else {
+        guard hasMoreRecords, !isLoadingNextPage, !hasPageError else {
             return
         }
         guard record.id == visibleRecords.last?.id else {
             return
         }
+        loadNextRecordsPage()
+    }
+
+    private func loadNextRecordsPage() {
         Task {
             if isBackendRecordSearchActive {
                 await appState.loadMoreBackendRecordSearchResults()
             } else {
                 await appState.loadMoreBackendRecords()
+            }
+        }
+    }
+
+    private func retryRecordsPage() {
+        Task {
+            if isBackendRecordSearchActive {
+                await appState.retryBackendRecordSearchPage()
+            } else {
+                await appState.retryBackendRecordsPage()
             }
         }
     }
@@ -544,7 +598,11 @@ struct HistoryView: View {
             isRefreshing = true
         }
 
-        await appState.refreshBackendRecords()
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await appState.searchBackendRecords(query: searchText)
+        } else {
+            await appState.refreshBackendRecords()
+        }
 
         await MainActor.run {
             if appState.focusedRecordRequest != nil {

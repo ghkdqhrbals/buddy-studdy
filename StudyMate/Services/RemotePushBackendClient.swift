@@ -1854,6 +1854,11 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         if signedRequest.value(forHTTPHeaderField: "Content-Type") == nil {
             signedRequest.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
+        #if DEBUG
+        guard !AppDebugFixtureConfiguration.isEnabled else {
+            throw URLError(.notConnectedToInternet)
+        }
+        #endif
         let (_, response) = try await session.upload(for: signedRequest, fromFile: fileURL)
         guard let httpResponse = response as? HTTPURLResponse,
               Self.canCompleteVoiceTutorRecordingUpload(
@@ -3033,6 +3038,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         ignoresHTTPStatus: Bool = false,
         logsBodyContents: Bool = true
     ) async throws -> Data {
+        #if DEBUG
+        // Fail before logging or transport, including actions reached from fixture UI.
+        guard !AppDebugFixtureConfiguration.isEnabled else {
+            throw URLError(.notConnectedToInternet)
+        }
+        #endif
         var request = request
         let protectsLearningContent = Self.suppressesPrivateLearningBodies(for: request.url)
         let logsBodyContents = logsBodyContents && !protectsLearningContent

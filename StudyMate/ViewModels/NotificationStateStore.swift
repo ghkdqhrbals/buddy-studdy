@@ -7,10 +7,12 @@ struct NotificationStateStore {
     var totalCount = 0
     var isLoading = false
     var errorMessage: String?
+    private(set) var failedLoadReset: Bool?
 
     mutating func beginLoading() {
         isLoading = true
         errorMessage = nil
+        failedLoadReset = nil
     }
 
     mutating func finishLoading() {
@@ -22,6 +24,8 @@ struct NotificationStateStore {
     }
 
     mutating func applyPage(_ page: BackendNotificationsPage, reset: Bool) {
+        errorMessage = nil
+        failedLoadReset = nil
         unreadCount = max(0, page.unreadCount)
         totalCount = max(0, page.totalCount)
 
@@ -36,6 +40,10 @@ struct NotificationStateStore {
 
     mutating func applyError(_ message: String?) {
         errorMessage = message
+    }
+
+    mutating func failLoading(reset: Bool) {
+        failedLoadReset = reset
     }
 
     mutating func markRead(notificationID: String, at readAt: Date) {
@@ -81,9 +89,11 @@ struct NotificationStateStore {
         totalCount = 0
         isLoading = false
         errorMessage = nil
+        failedLoadReset = nil
     }
 
     func canLoadMore(current notification: BackendAppNotification) -> Bool {
-        notification.id == notifications.last?.id && notifications.count < totalCount
+        !isLoading && errorMessage == nil && failedLoadReset == nil &&
+            notification.id == notifications.last?.id && notifications.count < totalCount
     }
 }

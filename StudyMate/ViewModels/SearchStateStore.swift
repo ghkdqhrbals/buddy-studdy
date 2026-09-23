@@ -7,6 +7,7 @@ struct SearchStateStore {
     private(set) var recordTotalCount = 0
     private(set) var recordLoadedCount = 0
     private(set) var isLoadingRecordPage = false
+    private(set) var failedRecordPageReset: Bool?
     private(set) var recordQuery = ""
     private var recordPageRequestID: UUID?
     var communityQuery = ""
@@ -27,6 +28,7 @@ struct SearchStateStore {
             recordQuery = ""
             isLoadingRecordPage = false
             recordPageRequestID = nil
+            failedRecordPageReset = nil
         }
     }
 
@@ -35,11 +37,15 @@ struct SearchStateStore {
     }
 
     mutating func beginRecordPage(query: String, reset: Bool) -> UUID? {
-        if reset || recordQuery != query {
+        if recordQuery != query || recordResults == nil {
             recordResults = []
             recordTotalCount = 0
             recordLoadedCount = 0
             recordQuery = query
+            isLoadingRecordPage = false
+            recordPageRequestID = nil
+        } else if reset {
+            // Refresh the same query without removing the already visible page.
             isLoadingRecordPage = false
             recordPageRequestID = nil
         }
@@ -49,6 +55,7 @@ struct SearchStateStore {
         let requestID = UUID()
         recordPageRequestID = requestID
         isLoadingRecordPage = true
+        failedRecordPageReset = nil
         return requestID
     }
 
@@ -67,6 +74,7 @@ struct SearchStateStore {
             merged.append(record)
         }
         recordResults = merged
+        failedRecordPageReset = nil
         recordTotalCount = max(page.totalCount, merged.count)
         recordLoadedCount = reset
             ? page.records.count
@@ -79,6 +87,11 @@ struct SearchStateStore {
         }
         isLoadingRecordPage = false
         recordPageRequestID = nil
+    }
+
+    mutating func failRecordPage(query: String, reset: Bool, requestID: UUID) {
+        guard recordQuery == query, recordPageRequestID == requestID else { return }
+        failedRecordPageReset = reset
     }
 
     mutating func removeRecordResult(id: String) {
