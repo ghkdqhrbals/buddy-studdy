@@ -73,15 +73,32 @@ failures. Recovery of the mismatch metric is not evidence of successful
 webhook delivery. No signature fallback, key rotation, subscription rewrite,
 or webhook retry was performed during the read-only investigation.
 
-The existing production V2 API key also returns HTTP 403 for the documented
+The production V2 API key initially returned HTTP 403 for the documented
 [integration GET API](https://www.revenuecat.com/docs/api-v2/integration),
-which requires `project_configuration:integrations:read`. Both existing project
-keys have Project configuration set to `No access`. A guarded local recovery
-procedure is prepared to query only the production integration, compare its
-returned signing key without printing it, and conditionally update only
-`REVENUECAT_WEBHOOK_SIGNING_SECRET` in the existing AWS secret. The separate
-confirmation for temporarily granting Integrations Configuration `Read only`
-and then restoring `No access` is pending; no permission or secret has changed.
+which requires `project_configuration:integrations:read`. On September 23 the
+user approved the permission change. Only the production key's Integrations
+Configuration access was temporarily changed from `No access` to `Read only`;
+all other permissions were preserved. The production integration GET then
+succeeded, but its response omitted `signing_secret` entirely. No secret could
+be compared or synchronized. The permission was restored to `No access`, and
+the same GET again returned the expected 403. No AWS secret changed.
+
+The [official Integration OpenAPI](https://www.revenuecat.com/docs/redocusaurus/openapi-v2-integration.yaml)
+describes `signing_secret` as returned only by a rotate request. Its five public
+operations include no rotate endpoint or signing-key update field. The
+[HMAC setup instructions](https://www.revenuecat.com/docs/integrations/webhooks#enabling-hmac-signing)
+instead direct the operator to Dashboard `Rotate secret`; the existing secret
+cannot be retrieved. A sample response containing this field is not evidence
+that GET can recover it.
+
+The next step is operator rotation in the existing production integration.
+Computer-control credential-change rules require that Dashboard action to be
+performed by the user. A local owner-only input file and guarded AWS update
+procedure are prepared so the new value need not appear in chat or logs. The
+procedure changes only `REVENUECAT_WEBHOOK_SIGNING_SECRET`, checks for concurrent
+AWS changes, verifies the stored result, and removes the input after success.
+Backend redeployment must then load the new secret. Rotation, secret update,
+redeployment for this credential, and successful TEST delivery remain pending.
 
 Once authentication is repaired, verify it with a RevenueCat `TEST` delivery.
 Do not indiscriminately replay historical renewal events without checking newer
