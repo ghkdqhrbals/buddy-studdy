@@ -1,0 +1,150 @@
+{
+  "verifiedAt": "2026-09-23T19:40:24Z",
+  "verificationMode": "FRESH_ASC_GET_ONLY",
+  "apiMutations": 0,
+  "appId": "6774108938",
+  "bundleId": "io.github.ghkdqhrbals.StudyMate",
+  "versionId": "5bb7c17c-3765-4b1b-b03c-00d8da654a2e",
+  "version": {
+    "platform": "IOS",
+    "versionString": "1.2.0",
+    "appStoreState": "WAITING_FOR_REVIEW",
+    "releaseType": "MANUAL"
+  },
+  "selectedBuildId": "ae4723cd-342b-4f21-987b-aa071c4ff1c0",
+  "build": {
+    "version": "122",
+    "processingState": "VALID",
+    "expired": false,
+    "buildAudienceType": "APP_STORE_ELIGIBLE",
+    "usesNonExemptEncryption": false
+  },
+  "submissionId": "1f254c53-7364-4536-9b7a-ed51b84881aa",
+  "submissionState": "WAITING_FOR_REVIEW",
+  "singleActiveIOSSubmission": true,
+  "items": [
+    {
+      "id": "MWYyNTRjNTMtNzM2NC00NTM2LTliN2EtZWQ1MWI4NDg4MWFhfDZ8ODkxODEwODQ1",
+      "state": "READY_FOR_REVIEW",
+      "appStoreVersionId": "5bb7c17c-3765-4b1b-b03c-00d8da654a2e"
+    }
+  ],
+  "oldSubmissionId": "7bc80e37-ea6e-4e63-9f39-a504cc216bb0",
+  "oldSubmissionState": "COMPLETE",
+  "versionLocalizations": {
+    "ko": {
+      "id": "9a0eaf15-bd0b-45d2-952b-342b10f60a0f",
+      "whatsNewMatchesRepository": true,
+      "whatsNewHash": "e7db6cdab6c4530d8c967f49f930823c5cde252fa1a7c5ba05cc7a63ae21ebfa",
+      "otherPublicFieldsHash": "8bd9bd43eb41252cab96727ff2d52f64260435c6f880f8b19a16bd3321f93daa"
+    },
+    "ja": {
+      "id": "c2e42eec-d0e0-4fc1-a48a-c6c08d7dd9f5",
+      "whatsNewMatchesRepository": true,
+      "whatsNewHash": "b992587ae178000b60d1531c003e41d0e087f7ee207a2e3126983cab2a01b10f",
+      "otherPublicFieldsHash": "5fb7f8b1328e99e451cc7479683fcc2bd0e9a15503d9316814665e84e4b4d97d"
+    },
+    "en-US": {
+      "id": "48238a43-6a50-46eb-8aa6-5669e337ff6b",
+      "whatsNewMatchesRepository": true,
+      "whatsNewHash": "fb5049593dbb7702603ed8ca0df16931b1349ab9ff7b9bbaeab30e5978c7f4f1",
+      "otherPublicFieldsHash": "c5827e8963b5b5e9b12024cb537708acf87a8c5e3a9f30497f5581515ee5c141"
+    }
+  },
+  "publicMetadataHashes": {
+    "version": "a7b44bd9ccafe75c462134ec284551903ae2b37486ae026dcca1a1650b8a7d25",
+    "locales": {
+      "ko": {
+        "id": "9a0eaf15-bd0b-45d2-952b-342b10f60a0f",
+        "hash": "8bd9bd43eb41252cab96727ff2d52f64260435c6f880f8b19a16bd3321f93daa"
+      },
+      "ja": {
+        "id": "c2e42eec-d0e0-4fc1-a48a-c6c08d7dd9f5",
+        "hash": "5fb7f8b1328e99e451cc7479683fcc2bd0e9a15503d9316814665e84e4b4d97d"
+      },
+      "en-US": {
+        "id": "48238a43-6a50-46eb-8aa6-5669e337ff6b",
+        "hash": "c5827e8963b5b5e9b12024cb537708acf87a8c5e3a9f30497f5581515ee5c141"
+      }
+    }
+  },
+  "publicMetadataMatchesPreCancelJournal": true,
+  "publicMetadataComparedFields": {
+    "version": [
+      "platform",
+      "versionString",
+      "releaseType",
+      "copyright",
+      "reviewType",
+      "earliestReleaseDate"
+    ],
+    "localization": [
+      "locale",
+      "description",
+      "keywords",
+      "marketingUrl",
+      "promotionalText",
+      "supportUrl"
+    ]
+  },
+  "testFlight": {
+    "internalBuildState": "IN_BETA_TESTING",
+    "localizations": {
+      "ja": {
+        "id": "aaf88d1b-59ce-483d-b715-d174f5f8c171",
+        "matchesRepository": true,
+        "hash": "9d617119b5134cf51a428eb896b84d2c420a605a94359676a534cbdc60ad2149"
+      },
+      "ko": {
+        "id": "165f3896-aebd-4d28-be2c-1835274f9157",
+        "matchesRepository": true,
+        "hash": "a76f3874d9cd14a0e8af21c7411e41c0d4a814cd257746dbc7754742893399e2"
+      },
+      "en-US": {
+        "id": "6eeeb622-6075-4b15-a511-41b9031ae95c",
+        "matchesRepository": true,
+        "hash": "2253fe1042d6a2e0dbd2604fb075600a1781b4d5f37591c4a5ef0ad7bacc6d64"
+      }
+    },
+    "existingInternalGroupId": "5f6797bb-38a0-400b-8269-74aa6f5f3bec",
+    "groupBelongsToExactApp": true,
+    "groupIncludesBuild122": true,
+    "groupStillIncludesBuild121": true
+  },
+  "sensitiveReviewFieldsRead": false,
+  "releaseWorkflow": {
+    "databaseId": 35907365247,
+    "number": 122,
+    "status": "completed",
+    "conclusion": "success",
+    "headSha": "f9e6389dc5d71581fb01a29d902b9b0870e44fe5",
+    "url": "https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/35907365247"
+  },
+  "releaseMetadata": {
+    "version": "1.2.0",
+    "build": "122",
+    "sourceSha": "f9e6389dc5d71581fb01a29d902b9b0870e44fe5",
+    "runId": "35907365247",
+    "backendBaseURL": "https://api.ghkdqhrbals.org",
+    "appReviewCandidate": false,
+    "admobTestMode": false
+  },
+  "ipaVerification": {
+    "ipaBytes": 30907313,
+    "ipaSHA256": "10c7c825889ef66e8109b6135c4edd0fc65e9c7abd9f0e2fba96fe08d8a4d84a",
+    "bundleIdentifier": "io.github.ghkdqhrbals.StudyMate",
+    "firebaseConfigurationPresentAndMatched": true,
+    "revenueCatProductionPublicKeyPresent": true,
+    "admobDemoIdentifiersAbsent": true,
+    "offlineQAFlagAndURLSchemeAbsent": true,
+    "appleDistributionSigner": true,
+    "localVerificationScope": "IPA plist read directly from ZIP; entitlements/signing read from copied main Mach-O; full bundle deep/strict verification belongs to CI archive/export steps."
+  },
+  "githubArtifact": {
+    "artifactId": 10772268471,
+    "artifactName": "BuddyStudy-iOS-1.2.0-122",
+    "sizeInBytes": 30768408,
+    "artifactSHA256": "1db86ee025806d5d8f4e99cd2d50e6724bdcbbdeca047023e0935a464c9038c1",
+    "digestMatchesGitHub": true
+  }
+}
