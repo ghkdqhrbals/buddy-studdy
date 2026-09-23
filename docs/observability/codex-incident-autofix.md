@@ -47,7 +47,10 @@ backend ERROR
 ### Grafana
 
 - Evaluates the existing backend ERROR alert once per minute.
-- Sends the same firing/resolved notification group to Slack and the internal receiver.
+- Sends firing log events to Slack. Resolved-only messages and resolved entries
+  in mixed groups are omitted because a log leaving the query window does not
+  prove recovery. The internal receiver retains the firing/resolved webhook
+  contract and ignores resolved entries.
 - Uses a custom Slack webhook payload so the visible link targets the alert's
   absolute event window instead of Grafana's static alert-rule `GeneratorURL`.
 - Signs the exact webhook body with HMAC-SHA256 using `timestamp + ":" + body`.

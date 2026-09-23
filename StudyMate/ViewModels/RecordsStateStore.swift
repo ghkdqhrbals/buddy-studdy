@@ -6,6 +6,8 @@ struct RecordsStateStore {
     private(set) var totalCount = 0
     private(set) var loadedBackendCount = 0
     private(set) var isLoadingPage = false
+    private(set) var hasLoadedPage = false
+    private(set) var failedPageReset: Bool?
 
     init(records: [StudyRecord] = []) {
         self.records = records
@@ -28,10 +30,13 @@ struct RecordsStateStore {
             return false
         }
         isLoadingPage = true
+        failedPageReset = nil
         return true
     }
 
     mutating func applyPage(_ page: BackendRecordsPage, reset: Bool) {
+        hasLoadedPage = true
+        failedPageReset = nil
         totalCount = max(page.totalCount, reset ? page.records.count : totalCount)
         loadedBackendCount = reset
             ? page.records.count
@@ -42,6 +47,10 @@ struct RecordsStateStore {
         isLoadingPage = false
     }
 
+    mutating func failPageLoad(reset: Bool) {
+        failedPageReset = reset
+    }
+
     mutating func removeLoadedBackendRecord(_ record: StudyRecord) {
         guard record.isCompletedRecord else {
             return
@@ -50,11 +59,13 @@ struct RecordsStateStore {
         loadedBackendCount = max(loadedBackendCount - 1, 0)
     }
 
-    mutating func clear() {
+    mutating func clear(loaded: Bool = false) {
         records = []
         totalCount = 0
         loadedBackendCount = 0
         isLoadingPage = false
+        hasLoadedPage = loaded
+        failedPageReset = nil
     }
 
     func record(

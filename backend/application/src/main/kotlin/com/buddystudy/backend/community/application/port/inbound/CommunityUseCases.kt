@@ -1,6 +1,8 @@
 package com.buddystudy.backend.community.application.port.inbound
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.community.application.model.PublicFeedSort
+import com.buddystudy.backend.community.application.model.PublicFeedScope
 import com.buddystudy.backend.community.application.model.CommunityCommentResponse
 import com.buddystudy.backend.community.application.model.CommunityCommentDeleteResponse
 import com.buddystudy.backend.community.application.model.CommunityCommentsResponse
@@ -27,6 +29,8 @@ interface CommunityUseCase {
         view: String = "localized",
         limit: Int,
         offset: Int,
+        sort: PublicFeedSort = PublicFeedSort.RECOMMENDED,
+        scope: PublicFeedScope = PublicFeedScope.ALL,
     ): CommunityQuestionsResponse
     suspend fun getPublicQuestionFeedV2(
         principal: Principal?,
@@ -34,6 +38,8 @@ interface CommunityUseCase {
         view: String = "localized",
         limit: Int,
         offset: Int,
+        sort: PublicFeedSort = PublicFeedSort.RECOMMENDED,
+        scope: PublicFeedScope = PublicFeedScope.ALL,
     ): CommunityQuestionsResponse
     suspend fun getLikedPublicQuestions(
         principal: Principal,

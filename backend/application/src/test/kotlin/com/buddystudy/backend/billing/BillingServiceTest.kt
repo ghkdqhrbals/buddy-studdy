@@ -96,6 +96,35 @@ class BillingServiceTest {
     )
 
     @Test
+    fun `billing status exposes the selected App Store subscription chain`() = runBlocking {
+        val ledger = FakeLedger(token, product).apply {
+            projectedEntitlement = projectedEntitlement?.copy(
+                originalTransactionId = transaction.originalTransactionId,
+            )
+        }
+
+        val status = service(ledger).status(principal())
+
+        assertEquals(transaction.originalTransactionId, status.originalTransactionId)
+        assertEquals(product.productId, status.productId)
+    }
+
+    @Test
+    fun `free and legacy entitlement projections retain nullable subscription identity`() = runBlocking {
+        val ledger = FakeLedger(token, product)
+        assertEquals(null, service(ledger).status(principal()).originalTransactionId)
+
+        ledger.projectedEntitlement = ledger.projectedEntitlement?.copy(
+            source = EntitlementSource.FREE,
+            originalTransactionId = transaction.originalTransactionId,
+        )
+        assertEquals(null, service(ledger).status(principal()).originalTransactionId)
+
+        ledger.projectedEntitlement = null
+        assertEquals(null, service(ledger).status(principal()).originalTransactionId)
+    }
+
+    @Test
     fun `billing status exposes the exact scheduled plan transition`() = runBlocking {
         val changesAt = Instant.parse("2026-09-02T00:00:00Z")
         val ledger = FakeLedger(token, product).apply {
@@ -221,6 +250,7 @@ class BillingServiceTest {
             projectedEntitlement = projectedEntitlement?.copy(
                 expiresAt = now.minusSeconds(1),
                 accessStatus = SubscriptionAccessStatus.ACTIVE,
+                originalTransactionId = transaction.originalTransactionId,
             )
         }
 
@@ -230,6 +260,7 @@ class BillingServiceTest {
         assertEquals(EntitlementSource.FREE, status.source)
         assertEquals(SubscriptionAccessStatus.ACTIVE, status.accessStatus)
         assertEquals(null, status.productId)
+        assertEquals(null, status.originalTransactionId)
         assertEquals(30, status.quota.baseLimit)
         assertEquals(false, status.adFree)
     }

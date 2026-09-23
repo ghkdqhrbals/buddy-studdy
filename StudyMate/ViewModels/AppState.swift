@@ -539,6 +539,21 @@ final class AppState: ObservableObject {
         recordsState.isLoadingPage
     }
 
+    var hasLoadedRecordPage: Bool {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled { return true }
+        #endif
+        return recordsState.hasLoadedPage
+    }
+
+    var hasRecordPageError: Bool {
+        recordsState.failedPageReset != nil
+    }
+
+    var hasRecordSearchPageError: Bool {
+        searchState.failedRecordPageReset != nil
+    }
+
     var canLoadMoreRecords: Bool {
         recordsState.canLoadMore
     }
@@ -719,6 +734,16 @@ final class AppState: ObservableObject {
         }
     }
 
+    var subscribedCommunityTopics: [String] { topicSubscriptionState.topics }
+    var hasLoadedTopicSubscriptions: Bool { topicSubscriptionState.hasLoaded }
+    var isLoadingTopicSubscriptions: Bool { topicSubscriptionState.isLoading }
+    var isSavingTopicSubscriptions: Bool { topicSubscriptionState.isSaving }
+    var topicSubscriptionsErrorMessage: String? { topicSubscriptionState.errorMessage }
+    func suggestedCommunityTopics(excluding selectedTopics: [String]) -> [String] {
+        let candidates = settings.studyCategories.map(\.title) + backendStudyRooms.map(\.topic) + communityQuestions.map(\.topic)
+        return CommunityTopicSubscriptionPolicy.suggestions(from: candidates, excluding: selectedTopics)
+    }
+
     var likedCommunityQuestions: [CommunityQuestion] {
         communityRecordsCacheIdentity == commonRecordsIdentity
             ? likedQuestionsState.questions
@@ -799,7 +824,10 @@ final class AppState: ObservableObject {
             var nextState = communityProfileState
             nextState.profile = newValue
             communityProfileState = nextState
-            if changesAccount { invalidateCommonRecordReads(detachQuestionDrafts: true) }
+            if changesAccount {
+                invalidateCommonRecordReads(detachQuestionDrafts: true)
+                resetCommunityPersonalizationState()
+            }
         }
     }
 
@@ -888,6 +916,9 @@ final class AppState: ObservableObject {
     @Published var cloudSyncMessage: String?
     @Published var hasCloudSyncError = false
     @Published var cloudLastSyncedAt: Date?
+    @Published private var topicSubscriptionState = CommunityTopicSubscriptionStateStore()
+    @Published private(set) var communityFeedSort: CommunityFeedSort = .recommended
+    @Published private(set) var communityFeedScope: CommunityFeedScope = .all
     @Published private var communityFeedState = CommunityFeedStateStore()
     @Published private var likedQuestionsState = LikedQuestionsStateStore()
     @Published private var communityQuestionLikeRequestState = CommunityQuestionLikeRequestStore()
@@ -1019,8 +1050,7 @@ final class AppState: ObservableObject {
     var strings: AppStrings {
         #if DEBUG
         if isAppStoreScreenshotFixtureEnabled {
-            switch ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_LANGUAGE"]?
-                .lowercased() {
+            switch AppDebugFixtureConfiguration.language {
             case "ja", "jp", "japanese":
                 return AppStrings(language: .japanese)
             case "en", "english":
@@ -1034,15 +1064,16 @@ final class AppState: ObservableObject {
     }
 
     #if DEBUG
+    private var screenshotPublicQuestions: [CommunityQuestion] = []
+
     private var isAppStoreScreenshotFixtureEnabled: Bool {
-        ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"] != nil
+        AppDebugFixtureConfiguration.isEnabled
     }
     #endif
 
     var isMembershipScreenshotFixtureEnabled: Bool {
         #if DEBUG
-        ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?
-            .lowercased() == "membership"
+        AppDebugFixtureConfiguration.fixtureName() == "membership"
         #else
         false
         #endif
@@ -1135,10 +1166,14 @@ final class AppState: ObservableObject {
     func normalizeSelectedTabForMobile() {
         logAuthTrace("mobile_normalize_tab_start", reason: "normalizeSelectedTabForMobile")
         #if DEBUG
-        if ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?
-            .lowercased() == "study-tree" {
+        if AppDebugFixtureConfiguration.fixtureName() == "study-tree" {
             selectedTab = .home
             homeStudyRoute = HomeStudyRoute(categoryID: "101", showsTree: true)
+            return
+        }
+        if let fixture = AppDebugFixtureConfiguration.fixtureName(),
+           ["learning-result", "result"].contains(fixture) {
+            selectedTab = .home
             return
         }
         if selectedTab == .study,
@@ -1778,6 +1813,7 @@ final class AppState: ObservableObject {
         billingRefreshRequestID += 1
         if didChangeBackend {
             invalidateCommonRecordReads(detachQuestionDrafts: true)
+            resetCommunityPersonalizationState()
             billingCatalog = nil
             billingStatus = nil
             billingInvoices = []
@@ -2157,14 +2193,11 @@ final class AppState: ObservableObject {
 
     #if DEBUG
     private func configureAppStoreScreenshotFixtureIfNeeded() {
-        guard let fixture = ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?
-            .lowercased() else {
+        guard let fixture = AppDebugFixtureConfiguration.fixtureName() else {
             return
         }
 
-        let screenshotLanguage = ProcessInfo.processInfo
-            .environment["BUDDYSTUDY_SCREENSHOT_LANGUAGE"]?
-            .lowercased() ?? "ko"
+        let screenshotLanguage = AppDebugFixtureConfiguration.language
         let language: AppLanguage
         switch screenshotLanguage {
         case "ja", "jp", "japanese":
@@ -2208,6 +2241,11 @@ final class AppState: ObservableObject {
         hasCompletedOnboarding = true
         isCloudSyncEnabled = false
         communitySessionState = CommunitySessionStateStore(isSignedIn: true)
+        communityProfileState.profile = CommunityUserProfile(
+            id: 900,
+            displayName: isKorean ? "버디 학습자" : (isJapanese ? "Buddy学習者" : "Buddy Learner"),
+            status: "ACTIVE", provider: "SCREENSHOT", bio: "", avatarURL: nil
+        )
 
         func room(
             _ id: Int,
@@ -2369,6 +2407,7 @@ final class AppState: ObservableObject {
             )
         }
         recordsState.replace(with: records)
+        commonRecordsCacheIdentity = commonRecordsIdentity
 
         let authorNames = isKorean
             ? ["꾸준한개발자", "알고리즘메이트", "영어한스푼"]
@@ -2411,7 +2450,7 @@ final class AppState: ObservableObject {
                 gradingResult: records[index].gradingResult,
                 topic: recordTopics[item],
                 difficultyLevel: 4 + (index % 4),
-                status: "ANSWERED",
+                status: "GRADED",
                 source: "STUDY",
                 createdAt: now.addingTimeInterval(TimeInterval(-(index + 1) * 5_400)),
                 answeredAt: now.addingTimeInterval(TimeInterval(-(index + 1) * 5_100)),
@@ -2422,16 +2461,24 @@ final class AppState: ObservableObject {
                 isLikedByMe: index == 0
             )
         }
+        screenshotPublicQuestions = publicQuestions
         communityFeedState.applyPage(
             CommunityQuestionsResponse(
                 questions: publicQuestions,
-                totalCount: 48,
+                totalCount: publicQuestions.count,
                 limit: 20,
                 offset: 0
             ),
             offset: 0,
             reset: true
         )
+
+        if let requestID = topicSubscriptionState.beginLoading() {
+            topicSubscriptionState.apply(
+                CommunityTopicSubscriptions(topics: Array(CommunityTopicSubscriptionPolicy.uniqueTopics(publicQuestions.map(\.topic)).prefix(2))),
+                requestID: requestID
+            )
+        }
 
         let averages = [91, 88, 90, 85, 82, 94]
         let bestScores = [98, 96, 99, 94, 93, 100]
@@ -2622,6 +2669,17 @@ final class AppState: ObservableObject {
 
         homeStudyRoute = nil
         switch fixture {
+        case "learning-result", "result":
+            selectedTab = .home
+            currentQuestion = records[0].question
+            lastAnswer = records[0].answer ?? ""
+            gradingResult = records[0].gradingResult
+            var resultRooms = rooms
+            if let index = resultRooms.firstIndex(where: { $0.id == studyIDs[0] }) {
+                resultRooms[index].latestQuestion = records[0]
+            }
+            studyRoomState.replace(with: resultRooms)
+            homeStudyRoute = HomeStudyRoute(categoryID: String(studyIDs[0]), isContentPrepared: true)
         case "study-tree", "tree":
             selectedTab = .home
             homeStudyRoute = HomeStudyRoute(categoryID: "101", showsTree: true)
@@ -2639,6 +2697,58 @@ final class AppState: ObservableObject {
             appRouteRequest = AppRouteRequest(route: .publicQuestions)
         }
     }
+    #if os(iOS)
+    /// Fixture history uses only synthetic in-memory content, never a stored
+    /// credential or a backend request. Production loaders keep their own fence.
+    private func makeAppStoreScreenshotLearningRecordsLoader(
+        studyID: Int,
+        scope: StudyLearningRecordScope
+    ) -> StudyLearningRecordsLoader? {
+        guard isAppStoreScreenshotFixtureEnabled, studyID > 0, let identity = studyLearningRecordsIdentity else { return nil }
+        let context = StudyLearningRecordsContext(identity: identity, studyID: studyID, scope: scope)
+        let studyIDs = scope == .node ? Set([studyID]) : backendStudySubtreeIDs(rootIDs: [studyID])
+        let records = recordsState.records.filter {
+            $0.id.hasPrefix("screenshot-record-") && $0.studyID.map(studyIDs.contains) == true
+        }
+        struct FixtureItem: Encodable {
+            let id: String
+            let source = "QUESTION"
+            let studyId: Int
+            let createdAt: Date
+            let questionRecord: StudyRecord
+            let record: StudyRecord
+        }
+        let items = records.compactMap { record -> BackendStudyLearningRecord? in
+            guard let studyID = record.studyID,
+                  let data = try? JSONEncoder().encode(FixtureItem(
+                    id: "question:\(record.id)", studyId: studyID, createdAt: record.question.createdAt,
+                    questionRecord: record, record: record
+                  )) else { return nil }
+            return try? JSONDecoder().decode(BackendStudyLearningRecord.self, from: data)
+        }
+        let page = BackendStudyLearningRecordsPage(items: items)
+        let isCurrent: @MainActor () -> Bool = { [weak self] in
+            self?.studyLearningRecordsIdentity == identity
+        }
+        return StudyLearningRecordsLoader(
+            context: context,
+            isCurrent: isCurrent,
+            cachedPage: { cursor in isCurrent() && cursor == nil ? page : nil },
+            loadPage: { cursor in
+                guard isCurrent(), cursor == nil, !Task.isCancelled else { throw CancellationError() }
+                return page
+            },
+            loadVoice: { _, _ in throw StudyLearningRecordsError.unavailable },
+            loadQuestion: { recordID, _ in
+                guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
+                guard let record = records.first(where: { $0.id == recordID }) else {
+                    throw StudyLearningRecordsError.unavailable
+                }
+                return record
+            }
+        )
+    }
+    #endif
     #endif
 
     deinit {
@@ -2665,17 +2775,17 @@ final class AppState: ObservableObject {
         }
 
         didStart = true
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return
+        }
+        #endif
         #if os(iOS)
         await cleanupLocalVoiceTutorRecordings()
         #endif
         scheduleDeferredReferralProfileResolution()
         #if os(iOS)
         startAppleBillingTransactionListener()
-        #endif
-        #if DEBUG
-        if isAppStoreScreenshotFixtureEnabled {
-            return
-        }
         #endif
         let usesRemoteAppControl = await refreshAppControlPolicy()
         guard !isMaintenanceAccessBlocked else {
@@ -3155,6 +3265,10 @@ final class AppState: ObservableObject {
         await loadBackendRecordsPage(reset: false)
     }
 
+    func retryBackendRecordsPage() async {
+        await loadBackendRecordsPage(reset: recordsState.failedPageReset ?? true)
+    }
+
     func fetchBackendRecords(
         studyID: Int,
         limit: Int = 30,
@@ -3201,6 +3315,11 @@ final class AppState: ObservableObject {
         studyID: Int,
         scope: StudyLearningRecordScope
     ) -> StudyLearningRecordsLoader? {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return makeAppStoreScreenshotLearningRecordsLoader(studyID: studyID, scope: scope)
+        }
+        #endif
         guard studyID > 0, let identity = studyLearningRecordsIdentity,
               let account = try? makeVoiceTutorRequestContext() else { return nil }
         let key = StudyLearningRecordsContext(identity: identity, studyID: studyID, scope: scope)
@@ -3333,6 +3452,9 @@ final class AppState: ObservableObject {
               let registration = await registrationWithAccessToken(
                 storedRegistration, reason: "records", validity: isCurrent
               ), isCurrent() else {
+            if isCurrent(), !Task.isCancelled, commonRecordsPageRequestID == requestID {
+                recordsState.failPageLoad(reset: reset)
+            }
             if commonRecordsPageRequestID == requestID { finishBackendRecordPageLoad() }
             log(.warning, "백엔드 등록이 없어 기록 새로고침을 건너뛰었습니다.")
             return
@@ -3381,6 +3503,7 @@ final class AppState: ObservableObject {
                 if handlePageAccessError(error, page: .records) {
                     return
                 }
+                recordsState.failPageLoad(reset: reset)
                 log(.warning, "백엔드 기록 새로고침 실패: \(error.localizedDescription)")
             },
             onCompletion: {
@@ -3462,7 +3585,9 @@ final class AppState: ObservableObject {
         }
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "notifications") else {
+            guard isCurrentCommunitySession(sessionGeneration) else { return }
             notificationErrorMessage = strings.myStudyLoginHelp
+            notificationState.failLoading(reset: reset)
             return
         }
         guard isCurrentCommunitySession(sessionGeneration) else {
@@ -3503,11 +3628,15 @@ final class AppState: ObservableObject {
                     log(.info, "로그아웃 후 알림 목록 오류 처리를 건너뛰었습니다.")
                     return
                 }
+                guard !Self.isCancellationLikeError(error) else { return }
                 handleAppError(
                     error,
                     fallback: strings.notificationLoadRetryDescription,
                     target: .notification
                 )
+                if isCurrentCommunitySession(sessionGeneration) {
+                    notificationState.failLoading(reset: reset)
+                }
                 log(
                     .warning,
                     "알림 목록 조회 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
@@ -3529,6 +3658,10 @@ final class AppState: ObservableObject {
             return
         }
         await loadNotifications(reset: false)
+    }
+
+    func retryNotifications() async {
+        await loadNotifications(reset: notificationState.failedLoadReset ?? true)
     }
 
     func markNotificationRead(_ notification: BackendAppNotification) async {
@@ -4065,6 +4198,9 @@ final class AppState: ObservableObject {
         defer { finishBackendRecordSearchPage(query: trimmedQuery, requestID: requestID) }
 
         guard let registration = await prepareRecordRegistration(reason: "record-search", validity: isCurrent) else {
+            if isCurrent(), !Task.isCancelled {
+                searchState.failRecordPage(query: trimmedQuery, reset: reset, requestID: requestID)
+            }
             return
         }
 
@@ -4096,6 +4232,7 @@ final class AppState: ObservableObject {
             searchState = nextState
         } catch {
             guard isCurrent(), !Self.isCancellationLikeError(error) else { return }
+            searchState.failRecordPage(query: trimmedQuery, reset: reset, requestID: requestID)
             log(.warning, "기록 검색 실패: \(error.localizedDescription)")
         }
     }
@@ -4108,6 +4245,14 @@ final class AppState: ObservableObject {
         await searchBackendRecords(query: searchState.recordQuery, reset: false)
     }
 
+    func retryBackendRecordSearchPage() async {
+        guard !searchState.recordQuery.isEmpty else { return }
+        await searchBackendRecords(
+            query: searchState.recordQuery,
+            reset: searchState.failedRecordPageReset ?? true
+        )
+    }
+
     private func finishBackendRecordSearchPage(query: String, requestID: UUID) {
         var nextState = searchState
         nextState.finishRecordPage(query: query, requestID: requestID)
@@ -4118,9 +4263,9 @@ final class AppState: ObservableObject {
         replaceRecordSearchResults(nil)
     }
 
-    private func beginCommunityFeedLoad() -> UUID {
+    private func beginCommunityFeedLoad(query: String) -> UUID {
         var nextState = communityFeedState
-        let requestID = nextState.beginLoading()
+        let requestID = nextState.beginLoading(query: query)
         communityFeedState = nextState
         return requestID
     }
@@ -4516,6 +4661,189 @@ final class AppState: ObservableObject {
         )
     }
 
+    private func makeTopicSubscriptionRequestValidity() -> @MainActor () -> Bool {
+        let sessionGeneration = communitySessionState.generation
+        let clientGeneration = backendClientGeneration
+        let ownerID = communityProfile?.id
+        let account = try? makeVoiceTutorRequestContext()
+        return { [weak self] in
+            guard let self else { return false }
+            return self.isCurrentCommunitySession(sessionGeneration) &&
+                self.backendClientGeneration == clientGeneration &&
+                (ownerID == nil || self.communityProfile?.id == ownerID) &&
+                (account?.isCurrent() ?? true)
+        }
+    }
+
+    func loadTopicSubscriptions(force: Bool = false) async {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled { return }
+        #endif
+        guard isCommunitySessionActive, force || !topicSubscriptionState.hasLoaded else { return }
+        let isCurrent = makeTopicSubscriptionRequestValidity()
+        guard let requestID = topicSubscriptionState.beginLoading() else { return }
+        let useCase = communityUseCase
+        defer {
+            if topicSubscriptionState.isCurrentRequest(requestID), topicSubscriptionState.isLoading {
+                topicSubscriptionState.fail(strings.topicSubscriptionsRequestFailed, requestID: requestID)
+            }
+        }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "topic-subscriptions"),
+              isCurrent(),
+              topicSubscriptionState.isCurrentRequest(requestID) else {
+            topicSubscriptionState.fail(strings.topicSubscriptionsRequestFailed, requestID: requestID)
+            return
+        }
+        await actionRunner.run(
+            operation: { try await useCase.fetchTopicSubscriptions(registration: registration) },
+            onSuccess: { response in
+                guard isCurrent() else { return }
+                topicSubscriptionState.apply(response, requestID: requestID)
+            },
+            onFailure: { error in
+                guard isCurrent(),
+                      topicSubscriptionState.isCurrentRequest(requestID) else { return }
+                _ = handleAppError(error, fallback: "", target: .none)
+                topicSubscriptionState.fail(strings.topicSubscriptionsRequestFailed, requestID: requestID)
+            }
+        )
+    }
+
+    func saveTopicSubscriptions(_ topics: [String]) async -> Bool {
+        let normalizedTopics = CommunityTopicSubscriptionPolicy.uniqueTopics(topics)
+        guard isCommunitySessionActive,
+              CommunityTopicSubscriptionPolicy.isValid(normalizedTopics),
+              let requestID = topicSubscriptionState.beginSaving() else { return false }
+        let isCurrent = makeTopicSubscriptionRequestValidity()
+        let useCase = communityUseCase
+        defer {
+            if topicSubscriptionState.isCurrentRequest(requestID), topicSubscriptionState.isSaving {
+                topicSubscriptionState.fail(strings.topicSubscriptionsSaveFailed, requestID: requestID)
+            }
+        }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "topic-subscriptions-save"),
+              isCurrent(),
+              topicSubscriptionState.isCurrentRequest(requestID) else {
+            topicSubscriptionState.fail(strings.topicSubscriptionsSaveFailed, requestID: requestID)
+            return false
+        }
+        var didSave = false
+        await actionRunner.run(
+            operation: {
+                try await useCase.updateTopicSubscriptions(registration: registration, topics: normalizedTopics)
+            },
+            onSuccess: { response in
+                guard isCurrent(),
+                      topicSubscriptionState.isCurrentRequest(requestID) else { return }
+                topicSubscriptionState.apply(response, requestID: requestID)
+                AppAnalytics.topicSubscriptionsSaved(count: response.topics.count)
+                communityFeedState.invalidatePage()
+                refreshCommunityQuestions(userInitiated: true)
+                didSave = true
+            },
+            onFailure: { error in
+                guard isCurrent(),
+                      topicSubscriptionState.isCurrentRequest(requestID) else { return }
+                _ = handleAppError(error, fallback: "", target: .none)
+                topicSubscriptionState.fail(strings.topicSubscriptionsSaveFailed, requestID: requestID)
+            }
+        )
+        return didSave
+    }
+
+    func isCommunityTopicFollowed(_ topic: String) -> Bool {
+        let key = CommunityTopicSubscriptionPolicy.matchingKey(topic)
+        return subscribedCommunityTopics.contains { CommunityTopicSubscriptionPolicy.matchingKey($0) == key }
+    }
+
+    func toggleCommunityTopicSubscription(_ topic: String) async -> Bool {
+        guard isCommunitySessionActive, !isSavingTopicSubscriptions else { return false }
+        let isCurrent = makeTopicSubscriptionRequestValidity()
+        await loadTopicSubscriptions(force: true)
+        guard isCurrent(), hasLoadedTopicSubscriptions,
+              !isLoadingTopicSubscriptions, !isSavingTopicSubscriptions,
+              topicSubscriptionsErrorMessage == nil else { return false }
+        let isFollowing = !isCommunityTopicFollowed(topic)
+        let key = CommunityTopicSubscriptionPolicy.matchingKey(topic)
+        let topics = isFollowing
+            ? subscribedCommunityTopics + [topic]
+            : subscribedCommunityTopics.filter { CommunityTopicSubscriptionPolicy.matchingKey($0) != key }
+        guard CommunityTopicSubscriptionPolicy.isValid(topics) else {
+            topicSubscriptionState.showValidationError(strings.topicSubscriptionsLimitHelp)
+            return false
+        }
+        let saved = await saveTopicSubscriptions(topics)
+        if saved { AppAnalytics.publicTopicFollowChanged(isFollowing: isFollowing) }
+        return saved
+    }
+
+    /// Clearing the field also discards the filtered page and any in-flight
+    /// response, so a collapsed search cannot leave an invisible filter behind.
+    @discardableResult
+    func clearCommunitySearch() -> Bool {
+        let hadQuery = communityFeedState.clearSearch(draftQuery: communitySearchText)
+        communitySearchText = ""
+        return hadQuery
+    }
+
+    func setCommunityFeedSort(_ sort: CommunityFeedSort) {
+        guard sort != communityFeedSort else { return }
+        communityFeedSort = sort
+        communityFeedState.invalidatePage()
+        refreshCommunityQuestions(userInitiated: true)
+    }
+
+    func setCommunityFeedScope(_ scope: CommunityFeedScope) {
+        guard scope != communityFeedScope else { return }
+        communityFeedScope = scope
+        communityFeedState.invalidatePage()
+        refreshCommunityQuestions(userInitiated: true)
+    }
+
+    private func resetCommunityPersonalizationState() {
+        topicSubscriptionState.reset()
+        communityFeedSort = .recommended
+        communityFeedScope = .all
+        communityFeedState.invalidatePage()
+    }
+
+    #if DEBUG
+    /// Local rendering behavior only; it does not reproduce server ranking or reads.
+    private func loadScreenshotCommunityQuestions(reset: Bool) {
+        let query = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let followed = Set(subscribedCommunityTopics.map(CommunityTopicSubscriptionPolicy.matchingKey))
+        var questions = screenshotPublicQuestions.filter { question in
+            let matchesScope = communityFeedScope != .following
+                || followed.contains(CommunityTopicSubscriptionPolicy.matchingKey(question.topic))
+            return matchesScope && (query.isEmpty
+                || question.topic.localizedCaseInsensitiveContains(query)
+                || question.question.localizedCaseInsensitiveContains(query))
+        }
+        switch communityFeedSort {
+        case .recommended:
+            // Keep the authored fixture order; do not imitate production scores.
+            break
+        case .latest:
+            questions.sort { $0.createdAt > $1.createdAt }
+        case .views:
+            questions.sort { $0.viewCount == $1.viewCount ? $0.createdAt > $1.createdAt : $0.viewCount > $1.viewCount }
+        case .likes:
+            questions.sort { $0.likeCount == $1.likeCount ? $0.createdAt > $1.createdAt : $0.likeCount > $1.likeCount }
+        }
+        let offset = reset ? 0 : communityOffset
+        let page = Array(questions.dropFirst(offset).prefix(Self.communityQuestionPageSize))
+        let requestID = communityFeedState.beginLoading(query: query)
+        communityFeedState.applyPage(
+            CommunityQuestionsResponse(
+                questions: page, totalCount: questions.count,
+                limit: Self.communityQuestionPageSize, offset: offset
+            ),
+            offset: offset, reset: reset
+        )
+        communityFeedState.finishLoading(requestID)
+    }
+    #endif
+
     func loadCommunityQuestions(
         reset: Bool = true,
         userInitiated: Bool = false,
@@ -4523,6 +4851,7 @@ final class AppState: ObservableObject {
     ) async {
         #if DEBUG
         if isAppStoreScreenshotFixtureEnabled {
+            loadScreenshotCommunityQuestions(reset: reset)
             return
         }
         #endif
@@ -4530,6 +4859,9 @@ final class AppState: ObservableObject {
         let isCurrent = makeRecordRequestValidity()
         let language = settings.appLanguage
         let useCase = communityUseCase
+        guard reset || !isLoadingCommunityQuestions else { return }
+        let requestedSort = communityFeedSort
+        let requestedScope = communityFeedScope
         let trimmedTopic = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedOffset = reset ? 0 : communityOffset
         let limit = Self.communityQuestionPageSize
@@ -4538,7 +4870,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        let requestID = beginCommunityFeedLoad()
+        let requestID = beginCommunityFeedLoad(query: trimmedTopic)
         let resolvedAdFreeEntitlement: Bool?
         if isCommunitySessionActive,
            trimmedTopic.isEmpty,
@@ -4572,6 +4904,7 @@ final class AppState: ObservableObject {
             return
         }
 
+        guard isCurrentCommunityFeedLoad(requestID) else { return }
         await actionRunner.run(
             operation: {
                 try await useCase.fetchPublicQuestions(
@@ -4580,7 +4913,9 @@ final class AppState: ObservableObject {
                     limit: limit,
                     offset: normalizedOffset,
                     excludeDeviceID: nil,
-                    language: language
+                    language: language,
+                    sort: requestedSort,
+                    scope: requestedScope
                 )
             },
             onSuccess: { response in
@@ -4599,6 +4934,14 @@ final class AppState: ObservableObject {
                         offset: normalizedOffset
                     )
                 )
+                if reset {
+                    AppAnalytics.publicFeedLoaded(
+                        sort: requestedSort.rawValue,
+                        scope: requestedScope.rawValue,
+                        personalized: isCommunitySessionActive && !subscribedCommunityTopics.isEmpty &&
+                            (requestedScope == .following || requestedSort == .recommended)
+                    )
+                }
                 log(.info, "공개 질문 목록을 로드했습니다. count=\(response.questions.count), total=\(response.totalCount), offset=\(communityOffset)")
             },
             onFailure: { error in
@@ -4609,9 +4952,6 @@ final class AppState: ObservableObject {
                     clearCommunityFeedPage()
                 }
                 _ = handleCommunityError(error)
-                if !userInitiated {
-                    communityErrorMessage = nil
-                }
                 log(
                     .warning,
                     "공개 질문 로드 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
@@ -5270,7 +5610,9 @@ final class AppState: ObservableObject {
         guard !Task.isCancelled, isCurrentCommunitySession(sessionGeneration) else {
             return
         }
-        await loadCommunityQuestions(reset: true, userInitiated: false)
+        async let interests: Void = loadTopicSubscriptions()
+        async let questions: Void = loadCommunityQuestions(reset: true, userInitiated: false)
+        _ = await (interests, questions)
         logAuthTrace("community_sign_in_data_refresh_success", reason: reason, deduplicate: false)
     }
 
@@ -5588,6 +5930,9 @@ final class AppState: ObservableObject {
     }
 
     private func resetCommunitySignInState() {
+        #if os(iOS)
+        StudyReviewCoordinator.shared.cancelPendingRequest()
+        #endif
         logAuthTrace("community_session_reset_start", reason: "resetCommunitySignInState", deduplicate: false)
         #if os(iOS)
         do {
@@ -5675,6 +6020,7 @@ final class AppState: ObservableObject {
             nextState.signIn()
         } else {
             nextState.signOut()
+            resetCommunityPersonalizationState()
         }
         communitySessionState = nextState
         communitySessionUseCase.setSignedIn(isSignedIn)
@@ -6162,6 +6508,7 @@ final class AppState: ObservableObject {
                 log(.warning, "계정 변경 후 로컬 음성 튜터 녹음 파일 정리를 다음 실행으로 연기했습니다.")
             }
             #endif
+            resetCommunityPersonalizationState()
         }
         logAuthTrace(
             "community_profile_apply_start",
@@ -7885,6 +8232,41 @@ final class AppState: ObservableObject {
         billingRefreshTask = task
         await task.value
         billingRefreshTask = nil
+    }
+
+    func refreshBillingForPurchase() async throws {
+        let refreshOrder = membershipRefreshOrder.issue()
+        billingRefreshRequestID += 1
+        let requestID = billingRefreshRequestID
+        let currentBillingUseCase = billingUseCase
+        guard let account = try? makeVoiceTutorRequestContext() else {
+            throw AppStateError.missingRemotePushRegistration
+        }
+        let isCurrent: @MainActor () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return !Task.isCancelled && account.isCurrent() &&
+                requestID == self.billingRefreshRequestID &&
+                self.membershipRefreshOrder.isLatest(refreshOrder)
+        }
+        guard let registration = await registrationWithAccessToken(
+            account.registration,
+            reason: "billing-purchase-status",
+            validity: isCurrent
+        ) else {
+            guard isCurrent() else { throw CancellationError() }
+            throw AppStateError.missingRemotePushRegistration
+        }
+        let resolvedStatus = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "billing-purchase-status",
+            validity: isCurrent,
+            operation: { recoveredRegistration in
+                try await currentBillingUseCase.status(registration: recoveredRegistration)
+            }
+        )
+        guard isCurrent() else { throw CancellationError() }
+        applyBillingStatus(resolvedStatus)
+        billingErrorMessage = nil
     }
 
     private func resolveNativeAdvertisingAdFreeEntitlement() async -> Bool? {
@@ -12159,7 +12541,7 @@ final class AppState: ObservableObject {
         removeCommunityQuestions(ids: clearedRecordIDs)
         localStudyRecordUseCase.clearRecords()
         recordsToClear.forEach { localStudyRecordUseCase.deleteAnswerDraft(recordID: $0.id) }
-        recordsState.clear()
+        recordsState.clear(loaded: true)
         replaceRecordSearchResults(nil)
         currentQuestion = nil
         lastAnswer = ""

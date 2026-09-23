@@ -1250,6 +1250,8 @@ private struct MobileHomeView: View {
     @State private var editingStudyCategory: StudyCategory?
     @State private var editingStudyRoom: BackendStudyRoom?
     @State private var isAddingStudyCategory = false
+    @State private var newStudyInitialTitle = ""
+    @State private var isShowingTopicSubscriptions = false
     @State private var selectedCommunityQuestionRoute: CommunityQuestionRoute?
     @State private var notificationForwardRoute: NotificationForwardRoute?
     @State private var isHomeLoginPagePresented = false
@@ -1431,7 +1433,7 @@ private struct MobileHomeView: View {
         selectedHomeScope == .all && isRefreshingSelectedHomeScope
     }
 
-    var body: some View {
+    private var homeLayout: some View {
         VStack(alignment: .leading, spacing: 0) {
             homeTitleHeader
             homeScopePickerHeader
@@ -1444,6 +1446,12 @@ private struct MobileHomeView: View {
                 homeStudyTreeGraph
             } else {
                 List {
+                    if selectedHomeScope == .all {
+                        communityFeedControls
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                     homeContentSection
                 }
                 .listStyle(.plain)
@@ -1454,6 +1462,10 @@ private struct MobileHomeView: View {
             }
         }
         .background(Color(.systemBackground))
+    }
+
+    var body: some View {
+        homeLayout
         .navigationTitle("")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -1572,6 +1584,11 @@ private struct MobileHomeView: View {
         }
         .onAppear {
             handleAppRouteRequest(appState.appRouteRequest)
+            #if DEBUG
+            if AppDebugFixtureConfiguration.fixtureName() == "interests" {
+                isShowingTopicSubscriptions = true
+            }
+            #endif
         }
         .onChange(of: appState.appRouteRequest) { _, request in
             handleAppRouteRequest(request)
@@ -1613,7 +1630,9 @@ private struct MobileHomeView: View {
             )
             hasLoadedCommunityQuestions = false
             guard isSignedIn else {
+                isShowingTopicSubscriptions = false
                 endStudySelection()
+                Task { await loadCommunityQuestionsIfNeeded(userInitiated: false) }
                 return
             }
 
@@ -1634,6 +1653,12 @@ private struct MobileHomeView: View {
                 appState.clearBackendStudySearchResults()
             }
         }
+        .onChange(of: appState.communitySearchText) { oldQuery, newQuery in
+            guard selectedHomeScope == .all,
+                  !oldQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  newQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            reloadCommunityAfterClearingSearch()
+        }
         .onChange(of: appState.rootStudyCategoriesForDisplay.map(\.id)) { _, categoryIDs in
             selectedStudyCategoryIDs.formIntersection(categoryIDs)
         }
@@ -1650,16 +1675,21 @@ private struct MobileHomeView: View {
             isPreparing: $isPreparingProfile,
             isPresented: $isShowingProfileSettings
         ))
+        .modifier(StudyReviewPromptModifier(isEligibleScreen: isEligibleForStudyReview))
+        .sheet(isPresented: $isShowingTopicSubscriptions) {
+            MobileTopicSubscriptionsSheet()
+                .environmentObject(appState)
+        }
         .sheet(isPresented: $isShowingEmailSignIn) {
             EmailSignInSheet {
                 isShowingEmailSignIn = false
             }
             .environmentObject(appState)
         }
-        .sheet(isPresented: $isAddingStudyCategory) {
+        .sheet(isPresented: $isAddingStudyCategory, onDismiss: { newStudyInitialTitle = "" }) {
             StudyEditorSheet(
                 navigationTitle: strings.newStudyCategory,
-                initialTitle: "",
+                initialTitle: newStudyInitialTitle,
                 initialDifficulty: .beginner,
                 strings: strings
             ) { title, difficulty, _ in
@@ -1827,7 +1857,6 @@ private struct MobileHomeView: View {
             selectedCommunityQuestionRoute = CommunityQuestionRoute(id: id)
             Task { @MainActor in
                 await loadCommunityQuestionsIfNeeded(userInitiated: false)
-                selectedCommunityQuestionRoute = CommunityQuestionRoute(id: id)
             }
         case .feedback:
             isShowingFeedback = true
@@ -1838,6 +1867,142 @@ private struct MobileHomeView: View {
         appState.appRouteRequest = nil
     }
 
+    private var isEligibleForStudyReview: Bool {
+        selectedHomeScope != .tree && !isSelectingStudies && !isHomeSearchActive &&
+            !isShowingTopicSubscriptions && selectedCommunityQuestionRoute == nil &&
+            appState.homeStudyRoute == nil && notificationForwardRoute == nil &&
+            !isHomeLoginPagePresented && !isShowingNotifications && !isShowingProfileSettings &&
+            !isShowingVoiceTutor && !isPreparingProfile &&
+            !isShowingSettings && !isShowingFeedback && !isShowingEmailSignIn &&
+            !isAddingStudyCategory && editingStudyCategory == nil && editingStudyRoom == nil &&
+            pendingCommunityQuestionDeletion == nil && pendingCommunityQuestionReport == nil &&
+            pendingCommunityUserBlock == nil && !isShowingAdvertisementSelectionExplanation &&
+            advertisementReportTarget == nil && !showsSelectedStudiesDeleteConfirmation &&
+            homeRefreshTask == nil && !appState.isLoadingCommunityQuestions &&
+            !appState.isLoadingTopicSubscriptions && !appState.isSavingTopicSubscriptions
+    }
+
+    private func showTopicSubscriptions() {
+        if appState.isCommunitySessionActive {
+            isShowingTopicSubscriptions = true
+        } else {
+            isHomeLoginPagePresented = true
+        }
+    }
+
+    private var communityFeedControls: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) {
+                    communityScopeMenu
+                    communitySortMenu
+                    Spacer(minLength: 0)
+                    communityInterestsButton
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    communityScopeMenu
+                    communitySortMenu
+                    communityInterestsButton
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.subheadline)
+            .buttonStyle(.plain)
+            if appState.communityFeedSort == .recommended,
+               appState.communityFeedScope == .all,
+               !appState.subscribedCommunityTopics.isEmpty {
+                Text(strings.feedPersonalizedHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 8)
+            }
+        }
+        .padding(.horizontal, 2)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var communityScopeMenu: some View {
+        Menu {
+            ForEach(CommunityFeedScope.allCases) { scope in
+                Button {
+                    if scope == .following && !appState.isCommunitySessionActive {
+                        isHomeLoginPagePresented = true
+                    } else {
+                        appState.setCommunityFeedScope(scope)
+                    }
+                } label: {
+                    if appState.communityFeedScope == scope {
+                        Label(scope.title(strings: strings), systemImage: "checkmark")
+                    } else {
+                        Text(scope.title(strings: strings))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(appState.communityFeedScope.title(strings: strings))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                Image(systemName: "chevron.down").font(.caption2).accessibilityHidden(true)
+            }
+            .frame(minHeight: 44)
+        }
+        .accessibilityLabel(strings.feedScope)
+        .accessibilityValue(appState.communityFeedScope.title(strings: strings))
+        .accessibilityIdentifier("community-feed-scope")
+    }
+
+    private var communitySortMenu: some View {
+        Menu {
+            ForEach(CommunityFeedSort.allCases) { sort in
+                Button {
+                    appState.setCommunityFeedSort(sort)
+                } label: {
+                    if appState.communityFeedSort == sort {
+                        Label(sort.title(strings: strings), systemImage: "checkmark")
+                    } else {
+                        Text(sort.title(strings: strings))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(appState.communityFeedSort.title(strings: strings))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                Image(systemName: "chevron.down").font(.caption2).accessibilityHidden(true)
+            }
+            .frame(minHeight: 44)
+        }
+        .accessibilityLabel(strings.feedSort)
+        .accessibilityValue(appState.communityFeedSort.title(strings: strings))
+        .accessibilityIdentifier("community-feed-sort")
+    }
+
+    private var communityInterestsButton: some View {
+        Button(action: showTopicSubscriptions) {
+            HStack(spacing: 4) {
+                Image(systemName: "plus.circle").accessibilityHidden(true)
+                Text(strings.topicSubscriptions)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                if !appState.subscribedCommunityTopics.isEmpty {
+                    Text("\(appState.subscribedCommunityTopics.count)")
+                        .fixedSize()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(minHeight: 44)
+        }
+        .accessibilityLabel(strings.topicSubscriptions)
+        .accessibilityValue("\(appState.subscribedCommunityTopics.count)/\(CommunityTopicSubscriptionPolicy.maximumCount)")
+        .accessibilityIdentifier("community-topic-subscriptions")
+    }
+
     private var homeTitleHeader: some View {
         MobileRootLargeTitle(strings.tabHome)
             .padding(.top, 6)
@@ -1845,7 +2010,7 @@ private struct MobileHomeView: View {
     }
 
     private var homeScopePickerHeader: some View {
-        Picker("", selection: $selectedHomeScope) {
+        Picker(strings.homeFeedScope, selection: $selectedHomeScope) {
             ForEach(HomeFeedScope.allCases) { scope in
                 Text(scope.title(strings: strings))
                     .tag(scope)
@@ -2091,18 +2256,55 @@ private struct MobileHomeView: View {
             .padding(.vertical, 8)
             .listRowSeparator(.hidden)
         case .empty:
-            VStack(alignment: .leading, spacing: 4) {
-                Text(strings.noMatchingTopics)
-                    .font(.subheadline.weight(.semibold))
-
-                Text(strings.noMatchingTopicsDescription)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if appState.rootStudyCategoriesForDisplay.isEmpty && trimmedHomeStudySearchText.isEmpty {
+                firstStudyStarterContent
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(strings.noMatchingTopics)
+                        .font(.subheadline.weight(.semibold))
+                    Text(strings.noMatchingTopicsDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
             }
-            .padding(.vertical, 8)
         case .content:
             content()
         }
+    }
+
+    private var firstStudyStarterContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(strings.firstStudyStartTitle).font(.headline)
+            Text(strings.firstStudyStartDescription)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            ForEach(strings.firstStudyStarterTopics, id: \.self) { topic in
+                Button {
+                    AppAnalytics.firstStudyStarterSelected()
+                    newStudyInitialTitle = topic
+                    isAddingStudyCategory = true
+                } label: {
+                    HStack {
+                        Text(topic)
+                        Spacer()
+                        Image(systemName: "plus.circle")
+                    }
+                    .frame(minHeight: 36)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+            }
+            Button(strings.newStudyCategory) {
+                newStudyInitialTitle = ""
+                isAddingStudyCategory = true
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(.vertical, 14)
+        .listRowSeparator(.hidden)
+        .accessibilityIdentifier("first-study-starters")
     }
 
     @ViewBuilder
@@ -2174,19 +2376,58 @@ private struct MobileHomeView: View {
         Section {
             let hasContent = !appState.communityQuestions.isEmpty
 
+            if let error = appState.communityErrorMessage {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(error).font(.subheadline).foregroundStyle(.secondary)
+                    Button(strings.retry) {
+                        Task { await appState.loadCommunityQuestions(reset: true, userInitiated: true, preserveExistingOnFailure: true) }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .listRowSeparator(.hidden)
+            }
+
             if MobileHomeRefreshPresentationPolicy.showsInitialLoading(
                 hasContent: hasContent,
-                isRefreshing: isRefreshingCommunityContent
+                isRefreshing: isRefreshingCommunityContent || appState.isLoadingCommunityQuestions || appState.isLoadingTopicSubscriptions
             ) {
                 MobileHomeRefreshIndicator()
                     .frame(maxWidth: .infinity, minHeight: 320)
                     .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
                     .listRowSeparator(.hidden)
-            } else if !hasContent {
-                MobileCommunityEmptyState(strings: strings)
-                    .frame(maxWidth: .infinity, minHeight: 320)
-                    .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
+            } else if !hasContent, appState.communityErrorMessage == nil {
+                if !activeTrimmedSearchText.isEmpty {
+                    ContentUnavailableView {
+                        Label(strings.noSearchResults, systemImage: "magnifyingglass")
+                    } description: {
+                        Text(strings.feedSearchEmptyHelp)
+                    } actions: {
+                        Button(strings.clearSearch) { closeHomeSearch(clearText: true) }
+                            .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 240)
                     .listRowSeparator(.hidden)
+                    .accessibilityIdentifier("community-search-empty")
+                } else if appState.communityFeedScope == .following {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(appState.subscribedCommunityTopics.isEmpty ? strings.topicSubscriptionsNone : strings.topicSubscriptionsEmptyFeed)
+                            .font(.headline)
+                        Text(appState.subscribedCommunityTopics.isEmpty ? strings.topicSubscriptionsHelp : strings.topicSubscriptionsEmptyFeedHelp)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Button(strings.topicSubscriptions, action: showTopicSubscriptions)
+                            .buttonStyle(.borderedProminent)
+                        Button(strings.feedExploreAllTopics) { appState.setCommunityFeedScope(.all) }
+                            .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 240, alignment: .leading)
+                    .listRowSeparator(.hidden)
+                } else {
+                    MobileCommunityEmptyState(strings: strings)
+                        .frame(maxWidth: .infinity, minHeight: 320)
+                        .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
+                        .listRowSeparator(.hidden)
+                }
             } else {
                 ForEach(communityFeedItems) { item in
                     communityFeedRow(item)
@@ -2197,8 +2438,7 @@ private struct MobileHomeView: View {
                     appState.canLoadCommunityQuestions {
                     HStack {
                         Spacer()
-                        ProgressView()
-                            .controlSize(.small)
+                        ProgressView().controlSize(.small)
                         Spacer()
                     }
                     .padding(.vertical, 6)
@@ -2321,9 +2561,7 @@ private struct MobileHomeView: View {
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if communityQuestionActionPolicy(question).hasActions {
-                communityQuestionActionsMenu(question)
-            }
+            communityQuestionActionsMenu(question)
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 10))
         .listRowBackground(Color.clear)
@@ -2351,6 +2589,12 @@ private struct MobileHomeView: View {
 
     @ViewBuilder
     private func communityQuestionActions(_ question: CommunityQuestion) -> some View {
+        MobileCommunityDiscoveryActions(
+            question: question,
+            onSignIn: { isHomeLoginPagePresented = true },
+            onManageInterests: { isShowingTopicSubscriptions = true }
+        )
+
         let policy = communityQuestionActionPolicy(question)
         if policy.canManage {
             Button {
@@ -2386,6 +2630,7 @@ private struct MobileHomeView: View {
     }
 
     private func openCommunityQuestion(_ question: CommunityQuestion) {
+        AppAnalytics.publicFeedQuestionOpened()
         selectedCommunityQuestionRoute = CommunityQuestionRoute(id: question.id)
     }
 
@@ -2694,15 +2939,26 @@ private struct MobileHomeView: View {
         isSearchFocused = false
 
         if clearText {
-            setActiveSearchText("")
             submittedHomeStudySearchText = ""
             if selectedHomeScope.isPersonal {
+                homeStudySearchText = ""
                 appState.clearBackendStudySearchResults()
+            } else {
+                reloadCommunityAfterClearingSearch()
             }
         }
 
         withAnimation(.smooth(duration: 0.22)) {
             isSearchVisible = false
+        }
+    }
+
+    @MainActor
+    private func reloadCommunityAfterClearingSearch() {
+        guard appState.clearCommunitySearch() else { return }
+        hasLoadedCommunityQuestions = true
+        Task {
+            await appState.loadCommunityQuestions(reset: true, userInitiated: true)
         }
     }
 
@@ -2742,7 +2998,9 @@ private struct MobileHomeView: View {
             await appState.refreshVisibleData()
         case .all:
             hasLoadedCommunityQuestions = true
-            await appState.loadCommunityQuestions(reset: true, userInitiated: true)
+            async let interests: Void = appState.loadTopicSubscriptions(force: true)
+            async let questions: Void = appState.loadCommunityQuestions(reset: true, userInitiated: true)
+            _ = await (interests, questions)
         }
     }
 
@@ -2757,7 +3015,9 @@ private struct MobileHomeView: View {
         }
 
         hasLoadedCommunityQuestions = true
-        await appState.loadCommunityQuestions(reset: true, userInitiated: userInitiated)
+        async let interests: Void = appState.loadTopicSubscriptions()
+        async let questions: Void = appState.loadCommunityQuestions(reset: true, userInitiated: userInitiated)
+        _ = await (interests, questions)
     }
 
     @MainActor
@@ -2780,6 +3040,192 @@ private struct MobileHomeView: View {
                 await appState.searchBackendStudies(query: query)
             }
         }
+    }
+}
+
+private struct MobileCommunityDiscoveryActions: View {
+    @EnvironmentObject private var appState: AppState
+    let question: CommunityQuestion
+    let onSignIn: () -> Void
+    let onManageInterests: () -> Void
+
+    private var strings: AppStrings { appState.strings }
+    private var isFollowing: Bool { appState.isCommunityTopicFollowed(question.topic) }
+
+    var body: some View {
+        Button {
+            guard appState.isCommunitySessionActive else {
+                onSignIn()
+                return
+            }
+            Task {
+                if !(await appState.toggleCommunityTopicSubscription(question.topic)), appState.isCommunitySessionActive {
+                    onManageInterests()
+                }
+            }
+        } label: {
+            Label(
+                isFollowing ? strings.unfollowQuestionTopic : strings.followQuestionTopic,
+                systemImage: isFollowing ? "checkmark.circle" : "plus.circle"
+            )
+        }
+        .disabled(appState.isLoadingTopicSubscriptions || appState.isSavingTopicSubscriptions)
+        .accessibilityIdentifier("community-question-follow-topic")
+
+        if let shareURL = question.publicShareURL {
+            ShareLink(
+                item: shareURL,
+                subject: Text(strings.publicQuestionShareTitle),
+                message: Text(strings.publicQuestionShareMessage)
+            ) {
+                Label(strings.sharePublicQuestion, systemImage: "square.and.arrow.up")
+            }
+            .simultaneousGesture(TapGesture().onEnded { AppAnalytics.publicQuestionShareOpened() })
+            .accessibilityIdentifier("community-question-share")
+        }
+    }
+}
+
+private struct MobileTopicSubscriptionsSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft = CommunityTopicSubscriptionEditorDraft()
+
+    private var strings: AppStrings { appState.strings }
+    private var suggestions: [String] {
+        appState.suggestedCommunityTopics(excluding: draft.topics)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(strings.topicSubscriptionsHelp)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if !draft.isPrepared {
+                    Section {
+                        if appState.isLoadingTopicSubscriptions {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Text(appState.topicSubscriptionsErrorMessage ?? strings.topicSubscriptionsRequestFailed)
+                                .foregroundStyle(.secondary)
+                            Button(strings.retry) {
+                                Task {
+                                    await appState.loadTopicSubscriptions(force: true)
+                                    prepareDraftIfNeeded()
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Section {
+                        HStack {
+                            TextField(strings.topicSubscriptionsPlaceholder, text: $draft.input)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .submitLabel(.done)
+                                .onSubmit { draft.addInput() }
+                                .accessibilityIdentifier("topic-subscription-input")
+                            Button { draft.addInput() } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(CommunityTopicSubscriptionPolicy.displayLabel(draft.input).isEmpty)
+                            .accessibilityLabel(strings.topicSubscriptionAdd)
+                        }
+                    } header: {
+                        Text("\(strings.topicSubscriptions) \(draft.topics.count)/\(CommunityTopicSubscriptionPolicy.maximumCount)")
+                    } footer: {
+                        Text(strings.topicSubscriptionsLimitHelp)
+                    }
+                    .disabled(appState.isSavingTopicSubscriptions)
+
+                    if let error = draft.validationError?.message(strings: strings) ?? appState.topicSubscriptionsErrorMessage {
+                        Section { Text(error).font(.subheadline).foregroundStyle(.red) }
+                    }
+                    if !draft.topics.isEmpty {
+                        Section {
+                            ForEach(draft.topics, id: \.self) { topic in
+                                HStack {
+                                    Text(topic)
+                                    Spacer()
+                                    Button {
+                                        draft.remove(topic)
+                                    } label: {
+                                        Image(systemName: "minus.circle.fill")
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 44, height: 44)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("\(strings.topicSubscriptionRemove): \(topic)")
+                                }
+                            }
+                        }
+                        .disabled(appState.isSavingTopicSubscriptions)
+                    }
+                    if !suggestions.isEmpty {
+                        Section(strings.topicSubscriptionsSuggestions) {
+                            ForEach(suggestions, id: \.self) { topic in
+                                Button { draft.addSuggestion(topic) } label: {
+                                    HStack {
+                                        Text(topic).foregroundStyle(.primary)
+                                        Spacer()
+                                        Image(systemName: "plus.circle")
+                                    }
+                                }
+                                .disabled(appState.isSavingTopicSubscriptions || draft.topics.count >= CommunityTopicSubscriptionPolicy.maximumCount)
+                                .accessibilityLabel("\(strings.topicSubscriptionAdd): \(topic)")
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(strings.topicSubscriptions)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(strings.cancel) { dismiss() }
+                        .disabled(appState.isSavingTopicSubscriptions)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(strings.save) {
+                        guard let topicsToSave = draft.topicsForSaving() else { return }
+                        Task {
+                            if await appState.saveTopicSubscriptions(topicsToSave) { dismiss() }
+                        }
+                    }
+                    .disabled(!draft.isPrepared || !draft.hasChanges || appState.isSavingTopicSubscriptions || !CommunityTopicSubscriptionPolicy.isValid(draft.topics))
+                    .overlay { if appState.isSavingTopicSubscriptions { ProgressView() } }
+                    .accessibilityIdentifier("topic-subscription-save")
+                }
+            }
+            .interactiveDismissDisabled(appState.isSavingTopicSubscriptions || draft.hasChanges)
+            .task {
+                await appState.loadTopicSubscriptions(force: true)
+                prepareDraftIfNeeded()
+            }
+            .onChange(of: appState.hasLoadedTopicSubscriptions) { _, _ in prepareDraftIfNeeded() }
+            .onChange(of: appState.isLoadingTopicSubscriptions) { _, loading in
+                if !loading { prepareDraftIfNeeded() }
+            }
+            .onChange(of: appState.isSavingTopicSubscriptions) { _, saving in
+                if !saving { prepareDraftIfNeeded() }
+            }
+            .onChange(of: appState.isCommunitySessionActive) { _, signedIn in
+                if !signedIn { dismiss() }
+            }
+            .onChange(of: appState.commonRecordsIdentity) { _, _ in dismiss() }
+        }
+    }
+
+    private func prepareDraftIfNeeded() {
+        guard !draft.isPrepared, appState.hasLoadedTopicSubscriptions,
+              !appState.isLoadingTopicSubscriptions, !appState.isSavingTopicSubscriptions,
+              appState.topicSubscriptionsErrorMessage == nil else { return }
+        draft.prepareIfNeeded(appState.subscribedCommunityTopics)
     }
 }
 
@@ -2931,7 +3377,7 @@ private struct MobileNotificationsView: View {
                     if appState.notificationErrorMessage != nil {
                         Button(strings.retry) {
                             Task {
-                                await appState.loadNotifications(reset: true)
+                                await appState.retryNotifications()
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -2992,6 +3438,19 @@ private struct MobileNotificationsView: View {
                         .padding(.vertical, 12)
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
+                } else if appState.notificationErrorMessage != nil {
+                    VStack(spacing: 8) {
+                        Text(strings.notificationLoadRetryDescription)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Button(strings.retry) {
+                            Task { await appState.retryNotifications() }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
             }
         }
@@ -7568,9 +8027,10 @@ struct MobileMembershipManagementView: View {
                     tierProduct,
                     appAccountToken: appAccountToken,
                     resolveActionAfterSynchronization: {
-                        await appState.refreshBilling()
+                        try await appState.refreshBillingForPurchase()
                         return purchaseAction(for: tierProduct)
                     },
+                    activeSubscription: { appState.billingStatus },
                     prepareCheckout: appState.createAppleBillingCheckout,
                     confirmRevenueCat: appState.confirmRevenueCatBillingTransaction,
                     synchronize: appState.syncAppleBillingTransaction,
@@ -7599,6 +8059,9 @@ struct MobileMembershipManagementView: View {
                 if let billingError = error as? AppleBillingStoreError,
                    case .membershipApplicationIncomplete = billingError {
                     isBillingRecoveryPresented = true
+                } else if let billingError = error as? AppleBillingStoreError,
+                          case .activeSubscriptionNotOnStoreAccount = billingError {
+                    billingNotice = strings.billingStoreAccountMismatch
                 } else {
                     billingNotice = error.localizedDescription
                 }
@@ -10570,7 +11033,7 @@ private struct MobileCommunityQuestionRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            CommunityQuestionTopMeta(question: question)
+            CommunityQuestionTopMeta(question: question, language: strings.language)
 
             Text(MarkdownContent.plainText(question.question))
                 .font(.body.weight(.medium))
@@ -10617,6 +11080,8 @@ struct CommunityQuestionDetailView: View {
     @State private var isShowingDeleteConfirmation = false
     @State private var isShowingReportConfirmation = false
     @State private var isLikeRequestPending = false
+    @State private var isShowingCommunityLogin = false
+    @State private var isShowingTopicSubscriptions = false
     @State private var userToBlock: CommunityUserProfile?
     @State private var originalAvailable: Bool
     @FocusState private var isCommentInputFocused: Bool
@@ -10717,10 +11182,17 @@ struct CommunityQuestionDetailView: View {
         .navigationTitle(displayQuestion.recordType == .voiceTutor ? strings.commonRecordTitle : strings.communityQuestion)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if contentSource == .community && appState.communityQuestionActionPolicy(for: displayQuestion).hasActions {
+            if contentSource.showsCommunityInteractions {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        let policy = appState.communityQuestionActionPolicy(for: displayQuestion)
+                        MobileCommunityDiscoveryActions(
+                            question: displayQuestion,
+                            onSignIn: { isShowingCommunityLogin = true },
+                            onManageInterests: { isShowingTopicSubscriptions = true }
+                        )
+                        let policy = contentSource == .community
+                            ? appState.communityQuestionActionPolicy(for: displayQuestion)
+                            : CommunityQuestionActionPolicy(isSignedIn: false, isOwner: false)
 
                         if policy.canManage {
                             Button {
@@ -10762,6 +11234,12 @@ struct CommunityQuestionDetailView: View {
                     isCommentInputFocused = false
                 }
             }
+        }
+        .navigationDestination(isPresented: $isShowingCommunityLogin) {
+            MobileLoginPage().padding(.horizontal, 16)
+        }
+        .sheet(isPresented: $isShowingTopicSubscriptions) {
+            MobileTopicSubscriptionsSheet().environmentObject(appState)
         }
         .confirmationDialog(
             strings.deleteQuestionConfirmation,
@@ -10810,9 +11288,10 @@ struct CommunityQuestionDetailView: View {
             if contentSource.showsCommunityInteractions {
                 applyCachedComments()
             }
+            async let interestsLoad: Void = appState.loadTopicSubscriptions()
             async let questionLoad: Void = loadQuestionDetail()
             async let commentsLoad: Void = loadCommentsIfAvailable()
-            _ = await (questionLoad, commentsLoad)
+            _ = await (interestsLoad, questionLoad, commentsLoad)
         }
         .onChange(of: appState.commonRecordsIdentity) { _, _ in dismiss() }
     }
@@ -10964,6 +11443,7 @@ struct CommunityQuestionDetailView: View {
                 ForEach(comments) { comment in
                     CommunityCommentRow(
                         comment: comment,
+                        language: strings.language,
                         canDelete: canDeleteComment(comment),
                         isDeleting: deletingCommentIDs.contains(comment.id),
                         deleteTitle: strings.clear
@@ -11262,6 +11742,7 @@ struct CommunityQuestionDetailView: View {
 
 private struct CommunityCommentRow: View {
     var comment: CommunityQuestionComment
+    var language: AppLanguage
     var canDelete: Bool
     var isDeleting: Bool
     var deleteTitle: String
@@ -11283,7 +11764,7 @@ private struct CommunityCommentRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
 
-                    Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: comment.createdAt))
+                    Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: comment.createdAt, language: language))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: true, vertical: false)

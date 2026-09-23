@@ -44,6 +44,8 @@ import com.buddystudy.backend.community.application.model.CommunityCommentsRespo
 import com.buddystudy.backend.community.application.model.CommunityLikeResponse
 import com.buddystudy.backend.community.application.model.CommunityQuestionResponse
 import com.buddystudy.backend.community.application.model.CommunityQuestionsResponse
+import com.buddystudy.backend.community.application.model.PublicFeedSort
+import com.buddystudy.backend.community.application.model.PublicFeedScope
 import com.buddystudy.backend.community.application.model.CommunityFeedItemResponse
 import com.buddystudy.backend.community.application.model.NativeAdvertisementResponse
 import com.buddystudy.backend.community.application.model.NativeAdvertisementViewedEvent
@@ -142,6 +144,8 @@ class CommunityService(
         view: String,
         limit: Int,
         offset: Int,
+        sort: PublicFeedSort,
+        scope: PublicFeedScope,
     ): CommunityQuestionsResponse {
         val normalizedQuery = query?.trim()?.takeIf { it.isNotEmpty() }
         return publicQuestionsFromOrigin(
@@ -152,6 +156,8 @@ class CommunityService(
             limit = limit,
             offset = offset,
             includeNativeAdvertisement = false,
+            feedSort = sort,
+            feedScope = scope,
         )
     }
 
@@ -162,6 +168,8 @@ class CommunityService(
         view: String,
         limit: Int,
         offset: Int,
+        sort: PublicFeedSort,
+        scope: PublicFeedScope,
     ): CommunityQuestionsResponse = publicQuestionsFromOrigin(
         principal = principal,
         query = null,
@@ -171,6 +179,8 @@ class CommunityService(
         offset = offset,
         includeNativeAdvertisement = false,
         includeNativeAdSlot = offset == 0,
+        feedSort = sort,
+        feedScope = scope,
     )
 
     // Localized voice records may durably enqueue a missing translation while returning source text.
@@ -211,9 +221,21 @@ class CommunityService(
         offset: Int,
         includeNativeAdvertisement: Boolean,
         includeNativeAdSlot: Boolean = false,
+        feedSort: PublicFeedSort? = null,
+        feedScope: PublicFeedScope = PublicFeedScope.ALL,
     ): CommunityQuestionsResponse {
         val pageable = PageRequest.of(offset / limit, limit)
-        val page = if (query == null) {
+        val page = if (feedSort != null) {
+            questions.findPersonalizedPublicAnswered(
+                viewerUserId = principal?.userId,
+                query = query,
+                language = language,
+                sort = feedSort,
+                scope = feedScope,
+                limit = limit,
+                offset = offset,
+            )
+        } else if (query == null) {
             questions.findPublicAnsweredVisibleTo(principal?.userId, pageable)
         } else {
             questions.findPublicAnsweredByLanguageAndQueryVisibleTo(

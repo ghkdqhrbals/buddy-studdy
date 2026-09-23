@@ -1039,6 +1039,59 @@ enum ReferralNotice: String, Identifiable, Equatable {
     var id: String { rawValue }
 }
 
+struct PublicQuestionShareLink: Equatable {
+    static let canonicalHost = "api.ghkdqhrbals.org"
+    let questionID: String
+    let languageCode: String?
+
+    init?(questionID: String, language: AppLanguage) {
+        guard Self.isValidQuestionID(questionID) else { return nil }
+        self.questionID = questionID
+        self.languageCode = language.backendCode
+    }
+
+    init?(url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              components.host?.lowercased() == Self.canonicalHost,
+              components.percentEncodedHost?.lowercased() == Self.canonicalHost,
+              components.user == nil, components.password == nil, components.port == nil,
+              components.fragment == nil,
+              components.percentEncodedPath.hasPrefix("/questions/") else { return nil }
+        let questionID = String(components.percentEncodedPath.dropFirst("/questions/".count))
+        guard Self.isValidQuestionID(questionID) else { return nil }
+        let queryItems = components.queryItems ?? []
+        guard queryItems.count <= 1,
+              queryItems.allSatisfy({ $0.name == "tl" && ["ko", "en", "ja"].contains($0.value ?? "") }) else { return nil }
+        self.questionID = questionID
+        self.languageCode = queryItems.first?.value
+    }
+
+    var url: URL {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = Self.canonicalHost
+        components.path = "/questions/\(questionID)"
+        if let languageCode { components.queryItems = [URLQueryItem(name: "tl", value: languageCode)] }
+        return components.url!
+    }
+
+    static func isProductionBackend(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        return components.scheme?.lowercased() == "https" &&
+            components.host?.lowercased() == canonicalHost &&
+            components.percentEncodedHost?.lowercased() == canonicalHost &&
+            components.user == nil && components.password == nil && components.port == nil &&
+            (components.path.isEmpty || components.path == "/") &&
+            components.query == nil && components.fragment == nil
+    }
+
+    private static func isValidQuestionID(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.allSatisfy { (48...57).contains($0) } &&
+            value.first != "0" && Int64(value).map { $0 > 0 } == true
+    }
+}
+
 enum AppRoute: Equatable, Hashable {
     case home
     case studyList
@@ -1054,6 +1107,11 @@ enum AppRoute: Equatable, Hashable {
     case feedback
 
     init?(url: URL) {
+        if url.scheme?.lowercased() == "https" {
+            guard let link = PublicQuestionShareLink(url: url) else { return nil }
+            self = .publicQuestion(id: link.questionID)
+            return
+        }
         guard url.scheme?.lowercased() == "buddystudy" else {
             return nil
         }
@@ -3665,6 +3723,13 @@ struct AppStrings {
     }
     var billingPurchased: String { text("멤버십이 적용됐습니다.", "Your membership is active.", "メンバーシップが有効になりました。") }
     var billingRestored: String { text("구매 내역을 복원했습니다.", "Purchases restored.", "購入履歴を復元しました。") }
+    var billingStoreAccountMismatch: String {
+        text(
+            "현재 App Store 계정에서 기존 구독을 확인할 수 없어 변경을 중단했습니다. 구독을 구매한 Apple 계정으로 전환한 뒤 구매를 복원해 주세요. 기존 구독은 구독 관리에서 확인할 수 있습니다.",
+            "Your existing subscription could not be verified on the current App Store account, so the change was stopped. Switch to the Apple account used for that subscription and restore purchases. You can review it in Manage subscription.",
+            "現在のApp Storeアカウントで既存のサブスクリプションを確認できないため、変更を停止しました。購入時のAppleアカウントに切り替えて購入を復元してください。既存の契約はサブスクリプション管理で確認できます。"
+        )
+    }
     var noRestorablePurchases: String {
         text(
             "복원할 수 있는 활성 구매가 없습니다.",
@@ -4416,6 +4481,7 @@ struct AppStrings {
     var streakStartToday: String { text("오늘 시작해보세요", "Start today") }
     var topicGrowth: String { text("성장 주제", "Growth") }
     var studyGrowth: String { text("학습별 성장", "Growth by study") }
+    var studyGrowthCompact: String { text("학습별 성장", "Study growth", "学習別の成長") }
     var growthCalculationHelp: String { text("성장 계산 안내", "How growth is calculated") }
     var abilityScale: String { text("실력 위치 · 1–10", "Ability position · 1–10") }
     var growthHelpAbilityTitle: String { text("실력을 1–10으로 환산", "Ability is placed on a 1–10 scale") }
@@ -4699,6 +4765,51 @@ struct AppStrings {
     var communityQuestionLimit: String { text("최대 20개씩 표시됩니다.", "Showing up to 20 questions at a time.") }
     var communityUnavailable: String { text("다른 사용자 질문 기능을 현재 사용할 수 없습니다.", "Community questions are currently unavailable.") }
     var communityRequestFailed: String { text("다른 사용자 질문을 불러오지 못했습니다.", "Could not load community questions.") }
+    var followQuestionTopic: String { text("이 주제 구독", "Follow this topic", "このトピックをフォロー") }
+    var unfollowQuestionTopic: String { text("이 주제 구독 취소", "Unfollow this topic", "このトピックのフォローを解除") }
+    var sharePublicQuestion: String { text("질문 공유", "Share question", "質問を共有") }
+    var publicQuestionShareTitle: String { text("BuddyStudy 공부 질문", "A study question on BuddyStudy", "BuddyStudyの学習質問") }
+    var publicQuestionShareMessage: String { text("이 질문을 함께 생각해 보세요.", "Explore this study question together.", "この学習質問を一緒に考えてみましょう。") }
+    var firstStudyStartTitle: String { text("첫 공부를 시작해 보세요", "Start your first study", "最初の学習を始めましょう") }
+    var firstStudyStartDescription: String { text("주제를 고르고 나에게 맞는 난이도로 시작하세요.", "Choose a topic and set the difficulty that suits you.", "トピックを選んで、自分に合う難易度で始めましょう。") }
+    var firstStudyStarterTopics: [String] {
+        [text("Swift 앱 개발", "Swift App Development", "Swiftアプリ開発"), text("영어 회화", "English Conversation", "英会話"), text("데이터 분석", "Data Analysis", "データ分析")]
+    }
+    var feedRecommended: String { text("추천순", "Recommended", "おすすめ順") }
+    var feedLatest: String { text("최신순", "Latest", "新着順") }
+    var feedMostViewed: String { text("조회순", "Most viewed", "閲覧数順") }
+    var feedMostLiked: String { text("좋아요순", "Most liked", "いいね順") }
+    var feedAllTopics: String { text("전체 주제", "All topics", "すべてのトピック") }
+    var feedFollowingTopics: String { text("구독 주제", "Following", "フォロー中") }
+    var feedSort: String { text("질문 정렬", "Sort questions", "質問の並び順") }
+    var feedScope: String { text("질문 범위", "Question scope", "質問の範囲") }
+    var homeFeedScope: String { text("학습 보기", "Study view", "学習の表示") }
+    var feedSearchEmptyHelp: String { text("검색어를 바꾸거나 검색을 지워 다시 둘러보세요.", "Try another topic or clear your search to keep exploring.", "別のトピックで検索するか、検索をクリアしてご覧ください。") }
+    var topicSubscriptions: String { text("관심주제", "Interests", "興味のあるトピック") }
+    var topicSubscriptionsHelp: String {
+        text(
+            "관심주제를 구독하면 홈에서 조회와 좋아요가 많은 질문을 먼저 추천해 드려요.",
+            "Follow topics to see popular questions with more views and likes in your Home recommendations.",
+            "トピックをフォローすると、閲覧やいいねの多い質問がホームで優先的におすすめされます。"
+        )
+    }
+    var topicSubscriptionsPlaceholder: String { text("관심주제 입력", "Add an interest", "トピックを入力") }
+    var topicSubscriptionsSuggestions: String { text("추천 주제", "Suggested topics", "おすすめのトピック") }
+    var topicSubscriptionAdd: String { text("구독", "Follow", "フォロー") }
+    var topicSubscriptionRemove: String { text("구독 취소", "Unfollow", "フォローを解除") }
+    var topicSubscriptionsNone: String { text("구독한 주제가 없습니다", "No followed topics yet", "フォロー中のトピックはありません") }
+    var topicSubscriptionsLimitHelp: String { text("관심주제는 최대 30개, 각 120자까지 입력할 수 있어요.", "Follow up to 30 topics, each up to 120 characters.", "最大30件、各120文字まで登録できます。") }
+    var topicSubscriptionsRequestFailed: String { text("관심주제를 불러오지 못했습니다. 다시 시도해 주세요.", "Could not load your interests. Please try again.", "トピックを読み込めませんでした。もう一度お試しください。") }
+    var topicSubscriptionsSaveFailed: String { text("관심주제를 저장하지 못했습니다. 다시 시도해 주세요.", "Could not save your interests. Please try again.", "トピックを保存できませんでした。もう一度お試しください。") }
+    var topicSubscriptionsDuplicate: String { text("이미 추가한 관심주제입니다.", "You already follow this topic.", "このトピックは追加済みです。") }
+    var topicSubscriptionsInvalidName: String { text("주제 이름을 입력해 주세요. 공백이나 하이픈, 밑줄만으로는 추가할 수 없어요.", "Enter a topic name, not just spaces, hyphens or underscores.", "トピック名を入力してください。空白・ハイフン・アンダースコアだけでは追加できません。") }
+    var topicSubscriptionsInvalidCharacters: String { text("주제 이름에 사용할 수 없는 문자가 있어요. 다른 이름을 입력해 주세요.", "This topic contains unsupported characters. Try another name.", "使用できない文字が含まれています。別のトピック名を入力してください。") }
+    var topicSubscriptionsTooLong: String { text("주제 이름을 120자 이내로 줄여 주세요.", "Shorten the topic name to 120 characters or fewer.", "トピック名を120文字以内にしてください。") }
+    var topicSubscriptionsLimitReached: String { text("관심주제 30개를 모두 채웠어요. 새 주제를 추가하려면 하나를 삭제해 주세요.", "You follow 30 topics. Remove one before adding another.", "30件のトピックをフォロー中です。追加するには1件削除してください。") }
+    var topicSubscriptionsEmptyFeed: String { text("구독한 주제의 공개 질문이 아직 없습니다.", "No public questions in your followed topics yet.", "フォロー中のトピックの公開質問はまだありません。") }
+    var topicSubscriptionsEmptyFeedHelp: String { text("관심주제를 더 추가하거나 전체 주제를 둘러보세요.", "Add more interests or explore all topics.", "興味のあるトピックを追加するか、すべてのトピックをご覧ください。") }
+    var feedPersonalizedHelp: String { text("구독한 주제의 인기 질문을 먼저 추천해 드려요.", "Popular questions from your interests appear first.", "フォロー中のトピックの人気の質問を優先しておすすめします。") }
+    var feedExploreAllTopics: String { text("전체 주제 둘러보기", "Explore all topics", "すべてのトピックを見る") }
     var likedQuestions: String { text("좋아요한 질문", "Liked Questions", "いいねした質問") }
     var searchLikedQuestions: String { text("좋아요한 질문 검색", "Search Liked Questions", "いいねした質問を検索") }
     var noLikedQuestions: String { text("좋아요한 질문이 없습니다.", "No liked questions yet.", "いいねした質問はまだありません。") }
@@ -5022,6 +5133,7 @@ struct MembershipProductPolicy {
         "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
         "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
     ]
+    static let recognizedSubscriptionProductIDs = purchasableMonthlyProductIDs.union(retiredAnnualProductIDs)
 
     static func isPurchasableMonthlyProduct(
         _ product: BackendBillingTierProduct

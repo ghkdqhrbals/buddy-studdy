@@ -8,8 +8,17 @@ protocol CommunityRepository {
         limit: Int,
         offset: Int,
         excludeDeviceID: String?,
-        language: AppLanguage
+        language: AppLanguage,
+        sort: CommunityFeedSort,
+        scope: CommunityFeedScope
     ) async throws -> CommunityQuestionsResponse
+
+    func fetchTopicSubscriptions(registration: RemotePushRegistration) async throws -> CommunityTopicSubscriptions
+
+    func updateTopicSubscriptions(
+        registration: RemotePushRegistration,
+        topics: [String]
+    ) async throws -> CommunityTopicSubscriptions
 
     func fetchNativeAdvertisementFallback(
         registration: RemotePushRegistration,

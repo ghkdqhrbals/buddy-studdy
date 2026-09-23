@@ -5,6 +5,8 @@ import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.community.application.model.PublicFeedSort
+import com.buddystudy.backend.community.application.model.PublicFeedScope
 import com.buddystudy.backend.community.application.model.CommunityQuestionsResponse
 import com.buddystudy.backend.community.application.model.CommunityFeedItemResponse
 import com.buddystudy.backend.community.application.model.NativeAdSlotResponse
@@ -154,6 +156,18 @@ class CommunityWebAdapterTest {
             .isInstanceOf(ApiException::class.java)
             .extracting("code")
             .isEqualTo(ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED)
+    }
+
+    @Test
+    fun `v2 personalized modes forward to the use case and reject unknown values`(): Unit = runBlocking {
+        val useCase = mock(CommunityUseCase::class.java)
+        val adapter = CommunityWebAdapter(useCase)
+        adapter.getPublicQuestionFeedV2("en", "localized", 1000, -1, authentication, "views", "following")
+        verify(useCase).getPublicQuestionFeedV2(principal, "en", "localized", 100, 0, PublicFeedSort.VIEWS, PublicFeedScope.FOLLOWING)
+        adapter.getPublicQuestionsV2("Redis", "ja", "original", 20, 7, authentication, "likes", "all")
+        verify(useCase).getPublicQuestionsV2(principal, "Redis", "ja", "original", 20, 7, PublicFeedSort.LIKES, PublicFeedScope.ALL)
+        assertThatThrownBy { runBlocking { adapter.getPublicQuestionFeedV2("en", "localized", 20, 0, authentication, "injected", "all") } }
+            .isInstanceOf(ApiException::class.java).extracting("code").isEqualTo(ApiErrorCode.VALIDATION_ERROR)
     }
 
     private fun emptyResponse(limit: Int, offset: Int) = CommunityQuestionsResponse(

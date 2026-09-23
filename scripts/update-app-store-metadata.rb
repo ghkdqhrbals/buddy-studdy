@@ -210,6 +210,11 @@ def validate_metadata(metadata_by_locale)
     abort "#{locale} description is empty" if description.strip.empty?
     abort "#{locale} What's New is empty" if whats_new && whats_new.strip.empty?
     abort "#{locale} keywords are empty" if keywords.strip.empty?
+    keyword_terms = keywords.split(",", -1)
+    abort "#{locale} keywords contain an empty term" if keyword_terms.any?(&:empty?)
+    abort "#{locale} keywords contain separator whitespace" if keyword_terms.any? { |term| term != term.strip }
+    normalized_terms = keyword_terms.map(&:downcase)
+    abort "#{locale} keywords contain duplicate terms" unless normalized_terms.uniq.length == normalized_terms.length
     abort "#{locale} support URL must use HTTPS" unless support_url.start_with?("https://")
     abort "#{locale} marketing URL must use HTTPS" unless marketing_url.start_with?("https://")
   end
@@ -219,6 +224,14 @@ metadata_path = File.expand_path(ENV.fetch("APP_STORE_METADATA_PATH", DEFAULT_ME
 abort "Metadata file not found: #{metadata_path}" unless File.file?(metadata_path)
 metadata_by_locale = JSON.parse(File.read(metadata_path))
 validate_metadata(metadata_by_locale)
+
+if ENV["APP_STORE_METADATA_VALIDATE_ONLY"] == "1"
+  metadata_by_locale.each do |locale, metadata|
+    puts "#{locale}: valid version metadata (keywords #{metadata.fetch('keywords').bytesize}/100 bytes, " \
+         "promotional text #{metadata.fetch('promotionalText').length}/170 characters)"
+  end
+  exit
+end
 
 token = app_store_token
 bundle_id = ENV.fetch("APP_BUNDLE_ID", DEFAULT_BUNDLE_ID)

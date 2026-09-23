@@ -72,6 +72,14 @@ deployment.
   Store provisioning profile with manual signing. Archive creation must not
   ask Apple to create or revoke development certificates; the App Store
   Connect API key is reserved for upload and version-management operations.
+- Manual iOS releases expose `publish_status` (default `true`). Setting it to
+  `false` skips the personal-deploy status dispatch and all Slack updates from
+  its monitor. Signing, archive/export verification, artifact retention and the
+  existing upload/review controls still apply. To prepare an artifact without
+  upload or status messages, set `upload_to_app_store_connect=false`,
+  `app_review_candidate=false`, `admob_test_mode=false`, and
+  `publish_status=false`. Tags retain status publication; when enabled, a
+  failed status dispatch still blocks the build.
 - iOS archives and exported IPAs must include nonempty microphone and camera
   purpose strings because the linked realtime SDK references protected APIs.
   Conversations remain audio-only and never request camera access. Build
@@ -104,6 +112,17 @@ deployment.
   replacing the container.
 - EC2 self-hosted runners are deploy-only. They pull images and restart
   containers, but must not compile backend code or build Docker images.
+- Manual backend deployments expose `notify_slack` (default `true`). Set it to
+  `false` to omit the Slack result message while retaining deployment-history
+  events. Repository-dispatch behavior remains unchanged. When an explicit
+  deployment branch is needed, build the source image with
+  `dispatch_deploy=false`, record its immutable runtime-qualified image and
+  digest, then dispatch `deploy-backend.yml` at the reviewed deployment ref.
+  A repository dispatch always uses the deploy repository's default branch;
+  do not use that route when its workflow still contains runtime health gates.
+  For the 1.2.0 preparation, `codex/personalized-feed-rollout` starts from the
+  previously successful deployment configuration `9f49905e`, preserving its
+  removal of health gates. Keep `promote_swarm=false` for an ordinary rollout.
 - Backend administrator recovery requires the exact `RESET admin` confirmation
   and a temporary cost-12 BCrypt hash in
   `ADMIN_RECOVERY_PASSWORD_BCRYPT_HASH`. It must never accept or print a
@@ -112,13 +131,12 @@ deployment.
 - The backend application is a single-replica Docker Swarm service named
   `buddystudy_backend`. Updates use `start-first`, the image dependency health
   check, a five-second post-readiness monitor window, and automatic rollback.
-  The deployment workflow waits for Swarm to report `UpdateStatus=completed`,
-  verifies `1/1` replicas, and requires the running task image to match the
-  requested immutable release before it reports success. A paused or rolled
-  back update fails the workflow and its deployment notification. This
-  prevents an unhealthy replacement task from taking traffic while retaining
-  the previous task during the update. A single Swarm node provides deployment
-  continuity, not host-level high availability.
+  These are runtime policies owned by Swarm. The deployment workflow verifies
+  that the service specification references the requested release and prints
+  task metadata without waiting for replicas, task health, or update completion.
+  Workflow success means the release configuration was submitted; Grafana
+  reports runtime outages. A single Swarm node provides
+  deployment continuity, not host-level high availability.
 - The backend task is limited to 1.25 GiB memory and reserves 512 MiB so the
   old and new task can overlap on the 4 GiB EC2 host without allowing two JVMs
   to consume the entire machine. JVM heap remains 50% of its container limit.
@@ -139,7 +157,9 @@ deployment.
 - Monitoring dashboards, the TestZone browser UI, Loki, and Grafana are
   deployed by the monitoring workflow. TestZone's execution service and
   InfluxDB are deployed by the TestZone workflow. Backend deploys must not
-  recreate any of them.
+  recreate any of them. Backend deploys also preserve EC2 Promtail and legacy
+  monitoring containers; monitoring installation, configuration, and removal
+  belong to a separate monitoring workflow.
 - MacBook Air Docker storage remains module-owned even though monitoring,
   TestZone, and Redis Stream Scope share one Docker Desktop VM. Each
   module configures the Docker `local` log driver at 10 MiB times three files
@@ -342,8 +362,9 @@ deployment.
   a retained Docker volume, and a password stored in AWS Secrets Manager.
   Redis publishes host port `6379`; the separate backend-network workflow
   restricts that port to the same approved administrator CIDRs as MySQL. Redis
-  starts before the backend; Actions verifies only process survival and port
-  publication while application readiness and Grafana verify runtime behavior.
+  starts before the backend; Actions verifies only configured port publication.
+  It does not probe MySQL queries or Redis process survival. Application
+  readiness and Grafana verify runtime behavior.
 - Scheduler readiness includes every registered managed job, all of which are
   expected to succeed within the readiness freshness window. Admin analytics
   aggregation is an authenticated on-demand backend operation and is not
@@ -354,7 +375,14 @@ deployment.
   managed jobs, which also belong in the default
   monitored list so a verified charge cannot remain unfulfilled silently.
   RevenueCat webhook recovery requires `REVENUECAT_WEBHOOK_SIGNING_SECRET` in
-  the backend application secret. Subscription reconciliation additionally
+  the `buddystudy/prod` AWS Secrets Manager application secret in
+  `ap-northeast-2`. The backend workflow reads the current secret for every
+  rollout and injects it into the production service environment. Store the
+  complete RevenueCat integration HMAC signing secret as plain text, without
+  Base64 decoding or removing a prefix; the Authorization header value and
+  RevenueCat API key are separate credentials. After updating this field,
+  redeploy the backend module and retry the failed RevenueCat deliveries.
+  Subscription reconciliation additionally
   requires `REVENUECAT_PROJECT_ID` and `REVENUECAT_SERVER_API_KEY`.
   `REVENUECAT_APP_ID` is optional scoping metadata; an empty app ID accepts all
   HMAC-authenticated apps in the BuddyStudy RevenueCat project and still rejects
@@ -597,7 +625,14 @@ deployment.
   because it forces the clickable message title to the static alert-rule
   `GeneratorURL`. A custom webhook payload instead renders only the concise
   incident summary with error class, Trace / Request ID, event time, and a
-  `Grafana 로그 보기` link. The custom payload writes its Go-template locals as
+  `Grafana 로그 보기` link. These are individual log-event notifications, so the
+  Slack integration disables resolved messages and the payload selects only
+  `.Alerts.Firing`, including in mixed groups. Expiry from the Loki query window
+  is not incident recovery. Condition-based recovery alerts must use a separate
+  contact point; the internal Codex receiver retains its existing webhook
+  lifecycle contract. Deployment validates the Slack suppression settings from
+  the provisioned file without probing running services.
+  The custom payload writes its Go-template locals as
   `$$name`; Grafana provisioning reduces those to literal `$name` instead of
   interpreting them as environment-variable references. API alert links query the
   exact `requestId`; background alert links query the original

@@ -4,6 +4,10 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.backend.auth.application.port.inbound.RegisterDeviceCommand
 import com.buddystudy.backend.auth.application.service.LoginService
+import com.buddystudy.backend.auth.application.port.outbound.UserPort
+import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
+import com.buddystudy.backend.auth.application.permission.Roles
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.backend.auth.adapter.inbound.web.NotificationPreferenceRequest
 import com.buddystudy.backend.auth.adapter.inbound.web.TermsAgreementRequest
 import org.assertj.core.api.Assertions.assertThat
@@ -32,6 +36,8 @@ import java.net.http.HttpResponse
 @ExtendWith(OutputCaptureExtension::class)
 class SecurityIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var login: LoginService
+    @Autowired lateinit var users: UserPort
+    @Autowired lateinit var roles: RoleAssignmentPort
     @LocalServerPort var port: Int = 0
 
     private val client = HttpClient.newHttpClient()
@@ -77,6 +83,37 @@ class SecurityIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(missing.body()).contains("AUTH_ACCESS_TOKEN_REQUIRED")
         assertThat(invalid.statusCode()).isEqualTo(401)
         assertThat(invalid.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
+    fun `topic subscriptions require a valid account token`(): Unit = runBlocking {
+        assertThat(get("/api/v1/me/topic-subscriptions").statusCode()).isEqualTo(401)
+        assertThat(get("/api/v1/me/topic-subscriptions", "not-a-token").statusCode()).isEqualTo(401)
+    }
+
+    @Test
+    fun `signed in subscriptions reject null JSON without clearing saved interests`(): Unit = runBlocking {
+        val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        assertThat(get("/api/v1/me/topic-subscriptions", auth.accessToken).statusCode()).isEqualTo(403)
+        val user = users.findByProviderAndProviderId("ANONYMOUS", auth.deviceId)!!
+        user.status = UserStatus.ACTIVE
+        users.save(user)
+        roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
+        val token = login.token(auth.deviceId, auth.clientSecret).accessToken
+        fun put(body: String): HttpResponse<String> = client.send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/api/v1/me/topic-subscriptions"))
+                .header("Content-Type", "application/json").header("Authorization", "Bearer $token")
+                .PUT(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString(),
+        )
+        assertThat(put("""{"topics":["Swift UI"]}""").statusCode()).isEqualTo(200)
+        val invalid = put("""{"topics":[null]}""")
+        assertThat(invalid.statusCode()).isEqualTo(422)
+        assertThat(invalid.body()).contains("VALIDATION_ERROR")
+        assertThat(put("{}").statusCode()).isEqualTo(422)
+        assertThat(put("""{"topics":null}""").statusCode()).isEqualTo(422)
+        assertThat(get("/api/v1/me/topic-subscriptions", token).body()).contains("Swift UI")
+        assertThat(put("""{"topics":[]}""").statusCode()).isEqualTo(200)
+        assertThat(get("/api/v1/me/topic-subscriptions", token).body()).contains("\"topics\":[]")
     }
 
     @Test

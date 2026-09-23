@@ -9,6 +9,12 @@ extension AppStrings {
     }
 
     var commonRecordTitle: String { commonRecordText("학습 기록", "Learning record", "学習記録") }
+    var unableToLoadRecords: String {
+        commonRecordText("기록을 불러오지 못했습니다", "Unable to load records", "記録を読み込めませんでした")
+    }
+    var recordLoadRetryDescription: String {
+        commonRecordText("잠시 후 다시 시도해 주세요.", "Please try again shortly.", "しばらくしてからもう一度お試しください。")
+    }
     var voiceRecordFeedback: String { commonRecordText("피드백", "Feedback", "フィードバック") }
     var voiceRecordStrengths: String { commonRecordText("잘한 점", "Strengths", "よかった点") }
     var voiceRecordImprovements: String { commonRecordText("보완할 점", "To improve", "改善点") }

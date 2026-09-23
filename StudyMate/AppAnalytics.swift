@@ -1,6 +1,39 @@
 import Foundation
 import OSLog
 
+#if DEBUG
+/// Local rendering fixtures, including the separately signed offline QA app.
+/// The bundle marker is ignored outside the dedicated identifier and in Release.
+enum AppDebugFixtureConfiguration {
+    static let qaBundleIdentifier = "io.github.ghkdqhrbals.StudyMate.OfflineQA"
+
+    static var isEnabled: Bool { fixtureName() != nil }
+
+    static func fixtureName(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        info: [String: Any] = Bundle.main.infoDictionary ?? [:],
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier
+    ) -> String? {
+        if let value = environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"], !value.isEmpty {
+            return value.lowercased()
+        }
+        guard bundleIdentifier == qaBundleIdentifier,
+              info["BuddyStudyOfflineQA"] as? Bool == true else { return nil }
+        return (info["BuddyStudyScreenshotFixture"] as? String ?? "feed").lowercased()
+    }
+
+    static var language: String {
+        if let value = ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_LANGUAGE"] {
+            return value.lowercased()
+        }
+        guard Bundle.main.bundleIdentifier == qaBundleIdentifier,
+              Bundle.main.object(forInfoDictionaryKey: "BuddyStudyOfflineQA") as? Bool == true
+        else { return "ko" }
+        return (Bundle.main.object(forInfoDictionaryKey: "BuddyStudyScreenshotLanguage") as? String ?? "ko").lowercased()
+    }
+}
+#endif
+
 #if canImport(FirebaseAnalytics) && canImport(FirebaseCore)
 import FirebaseAnalytics
 import FirebaseCore
@@ -83,6 +116,9 @@ enum AppAnalytics {
         bundle: Bundle = .main,
         processInfo: ProcessInfo = .processInfo
     ) {
+        #if DEBUG
+        guard !AppDebugFixtureConfiguration.isEnabled else { return }
+        #endif
         guard !isConfigured else {
             return
         }
@@ -175,6 +211,32 @@ enum AppAnalytics {
     static func answerGradingFailed() {
         log("answer_grading_failed")
     }
+
+    static func publicFeedLoaded(sort: String, scope: String, personalized: Bool) {
+        guard ["recommended", "latest", "views", "likes"].contains(sort),
+              ["all", "following"].contains(scope) else { return }
+        log("public_feed_loaded", parameters: [
+            "sort": sort, "scope": scope, "personalized": personalized ? 1 : 0
+        ])
+    }
+
+    static func topicSubscriptionsSaved(count: Int) {
+        let bucket = count == 0 ? "none" : count <= 3 ? "1_to_3" : count <= 10 ? "4_to_10" : "11_plus"
+        log("topic_subscriptions_saved", parameters: ["count_bucket": bucket])
+    }
+
+    static func publicFeedQuestionOpened() { log("public_feed_question_opened") }
+
+    static func publicQuestionShareOpened() { log("public_question_share_opened") }
+
+    static func publicTopicFollowChanged(isFollowing: Bool) {
+        log("public_topic_follow_changed", parameters: ["following": isFollowing ? 1 : 0])
+    }
+
+    static func firstStudyStarterSelected() { log("first_study_starter_selected") }
+
+    // An API attempt only: StoreKit supplies no display or rating-conversion callback.
+    static func reviewRequested() { log("store_review_requested") }
 
     static func notificationOpened(kind: AppAnalyticsNotificationKind) {
         log("notification_opened", parameters: ["notification_kind": kind.rawValue])

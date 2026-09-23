@@ -6,6 +6,296 @@ import UIKit
 #endif
 @testable import StudyMate
 
+final class StoreKitPurchaseAccountPolicyTests: XCTestCase {
+    private let accountToken = UUID(uuidString: "7ec4cbca-03d2-45e6-91c9-e5e8931b4e52")!
+    private let now = Date(timeIntervalSince1970: 1_789_628_288)
+    private let productID = "io.github.ghkdqhrbals.StudyMate.tier2.monthly"
+
+    func testFirstPurchaseAndCurrentPlanDoNotRequireAnExistingStoreSubscription() {
+        for action in [MembershipPrimaryAction.subscribe, .current] {
+            XCTAssertTrue(StoreKitPurchaseAccountPolicy.allowsPurchase(
+                action: action,
+                activeProductID: nil,
+                activeOriginalTransactionID: nil,
+                verifiedCurrentEntitlements: [],
+                appAccountToken: accountToken,
+                now: now
+            ))
+        }
+    }
+
+    func testPaidPlanChangeAndDowngradeRequireExistingLocalSubscription() {
+        for action in [MembershipPrimaryAction.change, .downgrade] {
+            XCTAssertFalse(allows(action, []))
+            XCTAssertTrue(allows(action, [candidate()]))
+        }
+    }
+
+    func testSameProductAndBuddyStudyAccountOnAnotherAppleChainCannotAuthorizeChange() {
+        var anotherStoreAccount = candidate()
+        anotherStoreAccount.originalTransactionID = 200_000_000_000_201
+
+        XCTAssertFalse(allows(.change, [anotherStoreAccount]))
+        XCTAssertFalse(allows(.downgrade, [anotherStoreAccount]))
+    }
+
+    func testAnotherBuddyStudyAccountOrProductCannotAuthorizeChange() {
+        var anotherAccount = candidate()
+        anotherAccount.appAccountToken = UUID()
+        var anotherProduct = candidate()
+        anotherProduct.productID = "io.github.ghkdqhrbals.StudyMate.tier3.monthly"
+
+        XCTAssertFalse(allows(.change, [anotherAccount, anotherProduct]))
+        anotherAccount.appAccountToken = nil
+        XCTAssertFalse(allows(.change, [anotherAccount]))
+    }
+
+    func testExpiredRevokedAndSupersededTransactionsCannotAuthorizeChange() {
+        var expired = candidate()
+        expired.expirationDate = now
+        var revoked = candidate()
+        revoked.revocationDate = now
+        var upgraded = candidate()
+        upgraded.isUpgraded = true
+
+        XCTAssertFalse(allows(.change, [expired, revoked, upgraded]))
+    }
+
+    func testMissingOrMalformedBackendChainFailsClosedForPaidChanges() {
+        for chain in [nil, "", "not-an-apple-transaction"] as [String?] {
+            XCTAssertFalse(StoreKitPurchaseAccountPolicy.allowsPurchase(
+                action: .change,
+                activeProductID: productID,
+                activeOriginalTransactionID: chain,
+                verifiedCurrentEntitlements: [candidate()],
+                appAccountToken: accountToken,
+                now: now
+            ))
+        }
+    }
+
+    func testMatchingChainCanBeFoundAmongOtherVerifiedEntitlements() {
+        var unrelated = candidate()
+        unrelated.originalTransactionID = 99
+        unrelated.purchaseDate = now
+        XCTAssertTrue(allows(.change, [unrelated, candidate()]))
+    }
+
+    func testExistingAnnualSubscriptionCanAuthorizeMonthlyChangeWithoutReturningToSale() {
+        for product in MembershipProductPolicy.retiredAnnualProductIDs {
+            var annual = candidate()
+            annual.productID = product
+            XCTAssertTrue(StoreKitPurchaseAccountPolicy.allowsPurchase(
+                action: .change,
+                activeProductID: product,
+                activeOriginalTransactionID: "100000000000101",
+                verifiedCurrentEntitlements: [annual],
+                appAccountToken: accountToken,
+                now: now
+            ))
+            XCTAssertFalse(MembershipProductPolicy.purchasableMonthlyProductIDs.contains(product))
+            annual.originalTransactionID = 202
+            XCTAssertFalse(StoreKitPurchaseAccountPolicy.allowsPurchase(
+                action: .change,
+                activeProductID: product,
+                activeOriginalTransactionID: "100000000000101",
+                verifiedCurrentEntitlements: [annual],
+                appAccountToken: accountToken,
+                now: now
+            ))
+        }
+    }
+
+    func testVerifiedCurrentGraceEntitlementAllowsChangeWithoutRelaxingRestore() {
+        var grace = candidate()
+        grace.expirationDate = now.addingTimeInterval(-60)
+        for action in [MembershipPrimaryAction.change, .downgrade] {
+            XCTAssertTrue(StoreKitPurchaseAccountPolicy.allowsPurchase(
+                action: action,
+                activeProductID: productID,
+                activeOriginalTransactionID: "100000000000101",
+                activeAccessStatus: "GRACE_PERIOD",
+                verifiedCurrentEntitlements: [grace],
+                appAccountToken: accountToken,
+                now: now
+            ))
+        }
+        XCTAssertFalse(allows(.change, [grace]))
+        XCTAssertNil(StoreKitRestoreCandidateSelector.latestActiveMonthly(
+            from: [grace], appAccountToken: accountToken, now: now
+        ))
+        grace.originalTransactionID = 202
+        XCTAssertFalse(StoreKitPurchaseAccountPolicy.allowsPurchase(
+            action: .change,
+            activeProductID: productID,
+            activeOriginalTransactionID: "100000000000101",
+            activeAccessStatus: "GRACE_PERIOD",
+            verifiedCurrentEntitlements: [grace],
+            appAccountToken: accountToken,
+            now: now
+        ))
+    }
+
+    @MainActor
+    func testFailedFreshStatusCannotReachSynchronizationCheckoutOrStorePurchase() async {
+        var steps: [String] = []
+        do {
+            _ = try await AppleBillingStore.preparePurchase(
+                resolveActionAfterSynchronization: {
+                    steps.append("status")
+                    throw URLError(.notConnectedToInternet)
+                },
+                synchronizeCurrentEntitlements: { steps.append("synchronize") },
+                validateStoreAccount: { _ in steps.append("validate") },
+                prepareCheckout: {
+                    steps.append("checkout")
+                    throw URLError(.unknown)
+                }
+            )
+            steps.append("purchase")
+            XCTFail("A failed status read must abort purchase preparation")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .notConnectedToInternet)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(steps, ["status"])
+    }
+
+    @MainActor
+    func testFailedStatusAfterEntitlementSyncCannotUseInitialFreeDecision() async {
+        var steps: [String] = []
+        var statusReads = 0
+        do {
+            _ = try await AppleBillingStore.preparePurchase(
+                resolveActionAfterSynchronization: {
+                    steps.append("status")
+                    statusReads += 1
+                    if statusReads == 1 { return .subscribe }
+                    throw URLError(.timedOut)
+                },
+                synchronizeCurrentEntitlements: { steps.append("synchronize") },
+                validateStoreAccount: { _ in steps.append("validate") },
+                prepareCheckout: {
+                    steps.append("checkout")
+                    throw URLError(.unknown)
+                }
+            )
+            steps.append("purchase")
+            XCTFail("A stale initial action must not authorize a purchase")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .timedOut)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(steps, ["status", "synchronize", "status"])
+    }
+
+    @MainActor
+    func testMismatchedStoreAccountAbortsBeforeCheckoutOrPurchase() async {
+        var steps: [String] = []
+        do {
+            _ = try await AppleBillingStore.preparePurchase(
+                resolveActionAfterSynchronization: { .change },
+                synchronizeCurrentEntitlements: {},
+                validateStoreAccount: { _ in
+                    steps.append("validate")
+                    throw AppleBillingStoreError.activeSubscriptionNotOnStoreAccount
+                },
+                prepareCheckout: {
+                    steps.append("checkout")
+                    throw URLError(.unknown)
+                }
+            )
+            steps.append("purchase")
+            XCTFail("Account mismatch must stop the flow")
+        } catch AppleBillingStoreError.activeSubscriptionNotOnStoreAccount {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(steps, ["validate"])
+    }
+
+    @MainActor
+    func testVerifiedDowngradeStillSchedulesWithoutCheckoutOrEntitlementReplay() async throws {
+        var steps: [String] = []
+        let result = try await AppleBillingStore.preparePurchase(
+            resolveActionAfterSynchronization: { .downgrade },
+            synchronizeCurrentEntitlements: { steps.append("synchronize") },
+            validateStoreAccount: { action in
+                XCTAssertEqual(action, .downgrade)
+                steps.append("validate")
+            },
+            prepareCheckout: {
+                steps.append("checkout")
+                throw URLError(.unknown)
+            }
+        )
+        XCTAssertEqual(result.action, .downgrade)
+        XCTAssertNil(result.checkout)
+        XCTAssertEqual(steps, ["validate"])
+    }
+
+    @MainActor
+    func testCancellationDuringStoreAccountValidationStopsCheckoutAndPurchase() async {
+        var steps: [String] = []
+        let preparation = Task { @MainActor in
+            _ = try await AppleBillingStore.preparePurchase(
+                resolveActionAfterSynchronization: { .change },
+                synchronizeCurrentEntitlements: {},
+                validateStoreAccount: { _ in
+                    steps.append("validate")
+                    withUnsafeCurrentTask { $0?.cancel() }
+                },
+                prepareCheckout: {
+                    steps.append("checkout")
+                    throw URLError(.unknown)
+                }
+            )
+            steps.append("purchase")
+        }
+        do {
+            try await preparation.value
+            XCTFail("Cancellation must stop purchase preparation")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(steps, ["validate"])
+    }
+
+    func testGuidanceExplainsAppleAccountRestoreAndManagementInSupportedLanguages() {
+        XCTAssertTrue(AppStrings(language: .english).billingStoreAccountMismatch.contains("Apple account"))
+        XCTAssertTrue(AppStrings(language: .english).billingStoreAccountMismatch.contains("restore purchases"))
+        XCTAssertTrue(AppStrings(language: .english).billingStoreAccountMismatch.contains("Manage subscription"))
+        XCTAssertTrue(AppStrings(language: .korean).billingStoreAccountMismatch.contains("구매를 복원"))
+        XCTAssertTrue(AppStrings(language: .japanese).billingStoreAccountMismatch.contains("購入を復元"))
+    }
+
+    private func allows(_ action: MembershipPrimaryAction, _ candidates: [StoreKitRestoreCandidate]) -> Bool {
+        StoreKitPurchaseAccountPolicy.allowsPurchase(
+            action: action,
+            activeProductID: productID,
+            activeOriginalTransactionID: "100000000000101",
+            verifiedCurrentEntitlements: candidates,
+            appAccountToken: accountToken,
+            now: now
+        )
+    }
+
+    private func candidate() -> StoreKitRestoreCandidate {
+        StoreKitRestoreCandidate(
+            transactionID: 100_000_000_000_102,
+            originalTransactionID: 100_000_000_000_101,
+            productID: productID,
+            appAccountToken: accountToken,
+            purchaseDate: now.addingTimeInterval(-3600),
+            expirationDate: now.addingTimeInterval(3600),
+            revocationDate: nil
+        )
+    }
+}
+
 final class BillingLocalizationTests: XCTestCase {
     func testMembershipAndBillingLabelsAreLocalizedInJapanese() {
         let strings = AppStrings(language: .japanese)
@@ -239,6 +529,7 @@ final class BillingLocalizationTests: XCTestCase {
           "accessStatus": "ACTIVE",
           "renewalStatus": "CANCELED",
           "productId": "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+          "originalTransactionId": "100000000000101",
           "startedAt": "2026-08-01T00:00:00Z",
           "expiresAt": "2026-09-01T00:00:00Z",
           "willRenew": false,
@@ -261,6 +552,7 @@ final class BillingLocalizationTests: XCTestCase {
         let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
 
         XCTAssertEqual(status.tierCode, "TIER2")
+        XCTAssertEqual(status.originalTransactionId, "100000000000101")
         XCTAssertTrue(status.adFree)
         XCTAssertTrue(status.isEntitlementActive)
         XCTAssertFalse(status.willRenew)
@@ -298,6 +590,7 @@ final class BillingLocalizationTests: XCTestCase {
         }
 
         XCTAssertTrue(try decode(accessStatus: "GRACE_PERIOD").isEntitlementActive)
+        XCTAssertNil(try decode(accessStatus: "GRACE_PERIOD").originalTransactionId)
         XCTAssertFalse(try decode(accessStatus: "EXPIRED").isEntitlementActive)
     }
 
@@ -1506,6 +1799,63 @@ final class MobileHomeStudyPresentationPolicyTests: XCTestCase {
     }
 }
 
+final class HomeSearchUsabilityTests: XCTestCase {
+    @MainActor
+    func testErasingTheFieldStillInvalidatesTheOutstandingFilteredResponse() {
+        var state = CommunityFeedStateStore()
+        let oldRequest = state.beginLoading(query: "Swift")
+        state.offset = 20
+        state.totalCount = 42
+
+        XCTAssertTrue(state.clearSearch(draftQuery: ""))
+        XCTAssertFalse(state.isCurrentRequest(oldRequest))
+        XCTAssertEqual(state.query, "")
+        XCTAssertEqual(state.offset, 0)
+        XCTAssertEqual(state.totalCount, 0)
+        XCTAssertFalse(state.isLoading)
+    }
+
+    @MainActor
+    func testClearingPublicSearchResetsFilteredPageButPreservesScopeAndSort() {
+        let suite = "HomeSearchUsabilityTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
+        appState.communitySearchText = "  Swift  "
+        let originalScope = appState.communityFeedScope
+        let originalSort = appState.communityFeedSort
+        appState.communityOffset = 20
+        appState.communityTotalCount = 42
+        appState.isLoadingCommunityQuestions = true
+        appState.communityErrorMessage = "previous search failed"
+
+        XCTAssertTrue(appState.clearCommunitySearch())
+        XCTAssertEqual(appState.communitySearchText, "")
+        XCTAssertEqual(appState.communityOffset, 0)
+        XCTAssertEqual(appState.communityTotalCount, 0)
+        XCTAssertFalse(appState.isLoadingCommunityQuestions)
+        XCTAssertNil(appState.communityErrorMessage)
+        XCTAssertEqual(appState.communityFeedScope, originalScope)
+        XCTAssertEqual(appState.communityFeedSort, originalSort)
+    }
+
+    @MainActor
+    func testClosingAnEmptySearchDoesNotDiscardTheExistingUnfilteredPage() {
+        let suite = "HomeSearchUsabilityTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
+        appState.communitySearchText = "  "
+        appState.communityOffset = 20
+        appState.communityTotalCount = 42
+
+        XCTAssertFalse(appState.clearCommunitySearch())
+        XCTAssertEqual(appState.communitySearchText, "")
+        XCTAssertEqual(appState.communityOffset, 20)
+        XCTAssertEqual(appState.communityTotalCount, 42)
+    }
+}
+
 final class PageAccessPolicyTests: XCTestCase {
     @MainActor
     func testNotificationStudyListRouteUsesExistingHomeMyStudiesScreen() {
@@ -1962,6 +2312,43 @@ final class DeveloperAccessPolicyTests: XCTestCase {
 }
 
 final class NotificationStateStoreTests: XCTestCase {
+    @MainActor
+    func testFailedNotificationPagesPreserveRowsAndRetryModeWithoutAutomaticRetry() {
+        let notification = BackendAppNotification(
+            id: "kept", type: "QUESTION", title: "Question", body: "Saved notification",
+            isRead: false, createdAt: Date(timeIntervalSince1970: 1)
+        )
+        var store = NotificationStateStore(notifications: [notification], unreadCount: 1, totalCount: 3)
+
+        for reset in [false, true] {
+            store.beginLoading()
+            XCTAssertFalse(store.canLoadMore(current: notification))
+            store.applyError("Please try again.")
+            store.failLoading(reset: reset)
+            store.finishLoading()
+
+            XCTAssertEqual(store.notifications, [notification])
+            XCTAssertEqual(store.unreadCount, 1)
+            XCTAssertEqual(store.totalCount, 3)
+            XCTAssertEqual(store.failedLoadReset, reset)
+            XCTAssertFalse(store.canLoadMore(current: notification))
+        }
+
+        store.beginLoading()
+        XCTAssertNil(store.errorMessage)
+        XCTAssertNil(store.failedLoadReset)
+        store.applyPage(
+            BackendNotificationsPage(notifications: [notification], unreadCount: 1, totalCount: 3),
+            reset: true
+        )
+        store.finishLoading()
+        XCTAssertTrue(store.canLoadMore(current: notification))
+        store.reset()
+        XCTAssertTrue(store.notifications.isEmpty)
+        XCTAssertNil(store.failedLoadReset)
+        XCTAssertNil(store.errorMessage)
+    }
+
     @MainActor
     func testMarkAllReadUpdatesEveryLoadedNotificationAndUnreadCount() {
         let readAt = Date(timeIntervalSince1970: 100)
@@ -2773,6 +3160,140 @@ final class StudyOutlinePolicyTests: XCTestCase {
 }
 
 final class RecordsPaginationTests: XCTestCase {
+    @MainActor
+    func testDestructiveClearShowsLoadedEmptyStateWhileIdentityClearReturnsToInitialState() {
+        let record = recoveryTestRecord(id: "deleted")
+        var state = RecordsStateStore(records: [record])
+        state.applyPage(BackendRecordsPage(records: [record], totalCount: 3, limit: 30, offset: 0), reset: true)
+        state.failPageLoad(reset: false)
+
+        state.clear(loaded: true)
+
+        XCTAssertTrue(state.records.isEmpty)
+        XCTAssertTrue(state.hasLoadedPage)
+        XCTAssertFalse(state.isLoadingPage)
+        XCTAssertNil(state.failedPageReset)
+        XCTAssertEqual(state.totalCount, 0)
+        XCTAssertEqual(state.loadedBackendCount, 0)
+        XCTAssertFalse(state.canLoadMore)
+
+        state.clear()
+        XCTAssertFalse(state.hasLoadedPage)
+        XCTAssertFalse(state.isLoadingPage)
+        XCTAssertNil(state.failedPageReset)
+    }
+
+    @MainActor
+    func testInitialRecordFailureIsDistinctFromSuccessfullyLoadedEmptyPage() {
+        var state = RecordsStateStore()
+        XCTAssertFalse(state.hasLoadedPage)
+        XCTAssertTrue(state.beginPageLoad())
+        state.failPageLoad(reset: true)
+        state.finishPageLoad()
+        XCTAssertFalse(state.hasLoadedPage)
+        XCTAssertEqual(state.failedPageReset, true)
+        XCTAssertFalse(state.isLoadingPage)
+
+        XCTAssertTrue(state.beginPageLoad())
+        XCTAssertNil(state.failedPageReset)
+        state.applyPage(BackendRecordsPage(records: [], totalCount: 0, limit: 30, offset: 0), reset: true)
+        state.finishPageLoad()
+        XCTAssertTrue(state.hasLoadedPage)
+        XCTAssertFalse(state.canLoadMore)
+        state.clear()
+        XCTAssertFalse(state.hasLoadedPage)
+        XCTAssertNil(state.failedPageReset)
+    }
+
+    @MainActor
+    func testFailedRecordPagePreservesLoadedRowsAndOffsetUntilRetrySucceeds() {
+        let record = recoveryTestRecord(id: "kept")
+        var state = RecordsStateStore(records: [record])
+        state.applyPage(BackendRecordsPage(records: [record], totalCount: 3, limit: 30, offset: 0), reset: true)
+
+        XCTAssertTrue(state.beginPageLoad())
+        state.failPageLoad(reset: false)
+        state.finishPageLoad()
+        XCTAssertEqual(state.records, [record])
+        XCTAssertEqual(state.loadedBackendCount, 1)
+        XCTAssertEqual(state.totalCount, 3)
+        XCTAssertEqual(state.failedPageReset, false)
+
+        XCTAssertTrue(state.beginPageLoad())
+        state.applyPage(
+            BackendRecordsPage(records: [recoveryTestRecord(id: "next")], totalCount: 3, limit: 30, offset: 1),
+            reset: false
+        )
+        state.finishPageLoad()
+        XCTAssertEqual(state.loadedBackendCount, 2)
+        XCTAssertNil(state.failedPageReset)
+        XCTAssertTrue(state.canLoadMore)
+    }
+
+    @MainActor
+    func testSearchFailurePreservesRowsAndOffsetForAppendAndRefresh() throws {
+        var state = SearchStateStore()
+        let record = recoveryTestRecord(id: "search-kept")
+        let first = try XCTUnwrap(state.beginRecordPage(query: "Swift", reset: true))
+        state.applyRecordPage(
+            BackendRecordsPage(records: [record], totalCount: 3, limit: 30, offset: 0),
+            query: "Swift", reset: true, requestID: first
+        )
+        state.finishRecordPage(query: "Swift", requestID: first)
+
+        for reset in [false, true] {
+            let request = try XCTUnwrap(state.beginRecordPage(query: "Swift", reset: reset))
+            XCTAssertEqual(state.recordResults, [record])
+            state.failRecordPage(query: "Swift", reset: reset, requestID: request)
+            state.finishRecordPage(query: "Swift", requestID: request)
+            XCTAssertEqual(state.failedRecordPageReset, reset)
+            XCTAssertEqual(state.recordResults, [record])
+            XCTAssertEqual(state.recordLoadedCount, 1)
+            XCTAssertEqual(state.recordTotalCount, 3)
+            XCTAssertFalse(state.isLoadingRecordPage)
+        }
+
+        let retry = try XCTUnwrap(state.beginRecordPage(query: "Swift", reset: true))
+        state.applyRecordPage(
+            BackendRecordsPage(records: [], totalCount: 0, limit: 30, offset: 0),
+            query: "Swift", reset: true, requestID: retry
+        )
+        state.finishRecordPage(query: "Swift", requestID: retry)
+        XCTAssertEqual(state.recordResults, [])
+        XCTAssertNil(state.failedRecordPageReset)
+        XCTAssertFalse(state.canLoadMoreRecordResults)
+    }
+
+    @MainActor
+    func testStaleSearchFailureCannotReplaceNewQueryOrSurviveClear() throws {
+        var state = SearchStateStore()
+        let old = try XCTUnwrap(state.beginRecordPage(query: "old", reset: true))
+        let current = try XCTUnwrap(state.beginRecordPage(query: "new", reset: true))
+        state.failRecordPage(query: "old", reset: true, requestID: old)
+        state.finishRecordPage(query: "old", requestID: old)
+        XCTAssertEqual(state.recordQuery, "new")
+        XCTAssertTrue(state.isLoadingRecordPage)
+        XCTAssertNil(state.failedRecordPageReset)
+
+        state.failRecordPage(query: "new", reset: true, requestID: current)
+        state.finishRecordPage(query: "new", requestID: current)
+        XCTAssertEqual(state.failedRecordPageReset, true)
+        state.clearRecordResults()
+        state.failRecordPage(query: "new", reset: true, requestID: current)
+        XCTAssertNil(state.recordResults)
+        XCTAssertNil(state.failedRecordPageReset)
+        XCTAssertFalse(state.isLoadingRecordPage)
+    }
+
+    private func recoveryTestRecord(id: String) -> StudyRecord {
+        StudyRecord(
+            id: id,
+            question: QuestionItem(question: "Saved question", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 1)),
+            topic: "Swift",
+            difficulty: .level5
+        )
+    }
+
     func testStudyRecordsAreNotTrimmedByLegacyHistoryPreference() {
         let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3084,6 +3605,124 @@ private final class StudyPreparedPresentationRejectingURLProtocol: URLProtocol, 
 #endif
 
 #if os(iOS)
+@MainActor
+final class TopicSubscriptionEditorPolicyTests: XCTestCase {
+    func testSuggestionPreservesTypedInputAndBothAreIncludedWhenSaving() {
+        var draft = CommunityTopicSubscriptionEditorDraft()
+        draft.prepareIfNeeded(["Swift"])
+        draft.input = "  Database   design  "
+
+        XCTAssertTrue(draft.addSuggestion("C++"))
+        XCTAssertEqual(draft.input, "  Database   design  ")
+        XCTAssertEqual(draft.topicsForSaving(), ["Swift", "C++", "Database design"])
+        XCTAssertEqual(draft.input, "")
+    }
+
+    func testUnchangedOrRevertedDraftDoesNotProduceSavePayload() {
+        var draft = CommunityTopicSubscriptionEditorDraft()
+        XCTAssertFalse(draft.hasChanges)
+        XCTAssertNil(draft.topicsForSaving())
+        draft.prepareIfNeeded(["Swift"])
+        draft.input = " \n\t "
+        XCTAssertFalse(draft.hasChanges)
+        XCTAssertNil(draft.topicsForSaving())
+
+        draft.remove("Swift")
+        XCTAssertTrue(draft.hasChanges)
+        XCTAssertEqual(draft.topicsForSaving(), [])
+        XCTAssertTrue(draft.addSuggestion("Swift"))
+        XCTAssertFalse(draft.hasChanges)
+        XCTAssertNil(draft.topicsForSaving())
+    }
+
+    func testDraftSnapshotAndSavePayloadSurviveRefreshAndRetry() {
+        var draft = CommunityTopicSubscriptionEditorDraft()
+        draft.prepareIfNeeded(["Swift"])
+        draft.input = "Redis"
+        let firstAttempt = draft.topicsForSaving()
+
+        // A failed network save leaves the editor in place. A background refresh
+        // must not replace its local additions or establish a new baseline.
+        draft.prepareIfNeeded(["Server topic"])
+        XCTAssertEqual(firstAttempt, ["Swift", "Redis"])
+        XCTAssertEqual(draft.topicsForSaving(), firstAttempt)
+        XCTAssertTrue(draft.hasChanges)
+    }
+
+    func testDuplicateAtCapacityReportsDuplicateBeforeCapacityAndKeepsInput() {
+        let topics = ["Swift UI"] + (1..<30).map { "Topic \($0)" }
+        var draft = CommunityTopicSubscriptionEditorDraft()
+        draft.prepareIfNeeded(topics)
+        draft.input = "swift-ui"
+
+        XCTAssertFalse(draft.addInput())
+        XCTAssertEqual(draft.validationError, .duplicate)
+        XCTAssertEqual(draft.topics, topics)
+        XCTAssertEqual(draft.input, "swift-ui")
+        draft.input = "New topic"
+        XCTAssertNil(draft.validationError)
+        XCTAssertNil(draft.topicsForSaving())
+        XCTAssertEqual(draft.validationError, .limitReached)
+        XCTAssertEqual(draft.input, "New topic")
+
+        draft.remove("Swift UI")
+        XCTAssertNil(draft.validationError)
+        XCTAssertEqual(draft.topicsForSaving()?.count, 30)
+        XCTAssertEqual(draft.topics.last, "New topic")
+    }
+
+    func testInvalidNamesCharactersAndLengthsHaveDistinctErrorsWithoutMutation() {
+        let invalidInputs: [(String, CommunityTopicSubscriptionPolicy.AdditionError)] = [
+            (" _ - \t", .invalidName),
+            ("Swift\u{0000}UI", .invalidCharacters),
+            (String(repeating: "a", count: 121), .tooLong),
+            (String(repeating: "İ", count: 120), .tooLong)
+        ]
+        for (input, error) in invalidInputs {
+            var draft = CommunityTopicSubscriptionEditorDraft()
+            draft.prepareIfNeeded(["C++"])
+            draft.input = input
+            XCTAssertFalse(draft.addInput())
+            XCTAssertEqual(draft.validationError, error)
+            XCTAssertEqual(draft.topics, ["C++"])
+            XCTAssertEqual(draft.input, input)
+            draft.input = "C#"
+            XCTAssertNil(draft.validationError)
+            XCTAssertTrue(draft.addInput())
+            XCTAssertEqual(draft.topics, ["C++", "C#"])
+        }
+    }
+
+    func testAdditionAcceptsLengthBoundaryAndNormalizesWhitespace() {
+        var draft = CommunityTopicSubscriptionEditorDraft()
+        draft.prepareIfNeeded([])
+        draft.input = String(repeating: "a", count: 120)
+        XCTAssertTrue(draft.addInput())
+        draft.input = "　Swift\n\tUI　"
+        XCTAssertTrue(draft.addInput())
+        XCTAssertEqual(draft.topics.last, "Swift UI")
+        XCTAssertTrue(CommunityTopicSubscriptionPolicy.isValid(draft.topics))
+    }
+
+    func testSuggestionsExcludeSelectedBeforeApplyingLimit() {
+        let selected = (0..<20).map { "Selected \($0)" }
+        let available = (0..<25).map { "Available \($0)" }
+        let candidates = selected + ["selected-0", "---", "Bad\u{0000}topic"] + available
+
+        XCTAssertEqual(
+            CommunityTopicSubscriptionPolicy.suggestions(from: candidates, excluding: selected),
+            Array(available.prefix(20))
+        )
+        XCTAssertEqual(
+            CommunityTopicSubscriptionPolicy.suggestions(
+                from: [" C++ ", "C++", "C#", "Swift UI", "swift-ui"], excluding: ["SWIFT_UI"]
+            ),
+            ["C++", "C#"]
+        )
+        XCTAssertTrue(CommunityTopicSubscriptionPolicy.suggestions(from: available, excluding: [], limit: 0).isEmpty)
+    }
+}
+
 @MainActor
 final class ProfileEditorDraftTests: XCTestCase {
     func testPreparedProfileHasFinalNameAndAvatarBeforeAppearance() {

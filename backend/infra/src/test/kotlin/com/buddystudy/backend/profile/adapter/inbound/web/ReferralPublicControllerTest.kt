@@ -48,6 +48,7 @@ class ReferralPublicControllerTest {
             .jsonPath("$.applinks.details[0].appID")
             .isEqualTo("4CL25TC734.io.github.ghkdqhrbals.StudyMate")
             .jsonPath("$.applinks.details[0].paths[0]").isEqualTo("/referrals/*")
+            .jsonPath("$.applinks.details[0].paths[1]").isEqualTo("/questions/*")
     }
 
     private class FakeReferralUseCase : ReferralUseCase {

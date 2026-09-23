@@ -1297,7 +1297,7 @@ private struct StatsOverviewSection: View {
                     .frame(height: 58)
 
                 StatsAchievementCard(
-                    title: strings.studyGrowth,
+                    title: strings.studyGrowthCompact,
                     value: achievements.growthValue,
                     caption: achievements.growthCaption
                 )

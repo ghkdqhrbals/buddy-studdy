@@ -1,0 +1,60 @@
+{
+  "baseCommit": "91d335edd4c28e230a04bbb97f1d0c36daed3c2b",
+  "sourceSHA256": {
+    "StudyMate/AppAnalytics.swift": "78873b64f2fffd01f0984b379e5555ef95f05a3ed7461eaf8b41e54c23dfc78f",
+    "StudyMate/AppControl.swift": "95e4ba461514322f794a8873cc09a082d2a6f4c79d9de9ee73e1cc607f83dfb0",
+    "StudyMate/Models/AppStrings+CommonRecords.swift": "f42bdcd67abc2c8e1ee43b2ebf76623e4c815e7504e4f735dcc0f9221b6f595d",
+    "StudyMate/Models/StudyModels.swift": "adb978778ec78d4c24a08dd1671d9baa7b70aac4da1e0b90949b577e37195705",
+    "StudyMate/SentryMonitoring.swift": "daded30bbf5d0e9859fb7e179c1dc50b95bb882890a0182b686010e51e7527dc",
+    "StudyMate/Services/AdMobNativeAdvertising.swift": "8791c773b888821646ab27942cd5b960555920525655174c52b24e684d670efa",
+    "StudyMate/Services/AppleBillingStore.swift": "1470e91c840119cbc2a233d9f5332145e68e75483efa2ff5962940e295f1f7d1",
+    "StudyMate/Services/RemotePushBackendClient.swift": "ae87d2aa158e5f3cb4a760bb22e5fc64be573b602d50c55f88ca4b14953803b3",
+    "StudyMate/ViewModels/AppState.swift": "dc6a9088d5bb76aa7ec5e3f36d7afaba9a809e266d7707adab2da53cef53d22b",
+    "StudyMate/ViewModels/CommunityFeedStateStore.swift": "f90672bf2aa5e7784e4e04f16aa9e6fb8b6204def8197a37769f0e5faf603eb9",
+    "StudyMate/ViewModels/NotificationStateStore.swift": "9f75202464c1cda15c6b1d8d28fdd53fc8cd6b45c2cf4a107d9bed3465604f42",
+    "StudyMate/ViewModels/RecordsStateStore.swift": "e1f290a1bc9a73bd8b0c1972b4bdc70b3e81fb94a36e980561eef68e946f9293",
+    "StudyMate/ViewModels/SearchStateStore.swift": "d341e3d6fe6ddce887a09a1bf5fb585192390eb24ab281091c0f050d959e42ea",
+    "StudyMate/Views/HistoryView.swift": "d552111c98a4ebf5f109feb7b9d1c87e748ce81385d12ff626ec487e51005896",
+    "StudyMate/Views/MobileRootView.swift": "d16d3498f3218641c8bb993c935096ae4341f1f2c6127c0c25a3d96bbd50c5e8",
+    "StudyMateiOSTests/PageAccessPolicyTests.swift": "5d5092ddacd2c78a35f894e0e84bf4801adaaba9bf1ac8b9e1330c097b535aca",
+    "scripts/build-ios-offline-qa.sh": "4b4e13a7b143f68c091bd0672619c3c0adbf08040a25025cc05e2f513ccbb89b"
+  },
+  "regressionRuns": [
+    {
+      "resultBundle": "build/UsabilityRegressionRun3.xcresult",
+      "passed": 39,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "resultBundle": "build/UsabilityRecordClearRegression.xcresult",
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "note": "7 overlapping Records tests and 1 new destructive-clear/identity-reset test"
+    }
+  ],
+  "genericIOSBuild": {
+    "result": "BUILD SUCCEEDED",
+    "scheme": "StudyMateiOS",
+    "configuration": "Debug",
+    "destination": "generic/platform=iOS",
+    "codeSigningAllowed": false,
+    "log": "/tmp/buddystudy-usability-qa-records-final.log"
+  },
+  "physicalQA": {
+    "device": "iPhone 16 Pro",
+    "os": "iOS 26.6.2",
+    "bundleIdentifier": "io.github.ghkdqhrbals.StudyMate.OfflineQA",
+    "executableSHA256": "ec94e4169f9ddd809096b6f640950c4693d7fa38095de037eb51d66e0f2df849",
+    "fixture": "feed",
+    "language": "ko",
+    "install": "success",
+    "launch": "success",
+    "signatureAndIsolationChecks": "passed",
+    "originalTestFlightVersion": "1.2.0 (121)",
+    "originalTestFlightReadback": "2026-09-23 18:13 KST",
+    "scope": "Offline synthetic SwiftUI rendering and local interactions; no production persistence, network recovery or distribution verification"
+  },
+  "distribution": "No new App Store or TestFlight upload"
+}

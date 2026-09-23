@@ -32,6 +32,29 @@ subscriptions. Apple's native subscription management is the fallback when
 RevenueCat is unavailable. Apple, not BuddyStudy or RevenueCat, makes the final
 decision for an Apple refund.
 
+Before changing an existing paid plan, including a scheduled downgrade, iOS
+fetches billing status through a throwing purchase-only request, then matches
+its `originalTransactionId` and current product against a verified
+`Transaction.currentEntitlements` entry
+owned by the same `appAccountToken`. A RevenueCat customer may contain purchases
+from different Apple accounts, so the customer ID alone cannot authorize an
+upgrade on the device's current Store account. The transaction must be unexpired,
+unless fresh backend status confirms `GRACE_PERIOD` for that same current chain;
+this exception does not broaden purchase restoration. A failed status request
+aborts purchase preparation instead of falling back to a cached free-plan decision.
+Existing retired annual products may supply ownership evidence, but remain
+unavailable for new purchases. Cancellation at any awaited preflight boundary
+also prevents the Store purchase call.
+Missing, revoked, superseded, or
+mismatched local evidence stops the flow before checkout creation or the Store
+purchase call. The localized message directs the user to switch to the Apple
+account that owns the existing subscription, restore purchases, or review it in
+subscription management. First purchases and already-paid fulfillment remain
+available; a matching current chain still permits upgrades and scheduled
+downgrades. Deploy the additive billing-status identity field before distributing
+this client: older responses decode successfully but cannot authorize a paid
+plan change without an identified subscription chain.
+
 When a future downgrade or cancellation is scheduled, the status response includes a
 structured `planTransition`. It names the current and next tiers and gives the
 exact shared boundary as `currentPlanEndsAt` and `nextPlanStartsAt`. iOS renders
@@ -550,6 +573,14 @@ References:
 - Alert on delayed webhooks, entitlement mismatch, reconciliation exhaustion, stale quota reservations, negative counters, ownership conflict, duplicate active subscriptions, and refunds pending beyond the operational threshold.
 - Test purchase success, app termination after Apple approval, duplicate and out-of-order webhooks, backend restart between payment and entitlement commits, exhausted projection recovery, restore, refund approval, refund decline, and refund reversal.
 
+The 2026-09-17 Store-account guard passed the generic `StudyMateiOS` iOS build
+and 21 focused XCTest cases on a connected physical iPhone. The tests cover
+exact chain/product/account ownership, missing server identity, revoked and
+superseded evidence, grace access, existing annual subscriptions, failed fresh
+status reads, cancellation, downgrade preparation, restore filtering, and
+backward-compatible status decoding. These are policy and orchestration tests;
+they do not perform a charged Store purchase or switch the device's Apple account.
+
 RevenueCat owns App Store transaction completion
 (`purchasesAreCompletedBy: .revenueCat`). The stable BuddyStudy
 `appAccountToken` is the RevenueCat App User ID, so a purchase can be recovered
@@ -773,11 +804,33 @@ past its stored boundary until that access, but no client can reserve or observe
 stale capacity.
 
 Every five minutes the backend records `billing_lifecycle_metrics` for webhook
-lag, entitlement mismatch, exhausted reconciliation, stale question
-reservations, negative counters, duplicate active subscriptions, and ownership conflicts.
-An anomalous snapshot is emitted as `billing_lifecycle_anomaly` at ERROR; the
-existing Grafana/Loki operational-error rule owns Slack notification. The
-backend never calls Slack directly.
+lag, entitlement mismatch, exhausted reconciliation, stale question reservations,
+negative counters, duplicate active subscriptions, and ownership conflicts.
+An anomaly kind entering an unhealthy state is emitted as
+`billing_lifecycle_anomaly` at ERROR once per continuous episode in the running
+process. Later snapshots retain the metric values and log the ongoing anomaly
+without creating another ERROR. A successful snapshot clears only the anomaly
+kinds that actually recovered; a new kind or recurrence after recovery alerts
+again. Ownership conflicts are new events, so each interval with additional
+conflicts still alerts. A restart reports any existing anomaly once again.
+
+The entitlement-mismatch metric compares effective access. An `APP_STORE`
+projection with `ACTIVE` access and an elapsed `expires_at` counts as `TIER1`,
+matching billing status even before reconciliation rewrites the historical tier.
+The expected side retains the entitlement projector's existing rule: `ACTIVE`
+or `GRACE_PERIOD` subscriptions with no expiry or a future expiry. Missing, free,
+expired, or incorrectly tiered projections still count as drift when that rule
+selects a current paid subscription. In particular, a renewed subscription paired
+with an expired projection remains a mismatch even when their stored tier codes
+match. This comparison does not change stored entitlements, repair subscriptions,
+or redefine the existing grace-period policy.
+
+Collection failures similarly alert once until collection succeeds. Failed or
+cancelled collection never clears an active anomaly or reports it recovered.
+The existing Grafana/Loki operational-error rule owns Slack notification; its
+ERROR-log events send firing notifications only because expiry from a log
+window does not prove that the underlying condition recovered. The backend
+never calls Slack directly.
 
 ## API
 

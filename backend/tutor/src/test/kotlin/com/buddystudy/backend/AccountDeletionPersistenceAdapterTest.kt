@@ -1,6 +1,10 @@
 package com.buddystudy.backend
 
 import com.buddystudy.backend.auth.application.port.outbound.AccountDeletionPort
+import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.community.application.port.inbound.TopicSubscriptionUseCase
+import com.buddystudy.backend.common.application.error.ApiException
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -25,6 +29,7 @@ import java.util.UUID
 class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var accountDeletion: AccountDeletionPort
     @Autowired lateinit var client: DatabaseClient
+    @Autowired lateinit var topicSubscriptions: TopicSubscriptionUseCase
 
     @Test
     fun `voice tutor read permission remains active-account-only after runtime seed reconciliation`(): Unit = runBlocking {
@@ -60,7 +65,11 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         insertUserBlock(peerUserId, userId, withdrawnAt.minusSeconds(20))
         val voiceSessionId = insertVoiceTutorData(userId, withdrawnAt.minusSeconds(30))
 
+        client.sql("insert into user_topic_subscriptions (user_id, topic_key, topic, sort_order) values (:userId, 'swift', 'Swift', 0)")
+            .bind("userId", userId).fetch().rowsUpdated().awaitSingle()
+
         val snapshot = accountDeletion.beginWithdrawal(userId, withdrawnAt)
+        assertThat(longValue("select count(*) from user_topic_subscriptions where user_id = $userId")).isZero()
 
         assertThat(snapshot.deviceIds).containsExactly(deviceId)
         assertThat(stringValue("select status from users where id = $userId")).isEqualTo("WITHDRAWN")
@@ -83,6 +92,18 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(longValue("select count(*) from voice_tutor_recordings where session_id = '$voiceSessionId'")).isZero()
         assertThat(longValue("select count(*) from voice_tutor_transcript_turns where session_id = '$voiceSessionId'")).isZero()
         assertThat(longValue("select count(*) from voice_tutor_results where session_id = '$voiceSessionId'")).isZero()
+    }
+
+    @Test
+    fun `an authorized request delayed until after withdrawal cannot recreate private interests`(): Unit = runBlocking {
+        val userId = insertUser(UUID.randomUUID().toString(), Instant.now())
+        val stalePrincipal = Principal(userId, "withdrawal-subscription", 1, false)
+        topicSubscriptions.replace(stalePrincipal, listOf("Swift"))
+        accountDeletion.beginWithdrawal(userId, Instant.now())
+        assertThatThrownBy { runBlocking { topicSubscriptions.replace(stalePrincipal, listOf("Kotlin")) } }
+            .isInstanceOf(ApiException::class.java)
+            .hasMessage("An active account is required.")
+        assertThat(longValue("select count(*) from user_topic_subscriptions where user_id = $userId")).isZero()
     }
 
     private suspend fun insertBillingAccount(userId: Long, token: String, createdAt: Instant) {

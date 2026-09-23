@@ -309,6 +309,16 @@ docker run --rm -v "$PWD:/workspace" -w /workspace gradle:8.14.2-jdk24-alpine gr
 
 The tests cover Spring context startup, coroutine services, R2DBC persistence, MySQL-specific SQL through Testcontainers, and core service behavior.
 
+If Docker is unavailable, integration tests can opt into a fresh, isolated local
+MySQL instance: `BUDDYSTUDY_TEST_MYSQL_PORT=33079`. The fixture uses only
+`127.0.0.1`, database `buddystudy_test`, and local root with an empty password;
+port 3306 is rejected. Create that disposable database in a separate temporary
+datadir before running, and stop/delete the test instance afterward. Never point
+it at an existing application database. Supply a separate local Redis via
+`REDIS_HOST=127.0.0.1 REDIS_PORT=36379` if the normal Docker Redis is unavailable.
+For focused JVM checks, skip unrelated AOT context generation with
+`-x :tutor:processTestAot`. Normal runs still use Testcontainers by default.
+
 ## API
 
 See [API.md](API.md) for request/response examples.

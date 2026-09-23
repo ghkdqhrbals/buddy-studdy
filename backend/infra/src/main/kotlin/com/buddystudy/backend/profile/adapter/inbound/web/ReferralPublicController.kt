@@ -55,7 +55,7 @@ class ReferralPublicWebAdapter(
                 details = listOf(
                     AppleAppLinkDetails(
                         appID = links.appleAppId(),
-                        paths = listOf("/referrals/*"),
+                        paths = listOf("/referrals/*", "/questions/*"),
                     ),
                 ),
             ),

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CommunityQuestionTopMeta: View {
     var question: CommunityQuestion
+    var language: AppLanguage? = nil
 
     var body: some View {
         HStack(spacing: 7) {
@@ -34,7 +35,7 @@ struct CommunityQuestionTopMeta: View {
                 .accessibilityElement(children: .combine)
             }
 
-            Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: question.createdAt))
+            Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: question.createdAt, language: language))
                 .fixedSize(horizontal: true, vertical: false)
 
             Spacer(minLength: 0)

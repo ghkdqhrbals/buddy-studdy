@@ -22,7 +22,7 @@ class AdminTranslationProviderHealthProbeTest {
         val properties = configuredProperties()
         val probe = probe(properties) { request ->
             requests += request
-            ClientResponse.create(HttpStatus.OK).body("[]").build()
+            ClientResponse.create(HttpStatus.OK).body("""{"translatedText":"Hello"}""").build()
         }
 
         val result = probe.checkTranslationProviders()
@@ -34,9 +34,10 @@ class AdminTranslationProviderHealthProbeTest {
             assertThat(provider.latencyMs).isNotNull().isGreaterThanOrEqualTo(0)
         }
         assertThat(requests.map { it.url().toString() }).containsExactlyInAnyOrder(
-            "https://libre.example/languages",
+            "https://libre.example/translate",
             "https://api.openai.com/v1/models",
         )
+        assertThat(requests.single { it.url().host == "libre.example" }.method()).isEqualTo(org.springframework.http.HttpMethod.POST)
         val openAIRequest = requests.single { it.url().host == "api.openai.com" }
         assertThat(openAIRequest.headers().getFirst(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer secret-openai-key")
         assertThat(result.toString()).doesNotContain("secret-openai-key")
@@ -49,7 +50,7 @@ class AdminTranslationProviderHealthProbeTest {
             if (request.url().host == "libre.example") {
                 ClientResponse.create(HttpStatus.SERVICE_UNAVAILABLE).build()
             } else {
-                ClientResponse.create(HttpStatus.OK).body("[]").build()
+                ClientResponse.create(HttpStatus.OK).body("""{"translatedText":"Hello"}""").build()
             }
         }
 
@@ -66,7 +67,7 @@ class AdminTranslationProviderHealthProbeTest {
         val properties = configuredProperties().apply { openai.userContentApiKey = "" }
         val probe = probe(properties) { request ->
             requests += request
-            ClientResponse.create(HttpStatus.OK).body("[]").build()
+            ClientResponse.create(HttpStatus.OK).body("""{"translatedText":"Hello"}""").build()
         }
 
         val providers = probe.checkTranslationProviders().providers.associateBy { it.provider }
@@ -74,6 +75,19 @@ class AdminTranslationProviderHealthProbeTest {
         assertThat(providers.getValue("openai").status).isEqualTo("NOT_CONFIGURED")
         assertThat(providers.getValue("openai").latencyMs).isNull()
         assertThat(requests.map { it.url().host }).containsExactly("libre.example")
+    }
+
+    @Test
+    fun `does not report a reachable provider with empty translations as healthy`() = runBlocking<Unit> {
+        val check = probe(configuredProperties()) { request ->
+            ClientResponse.create(HttpStatus.OK).body(
+                if (request.url().host == "libre.example") """{"translatedText":" "}""" else "[]",
+            ).build()
+        }
+        val providers = check.checkTranslationProviders().providers.associateBy { it.provider }
+        assertThat(providers.getValue("libretranslate").status).isEqualTo("DOWN")
+        assertThat(providers.getValue("libretranslate").detail).contains("empty translation")
+        assertThat(providers.getValue("openai").status).isEqualTo("UP")
     }
 
     private fun configuredProperties() = BuddyStudyProperties().apply {

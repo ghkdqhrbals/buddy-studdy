@@ -83,6 +83,21 @@ final class SettingsStore {
         return offsets
     }
 
+    #if os(iOS)
+    func loadStudyReviewProgress() -> StudyReviewProgress {
+        guard let data = defaults.data(forKey: "studyReviewProgress"),
+              let progress = try? decoder.decode(StudyReviewProgress.self, from: data) else {
+            return StudyReviewProgress()
+        }
+        return progress
+    }
+
+    func saveStudyReviewProgress(_ progress: StudyReviewProgress) {
+        guard let data = try? encoder.encode(progress) else { return }
+        defaults.set(data, forKey: "studyReviewProgress")
+    }
+    #endif
+
     func saveStudyTreeNodeOffsets(_ offsets: [Int: StudyTreeNodeOffset], rootStudyID: Int) {
         guard let data = try? encoder.encode(offsets) else {
             return

@@ -108,6 +108,10 @@ still delete obsolete high-volume runs to reclaim their artifact storage.
     the captured `requestId`, while background links use the original timestamp
     and logger; both ranges start at the event time instead of a moving
     `now-15m` window.
+  - These ERROR notifications represent individual log events. Slack sends only
+    firing events and omits resolved events even from mixed groups: expiry from
+    the Loki query window does not prove recovery. Condition-based recovery
+    alerts must use a separate contact point that retains recovery messages.
   - `GRAFANA_SLACK_WEBHOOK_URL` is the `BuddyStudy Grafana` Incoming Webhook
     installed specifically to Slack `#error` (`C0BRMLFMH9V`). Slack app
     webhooks do not allow a payload to override their channel, so routing is
