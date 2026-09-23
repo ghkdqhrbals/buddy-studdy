@@ -1,10 +1,13 @@
 # BuddyStudy 1.2.0 candidate package
 
-Prepared on 2026-09-23 from app source `4cb14b7a`, then archived and deployed
-from `ee9f96cf9644acbcc2bab8535942d6697277d6a2`. The production backend is deployed;
-the signed iOS **1.2.0 (121)** was uploaded, processed as **VALID** and selected
+Prepared on 2026-09-23 from app source `4cb14b7a`, then archived
+from `ee9f96cf9644acbcc2bab8535942d6697277d6a2`. The production backend subsequently
+received the billing-monitoring correction recorded below; the iOS IPA is unchanged.
+The signed iOS **1.2.0 (121)** was uploaded, processed as **VALID** and selected
 on the 1.2.0 version, then **submitted for App Review at 04:15 KST**. UI and
-API readback confirm **WAITING_FOR_REVIEW**. This is not approval or public
+API readback confirm **WAITING_FOR_REVIEW**. The latest read-only API check at
+**2026-09-23 16:11:56 KST** confirms that state, manual release and the same VALID
+build 121. This is not approval or public
 release. Existing 1.1.0 evidence and reusable templates remain unchanged.
 
 The release operator's September 23 App Store Connect UI/API checks confirmed
@@ -52,21 +55,52 @@ only in the existing secure App Store Connect fields, never in these files.
 | Source/build | Verified 1.2.0 (121), source `ee9f96cf`, archive run `35754933809`, local upload success, Apple VALID / APP_STORE_ELIGIBLE / non-exempt encryption false. IPA SHA-256 `a93f0f1f9f48d43b7ccd5bc53e21075f601c4fef1eeb263cfaf418c10203ab06`; see [signed-candidate evidence](../../../docs/verification/2026-09-23-ios-release-candidate.md). |
 | App Store version ID | `5bb7c17c-3765-4b1b-b03c-00d8da654a2e`, 1.2.0 / WAITING_FOR_REVIEW / MANUAL, selected build 121; submission `7bc80e37-ea6e-4e63-9f39-a504cc216bb0`. |
 | TestFlight availability | Read-only API check at 2026-09-23 02:15:38 KST: build 121 is IN_BETA_TESTING and already belongs to the existing one-tester internal group. No new invitation or group change is needed for that tester; verify the device uses the matching existing TestFlight account. |
-| Review access | Existing secure account/password fields are present and preserved. Working login and required-term state still need candidate verification. |
+| Review access | Existing secure account/password fields are present and preserved. The candidate's retained personal account was privately confirmed to differ from the configured review account. Dedicated review login and required-term state still need candidate verification; the personal session was not replaced. |
 | Review contact | Existing first/last name, email and phone fields are present and preserved. No values were invented or copied into this package. |
 | Paid-feature access | Confirm how the reviewer can access Plus/Pro Voice Tutor and remaining voice time. A free account alone cannot verify voice; do not fabricate an entitlement or subscription. |
-| Device evidence | Final signed-candidate iPhone checks remain unverified. The user explicitly approved proceeding without physical-iPad verification because no iPad is available; existing simulator evidence remains limited to rendering. |
+| Device evidence | Signed 1.2.0 (121) was installed and partially verified on physical iPhone 16 Pro / iOS 26.6.2. Interest persistence/cancellation/following/unfollow, empty Following navigation, topic search, view ordering, 10 retained draft values, membership display, Notes HTTPS cold/warm navigation, English/Japanese presentation and restoration to Korean were verified; see the [candidate-device report](../../../docs/verification/2026-09-23-ios-candidate-device.md). The full guide, dedicated review login and paid-feature operation are not passed. Physical-iPad verification remains omitted under the user's release-specific approval; simulator evidence remains limited to rendering. |
+| Product analytics | At 16:31–16:32 KST on September 23, Firebase/GA4 showed daily aggregate counts of 9 `public_feed_loaded`, 2 `topic_subscriptions_saved`, and 1 `public_topic_follow_changed`. This establishes collection, not attribution to this particular iPhone or a measured acquisition improvement; see [growth evidence](../../../docs/APP_STORE_GROWTH.md). |
 | Video/attachment | No 1.2.0 filename, attachment ID or URL is available. If attaching evidence or answering a current Apple request, use the actual candidate recording and verify delivery/access. Do not relabel the 1.1.0 (118) video as 1.2.0. |
 | Public share samples | Public QUESTION `156` returned correct ko/en/ja previews. No VOICE_TUTOR sample was present in the bounded live feed; its production sample remains pending. `{numericId}` in notes is a route pattern. |
-| Backend release | Image source `ee9f96cf`, deploy `35755734992`, digest `sha256:636d835f6b1eaaa70ea8b0f465b627b4c9946987e2177c858729234aeb8665c9`; local GET checks passed. Source contains V120, but production Flyway history was not queried. See [production evidence](../../../docs/verification/2026-09-23-personalized-feed-production.md). |
-| Advertising state | Record actual production placement switch/provider behavior. Notes describe supported behavior, not a claim that a particular ad will appear. |
+| Backend release | Current image source `a11f14fe12469b802cb106d058f3a6caf5c34a6b`, build `35775313717`, latest configuration deploy `35821046597` (RevenueCat signing-key recovery; code rollout `35776237290`), digest `sha256:ec7c3ced13a0a821f927e60d477ab74de76ad675d9aba30851436b2626c39d3e`; see [billing correction and rollout evidence](../../../docs/observability/billing-entitlement-expiry-2026-09-23.md). The [05:01 KST anonymous feed/share recheck](../../../docs/verification/2026-09-23-personalized-feed-production.md) passed 23 GET requests and 65 assertions after this deployment. It does not establish authenticated personalization, iPhone behavior or webhook recovery. Source contains V120, but production Flyway history was not queried. |
+| Advertising state | The physical Free-account candidate feed displayed a labeled Coupang native advertisement; it was not clicked. Placement administration policy and paid-account ad suppression remain unverified. |
 
-The follow-up device inventory found the paired iPhone 16 Pro on iOS 26.6.2
-(23G90), with BuddyStudy **1.1.0 (16)** and TestFlight **4.3.1** installed; it
-does not yet establish installation of 1.2.0 (121). No physical iPad was listed.
-iPhone Mirroring selected this same phone. After owner confirmation it advanced
-to "iPhone in use; lock iPhone to connect", then timed out; a retry showed the
-same in-use condition. No candidate interaction or reviewer login was completed.
+iPhone Mirroring subsequently connected to the iPhone 16 Pro on iOS 26.6.2
+(23G90). After a validated partial preferences backup, TestFlight installed
+**1.2.0 (121)**, independently confirmed by an official device query at
+**2026-09-23 15:01:26 KST**. The existing authenticated Free session and study
+tree remained available; a private preferences comparison verified that all
+10 nonempty record drafts were unchanged. Interest checks restored the initial
+empty subscription list. Public question 156 opened through Notes HTTPS links
+with both a warm and a cold app, and through Safari's custom-scheme action.
+Chrome's app-open button still produced no handoff and remains an unresolved
+browser-specific limitation. See the [partial candidate-device evidence](../../../docs/verification/2026-09-23-ios-candidate-device.md)
+for the observed scope. Dedicated reviewer login, paid Voice and purchase/restore
+were not verified. No physical iPad was available.
+English Home, Interests and Profile presentation were checked. A later
+mirroring coordinate-input interruption was resolved by normally quitting and
+reopening the Mac iPhone Mirroring app; no authentication/security settings
+changed and the iOS app was not reinstalled. At 16:07–16:08 KST, Japanese was
+saved and Profile, date/quota labels, Home and Interests (0/30) rendered
+correctly; topic text retained its source language. Korean was selected and
+saved at 16:09 KST. At 16:10 KST, Home was visible in Korean with
+Recommended/All selected and the original empty interest baseline retained.
+Japanese presentation and Korean restoration are complete within this observed
+scope; the full guide and other unverified checks remain open.
+
+Later checks confirmed the zero-interest Following state, its Browse All Topics
+action, and a submitted topic search. At 16:37 KST, the search text had been
+explicitly cleared and the Korean All / Recommended home feed restored. No
+personal-account switch was performed: logout detaches ungraded drafts from
+their remote study identifiers and the partial backup is not restore-tested.
+The Monitoring Users page required administrator sign-in, so it supplied no
+additional reviewer-account evidence.
+
+The requested interest-feed and App Store growth implementation and its scoped
+verification are complete. The checklist below also includes broader release
+checks; unchecked items must not be represented as passed. Apple approval,
+manual publication, and measured store performance remain external or later
+release stages, not results established by submission or device testing.
 
 Do not authenticate the permanent review account from a parallel CLI/device
 just to inspect it: the current account-session policy revokes its other active

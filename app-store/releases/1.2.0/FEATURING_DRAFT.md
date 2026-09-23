@@ -2,6 +2,9 @@
 
 Local preparation only. No nomination has been created or submitted to Apple.
 The release date is undecided; do not invent one to complete the form.
+The owner completed the requested account actions and the agreement blocker
+cleared. Apple accepted the 1.2.0 (121) submission for review; the 04:56:31 KST API
+check on September 23 still showed WAITING_FOR_REVIEW with manual release.
 
 | Field | Proposed value |
 | --- | --- |
@@ -11,7 +14,7 @@ The release date is undecided; do not invent one to complete the form.
 | Platforms | iPhone and iPad |
 | Localizations | Korean, English and Japanese |
 | Countries/regions | Confirm the actual distribution list before selection |
-| Expected publication | Pending agreement, release validation and owner launch timing |
+| Expected publication | Pending App Review approval, release validation and owner manual-release timing |
 
 ## Description for the editorial team
 
@@ -48,9 +51,10 @@ AI 피드백, 답변 기록을 각 주제에 연결합니다.
   fixture screenshots show actual UI with illustrative data, not user traction.
 - Add an accessible candidate/video URL only after checking its actual content
   and permissions. No public TestFlight link or video is available in this packet.
-- Confirm physical iPad and signed-candidate results before stating that this
-  release was tested on those devices. Do not claim accessibility support that
-  has not been evaluated.
+- The user approved proceeding without physical-iPad verification because no
+  iPad is available; do not present this exception as a passed device test.
+  Confirm signed-candidate iPhone results before claiming that verification.
+  Do not claim accessibility support that has not been evaluated.
 - Do not claim chart rank, improved learning outcomes, conversion uplift or
   retention improvement without measurements.
 

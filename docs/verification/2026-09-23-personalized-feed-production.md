@@ -85,6 +85,28 @@ parameters. Its temporary script and sanitized results are
 not repository fixtures or an Actions runtime gate. Logs were filtered before
 display, and no credential values were retained.
 
+## Verification after the billing fix
+
+The subsequent [billing expiry fix](../observability/billing-entitlement-expiry-2026-09-23.md)
+was built from `a11f14fe12469b802cb106d058f3a6caf5c34a6b` and deployed with
+[run 35776237290](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/35776237290).
+The current backend image is
+`ghcr.io/ghkdqhrbals/buddystudy-backend@sha256:ec7c3ced13a0a821f927e60d477ab74de76ad675d9aba30851436b2626c39d3e`.
+The initial release identity above remains the history of the feed rollout.
+
+After that deployment, the same local anonymous matrix ran at
+`2026-09-22T20:01:24Z–20:01:25Z` (`2026-09-23 05:01 KST`): **23 GET requests and
+65 assertions passed**. The public list still contained 15 completed QUESTION
+records, with no VOICE_TUTOR sample. Pagination, sorting, authentication bounds,
+all three share-page locales, identical unavailable responses, and unchanged view
+counts passed again. The script and sanitized evidence were saved separately as
+`/tmp/buddystudy-production-readonly-check-after-billing.py` and
+`/tmp/buddystudy-production-readonly-results-after-billing.json`.
+
+This repeat was a local read-only check, not an Actions gate. It does not establish
+authenticated interest persistence, physical-iPhone behavior, or recovery of the
+separate RevenueCat webhook signature failure described in the billing report.
+
 ## Migration evidence and remaining limits
 
 - The image source includes additive

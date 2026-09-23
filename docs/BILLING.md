@@ -814,6 +814,17 @@ kinds that actually recovered; a new kind or recurrence after recovery alerts
 again. Ownership conflicts are new events, so each interval with additional
 conflicts still alerts. A restart reports any existing anomaly once again.
 
+The entitlement-mismatch metric compares effective access. An `APP_STORE`
+projection with `ACTIVE` access and an elapsed `expires_at` counts as `TIER1`,
+matching billing status even before reconciliation rewrites the historical tier.
+The expected side retains the entitlement projector's existing rule: `ACTIVE`
+or `GRACE_PERIOD` subscriptions with no expiry or a future expiry. Missing, free,
+expired, or incorrectly tiered projections still count as drift when that rule
+selects a current paid subscription. In particular, a renewed subscription paired
+with an expired projection remains a mismatch even when their stored tier codes
+match. This comparison does not change stored entitlements, repair subscriptions,
+or redefine the existing grace-period policy.
+
 Collection failures similarly alert once until collection succeeds. Failed or
 cancelled collection never clears an active anomaly or reports it recovered.
 The existing Grafana/Loki operational-error rule owns Slack notification; its
