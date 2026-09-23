@@ -6,7 +6,7 @@ received the billing-monitoring correction recorded below; the iOS IPA is unchan
 The signed iOS **1.2.0 (121)** was uploaded, processed as **VALID** and selected
 on the 1.2.0 version, then **submitted for App Review at 04:15 KST**. UI and
 API readback confirm **WAITING_FOR_REVIEW**. The latest read-only API check at
-**2026-09-23 14:56:58 KST** confirms that state, manual release and the same VALID
+**2026-09-23 16:11:56 KST** confirms that state, manual release and the same VALID
 build 121. This is not approval or public
 release. Existing 1.1.0 evidence and reusable templates remain unchanged.
 
@@ -58,7 +58,7 @@ only in the existing secure App Store Connect fields, never in these files.
 | Review access | Existing secure account/password fields are present and preserved. The candidate's retained personal account was privately confirmed to differ from the configured review account. Dedicated review login and required-term state still need candidate verification; the personal session was not replaced. |
 | Review contact | Existing first/last name, email and phone fields are present and preserved. No values were invented or copied into this package. |
 | Paid-feature access | Confirm how the reviewer can access Plus/Pro Voice Tutor and remaining voice time. A free account alone cannot verify voice; do not fabricate an entitlement or subscription. |
-| Device evidence | Signed 1.2.0 (121) was installed and partially verified on physical iPhone 16 Pro / iOS 26.6.2. Interest persistence/cancellation/following/unfollow, view ordering, 10 retained draft values, membership display and Notes HTTPS cold/warm navigation were verified; see the [candidate-device report](../../../docs/verification/2026-09-23-ios-candidate-device.md). The full guide, dedicated review login and paid-feature operation are not passed. Physical-iPad verification remains omitted under the user's release-specific approval; simulator evidence remains limited to rendering. |
+| Device evidence | Signed 1.2.0 (121) was installed and partially verified on physical iPhone 16 Pro / iOS 26.6.2. Interest persistence/cancellation/following/unfollow, view ordering, 10 retained draft values, membership display, Notes HTTPS cold/warm navigation, English/Japanese presentation and restoration to Korean were verified; see the [candidate-device report](../../../docs/verification/2026-09-23-ios-candidate-device.md). The full guide, dedicated review login and paid-feature operation are not passed. Physical-iPad verification remains omitted under the user's release-specific approval; simulator evidence remains limited to rendering. |
 | Video/attachment | No 1.2.0 filename, attachment ID or URL is available. If attaching evidence or answering a current Apple request, use the actual candidate recording and verify delivery/access. Do not relabel the 1.1.0 (118) video as 1.2.0. |
 | Public share samples | Public QUESTION `156` returned correct ko/en/ja previews. No VOICE_TUTOR sample was present in the bounded live feed; its production sample remains pending. `{numericId}` in notes is a route pattern. |
 | Backend release | Current image source `a11f14fe12469b802cb106d058f3a6caf5c34a6b`, build `35775313717`, latest configuration deploy `35821046597` (RevenueCat signing-key recovery; code rollout `35776237290`), digest `sha256:ec7c3ced13a0a821f927e60d477ab74de76ad675d9aba30851436b2626c39d3e`; see [billing correction and rollout evidence](../../../docs/observability/billing-entitlement-expiry-2026-09-23.md). The [05:01 KST anonymous feed/share recheck](../../../docs/verification/2026-09-23-personalized-feed-production.md) passed 23 GET requests and 65 assertions after this deployment. It does not establish authenticated personalization, iPhone behavior or webhook recovery. Source contains V120, but production Flyway history was not queried. |
@@ -76,11 +76,16 @@ Chrome's app-open button still produced no handoff and remains an unresolved
 browser-specific limitation. See the [partial candidate-device evidence](../../../docs/verification/2026-09-23-ios-candidate-device.md)
 for the observed scope. Dedicated reviewer login, paid Voice and purchase/restore
 were not verified. No physical iPad was available.
-English Home, Interests and Profile presentation were subsequently checked.
-The phone switched to another app during further testing at approximately
-15:24 KST, so input stopped. Restoration of the original Korean language and
-the remaining Japanese presentation check await device availability; the
-saved app language at that checkpoint was English.
+English Home, Interests and Profile presentation were checked. A later
+mirroring coordinate-input interruption was resolved by normally quitting and
+reopening the Mac iPhone Mirroring app; no authentication/security settings
+changed and the iOS app was not reinstalled. At 16:07–16:08 KST, Japanese was
+saved and Profile, date/quota labels, Home and Interests (0/30) rendered
+correctly; topic text retained its source language. Korean was selected and
+saved at 16:09 KST. At 16:10 KST, Home was visible in Korean with
+Recommended/All selected and the original empty interest baseline retained.
+Japanese presentation and Korean restoration are complete within this observed
+scope; the full guide and other unverified checks remain open.
 
 Do not authenticate the permanent review account from a parallel CLI/device
 just to inspect it: the current account-session policy revokes its other active

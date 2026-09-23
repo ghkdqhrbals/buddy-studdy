@@ -74,7 +74,9 @@ overwritten.
 | Link language preservation | The app remained in Korean through these link checks. | Limited to the observed Korean-language state. |
 | Free-account native advertisement | After unfollowing, the free feed displayed a native placement labeled `쿠팡 (광고)` with disclosure. The advertisement was not clicked. | Proves an actual placement was visible for this Free account, not provider-policy details or paid-account suppression. |
 | Free-account Voice screen | The Profile Voice page showed Plus/Pro access as locked and no past voice history. | No microphone request, call, or purchase was initiated; paid Voice operation was not tested. |
-| English presentation | English was selected and saved in Settings. Home, feed controls, Interests (including Cancel/Save and 0/30), Profile, quota-reset date, and tab labels rendered in English. | Public topic/question content retained its available source language. Japanese presentation was not reached. |
+| English presentation | English was selected and saved in Settings. Home, feed controls, Interests (including Cancel/Save and 0/30), Profile, quota-reset date, and tab labels rendered in English. | Public topic/question content retained its available source language. |
+| Japanese presentation | At 16:07–16:08 KST, Japanese was selected and saved in Settings. Profile, date and quota labels, Home, and Interests with 0/30 rendered correctly in Japanese. | Topic text retained its source language; this was a presentation check, not a translation-completeness claim. |
+| Korean restoration | At 16:09 KST, Korean was selected and the saved state was visible. At 16:10 KST, Home rendered in Korean with Recommended/All selected and the initial interest count of 0 retained. | The original app language and empty interest baseline were restored. |
 
 The initial empty interest list has been restored. No question creation or
 editing, like, deletion, publicity change, or account change was performed in
@@ -104,18 +106,19 @@ action was performed. These observations establish the displayed purchase
 information, not transaction fulfillment, introductory-offer eligibility for
 this Apple account, paid entitlement, or Voice call operation.
 
+### Resolved input interruption
+
+Input paused at approximately 15:24 KST after the phone switched to another app.
+The user subsequently confirmed that mirroring worked. A fresh automation
+session still returned `noWindowsAvailable` for coordinate clicks, while
+Cmd-3, app-name search and Return successfully opened BuddyStudy. Normally
+quitting and reopening the Mac iPhone Mirroring app through its UI restored
+coordinate input. No authentication or security setting was changed, and the
+iOS app was not reinstalled. The Japanese checks and Korean restoration above
+were then completed; mirroring is not a remaining blocker in this report.
+
 ## Remaining limitations and unverified checks
 
-- At approximately 15:24 KST, the phone unexpectedly switched to another app
-  while returning to Settings. Device input stopped to avoid interfering with
-  the owner's use. BuddyStudy's saved language was still English at that point;
-  restoring the original Korean setting and Japanese presentation checks remain
-  pending renewed device availability. After the owner confirmed locking the
-  phone, the mirroring app still exposed its last frame, but coordinate input
-  reported no available window. Re-selecting the app by its observed bundle ID
-  and raising the window did not restore input. The owner was asked to keep the
-  Mac unlocked with the mirroring window visible while locking only the iPhone.
-  The agent did not continue manipulating the other app.
 - Chrome's app-open button remains a browser-specific unresolved limitation.
   Companion source, signed-IPA and live-response-header inspection found the
   expected scheme/routing and no CSP block; the reason for the observed missing
