@@ -58,7 +58,8 @@ only in the existing secure App Store Connect fields, never in these files.
 | Review access | Existing secure account/password fields are present and preserved. The candidate's retained personal account was privately confirmed to differ from the configured review account. Dedicated review login and required-term state still need candidate verification; the personal session was not replaced. |
 | Review contact | Existing first/last name, email and phone fields are present and preserved. No values were invented or copied into this package. |
 | Paid-feature access | Confirm how the reviewer can access Plus/Pro Voice Tutor and remaining voice time. A free account alone cannot verify voice; do not fabricate an entitlement or subscription. |
-| Device evidence | Signed 1.2.0 (121) was installed and partially verified on physical iPhone 16 Pro / iOS 26.6.2. Interest persistence/cancellation/following/unfollow, view ordering, 10 retained draft values, membership display, Notes HTTPS cold/warm navigation, English/Japanese presentation and restoration to Korean were verified; see the [candidate-device report](../../../docs/verification/2026-09-23-ios-candidate-device.md). The full guide, dedicated review login and paid-feature operation are not passed. Physical-iPad verification remains omitted under the user's release-specific approval; simulator evidence remains limited to rendering. |
+| Device evidence | Signed 1.2.0 (121) was installed and partially verified on physical iPhone 16 Pro / iOS 26.6.2. Interest persistence/cancellation/following/unfollow, empty Following navigation, topic search, view ordering, 10 retained draft values, membership display, Notes HTTPS cold/warm navigation, English/Japanese presentation and restoration to Korean were verified; see the [candidate-device report](../../../docs/verification/2026-09-23-ios-candidate-device.md). The full guide, dedicated review login and paid-feature operation are not passed. Physical-iPad verification remains omitted under the user's release-specific approval; simulator evidence remains limited to rendering. |
+| Product analytics | At 16:31–16:32 KST on September 23, Firebase/GA4 showed daily aggregate counts of 9 `public_feed_loaded`, 2 `topic_subscriptions_saved`, and 1 `public_topic_follow_changed`. This establishes collection, not attribution to this particular iPhone or a measured acquisition improvement; see [growth evidence](../../../docs/APP_STORE_GROWTH.md). |
 | Video/attachment | No 1.2.0 filename, attachment ID or URL is available. If attaching evidence or answering a current Apple request, use the actual candidate recording and verify delivery/access. Do not relabel the 1.1.0 (118) video as 1.2.0. |
 | Public share samples | Public QUESTION `156` returned correct ko/en/ja previews. No VOICE_TUTOR sample was present in the bounded live feed; its production sample remains pending. `{numericId}` in notes is a route pattern. |
 | Backend release | Current image source `a11f14fe12469b802cb106d058f3a6caf5c34a6b`, build `35775313717`, latest configuration deploy `35821046597` (RevenueCat signing-key recovery; code rollout `35776237290`), digest `sha256:ec7c3ced13a0a821f927e60d477ab74de76ad675d9aba30851436b2626c39d3e`; see [billing correction and rollout evidence](../../../docs/observability/billing-entitlement-expiry-2026-09-23.md). The [05:01 KST anonymous feed/share recheck](../../../docs/verification/2026-09-23-personalized-feed-production.md) passed 23 GET requests and 65 assertions after this deployment. It does not establish authenticated personalization, iPhone behavior or webhook recovery. Source contains V120, but production Flyway history was not queried. |
@@ -86,6 +87,20 @@ saved at 16:09 KST. At 16:10 KST, Home was visible in Korean with
 Recommended/All selected and the original empty interest baseline retained.
 Japanese presentation and Korean restoration are complete within this observed
 scope; the full guide and other unverified checks remain open.
+
+Later checks confirmed the zero-interest Following state, its Browse All Topics
+action, and a submitted topic search. At 16:37 KST, the search text had been
+explicitly cleared and the Korean All / Recommended home feed restored. No
+personal-account switch was performed: logout detaches ungraded drafts from
+their remote study identifiers and the partial backup is not restore-tested.
+The Monitoring Users page required administrator sign-in, so it supplied no
+additional reviewer-account evidence.
+
+The requested interest-feed and App Store growth implementation and its scoped
+verification are complete. The checklist below also includes broader release
+checks; unchecked items must not be represented as passed. Apple approval,
+manual publication, and measured store performance remain external or later
+release stages, not results established by submission or device testing.
 
 Do not authenticate the permanent review account from a parallel CLI/device
 just to inspect it: the current account-session policy revokes its other active

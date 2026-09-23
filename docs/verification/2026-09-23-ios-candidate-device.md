@@ -77,6 +77,8 @@ overwritten.
 | English presentation | English was selected and saved in Settings. Home, feed controls, Interests (including Cancel/Save and 0/30), Profile, quota-reset date, and tab labels rendered in English. | Public topic/question content retained its available source language. |
 | Japanese presentation | At 16:07–16:08 KST, Japanese was selected and saved in Settings. Profile, date and quota labels, Home, and Interests with 0/30 rendered correctly in Japanese. | Topic text retained its source language; this was a presentation check, not a translation-completeness claim. |
 | Korean restoration | At 16:09 KST, Korean was selected and the saved state was visible. At 16:10 KST, Home rendered in Korean with Recommended/All selected and the initial interest count of 0 retained. | The original app language and empty interest baseline were restored. |
+| Empty Following scope | At approximately 16:29–16:30 KST, selecting Following with zero interests displayed the localized empty state and Interests / Browse All Topics actions. Browse All Topics returned to All / Recommended. | No subscription or study was created. |
+| Topic search | At 16:35 KST, submitting `aggregate` with Return displayed one matching public-question row. At 16:36–16:37 KST, explicitly clearing the text and submitting restored the unfiltered feed, then the search bar was closed. | Closing the search bar alone retained the query; clearing the text was required to restore the baseline. This was one observed query, not exhaustive search coverage. |
 
 The initial empty interest list has been restored. No question creation or
 editing, like, deletion, publicity change, or account change was performed in
@@ -117,6 +119,24 @@ coordinate input. No authentication or security setting was changed, and the
 iOS app was not reinstalled. The Japanese checks and Korean restoration above
 were then completed; mirroring is not a remaining blocker in this report.
 
+### Analytics delivery and account-preserving scope
+
+At 16:31–16:32 KST, the existing authenticated Firebase/GA4 console showed
+September 23 aggregate counts of **9 `public_feed_loaded`**, **2
+`topic_subscriptions_saved`**, and **1 `public_topic_follow_changed`**. These
+confirm collection of the new event types, not attribution to this individual
+iPhone or verification window. No events were injected and no analytics setting
+was changed. See [growth measurement evidence](../APP_STORE_GROWTH.md).
+
+The personal account was not logged out to test another account. The candidate's
+logout path detaches pending answer drafts from their remote study identifiers
+and purges local voice recordings; the partial preferences backup has not been
+restore-tested. The earlier exact draft-map preservation result must not be
+treated as permission to alter these associations. Cross-account UI behavior
+remains unverified on this candidate. A read-only attempt to open the Monitoring
+Users page reached its administrator sign-in screen; no reviewer lookup or
+account/entitlement change was performed.
+
 ## Remaining limitations and unverified checks
 
 - Chrome's app-open button remains a browser-specific unresolved limitation.
@@ -133,3 +153,7 @@ were then completed; mirroring is not a remaining blocker in this report.
 
 This remains partial candidate-device evidence. The complete guide, dedicated
 reviewer credentials, and paid-feature operation are not marked passed.
+The completed checks above cover the changed interest-feed and growth paths;
+the broader release guide is not represented as an additional implementation
+requirement for this task. Apple approval, manual publication, and subsequent
+acquisition/ranking outcomes remain separate from implementation verification.

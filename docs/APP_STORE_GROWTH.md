@@ -102,9 +102,10 @@ only the validation mode is completely local.
 The metadata JSON now contains localized interest/share feature bullets and
 `whatsNew` covering interests, sharing and first-study topic suggestions for the
 next update; use those files as the single source of release
-copy. They are saved on the unpublished 1.2.0 draft. Complete the exact signed
-iOS candidate's subscription, account-isolation and real-device checks against
-the deployed API before review submission. Release history for distributed
+copy. They are saved on the unpublished 1.2.0 version submitted for review.
+Complete the remaining signed-candidate checks against the deployed API before
+manual release; partial physical-iPhone evidence does not verify paid membership,
+reviewer access or account isolation. Release history for distributed
 version `1.1.0` remains unchanged. Topic following must not be confused with
 paid membership.
 
@@ -171,10 +172,15 @@ evidence that Smart App Banners or Universal Links work on a physical iPhone.
    link. Sharing must remain user-initiated, use a verified public URL and expose
    no private answers or credentials. Support should be reachable independently
    of rating choices.
-4. Run the required generic iOS build and physical iPhone checks. Record the
-   exact build/device/OS and verify Korean, English and Japanese text. Follow
-   [existing App Review requirements](APP_STORE_REVIEW_1.1.0.md), including
-   physical iPad evidence if the submitted binary supports iPad.
+4. Generic iOS build evidence and partial physical-iPhone checks are recorded in
+   the integration and [candidate-device reports](verification/2026-09-23-ios-candidate-device.md).
+   Signed 1.2.0 (121) on iPhone 16 Pro / iOS 26.6.2 was checked in Korean,
+   English and Japanese. Korean was restored at 16:09–16:10 KST on September 23,
+   with the initial empty interest list retained. These presentation checks do
+   not establish complete content translation or a pass for the full TestFlight
+   guide, dedicated reviewer login, paid Voice or purchase/restore. Physical-iPad
+   verification is omitted under the user's release-specific approval; simulator
+   rendering evidence is not a physical-iPad pass.
 5. Deploy backend changes through the module-specific GitHub Actions path,
    then verify the actual release candidate. Source validation never replaces
    deployment or review evidence. Do not add runtime health gates to Actions.
@@ -202,8 +208,9 @@ provides it. The read-only baseline observation above is small; no statistically
 useful before/after result has been established.
 [Apple: Analytics](https://developer.apple.com/app-store-connect/analytics/)
 
-The app also defines these bounded product analytics events; verify delivery
-in the configured analytics project before using them as experiment evidence.
+The app defines these bounded product analytics events. Delivery was observed
+for the three events in the dated report below; delivery of the other events
+remains to be verified before using them as experiment evidence.
 These are not App Store Connect metrics and must not contain question text,
 answers, search terms, or topic names.
 
@@ -216,6 +223,25 @@ answers, search terms, or topic names.
 | `public_topic_follow_changed` | `following`: `0` or `1` | Successful inline follow/unfollow save; not the topic name |
 | `first_study_starter_selected` | None | Tap on a suggested first-study topic; not proof that the editor was saved or a question generated |
 | `store_review_requested` | None | A StoreKit request attempt only; never count this as a shown prompt, rating or review |
+
+At **2026-09-23 16:32 KST**, a read-only inspection of the authenticated
+[Firebase Analytics console](https://console.firebase.google.com/project/buddystudy-498513/analytics)
+for project `buddystudy-498513`, GA4 property `547548550`, showed these counts in
+the **Today, September 23** event report:
+
+| Event | Observed count |
+| --- | ---: |
+| `public_feed_loaded` | 9 |
+| `topic_subscriptions_saved` | 2 |
+| `public_topic_follow_changed` | 1 |
+
+These are current-day aggregate delivery observations, not attribution to the
+specific QA iPhone or only its 15:02–16:10 KST test window. The exact signed
+1.2.0 (121) IPA contains the real Firebase project configuration, and Release
+code explicitly enables Analytics collection; no missing SDK configuration
+blocker was identified. The check made no analytics-setting or access changes
+and generated no synthetic events. It does not verify every event parameter,
+establish a conversion rate, or demonstrate acquisition or retention improvement.
 
 Compare feed opens per successful load alongside returning use and completed
 learning. These counters alone cannot establish causation or chart improvement.
@@ -239,9 +265,10 @@ record the exact files, order, dimensions and COMPLETE processing state.
 Read-only checks confirmed Education/Productivity categories and the existing
 eight available storefronts; those settings were preserved. The owner reported
 the account actions complete and Apple accepted the submission. Candidate-specific
-physical-iPhone and review-access checks remain unverified; physical-iPad
-verification is omitted at the user's explicit request. Apple approval and
-manual publication are still pending. A screenshot
+physical-iPhone checks are partially complete as recorded above; the full guide,
+dedicated reviewer access and paid-feature operation remain unverified.
+Physical-iPad verification is omitted at the user's explicit request. Apple
+approval and manual publication are still pending. A screenshot
 experiment has not been configured, and the small historical baseline cannot
 establish improved acquisition or retention.
 
