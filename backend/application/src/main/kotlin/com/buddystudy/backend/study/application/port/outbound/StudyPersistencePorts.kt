@@ -117,6 +117,11 @@ interface SystemTopicCatalogPort {
 }
 
 interface QuestionPort {
+    suspend fun lockThreadByRootAndUser(rootRecordId: Long, userId: Long): List<QuestionEntity> =
+        findThreadByRootAndUser(rootRecordId, userId)
+    suspend fun findThreadByRootAndUser(rootRecordId: Long, userId: Long): List<QuestionEntity> =
+        error("Question threads are not supported by this adapter.")
+
     suspend fun save(entity: QuestionEntity): QuestionEntity
     suspend fun findQuestionById(id: Long): QuestionEntity?
     suspend fun findStalledGradings(cutoff: Instant, limit: Int): List<QuestionEntity> = emptyList()

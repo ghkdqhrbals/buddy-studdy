@@ -47,7 +47,8 @@ class StudyLearningRecordQueryAdapter(private val client: DatabaseClient) : Stud
                        coalesce(q.answered_at, q.created_at) as occurred_at
                 from questions q join selected_nodes n on n.id = q.study_id
                 where q.user_id = :userId and q.record_type = 'QUESTION'
-                  and q.deleted_at is null and q.skipped_at is null and q.score is not null
+                  and q.deleted_at is null and q.skipped_at is null
+                  and (q.score is not null or q.source = 'custom_question')
                 union all
                 -- Preserve the v1 source/extension cursor key, never duplicate the canonical row.
                 select r.id as record_id, q.study_id, 'VOICE_TUTOR' as record_source, q.created_at

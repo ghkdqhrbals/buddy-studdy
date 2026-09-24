@@ -134,6 +134,9 @@ enum class ApiErrorCode(
         "The service's AI provider credits are exhausted, so Voice Tutor cannot start. Please contact support.",
     ),
 
+    FOLLOW_UP_NOT_AVAILABLE(HttpStatus.CONFLICT, 517, "error.follow_up.not_available", "Only the latest graded answer in an available thread can receive a follow-up."),
+    FOLLOW_UP_LIMIT_REACHED(HttpStatus.CONFLICT, 518, "error.follow_up.limit_reached", "This question already has two follow-ups."),
+
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),
     SERVER_BUSY(HttpStatus.SERVICE_UNAVAILABLE, 902, "error.server.busy", "Server is temporarily busy."),

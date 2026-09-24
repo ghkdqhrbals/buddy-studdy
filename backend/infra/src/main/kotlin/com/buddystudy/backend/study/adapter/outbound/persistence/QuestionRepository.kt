@@ -31,6 +31,25 @@ class QuestionRepository(
     private val template: R2dbcEntityTemplate,
     private val searchProjection: QuestionSearchProjectionManager,
 ) : QuestionPort {
+    override suspend fun lockThreadByRootAndUser(rootRecordId: Long, userId: Long): List<QuestionEntity> =
+        template.databaseClient.sql(
+            """
+            select * from questions
+            where user_id = :userId and (id = :rootId or root_record_id = :rootId)
+            order by follow_up_depth asc, id asc limit 3 for update
+            """.trimIndent(),
+        ).bind("userId", userId).bind("rootId", rootRecordId)
+            .map { row, _ -> template.converter.read(QuestionEntity::class.java, row) }
+            .all().collectList().awaitSingle()
+
+    override suspend fun findThreadByRootAndUser(rootRecordId: Long, userId: Long): List<QuestionEntity> =
+        template.select(
+            Query.query(Criteria.where("user_id").`is`(userId).and(
+                Criteria.where("id").`is`(rootRecordId).or("root_record_id").`is`(rootRecordId),
+            )).sort(Sort.by(Sort.Direction.ASC, "follow_up_depth", "id")).limit(3),
+            QuestionEntity::class.java,
+        ).collectList().awaitSingle()
+
     override suspend fun save(entity: QuestionEntity): QuestionEntity {
         val saved = template.saveEntity(entity, entity.id)
         searchProjection.refresh(saved.id)
@@ -184,6 +203,7 @@ class QuestionRepository(
                 from questions q
                 where q.user_id = :userId and q.deleted_at is null and q.score is not null
                   and q.record_type = 'QUESTION'
+                  and q.source not in ('follow_up', 'custom_question')
                   and q.topic in ($topicMarkers)
             ) ranked
             where topic_rank <= :perTopicLimit
@@ -197,7 +217,7 @@ class QuestionRepository(
 
     override suspend fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> =
         page(Criteria.where("deleted_at").isNull.and("record_type").`is`(StudyRecordType.QUESTION.name)
-            .and("score").isNotNull, pageable, "answered_at")
+            .and("score").isNotNull.and("source").notIn("follow_up", "custom_question"), pageable, "answered_at")
 
     override suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> =
         page(pendingCriteria().and("user_id").`is`(userId), pageable)
@@ -225,7 +245,7 @@ class QuestionRepository(
                     .and("user_id").`is`(userId)
                     .and("deleted_at").isNull
                     .and("skipped_at").isNull
-                    .and("score").isNotNull,
+                    .and(completedRecordCriteria()),
             )
                 .sort(
                     Sort.by(
@@ -243,7 +263,7 @@ class QuestionRepository(
             """
             select status
             from questions
-            where study_id = :studyId and deleted_at is null and record_type = 'QUESTION'
+            where study_id = :studyId and deleted_at is null and record_type = 'QUESTION' and source <> 'custom_question'
             order by created_at desc, id desc
             limit 1
             """.trimIndent(),
@@ -266,7 +286,7 @@ class QuestionRepository(
                            order by q.created_at desc, q.id desc
                        ) as study_rank
                 from questions q
-                where q.study_id in ($studyMarkers) and q.deleted_at is null and q.record_type = 'QUESTION'
+                where q.study_id in ($studyMarkers) and q.deleted_at is null and q.record_type = 'QUESTION' and q.source <> 'custom_question'
             ) ranked
             where study_rank = 1
             """.trimIndent(),
@@ -681,7 +701,8 @@ class QuestionRepository(
 
     /** Completed voice exchanges may legitimately have no numeric assessment. */
     private fun completedRecordCriteria(): Criteria = Criteria.from(
-        Criteria.where("record_type").`is`(StudyRecordType.QUESTION.name).and("score").isNotNull,
+        Criteria.where("record_type").`is`(StudyRecordType.QUESTION.name)
+            .and(Criteria.where("score").isNotNull.or("source").`is`("custom_question")),
     ).or(
         Criteria.where("record_type").`is`(StudyRecordType.VOICE_TUTOR.name)
             .and("status").`is`(QuestionStatus.COMPLETED.databaseValue)
@@ -819,7 +840,7 @@ class QuestionRepository(
             """.trimIndent()
         }
         val gradedCondition = when {
-            questionsOnly -> "and q.record_type = 'QUESTION'" + if (includePending) "" else " and q.score is not null"
+            questionsOnly -> "and q.record_type = 'QUESTION'" + if (includePending) "" else " and (q.score is not null or q.source = 'custom_question')"
             includePending -> ""
             else -> "and $COMPLETED_RECORD_CONDITION"
         }
@@ -926,7 +947,7 @@ class QuestionRepository(
 
     companion object {
         private const val COMPLETED_RECORD_CONDITION =
-            "((q.record_type = 'QUESTION' and q.score is not null) or " +
+            "((q.record_type = 'QUESTION' and (q.score is not null or q.source = 'custom_question')) or " +
                 "(q.record_type = 'VOICE_TUTOR' and q.status = 'completed' and q.voice_record_id is not null))"
 
         const val PUBLIC_ANSWER_CONDITION =

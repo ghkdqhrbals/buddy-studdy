@@ -73,6 +73,8 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var roles: RoleAssignmentPort
     @Autowired lateinit var refreshUserStats: RefreshUserStatsUseCase
     @Autowired lateinit var databaseClient: DatabaseClient
+    @Autowired lateinit var followUpProcessor: com.buddystudy.backend.study.application.port.inbound.ProcessQuestionGenerationUseCase
+    @Autowired lateinit var followUpQuota: com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
     @Autowired lateinit var membershipTiers: UserMembershipTierRepository
     @Autowired lateinit var contentLocalizations: ContentLocalizationPort
     @Autowired lateinit var comments: QuestionCommentRepository
@@ -93,6 +95,127 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         questions.deleteAll()
         studies.deleteAll()
         Unit
+    }
+
+    @Test
+    fun `follow-up HTTP request is owner scoped durable idempotent and reserves one question`(): Unit = runBlocking {
+        val owner = registerActiveUser("followup-admission")
+        val other = registerActiveUser("followup-outsider")
+        val study = createStudy(owner, "Follow-up admission")
+        val original = questions.save(gradedQuestion(owner.deviceId, study.userId, study.id, study.topic,
+            "Explain atomicity", Instant.now().minusSeconds(120)))
+        val quotaTime = Instant.now()
+        val quota = checkNotNull(followUpQuota.quotaStatusForUser(study.userId, quotaTime))
+        repeat(quota.monthlyQuestionLimit - 1) { index ->
+            val key = "follow-up-fill-${study.userId}-$index"
+            check(followUpQuota.reserveMonthlySystemQuestion(study.userId, checkNotNull(quota.periodStartedAt), key, key, quotaTime))
+        }
+        val before = getJson("/api/v1/questions/quota", owner.accessToken, owner.deviceId, owner.clientSecret).json()
+        assertThat(before["remainingCount"].asInt()).isEqualTo(1)
+        val path = "/api/v1/records/${original.id}/follow-ups"
+        val forbidden = postJson(path, "", other.accessToken, other.deviceId, other.clientSecret, "foreign")
+        assertThat(forbidden.statusCode()).isEqualTo(404)
+        val first = postJson(path, "", owner.accessToken, owner.deviceId, owner.clientSecret, "followup-tap")
+        assertThat(first.statusCode()).describedAs(first.body()).isEqualTo(202)
+        val replay = postJson(path, "", owner.accessToken, owner.deviceId, owner.clientSecret, "followup-tap")
+        assertThat(replay.statusCode()).isEqualTo(202)
+        assertThat(replay.json()["correlationId"].asText()).isEqualTo(first.json()["correlationId"].asText())
+        val process = getJson("/api/v1/question-processes/${first.json()["correlationId"].asText()}",
+            owner.accessToken, owner.deviceId, owner.clientSecret)
+        assertThat(process.statusCode()).isEqualTo(200)
+        assertThat(process.json()["status"].asText()).isEqualTo("QUEUED")
+        val after = getJson("/api/v1/questions/quota", owner.accessToken, owner.deviceId, owner.clientSecret).json()
+        assertThat(after["reservedCount"].asInt()).isEqualTo(before["reservedCount"].asInt() + 1)
+        assertThat(after["remainingCount"].asInt()).isEqualTo(before["remainingCount"].asInt() - 1)
+        assertThat(questions.findQuestionById(original.id)?.answer).isEqualTo(original.answer)
+        // Exercise the real worker/persistence/quota path with this test context's fake OpenAI.
+        val ownerUser = checkNotNull(users.findById(study.userId))
+        ownerUser.appLanguage = com.buddystudy.common.domain.SupportedLanguage.ENGLISH
+        users.save(ownerUser)
+        followUpProcessor.process(com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent(
+            eventId = "follow-up-worker-${java.util.UUID.randomUUID()}",
+            correlationId = first.json()["correlationId"].asText(),
+            userId = study.userId, studyId = study.id, topicId = study.id,
+            source = com.buddystudy.backend.study.application.model.QuestionGenerationSource.FOLLOW_UP,
+            occurredAt = Instant.now(),
+        ), "study.question.generate.v1")
+        val generated = questions.findThreadByRootAndUser(original.id, study.userId).last()
+        assertThat(generated.id).isNotEqualTo(original.id)
+        assertThat(generated.parentRecordId).isEqualTo(original.id)
+        assertThat(generated.rootRecordId).isEqualTo(original.id)
+        assertThat(generated.followUpDepth).isEqualTo(1)
+        assertThat(generated.source).isEqualTo(QuestionSource.FOLLOW_UP)
+        assertThat(generated.publicQuestion).isFalse()
+        assertThat(generated.topic).isEqualTo(original.topic)
+        assertThat(generated.difficultyLevel).isEqualTo(original.difficultyLevel)
+        val committed = getJson("/api/v1/questions/quota", owner.accessToken, owner.deviceId, owner.clientSecret).json()
+        assertThat(committed["usedCount"].asInt()).isEqualTo(before["usedCount"].asInt() + 1)
+        assertThat(committed["reservedCount"].asInt()).isEqualTo(before["reservedCount"].asInt())
+    }
+
+    @Test
+    fun `skipped follow-up remains in private thread history and cannot reopen an earlier branch`(): Unit = runBlocking {
+        val owner = registerActiveUser("followup-skipped")
+        val study = createStudy(owner, "Skipped follow-up")
+        val now = Instant.now().minusSeconds(120)
+        val original = questions.save(gradedQuestion(owner.deviceId, study.userId, study.id, study.topic, "Original", now))
+        val child = questions.save(pendingQuestion(owner.deviceId, study.userId, study.id, study.topic, "Skipped practice", now.plusSeconds(1)).apply {
+            source = QuestionSource.FOLLOW_UP
+            parentRecordId = original.id
+            rootRecordId = original.id
+            followUpDepth = 1
+            publicQuestion = false
+        })
+        val skipped = postJson("/api/v1/records/${child.id}/skip", "", owner.accessToken, owner.deviceId, owner.clientSecret)
+        assertThat(skipped.statusCode()).describedAs(skipped.body()).isEqualTo(200)
+        val thread = getJson("/api/v1/records/${original.id}/thread?tl=en&view=original", owner.accessToken, owner.deviceId, owner.clientSecret)
+        assertThat(thread.statusCode()).describedAs(thread.body()).isEqualTo(200)
+        assertThat(thread.json()["records"].map { it["id"].asText() }).containsExactly(original.id.toString(), child.id.toString())
+        assertThat(thread.json()["records"][1]["questionStatus"].asText()).isEqualTo("SKIPPED")
+        assertThat(thread.json()["records"][1]["followUpDepth"].asInt()).isEqualTo(1)
+        assertThat(thread.json()["records"][1]["question"]["question"].asText()).isEqualTo("Skipped practice")
+        // The current owner-detail contract reconciles terminal skips, while browse pages hide them.
+        val detail = getJson("/api/v1/records/${child.id}", owner.accessToken, owner.deviceId, owner.clientSecret)
+        assertThat(detail.statusCode()).isEqualTo(200)
+        assertThat(detail.json()["questionStatus"].asText()).isEqualTo("SKIPPED")
+        for (recordId in listOf(original.id, child.id)) {
+            val retry = postJson("/api/v1/records/$recordId/follow-ups", "", owner.accessToken, owner.deviceId, owner.clientSecret, "skip-retry-$recordId")
+            assertThat(retry.statusCode()).describedAs(retry.body()).isEqualTo(409)
+            assertThat(retry.body()).contains("FOLLOW_UP_NOT_AVAILABLE")
+        }
+    }
+
+    @Test
+    fun `follow-up HTTP thread preserves lineage and enforces two-turn limit after deletion`(): Unit = runBlocking {
+        val owner = registerActiveUser("followup-thread")
+        val other = registerActiveUser("followup-thread-other")
+        val study = createStudy(owner, "Follow-up thread")
+        val now = Instant.now().minusSeconds(120)
+        val original = questions.save(gradedQuestion(owner.deviceId, study.userId, study.id, study.topic, "Original", now))
+        val first = questions.save(gradedQuestion(owner.deviceId, study.userId, study.id, study.topic, "First follow-up", now.plusSeconds(1), false).apply {
+            source = QuestionSource.FOLLOW_UP; parentRecordId = original.id; rootRecordId = original.id; followUpDepth = 1
+        })
+        val second = questions.save(gradedQuestion(owner.deviceId, study.userId, study.id, study.topic, "Second follow-up", now.plusSeconds(2), false).apply {
+            source = QuestionSource.FOLLOW_UP; parentRecordId = first.id; rootRecordId = original.id; followUpDepth = 2
+        })
+        val path = "/api/v1/records/${second.id}/thread?tl=en&view=original"
+        val response = getJson(path, owner.accessToken, owner.deviceId, owner.clientSecret)
+        assertThat(response.statusCode()).describedAs(response.body()).isEqualTo(200)
+        val records = response.json()["records"]
+        assertThat(records.map { it["id"].asText() }).containsExactly(original.id.toString(), first.id.toString(), second.id.toString())
+        assertThat(records[2]["parentRecordId"].asText()).isEqualTo(first.id.toString())
+        assertThat(records[2]["rootRecordId"].asText()).isEqualTo(original.id.toString())
+        assertThat(records[2]["followUpDepth"].asInt()).isEqualTo(2)
+        assertThat(records[2]["source"].asText()).isEqualTo("follow_up")
+        assertThat(records[2]["public"].asBoolean()).isFalse()
+        assertThat(getJson(path, other.accessToken, other.deviceId, other.clientSecret).statusCode()).isEqualTo(404)
+        assertThat(delete("/api/v1/records/${first.id}", owner).statusCode()).isEqualTo(204)
+        val third = postJson("/api/v1/records/${second.id}/follow-ups", "", owner.accessToken, owner.deviceId, owner.clientSecret, "third")
+        assertThat(third.statusCode()).describedAs(third.body()).isEqualTo(409)
+        assertThat(third.body()).contains("FOLLOW_UP_LIMIT_REACHED")
+        assertThat(delete("/api/v1/records/${original.id}", owner).statusCode()).isEqualTo(204)
+        val deletedRoot = postJson("/api/v1/records/${second.id}/follow-ups", "", owner.accessToken, owner.deviceId, owner.clientSecret, "deleted-root")
+        assertThat(deletedRoot.statusCode()).isEqualTo(404)
     }
 
     @Test
@@ -579,6 +702,12 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             ),
         )
 
+        // Policy v5 snapshots the authoritative current-period base limit in user_quota.
+        // Restoring only the catalog cannot change this deliberately exhausted test fixture.
+        databaseClient.sql("update user_quota set base_limit = 30 where user_id = :userId")
+            .bind("userId", studies.findById(created["id"].asLong())!!.userId)
+            .fetch().rowsUpdated().awaitSingle()
+
         val accepted = postJson(
             "/api/v1/studies/${child["id"].asLong()}/questions",
             "",
@@ -666,6 +795,105 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         val publicAfterDeletion = get("/api/v1/public/questions?limit=20&offset=0&query=lifecycle")
             .also { assertThat(it.statusCode()).isEqualTo(200) }.json()
         assertThat(publicAfterDeletion["questions"].map { it["id"].asText() }).doesNotContain(record.id.toString())
+    }
+
+    @Test
+    fun `custom question creation is idempotent and preserves pending draft and original content`(): Unit = runBlocking {
+        val owner = registerActiveUser("custom-roundtrip")
+        val study = createStudy(owner, "Custom topic")
+        val pending = questions.save(pendingQuestion(owner.deviceId, study.userId, study.id, study.topic, "Pending draft stays here", Instant.now().minusSeconds(30)))
+        val path = "/api/v1/studies/${study.id}/custom-questions"
+        val body = mapper.writeValueAsString(mapOf("question" to "My custom question", "answer" to "My own **answer**", "language" to "en"))
+        val concurrent = (1..2).map {
+            java.util.concurrent.CompletableFuture.supplyAsync {
+                postJson(path, body, owner.accessToken, owner.deviceId, owner.clientSecret, "custom-concurrent-key")
+            }
+        }.map { it.get(30, java.util.concurrent.TimeUnit.SECONDS) }
+        concurrent.forEach { assertThat(it.statusCode()).describedAs(it.body()).isEqualTo(201) }
+        val created = concurrent.first().json()
+        val id = created["id"].asText()
+        assertThat(concurrent.map { it.json()["id"].asText() }.distinct()).containsExactly(id)
+        assertThat(created["source"].asText()).isEqualTo("custom_question")
+        assertThat(created["questionStatus"].asText()).isEqualTo("GRADED")
+        assertThat(created["gradingResult"].isNull).isTrue()
+        assertThat(created["gradingStatus"].isNull).isTrue()
+        assertThat(created["public"].asBoolean()).isFalse()
+        assertThat(created["answer"].asText()).isEqualTo("My own **answer**")
+        val detail = getJson("/api/v1/records/$id?language=ko", owner.accessToken, owner.deviceId, owner.clientSecret)
+            .also { assertThat(it.statusCode()).describedAs(it.body()).isEqualTo(200) }.json()
+        assertThat(detail["question"]["question"].asText()).isEqualTo("My custom question")
+        assertThat(detail["localization"]["question"]["translationState"].asText()).isEqualTo("ORIGINAL")
+        assertThat(detail["answer"].asText()).isEqualTo("My own **answer**")
+        val history = getJson("/api/v1/records?query=custom", owner.accessToken, owner.deviceId, owner.clientSecret).json()
+        assertThat(history["records"].map { it["id"].asText() }).contains(id)
+        val room = getJson("/api/v1/studies/${study.id}", owner.accessToken, owner.deviceId, owner.clientSecret).json()
+        assertThat(room["pendingQuestion"]["id"].asText()).isEqualTo(pending.id.toString())
+        assertThat(room["latestQuestion"]["id"].asText()).isEqualTo(id)
+        assertThat(questions.countPendingForStudy(study.id)).isEqualTo(1)
+        val changed = postJson(path, body.replace("My own", "Changed"), owner.accessToken, owner.deviceId, owner.clientSecret, "custom-concurrent-key")
+        assertThat(changed.statusCode()).describedAs(changed.body()).isEqualTo(409)
+    }
+
+    @Test
+    fun `custom question HTTP rejects missing ownership blank null and oversized fields`(): Unit = runBlocking {
+        val owner = registerActiveUser("custom-validation-owner")
+        val other = registerActiveUser("custom-validation-other")
+        val study = createStudy(owner, "Private custom topic")
+        val path = "/api/v1/studies/${study.id}/custom-questions"
+        val valid = """{"question":"Q","answer":"A","language":"en"}"""
+        assertThat(postJson(path, valid, other.accessToken, other.deviceId, other.clientSecret, "custom-other-key").statusCode()).isEqualTo(404)
+        for ((index, fields) in listOf(
+            mapOf("question" to "", "answer" to "A", "language" to "en"),
+            mapOf("question" to "Q", "answer" to null, "language" to "en"),
+            mapOf("question" to null, "answer" to "A", "language" to "en"),
+            mapOf("question" to "Q", "answer" to "A", "language" to "xx"),
+            mapOf("question" to "Q".repeat(4001), "answer" to "A", "language" to "en"),
+            mapOf("question" to "Q", "answer" to "A".repeat(12001), "language" to "en"),
+        ).withIndex()) {
+            val response = postJson(path, mapper.writeValueAsString(fields), owner.accessToken, owner.deviceId, owner.clientSecret, "custom-invalid-$index")
+            assertThat(response.statusCode()).describedAs(response.body()).isBetween(400, 499)
+        }
+        assertThat(questions.findVisibleByUser(study.userId, true, org.springframework.data.domain.PageRequest.of(0, 20)).content).isEmpty()
+    }
+
+    @Test
+    fun `custom questions cannot be graded published skipped or read by another owner and can be deleted`(): Unit = runBlocking {
+        val owner = registerActiveUser("custom-lifecycle-owner")
+        val other = registerActiveUser("custom-lifecycle-other")
+        val study = createStudy(owner, "Custom lifecycle")
+        val created = postJson("/api/v1/studies/${study.id}/custom-questions", """{"question":"Private notes","answer":"My answer","language":"en"}""", owner.accessToken, owner.deviceId, owner.clientSecret, "custom-lifecycle-key")
+            .also { assertThat(it.statusCode()).describedAs(it.body()).isEqualTo(201) }.json()
+        val id = created["id"].asText()
+        assertThat(getJson("/api/v1/records/$id", other.accessToken, other.deviceId, other.clientSecret).statusCode()).isEqualTo(404)
+        assertThat(postJson("/api/v1/records/$id/answer", """{"answer":"My answer","sourceLanguage":"en"}""", owner.accessToken, owner.deviceId, owner.clientSecret).statusCode()).isEqualTo(409)
+        assertThat(postJson("/api/v1/records/$id/follow-ups", "{}", owner.accessToken, owner.deviceId, owner.clientSecret, "custom-no-followup").statusCode()).isEqualTo(409)
+        assertThat(postJson("/api/v1/records/$id/skip", "{}", owner.accessToken, owner.deviceId, owner.clientSecret).statusCode()).isEqualTo(409)
+        val publicity = request("PATCH", "/api/v1/records/$id/publicity", """{"isPublic":true}""", owner.accessToken, owner.deviceId, owner.clientSecret)
+        assertThat(publicity.statusCode()).describedAs(publicity.body()).isEqualTo(409)
+        val stored = questions.findById(id.toLong())!!
+        assertThat(stored.score).isNull()
+        assertThat(stored.gradingRequestId).isNull()
+        assertThat(stored.publicQuestion).isFalse()
+        assertThat(questions.findPublicAnsweredById(id.toLong())).isNull()
+        assertThat(delete("/api/v1/records/$id", owner).statusCode()).isEqualTo(204)
+        assertThat(getJson("/api/v1/records/$id", owner.accessToken, owner.deviceId, owner.clientSecret).statusCode()).isEqualTo(404)
+    }
+
+    @Test
+    fun `custom questions are saved with exhausted AI quota without consuming or reserving allowance`(): Unit = runBlocking {
+        val owner = registerActiveUser("custom-quota-owner")
+        val study = createStudy(owner, "Custom quota")
+        getJson("/api/v1/questions/quota", owner.accessToken, owner.deviceId, owner.clientSecret)
+        databaseClient.sql("update user_quota set committed_count = base_limit + bonus_limit where user_id = :id")
+            .bind("id", study.userId).fetch().rowsUpdated().awaitSingle()
+        suspend fun quota() = databaseClient.sql("select committed_count, reserved_count, base_limit, bonus_limit from user_quota where user_id = :id")
+            .bind("id", study.userId).fetch().one().awaitSingle()
+        val before = quota()
+        val created = postJson("/api/v1/studies/${study.id}/custom-questions", """{"question":"Q","answer":"A","language":"en"}""", owner.accessToken, owner.deviceId, owner.clientSecret, "custom-zero-quota")
+        assertThat(created.statusCode()).describedAs(created.body()).isEqualTo(201)
+        assertThat(quota()).isEqualTo(before)
+        val id = created.json()["id"].asLong()
+        assertThat(questions.findAllGradedForStats(org.springframework.data.domain.PageRequest.of(0, 100)).content.map { it.id }).doesNotContain(id)
     }
 
     @TestConfiguration
