@@ -458,10 +458,7 @@ private extension View {
             )
         ) {
             if let record = selectedRecord.wrappedValue {
-                CommunityQuestionDetailView(
-                    question: record.asQuestionBrowseQuestion(author: author),
-                    contentSource: .record(isPublic: record.isPublic)
-                )
+                CommonStudyRecordDetailView(record: record)
             }
         }
         #else
@@ -517,6 +514,13 @@ struct StudyRecordDetailView: View {
 
                 localizationControl
 
+                if displayedRecord.isQuestion {
+                    StudyThreadHistorySection(
+                        records: appState.studyThread(containing: displayedRecord).filter { $0.followUpDepth < displayedRecord.followUpDepth },
+                        strings: appState.strings
+                    )
+                }
+
                 VStack(alignment: .leading, spacing: 12) {
                     RecordChatBubble(role: .question) {
                         VStack(alignment: .leading, spacing: 8) {
@@ -556,7 +560,7 @@ struct StudyRecordDetailView: View {
                                 .tint(.white)
                                 .textSelection(.enabled)
                         }
-                    } else if displayedRecord.isPendingQuestion {
+                    } else if displayedRecord.isPendingQuestion && StudyAnswerPresentationPolicy.shouldShowEditor(for: displayedRecord) {
                         RecordChatBubble(role: .input) {
                             RecordAnswerInput(
                                 strings: appState.strings,
@@ -589,6 +593,12 @@ struct StudyRecordDetailView: View {
                         .accessibilityLabel(gradingStatusMessage)
                     }
 
+                    if displayedRecord.isFollowUp && displayedRecord.questionStatus == .skipped {
+                        Label(appState.strings.skippedFollowUp, systemImage: "forward.fill")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+
                     if let result = displayedRecord.gradingResult {
                         RecordChatBubble(role: .feedback) {
                             VStack(alignment: .leading, spacing: 8) {
@@ -618,6 +628,9 @@ struct StudyRecordDetailView: View {
                         VoiceRecordFeedbackContent(content: voice, answer: displayedRecord.answer, strings: appState.strings)
                     }
                     #endif
+                    if displayedRecord.isQuestion {
+                        StudyFollowUpActions(record: displayedRecord)
+                    }
                 }
             }
             .padding(.top, 10)
@@ -629,8 +642,32 @@ struct StudyRecordDetailView: View {
         #endif
         .task(id: record.id) {
             await refreshLocalizedRecord()
+            if record.isQuestion && !record.isCustomQuestion {
+                await appState.loadStudyThread(containing: record)
+            }
+            draftAnswer = appState.answerDraft(for: latestRecord)
+        }
+        .task(id: latestRecord.gradingRequestID) {
+            let current = latestRecord
+            guard answerSubmissionTask == nil,
+                  current.gradingResult == nil, current.gradingRequestID != nil else { return }
+            let ownerID = UUID().uuidString
+            answerGradingOwnerID = ownerID
+            await appState.resumeStudyRoomAnswerGrading(current, pollingOwnerID: ownerID)
+            if answerGradingOwnerID == ownerID { answerGradingOwnerID = nil }
+        }
+        .onChange(of: latestRecord.id) {
+            appState.flushPendingAnswerDraftSave()
+            draftAnswer = appState.answerDraft(for: latestRecord)
+            showsHint = false
+        }
+        .onChange(of: draftAnswer) {
+            if latestRecord.isPendingQuestion && StudyAnswerPresentationPolicy.shouldShowEditor(for: latestRecord) {
+                appState.updateAnswer(draftAnswer, for: latestRecord)
+            }
         }
         .onDisappear {
+            appState.flushPendingAnswerDraftSave()
             if let answerGradingOwnerID {
                 appState.cancelAnswerGradingPolling(
                     ownerID: answerGradingOwnerID,
@@ -642,15 +679,12 @@ struct StudyRecordDetailView: View {
     }
 
     private var latestRecord: StudyRecord {
-        guard !isShowingOriginal,
-              detailRecord.isPendingQuestion,
-              let liveRecord = appState.studyRecords.first(where: {
-                  StudyRecordIdentityPolicy.recordsMatch($0, record)
-              }),
-              liveRecord.gradingResult != nil else {
-            return detailRecord
-        }
-        return liveRecord
+        guard !isShowingOriginal, detailRecord.isQuestion else { return detailRecord }
+        guard let live = appState.studyThread(containing: detailRecord).last else { return detailRecord }
+        if live.id != detailRecord.id { return live }
+        if detailRecord.gradingResult == nil,
+           live.gradingResult != nil || live.gradingRequestID != nil { return live }
+        return detailRecord
     }
 
     @ViewBuilder
@@ -707,7 +741,7 @@ struct StudyRecordDetailView: View {
 
     private func switchContentView() async {
         let target: LocalizedContentView = isShowingOriginal ? .localized : .original
-        guard let loaded = await appState.loadStudyRecordDetail(recordID: record.id, view: target) else {
+        guard let loaded = await appState.loadStudyRecordDetail(recordID: latestRecord.id, view: target) else {
             return
         }
         detailRecord = loaded
@@ -716,7 +750,7 @@ struct StudyRecordDetailView: View {
     }
 
     private var canSubmitAnswer: Bool {
-        StudyAnswerPresentationPolicy.shouldShowEditor(for: latestRecord) &&
+        latestRecord.isPendingQuestion && StudyAnswerPresentationPolicy.shouldShowEditor(for: latestRecord) &&
             !appState.isAnswerGradingInProgress(for: latestRecord) &&
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -813,7 +847,15 @@ private struct RecordDetailHeader: View {
 
                 Spacer(minLength: 8)
 
-                if let score = record.displayScore {
+                if record.isFollowUp && record.questionStatus == .skipped {
+                    Text(strings.skippedFollowUp)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                } else if record.isCustomQuestion {
+                    Text(strings.customQuestionTag)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                } else if let score = record.displayScore {
                     Text("\(score)/100")
                         .font(.title3.weight(.semibold))
                         .lineLimit(1)
@@ -1140,7 +1182,8 @@ struct TopicLevelRange: Equatable {
 
     static func calculate(records: [StudyRecord]) -> TopicLevelRange? {
         let scoredRecords = records.compactMap { record -> (difficulty: Difficulty, score: Int)? in
-            guard let score = record.gradingResult?.score else {
+            guard record.isQuestion, !record.isFollowUp, !record.isCustomQuestion,
+                  let score = record.gradingResult?.score else {
                 return nil
             }
 
@@ -3808,7 +3851,7 @@ private enum LegacyStudyGrowthProjection {
         }
         let filteredRecords = records.filter { record in
             let date = record.answeredAt ?? record.question.createdAt
-            return record.isQuestion && date >= startAt && date < endAt
+            return record.isQuestion && !record.isFollowUp && !record.isCustomQuestion && date >= startAt && date < endAt
         }
         let recordsByStudy = Dictionary(grouping: filteredRecords.compactMap { record -> (Int, StudyRecord)? in
             guard let studyID = record.studyID else {

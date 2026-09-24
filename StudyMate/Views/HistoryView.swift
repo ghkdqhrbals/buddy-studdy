@@ -90,7 +90,7 @@ struct HistoryView: View {
             return []
         }
         return appState.studyRecords.filter { record in
-            guard record.gradingResult != nil else {
+            guard record.isCompleted else {
                 return false
             }
             return interval.contains(sortDate(for: record))
@@ -101,12 +101,8 @@ struct HistoryView: View {
         Set(weeklyRecords.map { Self.weekCalendar.startOfDay(for: sortDate(for: $0)) }).count
     }
 
-    private var weeklyAverageScore: Int {
-        let scores = weeklyRecords.compactMap(\.gradingResult?.score)
-        guard !scores.isEmpty else {
-            return 0
-        }
-        return Int((Double(scores.reduce(0, +)) / Double(scores.count)).rounded())
+    private var weeklyAverageScore: Int? {
+        StudyRecordScorePolicy.average(records: weeklyRecords)
     }
 
     private var weeklyActivityCounts: [Int] {
@@ -724,7 +720,11 @@ struct HistoryRow: View {
 
                     Spacer(minLength: 8)
 
-                    if let score = record.displayScore {
+                    if record.isCustomQuestion {
+                        Text(strings.customQuestionTag)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    } else if let score = record.displayScore {
                         Text("\(score)/100")
                             .font(.title3.weight(.bold))
                             .foregroundStyle(scoreColor(score))
@@ -740,6 +740,12 @@ struct HistoryRow: View {
                 Text(MarkdownContent.plainText(record.question.question))
                     .font(.body.weight(.medium))
                     .lineLimit(2)
+
+                if record.isFollowUp {
+                    Text(strings.extraPractice)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
 
                 RecordStatsMeta(record: record)
             }
@@ -784,7 +790,7 @@ struct HistoryRow: View {
 private struct HistoryWeeklySummaryCard: View {
     var studyDays: Int
     var activityCount: Int
-    var averageScore: Int
+    var averageScore: Int?
     var dailyCounts: [Int]
     var strings: AppStrings
 
@@ -814,8 +820,8 @@ private struct HistoryWeeklySummaryCard: View {
 
                 HistoryWeeklyMetric(
                     title: strings.guestAverageScore,
-                    value: "\(averageScore)",
-                    suffix: strings.language == .korean ? "점" : ""
+                    value: averageScore.map { String($0) } ?? "—",
+                    suffix: averageScore != nil && strings.language == .korean ? "점" : ""
                 )
             }
 

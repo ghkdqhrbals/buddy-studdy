@@ -26,6 +26,30 @@ final class VoiceCommonRecordTests: XCTestCase {
         XCTAssertFalse(record.isPendingQuestion)
     }
 
+    func testThreadCompatibilityKeepsVoiceCompletedAndOutsideQuestionActions() throws {
+        let voice = try decodeRecord(voiceJSON())
+        XCTAssertTrue(voice.isCompleted)
+        XCTAssertFalse(voice.isPendingStudyQuestion)
+        XCTAssertFalse(StudyFollowUpPolicy.canRequest(after: voice, thread: [voice]))
+        XCTAssertEqual(StudyFollowUpPolicy.orderedThread(containing: voice, records: [voice]), [voice])
+        XCTAssertFalse(StudyRecordIdentityPolicy.recordMatchesQuestion(voice, question: voice.question))
+    }
+
+    func testCustomRecordIsCompletedWithoutQuestionGradingOrPublicity() throws {
+        var object = questionJSON()
+        object["source"] = "custom_question"
+        object["gradingResult"] = NSNull()
+        object["questionStatus"] = "UNGRADED"
+        let custom = try decodeRecord(object)
+        XCTAssertTrue(custom.isCompletedRecord)
+        XCTAssertTrue(custom.isCompleted)
+        XCTAssertFalse(custom.isPendingQuestion)
+        XCTAssertFalse(custom.isPendingStudyQuestion)
+        XCTAssertFalse(custom.canPublish)
+        XCTAssertFalse(custom.isPublic)
+        XCTAssertNil(custom.asCommunityQuestion(author: nil))
+    }
+
     func testMixedRecordsPagePreservesBothTypesAndPagination() throws {
         let page: BackendRecordsPage = try decode(pageJSON([questionJSON(), voiceJSON()], total: 7, offset: 3))
         XCTAssertEqual(page.records.map(\.id), ["101", "900"])

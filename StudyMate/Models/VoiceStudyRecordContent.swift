@@ -57,18 +57,18 @@ extension StudyRecord {
 
     /// Pending questions keep their existing workflow; voice is never a draft.
     var isPendingQuestion: Bool {
-        isQuestion && !isDetachedLocalQuestion && gradingResult == nil &&
+        isQuestion && !isDetachedLocalQuestion && !isCustomQuestion && gradingResult == nil &&
             questionStatus != .skipped && questionStatus != .graded && questionStatus != .completed
     }
 
     var isCompletedRecord: Bool {
         isVoiceRecord
             ? voiceRecord != nil && questionStatus == .completed
-            : gradingResult != nil
+            : gradingResult != nil || isCustomQuestion
     }
 
     var canPublish: Bool {
-        guard isCompletedRecord else { return false }
+        guard isCompletedRecord, !isFollowUp, !isCustomQuestion else { return false }
         guard isVoiceRecord else { return true }
         return !question.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             answer?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false

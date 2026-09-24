@@ -32,6 +32,8 @@ enum class QuestionSource(
     SCHEDULED("scheduled"),
     MANUAL("manual"),
     VOICE_TUTOR("voice_tutor"),
+    FOLLOW_UP("follow_up"),
+    CUSTOM_QUESTION("custom_question"),
     ;
 
     companion object {

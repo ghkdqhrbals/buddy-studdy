@@ -76,7 +76,12 @@ struct RecordsStateStore {
             return nil
         }
 
-        return records.last { $0.isQuestion && matches($0, question) }
+        return records.last {
+            $0.isQuestion && StudyRecordIdentityPolicy.sameQuestionInstance($0.question, question)
+        } ?? records.last {
+            $0.isQuestion && matches($0, question) &&
+                StudyRecordIdentityPolicy.questionsMatch($0.question.question, question.question)
+        }
     }
 
     func record(questionCreatedAt: TimeInterval?) -> StudyRecord? {

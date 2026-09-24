@@ -30,11 +30,11 @@ class QuestionGenerationSagaRepository(
             insert into question_generation_sagas (
                 correlation_id, user_id, study_id, topic_id, question_id, source, status, current_step,
                 idempotency_key, quota_period_started_at, quota_refunded_at, failed_step, error_code,
-                error_message, created_at, updated_at, completed_at, rollback_completed_at
+                error_message, created_at, updated_at, completed_at, rollback_completed_at, parent_record_id, root_record_id, follow_up_depth
             ) values (
                 :correlationId, :userId, :studyId, :topicId, :questionId, :source, :status, :currentStep,
                 :idempotencyKey, :quotaPeriodStartedAt, :quotaRefundedAt, :failedStep, :errorCode,
-                :errorMessage, :createdAt, :updatedAt, :completedAt, :rollbackCompletedAt
+                :errorMessage, :createdAt, :updatedAt, :completedAt, :rollbackCompletedAt, :parentRecordId, :rootRecordId, :followUpDepth
             )
             """.trimIndent(),
         )
@@ -43,6 +43,7 @@ class QuestionGenerationSagaRepository(
             .bind("studyId", saga.studyId)
             .bind("topicId", saga.topicId)
             .bind("source", saga.source.name)
+            .bind("followUpDepth", saga.followUpDepth)
             .bind("status", saga.status.name)
             .bind("currentStep", saga.currentStep.name)
             .bind("idempotencyKey", saga.idempotencyKey)
@@ -50,6 +51,8 @@ class QuestionGenerationSagaRepository(
             .bind("createdAt", saga.createdAt.utcDateTime())
             .bind("updatedAt", saga.updatedAt.utcDateTime())
         statement = statement.bindNullable("questionId", saga.questionId, Long::class.javaObjectType)
+            .bindNullable("parentRecordId", saga.parentRecordId, Long::class.javaObjectType)
+            .bindNullable("rootRecordId", saga.rootRecordId, Long::class.javaObjectType)
             .bindNullable("quotaRefundedAt", saga.quotaRefundedAt?.utcDateTime(), LocalDateTime::class.java)
             .bindNullable("failedStep", saga.failedStep?.name, String::class.java)
             .bindNullable("errorCode", saga.errorCode, String::class.java)
@@ -269,6 +272,9 @@ class QuestionGenerationSagaRepository(
             studyId = get("study_id", java.lang.Long::class.java)!!.toLong(),
             topicId = get("topic_id", java.lang.Long::class.java)!!.toLong(),
             questionId = get("question_id", java.lang.Long::class.java)?.toLong(),
+            parentRecordId = get("parent_record_id", java.lang.Long::class.java)?.toLong(),
+            rootRecordId = get("root_record_id", java.lang.Long::class.java)?.toLong(),
+            followUpDepth = (get("follow_up_depth") as Number).toInt(),
             source = QuestionGenerationSource.valueOf(get("source", String::class.java)!!),
             status = QuestionGenerationStatus.valueOf(get("status", String::class.java)!!),
             currentStep = QuestionGenerationStep.valueOf(get("current_step", String::class.java)!!),

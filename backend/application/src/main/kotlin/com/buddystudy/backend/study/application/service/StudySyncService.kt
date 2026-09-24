@@ -551,7 +551,7 @@ class StudySyncService(
     }
 
     private suspend fun QuestionEntity.localizedForDisplay(language: String): QuestionEntity =
-        applyReadyQuestionLocalization(
+        if (source == com.buddystudy.study.domain.entity.QuestionSource.CUSTOM_QUESTION) this else applyReadyQuestionLocalization(
             contentLocalizations.record(id, language),
             language,
         )

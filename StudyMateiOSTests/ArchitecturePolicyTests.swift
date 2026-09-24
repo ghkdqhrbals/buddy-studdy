@@ -1503,10 +1503,15 @@ final class ArchitecturePolicyTests: XCTestCase {
         let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
         let content = try String(contentsOf: file, encoding: .utf8)
 
+        let sectionStart = try XCTUnwrap(content.range(of: "private var communityQuestionSection: some View {")?.lowerBound)
+        let sectionEnd = try XCTUnwrap(content.range(of: "private func communityFeedRow", range: sectionStart..<content.endIndex)?.lowerBound)
+        let section = String(content[sectionStart..<sectionEnd])
+        XCTAssertTrue(section.contains("let hasContent = !appState.communityQuestions.isEmpty"))
         XCTAssertTrue(
-            content.contains("let hasContent = !appState.communityQuestions.isEmpty\n\n            if MobileHomeRefreshPresentationPolicy.showsInitialLoading("),
+            section.contains("if MobileHomeRefreshPresentationPolicy.showsInitialLoading(\n                hasContent: hasContent,"),
             "When public questions are empty, the refresh indicator should render in the public-question content slot instead of shifting the fixed title or tab area."
         )
+        XCTAssertTrue(section.contains("MobileHomeRefreshIndicator()\n                    .frame(maxWidth: .infinity, minHeight: 320)"))
         XCTAssertFalse(
             content.contains("if isRefreshingCommunityContent {\n                    MobileHomeRefreshIndicator()"),
             "Refreshing cached public questions must not insert a standalone loading row above the existing feed."
@@ -1893,16 +1898,12 @@ final class ArchitecturePolicyTests: XCTestCase {
             "Topic records should reuse the existing paginated record row."
         )
         XCTAssertTrue(
+            content.contains("CommonStudyRecordDetailView(record: record)"),
+            "Own statistics records must use canonical detail so public interactions and private follow-up/custom content remain available."
+        )
+        XCTAssertFalse(
             content.contains("record.asQuestionBrowseQuestion(author: author)"),
-            "Statistics should project a record into the question-browse presentation model."
-        )
-        XCTAssertTrue(
-            content.contains("CommunityQuestionDetailView("),
-            "Statistics should navigate to the shared question-browse detail."
-        )
-        XCTAssertTrue(
-            content.contains("contentSource: .record(isPublic: record.isPublic)"),
-            "The question-browse detail should retain record privacy behavior."
+            "A public projection would discard follow-up ancestry and custom-question source metadata."
         )
     }
 
@@ -2393,7 +2394,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             content.contains("guard !isGeneratingQuestion, questionGenerationPollingTask == nil else"),
             "A previous polling task must block a rapid second question-generation request."
         )
-        let marker = "if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {"
+        let marker = "if appErrorHandlingUseCase.isPermanentQuestionGenerationError(error) {"
         var searchStart = content.startIndex
         for _ in 0..<2 {
             let markerRange = try XCTUnwrap(content.range(of: marker, range: searchStart..<content.endIndex))

@@ -117,6 +117,11 @@ interface SystemTopicCatalogPort {
 }
 
 interface QuestionPort {
+    suspend fun lockThreadByRootAndUser(rootRecordId: Long, userId: Long): List<QuestionEntity> =
+        findThreadByRootAndUser(rootRecordId, userId)
+    suspend fun findThreadByRootAndUser(rootRecordId: Long, userId: Long): List<QuestionEntity> =
+        error("Question threads are not supported by this adapter.")
+
     suspend fun save(entity: QuestionEntity): QuestionEntity
     suspend fun findQuestionById(id: Long): QuestionEntity?
     suspend fun findStalledGradings(cutoff: Instant, limit: Int): List<QuestionEntity> = emptyList()
@@ -134,7 +139,7 @@ interface QuestionPort {
             .filter {
                 it.userId == userId && it.deletedAt == null && it.skippedAt == null &&
                     when (it.recordType) {
-                        StudyRecordType.QUESTION -> it.score != null
+                        StudyRecordType.QUESTION -> it.score != null || it.source == com.buddystudy.study.domain.entity.QuestionSource.CUSTOM_QUESTION
                         StudyRecordType.VOICE_TUTOR -> it.status == QuestionStatus.COMPLETED && it.voiceRecordId != null
                     }
             }

@@ -832,6 +832,18 @@ ERROR-log events send firing notifications only because expiry from a log
 window does not prove that the underlying condition recovered. The backend
 never calls Slack directly.
 
+### Follow-up learning in iOS 1.3.0
+
+An AI-generated follow-up is a generated system question and reserves one
+monthly allowance unit through the existing Saga correlation ID. Original and
+follow-up questions use the same exactly-once commit/release rules. The iOS
+action discloses the unit cost before generation. Learner-authored custom
+questions and answers are saved without AI generation or grading, have no
+numeric score, and do not reserve or consume question allowance. Idempotent
+save retries return the same custom record. Creating a study or descendant
+topic also remains quota-free.
+See [FOLLOW_UP_QUESTIONS.md](FOLLOW_UP_QUESTIONS.md).
+
 ## API
 
 User endpoints:
