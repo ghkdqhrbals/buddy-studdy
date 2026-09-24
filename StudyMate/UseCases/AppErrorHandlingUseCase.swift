@@ -1,6 +1,18 @@
 import Foundation
 
 struct AppErrorHandlingUseCase {
+    func isTerminalReferralRedemptionError(_ error: Error) -> Bool {
+        BackendErrorPresentationPolicy.isTerminalReferralRedemptionError(error)
+    }
+
+    func followUpAvailabilityFailure(_ error: Error) -> FollowUpAvailabilityFailure? {
+        BackendErrorPresentationPolicy.followUpAvailabilityFailure(error)
+    }
+
+    func isPermanentQuestionGenerationError(_ error: Error) -> Bool {
+        BackendErrorPresentationPolicy.isPermanentQuestionGenerationError(error)
+    }
+
     func resolve(
         _ error: Error,
         fallback: String,

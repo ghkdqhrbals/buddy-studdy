@@ -11067,6 +11067,7 @@ struct CommunityQuestionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     var question: CommunityQuestion
     var contentSource: CommunityQuestionDetailContentSource
+    var ownedStudyRecord: StudyRecord?
     @State private var displayQuestion: CommunityQuestion
     @State private var comments: [CommunityQuestionComment] = []
     @State private var commentsTotalCount = 0
@@ -11088,10 +11089,12 @@ struct CommunityQuestionDetailView: View {
 
     init(
         question: CommunityQuestion,
-        contentSource: CommunityQuestionDetailContentSource = .community
+        contentSource: CommunityQuestionDetailContentSource = .community,
+        ownedStudyRecord: StudyRecord? = nil
     ) {
         self.question = question
         self.contentSource = contentSource
+        self.ownedStudyRecord = ownedStudyRecord
         _displayQuestion = State(initialValue: question)
         _commentsTotalCount = State(initialValue: question.commentCount)
         _originalAvailable = State(
@@ -11168,6 +11171,22 @@ struct CommunityQuestionDetailView: View {
                     }
                 }
 
+                if let ownedStudyRecord {
+                    if appState.studyThread(containing: ownedStudyRecord).count > 1 {
+                        NavigationLink {
+                            StudyRecordDetailView(record: ownedStudyRecord)
+                                .padding(.horizontal, 16)
+                                .navigationTitle(strings.recordDetail)
+                        } label: {
+                            Label(strings.viewLearningThread, systemImage: "arrow.turn.down.right")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        StudyFollowUpActions(record: ownedStudyRecord)
+                    }
+                }
+
                 if contentSource.showsCommunityInteractions && displayQuestion.canPublish {
                     communityActions
 
@@ -11177,6 +11196,11 @@ struct CommunityQuestionDetailView: View {
                 }
             }
             .padding(16)
+        }
+        .task(id: ownedStudyRecord?.id) {
+            if let ownedStudyRecord {
+                await appState.loadStudyThread(containing: ownedStudyRecord)
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle(displayQuestion.recordType == .voiceTutor ? strings.commonRecordTitle : strings.communityQuestion)

@@ -169,7 +169,11 @@ private struct StudyLearningRecordRow: View {
                     Text(record.source == .voiceTutor ? strings.studyLearningVoiceLabel : strings.studyLearningQuestionLabel)
                     if showsTopic { Text(record.topic).lineLimit(1) }
                     Spacer(minLength: 4)
-                    if let score = record.score { Text("\(score)/100").monospacedDigit() }
+                    if record.commonRecord?.isCustomQuestion == true {
+                        Text(strings.customQuestionTag)
+                    } else if let score = record.score {
+                        Text("\(score)/100").monospacedDigit()
+                    }
                 }
                 .font(.caption2).foregroundStyle(.secondary)
                 Text(record.question)

@@ -6,6 +6,10 @@ protocol LocalStudyRecordRepository {
     func saveLearningRecordsPage(_ page: BackendStudyLearningRecordsPage, for key: StudyLearningRecordsCacheKey)
     func clearLearningRecordsPages()
     #endif
+
+    func loadCustomQuestionDraft(key: String) -> CustomQuestionDraft?
+    func saveCustomQuestionDraft(_ draft: CustomQuestionDraft?, key: String)
+
     func loadStudyRecords() -> [StudyRecord]
     func appendStudyRecord(question: QuestionItem, settings: StudySettings)
     func saveSubmittedAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool)

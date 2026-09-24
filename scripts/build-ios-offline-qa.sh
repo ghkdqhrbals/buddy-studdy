@@ -19,13 +19,13 @@ while [[ $# -gt 0 ]]; do
     --language) language="${2:?Missing language}"; shift 2 ;;
     --derived-data-path) derived_data_path="${2:?Missing existing DerivedData path}"; shift 2 ;;
     --help)
-      echo 'Usage: build-ios-offline-qa.sh [--prepare-only] [--simulator] [--fixture feed|interests|learning-result|statistics|study-tree|study-list|records|membership] [--language ko|en|ja] [--derived-data-path existing-cache]'
+      echo 'Usage: build-ios-offline-qa.sh [--prepare-only] [--simulator] [--fixture feed|interests|learning-result|statistics|study-tree|study-list|records|membership|follow-up|follow-up-pending|custom-question|custom-records] [--language ko|en|ja] [--derived-data-path existing-cache]'
       exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 case "$fixture" in
-  feed|interests|learning-result|statistics|study-tree|study-list|records|membership) ;;
+  feed|interests|learning-result|statistics|study-tree|study-list|records|membership|follow-up|follow-up-pending|custom-question|custom-records) ;;
   *) echo 'Unknown fixture.' >&2; exit 2 ;;
 esac
 case "$language" in ko|en|ja) ;; *) echo 'Select ko, en or ja.' >&2; exit 2 ;; esac

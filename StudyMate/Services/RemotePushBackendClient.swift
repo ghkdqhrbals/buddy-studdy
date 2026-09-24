@@ -744,6 +744,24 @@ protocol RemotePushBackendClientProtocol {
         idempotencyKey: String
     ) async throws -> QuestionGenerationAccepted
 
+    func createFollowUp(
+        registration: RemotePushRegistration,
+        recordID: String,
+        idempotencyKey: String
+    ) async throws -> QuestionGenerationAccepted
+
+    func fetchRecordThread(
+        registration: RemotePushRegistration,
+        recordID: String,
+        language: AppLanguage
+    ) async throws -> [StudyRecord]
+
+    func createCustomQuestion(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        draft: CustomQuestionDraft
+    ) async throws -> StudyRecord
+
     func fetchQuestionGenerationProcess(
         registration: RemotePushRegistration,
         correlationID: String
@@ -796,6 +814,18 @@ protocol RemotePushBackendClientProtocol {
 }
 
 extension RemotePushBackendClientProtocol {
+    func createCustomQuestion(registration: RemotePushRegistration, studyID: Int, draft: CustomQuestionDraft) async throws -> StudyRecord {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func createFollowUp(registration: RemotePushRegistration, recordID: String, idempotencyKey: String) async throws -> QuestionGenerationAccepted {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchRecordThread(registration: RemotePushRegistration, recordID: String, language: AppLanguage) async throws -> [StudyRecord] {
+        throw RemotePushBackendError.invalidResponse
+    }
+
     func suppressNativeAdvertisement(
         registration: RemotePushRegistration,
         selectionID: String
@@ -2894,6 +2924,61 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(QuestionGenerationAccepted.self, from: data)
     }
 
+    func createFollowUp(
+        registration: RemotePushRegistration,
+        recordID: String,
+        idempotencyKey: String
+    ) async throws -> QuestionGenerationAccepted {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "records", recordID, "follow-ups")
+        )
+        request.httpMethod = "POST"
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        return try decoder.decode(QuestionGenerationAccepted.self, from: await perform(request))
+    }
+
+    func createCustomQuestion(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        draft: CustomQuestionDraft
+    ) async throws -> StudyRecord {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "studies", String(studyID), "custom-questions")
+        )
+        request.httpMethod = "POST"
+        request.setValue(draft.idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(CustomQuestionRequest(
+            question: draft.question,
+            answer: draft.answer,
+            language: draft.language.backendCode
+        ))
+        return try decoder.decode(StudyRecord.self, from: await perform(request))
+    }
+
+    private struct CustomQuestionRequest: Encodable {
+        var question: String
+        var answer: String
+        var language: String
+    }
+
+    func fetchRecordThread(
+        registration: RemotePushRegistration,
+        recordID: String,
+        language: AppLanguage
+    ) async throws -> [StudyRecord] {
+        var components = URLComponents(url: endpoint("api", "v1", "records", recordID, "thread"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue)
+        ]
+        guard let url = components?.url else { throw RemotePushBackendError.invalidResponse }
+        let request = authenticatedRequest(registration: registration, url: url)
+        return try decoder.decode(BackendRecordThread.self, from: await perform(request)).records
+    }
+
     func fetchQuestionGenerationProcess(
         registration: RemotePushRegistration,
         correlationID: String
@@ -4771,6 +4856,11 @@ struct PendingQuestionGenerationProcess: Codable, Equatable {
     var studyID: Int
     var studyCategoryID: String?
     var submittedAt: Date
+    var parentRecordID: String? = nil
+}
+
+private struct BackendRecordThread: Decodable {
+    var records: [StudyRecord]
 }
 
 struct BackendRecordsPage: Decodable, Equatable {

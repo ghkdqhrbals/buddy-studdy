@@ -458,10 +458,7 @@ private extension View {
             )
         ) {
             if let record = selectedRecord.wrappedValue {
-                CommunityQuestionDetailView(
-                    question: record.asQuestionBrowseQuestion(author: author),
-                    contentSource: .record(isPublic: record.isPublic)
-                )
+                CommonStudyRecordDetailView(record: record)
             }
         }
         #else
@@ -516,6 +513,11 @@ struct StudyRecordDetailView: View {
                 RecordDetailHeader(record: displayedRecord, strings: appState.strings, language: appState.settings.appLanguage)
 
                 localizationControl
+
+                StudyThreadHistorySection(
+                    records: appState.studyThread(containing: displayedRecord).filter { $0.followUpDepth < displayedRecord.followUpDepth },
+                    strings: appState.strings
+                )
 
                 VStack(alignment: .leading, spacing: 12) {
                     RecordChatBubble(role: .question) {
@@ -589,6 +591,12 @@ struct StudyRecordDetailView: View {
                         .accessibilityLabel(gradingStatusMessage)
                     }
 
+                    if displayedRecord.isFollowUp && displayedRecord.questionStatus == .skipped {
+                        Label(appState.strings.skippedFollowUp, systemImage: "forward.fill")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+
                     if let result = displayedRecord.gradingResult {
                         RecordChatBubble(role: .feedback) {
                             VStack(alignment: .leading, spacing: 8) {
@@ -618,6 +626,7 @@ struct StudyRecordDetailView: View {
                         VoiceRecordFeedbackContent(content: voice, answer: displayedRecord.answer, strings: appState.strings)
                     }
                     #endif
+                    StudyFollowUpActions(record: displayedRecord)
                 }
             }
             .padding(.top, 10)
@@ -629,8 +638,32 @@ struct StudyRecordDetailView: View {
         #endif
         .task(id: record.id) {
             await refreshLocalizedRecord()
+            if record.isQuestion && !record.isCustomQuestion && !record.isDetachedLocalQuestion {
+                await appState.loadStudyThread(containing: record)
+            }
+            draftAnswer = appState.answerDraft(for: latestRecord)
+        }
+        .task(id: latestRecord.gradingRequestID) {
+            let current = latestRecord
+            guard answerSubmissionTask == nil,
+                  current.gradingResult == nil, current.gradingRequestID != nil else { return }
+            let ownerID = UUID().uuidString
+            answerGradingOwnerID = ownerID
+            await appState.resumeStudyRoomAnswerGrading(current, pollingOwnerID: ownerID)
+            if answerGradingOwnerID == ownerID { answerGradingOwnerID = nil }
+        }
+        .onChange(of: latestRecord.id) {
+            appState.flushPendingAnswerDraftSave()
+            draftAnswer = appState.answerDraft(for: latestRecord)
+            showsHint = false
+        }
+        .onChange(of: draftAnswer) {
+            if StudyAnswerPresentationPolicy.shouldShowEditor(for: latestRecord) {
+                appState.updateAnswer(draftAnswer, for: latestRecord)
+            }
         }
         .onDisappear {
+            appState.flushPendingAnswerDraftSave()
             if let answerGradingOwnerID {
                 appState.cancelAnswerGradingPolling(
                     ownerID: answerGradingOwnerID,
@@ -642,15 +675,12 @@ struct StudyRecordDetailView: View {
     }
 
     private var latestRecord: StudyRecord {
-        guard !isShowingOriginal,
-              detailRecord.isPendingQuestion,
-              let liveRecord = appState.studyRecords.first(where: {
-                  StudyRecordIdentityPolicy.recordsMatch($0, record)
-              }),
-              liveRecord.gradingResult != nil else {
-            return detailRecord
-        }
-        return liveRecord
+        guard !isShowingOriginal, detailRecord.isQuestion, !detailRecord.isCustomQuestion else { return detailRecord }
+        guard let live = appState.studyThread(containing: detailRecord).last else { return detailRecord }
+        if live.id != detailRecord.id { return live }
+        if detailRecord.gradingResult == nil,
+           live.gradingResult != nil || live.gradingRequestID != nil { return live }
+        return detailRecord
     }
 
     @ViewBuilder
@@ -707,7 +737,7 @@ struct StudyRecordDetailView: View {
 
     private func switchContentView() async {
         let target: LocalizedContentView = isShowingOriginal ? .localized : .original
-        guard let loaded = await appState.loadStudyRecordDetail(recordID: record.id, view: target) else {
+        guard let loaded = await appState.loadStudyRecordDetail(recordID: latestRecord.id, view: target) else {
             return
         }
         detailRecord = loaded
@@ -813,7 +843,15 @@ private struct RecordDetailHeader: View {
 
                 Spacer(minLength: 8)
 
-                if let score = record.displayScore {
+                if record.isFollowUp && record.questionStatus == .skipped {
+                    Text(strings.skippedFollowUp)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                } else if record.isCustomQuestion {
+                    Text(strings.customQuestionTag)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                } else if let score = record.displayScore {
                     Text("\(score)/100")
                         .font(.title3.weight(.semibold))
                         .lineLimit(1)
@@ -1138,9 +1176,14 @@ struct TopicLevelRange: Equatable {
         upperBound - lowerBound
     }
 
+    static func assessmentRecords(from records: [StudyRecord]) -> [StudyRecord] {
+        records.filter { $0.isQuestion && !$0.isFollowUp && !$0.isCustomQuestion && $0.gradingResult != nil }
+    }
+
     static func calculate(records: [StudyRecord]) -> TopicLevelRange? {
-        let scoredRecords = records.compactMap { record -> (difficulty: Difficulty, score: Int)? in
-            guard let score = record.gradingResult?.score else {
+        let scoredRecords = assessmentRecords(from: records).compactMap { record -> (difficulty: Difficulty, score: Int)? in
+            guard !record.isFollowUp, !record.isCustomQuestion,
+                  let score = record.gradingResult?.score else {
                 return nil
             }
 
@@ -1430,8 +1473,7 @@ private struct StatsAchievementSnapshot {
     private static func bestGrowth(from topics: [TopicStat]) -> (topic: String, delta: Double)? {
         topics
             .compactMap { stat -> (topic: String, delta: Double)? in
-                let records = stat.records
-                    .filter { $0.gradingResult?.score != nil }
+                let records = TopicLevelRange.assessmentRecords(from: stat.records)
                     .sorted { statsDate(for: $0) < statsDate(for: $1) }
                 guard records.count >= 2 else {
                     return nil
@@ -3791,7 +3833,7 @@ private enum StudyGrowthFormat {
     }
 }
 
-private enum LegacyStudyGrowthProjection {
+enum LegacyStudyGrowthProjection {
     static func make(
         rooms: [BackendStudyRoom],
         records: [StudyRecord],
@@ -3806,9 +3848,10 @@ private enum LegacyStudyGrowthProjection {
         let childrenByParent = Dictionary(grouping: rooms.filter { $0.parentStudyId != nil }) {
             $0.parentStudyId ?? -1
         }
-        let filteredRecords = records.filter { record in
+        let originalRecords = records.filter { $0.isQuestion && !$0.isFollowUp && !$0.isCustomQuestion }
+        let filteredRecords = originalRecords.filter { record in
             let date = record.answeredAt ?? record.question.createdAt
-            return record.isQuestion && date >= startAt && date < endAt
+            return date >= startAt && date < endAt
         }
         let recordsByStudy = Dictionary(grouping: filteredRecords.compactMap { record -> (Int, StudyRecord)? in
             guard let studyID = record.studyID else {
@@ -3893,13 +3936,13 @@ private enum LegacyStudyGrowthProjection {
 
         func profile(_ room: BackendStudyRoom) -> BackendStudyGrowthProfile {
             let subtree = subtreeIDs(room.id)
-            let generated = records.filter {
+            let generated = originalRecords.filter {
                 guard let studyID = $0.studyID, subtree.contains(studyID) else {
                     return false
                 }
                 return $0.question.createdAt >= startAt && $0.question.createdAt < endAt
             }
-            let answered = records.filter {
+            let answered = originalRecords.filter {
                 guard let studyID = $0.studyID,
                       subtree.contains(studyID),
                       $0.gradingResult != nil,
@@ -4237,7 +4280,7 @@ private struct TopicLevelTrendChart: View {
 
     private var points: [LevelTrendPoint] {
         var accumulated: [StudyRecord] = []
-        return records
+        return TopicLevelRange.assessmentRecords(from: records)
             .sorted { Self.statsDate(for: $0) < Self.statsDate(for: $1) }
             .compactMap { record in
                 accumulated.append(record)
@@ -4440,6 +4483,8 @@ private struct ScoreDistributionSection: View {
     var records: [StudyRecord]
     var strings: AppStrings
 
+    private var assessedRecords: [StudyRecord] { TopicLevelRange.assessmentRecords(from: records) }
+
     private var buckets: [ScoreBucket] {
         [
             ScoreBucket(title: strings.excellentScores, count: count(in: 90...100)),
@@ -4463,7 +4508,7 @@ private struct ScoreDistributionSection: View {
                             .foregroundStyle(.secondary)
                             .frame(width: 54, alignment: .leading)
 
-                        ProgressView(value: Double(bucket.count), total: Double(max(records.count, 1)))
+                        ProgressView(value: Double(bucket.count), total: Double(max(assessedRecords.count, 1)))
                             .tint(Color.secondary.opacity(0.65))
 
                         Text("\(bucket.count)")
@@ -4484,7 +4529,7 @@ private struct ScoreDistributionSection: View {
     }
 
     private func count(in range: ClosedRange<Int>) -> Int {
-        records.filter { record in
+        assessedRecords.filter { record in
             guard let score = record.gradingResult?.score else {
                 return false
             }
@@ -4542,7 +4587,7 @@ private struct ScoreRecordRow: View {
 
             Spacer(minLength: 8)
 
-            Text("\(record.gradingResult?.score ?? 0)")
+            Text(record.isCustomQuestion ? strings.customQuestionTag : record.displayScore.map(String.init) ?? "—")
                 .font(.headline)
         }
         .contentShape(Rectangle())
@@ -4571,8 +4616,10 @@ private struct ScoreRecordRow: View {
 private struct ScoreLineChart: View {
     var records: [StudyRecord]
 
+    private var assessedRecords: [StudyRecord] { TopicLevelRange.assessmentRecords(from: records) }
+
     private var scores: [Int] {
-        records.compactMap { $0.gradingResult?.score }
+        assessedRecords.compactMap { $0.gradingResult?.score }
     }
 
     var body: some View {
@@ -4628,15 +4675,15 @@ private struct ScoreLineChart: View {
                     Spacer()
 
                     HStack {
-                        if let firstRecord = records.first {
+                        if let firstRecord = assessedRecords.first {
                             let first = Self.statsDate(for: firstRecord)
                             Text(first, formatter: Self.axisDateFormatter)
                         }
 
                         Spacer()
 
-                        if records.count > 1,
-                           let latestRecord = records.last {
+                        if assessedRecords.count > 1,
+                           let latestRecord = assessedRecords.last {
                             let latest = Self.statsDate(for: latestRecord)
                             Text(latest, formatter: Self.axisDateFormatter)
                         }

@@ -216,6 +216,19 @@ runtime comparison or rollback does not fork application behavior.
 - Dense list rows use a plain-text projection for predictable height. Full question, hint, answer, feedback, and explanation bubbles render Markdown.
 - APNs, the notification inbox, and local notification bodies use a parser-derived plain-text projection of the stored Markdown so notification surfaces do not expose formatting markers. The notification event keeps the Markdown source, and the push adapter derives the safe title/body projection from the persisted notification when delivery is claimed.
 
+## Follow-up Learning
+
+iOS 1.3.0 extends owned graded records with bounded follow-up threads and
+private learner-authored question-and-answer records. Follow-up questions retain
+parent/root identity and use the existing backend generation Saga, quota
+reservation, and grading lifecycle. Their grades are coached practice and
+must not enter ordinary ability/growth aggregations. Custom questions use the
+existing question/record persistence path, carry a custom source and completed
+status, have no grade, and bypass AI generation and question quota. The client
+shows a custom tag instead of a numeric score and stores drafts through
+SettingsStore and resumes backend-owned accepted work when reopening a record.
+See [FOLLOW_UP_QUESTIONS.md](FOLLOW_UP_QUESTIONS.md) for product and API behavior.
+
 ## Data Flow
 
 ```text

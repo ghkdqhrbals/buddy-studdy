@@ -12,6 +12,8 @@ struct StudyView: View {
     @State private var draftAnswer = ""
     @State private var showsPendingLimitHelp = false
     @State private var editingStudyRoom: BackendStudyRoom?
+    @State private var showsCustomQuestionComposer = false
+    @State private var savedCustomQuestion: StudyRecord?
     @State private var selectedTreeRootID: Int?
     @State private var answerSubmissionTask: Task<Void, Never>?
     @State private var answerGradingOwnerID: String?
@@ -58,7 +60,21 @@ struct StudyView: View {
                 Group {
                     if let record = selectedStudyRecord {
                         let isGradingAnswer = appState.isAnswerGradingInProgress(for: record)
-                        StudyConversationSection(
+                        StudyThreadHistorySection(
+                            records: appState.studyThread(containing: record).filter { $0.followUpDepth < record.followUpDepth },
+                            strings: strings
+                        )
+                        if record.isFollowUp {
+                            Text(strings.followUpTurn(record.followUpDepth))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        if record.isCustomQuestion {
+                            CustomQuestionConversation(record: record, strings: strings)
+                        } else if record.isFollowUp && record.questionStatus == .skipped {
+                            SkippedFollowUpConversation(record: record, strings: strings)
+                        } else {
+                            StudyConversationSection(
                             question: record.question,
                             draftAnswer: $draftAnswer,
                             showsHint: $showsHint,
@@ -81,7 +97,9 @@ struct StudyView: View {
                             onSkip: {
                                 appState.skipStudyRoomRecord(record)
                             }
-                        )
+                            )
+                            StudyFollowUpActions(record: record)
+                        }
                     } else if appState.isGeneratingQuestion(categoryID: targetCategoryID) {
                         questionLoadingMessage(strings: strings)
                             .padding(.top, 4)
@@ -158,6 +176,23 @@ struct StudyView: View {
                 }
             }
         }
+        .sheet(isPresented: $showsCustomQuestionComposer) {
+            if let room = selectedBackendStudyRoom {
+                CustomQuestionComposer(studyID: room.id) { record in
+                    savedCustomQuestion = record
+                }
+            }
+        }
+        .navigationDestination(isPresented: Binding(
+            get: { savedCustomQuestion != nil },
+            set: { if !$0 { savedCustomQuestion = nil } }
+        )) {
+            if let record = savedCustomQuestion {
+                StudyRecordDetailView(record: record, refreshesRecordOnAppear: false)
+                    .padding(.horizontal, 16)
+                    .navigationTitle(strings.customQuestionTag)
+            }
+        }
         .alert(strings.pendingQuestionLimitTitle, isPresented: $showsPendingLimitHelp) {
             Button(strings.done, role: .cancel) {}
         } message: {
@@ -223,6 +258,11 @@ struct StudyView: View {
         .onChange(of: selectedStudyRecord?.id) {
             showsHint = false
             draftAnswer = appState.answerDraft(for: selectedStudyRecord)
+        }
+        .task(id: selectedStudyRecord?.id) {
+            if let record = selectedStudyRecord, !record.isCustomQuestion {
+                await appState.loadStudyThread(containing: record)
+            }
         }
         .onChange(of: selectedStudyRecord?.answer) {
             if draftAnswer != appState.answerDraft(for: selectedStudyRecord) {
@@ -291,7 +331,9 @@ struct StudyView: View {
     }
 
     private var selectedStudyRecord: StudyRecord? {
-        appState.studyRoomRecordForDisplay(categoryID: preferredCategoryID)
+        guard let record = appState.studyRoomRecordForDisplay(categoryID: preferredCategoryID) else { return nil }
+        guard record.isCompleted, !record.isCustomQuestion else { return record }
+        return appState.studyThread(containing: record).last ?? record
     }
 
     private var selectedDifficulty: Difficulty {
@@ -398,6 +440,13 @@ struct StudyView: View {
     private func studyOptionsMenu(strings: AppStrings) -> some View {
         Menu {
             if let room = selectedBackendStudyRoom {
+                Button {
+                    showsCustomQuestionComposer = true
+                } label: {
+                    Label(strings.createCustomQuestion, systemImage: "square.and.pencil")
+                }
+
+                Divider()
                 Button {
                     editingStudyRoom = room
                 } label: {
@@ -1032,6 +1081,253 @@ extension GradingResult {
             "exclamationmark.circle.fill"
         default:
             "xmark.circle.fill"
+        }
+    }
+}
+
+struct StudyThreadHistorySection: View {
+    var records: [StudyRecord]
+    var strings: AppStrings
+
+    var body: some View {
+        ForEach(records) { record in
+            VStack(alignment: .leading, spacing: 12) {
+                Text(record.isFollowUp ? strings.followUpTurn(record.followUpDepth) : strings.originalQuestion)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                StudyConversationSection(
+                    question: record.question,
+                    draftAnswer: .constant(record.answer ?? ""),
+                    showsHint: .constant(false),
+                    submittedAnswer: record.answer,
+                    gradingResult: record.gradingResult,
+                    isGradingAnswer: false,
+                    isResolvingAnswerState: false,
+                    gradingStatusMessage: nil,
+                    canSubmitAnswer: false,
+                    allowsAnswerEditing: false,
+                    terminalStatusMessage: record.questionStatus == .skipped ? strings.skippedFollowUp : nil,
+                    strings: strings,
+                    answerEditor: { EmptyView() },
+                    onSubmit: {},
+                    onSkip: {}
+                )
+                Divider().padding(.vertical, 6)
+            }
+        }
+    }
+}
+
+struct StudyFollowUpActions: View {
+    @EnvironmentObject private var appState: AppState
+    var record: StudyRecord
+
+    var body: some View {
+        let strings = appState.strings
+        if record.isQuestion && !record.isDetachedLocalQuestion && record.gradingResult != nil && !record.isCustomQuestion {
+            VStack(alignment: .leading, spacing: 10) {
+                if let message = appState.studyThreadErrors[record.threadRootID] {
+                    HStack {
+                        Text(message).font(.caption).foregroundStyle(.secondary)
+                        Button(strings.retry) {
+                            Task { await appState.loadStudyThread(containing: record) }
+                        }
+                        .font(.caption.weight(.semibold))
+                    }
+                }
+                if let message = appState.followUpErrors[record.threadRootID] {
+                    Text(message).font(.caption).foregroundStyle(.red)
+                }
+                if appState.isGeneratingFollowUp(for: record) {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text(strings.fetchingQuestion).font(.subheadline)
+                    }
+                    .accessibilityElement(children: .combine)
+                } else if record.followUpDepth >= StudyFollowUpPolicy.maximumDepth {
+                    Text(strings.followUpLimitReached)
+                        .font(.subheadline.weight(.medium))
+                } else if StudyFollowUpPolicy.canRequest(after: record, thread: appState.studyThread(containing: record)) {
+                    Button {
+                        Task { await appState.generateFollowUp(after: record) }
+                    } label: {
+                        Label(strings.followUpQuestion, systemImage: "arrow.turn.down.right")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(appState.isGeneratingQuestion || !appState.hasLoadedStudyThread(record))
+                    Text(strings.followUpQuotaNotice)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(strings.followUpPracticeNotice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.leading, 52)
+            .padding(.top, 6)
+        }
+    }
+}
+
+struct CustomQuestionConversation: View {
+    var record: StudyRecord
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(strings.customQuestionTag)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            StudyChatBubble(role: .tutor) {
+                MarkdownMessageText(markdown: record.question.question)
+                    .textSelection(.enabled)
+            }
+            if let answer = record.answer {
+                StudyChatBubble(role: .learnerAnswer) {
+                    MarkdownMessageText(markdown: answer, fillsWidth: false)
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+                }
+            }
+        }
+    }
+}
+
+struct SkippedFollowUpConversation: View {
+    var record: StudyRecord
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            StudyChatBubble(role: .tutor) {
+                MarkdownMessageText(markdown: record.question.question)
+                    .textSelection(.enabled)
+            }
+            Label(strings.skippedFollowUp, systemImage: "forward.fill")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 52)
+        }
+    }
+}
+
+struct CustomQuestionComposer: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    var studyID: Int
+    var onSave: (StudyRecord) -> Void
+    @State private var draft = CustomQuestionDraft(language: .korean)
+    @State private var ownerID: String?
+    @State private var isSaving = false
+    @State private var saveError: String?
+    @State private var hasSaved = false
+
+    var body: some View {
+        NavigationStack {
+            composerForm
+                .disabled(isSaving)
+                .navigationTitle(appState.strings.createCustomQuestion)
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
+                .toolbar { composerToolbar }
+                .interactiveDismissDisabled(isSaving)
+                .onAppear(perform: loadDraft)
+                .onChange(of: draft.question) { _, _ in persistChangedDraft() }
+                .onChange(of: draft.answer) { _, _ in persistChangedDraft() }
+                .onChange(of: appState.customQuestionDraftOwnerID) { _, _ in dismiss() }
+                .onDisappear(perform: preserveDraft)
+        }
+    }
+
+    private var composerForm: some View {
+        Form {
+            Section {
+                Text(appState.strings.customQuestionHelp)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                TextEditor(text: $draft.question)
+                    .frame(minHeight: 110)
+                    .accessibilityLabel(appState.strings.customQuestionPrompt)
+            } header: {
+                Text(appState.strings.customQuestionPrompt)
+            }
+            Section {
+                TextEditor(text: $draft.answer)
+                    .frame(minHeight: 170)
+                    .accessibilityLabel(appState.strings.customQuestionAnswer)
+            } header: {
+                Text(appState.strings.customQuestionAnswer)
+            } footer: {
+                Text(appState.strings.customQuestionLengthHelp)
+            }
+            if let saveError {
+                Section {
+                    Text(saveError)
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var composerToolbar: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button(appState.strings.cancel) { dismiss() }
+                .disabled(isSaving)
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            Button(action: save) {
+                if isSaving { ProgressView() } else { Text(appState.strings.save) }
+            }
+            .disabled(!draft.canSave || isSaving)
+        }
+    }
+
+    private func loadDraft() {
+        guard ownerID == nil else { return }
+        ownerID = appState.customQuestionDraftOwnerID
+        draft = appState.customQuestionDraft(studyID: studyID)
+    }
+
+    private func preserveDraft() {
+        guard let ownerID, !hasSaved else { return }
+        appState.saveCustomQuestionDraft(draft, studyID: studyID, ownerID: ownerID)
+    }
+
+    private func persistChangedDraft() {
+        guard let ownerID, ownerID == appState.customQuestionDraftOwnerID, !isSaving else { return }
+        // A changed payload starts a new intention; an unchanged retry keeps its accepted identity.
+        let persisted = appState.customQuestionDraft(studyID: studyID)
+        if persisted.question != draft.question || persisted.answer != draft.answer {
+            draft.idempotencyKey = UUID().uuidString
+        }
+        saveError = nil
+        appState.saveCustomQuestionDraft(draft, studyID: studyID, ownerID: ownerID)
+    }
+
+    private func save() {
+        guard let ownerID, ownerID == appState.customQuestionDraftOwnerID, draft.canSave, !isSaving else { return }
+        isSaving = true
+        saveError = nil
+        Task {
+            let record = await appState.createCustomQuestion(studyID: studyID, draft: draft, ownerID: ownerID)
+            guard ownerID == appState.customQuestionDraftOwnerID else { return }
+            if let record {
+                hasSaved = true
+                onSave(record)
+                dismiss()
+            } else {
+                saveError = appState.errorMessage ?? appState.strings.communityRequestFailed
+            }
+            isSaving = false
         }
     }
 }

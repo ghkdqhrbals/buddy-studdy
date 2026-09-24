@@ -5496,6 +5496,587 @@ final class QuestionGenerationFlowTests: XCTestCase {
         return condition()
     }
 
+    func testLegacyRecordDecodingDefaultsToIndependentOriginal() throws {
+        let encoder = JSONEncoder()
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(Self.threadRecord(id: "original"))) as? [String: Any])
+        for key in ["source", "parentRecordId", "rootRecordId", "followUpDepth"] { json.removeValue(forKey: key) }
+        let decoded = try JSONDecoder().decode(StudyRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.followUpDepth, 0)
+        XCTAssertEqual(decoded.threadRootID, "original")
+        XCTAssertFalse(decoded.isFollowUp)
+        XCTAssertFalse(decoded.isCustomQuestion)
+    }
+
+    func testFollowUpMetadataPersistsAndForcesPrivacy() throws {
+        let record = Self.threadRecord(id: "second", depth: 2)
+        let decoded = try JSONDecoder().decode(StudyRecord.self, from: JSONEncoder().encode(record))
+        XCTAssertEqual(decoded, record)
+        XCTAssertEqual(decoded.parentRecordID, "first")
+        XCTAssertEqual(decoded.threadRootID, "original")
+        XCTAssertFalse(decoded.isPublic)
+        XCTAssertNil(decoded.asCommunityQuestion(author: nil))
+    }
+
+    func testFollowUpRequiresLatestGradedTurnAndStopsAtTwo() {
+        let original = Self.threadRecord(id: "original")
+        let first = Self.threadRecord(id: "first", depth: 1)
+        let second = Self.threadRecord(id: "second", depth: 2)
+        var pending = first
+        pending.gradingResult = nil
+        pending.questionStatus = .ungraded
+        XCTAssertTrue(StudyFollowUpPolicy.canRequest(after: original, thread: [original]))
+        XCTAssertFalse(StudyFollowUpPolicy.canRequest(after: original, thread: [original, pending]))
+        XCTAssertFalse(StudyFollowUpPolicy.canRequest(after: pending, thread: [original, pending]))
+        XCTAssertTrue(StudyFollowUpPolicy.canRequest(after: first, thread: [original, first]))
+        XCTAssertFalse(StudyFollowUpPolicy.canRequest(after: second, thread: [original, first, second]))
+        XCTAssertEqual(StudyFollowUpPolicy.orderedThread(containing: first, records: [second, original, first]).map(\.id), ["original", "first", "second"])
+    }
+
+    func testSkippedFollowUpIsReadOnlyAndDoesNotBlockNewQuestions() {
+        let original = Self.threadRecord(id: "original")
+        var skipped = Self.threadRecord(id: "first", depth: 1)
+        skipped.gradingResult = nil
+        skipped.answer = nil
+        skipped.questionStatus = .skipped
+        let records = RecordsStateStore(records: [original, skipped])
+        XCTAssertFalse(StudyAnswerPresentationPolicy.shouldShowEditor(for: skipped))
+        XCTAssertFalse(StudyAnswerPresentationPolicy.state(for: skipped).isInProgress)
+        XCTAssertFalse(StudyFollowUpPolicy.canRequest(after: skipped, thread: [original, skipped]))
+        XCTAssertTrue(records.pendingRecords.isEmpty)
+        XCTAssertTrue(records.pendingRecordsIncludingCurrent(currentQuestion: skipped.question, gradingResult: nil, fallbackTopic: skipped.topic, fallbackDifficulty: skipped.difficulty, matches: { $0.question == $1 }).isEmpty)
+        XCTAssertEqual(StudyFollowUpPolicy.orderedThread(containing: original, records: records.records).map(\.id), ["original", "first"])
+    }
+
+    func testCustomQuestionsAreCompletedPrivateAndCannotBeGradedOrFollowedUp() {
+        var custom = Self.threadRecord(id: "custom")
+        custom.source = "custom_question"
+        custom.gradingResult = nil
+        custom.questionStatus = .graded
+        let records = RecordsStateStore(records: [custom])
+        XCTAssertTrue(custom.isCompleted)
+        XCTAssertFalse(custom.isPendingStudyQuestion)
+        XCTAssertFalse(StudyAnswerPresentationPolicy.shouldShowEditor(for: custom))
+        XCTAssertEqual(StudyAnswerPresentationPolicy.state(for: custom), .completed)
+        XCTAssertTrue(records.pendingRecords.isEmpty)
+        XCTAssertTrue(records.pendingRecordsIncludingCurrent(currentQuestion: custom.question, gradingResult: nil, fallbackTopic: custom.topic, fallbackDifficulty: custom.difficulty, matches: { $0.question == $1 }).isEmpty)
+        XCTAssertFalse(StudyFollowUpPolicy.canRequest(after: custom, thread: [custom]))
+        XCTAssertNil(custom.asCommunityQuestion(author: nil))
+    }
+
+    func testCoachedPracticeCannotChangeOriginalAbilityEstimate() {
+        let original = Self.threadRecord(id: "original")
+        var followUp = Self.threadRecord(id: "first", depth: 1)
+        followUp.gradingResult?.score = 100
+        followUp.difficulty = .level10
+        XCTAssertEqual(TopicLevelRange.calculate(records: [original, followUp]), TopicLevelRange.calculate(records: [original]))
+        XCTAssertNil(TopicLevelRange.calculate(records: [followUp]))
+    }
+
+    func testIdenticalQuestionTextKeepsThreadTurnsAndCustomRecordsDistinct() throws {
+        let suite = "ThreadIdentity-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults)
+        let original = Self.threadRecord(id: "original")
+        var first = Self.threadRecord(id: "first", depth: 1)
+        first.question.question = original.question.question
+        var custom = Self.threadRecord(id: "custom")
+        custom.source = "custom_question"
+        custom.question.question = original.question.question
+        store.saveStudyRecord(original)
+        store.saveStudyRecord(first)
+        store.saveStudyRecord(custom)
+        XCTAssertEqual(Set(store.loadStudyRecords().map(\.id)), ["original", "first", "custom"])
+        store.deleteStudyRecord(custom)
+        XCTAssertEqual(Set(store.loadStudyRecords().map(\.id)), ["original", "first"])
+        XCTAssertFalse(DeletedStudyRecordMarker(record: original, deletedAt: Date()).matches(first))
+    }
+
+    func testCustomDraftAndFollowUpRequestIdentitySurviveRelaunchSeparatelyFromAnswerDraft() throws {
+        let suite = "CustomDraft-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults)
+        let draft = CustomQuestionDraft(question: "직접 만든 질문", answer: "직접 작성한 답변", language: .korean, idempotencyKey: "custom-request-key")
+        let pending = PendingQuestionGenerationProcess(idempotencyKey: "follow-up-request-key", correlationID: "process-id", studyID: 16, studyCategoryID: "16", submittedAt: Date(timeIntervalSince1970: 1_800_000_000), parentRecordID: "first")
+        store.saveAnswerDraft("아직 제출하지 않은 답변", recordID: "unrelated")
+        store.saveCustomQuestionDraft(draft, key: "7:16")
+        store.savePendingQuestionGenerationProcess(pending)
+        let reopened = SettingsStore(defaults: defaults)
+        XCTAssertEqual(reopened.loadCustomQuestionDraft(key: "7:16"), draft)
+        XCTAssertNil(reopened.loadCustomQuestionDraft(key: "8:16"))
+        XCTAssertEqual(reopened.loadPendingQuestionGenerationProcess(), pending)
+        XCTAssertEqual(reopened.loadAnswerDraft(recordID: "unrelated"), "아직 제출하지 않은 답변")
+        reopened.saveCustomQuestionDraft(nil, key: "7:16")
+        XCTAssertNil(reopened.loadCustomQuestionDraft(key: "7:16"))
+        XCTAssertEqual(reopened.loadAnswerDraft(recordID: "unrelated"), "아직 제출하지 않은 답변")
+    }
+
+    func testCurrentRecordResolutionIgnoresUnrelatedTimestampCollisions() {
+        let original = Self.threadRecord(id: "original")
+        let unrelated = Self.threadRecord(id: "unrelated")
+        let records = RecordsStateStore(records: [original, unrelated])
+        let resolved = records.record(matching: original.question, matches: {
+            $0.question.createdAt == $1.createdAt || StudyRecordIdentityPolicy.questionsMatch($0.question.question, $1.question)
+        })
+        XCTAssertEqual(resolved?.id, original.id)
+    }
+
+    func testCustomDraftCannotLeakAcrossAccountChanges() throws {
+        let suite = "CustomDraftOwnership-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        let appState = AppState(settingsStore: store)
+        var access = appState.backendAccessState
+        access.user.id = 7
+        appState.backendAccessState = access
+        let ownerID = appState.customQuestionDraftOwnerID
+        let draft = CustomQuestionDraft(question: "Private question", answer: "Private answer", language: .english)
+        appState.saveCustomQuestionDraft(draft, studyID: 16, ownerID: ownerID)
+        access.user.id = 8
+        appState.backendAccessState = access
+        appState.saveCustomQuestionDraft(draft, studyID: 16, ownerID: ownerID)
+        XCTAssertTrue(appState.customQuestionDraft(studyID: 16).question.isEmpty)
+        access.user.id = 7
+        appState.backendAccessState = access
+        XCTAssertEqual(appState.customQuestionDraft(studyID: 16), draft)
+    }
+
+    func testCustomDraftNamespacesSameAccountAndStudyByBackendOrigin() throws {
+        let suite = "CustomDraftOrigin-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        let originEnvironmentKey = "BUDDYSTUDY_BACKEND_BASE_URL"
+        let previousLaunchOrigin = ProcessInfo.processInfo.environment[originEnvironmentKey]
+        defer {
+            if let previousLaunchOrigin {
+                setenv(originEnvironmentKey, previousLaunchOrigin, 1)
+            } else {
+                unsetenv(originEnvironmentKey)
+            }
+        }
+        store.saveDeveloperAccessUnlocked(true)
+        store.saveIsDebuggingEnabled(true)
+        let client = makeClient { _ in
+            XCTFail("Draft persistence must not request a server")
+            throw URLError(.unsupportedURL)
+        }
+        let distribution = AppDistributionContext(isTestFlight: false, buildIdentifier: "1.3.0(130)", isDebugBuild: true)
+        func app(at origin: String) -> AppState {
+            // Launch configuration intentionally outranks the stored debug URL.
+            // Use the same effective-origin path as the app, with isolated HTTP transport.
+            setenv(originEnvironmentKey, origin, 1)
+            store.saveDebugBackendBaseURL(origin)
+            let state = AppState(settingsStore: store, remotePushBackendClient: client, appDistributionContext: distribution)
+            var access = state.backendAccessState
+            access.user.id = 7
+            state.backendAccessState = access
+            return state
+        }
+        let first = app(at: "https://first.example.test")
+        let firstEffectiveOrigin = AppUseCasesProvider().displayBaseURL(
+            isDebuggingEnabled: first.isDebuggingEnabled, debugBackendBaseURL: first.debugBackendBaseURL
+        )
+        XCTAssertEqual(firstEffectiveOrigin, "https://first.example.test")
+        let firstDraft = CustomQuestionDraft(question: "First server question", answer: "Private first answer", language: .english)
+        first.saveCustomQuestionDraft(firstDraft, studyID: 16, ownerID: first.customQuestionDraftOwnerID)
+        let second = app(at: "https://second.example.test")
+        let secondEffectiveOrigin = AppUseCasesProvider().displayBaseURL(
+            isDebuggingEnabled: second.isDebuggingEnabled, debugBackendBaseURL: second.debugBackendBaseURL
+        )
+        XCTAssertEqual(secondEffectiveOrigin, "https://second.example.test")
+        XCTAssertNotEqual(firstEffectiveOrigin, secondEffectiveOrigin, "The draft isolation scenario requires two different effective server origins.")
+        XCTAssertTrue(second.customQuestionDraft(studyID: 16).question.isEmpty)
+        let secondDraft = CustomQuestionDraft(question: "Second server question", answer: "Private second answer", language: .english)
+        second.saveCustomQuestionDraft(secondDraft, studyID: 16, ownerID: second.customQuestionDraftOwnerID)
+        XCTAssertEqual(first.customQuestionDraft(studyID: 16), firstDraft)
+        XCTAssertEqual(second.customQuestionDraft(studyID: 16), secondDraft)
+        XCTAssertEqual(app(at: "https://first.example.test").customQuestionDraft(studyID: 16), firstDraft)
+    }
+
+    func testCustomQuestionValidationUsesServerUTF16Limits() {
+        XCTAssertFalse(CustomQuestionDraft(question: " ", answer: "Answer", language: .english).canSave)
+        XCTAssertTrue(CustomQuestionDraft(question: String(repeating: "😀", count: 2_000), answer: "Answer", language: .english).canSave)
+        XCTAssertFalse(CustomQuestionDraft(question: String(repeating: "😀", count: 2_001), answer: "Answer", language: .english).canSave)
+        XCTAssertFalse(CustomQuestionDraft(question: "Question", answer: String(repeating: "😀", count: 6_001), language: .english).canSave)
+    }
+
+    func testCreateFollowUpSendsParentAndStableIdempotencyKey() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/records/first/follow-ups")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "follow-up-request-key")
+            return Self.response(for: request, statusCode: 202, body: """
+                {"correlationId":"follow-up-process","studyId":"16","topicId":"16","status":"QUEUED","pollAfterMs":250,"submittedAt":"2026-09-24T12:00:00Z"}
+                """)
+        }
+        let result = try await client.createFollowUp(registration: Self.registration, recordID: "first", idempotencyKey: "follow-up-request-key")
+        XCTAssertEqual(result.correlationID, "follow-up-process")
+    }
+
+    func testCustomQuestionUsesSeparateEndpointAndUnchangedDraftReplaysSameIdentity() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/studies/16/custom-questions")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "custom-request-key")
+            let data = try Self.bodyData(from: request)
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(body["question"] as? String, "직접 질문")
+            XCTAssertEqual(body["answer"] as? String, "직접 답변")
+            XCTAssertEqual(body["language"] as? String, "ko")
+            XCTAssertEqual(body.count, 3)
+            var record = Self.threadRecord(id: "custom")
+            record.source = "custom_question"
+            record.gradingResult = nil
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            return Self.response(for: request, statusCode: 201, body: String(decoding: try encoder.encode(record), as: UTF8.self))
+        }
+        let draft = CustomQuestionDraft(question: "직접 질문", answer: "직접 답변", language: .korean, idempotencyKey: "custom-request-key")
+        let first = try await client.createCustomQuestion(registration: Self.registration, studyID: 16, draft: draft)
+        let retried = try await client.createCustomQuestion(registration: Self.registration, studyID: 16, draft: draft)
+        XCTAssertEqual(first.id, retried.id)
+        XCTAssertTrue(first.isCustomQuestion)
+        XCTAssertFalse(first.isPublic)
+        XCTAssertNil(first.gradingResult)
+    }
+
+    func testThreadRefreshReconcilesDeletedTurnsWithoutChangingUnrelatedDraft() async throws {
+        let suite = "ThreadRefresh-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        let original = Self.threadRecord(id: "original")
+        let first = Self.threadRecord(id: "first", depth: 1)
+        let removed = Self.threadRecord(id: "second", depth: 2)
+        var pending = Self.threadRecord(id: "unrelated")
+        pending.gradingResult = nil
+        pending.answer = nil
+        pending.questionStatus = .ungraded
+        store.replaceStudyRecords([original, first, removed, pending])
+        store.saveQuestion(pending.question)
+        store.saveAnswerDraft("이어 쓰던 답변", recordID: pending.id)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let recordsJSON = String(decoding: try encoder.encode([original, first]), as: UTF8.self)
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/records/original/thread")
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            XCTAssertTrue(query.contains(URLQueryItem(name: "view", value: "localized")))
+            return Self.response(for: request, statusCode: 200, body: "{\"records\":\(recordsJSON)}")
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        let loaded = await appState.loadStudyThread(containing: original)
+        XCTAssertTrue(loaded)
+        XCTAssertEqual(appState.studyThread(containing: original).map(\.id), ["original", "first"])
+        XCTAssertEqual(appState.currentQuestion, pending.question)
+        XCTAssertEqual(store.loadAnswerDraft(recordID: pending.id), "이어 쓰던 답변")
+        XCTAssertEqual(appState.studyRecords.first(where: { $0.id == "original" })?.gradingResult?.score, original.gradingResult?.score)
+    }
+
+    func testSavingCustomQuestionPreservesActiveAnswerAndDoesNotRequestAIOrQuota() async throws {
+        let suite = "CustomSaveFlow-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        var pending = Self.threadRecord(id: "active-draft")
+        pending.gradingResult = nil
+        pending.answer = nil
+        pending.questionStatus = .ungraded
+        store.saveStudyRecord(pending)
+        store.saveQuestion(pending.question)
+        store.saveLastAnswer("Current answer draft")
+        store.saveAnswerDraft("Current answer draft", recordID: pending.id)
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/studies/16/custom-questions")
+            var custom = Self.threadRecord(id: "saved-custom")
+            custom.source = "custom_question"
+            custom.gradingResult = nil
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            return Self.response(for: request, statusCode: 201, body: String(decoding: try encoder.encode(custom), as: UTF8.self))
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        let draft = CustomQuestionDraft(question: "My question", answer: "My answer", language: .english)
+        let saved = await appState.createCustomQuestion(studyID: 16, draft: draft, ownerID: appState.customQuestionDraftOwnerID)
+        XCTAssertEqual(saved?.id, "saved-custom")
+        XCTAssertEqual(appState.currentQuestion, pending.question)
+        XCTAssertEqual(appState.lastAnswer, "Current answer draft")
+        XCTAssertEqual(store.loadAnswerDraft(recordID: pending.id), "Current answer draft")
+        XCTAssertEqual(appState.pendingStudyRecords.map(\.id), [pending.id])
+        XCTAssertTrue(appState.studyRecords.contains(where: { $0.id == "saved-custom" }))
+        XCTAssertTrue(appState.customQuestionDraft(studyID: 16).question.isEmpty)
+    }
+
+    func testQuestionGenerationRetriesGatewayFailuresButStopsOnQuotaAndFollowUpConflicts() {
+        let policy = AppErrorHandlingUseCase()
+        for status in [408, 429, 500, 502, 503, 504] {
+            XCTAssertFalse(policy.isPermanentQuestionGenerationError(RemotePushBackendError.httpStatus(status, "", nil)))
+        }
+        for (code, numeric) in [("QUOTA_EXCEEDED", 305), ("FOLLOW_UP_NOT_AVAILABLE", 517), ("FOLLOW_UP_LIMIT_REACHED", 518)] {
+            let error = RemotePushBackendError.httpStatus(409, "", BackendAPIError(code: code, numericCode: numeric, message: "Rejected"))
+            XCTAssertTrue(policy.isPermanentQuestionGenerationError(error))
+        }
+        XCTAssertEqual(policy.followUpAvailabilityFailure(RemotePushBackendError.httpStatus(409, "", BackendAPIError(code: "FOLLOW_UP_LIMIT_REACHED", message: "Limit"))), .limitReached)
+        XCTAssertEqual(policy.followUpAvailabilityFailure(RemotePushBackendError.httpStatus(409, "", BackendAPIError(code: "517", message: "Not available"))), .notAvailable)
+        for voiceCode in ["511", "512"] {
+            XCTAssertNil(policy.followUpAvailabilityFailure(RemotePushBackendError.httpStatus(409, "", BackendAPIError(code: voiceCode, message: "Voice tutor entitlement"))))
+        }
+    }
+
+    func testFollowUpRetryReusesAcceptedRequestAndPreservesAnotherDraft() async throws {
+        let suite = "FollowUpRetry-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        let original = Self.threadRecord(id: "original")
+        var unrelated = Self.threadRecord(id: "active-draft")
+        unrelated.studyID = 99
+        unrelated.answer = nil
+        unrelated.gradingResult = nil
+        unrelated.questionStatus = .ungraded
+        store.replaceStudyRecords([original, unrelated])
+        store.saveQuestion(unrelated.question)
+        store.saveLastAnswer("Keep writing")
+        store.saveAnswerDraft("Keep writing", recordID: unrelated.id)
+        let keys = LockedValue<[String]>([])
+        var next = Self.threadRecord(id: "first", depth: 1)
+        next.gradingResult = nil
+        next.answer = nil
+        next.questionStatus = .ungraded
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let nextJSON = String(decoding: try encoder.encode(next), as: UTF8.self)
+        let client = makeClient { request in
+            switch request.url?.path {
+            case "/api/v1/records/original/follow-ups":
+                let key = request.value(forHTTPHeaderField: "Idempotency-Key") ?? ""
+                keys.set(keys.value + [key])
+                if keys.value.count == 1 {
+                    // The server may have accepted the operation before its response was lost.
+                    return Self.response(for: request, statusCode: 502, body: "{}")
+                }
+                return Self.response(for: request, statusCode: 202, body: """
+                    {"correlationId":"same-process","studyId":"16","topicId":"16","status":"QUEUED","pollAfterMs":250,"submittedAt":"2026-09-24T12:00:00Z"}
+                    """)
+            case "/api/v1/question-processes/same-process":
+                return Self.response(for: request, statusCode: 200, body: """
+                    {"correlationId":"same-process","status":"COMPLETED","currentStep":"COMPLETED","terminal":true,"question":\(nextJSON),"updatedAt":"2026-09-24T12:00:01Z"}
+                    """)
+            default:
+                // Completing question generation refreshes the existing quota endpoint.
+                return Self.response(for: request, statusCode: 200, body: "{\"usedCount\":1,\"monthlyLimit\":30,\"remainingCount\":29,\"resetAt\":\"2026-10-24T12:00:00Z\"}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client, appSleepProvider: ImmediateAppSleepProvider())
+        await appState.generateFollowUp(after: original)
+        let finished = await waitUntil { !appState.isGeneratingQuestion }
+        XCTAssertTrue(finished)
+        XCTAssertEqual(keys.value.count, 2)
+        XCTAssertEqual(Set(keys.value).count, 1)
+        XCTAssertFalse(keys.value.first?.isEmpty ?? true)
+        XCTAssertNil(store.loadPendingQuestionGenerationProcess())
+        XCTAssertEqual(appState.currentQuestion, unrelated.question)
+        XCTAssertEqual(appState.lastAnswer, "Keep writing")
+        XCTAssertEqual(appState.studyThread(containing: original).map(\.id), ["original", "first"])
+        XCTAssertEqual(store.loadAnswerDraft(recordID: unrelated.id), "Keep writing")
+        XCTAssertEqual(appState.studyRecords.first(where: { $0.id == original.id })?.gradingResult, original.gradingResult)
+    }
+
+    func testFollowUpAndCustomQuestionCallbacksRequireTimeAndText() {
+        let followUp = Self.threadRecord(id: "first", depth: 1)
+        var custom = Self.threadRecord(id: "custom")
+        custom.source = "custom_question"
+        for record in [followUp, custom] {
+            var differentText = record.question
+            differentText.question = "An unrelated question at the same time"
+            var differentTime = record.question
+            differentTime.createdAt = record.question.createdAt.addingTimeInterval(60)
+            XCTAssertTrue(StudyRecordIdentityPolicy.recordMatchesQuestion(record, question: record.question))
+            XCTAssertFalse(StudyRecordIdentityPolicy.recordMatchesQuestion(record, question: differentText))
+            XCTAssertFalse(StudyRecordIdentityPolicy.recordMatchesQuestion(record, question: differentTime))
+        }
+        var current = custom.question
+        current.question = "My active question is not the completed custom question"
+        let records = RecordsStateStore(records: [custom])
+        let pending = records.pendingRecordsIncludingCurrent(
+            currentQuestion: current,
+            gradingResult: nil,
+            fallbackTopic: custom.topic,
+            fallbackDifficulty: custom.difficulty,
+            matches: StudyRecordIdentityPolicy.recordMatchesQuestion
+        )
+        XCTAssertEqual(pending.map(\.question), [current])
+    }
+
+    func testPendingRoomSelectionUsesTheActualFollowUpWhenTimestampsCollide() throws {
+        let suite = "FollowUpSelectionIdentity-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        let category = StudyCategory(id: "16", title: "Caching", difficulty: .level5)
+        store.saveSettings(StudySettings(topic: category.title, difficulty: category.difficulty, customPrompt: "", intervalMinutes: 30, studyCategories: [category], selectedStudyCategoryID: category.id))
+        var first = Self.threadRecord(id: "first", depth: 1)
+        first.answer = nil
+        first.gradingResult = nil
+        first.questionStatus = .ungraded
+        var second = first
+        second.id = "another-follow-up"
+        second.question.question = "A different pending follow-up at the same timestamp"
+        second.rootRecordID = "another-original"
+        store.replaceStudyRecords([first, second])
+        store.saveQuestion(second.question)
+        let appState = AppState(settingsStore: store)
+        XCTAssertEqual(appState.pendingStudyRecord(categoryID: category.id)?.id, second.id)
+    }
+
+    func testSkippingAnotherFollowUpAtSameTimestampPreservesActiveDraft() throws {
+        let suite = "FollowUpSkipIdentity-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        var active = Self.threadRecord(id: "active")
+        active.answer = nil
+        active.gradingResult = nil
+        active.questionStatus = .ungraded
+        var skipped = Self.threadRecord(id: "first", depth: 1)
+        skipped.question.createdAt = active.question.createdAt
+        skipped.answer = nil
+        skipped.gradingResult = nil
+        skipped.questionStatus = .ungraded
+        store.replaceStudyRecords([active, skipped])
+        store.saveQuestion(active.question)
+        store.saveLastAnswer("Keep my active answer")
+        store.saveAnswerDraft("Keep my active answer", recordID: active.id)
+        let appState = AppState(settingsStore: store)
+        appState.skipStudyRoomRecord(skipped)
+        XCTAssertEqual(appState.currentQuestion, active.question)
+        XCTAssertEqual(appState.lastAnswer, "Keep my active answer")
+        XCTAssertEqual(store.loadAnswerDraft(recordID: active.id), "Keep my active answer")
+        XCTAssertTrue(appState.studyRecords.contains { $0.id == active.id })
+        XCTAssertFalse(appState.studyRecords.contains { $0.id == skipped.id })
+    }
+
+    func testAutosavingDifferentFollowUpAtSameTimestampDoesNotReplaceCurrentAnswer() throws {
+        let suite = "FollowUpDraftIdentity-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        var active = Self.threadRecord(id: "active")
+        active.answer = nil
+        active.gradingResult = nil
+        active.questionStatus = .ungraded
+        var other = Self.threadRecord(id: "first", depth: 1)
+        other.question.createdAt = active.question.createdAt
+        other.answer = nil
+        other.gradingResult = nil
+        other.questionStatus = .ungraded
+        store.replaceStudyRecords([active, other])
+        store.saveQuestion(active.question)
+        store.saveLastAnswer("Keep the active answer")
+        store.saveAnswerDraft("Keep the active answer", recordID: active.id)
+        let appState = AppState(settingsStore: store)
+        appState.updateAnswer("Separate follow-up draft", for: other)
+        appState.flushPendingAnswerDraftSave()
+        XCTAssertEqual(appState.lastAnswer, "Keep the active answer")
+        XCTAssertEqual(store.loadAnswerDraft(recordID: active.id), "Keep the active answer")
+        XCTAssertEqual(store.loadAnswerDraft(recordID: other.id), "Separate follow-up draft")
+    }
+
+    func testDeletingCustomQuestionWithRepeatedTextKeepsDifferentActiveRecord() throws {
+        let suite = "CustomDeletionIdentity-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        var active = Self.threadRecord(id: "active")
+        active.answer = nil
+        active.gradingResult = nil
+        active.questionStatus = .ungraded
+        var custom = Self.threadRecord(id: "custom")
+        custom.source = "custom_question"
+        custom.gradingResult = nil
+        custom.question.question = active.question.question
+        custom.question.createdAt = active.question.createdAt.addingTimeInterval(60)
+        store.replaceStudyRecords([active, custom])
+        store.saveQuestion(active.question)
+        store.saveLastAnswer("Keep this answer")
+        let appState = AppState(settingsStore: store)
+        appState.deleteStudyRecord(custom)
+        XCTAssertEqual(appState.currentQuestion, active.question)
+        XCTAssertEqual(appState.lastAnswer, "Keep this answer")
+        XCTAssertEqual(appState.studyRecords.map(\.id), [active.id])
+    }
+
+    func testHistoryAverageDistinguishesNoScoreFromAnActualZero() {
+        var custom = Self.threadRecord(id: "custom")
+        custom.source = "custom_question"
+        custom.gradingResult = nil
+        var followUp = Self.threadRecord(id: "first", depth: 1)
+        followUp.gradingResult?.score = 100
+        var zero = Self.threadRecord(id: "zero")
+        zero.gradingResult?.score = 0
+        var eighty = Self.threadRecord(id: "eighty")
+        eighty.gradingResult?.score = 80
+        XCTAssertNil(StudyRecordScorePolicy.average(records: []))
+        XCTAssertNil(StudyRecordScorePolicy.average(records: [custom]))
+        XCTAssertNil(StudyRecordScorePolicy.average(records: [custom, followUp]))
+        XCTAssertEqual(StudyRecordScorePolicy.average(records: [zero]), 0)
+        XCTAssertEqual(StudyRecordScorePolicy.average(records: [custom, followUp, zero]), 0)
+        XCTAssertEqual(StudyRecordScorePolicy.average(records: [custom, followUp, zero, eighty]), 40)
+    }
+
+    func testGrowthProjectionAndAssessmentSamplesIgnoreCoachedAndCustomRecords() throws {
+        var original = Self.threadRecord(id: "original")
+        original.answeredAt = original.question.createdAt.addingTimeInterval(1)
+        var followUp = Self.threadRecord(id: "first", depth: 1)
+        followUp.answeredAt = followUp.question.createdAt.addingTimeInterval(1)
+        followUp.gradingResult?.score = 100
+        followUp.difficulty = .level10
+        var custom = Self.threadRecord(id: "custom")
+        custom.source = "custom_question"
+        custom.gradingResult = nil
+        custom.answeredAt = custom.question.createdAt.addingTimeInterval(1)
+        let startAt = original.question.createdAt.addingTimeInterval(-60)
+        let endAt = original.question.createdAt.addingTimeInterval(600)
+        let room = BackendStudyRoom(
+            id: 16, topic: "Caching", difficultyLevel: 5, intervalMinutes: 30, enabled: true,
+            notificationSound: nil, customPrompt: "", openAIModel: "gpt-4o-mini", maxHistoryCount: 20,
+            nextDueAt: nil, lastSentAt: nil, lastError: nil, pendingQuestion: nil,
+            createdAt: startAt, updatedAt: startAt
+        )
+        let baseline = try XCTUnwrap(LegacyStudyGrowthProjection.make(rooms: [room], records: [original], startAt: startAt, endAt: endAt))
+        let mixed = try XCTUnwrap(LegacyStudyGrowthProjection.make(rooms: [room], records: [original, followUp, custom], startAt: startAt, endAt: endAt))
+        XCTAssertEqual(mixed.roots, baseline.roots)
+        XCTAssertEqual(mixed.nodes, baseline.nodes)
+        XCTAssertEqual(mixed.roots.first?.profile?.completion, 1)
+        XCTAssertEqual(TopicLevelRange.assessmentRecords(from: [original, followUp, custom]).map(\.id), [original.id])
+    }
+
+    private nonisolated static func threadRecord(id: String, depth: Int = 0) -> StudyRecord {
+        StudyRecord(
+            id: id,
+            studyID: 16,
+            question: QuestionItem(question: "Question \(id)", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 1_800_000_000 + Double(depth * 60))),
+            answer: "My answer",
+            gradingResult: GradingResult(score: 60, isCorrect: false, feedback: "Explain the reason.", explanation: "Consider when the conditions change."),
+            topic: "Caching",
+            difficulty: .level5,
+            questionStatus: .graded,
+            parentRecordID: depth == 0 ? nil : depth == 1 ? "original" : "first",
+            rootRecordID: depth == 0 ? nil : "original",
+            followUpDepth: depth,
+            source: depth == 0 ? "manual" : "follow_up"
+        )
+    }
+
     private func makeClient(
         baseURL: URL = URL(string: "https://example.test")!,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
