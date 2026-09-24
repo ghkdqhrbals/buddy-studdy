@@ -93,10 +93,48 @@ including real MySQL V120→V122 upgrade compatibility and existing voice rows.
 Backend commit `efe8cf6cf5d33746c747f1f4b74f35f1f9df05b0` was pushed separately and
 [Build Backend Image run 36040541276](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/36040541276)
 was dispatched with JVM runtime and the module-scoped personal-deploy handoff.
-Deployment is still being tracked; no successful rollout or TestFlight upload
-is claimed at this checkpoint.
+Both the image workflow and
+[personal-deploy run 36041292362](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/36041292362)
+completed successfully. At **2026-09-25 03:29:07 KST**, the Swarm rollout reported
+`completed`, `1/1` replicas and the expected image task running. Source SHA and
+image tag match the backend commit; the published and pulled manifest digest is
+`sha256:87cad0d372266c718a54d0bb5f8190dce9fd9923dbb649148671c965f8269a0a`.
+No SSH or runtime health/smoke endpoint checks were performed. Backend files in
+the iOS release commit `dbe1b02e77b94f5bac193a09955d6b077cbb999d` exactly match this
+deployed backend commit.
 
-The intended distribution is TestFlight only. The release dispatch will use
+### Signed TestFlight candidate
+
+[Release iOS App run 36041493343](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/36041493343)
+completed successfully for **1.3.0 (123)** from
+`dbe1b02e77b94f5bac193a09955d6b077cbb999d`. Apple accepted the upload at
+**2026-09-25 03:46:16 KST** with `UPLOAD SUCCEEDED with no errors`.
+App Store Connect then displayed the exact version/build as processing.
+
+The downloaded artifact digest matches GitHub's artifact digest:
+`sha256:32f61d2114d03862df411fd0178768dcedb0c54fbb07fc5e906249d0fc45d8c6`.
+IPA SHA256 is `c2d37fdbc383b284f24647e73b92e3c5ea6396ba41b485a84190b1fddec52dfb`.
+Independent inspection passed all 30 checks: exact version/bundle/source,
+production API, production non-demo AdMob configuration, embedded Google Mobile
+Ads 13.8.0 and UMP 3.1.0, matching Firebase configuration, RevenueCat public key,
+absence of Offline QA fixtures, and distribution signing/production entitlements.
+See the [machine-readable artifact receipt](../../app-store/releases/1.3.0/testflight-123-release-verification.json).
+
+[Internal distribution run 36043671798](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/36043671798)
+completed successfully. At **2026-09-25 03:48:48 KST**, it verified exact build
+**1.3.0 (123)** as `VALID`, `IN_BETA_TESTING`, audience `APP_STORE_ELIGIBLE`,
+already connected to the existing internal group `tester`
+(`5f6797bb-38a0-400b-8269-74aa6f5f3bec`). The result was `current`; no new tester
+or external group was added. App Store Connect independently displayed the
+same build and internal group with its existing one tester.
+
+[The exact build page](https://appstoreconnect.apple.com/teams/889a8253-618e-4e3a-84ff-73ac167fd81e/apps/6774108938/testflight/ios/8f950eb5-5832-4462-b2f4-304fe3ea3e90)
+now has the source-controlled English, Korean and Japanese What to Test notes.
+Each locale's save completed in the authenticated UI; Korean content was read
+back after changing languages. TestFlight availability is confirmed; this is
+not a claim that the user installed or interacted with build 123 on the phone.
+
+Distribution is TestFlight only. The release dispatch used
 `version=1.3.0`, `upload_to_app_store_connect=true`,
 `app_review_candidate=false`, `admob_test_mode=false`, `publish_status=false`.
 No App Review submission or public release is authorized by this task.
