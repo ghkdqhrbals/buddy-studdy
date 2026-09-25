@@ -66,8 +66,32 @@ does not log a scheduled retry when no retry is due. Log:
 `/tmp/buddy-rc-ignore-tests.log` (`BUILD SUCCESSFUL`).
 
 Independent code review found no remaining actionable issues after terminal
-state protection was added. `git diff --check` passed. Deployment and production
-receipt cleanup are not yet confirmed at this checkpoint.
+state protection was added. `git diff --check` passed.
+
+## Production deployment and readback
+
+Fix commit `9bb8e8a19bb62b1449695c4c7bdd61ac703e465a` was pushed on
+`codex/ios-130-testflight`. The module-scoped
+[backend image workflow 36090480277](https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/36090480277)
+and [personal-deploy workflow 36090994321](https://github.com/ghkdqhrbals/personal-deploy/actions/runs/36090994321)
+both completed successfully. The deployed image is
+`ghcr.io/ghkdqhrbals/buddystudy-backend:9bb8e8a19bb62b1449695c4c7bdd61ac703e465a-jvm`,
+manifest digest
+`sha256:d7cd08863a38bb3400b8e3558115244ac87b10896921d2b2e7e71cd7c90704bc`.
+The handoff correlation is
+`36090480277-1-9bb8e8a19bb62b1449695c4c7bdd61ac703e465a-jvm`.
+At **12:37:58 KST**, the rollout log reported `state=completed`, `replicas=1/1`
+and `expectedTaskRunning=true`. The deploy-time pull digest matches the published
+manifest. Log: `/tmp/buddystudy-backend-9bb8e8a-verification/deploy.log`.
+
+At approximately **2026-09-25 12:39 KST**, the authenticated production
+[Orders & Billing UI](https://monitoring.lowfidev.cloud/orders.html), with all
+failure sources/statuses selected, reported **0 retrying or exhausted records**
+and `No billing processing failures match this filter.` Both previously observed
+local StoreKit events were absent from the failure list. The invoice count
+remained 35. No real purchase, refund, cancellation, quota adjustment, direct
+database edit or production SSH command was performed. Runtime endpoint health
+checks were not added to or run by GitHub Actions.
 
 TestFlight 1.3.0 (123) remains the distributed
 Release binary; the iOS fix is Debug-only and requires no replacement upload.
