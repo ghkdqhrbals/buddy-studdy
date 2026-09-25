@@ -13,6 +13,7 @@ import com.buddystudy.backend.billing.application.port.outbound.RevenueCatWebhoo
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.billing.domain.BillingEventSource
+import com.buddystudy.billing.domain.BillingEnvironment
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.slf4j.LoggerFactory
@@ -44,6 +45,10 @@ class RevenueCatBillingService(
         events.forEach { event ->
             val now = clock.instant()
             try {
+                if (event.isLocalStoreKitTestingEvent()) {
+                    ledger.ignoreRevenueCatEvent(event.eventId, LOCAL_STOREKIT_TEST_REASON, now)
+                    return@forEach
+                }
                 if (event.eventType in PURCHASE_EVENT_TYPES) {
                     val transaction = event.toVerifiedAppleTransaction()
                     val userId = ledger.userIdForAppAccountToken(transaction.appAccountToken)
@@ -86,7 +91,7 @@ class RevenueCatBillingService(
                         error.message,
                         error,
                     )
-                } else {
+                } else if (outcome.nextAttemptAt != null) {
                     logger.warn(
                         "billing_processing_retry_scheduled source=REVENUECAT_EVENT eventId={} eventType={} " +
                             "attempt={} maxAttempts={} nextAttemptAt={} errorType={} message={}",
@@ -175,6 +180,12 @@ class RevenueCatBillingService(
             .firstOrNull()
             ?: invalidEvent("RevenueCat App User ID must be the BuddyStudy appAccountToken UUID.")
 
+    private fun VerifiedRevenueCatEvent.isLocalStoreKitTestingEvent(): Boolean =
+        store == "APP_STORE" && environment == BillingEnvironment.SANDBOX &&
+            sequenceOf(transactionId, originalTransactionId)
+                .filterNotNull()
+                .any { it.startsWith("StoreKitTest_Transaction_") }
+
     private fun VerifiedRevenueCatEvent.validateAcceptedStore() {
         val acceptedStore = store == "APP_STORE" || (store == "TEST_STORE" && allowTestStore)
         if (!acceptedStore) invalidEvent("RevenueCat store is not accepted in this environment.")
@@ -192,5 +203,6 @@ class RevenueCatBillingService(
         val PURCHASE_EVENT_TYPES = setOf("INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE")
         val PROVIDER_ID = Regex("^[A-Za-z0-9._:-]{1,191}$")
         val PRODUCT_ID = Regex("^[A-Za-z0-9._-]{1,191}$")
+        const val LOCAL_STOREKIT_TEST_REASON = "Xcode StoreKit test transaction is outside RevenueCat billing fulfillment."
     }
 }

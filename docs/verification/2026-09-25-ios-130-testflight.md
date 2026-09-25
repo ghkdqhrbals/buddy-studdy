@@ -55,6 +55,11 @@ launch environment; the fixture now sets/restores its effective synthetic
 origin and asserts the actual origins differ. Its injected HTTP client remains
 fail-closed. All five suites then passed.
 
+Post-release investigation found that the hosted simulator's StoreKit discount
+test had initialized the live RevenueCat observer and emitted two anonymous
+local-test webhook receipts. The test assertions above passed, but SDK isolation
+was incomplete. See [the incident and isolation correction](2026-09-25-revenuecat-local-storekit.md).
+
 ### Physical iPhone
 
 The separately signed Offline QA app was installed and launched on **Min iPhone,

@@ -1,9 +1,46 @@
 import StoreKit
 import StoreKitTest
+import RevenueCat
 import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testRevenueCatStartupDetectsHostedTestsAndAllowsRegularDebugLaunch() {
+        for key in ["XCTestConfigurationFilePath", "XCTestBundlePath", "XCTestSessionIdentifier"] {
+            XCTAssertTrue(RevenueCatDebugStartupPolicy.isHostedXCTest(
+                environment: [key: "test-host"], hasXCTestRuntime: false
+            ), key)
+        }
+        XCTAssertTrue(RevenueCatDebugStartupPolicy.isHostedXCTest(
+            environment: [:], hasXCTestRuntime: true
+        ))
+        XCTAssertFalse(RevenueCatDebugStartupPolicy.isHostedXCTest(
+            environment: [:], hasXCTestRuntime: false
+        ))
+        XCTAssertFalse(RevenueCatDebugStartupPolicy.isHostedXCTest(
+            environment: ["SIMULATOR_UDID": "simulator", "XCODE_RUNNING_FOR_PREVIEWS": "1"],
+            hasXCTestRuntime: false
+        ))
+    }
+
+    @MainActor
+    func testHostedXCTestBillingStartupAndIdentifyKeepRevenueCatUnconfigured() async throws {
+        guard RevenueCatDebugStartupPolicy.isHostedXCTest(), !Purchases.isConfigured else {
+            XCTFail("The real hosted test process must be detected before app bootstrap starts the live SDK")
+            return
+        }
+        RevenueCatBillingBridge.shared.start()
+        guard !Purchases.isConfigured else {
+            XCTFail("Billing startup configured the live SDK inside a hosted test")
+            return
+        }
+        try await RevenueCatBillingBridge.shared.identify(
+            appAccountToken: UUID(uuidString: "6d3a6958-1eed-4a16-8f36-b2bf22bf7c21")!
+        )
+        XCTAssertFalse(Purchases.isConfigured)
+        XCTAssertFalse(RevenueCatBillingBridge.shared.isEnabled)
+    }
+
     func testRevenueCatRequiresAnApplePublicSDKKey() {
         XCTAssertTrue(RevenueCatBillingBridge.isValidPublicSDKKey("appl_public_sdk_key"))
         XCTAssertTrue(RevenueCatBillingBridge.isValidPublicSDKKey("  appl_public_sdk_key\n"))
@@ -3292,6 +3329,11 @@ final class ArchitecturePolicyTests: XCTestCase {
     }
 
     func testFirstMonthOffersMatchStoreKitPricesAndGroupEligibility() async throws {
+        guard !Purchases.isConfigured else {
+            XCTFail("Refusing to create a local StoreKit purchase while the live RevenueCat observer is running")
+            return
+        }
+        XCTAssertTrue(RevenueCatDebugStartupPolicy.isHostedXCTest())
         let session = try SKTestSession(configurationFileNamed: "StudyMateDev")
         session.disableDialogs = true
         session.clearTransactions()
@@ -3328,6 +3370,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(200))
         }
         XCTAssertEqual(eligibility, [false, false], "The introductory offer cannot be reused by switching tiers")
+        XCTAssertFalse(Purchases.isConfigured, "Local StoreKit transactions must remain isolated from RevenueCat")
     }
 
     private func repositoryRoot() throws -> URL {
