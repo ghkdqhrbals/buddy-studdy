@@ -1,0 +1,100 @@
+{
+  "version": "1.3.0",
+  "build": "123",
+  "bundleIdentifier": "io.github.ghkdqhrbals.StudyMate",
+  "productionBackend": "https://api.ghkdqhrbals.org",
+  "sourceSha": "dbe1b02e77b94f5bac193a09955d6b077cbb999d",
+  "runId": 36041493343,
+  "runURL": "https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/36041493343",
+  "artifact": {
+    "id": 10828070996,
+    "name": "BuddyStudy-iOS-1.3.0-123",
+    "apiDigest": "sha256:32f61d2114d03862df411fd0178768dcedb0c54fbb07fc5e906249d0fc45d8c6",
+    "downloadSHA256": "32f61d2114d03862df411fd0178768dcedb0c54fbb07fc5e906249d0fc45d8c6",
+    "digestVerified": true
+  },
+  "ipaFile": "StudyMate.ipa",
+  "ipaSHA256": "c2d37fdbc383b284f24647e73b92e3c5ea6396ba41b485a84190b1fddec52dfb",
+  "checkedAt": "2026-09-24T18:44:59.337909+00:00",
+  "checks": {
+    "versionAndBuildMatch": true,
+    "bundleIdentifierMatch": true,
+    "productionBackendMatch": true,
+    "admobProductionIdentifierFormats": true,
+    "admobDemoIdentifiersAbsent": true,
+    "admobPublisherMatch": true,
+    "admobSKAdNetworkEntriesPresent": true,
+    "admobATTUsageDescriptionAbsent": true,
+    "firebaseConfigurationPresentAndMatched": true,
+    "revenueCatProductionPublicKeyPresent": true,
+    "offlineQAFlagAndURLSchemeAbsent": true,
+    "screenshotFixtureFlagsAbsent": true,
+    "microphoneAndCameraPurposesPresent": true,
+    "privacyTrackingDisabled": true,
+    "releaseMetadataMatch": true,
+    "localDeepStrictSignatureVerification": true,
+    "appleDistributionSigner": true,
+    "signedApplicationIdentifierMatch": true,
+    "debuggingDisabled": true,
+    "productionAPNsEntitlement": true,
+    "productionICloudEnvironment": true,
+    "iCloudContainerEntitlement": true,
+    "cloudKitEntitlement": true,
+    "appleSignInEntitlement": true,
+    "associatedDomainEntitlement": true,
+    "appStoreDistributionProfile": true,
+    "profileMatchesSignedApplication": true,
+    "artifactDigestMatch": true,
+    "embeddedAdMobVersionMatchesPin": true,
+    "embeddedUMPVersionMatchesPin": true
+  },
+  "allChecksPassed": true,
+  "workflowStatus": "completed",
+  "workflowConclusion": "success",
+  "appStoreConnectUploadAccepted": true,
+  "uploadAcceptanceEvidence": [
+    "Upload iOS IPA to TestFlight\tUpload to App Store Connect for TestFlight\t2026-09-24T18:46:16.6607300Z No errors uploading archive at 'release-artifact/StudyMate.ipa'.",
+    "Upload iOS IPA to TestFlight\tUpload to App Store Connect for TestFlight\t2026-09-24T18:46:16.6710850Z UPLOAD SUCCEEDED with no errors"
+  ],
+  "appleProcessingStatus": "VALID",
+  "embeddedSDKs": {
+    "GoogleMobileAds": "13.8.0",
+    "UserMessagingPlatform": "3.1.0"
+  },
+  "internalDistribution": {
+    "runId": 36043671798,
+    "runURL": "https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/36043671798",
+    "workflowConclusion": "success",
+    "evidence": [
+      "Verify and Distribute Existing Internal Build\tVerify and distribute exact internal build\t2026-09-24T18:48:48.9393580Z TestFlight build 1.3.0 (123): NOT_VISIBLE",
+      "Verify and Distribute Existing Internal Build\tVerify and distribute exact internal build\t2026-09-24T18:48:48.9427780Z TestFlight build 1.3.0 (123): VALID",
+      "Verify and Distribute Existing Internal Build\tVerify and distribute exact internal build\t2026-09-24T18:48:48.9436900Z TestFlight internal state 1.3.0 (123): IN_BETA_TESTING",
+      "Verify and Distribute Existing Internal Build\tVerify and distribute exact internal build\t2026-09-24T18:48:48.9440510Z Exact build: 1.3.0 (123) [VALID]",
+      "Verify and Distribute Existing Internal Build\tVerify and distribute exact internal build\t2026-09-24T18:48:48.9441440Z Expected build audience: APP_STORE_ELIGIBLE",
+      "Verify and Distribute Existing Internal Build\tVerify and distribute exact internal build\t2026-09-24T18:48:48.9442230Z Already distributed to internal group: tester (5f6797bb-38a0-400b-8269-74aa6f5f3bec)",
+      "Verify and Distribute Existing Internal Build\tVerify and distribute exact internal build\t2026-09-24T18:48:48.9443080Z Internal distribution result: current"
+    ],
+    "version": "1.3.0",
+    "build": "123",
+    "processingState": "VALID",
+    "internalBuildState": "IN_BETA_TESTING",
+    "buildAudienceType": "APP_STORE_ELIGIBLE",
+    "groupName": "tester",
+    "groupId": "5f6797bb-38a0-400b-8269-74aa6f5f3bec",
+    "relationshipVerified": true,
+    "result": "current"
+  },
+  "appStoreConnectBuildId": "8f950eb5-5832-4462-b2f4-304fe3ea3e90",
+  "testFlightNotes": {
+    "locales": [
+      "en-US",
+      "ko",
+      "ja"
+    ],
+    "sourcePath": "app-store/releases/1.3.0/testflight-build-localizations.json",
+    "sourceSHA256": "5b32e3c4b84599ad211c04faf5b9293a17d1558e7739ad27df9effe4df1033de",
+    "savedVia": "Authenticated App Store Connect build-specific What to Test UI",
+    "saveCompletionObservedForAllLocales": true,
+    "koreanContentReadBack": true
+  }
+}

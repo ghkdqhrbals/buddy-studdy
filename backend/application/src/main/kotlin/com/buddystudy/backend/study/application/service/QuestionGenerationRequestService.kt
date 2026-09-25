@@ -110,6 +110,47 @@ class QuestionGenerationRequestWriteService(
     }
 
     @Transactional
+    override suspend fun enqueueFollowUp(
+        userId: Long,
+        recordId: Long,
+        idempotencyKey: String,
+        now: Instant,
+    ): QueuedQuestionGeneration {
+        val validatedKey = manualIdempotencyKey(idempotencyKey)
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(validatedKey.toByteArray()).joinToString("") { "%02x".format(it) }
+        val scopedKey = "follow-up:$recordId:$digest"
+        existing(userId, scopedKey)?.let { return it }
+        val initialParent = questions.findByIdAndUserIdAndDeletedAtIsNull(recordId, userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        val rootId = initialParent.rootRecordId ?: initialParent.id
+        val root = questions.lockByIdAndUserIdAndDeletedAtIsNull(rootId, userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        // The root lock serializes different devices and different idempotency keys for this thread.
+        existing(userId, scopedKey)?.let { return it }
+        val thread = questions.lockThreadByRootAndUser(rootId, userId)
+        val parent = thread.lastOrNull()
+        if (thread.size >= 3 || initialParent.followUpDepth >= 2) {
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.FOLLOW_UP_LIMIT_REACHED, ApiErrorCode.FOLLOW_UP_LIMIT_REACHED.debugDescription)
+        }
+        if (root.status != com.buddystudy.study.domain.entity.QuestionStatus.GRADED ||
+            parent?.id != recordId || parent.deletedAt != null ||
+            parent.status != com.buddystudy.study.domain.entity.QuestionStatus.GRADED ||
+            parent.score == null || parent.answer.isNullOrBlank() || thread.any { it.deletedAt != null }
+        ) {
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.FOLLOW_UP_NOT_AVAILABLE, ApiErrorCode.FOLLOW_UP_NOT_AVAILABLE.debugDescription)
+        }
+        val topicStudy = root.studyId?.let { studies.findByIdAndUserId(it, userId) }
+            ?: throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.FOLLOW_UP_NOT_AVAILABLE, ApiErrorCode.FOLLOW_UP_NOT_AVAILABLE.debugDescription)
+        val rootStudy = StudyTreeSelector.rootFor(topicStudy, studies.findAllByUserId(userId))
+        val user = users.findById(userId)
+            ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN.debugDescription)
+        ensureQuestionCanBeCreated(topicStudy)
+        ensureNoActiveGeneration(userId, topicStudy.id)
+        return enqueue(user, rootStudy, topicStudy, QuestionGenerationSource.FOLLOW_UP, scopedKey, now, parent)
+    }
+
+    @Transactional
     override suspend fun enqueueScheduled(
         scheduleStudy: com.buddystudy.study.domain.entity.StudyEntity,
         topicStudy: com.buddystudy.study.domain.entity.StudyEntity,
@@ -157,6 +198,7 @@ class QuestionGenerationRequestWriteService(
         source: QuestionGenerationSource,
         idempotencyKey: String,
         now: Instant,
+        parent: com.buddystudy.study.domain.entity.QuestionEntity? = null,
     ): QueuedQuestionGeneration {
         val correlationId = UUID.randomUUID().toString()
         val questionKey = questionKeys.resolveForQuestionGeneration(user, correlationId)
@@ -181,6 +223,9 @@ class QuestionGenerationRequestWriteService(
             createdAt = now,
             updatedAt = now,
             completedAt = null,
+            parentRecordId = parent?.id,
+            rootRecordId = parent?.let { it.rootRecordId ?: it.id },
+            followUpDepth = parent?.let { it.followUpDepth + 1 } ?: 0,
         )
         if (!sagas.insert(saga)) {
             questionKeys.releaseQuestionReservation(questionKey, now)

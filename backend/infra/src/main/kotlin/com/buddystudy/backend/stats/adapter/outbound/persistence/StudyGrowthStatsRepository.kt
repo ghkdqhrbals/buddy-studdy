@@ -28,6 +28,7 @@ class StudyGrowthStatsRepository(
             where user_id = :userId
               and record_type = 'QUESTION'
               and deleted_at is null
+              and source not in ('follow_up', 'custom_question')
               and study_id is not null
               and (
                 (created_at >= :startAt and created_at < :endAt)
@@ -37,8 +38,8 @@ class StudyGrowthStatsRepository(
             """.trimIndent(),
         )
             .bind("userId", userId)
-            .bind("startAt", startAt)
-            .bind("endAt", endAt)
+            .bind("startAt", LocalDateTime.ofInstant(startAt, ZoneOffset.UTC))
+            .bind("endAt", LocalDateTime.ofInstant(endAt, ZoneOffset.UTC))
             .map { row, _ ->
                 val createdAt = row.instant("created_at")
                 val answeredAt = row.instantOrNull("answered_at")

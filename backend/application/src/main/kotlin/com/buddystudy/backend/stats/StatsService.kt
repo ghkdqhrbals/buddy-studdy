@@ -169,6 +169,10 @@ class StatsService(
             answeredAt = answeredAt,
             publicQuestion = publicQuestion,
             studyId = studyId,
+            parentRecordId = parentRecordId,
+            rootRecordId = rootRecordId,
+            followUpDepth = followUpDepth,
+            source = source.databaseValue,
         ),
         statsEntity?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
     )
@@ -265,7 +269,7 @@ class StatsRefreshService(
 class UserStatsRowBuilder {
     fun build(questions: List<QuestionEntity>, now: Instant): List<UserStatsEntity> =
         questions
-            .filter { it.userId != null && it.deletedAt == null && it.score != null }
+            .filter { it.userId != null && it.deletedAt == null && it.score != null && it.followUpDepth == 0 && it.source.databaseValue !in setOf("follow_up", "custom_question") }
             .groupBy { StatsBucketKey(it.userId!!, statsDate(it), normalizedTopic(it.topic), it.difficultyLevel) }
             .map { (key, rows) -> key.toEntity(rows, now) }
 

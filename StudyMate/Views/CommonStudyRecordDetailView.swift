@@ -17,10 +17,11 @@ struct CommonStudyRecordDetailView: View {
 
     var body: some View {
         Group {
-            if currentRecord.isCompletedRecord {
+            if currentRecord.isCompletedRecord && !currentRecord.isFollowUp && !currentRecord.isCustomQuestion {
                 CommunityQuestionDetailView(
                     question: currentRecord.asQuestionBrowseQuestion(author: appState.communityProfile),
-                    contentSource: .record(isPublic: currentRecord.isPublic && currentRecord.canPublish)
+                    contentSource: .record(isPublic: currentRecord.isPublic && currentRecord.canPublish),
+                    ownedStudyRecord: currentRecord.isQuestion ? currentRecord : nil
                 )
             } else {
                 StudyRecordDetailView(record: currentRecord).padding(.horizontal, 16)

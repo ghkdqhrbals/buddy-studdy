@@ -13,6 +13,12 @@ protocol RecordsRepository {
         language: AppLanguage, view: LocalizedContentView
     ) async throws -> BackendVoiceStudyLearningRecord
     #endif
+
+    func createCustomQuestion(registration: RemotePushRegistration, studyID: Int, draft: CustomQuestionDraft) async throws -> StudyRecord
+
+    func createFollowUp(registration: RemotePushRegistration, recordID: String, idempotencyKey: String) async throws -> QuestionGenerationAccepted
+    func fetchRecordThread(registration: RemotePushRegistration, recordID: String, language: AppLanguage) async throws -> [StudyRecord]
+
     func fetchRecords(
         registration: RemotePushRegistration,
         limit: Int,

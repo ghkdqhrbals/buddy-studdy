@@ -268,6 +268,9 @@ final class AppState: ObservableObject {
     @Published var isRequiredTermsGatePresented = false
     @Published private(set) var questionQuota: BackendQuestionQuota?
     @Published private(set) var questionQuotaNotice: String?
+    @Published private var loadedStudyThreadIDs: Set<String> = []
+    @Published private(set) var studyThreadErrors: [String: String] = [:]
+    @Published private(set) var followUpErrors: [String: String] = [:]
     @Published private(set) var billingCatalog: BackendBillingCatalog?
     @Published private(set) var billingStatus: BackendBillingStatus?
     @Published private(set) var billingInvoices: [BackendBillingInvoice] = []
@@ -459,6 +462,14 @@ final class AppState: ObservableObject {
     }
 
     private func invalidateCommonRecordReads(detachQuestionDrafts: Bool = false) {
+        loadedStudyThreadIDs.removeAll()
+        studyThreadErrors.removeAll()
+        followUpErrors.removeAll()
+        if detachQuestionDrafts,
+           currentStudySessionUseCase.loadPendingQuestionGenerationProcess()?.parentRecordID != nil {
+            questionGenerationPollingTask?.cancel()
+            finishQuestionGenerationProcess()
+        }
         commonRecordsPageRequestID = UUID()
         backendRecordRefreshTask?.cancel()
         backendRecordRefreshTask = nil
@@ -489,7 +500,7 @@ final class AppState: ObservableObject {
         // same numeric record ID; retain the visible question and answer.
         flushPendingAnswerDraftSave()
         let drafts = localStudyRecordUseCase.loadRecords().compactMap { record -> StudyRecord? in
-            guard record.isQuestion, record.gradingResult == nil else { return nil }
+            guard record.isQuestion, record.isPendingQuestion || record.isDetachedLocalQuestion else { return nil }
             guard !record.isDetachedLocalQuestion, Int64(record.id) != nil else { return record }
             var detached = record
             detached.id = "local-draft:\(UUID().uuidString)"
@@ -1172,7 +1183,7 @@ final class AppState: ObservableObject {
             return
         }
         if let fixture = AppDebugFixtureConfiguration.fixtureName(),
-           ["learning-result", "result"].contains(fixture) {
+           ["learning-result", "result", "follow-up", "follow-up-pending", "custom-question"].contains(fixture) {
             selectedTab = .home
             return
         }
@@ -2669,6 +2680,8 @@ final class AppState: ObservableObject {
 
         homeStudyRoute = nil
         switch fixture {
+        case "follow-up", "follow-up-pending", "custom-question", "custom-records":
+            configureConversationScreenshotFixture(fixture, language: language, rooms: rooms, now: now)
         case "learning-result", "result":
             selectedTab = .home
             currentQuestion = records[0].question
@@ -2749,6 +2762,89 @@ final class AppState: ObservableObject {
         )
     }
     #endif
+
+    private func configureConversationScreenshotFixture(
+        _ fixture: String,
+        language: AppLanguage,
+        rooms: [BackendStudyRoom],
+        now: Date
+    ) {
+        func text(_ korean: String, _ english: String, _ japanese: String) -> String {
+            switch language {
+            case .korean: korean
+            case .english: english
+            case .japanese: japanese
+            }
+        }
+        let topic = rooms.first { $0.id == 102 }?.topic ?? "SwiftUI"
+        let original = StudyRecord(
+            id: "screenshot-record-130001", studyID: 102,
+            question: QuestionItem(
+                question: text("@State와 @Binding은 어떻게 다른가요?", "How do @State and @Binding differ?", "@Stateと@Bindingの違いは何ですか？"),
+                createdAt: now.addingTimeInterval(-600)
+            ),
+            answer: text("@State는 뷰의 값을 소유하고 @Binding은 다른 곳의 값을 수정할 수 있게 합니다.", "@State owns a view's value; @Binding lets another view change it.", "@Stateは値を所有し、@Bindingは他のビューから値を変更できるようにします。"),
+            gradingResult: GradingResult(
+                score: 85, isCorrect: true,
+                feedback: text("값의 소유권을 잘 설명했어요.", "You explained ownership well.", "値の所有についてよく説明できています。"),
+                explanation: text("부모가 값을 소유하고 자식은 바인딩으로 접근할 수 있어요.", "The parent owns the value; its child can access a binding.", "親が値を所有し、子はバインディングを通してアクセスできます。")
+            ),
+            topic: topic, difficulty: Difficulty(level: 6), answeredAt: now.addingTimeInterval(-540), isPublic: false
+        )
+        let followUp = StudyRecord(
+            id: "screenshot-record-130002", studyID: 102,
+            question: QuestionItem(
+                question: text("부모와 자식 뷰에 각각 @State를 선언하면 값이 자동으로 연결될까요?", "If parent and child each declare @State, are those values automatically linked?", "親と子がそれぞれ@Stateを宣言すると、値は自動的に連動しますか？"),
+                createdAt: now.addingTimeInterval(-300)
+            ),
+            answer: text("아니요. 서로 별개의 상태이므로 부모의 값을 @Binding으로 전달해야 합니다.", "No. They are separate state values; the parent must pass a binding.", "いいえ。別々の状態なので、親からバインディングを渡す必要があります。"),
+            gradingResult: GradingResult(
+                score: 95, isCorrect: true,
+                feedback: text("별개의 상태와 공유된 바인딩을 잘 구분했어요.", "You distinguished independent state from a shared binding.", "独立した状態と共有バインディングを区別できています。"),
+                explanation: text("바인딩을 통해 한 곳에서 소유한 값을 함께 사용합니다.", "A binding shares access to a value owned in one place.", "バインディングは一か所で所有する値へのアクセスを共有します。")
+            ),
+            topic: topic, difficulty: Difficulty(level: 6), answeredAt: now.addingTimeInterval(-240), isPublic: false,
+            parentRecordID: original.id, rootRecordID: original.id, followUpDepth: 1, source: "follow_up"
+        )
+        let pending = StudyRecord(
+            id: "screenshot-record-130003", studyID: 102,
+            question: QuestionItem(
+                question: text("입력한 이름을 저장 버튼을 누를 때만 반영하려면 상태를 어디에 둘까요?", "Where would you keep an edited name if changes should apply only after Save?", "保存を押したときだけ名前を反映するには、編集状態をどこに置きますか？"),
+                createdAt: now.addingTimeInterval(-60)
+            ),
+            topic: topic, difficulty: Difficulty(level: 6), isPublic: false,
+            parentRecordID: followUp.id, rootRecordID: original.id, followUpDepth: 2, source: "follow_up"
+        )
+        let custom = StudyRecord(
+            id: "screenshot-record-130004", studyID: 102,
+            question: QuestionItem(
+                question: text("내 앱의 프로필 편집 화면에서 임시 입력을 어떻게 보관할까?", "How should my profile editor keep unsaved input?", "プロフィール編集画面の未保存の入力はどう保持する？"),
+                createdAt: now
+            ),
+            answer: text("편집 화면에 **초안 상태**를 두고, 저장할 때만 원본에 반영한다. 취소하면 원본은 유지한다.", "Keep a **local draft** in the editor and update the original only on Save. Cancel leaves the original intact.", "編集画面に**下書き状態**を置き、保存時に元の値へ反映する。キャンセルでは元の値を維持する。"),
+            topic: topic, difficulty: Difficulty(level: 6), answeredAt: now, isPublic: false,
+            questionStatus: .graded, source: "custom_question"
+        )
+        let isCustom = fixture.hasPrefix("custom-")
+        let thread = isCustom ? [custom] : fixture == "follow-up-pending" ? [original, followUp, pending] : [original, followUp]
+        let current = thread.last!
+        localStudyRecordUseCase.replaceRecords(thread)
+        recordsState.replace(with: thread)
+        loadedStudyThreadIDs.insert(original.id)
+        var fixtureRooms = rooms
+        if let index = fixtureRooms.firstIndex(where: { $0.id == 102 }) {
+            fixtureRooms[index].pendingQuestion = current.isCompleted ? nil : current
+            fixtureRooms[index].latestQuestion = isCustom ? custom : followUp
+        }
+        studyRoomState.replace(with: fixtureRooms)
+        currentQuestion = current.question
+        lastAnswer = current.answer ?? ""
+        gradingResult = current.gradingResult
+        selectedTab = fixture == "custom-records" ? .records : .home
+        if fixture != "custom-records" {
+            homeStudyRoute = HomeStudyRoute(categoryID: "102", isContentPrepared: true)
+        }
+    }
     #endif
 
     deinit {
@@ -5930,6 +6026,9 @@ final class AppState: ObservableObject {
     }
 
     private func resetCommunitySignInState() {
+        loadedStudyThreadIDs.removeAll()
+        studyThreadErrors.removeAll()
+        followUpErrors.removeAll()
         #if os(iOS)
         StudyReviewCoordinator.shared.cancelPendingRequest()
         #endif
@@ -7083,6 +7182,157 @@ final class AppState: ObservableObject {
         )
     }
 
+    func studyThread(containing record: StudyRecord) -> [StudyRecord] {
+        StudyFollowUpPolicy.orderedThread(containing: record, records: studyRecords)
+    }
+
+    func hasLoadedStudyThread(_ record: StudyRecord) -> Bool {
+        loadedStudyThreadIDs.contains(record.threadRootID)
+    }
+
+    @discardableResult
+    func loadStudyThread(containing record: StudyRecord) async -> Bool {
+        guard record.isQuestion, !record.isCustomQuestion, !record.isDetachedLocalQuestion else { return false }
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            loadedStudyThreadIDs.insert(record.threadRootID)
+            return true
+        }
+        #endif
+        let isCurrent = makeRecordRequestValidity()
+        let language = settings.appLanguage
+        let useCase = recordsUseCase
+        guard let registration = await prepareRecordRegistration(reason: "record-thread", validity: isCurrent) else {
+            guard isCurrent() else { return false }
+            studyThreadErrors[record.threadRootID] = strings.studyThreadLoadFailed
+            return false
+        }
+        do {
+            let thread = try await useCase.fetchRecordThread(
+                registration: registration,
+                recordID: record.id,
+                language: language
+            )
+            guard isCurrent(), !Task.isCancelled else { return false }
+            let otherThreads = studyRecords.filter { $0.threadRootID != record.threadRootID }
+            let merged = thread.reduce(otherThreads) { mergeBackendRecord($1, into: $0) }
+            localStudyRecordUseCase.replaceRecords(merged)
+            reloadStudyRecordsFromStore()
+            loadedStudyThreadIDs.insert(record.threadRootID)
+            studyThreadErrors[record.threadRootID] = nil
+            return true
+        } catch {
+            guard isCurrent(), !Task.isCancelled else { return false }
+            studyThreadErrors[record.threadRootID] = strings.studyThreadLoadFailed
+            log(.warning, "학습 대화 로드 실패: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    func isGeneratingFollowUp(for record: StudyRecord) -> Bool {
+        guard isGeneratingQuestion,
+              let parentID = currentStudySessionUseCase.loadPendingQuestionGenerationProcess()?.parentRecordID else {
+            return false
+        }
+        return studyThread(containing: record).contains { $0.id == parentID }
+    }
+
+    func generateFollowUp(after record: StudyRecord) async {
+        guard !isGeneratingQuestion, questionGenerationPollingTask == nil,
+              requirePageAccess(.studyDetail) else { return }
+        let isCurrent = makeRecordRequestValidity()
+        let requestOwnerID = customQuestionDraftOwnerID
+        flushPendingAnswerDraftSave()
+        followUpErrors[record.threadRootID] = nil
+        guard StudyFollowUpPolicy.canRequest(after: record, thread: studyThread(containing: record)) else {
+            followUpErrors[record.threadRootID] = record.followUpDepth >= StudyFollowUpPolicy.maximumDepth
+                ? strings.followUpLimitReached : strings.followUpUnavailable
+            return
+        }
+        isGeneratingQuestion = true
+        generatingQuestionCategoryID = record.studyID.map(String.init)
+        guard let registration = await prepareRecordRegistration(reason: "follow-up", validity: isCurrent),
+              isCurrent(), !Task.isCancelled,
+              let studyID = record.studyID else {
+            guard requestOwnerID == customQuestionDraftOwnerID else { return }
+            if isCurrent(), !Task.isCancelled {
+                followUpErrors[record.threadRootID] = strings.communityRequestFailed
+            }
+            finishQuestionGenerationProcess()
+            return
+        }
+        errorMessage = nil
+        let pending = PendingQuestionGenerationProcess(
+            idempotencyKey: appIdentifierProvider.makeIdentifier(),
+            correlationID: nil,
+            studyID: studyID,
+            studyCategoryID: String(studyID),
+            submittedAt: appClock.now,
+            parentRecordID: record.id
+        )
+        startQuestionGenerationPolling(pending: pending, registration: registration, manual: true)
+    }
+
+    private var customQuestionDraftAccountID: Int64 { communityProfile.map { Int64($0.id) } ?? backendAccessState.user.id }
+
+    private func customQuestionDraftKey(studyID: Int) -> String {
+        "\(configuredBackendBaseURLDescription)|\(customQuestionDraftAccountID):\(studyID)"
+    }
+
+    var customQuestionDraftOwnerID: String {
+        "\(customQuestionDraftAccountID):\(communitySessionState.generation):\(backendClientGeneration)"
+    }
+
+    func customQuestionDraft(studyID: Int) -> CustomQuestionDraft {
+        localStudyRecordUseCase.loadCustomQuestionDraft(key: customQuestionDraftKey(studyID: studyID))
+            ?? CustomQuestionDraft(language: settings.appLanguage)
+    }
+
+    func saveCustomQuestionDraft(_ draft: CustomQuestionDraft, studyID: Int, ownerID: String) {
+        guard ownerID == customQuestionDraftOwnerID else { return }
+        localStudyRecordUseCase.saveCustomQuestionDraft(draft, key: customQuestionDraftKey(studyID: studyID))
+    }
+
+    func createCustomQuestion(studyID: Int, draft: CustomQuestionDraft, ownerID: String) async -> StudyRecord? {
+        guard ownerID == customQuestionDraftOwnerID, draft.canSave, requirePageAccess(.studyDetail) else { return nil }
+        flushPendingAnswerDraftSave()
+        let isCurrent = makeRecordRequestValidity()
+        let useCase = recordsUseCase
+        let draftKey = customQuestionDraftKey(studyID: studyID)
+        localStudyRecordUseCase.saveCustomQuestionDraft(draft, key: draftKey)
+        guard let registration = await prepareRecordRegistration(reason: "custom-question", validity: isCurrent) else {
+            guard isCurrent(), ownerID == customQuestionDraftOwnerID else { return nil }
+            errorMessage = strings.communityRequestFailed
+            return nil
+        }
+        do {
+            let record = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "custom-question",
+                syncSettingsAfterRegistration: false,
+                validity: isCurrent,
+                operation: { registration in
+                    try await useCase.createCustomQuestion(registration: registration, studyID: studyID, draft: draft)
+                }
+            )
+            guard isCurrent(), ownerID == customQuestionDraftOwnerID, !Task.isCancelled else { return nil }
+            invalidateStudyLearningRecordPages()
+            localStudyRecordUseCase.replaceRecords(mergeBackendRecord(record, into: studyRecords))
+            reloadStudyRecordsFromStore()
+            if localStudyRecordUseCase.loadCustomQuestionDraft(key: draftKey)?.idempotencyKey == draft.idempotencyKey {
+                localStudyRecordUseCase.saveCustomQuestionDraft(nil, key: draftKey)
+            }
+            statusMessage = strings.customQuestionSaved
+            errorMessage = nil
+            return record
+        } catch {
+            guard isCurrent(), ownerID == customQuestionDraftOwnerID, !Task.isCancelled else { return nil }
+            errorMessage = appErrorHandlingUseCase.resolve(error, fallback: strings.communityRequestFailed, language: settings.appLanguage).featureMessage
+                ?? strings.communityRequestFailed
+            return nil
+        }
+    }
+
     func createCommunityQuestionComment(questionID: String, body: String) async -> CommunityQuestionComment? {
         guard isCommunitySessionActive else {
             return nil
@@ -7961,7 +8211,7 @@ final class AppState: ObservableObject {
 
         guard let category = studyCategoryForRoom(categoryID),
               let currentRecord = studyRecord(matching: currentQuestion),
-              currentRecord.gradingResult != nil else {
+              currentRecord.isCompleted else {
             return nil
         }
 
@@ -9560,24 +9810,12 @@ final class AppState: ObservableObject {
             }
             referralErrorMessage = strings.referralRedeemFailed
             log(.warning, "추천 코드를 등록하지 못했습니다: \(error.localizedDescription)")
-            return Self.isTerminalReferralRedemptionError(error)
+            return appErrorHandlingUseCase.isTerminalReferralRedemptionError(error)
                 ? .terminalFailure
                 : .transientFailure
         } catch {
             return .transientFailure
         }
-    }
-
-    private static func isTerminalReferralRedemptionError(_ error: Error) -> Bool {
-        guard let backendError = error as? RemotePushBackendError,
-              case .httpStatus(let statusCode, _, _) = backendError,
-              (400..<500).contains(statusCode) else {
-            return false
-        }
-        return statusCode != 401
-            && statusCode != 408
-            && statusCode != 425
-            && statusCode != 429
     }
 
     func syncAppleBillingTransaction(
@@ -10050,7 +10288,7 @@ final class AppState: ObservableObject {
         )
     }
 
-    private func resumeStudyRoomAnswerGrading(
+    func resumeStudyRoomAnswerGrading(
         _ queuedRecord: StudyRecord,
         pollingOwnerID: String
     ) async {
@@ -10738,27 +10976,42 @@ final class AppState: ObservableObject {
         registration: RemotePushRegistration,
         manual: Bool
     ) async {
+        let requestOwnerID = customQuestionDraftOwnerID
+        let isCurrent: @MainActor @Sendable () -> Bool = { [weak self] in
+            self?.customQuestionDraftOwnerID == requestOwnerID
+        }
+        let generationRecordsUseCase = recordsUseCase
+        let generationStudyRoomUseCase = studyRoomUseCase
         var pending = initialPending
         var consecutiveTransportFailures = 0
         defer {
             questionGenerationPollingTask = nil
         }
 
-        while !Task.isCancelled {
+        while !Task.isCancelled && isCurrent() {
             if pending.correlationID == nil {
                 do {
                     log(.info, "백엔드 질문 생성 요청을 등록합니다. studyID=\(pending.studyID)")
                     let accepted = try await performWithBackendIdentityRecovery(
                         registration: registration,
                         reason: "question-generation-submit",
+                        validity: isCurrent,
                         operation: { recoveredRegistration in
-                            try await studyRoomUseCase.createQuestion(
+                            if let parentRecordID = pending.parentRecordID {
+                                return try await generationRecordsUseCase.createFollowUp(
+                                    registration: recoveredRegistration,
+                                    recordID: parentRecordID,
+                                    idempotencyKey: pending.idempotencyKey
+                                )
+                            }
+                            return try await generationStudyRoomUseCase.createQuestion(
                                 registration: recoveredRegistration,
                                 studyID: pending.studyID,
                                 idempotencyKey: pending.idempotencyKey
                             )
                         }
                     )
+                    guard isCurrent(), !Task.isCancelled else { return }
                     pending.correlationID = accepted.correlationID
                     currentStudySessionUseCase.savePendingQuestionGenerationProcess(pending)
                     consecutiveTransportFailures = 0
@@ -10769,11 +11022,13 @@ final class AppState: ObservableObject {
                     )
                     await sleepForQuestionGeneration(milliseconds: accepted.pollAfterMilliseconds)
                 } catch {
-                    if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {
+                    guard isCurrent(), !Task.isCancelled else { return }
+                    if appErrorHandlingUseCase.isPermanentQuestionGenerationError(error) {
                         await handleQuestionGenerationRequestFailure(
                             error,
                             manual: manual,
-                            studyCategoryID: pending.studyCategoryID
+                            studyCategoryID: pending.studyCategoryID,
+                            parentRecordID: pending.parentRecordID
                         )
                         finishQuestionGenerationProcess()
                         return
@@ -10794,13 +11049,15 @@ final class AppState: ObservableObject {
                 let process = try await performWithBackendIdentityRecovery(
                     registration: registration,
                     reason: "question-generation-poll",
+                    validity: isCurrent,
                     operation: { recoveredRegistration in
-                        try await studyRoomUseCase.fetchQuestionGenerationProcess(
+                        try await generationStudyRoomUseCase.fetchQuestionGenerationProcess(
                             registration: recoveredRegistration,
                             correlationID: correlationID
                         )
                     }
                 )
+                guard isCurrent(), !Task.isCancelled else { return }
                 consecutiveTransportFailures = 0
                 if process.terminal {
                     if process.status == .completed, let record = process.question {
@@ -10810,6 +11067,10 @@ final class AppState: ObservableObject {
                         AppAnalytics.questionGenerationFailed(source: manual ? .manual : .scheduled)
                         let message = process.error?.message ?? strings.communityRequestFailed
                         errorMessage = message
+                        if let parentID = pending.parentRecordID,
+                           let parent = studyRecords.first(where: { $0.id == parentID }) {
+                            followUpErrors[parent.threadRootID] = message
+                        }
                         statusMessage = nil
                         log(
                             .error,
@@ -10824,11 +11085,13 @@ final class AppState: ObservableObject {
                 statusMessage = strings.fetchingQuestion
                 await sleepForQuestionGeneration(milliseconds: process.pollAfterMilliseconds ?? 250)
             } catch {
-                if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {
+                guard isCurrent(), !Task.isCancelled else { return }
+                if appErrorHandlingUseCase.isPermanentQuestionGenerationError(error) {
                     await handleQuestionGenerationRequestFailure(
                         error,
                         manual: manual,
-                        studyCategoryID: pending.studyCategoryID
+                        studyCategoryID: pending.studyCategoryID,
+                        parentRecordID: pending.parentRecordID
                     )
                     finishQuestionGenerationProcess()
                     return
@@ -10912,9 +11175,25 @@ final class AppState: ObservableObject {
     private func handleQuestionGenerationRequestFailure(
         _ error: Error,
         manual: Bool,
-        studyCategoryID: String?
+        studyCategoryID: String?,
+        parentRecordID: String? = nil
     ) async {
         statusMessage = nil
+        if let parentRecordID,
+           let parent = studyRecords.first(where: { $0.id == parentRecordID }) {
+            let availabilityFailure = appErrorHandlingUseCase.followUpAvailabilityFailure(error)
+            let isLimit = availabilityFailure == .limitReached
+            let isUnavailable = availabilityFailure == .notAvailable
+            let message = isLimit ? strings.followUpLimitReached
+                : isUnavailable ? strings.followUpUnavailable
+                : appErrorHandlingUseCase.resolve(error, fallback: strings.communityRequestFailed, language: settings.appLanguage).featureMessage
+                    ?? strings.communityRequestFailed
+            followUpErrors[parent.threadRootID] = message
+            if isLimit || isUnavailable {
+                await loadStudyThread(containing: parent)
+                return
+            }
+        }
         let resolution = appErrorHandlingUseCase.resolve(
             error,
             fallback: strings.monthlyQuotaReached,
@@ -10940,6 +11219,11 @@ final class AppState: ObservableObject {
             target: .none,
             protectedPage: .studyDetail,
             termsRetry: { [weak self] in
+                if let parentRecordID,
+                   let parent = self?.studyRecords.first(where: { $0.id == parentRecordID }) {
+                    await self?.generateFollowUp(after: parent)
+                    return
+                }
                 await self?.generateQuestion(manual: manual, studyCategoryID: studyCategoryID)
             }
         ) {
@@ -11734,7 +12018,7 @@ final class AppState: ObservableObject {
                 .compactMap(\.pendingQuestion)
                 .first(where: { $0.id == queuedRecord.id })
             ?? queuedRecord
-        guard currentRecord.gradingResult == nil else {
+        guard currentRecord.isPendingStudyQuestion else {
             return
         }
 
@@ -11935,9 +12219,7 @@ final class AppState: ObservableObject {
 
         notificationLandingMessage = nil
 
-        let matchesCurrentQuestion = currentQuestion.map {
-            Self.questionsMatch($0, record.question)
-        } ?? false
+        let matchesCurrentQuestion = isCurrentStudyRecord(record)
         let isStudyRoomPendingQuestion = studyRoomState.containsPendingQuestion(recordID: record.id)
 
         if matchesCurrentQuestion {
@@ -11945,7 +12227,7 @@ final class AppState: ObservableObject {
         }
 
         if let storedRecord = studyRecord(matching: record.question),
-           storedRecord.gradingResult == nil {
+           storedRecord.isPendingStudyQuestion {
             notificationService.cancelQuestionNotification(for: storedRecord.question)
             localStudyRecordUseCase.deleteRecord(storedRecord)
         } else if !matchesCurrentQuestion && !isStudyRoomPendingQuestion {
@@ -12101,9 +12383,15 @@ final class AppState: ObservableObject {
     private func persistAnswerDraft(_ draft: PendingAnswerDraft) {
         if let recordID = draft.recordID {
             localStudyRecordUseCase.saveAnswerDraft(draft.answer, recordID: recordID)
-            if let question = draft.question,
-               let currentQuestion,
-               Self.questionsMatch(currentQuestion, question) {
+            let matchesCurrentRecord: Bool
+            if let currentRecord = studyRecord(matching: currentQuestion) {
+                matchesCurrentRecord = currentRecord.id == recordID
+            } else if let question = draft.question, let currentQuestion {
+                matchesCurrentRecord = StudyRecordIdentityPolicy.sameQuestionInstance(currentQuestion, question)
+            } else {
+                matchesCurrentRecord = false
+            }
+            if matchesCurrentRecord {
                 lastAnswer = draft.answer
                 currentStudySessionUseCase.saveLastAnswer(draft.answer)
             }
@@ -12145,7 +12433,7 @@ final class AppState: ObservableObject {
         currentStudySessionUseCase.saveGradingResult(record.gradingResult)
         showStudyScreen(categoryID: categoryID(forTopic: record.topic))
         focusedRecordRequest = nil
-        statusMessage = record.gradingResult == nil ? "미제출 질문을 열었습니다." : "학습 기록을 열었습니다."
+        statusMessage = record.isPendingStudyQuestion ? "미제출 질문을 열었습니다." : "학습 기록을 열었습니다."
         markCloudDataChanged(syncDelaySeconds: 4)
     }
 
@@ -12301,7 +12589,7 @@ final class AppState: ObservableObject {
         _ = openNotificationRecord(refreshedRecord)
         notificationLandingMessage = nil
         statusMessage = trimmedReply.isEmpty
-            ? (refreshedRecord.gradingResult == nil ? "알림에서 열린 질문입니다." : "알림에서 기록을 열었습니다.")
+            ? (refreshedRecord.isPendingStudyQuestion ? "알림에서 열린 질문입니다." : "알림에서 기록을 열었습니다.")
             : "알림 답장을 기록에 저장했습니다."
         markCloudDataChanged()
         return true
@@ -12370,7 +12658,7 @@ final class AppState: ObservableObject {
             return false
         }
 
-        guard record.gradingResult == nil else {
+        guard record.isPendingStudyQuestion else {
             log(.info, "이미 채점된 질문이라 알림 답장을 덮어쓰지 않았습니다.")
             return false
         }
@@ -12471,7 +12759,7 @@ final class AppState: ObservableObject {
         }
 
         let existingRecord = studyRecord(matching: question)
-        guard existingRecord?.gradingResult == nil else {
+        guard existingRecord == nil || existingRecord?.isPendingQuestion == true else {
             log(.info, "이미 채점된 질문이라 알림 답장을 덮어쓰지 않았습니다.")
             return false
         }
@@ -12542,6 +12830,9 @@ final class AppState: ObservableObject {
         localStudyRecordUseCase.clearRecords()
         recordsToClear.forEach { localStudyRecordUseCase.deleteAnswerDraft(recordID: $0.id) }
         recordsState.clear(loaded: true)
+        loadedStudyThreadIDs.removeAll()
+        studyThreadErrors.removeAll()
+        followUpErrors.removeAll()
         replaceRecordSearchResults(nil)
         currentQuestion = nil
         lastAnswer = ""
@@ -12599,6 +12890,7 @@ final class AppState: ObservableObject {
         guard !recordsState.records.contains(where: { $0.id == record.id && $0.recordType != record.recordType }) else { return }
         if record.isQuestion { notificationService.cancelQuestionNotification(for: record.question) }
         invalidateStudyLearningRecordPages()
+        let matchesCurrentQuestion = record.isQuestion && isCurrentStudyRecord(record)
         var nextRecordsState = recordsState
         nextRecordsState.removeLoadedBackendRecord(record)
         recordsState = nextRecordsState
@@ -12610,8 +12902,7 @@ final class AppState: ObservableObject {
         removeCommunityQuestion(id: record.id)
         notificationLandingMessage = nil
 
-        if record.isQuestion,
-           StudyRecordIdentityPolicy.questionsMatch(currentQuestion?.question ?? "", record.question.question) {
+        if matchesCurrentQuestion {
             currentQuestion = nil
             gradingResult = nil
             lastAnswer = ""
@@ -12655,6 +12946,7 @@ final class AppState: ObservableObject {
     }
 
     func updateStudyRecordPublicity(_ record: StudyRecord, isPublic: Bool) {
+        guard !record.isFollowUp, !record.isCustomQuestion else { return }
         guard !record.isDetachedLocalQuestion,
               !recordsState.records.contains(where: { $0.id == record.id && $0.recordType != record.recordType }) else { return }
         guard !isPublic || record.canPublish else { return }
@@ -14603,7 +14895,15 @@ final class AppState: ObservableObject {
     }
 
     private func studyRecordMatches(_ record: StudyRecord, question: QuestionItem) -> Bool {
-        record.isQuestion && Self.questionsMatch(record.question, question)
+        StudyRecordIdentityPolicy.recordMatchesQuestion(record, question: question)
+    }
+
+    private func isCurrentStudyRecord(_ record: StudyRecord) -> Bool {
+        guard let currentQuestion else { return false }
+        if let currentRecord = studyRecord(matching: currentQuestion) {
+            return currentRecord.id == record.id
+        }
+        return StudyRecordIdentityPolicy.sameQuestionInstance(record.question, currentQuestion)
     }
 
     nonisolated private static func questionsMatch(_ lhs: QuestionItem, _ rhs: QuestionItem) -> Bool {
@@ -15233,7 +15533,7 @@ final class AppState: ObservableObject {
                 return lhsDate > rhsDate
             }
 
-        if let preferredRecord = matchingRecords.first(where: { $0.gradingResult == nil }) ?? matchingRecords.first {
+        if let preferredRecord = matchingRecords.first(where: \.isPendingQuestion) ?? matchingRecords.first {
             currentQuestion = preferredRecord.question
             lastAnswer = preferredRecord.answer ?? ""
             gradingResult = preferredRecord.gradingResult

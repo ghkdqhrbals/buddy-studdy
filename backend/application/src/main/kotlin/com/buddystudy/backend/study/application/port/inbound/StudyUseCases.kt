@@ -74,6 +74,13 @@ interface BrowseRecordsUseCase {
         language: String = "ko",
         view: String = "localized",
     ): StudyRecordResponse
+    /** Thread history keeps skipped turns visible without changing ordinary history visibility. */
+    suspend fun recordForThread(
+        principal: Principal,
+        id: Long,
+        language: String,
+        view: String,
+    ): StudyRecordResponse = record(principal, id, language, view)
 }
 
 interface StudySyncUseCase {

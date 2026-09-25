@@ -18,6 +18,7 @@ fun StudyRecordProjection.toRecordResponse(
     aiResponseTranslationPending: Boolean = true,
     answerAuthorOriginal: Boolean = false,
 ): StudyRecordResponse {
+    val displayMode = if (source == "custom_question") TranslationViewMode.ORIGINAL else viewMode
     val assessment = gradingAssessmentJson?.let { json ->
         runCatching { JsonMapperProvider.mapper.readValue(json, AiGradingAssessment::class.java) }.getOrNull()
     }
@@ -25,7 +26,7 @@ fun StudyRecordProjection.toRecordResponse(
         id = id,
         question = QuestionItemResponse(question = question, expectedAnswerHint = expectedAnswerHint, createdAt = createdAt),
         answer = answer,
-        gradingResult = score?.takeIf { recordType == StudyRecordType.QUESTION }?.let {
+        gradingResult = score?.takeIf { recordType == StudyRecordType.QUESTION && source != "custom_question" }?.let {
             GradingResultResponse(
                 score = it,
                 isCorrect = correct ?: (it >= 70),
@@ -58,6 +59,10 @@ fun StudyRecordProjection.toRecordResponse(
         commentCount = commentCount,
         viewCount = viewCount,
         studyId = studyId,
+        parentRecordId = parentRecordId?.toString(),
+        rootRecordId = rootRecordId?.toString(),
+        followUpDepth = followUpDepth,
+        source = source,
         gradingRequestId = gradingRequestId,
         correlationId = gradingRequestId,
         gradingStatus = gradingStatus?.let { runCatching { AnswerGradingStatus.valueOf(it) }.getOrNull() },
@@ -70,7 +75,7 @@ fun StudyRecordProjection.toRecordResponse(
                 sourceLanguage = questionSourceLanguage,
                 requestedLanguage = requestedLanguage,
                 displayLanguage = questionDisplayLanguage,
-                viewMode = viewMode,
+                viewMode = displayMode,
                 pending = questionTranslationPending,
             ),
             answer = answer?.let {
@@ -78,17 +83,17 @@ fun StudyRecordProjection.toRecordResponse(
                     sourceLanguage = answerSourceLanguage ?: questionSourceLanguage,
                     requestedLanguage = requestedLanguage,
                     displayLanguage = answerDisplayLanguage,
-                    viewMode = viewMode,
+                    viewMode = displayMode,
                     pending = answerTranslationPending,
                     authorOriginal = answerAuthorOriginal,
                 )
             },
-            aiResponse = score?.let {
+            aiResponse = score?.takeUnless { source == "custom_question" }?.let {
                 localeMetadata(
                     sourceLanguage = aiResponseSourceLanguage ?: questionSourceLanguage,
                     requestedLanguage = requestedLanguage,
                     displayLanguage = aiResponseDisplayLanguage,
-                    viewMode = viewMode,
+                    viewMode = displayMode,
                     pending = aiResponseTranslationPending,
                 )
             },

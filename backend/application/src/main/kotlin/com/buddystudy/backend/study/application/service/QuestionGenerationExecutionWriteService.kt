@@ -107,6 +107,16 @@ class QuestionGenerationExecutionWriteService(
         check(saga.status == QuestionGenerationStatus.GENERATING) {
             "Question generation Saga no longer permits completion."
         }
+        if (prepared.question.source == com.buddystudy.study.domain.entity.QuestionSource.FOLLOW_UP) {
+            val rootId = checkNotNull(prepared.question.rootRecordId)
+            checkNotNull(questions.lockByIdAndUserIdAndDeletedAtIsNull(rootId, event.userId)) {
+                "The original record was deleted during follow-up generation."
+            }
+            val thread = questions.lockThreadByRootAndUser(rootId, event.userId)
+            check(thread.lastOrNull()?.id == prepared.question.parentRecordId && thread.all { it.deletedAt == null }) {
+                "Follow-up context changed during generation."
+            }
+        }
         val saved = questions.save(prepared.question)
         questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
         prepared.coverage?.let { questionCoverage.markAsked(it, now) }

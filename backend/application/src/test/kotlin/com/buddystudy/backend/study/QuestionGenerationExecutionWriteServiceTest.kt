@@ -258,6 +258,35 @@ class QuestionGenerationExecutionWriteServiceTest {
         Mockito.verifyNoInteractions(sagas)
     }
 
+    @Test
+    fun `deletion during AI generation prevents saving the follow-up or charging quota`(): Unit = runBlocking {
+        val now = Instant.parse("2026-09-24T00:00:00Z")
+        for (deletedRoot in listOf(true, false)) {
+            val questions = Mockito.mock(QuestionPort::class.java)
+            val memberships = Mockito.mock(QuestionMembershipPort::class.java)
+            val original = QuestionEntity(id = 20, userId = 7)
+            Mockito.`when`(questions.lockByIdAndUserIdAndDeletedAtIsNull(20, 7))
+                .thenReturn(if (deletedRoot) null else original)
+            Mockito.`when`(questions.lockThreadByRootAndUser(20, 7))
+                .thenReturn(listOf(original, QuestionEntity(id = 21, userId = 7, deletedAt = now)))
+            val prepared = PreparedQuestionGeneration(
+                QuestionEntity(userId = 7, source = com.buddystudy.study.domain.entity.QuestionSource.FOLLOW_UP,
+                    parentRecordId = if (deletedRoot) 20 else 21, rootRecordId = 20, followUpDepth = if (deletedRoot) 1 else 2),
+                listOf(0.1f), null, OpenAIQuestionKey("test", user = null),
+            )
+            val storedSaga = saga(now, QuestionGenerationSource.FOLLOW_UP)
+            val sagas = Mockito.mock(QuestionGenerationSagaPort::class.java)
+            Mockito.`when`(sagas.findByCorrelationId(storedSaga.correlationId)).thenReturn(storedSaga)
+            val writer = writer(sagas, Mockito.mock(StreamInboxPort::class.java), memberships, questions = questions)
+            val failure = runCatching { writer.complete(event(storedSaga, now), prepared, now) }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+            assertThat(failure?.message).contains(if (deletedRoot) "original record was deleted" else "context changed")
+            Mockito.verify(questions).lockByIdAndUserIdAndDeletedAtIsNull(20, 7)
+            Mockito.verify(questions, Mockito.never()).save(prepared.question)
+            Mockito.verifyNoInteractions(memberships)
+        }
+    }
+
     private fun writer(
         sagas: QuestionGenerationSagaPort,
         inbox: StreamInboxPort,

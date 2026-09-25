@@ -86,6 +86,82 @@ class RevenueCatBillingServiceTest {
     }
 
     @Test
+    fun `local StoreKit receipts are ignored before account or payment processing`() = runBlocking<Unit> {
+        val localTransaction = "StoreKitTest_Transaction_synthetic_0"
+        val localEvents = listOf(
+            event.copy(
+                eventId = "local-anonymous-purchase",
+                appUserId = "\$RCAnonymousID:local-test",
+                originalAppUserId = "\$RCAnonymousID:local-test",
+                aliases = listOf("\$RCAnonymousID:local-test"),
+                transactionId = localTransaction,
+                originalTransactionId = localTransaction,
+            ),
+            event.copy(eventId = "local-identified-purchase", transactionId = localTransaction),
+            event.copy(
+                eventId = "local-original-only",
+                eventType = "RENEWAL",
+                originalTransactionId = localTransaction,
+            ),
+            event.copy(
+                eventId = "local-expiration",
+                eventType = "EXPIRATION",
+                transactionId = localTransaction,
+            ),
+        )
+        val verifier = Mockito.mock(RevenueCatWebhookVerificationPort::class.java)
+        val ledger = Mockito.mock(BillingLedgerPort::class.java)
+        val payments = Mockito.mock(VerifiedBillingPaymentUseCase::class.java)
+        val transactions = transactionVerifier()
+        Mockito.`when`(ledger.claimDueRevenueCatEvents(now, 100)).thenReturn(localEvents)
+
+        val service = RevenueCatBillingService(verifier, ledger, payments, transactions, Clock.fixed(now, ZoneOffset.UTC))
+        org.junit.jupiter.api.Assertions.assertEquals(localEvents.size, service.projectDueEvents())
+
+        Mockito.verify(ledger).claimDueRevenueCatEvents(now, 100)
+        localEvents.forEach { local ->
+            Mockito.verify(ledger).ignoreRevenueCatEvent(
+                local.eventId,
+                "Xcode StoreKit test transaction is outside RevenueCat billing fulfillment.",
+                now,
+            )
+        }
+        Mockito.verifyNoMoreInteractions(ledger)
+        Mockito.verifyNoInteractions(payments, transactions)
+    }
+
+    @Test
+    fun `local receipt classification requires exact prefix Apple store and sandbox environment`() = runBlocking<Unit> {
+        val candidates = listOf(
+            event.copy(transactionId = "StoreKitTestXTransaction_synthetic_0"),
+            event.copy(transactionId = "storekittest_Transaction_synthetic_0"),
+            event.copy(transactionId = "StoreKitTest_Transaction_synthetic_0", environment = BillingEnvironment.PRODUCTION),
+            event.copy(transactionId = "StoreKitTest_Transaction_synthetic_0", store = "TEST_STORE"),
+        )
+        candidates.forEachIndexed { index, source ->
+            val candidate = source.copy(eventId = "non-local-$index", appUserId = null, originalAppUserId = null)
+            val verifier = Mockito.mock(RevenueCatWebhookVerificationPort::class.java)
+            val ledger = Mockito.mock(BillingLedgerPort::class.java)
+            val payments = Mockito.mock(VerifiedBillingPaymentUseCase::class.java)
+            val errorMessage = if (candidate.store == "TEST_STORE") {
+                "RevenueCat store is not accepted in this environment."
+            } else {
+                "RevenueCat App User ID must be the BuddyStudy appAccountToken UUID."
+            }
+            Mockito.`when`(ledger.claimDueRevenueCatEvents(now, 100)).thenReturn(listOf(candidate))
+            Mockito.`when`(ledger.markRevenueCatEventFailed(candidate.eventId, errorMessage, now))
+                .thenReturn(BillingProcessingFailureOutcome(1, 3, "RETRYING", now.plusSeconds(900), false))
+            RevenueCatBillingService(verifier, ledger, payments, transactionVerifier(), Clock.fixed(now, ZoneOffset.UTC))
+                .projectDueEvents()
+
+            Mockito.verify(ledger).claimDueRevenueCatEvents(now, 100)
+            Mockito.verify(ledger).markRevenueCatEventFailed(candidate.eventId, errorMessage, now)
+            Mockito.verifyNoMoreInteractions(ledger)
+            Mockito.verifyNoInteractions(payments)
+        }
+    }
+
+    @Test
     fun `duplicate RevenueCat event stops before payment fulfillment`() = runBlocking<Unit> {
         val verifier = Mockito.mock(RevenueCatWebhookVerificationPort::class.java)
         val ledger = Mockito.mock(BillingLedgerPort::class.java)

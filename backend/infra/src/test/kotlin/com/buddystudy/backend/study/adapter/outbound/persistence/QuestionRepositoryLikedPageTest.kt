@@ -47,6 +47,7 @@ class QuestionRepositoryLikedPageTest {
             StringToQuestionStatus,
             QuestionStatusToString,
             StringToQuestionSource,
+            QuestionSourceToString,
             StringToStudyRecordType,
         )
         val mappingContext = RelationalMappingContext().also {
@@ -79,6 +80,9 @@ class QuestionRepositoryLikedPageTest {
                 device_id varchar(191) not null,
                 user_id bigint,
                 study_id bigint,
+                parent_record_id bigint,
+                root_record_id bigint,
+                follow_up_depth integer not null default 0,
                 concept_id bigint,
                 concept_key varchar(255),
                 angle_key varchar(255),
@@ -546,6 +550,34 @@ class QuestionRepositoryLikedPageTest {
         assertThat(adapter.findTopics(11)).isEmpty()
     }
 
+    @Test
+    fun `custom questions are privately paginated searchable and terminal without a score`(): Unit = runBlocking {
+        insertQuestion(200, 7, "Custom notes", "graded", "My supplied answer", false)
+        execute("update questions set source = 'custom_question', score = null, is_correct = null, study_id = 42 where id = 200")
+        execute("insert into question_search (question_id, language, topic, question, answer) values (200, 'ko', 'Custom notes', 'Question 200', 'My supplied answer')")
+        val page = org.springframework.data.domain.PageRequest.of(0, 20)
+        assertThat(repository.findVisibleByUser(7, false, page).content.map { it.id }).contains(200)
+        assertThat(repository.findVisibleByUserAndStudyId(7, false, 42, null, page).content.map { it.id }).containsExactly(200)
+        assertThat(repository.findVisibleByUserAndQuery(7, false, "supplied", page).content.map { it.id }).containsExactly(200)
+        assertThat(repository.findLatestCompletedByStudyIdAndUserId(42, 7)?.id).isEqualTo(200)
+        assertThat(repository.findPendingByUser(7, page).content.map { it.id }).doesNotContain(200)
+        assertThat(repository.findAllGradedForStats(page).content.map { it.id }).doesNotContain(200)
+        assertThat(repository.findPersonalizedPublicAnswered(null, null, "ko", PublicFeedSort.LATEST, PublicFeedScope.ALL, 100, 0).content.map { it.id }).doesNotContain(200)
+        assertThat(repository.findVisibleByUser(8, false, page).content.map { it.id }).doesNotContain(200)
+    }
+
+    @Test
+    fun `new custom record cannot clear the existing pending question generation guard`(): Unit = runBlocking {
+        insertQuestion(201, 7, "My topic", "ungraded", "", false)
+        insertQuestion(202, 7, "My topic", "graded", "Custom answer", false)
+        execute("update questions set study_id = 42, score = null where id in (201, 202)")
+        execute("update questions set source = 'custom_question', created_at = timestamp with time zone '2026-06-12 00:00:00+00:00' where id = 202")
+        assertThat(repository.findLatestStatusByStudyId(42)).isEqualTo(QuestionStatus.UNGRADED)
+        assertThat(repository.countPendingForStudy(42)).isEqualTo(1)
+        assertThat(repository.findLatestStatusesByStudyIds(listOf(42))[42]).isEqualTo(QuestionStatus.UNGRADED)
+        assertThat(repository.findLatestPendingByStudyIds(listOf(42)).map { it.id }).containsExactly(201)
+    }
+
     private suspend fun feed(
         viewer: Long? = null, sort: PublicFeedSort = PublicFeedSort.RECOMMENDED,
         scope: PublicFeedScope = PublicFeedScope.ALL, query: String? = null,
@@ -612,6 +644,11 @@ class QuestionRepositoryLikedPageTest {
     @ReadingConverter
     private object StringToQuestionSource : Converter<String, QuestionSource> {
         override fun convert(source: String): QuestionSource = QuestionSource.fromDatabaseValue(source)
+    }
+
+    @WritingConverter
+    private object QuestionSourceToString : Converter<QuestionSource, String> {
+        override fun convert(source: QuestionSource): String = source.databaseValue
     }
 
     @ReadingConverter

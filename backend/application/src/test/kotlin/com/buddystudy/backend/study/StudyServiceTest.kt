@@ -107,7 +107,7 @@ class StudyServiceTest {
     @Test
     fun `common record reads allow transactional voice translation repair while pending remains read only`() {
         val attributes = AnnotationTransactionAttributeSource()
-        for (name in listOf("records", "recordsByIds", "record")) {
+        for (name in listOf("records", "recordsByIds", "record", "recordForThread")) {
             val method = StudyService::class.java.methods.single { it.name == name }
             val transaction = attributes.getTransactionAttribute(method, StudyService::class.java)
             assertThat(transaction).describedAs("transaction for %s", name).isNotNull()

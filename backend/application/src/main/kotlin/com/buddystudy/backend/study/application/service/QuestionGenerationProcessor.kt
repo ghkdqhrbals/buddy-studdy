@@ -78,7 +78,9 @@ class QuestionGenerationProcessor(
                 saga.quotaPeriodStartedAt,
                 saga.correlationId,
             )
-            val prepared = prepare(
+            val prepared = if (saga.source == com.buddystudy.backend.study.application.model.QuestionGenerationSource.FOLLOW_UP) {
+                prepareFollowUp(saga, rootStudy, topicStudy, QuestionLanguage.normalize(user.appLanguage.databaseValue), questionKey)
+            } else prepare(
                 event = event,
                 rootStudy = rootStudy,
                 topicStudy = topicStudy,
@@ -190,6 +192,59 @@ class QuestionGenerationProcessor(
                 delay(WRITE_RETRY_DELAY_MILLIS * retry)
             }
         }
+    }
+
+    private suspend fun prepareFollowUp(
+        saga: com.buddystudy.backend.study.application.model.QuestionGenerationSaga,
+        rootStudy: StudyEntity,
+        topicStudy: StudyEntity,
+        language: String,
+        questionKey: OpenAIQuestionKey,
+    ): PreparedQuestionGeneration {
+        val rootId = checkNotNull(saga.rootRecordId)
+        val parentId = checkNotNull(saga.parentRecordId)
+        val thread = questions.findThreadByRootAndUser(rootId, saga.userId)
+        check(thread.isNotEmpty() && thread.first().id == rootId && thread.last().id == parentId) {
+            "Follow-up thread is no longer available."
+        }
+        check(thread.all { it.deletedAt == null && it.status == com.buddystudy.study.domain.entity.QuestionStatus.GRADED }) {
+            "Follow-up context is no longer available."
+        }
+        val original = thread.first()
+        val prompt = com.buddystudy.backend.study.application.prompt.FollowUpQuestionPrompt.build(
+            questionPrompts, thread, language,
+        )
+        val generated = openAI.generateQuestion(
+            questionKey.apiKey,
+            rootStudy.openaiModel.ifBlank { properties.openai.model },
+            prompt,
+        )
+        check(generated.question.isNotBlank() && QuestionLanguage.matches(generated.question, language)) {
+            "Generated follow-up did not match the requested language."
+        }
+        val embedding = openAI.embedText(questionKey.apiKey, generated.question)
+        val now = Instant.now()
+        val question = com.buddystudy.study.domain.entity.QuestionEntity(
+            deviceId = topicStudy.deviceId,
+            userId = saga.userId,
+            studyId = topicStudy.id,
+            parentRecordId = parentId,
+            rootRecordId = rootId,
+            followUpDepth = saga.followUpDepth,
+            source = com.buddystudy.study.domain.entity.QuestionSource.FOLLOW_UP,
+            publicQuestion = false,
+            question = generated.question,
+            hint = generated.hint,
+            topic = original.topic,
+            difficultyLevel = original.difficultyLevel,
+            sourceLanguage = com.buddystudy.common.domain.SupportedLanguage.fromLocale(language),
+            scheduledFor = now,
+            sentAt = now,
+            createdAt = now,
+            updatedAt = now,
+        ).applyRubric(generated.rubric)
+        // Coached practice does not advance the independent-question coverage rotation.
+        return PreparedQuestionGeneration(question, embedding, coverage = null, questionKey = questionKey)
     }
 
     private suspend fun prepare(

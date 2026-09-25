@@ -8,6 +8,8 @@ import com.buddystudy.backend.community.application.model.CommunityQuestionsResp
 import com.buddystudy.backend.notification.application.model.AppNotificationsResponse
 import com.buddystudy.backend.stats.application.model.StatsResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
+import com.buddystudy.backend.study.application.model.QuestionThreadResponse
+import com.buddystudy.backend.study.adapter.inbound.web.CustomQuestionRequest
 import com.buddystudy.backend.study.application.port.outbound.AiCriterionAssessment
 import com.buddystudy.backend.study.application.port.outbound.AiGradingAssessment
 import com.buddystudy.backend.study.application.port.outbound.AiGradingCriterion
@@ -80,6 +82,7 @@ class ApplicationRuntimeHintsTest {
             CommunityQuestionsResponse::class.java,
             CommunityQuestionResponse::class.java,
             StudyPageResponse::class.java,
+            QuestionThreadResponse::class.java,
             StatsResponse::class.java,
             AppNotificationsResponse::class.java,
         ).forEach { responseType ->
@@ -94,6 +97,22 @@ class ApplicationRuntimeHintsTest {
                     .test(hints),
             ).isTrue()
         }
+    }
+
+    @Test
+    fun `registers custom question request for native JSON deserialization`() {
+        val hints = RuntimeHints()
+        ApplicationRuntimeHints().registerHints(hints, javaClass.classLoader)
+        assertThat(
+            RuntimeHintsPredicates.reflection()
+                .onType(CustomQuestionRequest::class.java)
+                .withMemberCategories(
+                    MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                    MemberCategory.DECLARED_FIELDS,
+                    MemberCategory.INVOKE_PUBLIC_METHODS,
+                )
+                .test(hints),
+        ).isTrue()
     }
 
     @Test

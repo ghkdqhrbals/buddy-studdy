@@ -1,9 +1,46 @@
 import StoreKit
 import StoreKitTest
+import RevenueCat
 import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testRevenueCatStartupDetectsHostedTestsAndAllowsRegularDebugLaunch() {
+        for key in ["XCTestConfigurationFilePath", "XCTestBundlePath", "XCTestSessionIdentifier"] {
+            XCTAssertTrue(RevenueCatDebugStartupPolicy.isHostedXCTest(
+                environment: [key: "test-host"], hasXCTestRuntime: false
+            ), key)
+        }
+        XCTAssertTrue(RevenueCatDebugStartupPolicy.isHostedXCTest(
+            environment: [:], hasXCTestRuntime: true
+        ))
+        XCTAssertFalse(RevenueCatDebugStartupPolicy.isHostedXCTest(
+            environment: [:], hasXCTestRuntime: false
+        ))
+        XCTAssertFalse(RevenueCatDebugStartupPolicy.isHostedXCTest(
+            environment: ["SIMULATOR_UDID": "simulator", "XCODE_RUNNING_FOR_PREVIEWS": "1"],
+            hasXCTestRuntime: false
+        ))
+    }
+
+    @MainActor
+    func testHostedXCTestBillingStartupAndIdentifyKeepRevenueCatUnconfigured() async throws {
+        guard RevenueCatDebugStartupPolicy.isHostedXCTest(), !Purchases.isConfigured else {
+            XCTFail("The real hosted test process must be detected before app bootstrap starts the live SDK")
+            return
+        }
+        RevenueCatBillingBridge.shared.start()
+        guard !Purchases.isConfigured else {
+            XCTFail("Billing startup configured the live SDK inside a hosted test")
+            return
+        }
+        try await RevenueCatBillingBridge.shared.identify(
+            appAccountToken: UUID(uuidString: "6d3a6958-1eed-4a16-8f36-b2bf22bf7c21")!
+        )
+        XCTAssertFalse(Purchases.isConfigured)
+        XCTAssertFalse(RevenueCatBillingBridge.shared.isEnabled)
+    }
+
     func testRevenueCatRequiresAnApplePublicSDKKey() {
         XCTAssertTrue(RevenueCatBillingBridge.isValidPublicSDKKey("appl_public_sdk_key"))
         XCTAssertTrue(RevenueCatBillingBridge.isValidPublicSDKKey("  appl_public_sdk_key\n"))
@@ -452,7 +489,14 @@ final class ArchitecturePolicyTests: XCTestCase {
         ]
 
         let violations = try swiftFiles(in: viewModels).flatMap { file -> [String] in
-            let content = try String(contentsOf: file, encoding: .utf8)
+            var content = try String(contentsOf: file, encoding: .utf8)
+            if file.lastPathComponent == "VoiceTutorViewModel.swift" {
+                // This file also declares VoiceTutorStartupFailurePolicy. Inspect
+                // the actual view model, which must delegate to that typed policy.
+                let viewModelStart = try XCTUnwrap(content.range(of: "final class VoiceTutorViewModel")?.lowerBound)
+                content = String(content[viewModelStart...])
+                XCTAssertTrue(content.contains("VoiceTutorStartupFailurePolicy.presentation("))
+            }
             return forbiddenPatterns
                 .filter { content.contains($0) }
                 .map { "\(file.lastPathComponent): \($0)" }
@@ -616,7 +660,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
             encoding: .utf8
         )
-        let start = try XCTUnwrap(source.range(of: "private struct MobileMembershipManagementView")?.lowerBound)
+        let start = try XCTUnwrap(source.range(of: "struct MobileMembershipManagementView")?.lowerBound)
         let end = try XCTUnwrap(
             source.range(of: "private struct MembershipProductGroup", range: start..<source.endIndex)?.lowerBound
         )
@@ -628,7 +672,9 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(membershipSource.contains("Text(strings.membershipAutoRenewalDisclosure)"))
         XCTAssertTrue(membershipSource.contains("AppLegalLinks.termsOfServiceURL"))
         XCTAssertTrue(membershipSource.contains("AppLegalLinks.privacyPolicyURL"))
-        XCTAssertTrue(membershipSource.contains("group.products.first?.displayName"))
+        XCTAssertTrue(membershipSource.contains("if let product = group.products.first"))
+        XCTAssertTrue(membershipSource.contains("Text(product.displayPrice)"))
+        XCTAssertTrue(membershipSource.contains("strings.membershipRenewalPrice(product.displayPrice)"))
         XCTAssertTrue(membershipSource.contains("Text(strings.perMonth)"))
         XCTAssertTrue(membershipSource.contains("strings.monthlyQuestionAllowanceText"))
     }
@@ -852,10 +898,27 @@ final class ArchitecturePolicyTests: XCTestCase {
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
         let content = try String(contentsOf: appStateFile, encoding: .utf8)
 
-        XCTAssertFalse(
-            content.contains("UUID()"),
-            "AppState must use AppIdentifierProviding for generated identifiers instead of constructing UUID values directly."
+        let appStateStart = try XCTUnwrap(content.range(of: "final class AppState")?.lowerBound)
+        let appStateSource = String(content[appStateStart...])
+        // Local request/cached-page fences and detached drafts never identify a
+        // backend command. Newly generated operation identities use the provider.
+        let localIdentityStatements: Set<String> = [
+            "private var commonRecordsPageRequestID = UUID()",
+            "private var studyLearningRecordsLifetimeID = UUID()",
+            "commonRecordsPageRequestID = UUID()",
+            "studyLearningRecordsLifetimeID = UUID()",
+            "let requestID = UUID()",
+            #"detached.id = "local-draft:\(UUID().uuidString)""#,
+        ]
+        let directUUIDStatements = appStateSource.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.contains("UUID()") }
+        XCTAssertTrue(
+            directUUIDStatements.allSatisfy(localIdentityStatements.contains),
+            "Only explicit local fences/draft IDs may construct UUIDs; backend operation identifiers must use AppIdentifierProviding."
         )
+        XCTAssertTrue(appStateSource.contains("idempotencyKey: appIdentifierProvider.makeIdentifier()"))
+        XCTAssertTrue(appStateSource.contains("let idempotencyKey = appIdentifierProvider.makeIdentifier()"))
     }
 
     func testAppStateUsesTimeZoneProviderForRuntimeTimeZone() throws {
@@ -1503,10 +1566,15 @@ final class ArchitecturePolicyTests: XCTestCase {
         let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
         let content = try String(contentsOf: file, encoding: .utf8)
 
+        let sectionStart = try XCTUnwrap(content.range(of: "private var communityQuestionSection: some View {")?.lowerBound)
+        let sectionEnd = try XCTUnwrap(content.range(of: "private func communityFeedRow", range: sectionStart..<content.endIndex)?.lowerBound)
+        let section = String(content[sectionStart..<sectionEnd])
+        XCTAssertTrue(section.contains("let hasContent = !appState.communityQuestions.isEmpty"))
         XCTAssertTrue(
-            content.contains("let hasContent = !appState.communityQuestions.isEmpty\n\n            if MobileHomeRefreshPresentationPolicy.showsInitialLoading("),
+            section.contains("if MobileHomeRefreshPresentationPolicy.showsInitialLoading(\n                hasContent: hasContent,"),
             "When public questions are empty, the refresh indicator should render in the public-question content slot instead of shifting the fixed title or tab area."
         )
+        XCTAssertTrue(section.contains("MobileHomeRefreshIndicator()\n                    .frame(maxWidth: .infinity, minHeight: 320)"))
         XCTAssertFalse(
             content.contains("if isRefreshingCommunityContent {\n                    MobileHomeRefreshIndicator()"),
             "Refreshing cached public questions must not insert a standalone loading row above the existing feed."
@@ -1893,17 +1961,22 @@ final class ArchitecturePolicyTests: XCTestCase {
             "Topic records should reuse the existing paginated record row."
         )
         XCTAssertTrue(
+            content.contains("CommonStudyRecordDetailView(record: record)"),
+            "Statistics must use the canonical record detail so voice, custom questions, and private follow-up threads retain their content."
+        )
+        XCTAssertFalse(
             content.contains("record.asQuestionBrowseQuestion(author: author)"),
-            "Statistics should project a record into the question-browse presentation model."
+            "A public projection would discard follow-up ancestry and custom-question source metadata."
         )
-        XCTAssertTrue(
-            content.contains("CommunityQuestionDetailView("),
-            "Statistics should navigate to the shared question-browse detail."
-        )
-        XCTAssertTrue(
-            content.contains("contentSource: .record(isPublic: record.isPublic)"),
-            "The question-browse detail should retain record privacy behavior."
-        )
+    }
+
+    func testConversationFixtureBundleMarkerCannotActivateInInstalledApp() {
+        #if DEBUG
+        let info: [String: Any] = ["BuddyStudyOfflineQA": true, "BuddyStudyScreenshotFixture": "follow-up-pending"]
+        XCTAssertNil(AppDebugFixtureConfiguration.fixtureName(environment: [:], info: info, bundleIdentifier: "io.github.ghkdqhrbals.StudyMate"))
+        XCTAssertNil(AppDebugFixtureConfiguration.fixtureName(environment: [:], info: ["BuddyStudyScreenshotFixture": "custom-question"], bundleIdentifier: AppDebugFixtureConfiguration.qaBundleIdentifier))
+        XCTAssertEqual(AppDebugFixtureConfiguration.fixtureName(environment: [:], info: info, bundleIdentifier: AppDebugFixtureConfiguration.qaBundleIdentifier), "follow-up-pending")
+        #endif
     }
 
     func testProtectedMobileTabsNavigateToDedicatedLoginPage() throws {
@@ -2280,8 +2353,9 @@ final class ArchitecturePolicyTests: XCTestCase {
         let content = try String(contentsOf: backendClientFile, encoding: .utf8)
 
         XCTAssertFalse(
-            content.contains("\"access\""),
-            "The app must not call /api/v1/me/access as a page-access preflight."
+            content.range(of: #"endpoint\(\s*"api"\s*,\s*"v1"\s*,\s*"me"\s*,\s*"access"\s*\)"#, options: .regularExpression) != nil ||
+                content.contains("/api/v1/me/access"),
+            "The app must not call /api/v1/me/access as a page-access preflight; voice recording/access is a different endpoint."
         )
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: root.appendingPathComponent("StudyMate/UseCases/PageAccess/RefreshPageAccessUseCase.swift").path),
@@ -2393,7 +2467,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             content.contains("guard !isGeneratingQuestion, questionGenerationPollingTask == nil else"),
             "A previous polling task must block a rapid second question-generation request."
         )
-        let marker = "if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {"
+        let marker = "if appErrorHandlingUseCase.isPermanentQuestionGenerationError(error) {"
         var searchStart = content.startIndex
         for _ in 0..<2 {
             let markerRange = try XCTUnwrap(content.range(of: marker, range: searchStart..<content.endIndex))
@@ -3255,6 +3329,11 @@ final class ArchitecturePolicyTests: XCTestCase {
     }
 
     func testFirstMonthOffersMatchStoreKitPricesAndGroupEligibility() async throws {
+        guard !Purchases.isConfigured else {
+            XCTFail("Refusing to create a local StoreKit purchase while the live RevenueCat observer is running")
+            return
+        }
+        XCTAssertTrue(RevenueCatDebugStartupPolicy.isHostedXCTest())
         let session = try SKTestSession(configurationFileNamed: "StudyMateDev")
         session.disableDialogs = true
         session.clearTransactions()
@@ -3291,6 +3370,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(200))
         }
         XCTAssertEqual(eligibility, [false, false], "The introductory offer cannot be reused by switching tiers")
+        XCTAssertFalse(Purchases.isConfigured, "Local StoreKit transactions must remain isolated from RevenueCat")
     }
 
     private func repositoryRoot() throws -> URL {

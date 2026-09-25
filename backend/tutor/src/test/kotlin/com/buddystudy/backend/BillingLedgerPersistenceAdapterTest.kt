@@ -142,6 +142,74 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `ignored local StoreKit RevenueCat receipt is terminal while real sandbox purchase remains claimable`(): Unit = runBlocking {
+        val fixture = fixture("ignored-local-storekit")
+        val localTransactionId = "StoreKitTest_Transaction_${fixture.suffix.replace("-", "")}_0"
+        val localEvent = fixture.revenueCatLifecycleEvent(
+            eventId = "rc-local-${fixture.suffix}",
+            eventType = "INITIAL_PURCHASE",
+            transaction = fixture.transaction().copy(
+                transactionId = localTransactionId,
+                originalTransactionId = localTransactionId,
+            ),
+            eventAt = fixture.now,
+        ).copy(appUserId = "\$RCAnonymousID:local", originalAppUserId = null)
+        val realEvent = fixture.revenueCatLifecycleEvent(
+            eventId = "rc-real-sandbox-${fixture.suffix}",
+            eventType = "INITIAL_PURCHASE",
+            transaction = fixture.transaction().copy(
+                transactionId = "200${System.nanoTime()}",
+                originalTransactionId = "100${System.nanoTime()}",
+            ),
+            eventAt = fixture.now,
+        )
+        createdRevenueCatEventIds += listOf(localEvent.eventId, realEvent.eventId)
+        assertThat(ledger.recordRevenueCatEvent(localEvent, fixture.now)).isTrue()
+        assertThat(ledger.recordRevenueCatEvent(realEvent, fixture.now)).isTrue()
+
+        ledger.ignoreRevenueCatEvent(localEvent.eventId, "Ignored Xcode-local StoreKit test transaction.", fixture.now.plusSeconds(1))
+        val lateFailure = ledger.markRevenueCatEventFailed(localEvent.eventId, "late worker failure", fixture.now.plusSeconds(2))
+        assertThat(lateFailure.status).isEqualTo("IGNORED")
+        assertThat(lateFailure.attemptCount).isZero()
+        assertThat(lateFailure.nextAttemptAt).isNull()
+        assertThat(lateFailure.terminalTransition).isFalse()
+
+        listOf(
+            "billing_revenuecat_event_inbox" to "event_id",
+            "subscription_events" to "provider_event_id",
+        ).forEach { (table, idColumn) ->
+            val status = database.sql("select processing_status from $table where $idColumn = :id")
+                .bind("id", localEvent.eventId)
+                .map { row, _ -> row.get("processing_status", String::class.java)!! }.one().awaitSingle()
+            assertThat(status).isEqualTo("IGNORED")
+        }
+        assertThat(ledger.recordRevenueCatEvent(localEvent, fixture.now.plusSeconds(2))).isFalse()
+        val claimed = ledger.claimDueRevenueCatEvents(fixture.now.plusSeconds(3600), 100)
+        assertThat(claimed.map { it.eventId }).contains(realEvent.eventId).doesNotContain(localEvent.eventId)
+        assertThat(claimed.single { it.eventId == realEvent.eventId }.appUserId)
+            .isEqualTo(fixture.appAccountToken.toString())
+        val attempts = database.sql("select attempt_count from subscription_events where provider_event_id = :id")
+            .bind("id", localEvent.eventId).map { row, _ -> row.get("attempt_count", java.lang.Integer::class.java)!!.toInt() }
+            .one().awaitSingle()
+        assertThat(attempts).isZero()
+        val paymentCount = database.sql("select count(*) as count from payments where user_id = :userId")
+            .bind("userId", fixture.userId).map { row, _ -> row.get("count", java.lang.Long::class.java)!!.toLong() }
+            .one().awaitSingle()
+        assertThat(paymentCount).isZero()
+
+        ledger.applyRevenueCatEvent(realEvent, fixture.now.plusSeconds(3601))
+        ledger.ignoreRevenueCatEvent(realEvent.eventId, "late ignore", fixture.now.plusSeconds(3602))
+        val completedFailure = ledger.markRevenueCatEventFailed(realEvent.eventId, "late worker failure", fixture.now.plusSeconds(3603))
+        assertThat(completedFailure.status).isEqualTo("COMPLETED")
+        assertThat(completedFailure.attemptCount).isZero()
+        assertThat(completedFailure.nextAttemptAt).isNull()
+        assertThat(completedFailure.terminalTransition).isFalse()
+        val completedInbox = database.sql("select processing_status from billing_revenuecat_event_inbox where event_id = :id")
+            .bind("id", realEvent.eventId).map { row, _ -> row.get("processing_status", String::class.java)!! }.one().awaitSingle()
+        assertThat(completedInbox).isEqualTo("PROCESSED")
+    }
+
+    @Test
     fun `RevenueCat processing exhausts after three failures and is visible to administrators`(): Unit = runBlocking {
         val eventId = "rc-exhausted-${UUID.randomUUID()}"
         createdRevenueCatEventIds += eventId

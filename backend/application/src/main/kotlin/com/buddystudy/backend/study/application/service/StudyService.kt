@@ -183,6 +183,13 @@ class StudyService(
         return recordResponse(question, questionStats.findById(id), normalizedLanguage, viewMode)
     }
 
+    @Transactional
+    override suspend fun recordForThread(principal: Principal, id: Long, language: String, view: String): StudyRecordResponse {
+        val question = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        return listOf(question).toRecordResponses(QuestionLanguage.normalize(language), translationViewMode(view)).single()
+    }
+
     override suspend fun skip(principal: Principal, id: Long): StudyRecordResponse {
         val saved = recordWriter.skip(principal.userId, id)
         return recordResponse(saved, questionStats.findById(saved.id))
@@ -261,7 +268,9 @@ class StudyService(
         val aiSource = QuestionLanguage.normalize(
             (question.aiResponseSourceLanguage ?: question.sourceLanguage).databaseValue,
         )
-        if (viewMode == TranslationViewMode.ORIGINAL) {
+        if (viewMode == TranslationViewMode.ORIGINAL ||
+            question.source == com.buddystudy.study.domain.entity.QuestionSource.CUSTOM_QUESTION
+        ) {
             return ProjectedRecord(
                 question,
                 questionSource,
