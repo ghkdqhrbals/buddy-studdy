@@ -1105,6 +1105,7 @@ struct StudyThreadHistorySection: View {
                     isResolvingAnswerState: false,
                     gradingStatusMessage: nil,
                     canSubmitAnswer: false,
+                    allowsAnswerEditing: false,
                     strings: strings,
                     answerEditor: { EmptyView() },
                     onSubmit: {},
