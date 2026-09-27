@@ -109,6 +109,7 @@ class ApplicationRuntimeHints : RuntimeHintsRegistrar {
         "com.buddystudy.backend.admin.management.application.model.AdminUserSummary",
         "com.buddystudy.backend.profile.adapter.inbound.web.dto.AvatarUpdateRequest",
         "com.buddystudy.backend.profile.adapter.inbound.web.dto.ProfileUpdateRequest",
+        "com.buddystudy.backend.study.adapter.inbound.web.CustomQuestionRequest",
         "com.buddystudy.backend.profile.application.model.AvatarCatalogResponse",
         "com.buddystudy.backend.profile.application.model.AvatarCategoryResponse",
         "com.buddystudy.backend.profile.application.model.AvatarItemResponse",

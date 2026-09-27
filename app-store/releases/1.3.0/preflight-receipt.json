@@ -1,0 +1,96 @@
+{
+  "appId": "6774108938",
+  "versionId": "d2199695-02fb-483d-adc8-5f59aedcd67c",
+  "version": "1.3.0",
+  "buildNumber": "126",
+  "buildId": "f0b89c45-da8b-4357-b84d-13783d430af3",
+  "preflightAt": "2026-09-27T22:24:40Z",
+  "releaseType": "MANUAL",
+  "locales": [
+    "ko",
+    "en-US",
+    "ja"
+  ],
+  "screenshotSets": [
+    {
+      "locale": "ko",
+      "displayType": "APP_IPHONE_65",
+      "setId": "6bb809ae-026d-4dfd-ae17-8954e06404c9",
+      "count": 6,
+      "state": "COMPLETE",
+      "checksumsVerified": true
+    },
+    {
+      "locale": "ko",
+      "displayType": "APP_IPHONE_67",
+      "setId": "ac15f0f7-7863-4770-8251-936a7702a4b2",
+      "count": 6,
+      "state": "COMPLETE",
+      "checksumsVerified": true
+    },
+    {
+      "locale": "ko",
+      "displayType": "APP_IPAD_PRO_3GEN_129",
+      "setId": "5a307ea8-9469-4e6c-9544-6d0ee5b33a8f",
+      "count": 6,
+      "state": "COMPLETE",
+      "checksumsVerified": true
+    },
+    {
+      "locale": "en-US",
+      "displayType": "APP_IPHONE_65",
+      "setId": "ea273a5d-7bbd-472a-b0f0-e57bcd2f3b2e",
+      "count": 6,
+      "state": "COMPLETE",
+      "checksumsVerified": true
+    },
+    {
+      "locale": "en-US",
+      "displayType": "APP_IPHONE_67",
+      "setId": "a6d30d3a-8588-4e74-8047-54a947c1e934",
+      "count": 6,
+      "state": "COMPLETE",
+      "checksumsVerified": true
+    },
+    {
+      "locale": "en-US",
+      "displayType": "APP_IPAD_PRO_3GEN_129",
+      "setId": "fae69c8f-8961-4efa-998d-c69a8a39d331",
+      "count": 6,
+      "state": "COMPLETE",
+      "checksumsVerified": true
+    },
+    {
+      "locale": "en-US",
+      "displayType": "APP_IPHONE_61",
+      "setId": "400c0736-a1a4-4270-ad3f-50fdfa81c7f3",
+      "count": 6,
+      "state": "COMPLETE",
+      "checksumsVerified": true
+    },
+    {
+      "locale": "ja",
+      "displayType": "APP_IPHONE_65",
+      "setId": "1f0e3f1f-7b42-4eb9-8c04-f70367e7ea3f",
+      "count": 6,
+      "state": "COMPLETE",
+      "checksumsVerified": true
+    },
+    {
+      "locale": "ja",
+      "displayType": "APP_IPHONE_67",
+      "setId": "3a46af45-4a4b-48a1-9cdd-f876280b2cf5",
+      "count": 6,
+      "state": "COMPLETE",
+      "checksumsVerified": true
+    },
+    {
+      "locale": "ja",
+      "displayType": "APP_IPAD_PRO_3GEN_129",
+      "setId": "017fe3a1-7557-49d1-9478-58a9be1f18e7",
+      "count": 6,
+      "state": "COMPLETE",
+      "checksumsVerified": true
+    }
+  ]
+}

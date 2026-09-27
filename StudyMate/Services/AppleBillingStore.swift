@@ -4,6 +4,21 @@ import StoreKit
 import RevenueCat
 import UIKit
 
+#if DEBUG
+enum RevenueCatDebugStartupPolicy {
+    nonisolated static func isHostedXCTest(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        hasXCTestRuntime: Bool = NSClassFromString("XCTestCase") != nil
+    ) -> Bool {
+        // The test host starts the app before individual tests can install mocks.
+        // Never let its SDK observer forward local SKTestSession transactions.
+        hasXCTestRuntime || [
+            "XCTestConfigurationFilePath", "XCTestBundlePath", "XCTestSessionIdentifier",
+        ].contains { environment[$0]?.isEmpty == false }
+    }
+}
+#endif
+
 enum FirstMonthOfferPolicy {
     nonisolated static func canDisplay(
         eligible: Bool, monthly: Bool, periodCount: Int, periodValue: Int,
@@ -221,7 +236,8 @@ final class RevenueCatBillingBridge {
 
     func start() {
         #if DEBUG
-        guard !AppDebugFixtureConfiguration.isEnabled else { return }
+        guard !AppDebugFixtureConfiguration.isEnabled,
+              !RevenueCatDebugStartupPolicy.isHostedXCTest() else { return }
         #endif
         guard !Purchases.isConfigured else {
             return

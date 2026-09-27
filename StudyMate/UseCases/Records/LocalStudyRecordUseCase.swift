@@ -51,6 +51,14 @@ struct LocalStudyRecordUseCase {
         repository.replaceBackendStudyRecords(records)
     }
 
+    func loadCustomQuestionDraft(key: String) -> CustomQuestionDraft? {
+        repository.loadCustomQuestionDraft(key: key)
+    }
+
+    func saveCustomQuestionDraft(_ draft: CustomQuestionDraft?, key: String) {
+        repository.saveCustomQuestionDraft(draft, key: key)
+    }
+
     func loadAnswerDraft(recordID: String) -> String {
         repository.loadAnswerDraft(recordID: recordID)
     }

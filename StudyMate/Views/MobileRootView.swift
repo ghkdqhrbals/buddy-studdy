@@ -1895,7 +1895,6 @@ private struct MobileHomeView: View {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 16) {
                     communityScopeMenu
-                    communitySortMenu
                     Spacer(minLength: 0)
                     communityInterestsButton
                 }
@@ -1904,25 +1903,18 @@ private struct MobileHomeView: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     communityScopeMenu
-                    communitySortMenu
                     communityInterestsButton
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .font(.subheadline)
             .buttonStyle(.plain)
-            if appState.communityFeedSort == .recommended,
-               appState.communityFeedScope == .all,
-               !appState.subscribedCommunityTopics.isEmpty {
-                Text(strings.feedPersonalizedHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 8)
-            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 2)
-        .overlay(alignment: .bottom) { Divider() }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.secondary.opacity(0.2)).frame(height: 0.5)
+        }
     }
 
     private var communityScopeMenu: some View {
@@ -1954,33 +1946,6 @@ private struct MobileHomeView: View {
         .accessibilityLabel(strings.feedScope)
         .accessibilityValue(appState.communityFeedScope.title(strings: strings))
         .accessibilityIdentifier("community-feed-scope")
-    }
-
-    private var communitySortMenu: some View {
-        Menu {
-            ForEach(CommunityFeedSort.allCases) { sort in
-                Button {
-                    appState.setCommunityFeedSort(sort)
-                } label: {
-                    if appState.communityFeedSort == sort {
-                        Label(sort.title(strings: strings), systemImage: "checkmark")
-                    } else {
-                        Text(sort.title(strings: strings))
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Text(appState.communityFeedSort.title(strings: strings))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .layoutPriority(1)
-                Image(systemName: "chevron.down").font(.caption2).accessibilityHidden(true)
-            }
-            .frame(minHeight: 44)
-        }
-        .accessibilityLabel(strings.feedSort)
-        .accessibilityValue(appState.communityFeedSort.title(strings: strings))
-        .accessibilityIdentifier("community-feed-sort")
     }
 
     private var communityInterestsButton: some View {
@@ -3408,6 +3373,7 @@ private struct MobileNotificationsView: View {
                             "알림 목록에서 목적지를 열었습니다. notificationID=\(notification.id), route=\(route)"
                         )
                         Task {
+                            await appState.recordNotificationOpen(notificationID: notification.id, source: .inbox)
                             await appState.markNotificationRead(notification)
                         }
                     } label: {
@@ -11067,6 +11033,7 @@ struct CommunityQuestionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     var question: CommunityQuestion
     var contentSource: CommunityQuestionDetailContentSource
+    var ownedStudyRecord: StudyRecord?
     @State private var displayQuestion: CommunityQuestion
     @State private var comments: [CommunityQuestionComment] = []
     @State private var commentsTotalCount = 0
@@ -11088,10 +11055,12 @@ struct CommunityQuestionDetailView: View {
 
     init(
         question: CommunityQuestion,
-        contentSource: CommunityQuestionDetailContentSource = .community
+        contentSource: CommunityQuestionDetailContentSource = .community,
+        ownedStudyRecord: StudyRecord? = nil
     ) {
         self.question = question
         self.contentSource = contentSource
+        self.ownedStudyRecord = ownedStudyRecord
         _displayQuestion = State(initialValue: question)
         _commentsTotalCount = State(initialValue: question.commentCount)
         _originalAvailable = State(
@@ -11168,6 +11137,22 @@ struct CommunityQuestionDetailView: View {
                     }
                 }
 
+                if let ownedStudyRecord {
+                    if appState.studyThread(containing: ownedStudyRecord).count > 1 {
+                        NavigationLink {
+                            StudyRecordDetailView(record: ownedStudyRecord)
+                                .padding(.horizontal, 16)
+                                .navigationTitle(strings.recordDetail)
+                        } label: {
+                            Label(strings.viewLearningThread, systemImage: "arrow.turn.down.right")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        StudyFollowUpActions(record: ownedStudyRecord)
+                    }
+                }
+
                 if contentSource.showsCommunityInteractions && displayQuestion.canPublish {
                     communityActions
 
@@ -11177,6 +11162,11 @@ struct CommunityQuestionDetailView: View {
                 }
             }
             .padding(16)
+        }
+        .task(id: ownedStudyRecord?.id) {
+            if let ownedStudyRecord {
+                await appState.loadStudyThread(containing: ownedStudyRecord)
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle(displayQuestion.recordType == .voiceTutor ? strings.commonRecordTitle : strings.communityQuestion)

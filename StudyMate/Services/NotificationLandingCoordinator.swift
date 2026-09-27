@@ -108,6 +108,7 @@ final class NotificationLandingCoordinator {
     func land(userInfo: [AnyHashable: Any], replyText: String? = nil) async -> Bool {
         if let notificationID = StudyNotificationPayload.appNotificationID(from: userInfo) {
             Task { @MainActor in
+                await appState.recordNotificationOpen(notificationID: notificationID, source: .push)
                 await appState.markNotificationRead(notificationID: notificationID)
             }
         }

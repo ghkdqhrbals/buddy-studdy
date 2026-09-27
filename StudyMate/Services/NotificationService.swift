@@ -708,6 +708,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     private struct PendingAppRoute {
         var route: AppRoute
         var announcement: HomeAnnouncement?
+        var notificationID: String?
     }
 
     @MainActor
@@ -734,10 +735,10 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     #endif
 
     @MainActor
-    private func enqueueAppRoute(_ route: AppRoute, announcement: HomeAnnouncement? = nil) {
+    private func enqueueAppRoute(_ route: AppRoute, announcement: HomeAnnouncement? = nil, notificationID: String? = nil) {
         logEvent("push_route_enqueued route=\(route)")
         guard let appState else {
-            pendingAppRoutes.append(PendingAppRoute(route: route, announcement: announcement))
+            pendingAppRoutes.append(PendingAppRoute(route: route, announcement: announcement, notificationID: notificationID))
             return
         }
         guard appState.isCommunitySessionActive else {
@@ -745,7 +746,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
             return
         }
 
-        apply(PendingAppRoute(route: route, announcement: announcement), to: appState)
+        apply(PendingAppRoute(route: route, announcement: announcement, notificationID: notificationID), to: appState)
     }
 
     @MainActor
@@ -764,14 +765,15 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
 
     @MainActor
     private func apply(_ pending: PendingAppRoute, to appState: AppState) {
+        if let notificationID = pending.notificationID {
+            Task { @MainActor in
+                await appState.recordNotificationOpen(notificationID: notificationID, source: .push)
+                await appState.markNotificationRead(notificationID: notificationID)
+            }
+        }
         if let announcement = pending.announcement {
             appState.presentHomeAnnouncement(announcement)
             appState.openRoute(.home)
-            if let notificationID = announcement.notificationID {
-                Task { @MainActor in
-                    await appState.markNotificationRead(notificationID: notificationID)
-                }
-            }
             return
         }
         appState.openRouteFromNotification(pending.route)
@@ -964,7 +966,8 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
                 if let route = StudyNotificationPayload.appRoute(from: userInfo) {
                     StudyNotificationDelegate.shared.enqueueAppRoute(
                         route,
-                        announcement: StudyNotificationPayload.homeAnnouncement(from: userInfo)
+                        announcement: StudyNotificationPayload.homeAnnouncement(from: userInfo),
+                        notificationID: StudyNotificationPayload.appNotificationID(from: userInfo)
                     )
                 } else if recordID != nil {
                     StudyRemoteNotificationBridge.shared.enqueueNotificationResponse(

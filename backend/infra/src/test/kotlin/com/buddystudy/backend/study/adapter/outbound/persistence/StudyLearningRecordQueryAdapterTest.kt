@@ -40,7 +40,7 @@ class StudyLearningRecordQueryAdapterTest {
                 id bigint primary key, user_id bigint not null, study_id bigint,
                 topic varchar(255) not null, score integer, is_public boolean not null default false,
                 record_type varchar(24) not null default 'QUESTION', voice_record_id bigint unique,
-                status varchar(24) not null default 'graded',
+                status varchar(24) not null default 'graded', source varchar(64) not null default 'manual',
                 deleted_at timestamp(6), skipped_at timestamp(6),
                 answered_at timestamp(6), created_at timestamp(6) not null
             )
@@ -163,6 +163,23 @@ class StudyLearningRecordQueryAdapterTest {
         voice(2, score = 0)
 
         assertThat(page().labels()).containsExactly("QUESTION:2", "QUESTION:1", "VOICE_TUTOR:2", "VOICE_TUTOR:1")
+    }
+
+    @Test
+    fun `private authored answers share the node history with graded questions and voice while pending questions stay hidden`(): Unit = runBlocking {
+        node(10)
+        session()
+        question(1)
+        question(2, score = null)
+        question(3, score = null)
+        question(4, score = null, deleted = true)
+        database.sql("update questions set source = 'custom_question' where id in (3, 4)")
+            .fetch().rowsUpdated().awaitSingle()
+        voice(1, score = null)
+
+        assertThat(page().labels()).containsExactly("QUESTION:3", "QUESTION:1", "VOICE_TUTOR:1")
+        val first = page(limit = 1).single()
+        assertThat(page(cursor = first.cursor()).labels()).containsExactly("QUESTION:1", "VOICE_TUTOR:1")
     }
 
     @Test

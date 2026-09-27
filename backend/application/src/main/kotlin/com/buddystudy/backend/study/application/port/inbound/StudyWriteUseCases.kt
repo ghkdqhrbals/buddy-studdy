@@ -37,6 +37,9 @@ interface QuestionCreationWriteUseCase {
 }
 
 interface QuestionGenerationRequestWriteUseCase {
+    suspend fun enqueueFollowUp(userId: Long, recordId: Long, idempotencyKey: String, now: Instant): QueuedQuestionGeneration =
+        error("Follow-up generation is not supported by this adapter.")
+
     suspend fun enqueueManual(
         userId: Long,
         deviceId: String,

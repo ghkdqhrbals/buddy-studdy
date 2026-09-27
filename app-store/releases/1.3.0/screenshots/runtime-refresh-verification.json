@@ -1,0 +1,429 @@
+{
+  "checkedAt": "2026-09-27T22:05:01.425252+00:00",
+  "releaseSourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+  "recapturedAndRerenderedCount": 20,
+  "unaffectedCount": 40,
+  "allUnaffectedOutputBytesUnchanged": true,
+  "files": [
+    {
+      "path": "6.5/ko/01-learning-result.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "66eab7443e2ee312373bc1bd7298f9e708dfb77ce36767d5d9119e22d2d743a8",
+      "afterOutputSHA256": "66eab7443e2ee312373bc1bd7298f9e708dfb77ce36767d5d9119e22d2d743a8",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/ko/02-follow-up.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "b608d690c9c2f25c59359a4e2f1110220fcae83b310b711d31c5da7176e4bed7",
+      "afterOutputSHA256": "0b2e8d03a61ad3142b169f8f1f2d730df3b15205249f244ce1923adf1714425c",
+      "unchanged": false
+    },
+    {
+      "path": "6.5/ko/03-public-feed.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "f0c0e89529e45eb4dda03d1d50d44cc46f080729b4830a7aebcc7b78c25fea78",
+      "afterOutputSHA256": "f0c0e89529e45eb4dda03d1d50d44cc46f080729b4830a7aebcc7b78c25fea78",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/ko/04-study-tree.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "db7bc65d0a0789469d3870510a6170d19b8585ace3d5ee5f32d3a65b0fd250d2",
+      "afterOutputSHA256": "db7bc65d0a0789469d3870510a6170d19b8585ace3d5ee5f32d3a65b0fd250d2",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/ko/05-topic-progress.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "1e23d5d7699f72d31ca68c77b2e1626276e795e69757336b399d4c266456e21a",
+      "afterOutputSHA256": "1e23d5d7699f72d31ca68c77b2e1626276e795e69757336b399d4c266456e21a",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/ko/06-custom-question.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "1f79ca2b1bbb098f67e3501ba073cc0300c7b41ac7467ec05abcd23e30636495",
+      "afterOutputSHA256": "8577cdbb7495f55a68b41f6a99ff7e9e3110d93322dc8ac8a9175606a0248ad5",
+      "unchanged": false
+    },
+    {
+      "path": "6.5/en-US/01-learning-result.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "fa02530352b7df05015dbd899f62f505b31ac7d3c305f33a4db6986f2b0cc9ea",
+      "afterOutputSHA256": "fa02530352b7df05015dbd899f62f505b31ac7d3c305f33a4db6986f2b0cc9ea",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/en-US/02-follow-up.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "d1a13a5494943a8961a9b3f09c84b555478a8ff4b627c78cb028d2eb62195e8c",
+      "afterOutputSHA256": "8e0c699def25e9740b7b14831c024474a0855dfac55c64e8b827f086a88dfcc7",
+      "unchanged": false
+    },
+    {
+      "path": "6.5/en-US/03-public-feed.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "8b2426907f0ee7b67aea447e6ef1c7e4d860ce4a4641c3386a8e9f9b99268b4c",
+      "afterOutputSHA256": "8b2426907f0ee7b67aea447e6ef1c7e4d860ce4a4641c3386a8e9f9b99268b4c",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/en-US/04-study-tree.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "d38905f5567a0df366941eaa40f8e9317fda70bda020f15dff8c4cc64017f6f4",
+      "afterOutputSHA256": "d38905f5567a0df366941eaa40f8e9317fda70bda020f15dff8c4cc64017f6f4",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/en-US/05-topic-progress.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "ed7b625eaf0aa1c94ee3af5d69d5f16180081033dc87cb0a67dd0d19a445e6cc",
+      "afterOutputSHA256": "ed7b625eaf0aa1c94ee3af5d69d5f16180081033dc87cb0a67dd0d19a445e6cc",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/en-US/06-custom-question.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "ebee92bb93de75270a4883ab1b91747e30d35d79265308566499d1d4c612e56a",
+      "afterOutputSHA256": "3091d1a540d48973773ba607b1952ce6c3048d59013764fffff5b0626ccafbad",
+      "unchanged": false
+    },
+    {
+      "path": "6.5/ja/01-learning-result.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "ce589b62dd7d6f8c1417c7d35ad39bc4ca62e3400b1973764ba4cec6cee5dc56",
+      "afterOutputSHA256": "ce589b62dd7d6f8c1417c7d35ad39bc4ca62e3400b1973764ba4cec6cee5dc56",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/ja/02-follow-up.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "a6d0db2e4d68636484751139e64d96688b4de2bd486272fca9aaac1145029fef",
+      "afterOutputSHA256": "64981f28429cf21786aacc28fcc07d454a739503b8b7ad1fd007db6b394ecfb5",
+      "unchanged": false
+    },
+    {
+      "path": "6.5/ja/03-public-feed.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "5d2f749e56291bfe7f58d97e64718bb4a8c2748aa86961126d6f73d0dd7a4705",
+      "afterOutputSHA256": "5d2f749e56291bfe7f58d97e64718bb4a8c2748aa86961126d6f73d0dd7a4705",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/ja/04-study-tree.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "671f0f6b549d121f74d47f2c352ecc92ca148762fb7d522863c7869febbb2089",
+      "afterOutputSHA256": "671f0f6b549d121f74d47f2c352ecc92ca148762fb7d522863c7869febbb2089",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/ja/05-topic-progress.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "be658850c5fce812f871dbfc5fd5a4f7a9e802bbd221c9cc8c40deaa046c96c1",
+      "afterOutputSHA256": "be658850c5fce812f871dbfc5fd5a4f7a9e802bbd221c9cc8c40deaa046c96c1",
+      "unchanged": true
+    },
+    {
+      "path": "6.5/ja/06-custom-question.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "34bdae7b5cfa8f4d8a03e9dcbd714ed122e5df04614c37b577a6ec99061b0c01",
+      "afterOutputSHA256": "faa6cd7c54e56fbf0f3d6725f7d936137956d959f608a1c91786b1dbf002ed78",
+      "unchanged": false
+    },
+    {
+      "path": "6.9/ko/01-learning-result.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "4f5b32e01d85070e75f9a2fe52cd66adda14b7400fb49330d64a6618e3120097",
+      "afterOutputSHA256": "4f5b32e01d85070e75f9a2fe52cd66adda14b7400fb49330d64a6618e3120097",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/ko/02-follow-up.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "ffc9be296f21837e0eac7d8de0f3702b314499c327174d6b6bc17ccb1642bc56",
+      "afterOutputSHA256": "2411818e77640aad2421e73899a0cd74312d21dcb8b65d2df592f6d967db61d3",
+      "unchanged": false
+    },
+    {
+      "path": "6.9/ko/03-public-feed.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "f7f94a590e1cfa558bde0c1926f86722ef5c1ab63f4c8b1e0716ceb26fe4f073",
+      "afterOutputSHA256": "f7f94a590e1cfa558bde0c1926f86722ef5c1ab63f4c8b1e0716ceb26fe4f073",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/ko/04-study-tree.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "f681bc5305a47e0b1889dc97dcfc80a68416f1dd4e96d4f08555321dbe66d6f8",
+      "afterOutputSHA256": "f681bc5305a47e0b1889dc97dcfc80a68416f1dd4e96d4f08555321dbe66d6f8",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/ko/05-topic-progress.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "b1659da1cb1b8119d0e4814b40e65c0a8cbaeef931ac0f1f40cb0d25d64088b8",
+      "afterOutputSHA256": "b1659da1cb1b8119d0e4814b40e65c0a8cbaeef931ac0f1f40cb0d25d64088b8",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/ko/06-custom-question.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "829bfa41655ce6bf1280550b4fa711fe031abb7d968e1cecddc427462c2a925b",
+      "afterOutputSHA256": "fc1512da7c75eb48e2fd3e6a5afa88109d4bcfd0b826a7aa70aa727d9d430f8d",
+      "unchanged": false
+    },
+    {
+      "path": "6.9/en-US/01-learning-result.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "01d5e669bdecd8f9f461a8934f20666654ee2be0016f740aae598ba208bcb501",
+      "afterOutputSHA256": "01d5e669bdecd8f9f461a8934f20666654ee2be0016f740aae598ba208bcb501",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/en-US/02-follow-up.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "547bfb7bfb377df6a535eec6c2d2dcd6b2f96683bbec757749c0d2e9e13b5c3e",
+      "afterOutputSHA256": "0adf0fe301111aca137a3d414a75fcfa73a9918e384143d23f87c11564d70aea",
+      "unchanged": false
+    },
+    {
+      "path": "6.9/en-US/03-public-feed.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "44fa566ef012b789bd9f30c70ad24b7d694be4a9746f49c1c143ab9cefb7bd92",
+      "afterOutputSHA256": "44fa566ef012b789bd9f30c70ad24b7d694be4a9746f49c1c143ab9cefb7bd92",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/en-US/04-study-tree.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "9aa671fa87ee636fb0fb26f09e406ce82103e522eafcff514a7fe17c518dbe88",
+      "afterOutputSHA256": "9aa671fa87ee636fb0fb26f09e406ce82103e522eafcff514a7fe17c518dbe88",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/en-US/05-topic-progress.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "a730aaeca608cf8758ba591bebf5b61da8c30735a34bcc5f4212cb489ff893ef",
+      "afterOutputSHA256": "a730aaeca608cf8758ba591bebf5b61da8c30735a34bcc5f4212cb489ff893ef",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/en-US/06-custom-question.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "0d86e745935260c6a6a237cde1cf5f8033ec9403c5576b0ff1df2c845091cf2b",
+      "afterOutputSHA256": "d8680d3d3b3b7b89645a45f11870e129eb1abc778150c0a984ef6dc3db3bc04c",
+      "unchanged": false
+    },
+    {
+      "path": "6.9/ja/01-learning-result.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "61d0a3db16c3a61e4123ebf393ebae21cd97dcc78a61e9aae346c280aa161c2e",
+      "afterOutputSHA256": "61d0a3db16c3a61e4123ebf393ebae21cd97dcc78a61e9aae346c280aa161c2e",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/ja/02-follow-up.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "0e169b9301f9d709a44ab2a32252c24d26fbdf59d31c8593e7e0481e1a6892fd",
+      "afterOutputSHA256": "48421c2b283d3d59851078126843763c62ca2f1b9c84b9cd09af341a200540ac",
+      "unchanged": false
+    },
+    {
+      "path": "6.9/ja/03-public-feed.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "f7293919e7f2ae0ac15dc15753f4adc6e1deca124cf90e06eb15e534f0089f5a",
+      "afterOutputSHA256": "f7293919e7f2ae0ac15dc15753f4adc6e1deca124cf90e06eb15e534f0089f5a",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/ja/04-study-tree.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "e91d068b57c53f16181c2399eb9b23db82180cff247b23d882e82824cd35a8fb",
+      "afterOutputSHA256": "e91d068b57c53f16181c2399eb9b23db82180cff247b23d882e82824cd35a8fb",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/ja/05-topic-progress.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "c07476bc51b7f01cf4294cce79ef235d4ebfff0d7d8692ab6bf9f073fd1debef",
+      "afterOutputSHA256": "c07476bc51b7f01cf4294cce79ef235d4ebfff0d7d8692ab6bf9f073fd1debef",
+      "unchanged": true
+    },
+    {
+      "path": "6.9/ja/06-custom-question.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "1eca678ab9f8eebb08d4f3e65fa8fc3c4f1ca31b9039630b7c806d02454dead7",
+      "afterOutputSHA256": "7d02983002eb4ec9ce80ddabc12349dc565a42482b1fc2328fc90bcf31ed84b9",
+      "unchanged": false
+    },
+    {
+      "path": "ipad-13/ko/01-learning-result.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "ef2b6957aecb1e8d7472614c64600459531b37cd580e2083d76ef7298684da7b",
+      "afterOutputSHA256": "ef2b6957aecb1e8d7472614c64600459531b37cd580e2083d76ef7298684da7b",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/ko/02-follow-up.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "02b29bb8f24645a3cf889a4f67653354d50de98ca3c38ea4e5908347293d9e6b",
+      "afterOutputSHA256": "3f073ba7bf4cc2745b5eee54ac493b1f149f43eb8463728a3e7204306788b973",
+      "unchanged": false
+    },
+    {
+      "path": "ipad-13/ko/03-public-feed.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "774fade87f7513207d88843d20a82dfef02a9c157d9c6b9f579b124ad74bdeca",
+      "afterOutputSHA256": "774fade87f7513207d88843d20a82dfef02a9c157d9c6b9f579b124ad74bdeca",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/ko/04-study-tree.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "6bd6f6a51295087bc34bc9df2dd67b1670fccd8cfe130806ed9f20877270c592",
+      "afterOutputSHA256": "6bd6f6a51295087bc34bc9df2dd67b1670fccd8cfe130806ed9f20877270c592",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/ko/05-topic-progress.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "b646a1fe53b6c3b084062c5ec2b01ad46754e971aa719bbb7c801c2a61ae0818",
+      "afterOutputSHA256": "b646a1fe53b6c3b084062c5ec2b01ad46754e971aa719bbb7c801c2a61ae0818",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/ko/06-custom-question.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "a5a2cdc6060a95929f9be7fac115cd683dbce46af1007e6babd6edfa4acc34f2",
+      "afterOutputSHA256": "0e85e6b4b95633b3e82ff1209fd3ffd3b413dcfb80c91d4ba8d9499e3b9d43a4",
+      "unchanged": false
+    },
+    {
+      "path": "ipad-13/en-US/01-learning-result.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "5d4b7114d7dbb278deabcb0d6c1a9f08bec645693d3990154f7881791575734e",
+      "afterOutputSHA256": "5d4b7114d7dbb278deabcb0d6c1a9f08bec645693d3990154f7881791575734e",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/en-US/02-follow-up.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "a44db0da3518da3bddd558c2f9bbb22e2922e68f2c1bbfeb6cdb2984207391d4",
+      "afterOutputSHA256": "7735cc52acf90ad86aa7053436a772333933bd1205a3a06ad5fb5f4ba97f8e00",
+      "unchanged": false
+    },
+    {
+      "path": "ipad-13/en-US/03-public-feed.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "7b970bbc24af563b3a44a9979c9d44d586ae3e091f2950f6503483b0265e87dd",
+      "afterOutputSHA256": "7b970bbc24af563b3a44a9979c9d44d586ae3e091f2950f6503483b0265e87dd",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/en-US/04-study-tree.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "c241026a2464a6e6882234d84e832de63787189d7cfeaf936fa3578467809bef",
+      "afterOutputSHA256": "c241026a2464a6e6882234d84e832de63787189d7cfeaf936fa3578467809bef",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/en-US/05-topic-progress.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "b5ac9b9f36367c439f53c6dc751542ae4107bd1eb683b65dcbfefd205a9d80ab",
+      "afterOutputSHA256": "b5ac9b9f36367c439f53c6dc751542ae4107bd1eb683b65dcbfefd205a9d80ab",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/en-US/06-custom-question.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "5f57fc54751f76ef9deecd00cd4d8a9be5e150a18e4b23ba89d6332021904fb6",
+      "afterOutputSHA256": "b4057b05f8a4d77ecc6459a5f404874275588f8453aae733a223687722cacdcb",
+      "unchanged": false
+    },
+    {
+      "path": "ipad-13/ja/01-learning-result.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "24d63ea2a0887eb1ad5d3e10dba5032e773631957f653db7e9ee894fbabc9756",
+      "afterOutputSHA256": "24d63ea2a0887eb1ad5d3e10dba5032e773631957f653db7e9ee894fbabc9756",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/ja/02-follow-up.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "b1a0ae349f8f1c26a8039bbda1ca272f11c0989aeced1b2b8c8afe39f2d5d87a",
+      "afterOutputSHA256": "334e628e0e30a0473cee1305e9282f5cfe2e7e516057ebfa8704405afdb01103",
+      "unchanged": false
+    },
+    {
+      "path": "ipad-13/ja/03-public-feed.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "d5d7321b0b177a357dcd373fe99c883d47a8acff56b1e9639dd89fbcc2fb6806",
+      "afterOutputSHA256": "d5d7321b0b177a357dcd373fe99c883d47a8acff56b1e9639dd89fbcc2fb6806",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/ja/04-study-tree.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "ca68d1d1323f87f7c8ad47a85cd3d5c02e5e2f6352870207f4b03aa508c71c17",
+      "afterOutputSHA256": "ca68d1d1323f87f7c8ad47a85cd3d5c02e5e2f6352870207f4b03aa508c71c17",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/ja/05-topic-progress.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "5a75534325a3bdaa494c56682f5a609e8ba0e783f46cfd82d53d170ee9d40270",
+      "afterOutputSHA256": "5a75534325a3bdaa494c56682f5a609e8ba0e783f46cfd82d53d170ee9d40270",
+      "unchanged": true
+    },
+    {
+      "path": "ipad-13/ja/06-custom-question.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "e1e852d2ee7c14be6f7a028a21d7259bc8bb776d012fd5bc3f403889ba173720",
+      "afterOutputSHA256": "a7724e72924bf9637f3ab16524c538d5b6117361250e3c5b4b4c43215d6a139f",
+      "unchanged": false
+    },
+    {
+      "path": "6.3/en-US/01-learning-result.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "b70a4c2970465bd6daad5525f4af59240dd7aebc72ca7e8ab8ca273097a1c76c",
+      "afterOutputSHA256": "b70a4c2970465bd6daad5525f4af59240dd7aebc72ca7e8ab8ca273097a1c76c",
+      "unchanged": true
+    },
+    {
+      "path": "6.3/en-US/02-follow-up.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "990ce74af06221590cf017dbdb90682f55d1fa5e0b693c16c5bd1d43b679d937",
+      "afterOutputSHA256": "30a060f0df6adad76a83ff5155645826968ce4ae3490b25c9854169fc98815ea",
+      "unchanged": false
+    },
+    {
+      "path": "6.3/en-US/03-public-feed.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "860e0b20958edd5460d6a4e4973682ae6919200a6b68c014cebbde8c82fd9524",
+      "afterOutputSHA256": "860e0b20958edd5460d6a4e4973682ae6919200a6b68c014cebbde8c82fd9524",
+      "unchanged": true
+    },
+    {
+      "path": "6.3/en-US/04-study-tree.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "3ce55ad766ed2433bb6e7d8210ea5dea53ffd0d076b003d0b88c26624efaa746",
+      "afterOutputSHA256": "3ce55ad766ed2433bb6e7d8210ea5dea53ffd0d076b003d0b88c26624efaa746",
+      "unchanged": true
+    },
+    {
+      "path": "6.3/en-US/05-topic-progress.png",
+      "recaptured": false,
+      "beforeOutputSHA256": "1ecbc68198486a515ff7ad1e25a7acd0ad59cc8684e13a01a2b1b5ace44f3a42",
+      "afterOutputSHA256": "1ecbc68198486a515ff7ad1e25a7acd0ad59cc8684e13a01a2b1b5ace44f3a42",
+      "unchanged": true
+    },
+    {
+      "path": "6.3/en-US/06-custom-question.png",
+      "recaptured": true,
+      "beforeOutputSHA256": "4376e59beb38253acfe6b5f6e5a4b28ed1b548506c1e369946ca120d93924295",
+      "afterOutputSHA256": "8f4013e383ae31792f0dda1ebeaba2769e7a3e4a5cc7d0616df0c6fd09a5ba5f",
+      "unchanged": false
+    }
+  ]
+}

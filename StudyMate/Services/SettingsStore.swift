@@ -14,6 +14,7 @@ final class SettingsStore {
         static let gradingResult = "gradingResult"
         static let lastAnswer = "lastAnswer"
         static let answerDraftsByRecordID = "answerDraftsByRecordID"
+        static let customQuestionDrafts = "customQuestionDrafts"
         static let pendingQuestionGenerationProcess = "pendingQuestionGenerationProcess"
         static let isRunning = "isRunning"
         static let hasExplicitRunningPreference = "hasExplicitRunningPreference"
@@ -330,7 +331,7 @@ final class SettingsStore {
         onlyIfUngraded: Bool = false
     ) {
         if var record = recordStore.find(question: question) {
-            guard !onlyIfUngraded || record.gradingResult == nil else {
+            guard !onlyIfUngraded || record.isPendingStudyQuestion else {
                 return
             }
             record.answer = answer
@@ -482,6 +483,24 @@ final class SettingsStore {
 
     func saveLastAnswer(_ answer: String) {
         defaults.set(answer, forKey: Keys.lastAnswer)
+    }
+
+    func loadCustomQuestionDraft(key: String) -> CustomQuestionDraft? {
+        loadCustomQuestionDrafts()[key]
+    }
+
+    func saveCustomQuestionDraft(_ draft: CustomQuestionDraft?, key: String) {
+        var drafts = loadCustomQuestionDrafts()
+        drafts[key] = draft
+        if let data = try? encoder.encode(drafts) {
+            defaults.set(data, forKey: Keys.customQuestionDrafts)
+        }
+    }
+
+    private func loadCustomQuestionDrafts() -> [String: CustomQuestionDraft] {
+        guard let data = defaults.data(forKey: Keys.customQuestionDrafts),
+              let drafts = try? decoder.decode([String: CustomQuestionDraft].self, from: data) else { return [:] }
+        return drafts
     }
 
     func loadAnswerDraft(recordID: String) -> String {
@@ -1100,11 +1119,7 @@ private final class InMemoryStudyRecordStore: StudyRecordStorage {
     }
 
     func find(question: QuestionItem) -> StudyRecord? {
-        let normalizedQuestion = SettingsStore.normalizedQuestionText(question.question)
-        return records.last {
-            $0.isQuestion && ($0.question.createdAt == question.createdAt ||
-                SettingsStore.normalizedQuestionText($0.question.question) == normalizedQuestion)
-        }
+        records.last { StudyRecordIdentityPolicy.recordMatchesQuestion($0, question: question) }
     }
 
     func append(_ record: StudyRecord) {

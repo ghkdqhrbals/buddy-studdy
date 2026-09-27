@@ -1,0 +1,29 @@
+{
+  "checkedAt": "2026-09-27T22:03:46.289Z",
+  "releaseSourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+  "captureSourceCommits": [
+    "8ecc999d9f219fab2416566471e63f94a3228253",
+    "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+  ],
+  "fileCount": 60,
+  "setCount": 10,
+  "exactDimensions": true,
+  "opaqueRGB": true,
+  "sourceAndOutputChecksumsMatch": true,
+  "distinctNativeProofPerPanel": true,
+  "noHeadlineOverflow": true,
+  "fullDeviceInsideCanvas": true,
+  "contactSheets": [
+    "design/qa/6.5-ko.png",
+    "design/qa/6.5-en-US.png",
+    "design/qa/6.5-ja.png",
+    "design/qa/6.9-ko.png",
+    "design/qa/6.9-en-US.png",
+    "design/qa/6.9-ja.png",
+    "design/qa/ipad-13-ko.png",
+    "design/qa/ipad-13-en-US.png",
+    "design/qa/ipad-13-ja.png",
+    "design/qa/6.3-en-US.png"
+  ],
+  "visualReview": "See ../design/visual-review.md for the separate recorded visual review; not an automated assertion."
+}

@@ -173,6 +173,26 @@ class QuestionGenerationPersistenceIntegrationTest : MySqlIntegrationTestSupport
         ).isTrue()
     }
 
+    @Test
+    fun `follow-up saga roundtrips lineage and retains the active topic uniqueness guard`(): Unit = runBlocking {
+        val suffix = UUID.randomUUID().toString()
+        val now = Instant.now()
+        val original = saga(UUID.randomUUID().toString(), positiveId(suffix, 1), positiveId(suffix, 2),
+            positiveId(suffix, 3), "follow-up:$suffix", now).copy(
+                source = QuestionGenerationSource.FOLLOW_UP,
+                parentRecordId = 901,
+                rootRecordId = 900,
+                followUpDepth = 2,
+            )
+        assertThat(sagas.insert(original)).isTrue()
+        val persisted = checkNotNull(sagas.findByCorrelationId(original.correlationId))
+        assertThat(persisted.source).isEqualTo(QuestionGenerationSource.FOLLOW_UP)
+        assertThat(persisted.parentRecordId).isEqualTo(901)
+        assertThat(persisted.rootRecordId).isEqualTo(900)
+        assertThat(persisted.followUpDepth).isEqualTo(2)
+        assertThat(sagas.insert(original.copy(correlationId = UUID.randomUUID().toString(), idempotencyKey = "other:$suffix"))).isFalse()
+    }
+
     private fun saga(
         correlationId: String,
         userId: Long,

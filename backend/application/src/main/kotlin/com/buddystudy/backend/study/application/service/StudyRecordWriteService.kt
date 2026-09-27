@@ -19,6 +19,7 @@ import com.buddystudy.backend.study.application.port.inbound.StudyRecordWriteUse
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionSource
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyRecordType
 import org.springframework.http.HttpStatus
@@ -46,7 +47,8 @@ class StudyRecordWriteService(
         now: Instant,
     ): QuestionWriteResult {
         val question = lockGeneratedQuestion(recordId, userId)
-        if (question.status != QuestionStatus.UNGRADED || question.skippedAt != null ||
+        if (question.source == QuestionSource.CUSTOM_QUESTION ||
+            question.status != QuestionStatus.UNGRADED || question.skippedAt != null ||
             question.gradingRequestId != null ||
             question.gradingStatus != null ||
             question.score != null
@@ -100,6 +102,9 @@ class StudyRecordWriteService(
     @Transactional
     override suspend fun skip(userId: Long, recordId: Long): QuestionEntity {
         val question = lockGeneratedQuestion(recordId, userId)
+        if (question.source == QuestionSource.CUSTOM_QUESTION) {
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A saved custom question cannot be skipped.")
+        }
         // Repeated tools/requests observe the same result without changing its history.
         if (question.status == QuestionStatus.SKIPPED) return question
         if (question.status != QuestionStatus.UNGRADED || !question.answer.isNullOrBlank() ||
@@ -133,6 +138,9 @@ class StudyRecordWriteService(
     @Transactional
     override suspend fun updatePublicity(userId: Long, recordId: Long, isPublic: Boolean): QuestionEntity {
         val question = lockRecord(recordId, userId)
+        if (isPublic && question.source in setOf(QuestionSource.CUSTOM_QUESTION, QuestionSource.FOLLOW_UP)) {
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "Supplementary study records are private.")
+        }
         question.apply(question.toStudyRecord().restrictPublicity(isPublic))
         return questions.save(question)
     }
@@ -149,7 +157,8 @@ class StudyRecordWriteService(
         val question = lockGeneratedQuestion(recordId, userId)
         val normalizedAnswer = answer.trim()
         val persistedAnswer = question.answer?.trim()?.takeIf { it.isNotEmpty() }
-        if (question.status != QuestionStatus.UNGRADED || question.skippedAt != null ||
+        if (question.source == QuestionSource.CUSTOM_QUESTION ||
+            question.status != QuestionStatus.UNGRADED || question.skippedAt != null ||
             (persistedAnswer != null && persistedAnswer != normalizedAnswer) ||
             question.gradingRequestId != null ||
             question.gradingStatus != null ||

@@ -16,6 +16,8 @@ Grafana, and the private TestZone API behind the backend administrator session.
 - `/advertising.html`: Coupang advertising campaign creation and editing,
   localized creative, audience and frequency controls, performance totals, and
   the live server-ranking policy used to mix ads into public questions
+- `/push.html`: push campaign preview, saved drafts, explicit send, validated
+  app landing pages, all or selected recipients, and delivery/open metrics
 - `/streams.html`: authenticated Redis Stream delivery status with
   configured MAXLEN and retention use, consumer-group offsets, lag, pending
   ranges, per-consumer ownership, retry counts, partial-inspection errors,
@@ -26,7 +28,7 @@ Grafana, and the private TestZone API behind the backend administrator session.
 
 Every monitoring route is served by the shared React application. It provides
 one fixed navigation shell and visual system across API Logs, API Performance,
-TestZone, Users & Quotas, Advertising, Batch Jobs, Redis Streams, Access & Audit, and Settings. Manage
+TestZone, Users & Quotas, Advertising, Push Admin, Batch Jobs, Redis Streams, Access & Audit, and Settings. Manage
 adds one session-scoped administrator API boundary, TanStack Query server
 state, dense reusable tables, and a right-side object inspector. Redis field
 values and outbox payload JSON can be explored as a nested tree or raw JSON
@@ -44,6 +46,15 @@ its existing 5xx error definition. Server RPS, runtime latency metrics, and
 Grafana alert queries continue to read only `api_exchange`, so MCP logical
 calls do not inflate HTTP traffic statistics. The `codex:log-search` command
 supports the same events with `--method MCP --path list_studies`.
+
+Push Admin previews a campaign with `POST /api/v1/admin/push-campaigns/preview`,
+saves it as a draft with an idempotency UUID, and only sends after the operator
+selects **Queue push** on the saved draft. Landing pages are a fixed app-route
+allowlist; public-question links are revalidated by the backend. The selected
+audience is bounded to 500 registered users and the campaign list is paginated.
+CTR means unique recipients who explicitly opened a push divided by recipients
+accepted by APNs. Provider acceptance is not device-delivery confirmation;
+in-app inbox opens are excluded. No accepted recipients displays an em dash.
 
 API exchange logs are intentionally rendered exactly as captured by the
 backend, including authorization, client-secret, cookie, token, password, and

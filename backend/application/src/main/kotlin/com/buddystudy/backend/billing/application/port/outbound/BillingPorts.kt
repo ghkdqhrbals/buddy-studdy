@@ -150,6 +150,9 @@ interface BillingLedgerPort {
     /** Applies a verified RevenueCat lifecycle event and completes its receipt atomically. */
     suspend fun applyRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean
 
+    /** Closes a verified out-of-scope receipt without applying payment or entitlement state. */
+    suspend fun ignoreRevenueCatEvent(eventId: String, reason: String, now: Instant)
+
     /** REQUIRES_NEW failure update so processing errors survive transaction rollback. */
     suspend fun markRevenueCatEventFailed(eventId: String, error: String, now: Instant): BillingProcessingFailureOutcome
 

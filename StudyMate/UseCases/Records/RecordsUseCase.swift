@@ -29,6 +29,18 @@ struct RecordsUseCase {
     }
     #endif
 
+    func createCustomQuestion(registration: RemotePushRegistration, studyID: Int, draft: CustomQuestionDraft) async throws -> StudyRecord {
+        try await repository.createCustomQuestion(registration: registration, studyID: studyID, draft: draft)
+    }
+
+    func createFollowUp(registration: RemotePushRegistration, recordID: String, idempotencyKey: String) async throws -> QuestionGenerationAccepted {
+        try await repository.createFollowUp(registration: registration, recordID: recordID, idempotencyKey: idempotencyKey)
+    }
+
+    func fetchRecordThread(registration: RemotePushRegistration, recordID: String, language: AppLanguage) async throws -> [StudyRecord] {
+        try await repository.fetchRecordThread(registration: registration, recordID: recordID, language: language)
+    }
+
     func fetchRecords(
         registration: RemotePushRegistration,
         limit: Int,

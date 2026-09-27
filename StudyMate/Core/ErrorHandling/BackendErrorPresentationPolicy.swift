@@ -1,5 +1,10 @@
 import Foundation
 
+enum FollowUpAvailabilityFailure: Equatable {
+    case limitReached
+    case notAvailable
+}
+
 struct BackendErrorPresentation: Equatable {
     var message: String
     var inlineMessage: String?
@@ -14,6 +19,31 @@ struct BackendErrorPresentation: Equatable {
 }
 
 enum BackendErrorPresentationPolicy {
+    static func isTerminalReferralRedemptionError(_ error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError,
+              case .httpStatus(let statusCode, _, _) = backendError,
+              (400..<500).contains(statusCode) else { return false }
+        return ![401, 408, 425, 429].contains(statusCode)
+    }
+
+    static func followUpAvailabilityFailure(_ error: Error) -> FollowUpAvailabilityFailure? {
+        guard let backendError = error as? RemotePushBackendError else { return nil }
+        switch backendError.backendCode {
+        case "FOLLOW_UP_LIMIT_REACHED", "518": return .limitReached
+        case "FOLLOW_UP_NOT_AVAILABLE", "517": return .notAvailable
+        default: return nil
+        }
+    }
+
+    static func isPermanentQuestionGenerationError(_ error: Error) -> Bool {
+        if let backendError = error as? RemotePushBackendError,
+           case .httpStatus(let status, _, _) = backendError,
+           status == 408 || status == 429 || (500...599).contains(status) {
+            return false
+        }
+        return isPermanentBackendOperationError(error)
+    }
+
     static func presentation(
         for error: Error,
         fallback: String,

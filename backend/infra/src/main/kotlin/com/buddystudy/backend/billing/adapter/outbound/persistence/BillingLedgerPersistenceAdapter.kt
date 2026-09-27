@@ -1020,6 +1020,15 @@ class BillingLedgerPersistenceAdapter(
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    override suspend fun ignoreRevenueCatEvent(eventId: String, reason: String, now: Instant) {
+        val status = database.sql(
+            "select processing_status from subscription_events where provider = 'REVENUECAT' and provider_event_id = :eventId for update",
+        ).bind("eventId", eventId).map { row, _ -> row.string("processing_status") }.one().awaitSingleOrNull()
+        if (status == "COMPLETED" || status == "IGNORED") return
+        markRevenueCatEvent(eventId, BillingReceiptStatus.IGNORED, reason.take(4000), now)
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     override suspend fun markRevenueCatEventFailed(
         eventId: String,
         error: String,
@@ -1040,6 +1049,15 @@ class BillingLedgerPersistenceAdapter(
             )
         }.one().awaitSingleOrNull()
             ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "RevenueCat processing event is missing.")
+        if (current.processingStatus == "IGNORED" || current.processingStatus == "COMPLETED") {
+            return BillingProcessingFailureOutcome(
+                attemptCount = current.attemptCount,
+                maxAttempts = current.maxAttempts,
+                status = current.processingStatus,
+                nextAttemptAt = null,
+                terminalTransition = false,
+            )
+        }
         if (current.processingStatus == BILLING_PROCESSING_EXHAUSTED) {
             return current.outcome(nextAttemptAt = null, terminalTransition = false)
         }

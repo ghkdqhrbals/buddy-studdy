@@ -1,0 +1,98 @@
+{
+  "ko": [
+    [
+      "질문 하나로,",
+      "내 이해를 확인",
+      "짧게 답하고 AI 피드백으로 돌아봐요"
+    ],
+    [
+      "내 답변에서",
+      "한 걸음 더 깊게",
+      "AI 꼬리질문으로 생각을 이어가요"
+    ],
+    [
+      "함께 읽을 질문,",
+      "관심주제로 발견",
+      "공개 질문을 검색하고 관심주제를 구독해요"
+    ],
+    [
+      "관심을 넓히는",
+      "나만의 학습 트리",
+      "큰 주제에서 세부 주제로 넓혀가요"
+    ],
+    [
+      "주제별로 보는",
+      "나의 성장",
+      "학습 기록으로 이해와 성장 흐름을 확인해요"
+    ],
+    [
+      "내 질문도,",
+      "내 공부 기록으로",
+      "직접 쓴 질문과 답변을 채점 없이 저장해요"
+    ]
+  ],
+  "en-US": [
+    [
+      "One question.",
+      "A clearer mind.",
+      "Answer briefly. Reflect with AI feedback."
+    ],
+    [
+      "Your answer.",
+      "The next question.",
+      "Go deeper with AI follow-up questions."
+    ],
+    [
+      "Good questions.",
+      "Shared interests.",
+      "Search public questions. Follow your topics."
+    ],
+    [
+      "Grow your own",
+      "learning tree.",
+      "Branch from big ideas into smaller topics."
+    ],
+    [
+      "See your growth.",
+      "Topic by topic.",
+      "Explore your progress through study records."
+    ],
+    [
+      "Your questions.",
+      "Your study notes.",
+      "Save your own questions and answers, ungraded."
+    ]
+  ],
+  "ja": [
+    [
+      "ひとつの質問で、",
+      "理解を確かめる",
+      "短く答えて、AIのフィードバックで振り返る"
+    ],
+    [
+      "あなたの回答から、",
+      "もう一歩深く",
+      "AIの追加質問で、考えをつなげよう"
+    ],
+    [
+      "気になる質問に、",
+      "出会う場所",
+      "公開質問を検索して、興味のあるトピックをフォロー"
+    ],
+    [
+      "興味が広がる、",
+      "自分だけの学習ツリー",
+      "大きなテーマから、細かなトピックへ"
+    ],
+    [
+      "トピックごとに、",
+      "成長が見える",
+      "学習記録から、理解と成長の流れを確認"
+    ],
+    [
+      "自分の質問も、",
+      "学習の記録に",
+      "自分で書いた質問と回答を、採点せずに保存"
+    ]
+  ]
+}

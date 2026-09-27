@@ -871,9 +871,8 @@ struct HomeAnnouncement: Identifiable, Equatable {
     }
 
     init?(notification: BackendAppNotification) {
-        guard notification.type
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased() == "ADMIN_MESSAGE",
+        let type = notification.type.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard ["ADMIN_MESSAGE", "MARKETING"].contains(type),
               Self.isMessageDeepLink(notification.deepLink) else {
             return nil
         }
@@ -2053,6 +2052,16 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     var questionStatus: QuestionStatus
     var gradingLastEventID: Int64?
     var localization: RecordLocalizationMetadata?
+    var parentRecordID: String?
+    var rootRecordID: String?
+    var followUpDepth: Int
+    var source: String
+
+    var isFollowUp: Bool { isQuestion && (followUpDepth > 0 || source == "follow_up" || parentRecordID != nil) }
+    var isCustomQuestion: Bool { isQuestion && source == "custom_question" }
+    var isCompleted: Bool { isCompletedRecord }
+    var isPendingStudyQuestion: Bool { isPendingQuestion }
+    var threadRootID: String { rootRecordID ?? id }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -2075,6 +2084,10 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         case questionStatus
         case gradingLastEventID = "gradingLastEventId"
         case localization
+        case parentRecordID = "parentRecordId"
+        case rootRecordID = "rootRecordId"
+        case followUpDepth
+        case source
     }
 
     private enum BackendBooleanCodingKeys: String, CodingKey {
@@ -2102,7 +2115,11 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         gradingLastEventID: Int64? = nil,
         localization: RecordLocalizationMetadata? = nil,
         recordType: StudyRecordType = .question,
-        voiceRecord: VoiceRecordContent? = nil
+        voiceRecord: VoiceRecordContent? = nil,
+        parentRecordID: String? = nil,
+        rootRecordID: String? = nil,
+        followUpDepth: Int = 0,
+        source: String = "manual"
     ) {
         self.id = id
         self.recordType = recordType
@@ -2110,7 +2127,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.studyID = studyID
         self.question = question
         self.answer = answer
-        self.gradingResult = recordType == .voiceTutor ? nil : gradingResult
+        self.gradingResult = recordType == .voiceTutor || source == "custom_question" ? nil : gradingResult
         self.topic = topic
         self.difficulty = difficulty
         self.answeredAt = answeredAt
@@ -2128,6 +2145,11 @@ struct StudyRecord: Codable, Equatable, Identifiable {
                 : (self.gradingRequestID?.isEmpty == false || gradingStatus != nil ? .grading : .ungraded)))
         self.gradingLastEventID = gradingLastEventID
         self.localization = localization
+        self.parentRecordID = parentRecordID
+        self.rootRecordID = rootRecordID
+        self.followUpDepth = followUpDepth
+        self.source = source
+        if isFollowUp || isCustomQuestion { self.isPublic = false }
     }
 
     init(from decoder: Decoder) throws {
@@ -2161,6 +2183,12 @@ struct StudyRecord: Codable, Equatable, Identifiable {
                 : (gradingRequestID?.isEmpty == false || gradingStatus != nil ? .grading : .ungraded))
         gradingLastEventID = try container.decodeIfPresent(Int64.self, forKey: .gradingLastEventID)
         localization = try container.decodeIfPresent(RecordLocalizationMetadata.self, forKey: .localization)
+        parentRecordID = try container.decodeIfPresent(String.self, forKey: .parentRecordID)
+        rootRecordID = try container.decodeIfPresent(String.self, forKey: .rootRecordID)
+        followUpDepth = try container.decodeIfPresent(Int.self, forKey: .followUpDepth) ?? 0
+        source = try container.decodeIfPresent(String.self, forKey: .source) ?? "manual"
+        if isFollowUp || isCustomQuestion { isPublic = false }
+        if isCustomQuestion { gradingResult = nil }
         if recordType == .voiceTutor {
             guard voiceRecord != nil, questionStatus == .completed, gradingResult == nil,
                   gradingRequestID == nil, gradingStatus == nil,
@@ -2208,6 +2236,39 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     }
 }
 
+enum StudyFollowUpPolicy {
+    static let maximumDepth = 2
+
+    static func orderedThread(containing record: StudyRecord, records: [StudyRecord]) -> [StudyRecord] {
+        guard record.isQuestion else { return [record] }
+        var byID: [String: StudyRecord] = [record.id: record]
+        for candidate in records where candidate.isQuestion && candidate.threadRootID == record.threadRootID {
+            byID[candidate.id] = candidate
+        }
+        return byID.values.sorted {
+            if $0.followUpDepth != $1.followUpDepth { return $0.followUpDepth < $1.followUpDepth }
+            return $0.question.createdAt < $1.question.createdAt
+        }.prefix(maximumDepth + 1).map { $0 }
+    }
+
+    static func canRequest(after record: StudyRecord, thread: [StudyRecord]) -> Bool {
+        record.isQuestion && !record.isDetachedLocalQuestion && !record.isCustomQuestion &&
+            record.gradingResult != nil && record.questionStatus == .graded &&
+            record.followUpDepth < maximumDepth &&
+            !thread.contains { $0.followUpDepth > record.followUpDepth }
+    }
+}
+
+enum StudyRecordScorePolicy {
+    static func average(records: [StudyRecord]) -> Int? {
+        let scores = records
+            .filter { !$0.isFollowUp && !$0.isCustomQuestion }
+            .compactMap(\.displayScore)
+        guard !scores.isEmpty else { return nil }
+        return Int((Double(scores.reduce(0, +)) / Double(scores.count)).rounded())
+    }
+}
+
 enum QuestionStatus: String, Codable, Equatable {
     case ungraded = "UNGRADED"
     case grading = "GRADING"
@@ -2226,6 +2287,19 @@ enum QuestionStatus: String, Codable, Equatable {
             )
         }
         self = status
+    }
+}
+
+struct CustomQuestionDraft: Codable, Equatable {
+    var question = ""
+    var answer = ""
+    var language: AppLanguage
+    var idempotencyKey = UUID().uuidString
+
+    var canSave: Bool {
+        !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            question.utf16.count <= 4_000 && answer.utf16.count <= 12_000
     }
 }
 
@@ -2292,7 +2366,7 @@ enum StudyAnswerPresentationPolicy {
         }
         guard record.isQuestion else { return .completed }
         if record.questionStatus == .skipped || record.questionStatus == .completed ||
-            record.questionStatus == .graded ||
+            record.isCustomQuestion || record.questionStatus == .graded ||
             record.gradingResult != nil ||
             record.gradingStatus == .completed {
             return .completed
@@ -2347,6 +2421,7 @@ struct DeletedStudyRecordMarker: Codable, Equatable, Identifiable {
     func matches(_ record: StudyRecord) -> Bool {
         guard (recordType ?? .question) == record.recordType else { return false }
         if record.id == recordID { return true }
+        if mergeKey.hasPrefix("record|") || record.isFollowUp || record.isCustomQuestion { return false }
         guard !record.isDetachedLocalQuestion, !recordID.hasPrefix("local-draft:") else { return false }
         guard (recordType ?? .question) == .question, record.isQuestion else { return false }
         return Self.mergeKey(for: record) == mergeKey ||
@@ -2355,6 +2430,7 @@ struct DeletedStudyRecordMarker: Codable, Equatable, Identifiable {
 
     static func mergeKey(for record: StudyRecord) -> String {
         guard record.isQuestion else { return "record:\(record.id)" }
+        if record.isFollowUp || record.isCustomQuestion { return "record|\(record.id)" }
         return [
             record.topic.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
             String(record.difficulty.level),
@@ -2937,6 +3013,25 @@ struct AppStrings {
             japanese ?? JapaneseAppStrings.translation(for: english)
         }
     }
+
+    var viewLearningThread: String { text("학습 대화 이어보기", "Continue learning thread", "学習の会話を続ける") }
+    var followUpQuestion: String { text("꼬리질문 받기", "Get a follow-up", "追加問題を受け取る") }
+    var customQuestionTag: String { text("사용자 생성 질문", "Custom question", "ユーザー作成の問題") }
+    var createCustomQuestion: String { text("직접 질문 만들기", "Write your own question", "自分で問題を作る") }
+    var customQuestionHelp: String { text("질문과 답변을 직접 작성해 비공개로 저장합니다. 채점하거나 질문 횟수를 사용하지 않습니다.", "Write and privately save your own question and answer. There is no grading or question quota charge.", "問題と回答を自分で書いて非公開で保存します。採点や問題回数の消費はありません。") }
+    var customQuestionPrompt: String { text("학습할 질문", "Question to study", "学習する問題") }
+    var customQuestionAnswer: String { text("내가 작성한 답변", "Your answer", "自分で書いた回答") }
+    var customQuestionSaved: String { text("질문과 답변을 저장했습니다.", "Your question and answer are saved.", "問題と回答を保存しました。") }
+    var customQuestionLengthHelp: String { text("질문은 4,000자, 답변은 12,000자까지 입력할 수 있습니다.", "Up to 4,000 characters for the question and 12,000 for the answer.", "問題は4,000文字、回答は12,000文字まで入力できます。") }
+    var followUpQuotaNotice: String { text("질문 1회를 사용합니다. 원래 문제당 최대 2회까지 이어 풀 수 있습니다.", "Uses 1 question. Up to 2 follow-ups per original question.", "問題を1回使用します。元の問題につき2回まで続けられます。") }
+    var followUpPracticeNotice: String { text("비공개 추가 학습입니다. 원래 점수와 실력·성장 통계는 바뀌지 않습니다.", "Private extra practice. Your original score and ability and growth statistics stay unchanged.", "非公開の追加学習です。元の点数と実力・成長の統計は変わりません。") }
+    var followUpLimitReached: String { text("이 문제의 꼬리질문 2회를 모두 마쳤습니다.", "You have completed both follow-ups for this question.", "この問題の追加学習を2回とも完了しました。") }
+    var followUpUnavailable: String { text("가장 최근 답변의 채점을 마친 뒤 이어 풀 수 있습니다.", "Finish grading the latest answer to continue.", "最新の回答の採点が完了すると続けられます。") }
+    var studyThreadLoadFailed: String { text("이전 대화를 불러오지 못했습니다.", "Could not load the earlier conversation.", "前の会話を読み込めませんでした。") }
+    var extraPractice: String { text("추가 학습", "Extra practice", "追加学習") }
+    var skippedFollowUp: String { text("건너뛴 꼬리질문", "Skipped follow-up", "スキップした追加問題") }
+    var originalQuestion: String { text("원래 질문", "Original question", "元の問題") }
+    func followUpTurn(_ depth: Int) -> String { text("꼬리질문 \(depth)/2", "Follow-up \(depth)/2", "追加問題 \(depth)/2") }
 
     var showOriginal: String { text("원문 보기", "Show original", "原文を見る") }
     var updateNow: String { text("지금 업데이트", "Update now", "今すぐアップデート") }
@@ -3625,7 +3720,9 @@ struct AppStrings {
         text("\(count)명", "\(count)", "\(count)人")
     }
     func referralMonths(_ count: Int) -> String {
-        text("\(count)개월", "\(count) month\(count == 1 ? "" : "s")", "\(count)か月")
+        count == 1
+            ? text("1개월", "1 month", "1か月")
+            : text("\(count)개월", "\(count) months", "\(count)か月")
     }
     func referralShareMessage(code: String) -> String {
         text(
@@ -4775,22 +4872,17 @@ struct AppStrings {
     var firstStudyStarterTopics: [String] {
         [text("Swift 앱 개발", "Swift App Development", "Swiftアプリ開発"), text("영어 회화", "English Conversation", "英会話"), text("데이터 분석", "Data Analysis", "データ分析")]
     }
-    var feedRecommended: String { text("추천순", "Recommended", "おすすめ順") }
-    var feedLatest: String { text("최신순", "Latest", "新着順") }
-    var feedMostViewed: String { text("조회순", "Most viewed", "閲覧数順") }
-    var feedMostLiked: String { text("좋아요순", "Most liked", "いいね順") }
     var feedAllTopics: String { text("전체 주제", "All topics", "すべてのトピック") }
     var feedFollowingTopics: String { text("구독 주제", "Following", "フォロー中") }
-    var feedSort: String { text("질문 정렬", "Sort questions", "質問の並び順") }
     var feedScope: String { text("질문 범위", "Question scope", "質問の範囲") }
     var homeFeedScope: String { text("학습 보기", "Study view", "学習の表示") }
     var feedSearchEmptyHelp: String { text("검색어를 바꾸거나 검색을 지워 다시 둘러보세요.", "Try another topic or clear your search to keep exploring.", "別のトピックで検索するか、検索をクリアしてご覧ください。") }
     var topicSubscriptions: String { text("관심주제", "Interests", "興味のあるトピック") }
     var topicSubscriptionsHelp: String {
         text(
-            "관심주제를 구독하면 홈에서 조회와 좋아요가 많은 질문을 먼저 추천해 드려요.",
-            "Follow topics to see popular questions with more views and likes in your Home recommendations.",
-            "トピックをフォローすると、閲覧やいいねの多い質問がホームで優先的におすすめされます。"
+            "관심주제를 구독하고 구독 주제 피드에서 새 질문을 만나보세요.",
+            "Follow your interests and explore questions in your Following feed.",
+            "興味のあるトピックをフォローして、フォロー中のフィードで質問を見つけましょう。"
         )
     }
     var topicSubscriptionsPlaceholder: String { text("관심주제 입력", "Add an interest", "トピックを入力") }
@@ -4808,7 +4900,6 @@ struct AppStrings {
     var topicSubscriptionsLimitReached: String { text("관심주제 30개를 모두 채웠어요. 새 주제를 추가하려면 하나를 삭제해 주세요.", "You follow 30 topics. Remove one before adding another.", "30件のトピックをフォロー中です。追加するには1件削除してください。") }
     var topicSubscriptionsEmptyFeed: String { text("구독한 주제의 공개 질문이 아직 없습니다.", "No public questions in your followed topics yet.", "フォロー中のトピックの公開質問はまだありません。") }
     var topicSubscriptionsEmptyFeedHelp: String { text("관심주제를 더 추가하거나 전체 주제를 둘러보세요.", "Add more interests or explore all topics.", "興味のあるトピックを追加するか、すべてのトピックをご覧ください。") }
-    var feedPersonalizedHelp: String { text("구독한 주제의 인기 질문을 먼저 추천해 드려요.", "Popular questions from your interests appear first.", "フォロー中のトピックの人気の質問を優先しておすすめします。") }
     var feedExploreAllTopics: String { text("전체 주제 둘러보기", "Explore all topics", "すべてのトピックを見る") }
     var likedQuestions: String { text("좋아요한 질문", "Liked Questions", "いいねした質問") }
     var searchLikedQuestions: String { text("좋아요한 질문 검색", "Search Liked Questions", "いいねした質問を検索") }

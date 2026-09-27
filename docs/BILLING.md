@@ -832,6 +832,18 @@ ERROR-log events send firing notifications only because expiry from a log
 window does not prove that the underlying condition recovered. The backend
 never calls Slack directly.
 
+### Follow-up learning in iOS 1.3.0
+
+An AI-generated follow-up is a generated system question and reserves one
+monthly allowance unit through the existing Saga correlation ID. Original and
+follow-up questions use the same exactly-once commit/release rules. The iOS
+action discloses the unit cost before generation. Learner-authored custom
+questions and answers are saved without AI generation or grading, have no
+numeric score, and do not reserve or consume question allowance. Idempotent
+save retries return the same custom record. Creating a study or descendant
+topic also remains quota-free.
+See [FOLLOW_UP_QUESTIONS.md](FOLLOW_UP_QUESTIONS.md).
+
 ## API
 
 User endpoints:
@@ -979,6 +991,23 @@ real purchases can complete.
   contract.
 
 ## Processing failure operations
+
+RevenueCat can forward Xcode-local StoreKit transactions as `APP_STORE` /
+`SANDBOX` events. Events with that exact store/environment and a transaction or
+original transaction ID starting with `StoreKitTest_Transaction_` are retained
+as `IGNORED` receipts before account lookup or financial/lifecycle processing.
+They cannot create payments, invoices, entitlements or quota grants. Real Apple
+Sandbox/TestFlight transactions retain the normal fulfillment and retry rules;
+an anonymous ID alone is not a reason to ignore a purchase. The signed webhook
+authentication still runs before any receipt is recorded. Migration V123 closes
+only unfinished receipts with the same local-test signature, preserving their
+attempt history and all financial projections.
+
+Hosted iOS XCTest processes must not initialize RevenueCat. The Debug startup
+guard recognizes the XCTest host before the SDK can observe a local
+`SKTestSession` purchase. StoreKit configuration tests assert that RevenueCat is
+unconfigured before and after the local transaction. Offline QA retains its
+separate fixture guard and stripped SDK key; the Release purchase path is unchanged.
 
 RevenueCat event projection and subscription reconciliation failures use a
 durable three-attempt policy. The first and second failures remain `RETRYING`

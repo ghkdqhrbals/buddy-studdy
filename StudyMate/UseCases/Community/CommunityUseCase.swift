@@ -15,7 +15,6 @@ struct CommunityUseCase {
         offset: Int,
         excludeDeviceID: String?,
         language: AppLanguage,
-        sort: CommunityFeedSort,
         scope: CommunityFeedScope
     ) async throws -> CommunityQuestionsResponse {
         try await repository.fetchPublicQuestions(
@@ -25,7 +24,6 @@ struct CommunityUseCase {
             offset: offset,
             excludeDeviceID: excludeDeviceID,
             language: language,
-            sort: sort,
             scope: scope
         )
     }

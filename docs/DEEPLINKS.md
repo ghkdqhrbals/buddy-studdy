@@ -14,7 +14,8 @@ Universal Link의 이동 결과를 정리한다. 새 링크를 발급할 때는 
 - 앱 화면 이동: `AppState.openRoute` in `StudyMate/ViewModels/AppState.swift`
 - 푸시 및 알림함 이동: `StudyNotificationPayload`와
   `NotificationLandingCoordinator`
-- 관리자 발송 검증: backend `AdminMessagingService`
+- 관리자 개별 발송 검증: backend `AdminMessagingService`
+- 캠페인 발송 검증: backend `PushCampaignLandingPolicy`와 `PushCampaignService`
 
 ## 공통 규칙
 
@@ -103,8 +104,8 @@ https://api.ghkdqhrbals.org/questions/987?tl=ko
 | 화면 | 권장 URI | 파라미터 | 직접 실행 시 결과 | 비고 |
 | --- | --- | --- | --- | --- |
 | 홈 | `buddystudy://home` | 없음 | 홈 탭의 기본 화면을 연다. | `buddystudy://`도 홈으로 해석한다. |
-| 홈 공지 팝업 | `buddystudy://home/message` | URL 파라미터 없음 | URL만 열면 홈으로 이동한다. | 팝업은 `ADMIN_MESSAGE` 알림의 제목/본문이 함께 있을 때만 표시된다. |
-| 내 학습 목록 | `buddystudy://studies` | 없음 | 홈 탭의 **내 학습** 범위를 연다. | 이전 알림 호환용 경로이며 관리자 새 메시지 프리셋에는 노출하지 않는다. |
+| 홈 공지 팝업 | `buddystudy://home/message` | URL 파라미터 없음 | URL만 열면 홈으로 이동한다. | 팝업은 `ADMIN_MESSAGE` 또는 `MARKETING` 알림의 제목/본문이 함께 있을 때만 표시된다. |
+| 내 학습 목록 | `buddystudy://studies` | 없음 | 홈 탭의 **내 학습** 범위를 연다. | 개별 메시지 프리셋에는 없으며 Push Admin 캠페인에서는 선택할 수 있다. |
 | 학습방 | `buddystudy://studies/{studyId}` | `studyId`: 학습 또는 토픽 ID | 홈 탭에서 해당 학습방을 연다. | 학습 트리가 아니라 질문/답변 학습방을 연다. |
 | 기록 목록 | `buddystudy://records` | 없음 | 기록 탭을 연다. | 로그아웃 상태에서는 기록 로그인 안내가 표시된다. |
 | 기록 상세 | `buddystudy://records/{recordId}` | `recordId`: 기록 ID | 기록 탭에서 해당 기록 상세를 연다. | 질문 푸시가 사용하는 표준 경로다. |
@@ -179,10 +180,20 @@ buddystudy://public/questions/987
 
 ## 홈 공지 팝업 계약
 
+Push Admin 캠페인은 공개 피드·공개 질문·내 학습·기록·통계·프로필·설정·홈 공지
+목적지를 선택한다. 공개 질문은 발송 시점에도 공개 여부를 검증한다. 캠페인에는
+개인의 기록 ID나 학습방 ID를 넣지 않는다. URI 검증과 발송·집계 API는
+[PUSH_CAMPAIGNS.md](PUSH_CAMPAIGNS.md)에 정의한다.
+
+시스템 푸시를 명시적으로 누르면 `POST /api/v1/notifications/{id}/open`에
+`source=PUSH`, 앱 알림함 항목을 누르면 `source=INBOX`를 기록한다. 읽음 처리나
+모두 읽음, 단순 수신은 클릭으로 집계하지 않는다. 계정 소유권과 소스별 중복
+제거는 서버가 적용하며 집계 실패가 화면 이동을 막지 않는다.
+
 `buddystudy://home/message`는 일반 URL만으로 본문을 전달하는 화면이 아니다.
 다음 정상 발송 계약을 만족하는 관리자 알림에서만 공지 팝업으로 사용한다.
 
-1. 알림 유형이 `ADMIN_MESSAGE`다. 알림함 항목은 이 유형까지 확인한다.
+1. 알림 유형이 `ADMIN_MESSAGE` 또는 `MARKETING`이다. 알림함 항목은 이 유형까지 확인한다.
 2. `deepLink`, `url`, `landingUrl` 중 하나가
    `buddystudy://home/message`다.
 3. 시스템 푸시는 `aps.alert.title`과 `aps.alert.body`를 포함한다. 알림함에서는

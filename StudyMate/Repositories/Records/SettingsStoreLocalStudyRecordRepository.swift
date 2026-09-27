@@ -55,6 +55,14 @@ struct SettingsStoreLocalStudyRecordRepository: LocalStudyRecordRepository {
         settingsStore.replaceBackendStudyRecords(records)
     }
 
+    func loadCustomQuestionDraft(key: String) -> CustomQuestionDraft? {
+        settingsStore.loadCustomQuestionDraft(key: key)
+    }
+
+    func saveCustomQuestionDraft(_ draft: CustomQuestionDraft?, key: String) {
+        settingsStore.saveCustomQuestionDraft(draft, key: key)
+    }
+
     func loadAnswerDraft(recordID: String) -> String {
         settingsStore.loadAnswerDraft(recordID: recordID)
     }

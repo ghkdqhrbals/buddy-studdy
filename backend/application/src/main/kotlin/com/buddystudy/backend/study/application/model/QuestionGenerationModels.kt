@@ -10,6 +10,7 @@ import java.util.UUID
 enum class QuestionGenerationSource {
     MANUAL,
     SCHEDULED,
+    FOLLOW_UP,
 }
 
 enum class QuestionGenerationStatus {
@@ -46,6 +47,9 @@ data class QuestionGenerationSaga(
     val updatedAt: Instant,
     val completedAt: Instant?,
     val rollbackCompletedAt: Instant? = null,
+    val parentRecordId: Long? = null,
+    val rootRecordId: Long? = null,
+    val followUpDepth: Int = 0,
 )
 
 data class QuestionGenerationRequestedEvent(

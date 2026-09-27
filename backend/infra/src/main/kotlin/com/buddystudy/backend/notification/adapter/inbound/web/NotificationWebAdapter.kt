@@ -3,6 +3,8 @@ package com.buddystudy.backend.notification.adapter.inbound.web
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystudy.backend.notification.application.port.inbound.BrowseNotificationsUseCase
 import com.buddystudy.backend.notification.application.port.inbound.MutateNotificationsUseCase
+import com.buddystudy.backend.notification.application.port.inbound.TrackNotificationOpenUseCase
+import com.buddystudy.backend.notification.application.model.NotificationOpenSource
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
 import kotlin.math.max
@@ -12,7 +14,11 @@ import kotlin.math.min
 class NotificationWebAdapter(
     private val browse: BrowseNotificationsUseCase,
     private val mutate: MutateNotificationsUseCase,
+    private val opens: TrackNotificationOpenUseCase,
 ) : NotificationWebPort {
+    override suspend fun open(id: Long, source: NotificationOpenSource, authentication: Authentication) =
+        opens.open(authentication.principalOrThrow(), id, source)
+
     override suspend fun notifications(limit: Int, offset: Int, authentication: Authentication) =
         browse.notifications(authentication.principalOrThrow(), min(max(1, limit), 100), max(0, offset))
 

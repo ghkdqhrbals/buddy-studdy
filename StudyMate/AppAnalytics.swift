@@ -212,11 +212,10 @@ enum AppAnalytics {
         log("answer_grading_failed")
     }
 
-    static func publicFeedLoaded(sort: String, scope: String, personalized: Bool) {
-        guard ["recommended", "latest", "views", "likes"].contains(sort),
-              ["all", "following"].contains(scope) else { return }
+    static func publicFeedLoaded(scope: String, personalized: Bool) {
+        guard ["all", "following"].contains(scope) else { return }
         log("public_feed_loaded", parameters: [
-            "sort": sort, "scope": scope, "personalized": personalized ? 1 : 0
+            "scope": scope, "personalized": personalized ? 1 : 0
         ])
     }
 
