@@ -1,5 +1,10 @@
 import Foundation
 
+enum NotificationOpenSource: String, Encodable {
+    case push = "PUSH"
+    case inbox = "INBOX"
+}
+
 @MainActor
 protocol NotificationsRepository {
     func fetchNotifications(
@@ -13,6 +18,12 @@ protocol NotificationsRepository {
     func markRead(
         registration: RemotePushRegistration,
         notificationID: String
+    ) async throws
+
+    func recordOpen(
+        registration: RemotePushRegistration,
+        notificationID: String,
+        source: NotificationOpenSource
     ) async throws
 
     func markAllRead(registration: RemotePushRegistration) async throws

@@ -2649,7 +2649,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(CommunityTopicSubscriptionPolicy.displayLabel("Swift\n\tUI"), "Swift UI")
         XCTAssertFalse(CommunityTopicSubscriptionPolicy.isValid((0...30).map { "Topic \($0)" }))
         XCTAssertTrue(CommunityTopicSubscriptionPolicy.isValid([]))
-        XCTAssertEqual(AppStrings(language: .japanese).feedMostLiked, "いいね順")
+        XCTAssertEqual(AppStrings(language: .japanese).feedFollowingTopics, "フォロー中")
     }
 
     func testTopicSubscriptionStateRejectsStaleAccountResultsAndConcurrentWrites() throws {
@@ -2692,38 +2692,121 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertFalse(state.isLoading)
     }
 
-    func testPersonalizedFeedModesReachBothListAndSearchThroughUseCase() async throws {
+    func testServerOrderedFeedPreservesScopeAndSearchWithoutClientSort() async throws {
         let observed = LockedValue<[String]>([])
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "GET")
             let items = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
             let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
-            observed.set(observed.value + ["\(request.url!.path)|\(values["sort"]!)|\(values["scope"]!)|\(values["offset"]!)"])
+            XCTAssertNil(values["sort"], "The public feed order belongs to the server.")
+            observed.set(observed.value + ["\(request.url!.path)|\(values["scope"]!)|\(values["offset"]!)"])
             XCTAssertEqual(values["tl"], "ja")
             XCTAssertEqual(values["view"], "localized")
             XCTAssertEqual(values["limit"], "20")
-            return Self.response(for: request, statusCode: 200, body: Self.communityQuestionPageJSON(ids: [], totalCount: 0, offset: 20))
+            return Self.response(for: request, statusCode: 200, body: Self.communityQuestionPageJSON(ids: ["42", "9"], totalCount: 2, offset: 20))
         }
         let useCase = CommunityUseCase(repository: RemoteCommunityRepository(backendClient: client))
-        for sort in CommunityFeedSort.allCases {
-            for scope in CommunityFeedScope.allCases {
-                for query: String? in [nil, "Swift"] {
-                    _ = try await useCase.fetchPublicQuestions(
-                        registration: Self.signedInRegistration,
-                        query: query,
-                        limit: 20,
-                        offset: 20,
-                        excludeDeviceID: nil,
-                        language: .japanese,
-                        sort: sort,
-                        scope: scope
-                    )
-                }
+        for scope in CommunityFeedScope.allCases {
+            for query: String? in [nil, "Swift"] {
+                let page = try await useCase.fetchPublicQuestions(
+                    registration: Self.signedInRegistration,
+                    query: query,
+                    limit: 20,
+                    offset: 20,
+                    excludeDeviceID: nil,
+                    language: .japanese,
+                    scope: scope
+                )
+                XCTAssertEqual(page.questions.map(\.id), ["42", "9"])
             }
         }
-        XCTAssertEqual(Set(observed.value).count, 16)
-        XCTAssertTrue(observed.value.contains("/api/v2/public/questions/search|likes|following|20"))
-        XCTAssertTrue(observed.value.contains("/api/v2/public/questions|recommended|all|20"))
+        XCTAssertEqual(Set(observed.value).count, 4)
+        XCTAssertTrue(observed.value.contains("/api/v2/public/questions/search|following|20"))
+        XCTAssertTrue(observed.value.contains("/api/v2/public/questions|all|20"))
+    }
+
+    func testNotificationOpenUsesAuthenticatedSourceWithoutChangingReadState() async throws {
+        let sources = LockedValue<[String]>([])
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/notifications/91/open")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(Self.signedInRegistration.accessToken!)")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            let body = try JSONDecoder().decode([String: String].self, from: Self.bodyData(from: request))
+            sources.set(sources.value + [try XCTUnwrap(body["source"])])
+            return Self.response(for: request, statusCode: 200, body: #"{"ok":true}"#)
+        }
+        let useCase = NotificationsUseCase(repository: RemoteNotificationsRepository(backendClient: client))
+        try await useCase.recordOpen(registration: Self.signedInRegistration, notificationID: "91", source: .push)
+        try await useCase.recordOpen(registration: Self.signedInRegistration, notificationID: "91", source: .inbox)
+        XCTAssertEqual(sources.value, ["PUSH", "INBOX"])
+    }
+
+    func testPassiveCampaignDeliveryAndReadAllDoNotCountAsClicks() async throws {
+        let suiteName = "CampaignPassiveDeliveryTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+            StudyRemoteNotificationBridge.shared.resetForLogout()
+        }
+        let paths = LockedValue<[String]>([])
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            paths.set(paths.value + [request.url?.path ?? ""])
+            return Self.response(for: request, statusCode: 200, body: #"{"ok":true,"unreadCount":0}"#)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        appState.lastAnswer = "Keep this answer"
+        StudyRemoteNotificationBridge.shared.configure(appState: appState)
+        _ = await StudyRemoteNotificationBridge.shared.handleRemoteNotification(
+            userInfo: ["notificationId": "91", "deepLink": "buddystudy://public/questions/42", "type": "MARKETING"],
+            openStudy: false
+        )
+        await appState.markAllNotificationsRead()
+        await appState.markNotificationRead(notificationID: "91")
+        XCTAssertTrue(paths.value.contains("/api/v1/notifications/read-all"))
+        XCTAssertTrue(paths.value.contains("/api/v1/notifications/91/read"))
+        XCTAssertFalse(paths.value.contains { $0.hasSuffix("/open") })
+        XCTAssertNil(appState.appRouteRequest)
+        XCTAssertEqual(appState.lastAnswer, "Keep this answer")
+    }
+
+    func testExplicitCampaignTapTracksPushAndPreservesDraftWhenTrackingFails() async throws {
+        let suiteName = "CampaignExplicitTapTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let sources = LockedValue<[String]>([])
+        let paths = LockedValue<[String]>([])
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            paths.set(paths.value + [request.url?.path ?? ""])
+            if request.url?.path == "/api/v1/notifications/91/open" {
+                let body = try JSONDecoder().decode([String: String].self, from: Self.bodyData(from: request))
+                sources.set(sources.value + [try XCTUnwrap(body["source"])])
+                return Self.response(for: request, statusCode: 503, body: #"{"error":"Temporarily unavailable"}"#)
+            }
+            return Self.response(for: request, statusCode: 200, body: #"{"ok":true,"unreadCount":0}"#)
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        appState.lastAnswer = "Keep this answer"
+        let opened = await appState.notificationLandingCoordinator.land(userInfo: [
+            "notificationId": "91", "deepLink": "buddystudy://public/questions/42"
+        ])
+        XCTAssertTrue(opened)
+        XCTAssertEqual(appState.appRouteRequest?.route, .publicQuestion(id: "42"))
+        let tracked = await waitUntil { !sources.value.isEmpty }
+        XCTAssertTrue(tracked)
+        let readFinished = await waitUntil { paths.value.contains("/api/v1/notifications/91/read") }
+        XCTAssertTrue(readFinished)
+        XCTAssertEqual(sources.value, ["PUSH"])
+        XCTAssertNil(appState.notificationErrorMessage)
+        XCTAssertEqual(appState.lastAnswer, "Keep this answer")
     }
 
     func testTopicSubscriptionReadAndWriteUseAuthenticatedAccountContract() async throws {
@@ -2869,7 +2952,6 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertFalse(appState.hasLoadedTopicSubscriptions)
         XCTAssertFalse(appState.isSavingTopicSubscriptions)
         XCTAssertEqual(appState.communityFeedScope, .all)
-        XCTAssertEqual(appState.communityFeedSort, .recommended)
     }
 
     func testFeedFilterChangeDiscardsDelayedPageAndPaginationRetainsSelectedMode() async throws {
@@ -2889,28 +2971,28 @@ final class QuestionGenerationFlowTests: XCTestCase {
             let items = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
             let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
             let offset = Int(values["offset"] ?? "0") ?? 0
-            offsets.set(offsets.value + ["\(values["sort"] ?? "")|\(values["scope"] ?? "")|\(offset)"])
-            let id = values["sort"] == "likes" ? "liked-\(offset)" : "stale"
+            XCTAssertNil(values["sort"])
+            offsets.set(offsets.value + ["\(values["scope"] ?? "")|\(offset)"])
+            let id = values["scope"] == "following" ? "followed-\(offset)" : "stale"
             return Self.response(for: request, statusCode: 200, body: Self.communityQuestionPageJSON(ids: [id], totalCount: 2, offset: offset))
         }
         let appState = AppState(settingsStore: store, remotePushBackendClient: client)
         appState.communitySearchText = "Swift"
         QuestionGenerationURLProtocol.responseDelayHandler = { request in
             let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            return items.contains { $0.name == "sort" && $0.value == "recommended" } ? 250_000_000 : 0
+            return items.contains { $0.name == "scope" && $0.value == "all" } ? 250_000_000 : 0
         }
         let staleLoad = Task { @MainActor in await appState.loadCommunityQuestions(userInitiated: true) }
         let loading = await waitUntil { appState.isLoadingCommunityQuestions }
         XCTAssertTrue(loading)
         appState.setCommunityFeedScope(.following)
-        appState.setCommunityFeedSort(.likes)
         await staleLoad.value
-        let refreshed = await waitUntil { appState.communityQuestions.first?.id == "liked-0" && !appState.isLoadingCommunityQuestions }
+        let refreshed = await waitUntil { appState.communityQuestions.first?.id == "followed-0" && !appState.isLoadingCommunityQuestions }
         XCTAssertTrue(refreshed)
         await appState.loadNextCommunityPage()
-        XCTAssertEqual(appState.communityQuestions.map(\.id), ["liked-0", "liked-1"])
+        XCTAssertEqual(appState.communityQuestions.map(\.id), ["followed-0", "followed-1"])
         XCTAssertEqual(appState.communityOffset, 2)
-        XCTAssertTrue(offsets.value.contains("likes|following|1"))
+        XCTAssertTrue(offsets.value.contains("following|1"))
         XCTAssertFalse(appState.communityQuestions.contains { $0.id == "stale" })
     }
 
@@ -3082,19 +3164,19 @@ final class QuestionGenerationFlowTests: XCTestCase {
             return Self.response(
                 for: request,
                 statusCode: 200,
-                body: Self.communityQuestionPageJSON(ids: ["liked-1", "liked-2"], totalCount: 3, offset: 0)
+                body: Self.communityQuestionPageJSON(ids: ["followed-1", "liked-2"], totalCount: 3, offset: 0)
             )
         }
         let appState = AppState(settingsStore: store, remotePushBackendClient: client)
 
         XCTAssertFalse(appState.hasLoadedLikedCommunityQuestions)
         await appState.loadLikedCommunityQuestions(userInitiated: true)
-        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["liked-1", "liked-2"])
+        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["followed-1", "liked-2"])
         XCTAssertEqual(appState.likedCommunityQuestionsOffset, 2)
         XCTAssertTrue(appState.canLoadMoreLikedCommunityQuestions)
 
         await appState.loadNextLikedCommunityQuestionsPage()
-        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["liked-1", "liked-2", "liked-3"])
+        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["followed-1", "liked-2", "liked-3"])
         XCTAssertFalse(appState.canLoadMoreLikedCommunityQuestions)
 
         await appState.loadLikedCommunityQuestions(query: " redis ", reset: true, userInitiated: true)
@@ -3127,20 +3209,20 @@ final class QuestionGenerationFlowTests: XCTestCase {
                 return Self.response(
                     for: request,
                     statusCode: 200,
-                    body: Self.communityQuestionPageJSON(ids: ["liked-1"], totalCount: 1, offset: 0)
+                    body: Self.communityQuestionPageJSON(ids: ["followed-1"], totalCount: 1, offset: 0)
                 )
             case ("GET", "/api/v1/public/questions/liked"):
                 return Self.response(
                     for: request,
                     statusCode: 200,
-                    body: Self.communityQuestionPageJSON(ids: ["liked-1"], totalCount: 1, offset: 0)
+                    body: Self.communityQuestionPageJSON(ids: ["followed-1"], totalCount: 1, offset: 0)
                 )
             case ("DELETE", "/api/v1/public/questions/liked-1/like"):
                 likeRequestCount.increment()
                 return Self.response(
                     for: request,
                     statusCode: 200,
-                    body: #"{"questionId":"liked-1","likeCount":0,"isLikedByMe":false}"#
+                    body: #"{"questionId":"followed-1","likeCount":0,"isLikedByMe":false}"#
                 )
             default:
                 return Self.response(for: request, statusCode: 500, body: "{}")
@@ -3222,7 +3304,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
             return Self.response(
                 for: request,
                 statusCode: 200,
-                body: Self.communityQuestionPageJSON(ids: ["liked-1"], totalCount: 1, offset: 0)
+                body: Self.communityQuestionPageJSON(ids: ["followed-1"], totalCount: 1, offset: 0)
             )
         }
         let appState = AppState(
@@ -3231,7 +3313,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
             appNotificationEventProvider: eventProvider
         )
         await appState.loadLikedCommunityQuestions(reset: true, userInitiated: true)
-        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["liked-1"])
+        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["followed-1"])
 
         try eventProvider.sendBackendUnauthorized(
             for: XCTUnwrap(store.loadRemotePushRegistration())

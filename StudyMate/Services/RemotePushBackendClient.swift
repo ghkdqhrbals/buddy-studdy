@@ -317,6 +317,12 @@ protocol RemotePushBackendClientProtocol {
 
     func markNotificationRead(registration: RemotePushRegistration, notificationID: String) async throws
 
+    func recordNotificationOpen(
+        registration: RemotePushRegistration,
+        notificationID: String,
+        source: NotificationOpenSource
+    ) async throws
+
     func markAllNotificationsRead(registration: RemotePushRegistration) async throws
 
     func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws
@@ -586,7 +592,6 @@ protocol RemotePushBackendClientProtocol {
         offset: Int,
         excludeDeviceID: String?,
         language: AppLanguage,
-        sort: CommunityFeedSort,
         scope: CommunityFeedScope
     ) async throws -> CommunityQuestionsResponse
 
@@ -2191,6 +2196,22 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         _ = try await perform(request)
     }
 
+    func recordNotificationOpen(
+        registration: RemotePushRegistration,
+        notificationID: String,
+        source: NotificationOpenSource
+    ) async throws {
+        struct OpenRequest: Encodable { var source: NotificationOpenSource }
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "notifications", notificationID, "open")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(OpenRequest(source: source))
+        _ = try await perform(request)
+    }
+
     func markAllNotificationsRead(registration: RemotePushRegistration) async throws {
         var request = authenticatedRequest(
             registration: registration,
@@ -2359,7 +2380,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         offset: Int = 0,
         excludeDeviceID: String? = nil,
         language: AppLanguage = .korean,
-        sort: CommunityFeedSort = .recommended,
         scope: CommunityFeedScope = .all
     ) async throws -> CommunityQuestionsResponse {
         let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -2374,7 +2394,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             URLQueryItem(name: "offset", value: "\(max(0, offset))"),
             URLQueryItem(name: "tl", value: language.backendCode),
             URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue),
-            URLQueryItem(name: "sort", value: sort.rawValue),
             URLQueryItem(name: "scope", value: scope.rawValue)
         ]
         if !normalizedQuery.isEmpty {

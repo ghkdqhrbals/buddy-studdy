@@ -1816,14 +1816,13 @@ final class HomeSearchUsabilityTests: XCTestCase {
     }
 
     @MainActor
-    func testClearingPublicSearchResetsFilteredPageButPreservesScopeAndSort() {
+    func testClearingPublicSearchResetsFilteredPageButPreservesScope() {
         let suite = "HomeSearchUsabilityTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
         appState.communitySearchText = "  Swift  "
         let originalScope = appState.communityFeedScope
-        let originalSort = appState.communityFeedSort
         appState.communityOffset = 20
         appState.communityTotalCount = 42
         appState.isLoadingCommunityQuestions = true
@@ -1836,7 +1835,6 @@ final class HomeSearchUsabilityTests: XCTestCase {
         XCTAssertFalse(appState.isLoadingCommunityQuestions)
         XCTAssertNil(appState.communityErrorMessage)
         XCTAssertEqual(appState.communityFeedScope, originalScope)
-        XCTAssertEqual(appState.communityFeedSort, originalSort)
     }
 
     @MainActor

@@ -1,6 +1,7 @@
 import {
   Activity,
   BadgeDollarSign,
+  Bell,
   BookOpenText,
   CalendarClock,
   Cable,
@@ -47,6 +48,7 @@ export const navigationGroups = [
       { href: "/administrators.html", label: "Administrators", icon: UserCog },
       { href: "/feedback.html", label: "User Feedback", icon: MessageSquareText },
       { href: "/advertising.html", label: "Advertising", icon: BadgeDollarSign },
+      { href: "/push.html", label: "Push Admin", icon: Bell },
       { href: "/jobs.html", label: "Batch Jobs", icon: CalendarClock },
       { href: "/streams.html", label: "Redis Streams", icon: GitPullRequest },
       { href: "/deployments.html", label: "Deployments", icon: Rocket },

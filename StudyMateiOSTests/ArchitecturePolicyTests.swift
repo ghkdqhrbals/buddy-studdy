@@ -2900,6 +2900,32 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testMarketingCampaignShowsHomeMessageOnlyForSupportedDestination() {
+        let notification = BackendAppNotification(
+            id: "campaign-91",
+            type: "MARKETING",
+            title: "This week's study questions",
+            body: "Explore **SwiftUI** together.",
+            deepLink: "buddystudy://home/message",
+            isRead: false,
+            createdAt: Date()
+        )
+        XCTAssertEqual(HomeAnnouncement(notification: notification), HomeAnnouncement(
+            notificationID: "campaign-91",
+            title: "This week's study questions",
+            message: "Explore **SwiftUI** together."
+        ))
+        XCTAssertEqual(NotificationRouteResolver.route(for: notification), .home)
+        for deepLink in ["https://example.com/home/message", "buddystudy://public", "buddystudy://public/questions/42", "buddystudy://home/message/extra"] {
+            var routed = notification
+            routed.deepLink = deepLink
+            XCTAssertNil(HomeAnnouncement(notification: routed), deepLink)
+        }
+        var unsupported = notification
+        unsupported.type = "QUESTION_CREATED"
+        XCTAssertNil(HomeAnnouncement(notification: unsupported))
+    }
+
     func testAdminNotificationListItemCreatesHomeAnnouncementOnlyForMessageDestination() {
         let popup = BackendAppNotification(
             id: "91",

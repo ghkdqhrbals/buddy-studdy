@@ -274,9 +274,14 @@ class QuestionGenerationExecutionWriteServiceTest {
                     parentRecordId = if (deletedRoot) 20 else 21, rootRecordId = 20, followUpDepth = if (deletedRoot) 1 else 2),
                 listOf(0.1f), null, OpenAIQuestionKey("test", user = null),
             )
-            val writer = writer(Mockito.mock(QuestionGenerationSagaPort::class.java), Mockito.mock(StreamInboxPort::class.java), memberships, questions = questions)
-            val failure = runCatching { writer.complete(event(saga(now, QuestionGenerationSource.FOLLOW_UP), now), prepared, now) }.exceptionOrNull()
+            val sagas = Mockito.mock(QuestionGenerationSagaPort::class.java)
+            val activeSaga = saga(now, QuestionGenerationSource.FOLLOW_UP)
+            Mockito.`when`(sagas.findByCorrelationId(activeSaga.correlationId)).thenReturn(activeSaga)
+            val writer = writer(sagas, Mockito.mock(StreamInboxPort::class.java), memberships, questions = questions)
+            val failure = runCatching { writer.complete(event(activeSaga, now), prepared, now) }.exceptionOrNull()
             assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+            Mockito.verify(questions).lockByIdAndUserIdAndDeletedAtIsNull(20, 7)
+            if (!deletedRoot) Mockito.verify(questions).lockThreadByRootAndUser(20, 7)
             Mockito.verify(questions, Mockito.never()).save(prepared.question)
             Mockito.verifyNoInteractions(memberships)
         }

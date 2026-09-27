@@ -923,7 +923,6 @@ final class AppState: ObservableObject {
     @Published var hasCloudSyncError = false
     @Published var cloudLastSyncedAt: Date?
     @Published private var topicSubscriptionState = CommunityTopicSubscriptionStateStore()
-    @Published private(set) var communityFeedSort: CommunityFeedSort = .recommended
     @Published private(set) var communityFeedScope: CommunityFeedScope = .all
     @Published private var communityFeedState = CommunityFeedStateStore()
     @Published private var likedQuestionsState = LikedQuestionsStateStore()
@@ -3779,6 +3778,23 @@ final class AppState: ObservableObject {
         )
     }
 
+    /// Record explicit interaction separately from read state and passive push delivery.
+    func recordNotificationOpen(notificationID: String, source: NotificationOpenSource) async {
+        await runBackendNotificationMutation(
+            reason: "notification-open",
+            reportsFailure: false,
+            operation: { recoveredRegistration in
+                try await self.notificationsUseCase.recordOpen(
+                    registration: recoveredRegistration,
+                    notificationID: notificationID,
+                    source: source
+                )
+            },
+            onSuccess: {},
+            failureMessage: { "알림 열기 집계 실패: \($0.localizedDescription)" }
+        )
+    }
+
     func markAllNotificationsRead() async {
         await runBackendNotificationMutation(
             reason: "notifications-read-all",
@@ -3844,6 +3860,7 @@ final class AppState: ObservableObject {
 
     private func runBackendNotificationMutation(
         reason: String,
+        reportsFailure: Bool = true,
         operation: (RemotePushRegistration) async throws -> Void,
         onSuccess: () async -> Void = {},
         failureMessage: (Error) -> String
@@ -3882,7 +3899,9 @@ final class AppState: ObservableObject {
                     log(.info, "로그아웃 후 알림 변경 오류 처리를 건너뛰었습니다. reason=\(reason)")
                     return
                 }
-                handleAppError(error, fallback: "", target: .notification)
+                if reportsFailure {
+                    handleAppError(error, fallback: "", target: .notification)
+                }
                 log(.warning, failureMessage(error))
             }
         )
@@ -4877,13 +4896,6 @@ final class AppState: ObservableObject {
         return hadQuery
     }
 
-    func setCommunityFeedSort(_ sort: CommunityFeedSort) {
-        guard sort != communityFeedSort else { return }
-        communityFeedSort = sort
-        communityFeedState.invalidatePage()
-        refreshCommunityQuestions(userInitiated: true)
-    }
-
     func setCommunityFeedScope(_ scope: CommunityFeedScope) {
         guard scope != communityFeedScope else { return }
         communityFeedScope = scope
@@ -4893,7 +4905,6 @@ final class AppState: ObservableObject {
 
     private func resetCommunityPersonalizationState() {
         topicSubscriptionState.reset()
-        communityFeedSort = .recommended
         communityFeedScope = .all
         communityFeedState.invalidatePage()
     }
@@ -4903,23 +4914,12 @@ final class AppState: ObservableObject {
     private func loadScreenshotCommunityQuestions(reset: Bool) {
         let query = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let followed = Set(subscribedCommunityTopics.map(CommunityTopicSubscriptionPolicy.matchingKey))
-        var questions = screenshotPublicQuestions.filter { question in
+        let questions = screenshotPublicQuestions.filter { question in
             let matchesScope = communityFeedScope != .following
                 || followed.contains(CommunityTopicSubscriptionPolicy.matchingKey(question.topic))
             return matchesScope && (query.isEmpty
                 || question.topic.localizedCaseInsensitiveContains(query)
                 || question.question.localizedCaseInsensitiveContains(query))
-        }
-        switch communityFeedSort {
-        case .recommended:
-            // Keep the authored fixture order; do not imitate production scores.
-            break
-        case .latest:
-            questions.sort { $0.createdAt > $1.createdAt }
-        case .views:
-            questions.sort { $0.viewCount == $1.viewCount ? $0.createdAt > $1.createdAt : $0.viewCount > $1.viewCount }
-        case .likes:
-            questions.sort { $0.likeCount == $1.likeCount ? $0.createdAt > $1.createdAt : $0.likeCount > $1.likeCount }
         }
         let offset = reset ? 0 : communityOffset
         let page = Array(questions.dropFirst(offset).prefix(Self.communityQuestionPageSize))
@@ -4951,7 +4951,6 @@ final class AppState: ObservableObject {
         let language = settings.appLanguage
         let useCase = communityUseCase
         guard reset || !isLoadingCommunityQuestions else { return }
-        let requestedSort = communityFeedSort
         let requestedScope = communityFeedScope
         let trimmedTopic = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedOffset = reset ? 0 : communityOffset
@@ -5005,7 +5004,6 @@ final class AppState: ObservableObject {
                     offset: normalizedOffset,
                     excludeDeviceID: nil,
                     language: language,
-                    sort: requestedSort,
                     scope: requestedScope
                 )
             },
@@ -5027,10 +5025,8 @@ final class AppState: ObservableObject {
                 )
                 if reset {
                     AppAnalytics.publicFeedLoaded(
-                        sort: requestedSort.rawValue,
                         scope: requestedScope.rawValue,
-                        personalized: isCommunitySessionActive && !subscribedCommunityTopics.isEmpty &&
-                            (requestedScope == .following || requestedSort == .recommended)
+                        personalized: isCommunitySessionActive && !subscribedCommunityTopics.isEmpty
                     )
                 }
                 log(.info, "공개 질문 목록을 로드했습니다. count=\(response.questions.count), total=\(response.totalCount), offset=\(communityOffset)")

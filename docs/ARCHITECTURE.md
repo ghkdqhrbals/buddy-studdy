@@ -687,9 +687,14 @@ The shared media, privacy, quota and persistence invariants below remain applica
 
 ## Public-feed Topic Subscriptions
 
+The operator-controlled notification campaign, destination validation, durable
+dispatch and separate push/inbox click contracts are documented in
+[PUSH_CAMPAIGNS.md](PUSH_CAMPAIGNS.md). Popular content is promoted through an
+explicit campaign rather than a user-selectable popularity sort on Home.
+
 - `GET` and `PUT /api/v1/me/topic-subscriptions` read and atomically replace the current account's bounded interest list. Migration V120 creates the subscription table on this mainline. Dedicated inbound use-case, controller-facing, and outbound persistence ports keep the list separate from study creation, private learning context, billing, and question generation.
-- V2 public feed/search accepts `sort=recommended|latest|views|likes` and `scope=all|following`. The database applies public-answer and blocked-author visibility, followed-topic matching, ordering, and exact offset pagination together. Recommended prioritizes followed topics and ranks engagement with logarithmic view/like weights and age decay; it is an app content recommendation policy, unrelated to Apple's App Store ranking.
-- iOS keeps subscriptions in a session-scoped state store and fetches the account authority through the community repository/use case. Session generations and request identities prevent stale reads or mutations from repopulating a new account. Changing sort, scope, or subscriptions invalidates the current page before refreshing.
+- V2 public feed/search accepts `scope=all|following` and owns the ordering policy on the server. The legacy `sort` parameter is deprecated and ignored, including on search; clients cannot request view/like/latest rankings. The database applies public-answer and blocked-author visibility, followed-topic matching, ordering, and exact offset pagination together. Recommended prioritizes followed topics and ranks engagement with logarithmic view/like weights and age decay; it is an app content recommendation policy, unrelated to Apple's App Store ranking.
+- iOS keeps subscriptions in a session-scoped state store and fetches the account authority through the community repository/use case. Session generations and request identities prevent stale reads or mutations from repopulating a new account. Changing scope or subscriptions invalidates the current page before refreshing. The app has no sort selector or sort request parameter and renders the ordered response unchanged.
 - Inline follow/unfollow refreshes the current account's subscriptions before replacing the list; only a successful save changes the feed and records the bounded follow-state analytics event.
 - `StudyReviewCoordinator` persists bounded engagement/attempt counters through SettingsStore. Only a newly graded answer observed in a visible, active study room records an opportunity. `StudyReviewPromptModifier` requests StoreKit review after returning to idle Home, subject to a cancellable delay, per-version/rolling-year limits, and a one-hour opportunity expiry. Analytics describes requests as attempts because StoreKit supplies no completion callback.
 

@@ -4,6 +4,7 @@ import com.buddystudy.backend.auth.application.port.outbound.AccountDeletionPort
 import com.buddystudy.backend.auth.application.port.outbound.AccountWithdrawalSnapshot
 import com.buddystudy.backend.common.adapter.outbound.persistence.bindIndexed
 import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMarkers
+import com.buddystudy.backend.notification.application.port.outbound.ArchivePushCampaignOutcomesPort
 import kotlinx.coroutines.reactive.awaitSingle
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Component
@@ -13,6 +14,7 @@ import java.time.Instant
 @Component
 class AccountDeletionPersistenceAdapter(
     private val client: DatabaseClient,
+    private val pushCampaigns: ArchivePushCampaignOutcomesPort,
 ) : AccountDeletionPort {
     @Transactional
     override suspend fun beginWithdrawal(userId: Long, now: Instant): AccountWithdrawalSnapshot {
@@ -84,6 +86,7 @@ class AccountDeletionPersistenceAdapter(
         deviceIds: List<String>,
         withdrawnAt: Instant,
     ) {
+        pushCampaigns.archiveAndForgetUser(userId)
         val questionIds = longs("select id from questions where user_id = :userId", "userId" to userId)
         val studyIds = longs("select id from studies where user_id = :userId", "userId" to userId)
         val ids = DeletionIds(

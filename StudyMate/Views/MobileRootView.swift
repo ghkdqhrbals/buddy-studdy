@@ -1895,7 +1895,6 @@ private struct MobileHomeView: View {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 16) {
                     communityScopeMenu
-                    communitySortMenu
                     Spacer(minLength: 0)
                     communityInterestsButton
                 }
@@ -1904,22 +1903,12 @@ private struct MobileHomeView: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     communityScopeMenu
-                    communitySortMenu
                     communityInterestsButton
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .font(.subheadline)
             .buttonStyle(.plain)
-            if appState.communityFeedSort == .recommended,
-               appState.communityFeedScope == .all,
-               !appState.subscribedCommunityTopics.isEmpty {
-                Text(strings.feedPersonalizedHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 8)
-            }
         }
         .padding(.horizontal, 2)
         .overlay(alignment: .bottom) { Divider() }
@@ -1954,33 +1943,6 @@ private struct MobileHomeView: View {
         .accessibilityLabel(strings.feedScope)
         .accessibilityValue(appState.communityFeedScope.title(strings: strings))
         .accessibilityIdentifier("community-feed-scope")
-    }
-
-    private var communitySortMenu: some View {
-        Menu {
-            ForEach(CommunityFeedSort.allCases) { sort in
-                Button {
-                    appState.setCommunityFeedSort(sort)
-                } label: {
-                    if appState.communityFeedSort == sort {
-                        Label(sort.title(strings: strings), systemImage: "checkmark")
-                    } else {
-                        Text(sort.title(strings: strings))
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Text(appState.communityFeedSort.title(strings: strings))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .layoutPriority(1)
-                Image(systemName: "chevron.down").font(.caption2).accessibilityHidden(true)
-            }
-            .frame(minHeight: 44)
-        }
-        .accessibilityLabel(strings.feedSort)
-        .accessibilityValue(appState.communityFeedSort.title(strings: strings))
-        .accessibilityIdentifier("community-feed-sort")
     }
 
     private var communityInterestsButton: some View {
@@ -3408,6 +3370,7 @@ private struct MobileNotificationsView: View {
                             "알림 목록에서 목적지를 열었습니다. notificationID=\(notification.id), route=\(route)"
                         )
                         Task {
+                            await appState.recordNotificationOpen(notificationID: notification.id, source: .inbox)
                             await appState.markNotificationRead(notification)
                         }
                     } label: {

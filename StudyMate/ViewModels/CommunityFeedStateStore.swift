@@ -1,19 +1,5 @@
 import Foundation
 
-enum CommunityFeedSort: String, CaseIterable, Identifiable {
-    case recommended, latest, views, likes
-    var id: String { rawValue }
-
-    func title(strings: AppStrings) -> String {
-        switch self {
-        case .recommended: strings.feedRecommended
-        case .latest: strings.feedLatest
-        case .views: strings.feedMostViewed
-        case .likes: strings.feedMostLiked
-        }
-    }
-}
-
 enum CommunityFeedScope: String, CaseIterable, Identifiable {
     case all, following
     var id: String { rawValue }

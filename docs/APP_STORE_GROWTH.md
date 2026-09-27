@@ -1,5 +1,44 @@
 # BuddyStudy App Store growth
 
+## Current discovery checkpoint — 2026-09-27
+
+Read-only App Store Connect inspection confirmed iOS **1.2.0 (122)** is
+Ready for Distribution, with primary **Education** and secondary **Productivity**.
+The English listing now uses `BuddyStudy: AI Study & Quiz`,
+`Active Recall & Topic Progress`, and the 91-byte learning keyword list in this
+repository. The September 22 observations below are historical, not the current
+release state. The current featuring page shows the initial Get Started screen;
+no nomination was submitted in this task. The Analytics first-time downloads
+report for June 28–September 25 (90 days, all sources) still shows **1**, on
+September 17. Other days show `-`. The retention and crash overview reports
+insufficient data, so neither improvement nor a reliable conversion/retention
+baseline can be inferred.
+
+The current listing still describes view/like sorting. The next-release metadata
+has been corrected to public reading, search, topic following and direct
+notification destinations. These edits are local candidates and have not changed
+the live 1.2.0 page. Replace the old feed screenshots when releasing the new UI.
+
+Education Top 10 is a growth target, not an app-side switch. Keep three outcomes
+separate: a country/device/free-or-paid Education chart rank, search discovery,
+and editorial collections. The verified category already puts BuddyStudy in
+Education; a public feed rank or push CTR is not an Apple ranking signal we can
+assert. Check country-specific dated chart evidence before reporting a rank.
+
+The next concrete editorial deliverable is the
+[featuring nomination draft](../app-store/metadata/featuring-nomination.md).
+A release date is intentionally unassigned until the candidate and backend are
+ready. Apple recommends submitting a nomination at least three weeks in advance.
+[Apple nomination instructions](https://developer.apple.com/help/app-store-connect/manage-featuring-nominations/nominate-your-app-for-featuring/)
+
+Operators can use Push Admin for an occasional selected public question or a
+weekly editorial message. Review the exact message and destination, then send a
+single campaign. Compare unique push taps / provider-accepted recipients with
+returning learners and completed learning; do not optimize repeat notifications
+just to increase opens. A campaign is manual, not an automatic weekly broadcast.
+Use the existing Analytics acquisition and retention reports for store outcomes;
+small samples remain inconclusive. No chart improvement has been measured here.
+
 Prepared 2026-09-22 for iOS. Read-only App Store Connect inspection on this date
 confirmed app `6774108938`, BuddyStudy version `1.1.0`, build `119`, in
 `READY_FOR_DISTRIBUTION`. The live English keyword list still contained
@@ -99,8 +138,8 @@ only the validation mode is completely local.
 
 ## Release copy — next-update candidate
 
-The metadata JSON now contains localized interest/share feature bullets and
-`whatsNew` covering interests, sharing and first-study topic suggestions for the
+The metadata JSON now contains localized public-feed/search/topic-following feature bullets and
+`whatsNew` covering the simplified server-ordered feed and notification destinations for the
 next update; use those files as the single source of release
 copy. They are saved on the unpublished 1.2.0 version submitted for review.
 Complete the remaining signed-candidate checks against the deployed API before
@@ -216,7 +255,7 @@ answers, search terms, or topic names.
 
 | Event | Fields | Interpretation |
 | --- | --- | --- |
-| `public_feed_loaded` | `sort`, `scope`, `personalized` | Successful first-page or refreshed feed load; not every pagination request |
+| `public_feed_loaded` | `scope`, `personalized` | Successful first-page or refreshed feed load; not every pagination request |
 | `topic_subscriptions_saved` | `count_bucket`: `none`, `1_to_3`, `4_to_10`, `11_plus` | Successful saved preference set; not a paid subscription conversion |
 | `public_feed_question_opened` | None | User opens a public question; not proof that they answered it |
 | `public_question_share_opened` | None | Tap on the share action; not proof of sheet presentation, sending, installation or referral conversion |
@@ -248,8 +287,9 @@ learning. These counters alone cannot establish causation or chart improvement.
 
 For the first screenshot experiment, compare a question-and-feedback lead image
 with a topic-tree lead image, holding other artwork and copy steady. Use actual
-release UI in each locale. A future subscription-feed image belongs in an
-experiment only after that capability is live. Product Page Optimization is
+release UI in each locale. A public-feed image belongs in an
+experiment only after that capability is live. The older interest-feed screenshots
+show retired sorting controls and must be recaptured from the candidate build. Product Page Optimization is
 Apple's mechanism for comparing icons, screenshots and previews.
 [Apple: Product Page Optimization](https://developer.apple.com/app-store/product-page-optimization/)
 

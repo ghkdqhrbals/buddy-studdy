@@ -9,7 +9,6 @@ protocol CommunityRepository {
         offset: Int,
         excludeDeviceID: String?,
         language: AppLanguage,
-        sort: CommunityFeedSort,
         scope: CommunityFeedScope
     ) async throws -> CommunityQuestionsResponse
 

@@ -159,14 +159,16 @@ class CommunityWebAdapterTest {
     }
 
     @Test
-    fun `v2 personalized modes forward to the use case and reject unknown values`(): Unit = runBlocking {
+    fun `v2 ignores legacy client sorting while preserving search following and pagination`(): Unit = runBlocking {
         val useCase = mock(CommunityUseCase::class.java)
         val adapter = CommunityWebAdapter(useCase)
         adapter.getPublicQuestionFeedV2("en", "localized", 1000, -1, authentication, "views", "following")
-        verify(useCase).getPublicQuestionFeedV2(principal, "en", "localized", 100, 0, PublicFeedSort.VIEWS, PublicFeedScope.FOLLOWING)
+        verify(useCase).getPublicQuestionFeedV2(principal, "en", "localized", 100, 0, PublicFeedSort.RECOMMENDED, PublicFeedScope.FOLLOWING)
         adapter.getPublicQuestionsV2("Redis", "ja", "original", 20, 7, authentication, "likes", "all")
-        verify(useCase).getPublicQuestionsV2(principal, "Redis", "ja", "original", 20, 7, PublicFeedSort.LIKES, PublicFeedScope.ALL)
-        assertThatThrownBy { runBlocking { adapter.getPublicQuestionFeedV2("en", "localized", 20, 0, authentication, "injected", "all") } }
+        verify(useCase).getPublicQuestionsV2(principal, "Redis", "ja", "original", 20, 7, PublicFeedSort.RECOMMENDED, PublicFeedScope.ALL)
+        adapter.getPublicQuestionFeedV2("en", "localized", 20, 0, null, "unknown-client-sort", "all")
+        verify(useCase).getPublicQuestionFeedV2(null, "en", "localized", 20, 0, PublicFeedSort.RECOMMENDED, PublicFeedScope.ALL)
+        assertThatThrownBy { runBlocking { adapter.getPublicQuestionFeedV2("en", "localized", 20, 0, authentication, "recommended", "unknown") } }
             .isInstanceOf(ApiException::class.java).extracting("code").isEqualTo(ApiErrorCode.VALIDATION_ERROR)
     }
 

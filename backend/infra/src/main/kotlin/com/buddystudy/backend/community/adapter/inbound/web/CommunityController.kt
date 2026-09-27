@@ -231,8 +231,8 @@ class CommunitySearchV2Controller(
     private val community: CommunityWebPort,
 ) {
     @Operation(
-        summary = "List public completed records with native-ad slots",
-        description = "Ranks the public feed by subscribed topics, views, likes and freshness. Supports recommended, latest, views and likes ordering, and all or following scope, with at most one eligible server-governed native-ad slot.",
+        summary = "List public completed records with server-selected advertisements",
+        description = "Returns the public feed in server-owned order, with optional all or following scope and at most one eligible server-selected advertisement. Clients render items in the returned order.",
     )
     @GetMapping("/public/questions")
     suspend fun getPublicQuestionFeedV2(
@@ -241,6 +241,7 @@ class CommunitySearchV2Controller(
         @RequestParam(required = false) tl: String?,
         @RequestParam(required = false) language: String?,
         @RequestParam(defaultValue = "localized") view: String,
+        @Parameter(description = "Legacy compatibility parameter. Ignored; ordering is owned by the server.", deprecated = true)
         @RequestParam(defaultValue = "recommended") sort: String,
         @RequestParam(defaultValue = "all") scope: String,
         authentication: Authentication?,
@@ -264,6 +265,7 @@ class CommunitySearchV2Controller(
         @Parameter(description = "Deprecated target-language alias kept for older clients.", example = "ko", deprecated = true)
         @RequestParam(required = false) language: String?,
         @RequestParam(defaultValue = "localized") view: String,
+        @Parameter(description = "Legacy compatibility parameter. Ignored; ordering is owned by the server.", deprecated = true)
         @RequestParam(defaultValue = "recommended") sort: String,
         @RequestParam(defaultValue = "all") scope: String,
         authentication: Authentication?,
@@ -305,9 +307,8 @@ internal fun targetLanguage(tl: String?, legacyLanguage: String?): String =
         ?: legacyLanguage?.trim()?.takeIf(String::isNotEmpty)
         ?: "ko"
 
-private fun parseFeedSort(value: String): PublicFeedSort = PublicFeedSort.entries.firstOrNull {
-    it.name.equals(value.trim(), ignoreCase = true)
-} ?: throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid public feed sort.")
+// A compatibility sort parameter must never let a client override the public feed policy.
+private val serverFeedSort = PublicFeedSort.RECOMMENDED
 
 private fun parseFeedScope(value: String): PublicFeedScope = PublicFeedScope.entries.firstOrNull {
     it.name.equals(value.trim(), ignoreCase = true)
@@ -359,10 +360,10 @@ class CommunityWebAdapter(
         community.getPublicQuestions(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset))
 
     override suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String, scope: String) =
-        community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset), parseFeedSort(sort), parseFeedScope(scope))
+        community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset), serverFeedSort, parseFeedScope(scope))
 
     override suspend fun getPublicQuestionFeedV2(language: String, view: String, limit: Int, offset: Int, authentication: Authentication?, sort: String, scope: String) =
-        community.getPublicQuestionFeedV2(authentication.optionalPrincipal(), language, view, safeLimit(limit, 100), max(0, offset), parseFeedSort(sort), parseFeedScope(scope))
+        community.getPublicQuestionFeedV2(authentication.optionalPrincipal(), language, view, safeLimit(limit, 100), max(0, offset), serverFeedSort, parseFeedScope(scope))
 
     override suspend fun getLikedPublicQuestions(
         query: String?,

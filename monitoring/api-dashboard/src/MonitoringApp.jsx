@@ -13,6 +13,7 @@ import { AdministratorsPage } from "./pages/AdministratorsPage.jsx";
 import { OrdersPage } from "./pages/OrdersPage.jsx";
 import { ExternalApiHistoryPage } from "./pages/ExternalApiHistoryPage.jsx";
 import { AdvertisingPage } from "./pages/AdvertisingPage.jsx";
+import { PushCampaignsPage } from "./pages/PushCampaignsPage.jsx";
 
 export function MonitoringApp() {
   const route = {
@@ -25,6 +26,7 @@ export function MonitoringApp() {
     "/feedback.html": FeedbackPage,
     "/jobs.html": JobsPage,
     "/advertising.html": AdvertisingPage,
+    "/push.html": PushCampaignsPage,
     "/streams.html": StreamsPage,
     "/audit.html": AuditPage,
     "/settings.html": SettingsPage,

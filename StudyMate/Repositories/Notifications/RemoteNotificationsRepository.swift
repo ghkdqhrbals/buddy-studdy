@@ -34,6 +34,18 @@ struct RemoteNotificationsRepository: NotificationsRepository {
         )
     }
 
+    func recordOpen(
+        registration: RemotePushRegistration,
+        notificationID: String,
+        source: NotificationOpenSource
+    ) async throws {
+        try await backendClient.recordNotificationOpen(
+            registration: registration,
+            notificationID: notificationID,
+            source: source
+        )
+    }
+
     func markAllRead(registration: RemotePushRegistration) async throws {
         try await backendClient.markAllNotificationsRead(registration: registration)
     }

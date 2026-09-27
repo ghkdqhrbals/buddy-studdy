@@ -871,9 +871,8 @@ struct HomeAnnouncement: Identifiable, Equatable {
     }
 
     init?(notification: BackendAppNotification) {
-        guard notification.type
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased() == "ADMIN_MESSAGE",
+        let type = notification.type.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard ["ADMIN_MESSAGE", "MARKETING"].contains(type),
               Self.isMessageDeepLink(notification.deepLink) else {
             return nil
         }
@@ -4871,22 +4870,17 @@ struct AppStrings {
     var firstStudyStarterTopics: [String] {
         [text("Swift 앱 개발", "Swift App Development", "Swiftアプリ開発"), text("영어 회화", "English Conversation", "英会話"), text("데이터 분석", "Data Analysis", "データ分析")]
     }
-    var feedRecommended: String { text("추천순", "Recommended", "おすすめ順") }
-    var feedLatest: String { text("최신순", "Latest", "新着順") }
-    var feedMostViewed: String { text("조회순", "Most viewed", "閲覧数順") }
-    var feedMostLiked: String { text("좋아요순", "Most liked", "いいね順") }
     var feedAllTopics: String { text("전체 주제", "All topics", "すべてのトピック") }
     var feedFollowingTopics: String { text("구독 주제", "Following", "フォロー中") }
-    var feedSort: String { text("질문 정렬", "Sort questions", "質問の並び順") }
     var feedScope: String { text("질문 범위", "Question scope", "質問の範囲") }
     var homeFeedScope: String { text("학습 보기", "Study view", "学習の表示") }
     var feedSearchEmptyHelp: String { text("검색어를 바꾸거나 검색을 지워 다시 둘러보세요.", "Try another topic or clear your search to keep exploring.", "別のトピックで検索するか、検索をクリアしてご覧ください。") }
     var topicSubscriptions: String { text("관심주제", "Interests", "興味のあるトピック") }
     var topicSubscriptionsHelp: String {
         text(
-            "관심주제를 구독하면 홈에서 조회와 좋아요가 많은 질문을 먼저 추천해 드려요.",
-            "Follow topics to see popular questions with more views and likes in your Home recommendations.",
-            "トピックをフォローすると、閲覧やいいねの多い質問がホームで優先的におすすめされます。"
+            "관심주제를 구독하고 구독 주제 피드에서 새 질문을 만나보세요.",
+            "Follow your interests and explore questions in your Following feed.",
+            "興味のあるトピックをフォローして、フォロー中のフィードで質問を見つけましょう。"
         )
     }
     var topicSubscriptionsPlaceholder: String { text("관심주제 입력", "Add an interest", "トピックを入力") }
@@ -4904,7 +4898,6 @@ struct AppStrings {
     var topicSubscriptionsLimitReached: String { text("관심주제 30개를 모두 채웠어요. 새 주제를 추가하려면 하나를 삭제해 주세요.", "You follow 30 topics. Remove one before adding another.", "30件のトピックをフォロー中です。追加するには1件削除してください。") }
     var topicSubscriptionsEmptyFeed: String { text("구독한 주제의 공개 질문이 아직 없습니다.", "No public questions in your followed topics yet.", "フォロー中のトピックの公開質問はまだありません。") }
     var topicSubscriptionsEmptyFeedHelp: String { text("관심주제를 더 추가하거나 전체 주제를 둘러보세요.", "Add more interests or explore all topics.", "興味のあるトピックを追加するか、すべてのトピックをご覧ください。") }
-    var feedPersonalizedHelp: String { text("구독한 주제의 인기 질문을 먼저 추천해 드려요.", "Popular questions from your interests appear first.", "フォロー中のトピックの人気の質問を優先しておすすめします。") }
     var feedExploreAllTopics: String { text("전체 주제 둘러보기", "Explore all topics", "すべてのトピックを見る") }
     var likedQuestions: String { text("좋아요한 질문", "Liked Questions", "いいねした質問") }
     var searchLikedQuestions: String { text("좋아요한 질문 검색", "Search Liked Questions", "いいねした質問を検索") }

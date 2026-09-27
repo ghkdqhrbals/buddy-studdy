@@ -1214,3 +1214,44 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .token-usage-page > .inline-notice { min-width: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box; }
 .token-usage-page > .workspace-section { padding: 22px; }
 .token-usage-page .table-frame { max-width: 100%; overflow-x: auto; }
+
+/* Push Admin uses the shared dense operations layout. */
+.push-composer-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.push-wide-field { grid-column: 1 / -1; }
+.push-composer-fields textarea { resize: vertical; min-height: 96px; font: inherit; }
+.push-composer-fields .field small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.push-composer-fields > .section-description { margin-top: 12px; }
+.push-audience-picker > .section-description { margin-top: 8px; }
+.push-audience-picker { margin: 20px 0; }
+.push-audience-picker .search-field { width: 100%; }
+.push-selected-users { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.push-selected-users button { display: inline-flex; gap: 5px; align-items: center; max-width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; background: var(--blue-soft); color: #1e40af; font-size: 12px; cursor: pointer; }
+.push-selected-users span { color: var(--muted); }
+.push-user-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.push-user-row { display: flex; align-items: center; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.push-user-row span { display: grid; min-width: 0; gap: 3px; font-size: 12px; }
+.push-user-row small { color: var(--muted); overflow-wrap: anywhere; }
+.push-user-row input { accent-color: var(--blue); }
+.push-user-results > p { padding: 8px 12px; }
+.push-preview { margin: 20px 0; }
+.push-preview-notification { border: 1px solid var(--border); border-radius: 16px; padding: 16px; background: #f5f7fa; overflow-wrap: anywhere; }
+.push-preview-brand { display: flex; gap: 7px; align-items: center; margin-bottom: 10px; color: var(--muted); font-size: 11px; letter-spacing: .03em; }
+.push-preview-brand span { margin-left: auto; }
+.push-preview-notification > strong { font-size: 15px; }
+.push-preview-notification p { margin: 6px 0 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+.push-preview-summary { display: grid; gap: 12px; margin: 18px 0; }
+.push-preview-summary > div { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 12px; font-size: 13px; }
+.push-preview-summary dt { color: var(--muted); }
+.push-preview-summary dd { margin: 0; overflow-wrap: anywhere; }
+.push-preview-summary code { font-size: 12px; }
+.push-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 12px; margin: 18px 0; }
+.push-metrics > div { display: grid; gap: 6px; }
+.push-metrics span { color: var(--muted); font-size: 12px; }
+.push-metrics strong { font-size: 24px; font-weight: 650; }
+.push-campaign-cell { min-width: 180px; max-width: 300px; }
+.push-campaign-cell strong, .push-campaign-cell span { overflow-wrap: anywhere; white-space: normal; }
+@media (max-width: 640px) {
+  .push-user-results { grid-template-columns: minmax(0, 1fr); }
+  .push-preview-summary > div { grid-template-columns: 100px minmax(0, 1fr); gap: 8px; }
+  .push-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

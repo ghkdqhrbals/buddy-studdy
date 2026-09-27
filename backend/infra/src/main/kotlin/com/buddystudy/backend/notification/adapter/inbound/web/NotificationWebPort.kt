@@ -3,9 +3,11 @@ package com.buddystudy.backend.notification.adapter.inbound.web
 import com.buddystudy.backend.notification.application.model.AppNotificationsResponse
 import com.buddystudy.backend.notification.application.model.NotificationMutationResponse
 import com.buddystudy.backend.notification.application.model.NotificationUnreadCountResponse
+import com.buddystudy.backend.notification.application.model.NotificationOpenSource
 import org.springframework.security.core.Authentication
 
 interface NotificationWebPort {
+    suspend fun open(id: Long, source: NotificationOpenSource, authentication: Authentication): NotificationMutationResponse
     suspend fun notifications(limit: Int, offset: Int, authentication: Authentication): AppNotificationsResponse
     suspend fun unreadCount(authentication: Authentication): NotificationUnreadCountResponse
     suspend fun markRead(id: Long, authentication: Authentication): NotificationMutationResponse

@@ -15,7 +15,6 @@ struct RemoteCommunityRepository: CommunityRepository {
         offset: Int,
         excludeDeviceID: String?,
         language: AppLanguage,
-        sort: CommunityFeedSort,
         scope: CommunityFeedScope
     ) async throws -> CommunityQuestionsResponse {
         try await backendClient.fetchPublicQuestions(
@@ -25,7 +24,6 @@ struct RemoteCommunityRepository: CommunityRepository {
             offset: offset,
             excludeDeviceID: excludeDeviceID,
             language: language,
-            sort: sort,
             scope: scope
         )
     }

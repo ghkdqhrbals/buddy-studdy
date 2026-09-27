@@ -5,6 +5,7 @@ import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.notification.application.model.AppNotificationsResponse
 import com.buddystudy.backend.notification.application.model.NotificationMutationResponse
 import com.buddystudy.backend.notification.application.model.NotificationUnreadCountResponse
+import com.buddystudy.backend.notification.application.model.NotificationOpenSource
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.tags.Tag
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
@@ -24,6 +26,12 @@ import org.springframework.web.bind.annotation.RestController
 class NotificationController(
     private val notifications: NotificationWebPort,
 ) {
+    @Operation(summary = "Record an explicit notification open", description = "Idempotently records PUSH and INBOX taps separately. Reading notifications never counts as a click.")
+    @PostMapping("/{id}/open")
+    suspend fun open(@PathVariable id: Long, @RequestBody request: NotificationOpenRequest,
+        authentication: Authentication): NotificationMutationResponse =
+        notifications.open(id, request.source, authentication)
+
     @Operation(summary = "List my notifications", description = "Returns the authenticated user's notification inbox with offset pagination and unread count.")
     @GetMapping
     suspend fun notifications(
@@ -61,3 +69,5 @@ class NotificationController(
     suspend fun deleteAll(authentication: Authentication): NotificationMutationResponse =
         notifications.deleteAll(authentication)
 }
+
+data class NotificationOpenRequest(val source: NotificationOpenSource)
