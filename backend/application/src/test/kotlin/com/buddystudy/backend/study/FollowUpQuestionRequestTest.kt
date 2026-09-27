@@ -104,7 +104,7 @@ class FollowUpQuestionRequestTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = QuestionStatus::class, names = ["UNGRADED", "GRADING", "FAILED", "SKIPPED"])
+    @EnumSource(value = QuestionStatus::class, names = ["UNGRADED", "GRADING", "FAILED", "SKIPPED", "COMPLETED"])
     fun `only successful grading enables follow-up`(status: QuestionStatus): Unit = runBlocking {
         val fixture = fixture(listOf(record(20).apply { this.status = status }))
         expectError(ApiErrorCode.FOLLOW_UP_NOT_AVAILABLE) { fixture.writer.enqueueFollowUp(7, 20, "tap", now) }
@@ -113,11 +113,24 @@ class FollowUpQuestionRequestTest {
 
     @Test
     fun `unscored custom record and a currently pending topic do not reserve allowance`(): Unit = runBlocking {
-        val unscored = fixture(listOf(record(20).apply { score = null }))
+        val unscored = fixture(listOf(record(20).apply { score = null; source = QuestionSource.CUSTOM_QUESTION }))
         expectError(ApiErrorCode.FOLLOW_UP_NOT_AVAILABLE) { unscored.writer.enqueueFollowUp(7, 20, "tap", now) }
         val pending = fixture(listOf(record(20)), QuestionStatus.UNGRADED)
         expectError(ApiErrorCode.STUDY_PENDING_QUESTION_EXISTS) { pending.writer.enqueueFollowUp(7, 20, "tap", now) }
         assertThat(unscored.reservations + pending.reservations).isZero()
+    }
+
+    @Test
+    fun `completed voice assessment never starts a question-quota follow-up`() : Unit = runBlocking {
+        val voice = record(20).apply {
+            recordType = com.buddystudy.study.domain.entity.StudyRecordType.VOICE_TUTOR
+            source = QuestionSource.VOICE_TUTOR
+            status = QuestionStatus.COMPLETED
+            voiceRecordId = 10
+        }
+        val fixture = fixture(listOf(voice))
+        expectError(ApiErrorCode.FOLLOW_UP_NOT_AVAILABLE) { fixture.writer.enqueueFollowUp(7, 20, "tap", now) }
+        assertThat(fixture.reservations).isZero()
     }
 
     private suspend fun expectError(code: ApiErrorCode, block: suspend () -> Any) {

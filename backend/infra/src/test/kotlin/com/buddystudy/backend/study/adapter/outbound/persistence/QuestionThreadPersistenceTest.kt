@@ -115,6 +115,8 @@ class QuestionThreadPersistenceTest {
     fun `ability inputs exclude both coached followups and custom records`(): Unit = runBlocking {
         assertThat(repository.findAllGradedForStats(PageRequest.of(0, 20)).content.map { it.id })
             .containsExactlyInAnyOrder(1, 4)
+        assertThat(repository.findLatestGradedByUserAndTopics(7, listOf("Redis"), 20).map { it.id })
+            .containsExactly(1)
         val records = growth.findByUser(7, Instant.parse("2026-01-01T00:00:00Z"), Instant.parse("2027-01-01T00:00:00Z"))
         assertThat(records).hasSize(1)
         assertThat(records.single().score).isEqualTo(40)

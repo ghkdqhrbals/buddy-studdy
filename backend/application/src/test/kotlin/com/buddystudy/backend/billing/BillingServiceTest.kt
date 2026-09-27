@@ -1025,6 +1025,7 @@ class BillingServiceTest {
         }
         override suspend fun recordRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean = true
         override suspend fun applyRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean = true
+        override suspend fun ignoreRevenueCatEvent(eventId: String, reason: String, now: Instant) = Unit
         override suspend fun markRevenueCatEventFailed(
             eventId: String,
             error: String,

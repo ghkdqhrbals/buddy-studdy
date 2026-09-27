@@ -992,6 +992,23 @@ real purchases can complete.
 
 ## Processing failure operations
 
+RevenueCat can forward Xcode-local StoreKit transactions as `APP_STORE` /
+`SANDBOX` events. Events with that exact store/environment and a transaction or
+original transaction ID starting with `StoreKitTest_Transaction_` are retained
+as `IGNORED` receipts before account lookup or financial/lifecycle processing.
+They cannot create payments, invoices, entitlements or quota grants. Real Apple
+Sandbox/TestFlight transactions retain the normal fulfillment and retry rules;
+an anonymous ID alone is not a reason to ignore a purchase. The signed webhook
+authentication still runs before any receipt is recorded. Migration V123 closes
+only unfinished receipts with the same local-test signature, preserving their
+attempt history and all financial projections.
+
+Hosted iOS XCTest processes must not initialize RevenueCat. The Debug startup
+guard recognizes the XCTest host before the SDK can observe a local
+`SKTestSession` purchase. StoreKit configuration tests assert that RevenueCat is
+unconfigured before and after the local transaction. Offline QA retains its
+separate fixture guard and stripped SDK key; the Release purchase path is unchanged.
+
 RevenueCat event projection and subscription reconciliation failures use a
 durable three-attempt policy. The first and second failures remain `RETRYING`
 and become eligible again after 15 minutes. A third failure becomes

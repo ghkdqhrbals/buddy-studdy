@@ -183,7 +183,7 @@ class StudyService(
         return recordResponse(question, questionStats.findById(id), normalizedLanguage, viewMode)
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     override suspend fun recordForThread(principal: Principal, id: Long, language: String, view: String): StudyRecordResponse {
         val question = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")

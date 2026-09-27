@@ -202,7 +202,8 @@ class QuestionRepository(
                        ) as topic_rank
                 from questions q
                 where q.user_id = :userId and q.deleted_at is null and q.score is not null
-                  and q.record_type = 'QUESTION' and q.source not in ('follow_up', 'custom_question')
+                  and q.record_type = 'QUESTION'
+                  and q.source not in ('follow_up', 'custom_question')
                   and q.topic in ($topicMarkers)
             ) ranked
             where topic_rank <= :perTopicLimit
@@ -839,7 +840,7 @@ class QuestionRepository(
             """.trimIndent()
         }
         val gradedCondition = when {
-            questionsOnly -> "and q.record_type = 'QUESTION'" + if (includePending) "" else " and q.score is not null"
+            questionsOnly -> "and q.record_type = 'QUESTION'" + if (includePending) "" else " and (q.score is not null or q.source = 'custom_question')"
             includePending -> ""
             else -> "and $COMPLETED_RECORD_CONDITION"
         }

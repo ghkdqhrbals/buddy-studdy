@@ -174,7 +174,10 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(thread.json()["records"][1]["questionStatus"].asText()).isEqualTo("SKIPPED")
         assertThat(thread.json()["records"][1]["followUpDepth"].asInt()).isEqualTo(1)
         assertThat(thread.json()["records"][1]["question"]["question"].asText()).isEqualTo("Skipped practice")
-        assertThat(getJson("/api/v1/records/${child.id}", owner.accessToken, owner.deviceId, owner.clientSecret).statusCode()).isEqualTo(404)
+        // The current owner-detail contract reconciles terminal skips, while browse pages hide them.
+        val detail = getJson("/api/v1/records/${child.id}", owner.accessToken, owner.deviceId, owner.clientSecret)
+        assertThat(detail.statusCode()).isEqualTo(200)
+        assertThat(detail.json()["questionStatus"].asText()).isEqualTo("SKIPPED")
         for (recordId in listOf(original.id, child.id)) {
             val retry = postJson("/api/v1/records/$recordId/follow-ups", "", owner.accessToken, owner.deviceId, owner.clientSecret, "skip-retry-$recordId")
             assertThat(retry.statusCode()).describedAs(retry.body()).isEqualTo(409)
@@ -350,9 +353,16 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         )
         assertThat(schedule.statusCode()).isEqualTo(200)
 
-        // Settings synchronization must never create an implicit root study.
+        // Settings synchronization no longer creates a root study. Exercise the
+        // explicit creation boundary before checking record/page reconciliation.
         assertThat(studies.findAll()).isEmpty()
-        val study = createStudy(AuthHeaders(deviceId, clientSecret, accessToken), "Redis")
+        postJson(
+            "/api/v1/studies",
+            """{"topic":"Redis","difficultyLevel":2,"intervalMinutes":15,"customPrompt":"짧게 질문하세요.","openaiModel":"gpt-5.4","maxHistoryCount":100}""",
+            accessToken, deviceId, clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }
+
+        val study = studies.findAll().single()
         val swiftTopic = "SwiftUI-${Instant.now().toEpochMilli()}"
         val swiftStudy = studies.save(
             StudyEntity(

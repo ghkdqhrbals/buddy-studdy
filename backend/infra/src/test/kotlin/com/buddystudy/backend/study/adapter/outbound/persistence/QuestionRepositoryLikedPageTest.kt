@@ -47,8 +47,8 @@ class QuestionRepositoryLikedPageTest {
             StringToQuestionStatus,
             QuestionStatusToString,
             StringToQuestionSource,
-            StringToStudyRecordType,
             QuestionSourceToString,
+            StringToStudyRecordType,
         )
         val mappingContext = RelationalMappingContext().also {
             it.setSimpleTypeHolder(conversions.simpleTypeHolder)
@@ -646,13 +646,13 @@ class QuestionRepositoryLikedPageTest {
         override fun convert(source: String): QuestionSource = QuestionSource.fromDatabaseValue(source)
     }
 
-    @ReadingConverter
-    private object StringToStudyRecordType : Converter<String, StudyRecordType> {
-        override fun convert(source: String): StudyRecordType = StudyRecordType.valueOf(source)
-    }
-
     @WritingConverter
     private object QuestionSourceToString : Converter<QuestionSource, String> {
         override fun convert(source: QuestionSource): String = source.databaseValue
+    }
+
+    @ReadingConverter
+    private object StringToStudyRecordType : Converter<String, StudyRecordType> {
+        override fun convert(source: String): StudyRecordType = StudyRecordType.valueOf(source)
     }
 }
