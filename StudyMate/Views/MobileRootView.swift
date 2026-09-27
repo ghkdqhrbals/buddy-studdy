@@ -1910,8 +1910,11 @@ private struct MobileHomeView: View {
             .font(.subheadline)
             .buttonStyle(.plain)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 2)
-        .overlay(alignment: .bottom) { Divider() }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.secondary.opacity(0.2)).frame(height: 0.5)
+        }
     }
 
     private var communityScopeMenu: some View {
