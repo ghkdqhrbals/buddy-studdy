@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "status": "local-ready-final-source-verified",
+  "status": "uploaded-complete-order-verified",
   "expectedFilesPerSet": 6,
   "displayTypesSource": "Existing 1.2.0 accepted ASC set mapping; root verifies against live 1.3.0 before upload.",
   "sets": [
@@ -155,5 +155,7 @@
       ]
     }
   ],
-  "releaseSourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+  "releaseSourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+  "versionId": "d2199695-02fb-483d-adc8-5f59aedcd67c",
+  "receipt": "upload-receipt.json"
 }

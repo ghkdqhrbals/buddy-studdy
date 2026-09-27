@@ -1,0 +1,40 @@
+{
+  "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+  "runUrl": "https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/36353761091",
+  "artifactName": "BuddyStudy-iOS-1.3.0-126",
+  "ipaSHA256": "b14b208ee46bfafd8c94f0d5a2d36c541e956e63f16a90ffbb69c96e0504883f",
+  "ipaBytes": 31090299,
+  "bundle": {
+    "CFBundleIdentifier": "io.github.ghkdqhrbals.StudyMate",
+    "CFBundleShortVersionString": "1.3.0",
+    "CFBundleVersion": "126",
+    "MinimumOSVersion": "17.0",
+    "ITSAppUsesNonExemptEncryption": false,
+    "BuddyStudyBackendBaseURL": "https://api.ghkdqhrbals.org",
+    "UIDeviceFamily": [
+      1,
+      2
+    ]
+  },
+  "workflowMetadata": {
+    "version": "1.3.0",
+    "build": "126",
+    "sourceSha": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+    "runId": "36353761091",
+    "backendBaseURL": "https://api.ghkdqhrbals.org",
+    "appReviewCandidate": false,
+    "admobTestMode": false
+  },
+  "workflowStatus": "completed",
+  "workflowConclusion": "success",
+  "uploadToAppStoreConnect": "success",
+  "appStoreBuildId": "f0b89c45-da8b-4357-b84d-13783d430af3",
+  "appStoreProcessingState": "VALID",
+  "selectedForVersionId": "d2199695-02fb-483d-adc8-5f59aedcd67c",
+  "testFlightNotesLocales": [
+    "ko",
+    "en-US",
+    "ja"
+  ],
+  "testFlightNotesVerified": true
+}

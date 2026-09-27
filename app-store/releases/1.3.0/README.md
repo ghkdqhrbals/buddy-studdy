@@ -56,6 +56,19 @@ device framing and a sparse BuddyStudy brand accent. No Top 10 ranking, download
 testimonial, or learning-speed claim is made. The benchmark concerns screenshot
 presentation, not control of Apple's ranking algorithm.
 
-App Store Connect upload, processing state, selected binary, and submission
-status are owned by the release workflow and its separate receipts. This artwork
-package does not itself claim those operations have completed.
+## Release receipts
+
+App Store Connect accepted version **1.3.0 (126)** for App Review on
+2026-09-28 at07:24:48 KST. Both the submission and app version are
+`WAITING_FOR_REVIEW`; the existing manual-release setting is retained.
+The public store does not switch to1.3.0 until approval and release.
+
+- [Submission and final preflight](submission-receipt.json): exact selected
+  binary, three metadata locales, and60 screenshot checksums/dimensions/order.
+- [Signed build](signed-build-receipt.json): source commit, successful build/upload
+  workflow, inspected IPA metadata and SHA256, and verified TestFlight notes.
+- [Screenshot upload](screenshots/upload-receipt.json) and
+  [API readback](screenshots/asset-readback.json): all10sets, six images each,
+  COMPLETE state and intended order.
+- [Backend and Push Admin deployment](deployment-receipt.json): successful
+  separate workflows and immutable backend image digest.
