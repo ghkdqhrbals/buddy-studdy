@@ -1,0 +1,33 @@
+BuddyStudy 1.3.0
+
+Access
+Use the existing review account in App Store Connect's sign-in fields. Release builds connect to https://api.ghkdqhrbals.org. TestFlight purchases use Apple's sandbox. If prompted, review the required service terms before continuing. Do not delete the permanent review account; use a disposable account for deletion testing.
+
+Study flow
+Home > My Studies > create or open a study/topic > generate a question > answer > submit. Grading completes asynchronously. Records and Statistics show saved learning history and topic-level progress. Incoming questions do not replace an active ungraded answer draft.
+
+Empty My Studies provides suggested topics that open an editable form; saving is explicit. Creating studies/topics and following interests do not generate questions or consume question allowance.
+
+New follow-up and custom learning
+After an owned graded question, explicitly request a follow-up grounded in the answer and feedback. A thread allows at most two follow-ups; each consumes one question from the normal allowance. Original context stays visible. Follow-ups remain private and do not change independent topic-ability estimates.
+
+From a study room, save your own question and answer as a private Custom question record. This does not call AI, consume question allowance, or invent a score. Custom records appear in Records and remain outside ability estimates. Drafts survive navigation and failed requests.
+
+Public discovery
+Home is a searchable public feed in server-chosen order. There is no recommendation/newest/view/like sort selector. Signed-in users can save up to 30 interests and choose Following; topic following is separate from paid membership.
+
+Public-question menus offer follow/unfollow and sharing. https://api.ghkdqhrbals.org/questions/{numericId}?tl=en opens the public question in an installed app. The website shows topic/question text and an App Store link; it omits answers, scores, authors and audio. After installation, reopen the original link. Private/deleted content is unavailable.
+
+Public menus provide Report Question and Block User. Long-press comments to block authors. Own records provide Make private/Delete. Profile contains Liked Questions. Account deletion is in Settings > Account Settings.
+
+Voice and membership
+The phone button beside Home Search starts Voice Tutor when signed in and server allowance permits. Free includes 30 monthly questions and no voice access; Plus includes 300 questions and Pro 1,000. Each paid tier has a separate 60-minute monthly voice allowance and an ad-free public feed. Voice uses the microphone. Recording requires a separate per-call choice; publishing a learning exchange never publishes the full private transcript or recording.
+
+Profile > Membership & Billing > Manage membership shows localized monthly prices, renewal terms, Restore, Terms and Privacy. Apple determines introductory eligibility. Free public feeds may show non-personalized AdMob native ads with BuddyStudy/Coupang fallback. No ATT/IDFA tracking is used.
+
+Notifications and store assets
+Marketing notifications respect existing marketing preferences and open the selected public question, app page, or Home message. Taps are counted separately from passive delivery and read state. Store screenshots combine promotional headings with illustrative data rendered by the actual app UI; decorative tree art is not interface content. Apple's optional rating request has no reward or satisfaction screening.
+
+Privacy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-25.html
+Terms: https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-30.html
+EULA: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/

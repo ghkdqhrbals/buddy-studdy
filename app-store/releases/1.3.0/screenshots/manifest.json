@@ -1,0 +1,2423 @@
+{
+  "version": "1.3.0",
+  "prototype": false,
+  "releaseSourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+  "captureSourceCommits": [
+    "8ecc999d9f219fab2416566471e63f94a3228253",
+    "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+  ],
+  "generatedAt": "2026-09-27T22:02:57.662Z",
+  "renderer": "local Chromium + HTML/CSS; native image composited unchanged",
+  "chromiumVersion": "154.0.8037.57",
+  "panelOrder": [
+    "01-learning-result",
+    "02-follow-up",
+    "03-public-feed",
+    "04-study-tree",
+    "05-topic-progress",
+    "06-custom-question"
+  ],
+  "accentSHA256": "b05b1f345c3529a13b7c41c4e5cde3962cbb1785af0abf8dddeef5f212d829d3",
+  "files": [
+    {
+      "path": "6.5/ko/01-learning-result.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ko",
+      "panel": "01-learning-result",
+      "fixture": "learning-result",
+      "sourcePath": "native/iphone-6.5/ko/learning-result.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "8a34d4763153840a8e19e2efb891420a2dc46327a5743549bbd7217317c07595",
+      "outputSHA256": "66eab7443e2ee312373bc1bd7298f9e708dfb77ce36767d5d9119e22d2d743a8",
+      "copy": [
+        "질문 하나로,",
+        "내 이해를 확인",
+        "짧게 답하고 AI 피드백으로 돌아봐요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 332.703125,
+          "right": 1152,
+          "bottom": 502.703125
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "104px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/ko/02-follow-up.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ko",
+      "panel": "02-follow-up",
+      "fixture": "follow-up",
+      "sourcePath": "native/iphone-6.5/ko/follow-up.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "035331d97d62a7b2c2b0c0205933b599ef0a54a6ac412352cdd9cf1ea7f1f32b",
+      "outputSHA256": "0b2e8d03a61ad3142b169f8f1f2d730df3b15205249f244ce1923adf1714425c",
+      "copy": [
+        "내 답변에서",
+        "한 걸음 더 깊게",
+        "AI 꼬리질문으로 생각을 이어가요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 332.703125,
+          "right": 1152,
+          "bottom": 502.703125
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "104px"
+      }
+    },
+    {
+      "path": "6.5/ko/03-public-feed.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ko",
+      "panel": "03-public-feed",
+      "fixture": "feed",
+      "sourcePath": "native/iphone-6.5/ko/feed.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "9ac9393c70ab1074b4d043343b7d6095d2929b5904e6b12b2e7542b7dffef7ba",
+      "outputSHA256": "f0c0e89529e45eb4dda03d1d50d44cc46f080729b4830a7aebcc7b78c25fea78",
+      "copy": [
+        "함께 읽을 질문,",
+        "관심주제로 발견",
+        "공개 질문을 검색하고 관심주제를 구독해요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 332.703125,
+          "right": 1152,
+          "bottom": 502.703125
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "104px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/ko/04-study-tree.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ko",
+      "panel": "04-study-tree",
+      "fixture": "study-tree",
+      "sourcePath": "native/iphone-6.5/ko/study-tree.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "7cc76c0ee0d0c495d3ab28b5cd4800afaf4c971b9804847c65b4afb1a17bc172",
+      "outputSHA256": "db7bc65d0a0789469d3870510a6170d19b8585ace3d5ee5f32d3a65b0fd250d2",
+      "copy": [
+        "관심을 넓히는",
+        "나만의 학습 트리",
+        "큰 주제에서 세부 주제로 넓혀가요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 332.703125,
+          "right": 1152,
+          "bottom": 502.703125
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "104px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/ko/05-topic-progress.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ko",
+      "panel": "05-topic-progress",
+      "fixture": "statistics",
+      "sourcePath": "native/iphone-6.5/ko/statistics.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "9b5640dd0e9fa88a6e951c0051a87e0dfdce090433bbe3b825b516e2e8cac0f9",
+      "outputSHA256": "1e23d5d7699f72d31ca68c77b2e1626276e795e69757336b399d4c266456e21a",
+      "copy": [
+        "주제별로 보는",
+        "나의 성장",
+        "학습 기록으로 이해와 성장 흐름을 확인해요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 332.703125,
+          "right": 1152,
+          "bottom": 502.703125
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "104px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/ko/06-custom-question.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ko",
+      "panel": "06-custom-question",
+      "fixture": "custom-question",
+      "sourcePath": "native/iphone-6.5/ko/custom-question.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "254a9949b831b7bdfb559ca2610ce43e34135a228bc06220c570898ca8efe463",
+      "outputSHA256": "8577cdbb7495f55a68b41f6a99ff7e9e3110d93322dc8ac8a9175606a0248ad5",
+      "copy": [
+        "내 질문도,",
+        "내 공부 기록으로",
+        "직접 쓴 질문과 답변을 채점 없이 저장해요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 332.703125,
+          "right": 1152,
+          "bottom": 502.703125
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "104px"
+      }
+    },
+    {
+      "path": "6.5/en-US/01-learning-result.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "en-US",
+      "panel": "01-learning-result",
+      "fixture": "learning-result",
+      "sourcePath": "native/iphone-6.5/en-US/learning-result.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "2e8f6d001c4b3461ffcf8d33b582275470e84917a5cbeffe4e49b251f53120cf",
+      "outputSHA256": "fa02530352b7df05015dbd899f62f505b31ac7d3c305f33a4db6986f2b0cc9ea",
+      "copy": [
+        "One question.",
+        "A clearer mind.",
+        "Answer briefly. Reflect with AI feedback."
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 320.390625,
+          "right": 1152,
+          "bottom": 490.390625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "102px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/en-US/02-follow-up.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "en-US",
+      "panel": "02-follow-up",
+      "fixture": "follow-up",
+      "sourcePath": "native/iphone-6.5/en-US/follow-up.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "0526c6b2c9235dd3b3f8c2ec1a27f8b5f7411ae60e74267f1cdbf0cba94ad66e",
+      "outputSHA256": "8e0c699def25e9740b7b14831c024474a0855dfac55c64e8b827f086a88dfcc7",
+      "copy": [
+        "Your answer.",
+        "The next question.",
+        "Go deeper with AI follow-up questions."
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 320.390625,
+          "right": 1152,
+          "bottom": 490.390625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "102px"
+      }
+    },
+    {
+      "path": "6.5/en-US/03-public-feed.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "en-US",
+      "panel": "03-public-feed",
+      "fixture": "feed",
+      "sourcePath": "native/iphone-6.5/en-US/feed.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "00087df07c01fdc8fb10d047151f11c15e9686263d05a990dd9fa4ccdbdcb138",
+      "outputSHA256": "8b2426907f0ee7b67aea447e6ef1c7e4d860ce4a4641c3386a8e9f9b99268b4c",
+      "copy": [
+        "Good questions.",
+        "Shared interests.",
+        "Search public questions. Follow your topics."
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 320.390625,
+          "right": 1152,
+          "bottom": 490.390625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "102px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/en-US/04-study-tree.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "en-US",
+      "panel": "04-study-tree",
+      "fixture": "study-tree",
+      "sourcePath": "native/iphone-6.5/en-US/study-tree.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "caac09ea63acbce927c89fea7923e70cfa085464b74f2d1bc92b948d9058516f",
+      "outputSHA256": "d38905f5567a0df366941eaa40f8e9317fda70bda020f15dff8c4cc64017f6f4",
+      "copy": [
+        "Grow your own",
+        "learning tree.",
+        "Branch from big ideas into smaller topics."
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 320.390625,
+          "right": 1152,
+          "bottom": 490.390625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "102px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/en-US/05-topic-progress.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "en-US",
+      "panel": "05-topic-progress",
+      "fixture": "statistics",
+      "sourcePath": "native/iphone-6.5/en-US/statistics.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "c62ed6fc2108d35c39355de7c3b4f50b89bb6d5a3ca47f4a5bcc4b8619175e70",
+      "outputSHA256": "ed7b625eaf0aa1c94ee3af5d69d5f16180081033dc87cb0a67dd0d19a445e6cc",
+      "copy": [
+        "See your growth.",
+        "Topic by topic.",
+        "Explore your progress through study records."
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 320.390625,
+          "right": 1152,
+          "bottom": 490.390625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "102px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/en-US/06-custom-question.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "en-US",
+      "panel": "06-custom-question",
+      "fixture": "custom-question",
+      "sourcePath": "native/iphone-6.5/en-US/custom-question.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "072755fa0889cba78de56a9c1a057acdc5520ca816f4898e6b20f98ad38fc75f",
+      "outputSHA256": "3091d1a540d48973773ba607b1952ce6c3048d59013764fffff5b0626ccafbad",
+      "copy": [
+        "Your questions.",
+        "Your study notes.",
+        "Save your own questions and answers, ungraded."
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 320.390625,
+          "right": 1152,
+          "bottom": 490.390625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "102px"
+      }
+    },
+    {
+      "path": "6.5/ja/01-learning-result.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ja",
+      "panel": "01-learning-result",
+      "fixture": "learning-result",
+      "sourcePath": "native/iphone-6.5/ja/learning-result.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "3daaa7c4a1d434614f3c63f87fdbef4436d129ed0fe9ef40c1eafe0fec51d96a",
+      "outputSHA256": "ce589b62dd7d6f8c1417c7d35ad39bc4ca62e3400b1973764ba4cec6cee5dc56",
+      "copy": [
+        "ひとつの質問で、",
+        "理解を確かめる",
+        "短く答えて、AIのフィードバックで振り返る"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 306.65625,
+          "right": 1152,
+          "bottom": 476.65625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "84px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/ja/02-follow-up.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ja",
+      "panel": "02-follow-up",
+      "fixture": "follow-up",
+      "sourcePath": "native/iphone-6.5/ja/follow-up.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "c54a7306446b8f4b78d23d15815dba70b02e14b91b97aafb7dbb50054ceaa2d5",
+      "outputSHA256": "64981f28429cf21786aacc28fcc07d454a739503b8b7ad1fd007db6b394ecfb5",
+      "copy": [
+        "あなたの回答から、",
+        "もう一歩深く",
+        "AIの追加質問で、考えをつなげよう"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 306.65625,
+          "right": 1152,
+          "bottom": 476.65625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "84px"
+      }
+    },
+    {
+      "path": "6.5/ja/03-public-feed.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ja",
+      "panel": "03-public-feed",
+      "fixture": "feed",
+      "sourcePath": "native/iphone-6.5/ja/feed.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "e21c628a547a05c9a64a4a6f81a7b3e19e20da92e9cfa4317360397f2eb8e661",
+      "outputSHA256": "5d2f749e56291bfe7f58d97e64718bb4a8c2748aa86961126d6f73d0dd7a4705",
+      "copy": [
+        "気になる質問に、",
+        "出会う場所",
+        "公開質問を検索して、興味のあるトピックをフォロー"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 306.65625,
+          "right": 1152,
+          "bottom": 476.65625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "84px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/ja/04-study-tree.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ja",
+      "panel": "04-study-tree",
+      "fixture": "study-tree",
+      "sourcePath": "native/iphone-6.5/ja/study-tree.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "31246a91450a251b243695c47a4b220c5c9ce1bd4a5eed3880919f534b056703",
+      "outputSHA256": "671f0f6b549d121f74d47f2c352ecc92ca148762fb7d522863c7869febbb2089",
+      "copy": [
+        "興味が広がる、",
+        "自分だけの学習ツリー",
+        "大きなテーマから、細かなトピックへ"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 306.65625,
+          "right": 1152,
+          "bottom": 476.65625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "84px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/ja/05-topic-progress.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ja",
+      "panel": "05-topic-progress",
+      "fixture": "statistics",
+      "sourcePath": "native/iphone-6.5/ja/statistics.png",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "5061cba7dd70dc2b8c5d4eef0b6de63c3faecbde2ba18e78a093d8612cd64e07",
+      "outputSHA256": "be658850c5fce812f871dbfc5fd5a4f7a9e802bbd221c9cc8c40deaa046c96c1",
+      "copy": [
+        "トピックごとに、",
+        "成長が見える",
+        "学習記録から、理解と成長の流れを確認"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 306.65625,
+          "right": 1152,
+          "bottom": 476.65625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "84px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.5/ja/06-custom-question.png",
+      "width": 1242,
+      "height": 2688,
+      "locale": "ja",
+      "panel": "06-custom-question",
+      "fixture": "custom-question",
+      "sourcePath": "native/iphone-6.5/ja/custom-question.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1242,
+      "sourceHeight": 2688,
+      "sourceSHA256": "4e38835ec8939c96a2f19d55b9f7853b0824fcd529099c905596fd84cd087638",
+      "outputSHA256": "faa6cd7c54e56fbf0f3d6725f7d936137956d959f608a1c91786b1dbf002ed78",
+      "copy": [
+        "自分の質問も、",
+        "学習の記録に",
+        "自分で書いた質問と回答を、採点せずに保存"
+      ],
+      "layout": {
+        "copy": {
+          "x": 96,
+          "y": 170,
+          "width": 1056,
+          "height": 306.65625,
+          "right": 1152,
+          "bottom": 476.65625
+        },
+        "device": {
+          "x": 164.5703125,
+          "y": 631.671875,
+          "width": 912.859375,
+          "height": 1950.03125,
+          "right": 1077.4296875,
+          "bottom": 2581.703125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "84px"
+      }
+    },
+    {
+      "path": "6.9/ko/01-learning-result.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ko",
+      "panel": "01-learning-result",
+      "fixture": "learning-result",
+      "sourcePath": "native/iphone-6.9/ko/learning-result.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "e8c6c227cae70ad1110724cd9992f5e3d5ee89c3f8a3b330657132a45ff13a42",
+      "outputSHA256": "4f5b32e01d85070e75f9a2fe52cd66adda14b7400fb49330d64a6618e3120097",
+      "copy": [
+        "질문 하나로,",
+        "내 이해를 확인",
+        "짧게 답하고 AI 피드백으로 돌아봐요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 353.59375,
+          "right": 1224.359375,
+          "bottom": 534.265625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "110.531px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/ko/02-follow-up.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ko",
+      "panel": "02-follow-up",
+      "fixture": "follow-up",
+      "sourcePath": "native/iphone-6.9/ko/follow-up.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "94f4ae7ef8a2cafdfb868d64e403bab20fa25657e7c3f52bf183d55bd5ed319a",
+      "outputSHA256": "2411818e77640aad2421e73899a0cd74312d21dcb8b65d2df592f6d967db61d3",
+      "copy": [
+        "내 답변에서",
+        "한 걸음 더 깊게",
+        "AI 꼬리질문으로 생각을 이어가요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 353.59375,
+          "right": 1224.359375,
+          "bottom": 534.265625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "110.531px"
+      }
+    },
+    {
+      "path": "6.9/ko/03-public-feed.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ko",
+      "panel": "03-public-feed",
+      "fixture": "feed",
+      "sourcePath": "native/iphone-6.9/ko/feed.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "a57e53f4ac90b85075882fcae90edfc9e3329ef15a5572258a8b49e125756a67",
+      "outputSHA256": "f7f94a590e1cfa558bde0c1926f86722ef5c1ab63f4c8b1e0716ceb26fe4f073",
+      "copy": [
+        "함께 읽을 질문,",
+        "관심주제로 발견",
+        "공개 질문을 검색하고 관심주제를 구독해요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 353.59375,
+          "right": 1224.359375,
+          "bottom": 534.265625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "110.531px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/ko/04-study-tree.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ko",
+      "panel": "04-study-tree",
+      "fixture": "study-tree",
+      "sourcePath": "native/iphone-6.9/ko/study-tree.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "892ac6eeea6553a708a1439dd8e493bbce767a40e2b61f8ffbfa8a07055ce2b1",
+      "outputSHA256": "f681bc5305a47e0b1889dc97dcfc80a68416f1dd4e96d4f08555321dbe66d6f8",
+      "copy": [
+        "관심을 넓히는",
+        "나만의 학습 트리",
+        "큰 주제에서 세부 주제로 넓혀가요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 353.59375,
+          "right": 1224.359375,
+          "bottom": 534.265625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "110.531px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/ko/05-topic-progress.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ko",
+      "panel": "05-topic-progress",
+      "fixture": "statistics",
+      "sourcePath": "native/iphone-6.9/ko/statistics.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "1533fabd2dac5ae7bd98cf3a2fd0af94551844b746a895c6b3d2542944a554d7",
+      "outputSHA256": "b1659da1cb1b8119d0e4814b40e65c0a8cbaeef931ac0f1f40cb0d25d64088b8",
+      "copy": [
+        "주제별로 보는",
+        "나의 성장",
+        "학습 기록으로 이해와 성장 흐름을 확인해요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 353.59375,
+          "right": 1224.359375,
+          "bottom": 534.265625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "110.531px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/ko/06-custom-question.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ko",
+      "panel": "06-custom-question",
+      "fixture": "custom-question",
+      "sourcePath": "native/iphone-6.9/ko/custom-question.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "2af1e799792c51287b9f078e3fc8cc856e184e89dc25437a42d066fabbab97b8",
+      "outputSHA256": "fc1512da7c75eb48e2fd3e6a5afa88109d4bcfd0b826a7aa70aa727d9d430f8d",
+      "copy": [
+        "내 질문도,",
+        "내 공부 기록으로",
+        "직접 쓴 질문과 답변을 채점 없이 저장해요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 353.59375,
+          "right": 1224.359375,
+          "bottom": 534.265625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "110.531px"
+      }
+    },
+    {
+      "path": "6.9/en-US/01-learning-result.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "en-US",
+      "panel": "01-learning-result",
+      "fixture": "learning-result",
+      "sourcePath": "native/iphone-6.9/en-US/learning-result.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "6b7b41babc30cb31711665ef7f50d8f8daeadc895df7a0d3d03acace6cad872a",
+      "outputSHA256": "01d5e669bdecd8f9f461a8934f20666654ee2be0016f740aae598ba208bcb501",
+      "copy": [
+        "One question.",
+        "A clearer mind.",
+        "Answer briefly. Reflect with AI feedback."
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 340.484375,
+          "right": 1224.359375,
+          "bottom": 521.15625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.406px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/en-US/02-follow-up.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "en-US",
+      "panel": "02-follow-up",
+      "fixture": "follow-up",
+      "sourcePath": "native/iphone-6.9/en-US/follow-up.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "591efc70c94e14dcb1c3edcbd219660a7f1d5416a03e25833f710b66fa4d198c",
+      "outputSHA256": "0adf0fe301111aca137a3d414a75fcfa73a9918e384143d23f87c11564d70aea",
+      "copy": [
+        "Your answer.",
+        "The next question.",
+        "Go deeper with AI follow-up questions."
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 340.484375,
+          "right": 1224.359375,
+          "bottom": 521.15625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.406px"
+      }
+    },
+    {
+      "path": "6.9/en-US/03-public-feed.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "en-US",
+      "panel": "03-public-feed",
+      "fixture": "feed",
+      "sourcePath": "native/iphone-6.9/en-US/feed.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "e0504a9b92d9d30532b366366c7b7b5c308ca582bc39013b6439cacbf5a7f215",
+      "outputSHA256": "44fa566ef012b789bd9f30c70ad24b7d694be4a9746f49c1c143ab9cefb7bd92",
+      "copy": [
+        "Good questions.",
+        "Shared interests.",
+        "Search public questions. Follow your topics."
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 340.484375,
+          "right": 1224.359375,
+          "bottom": 521.15625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.406px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/en-US/04-study-tree.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "en-US",
+      "panel": "04-study-tree",
+      "fixture": "study-tree",
+      "sourcePath": "native/iphone-6.9/en-US/study-tree.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "591bd37d1befa2447963e560edeab59a8c5cae17d2999a990a0e0c128d5c8295",
+      "outputSHA256": "9aa671fa87ee636fb0fb26f09e406ce82103e522eafcff514a7fe17c518dbe88",
+      "copy": [
+        "Grow your own",
+        "learning tree.",
+        "Branch from big ideas into smaller topics."
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 340.484375,
+          "right": 1224.359375,
+          "bottom": 521.15625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.406px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/en-US/05-topic-progress.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "en-US",
+      "panel": "05-topic-progress",
+      "fixture": "statistics",
+      "sourcePath": "native/iphone-6.9/en-US/statistics.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "c0eed7110bc1f579c8564de06b55ca9b411e751fb10a6d50b35a7c7c81cdfea7",
+      "outputSHA256": "a730aaeca608cf8758ba591bebf5b61da8c30735a34bcc5f4212cb489ff893ef",
+      "copy": [
+        "See your growth.",
+        "Topic by topic.",
+        "Explore your progress through study records."
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 340.484375,
+          "right": 1224.359375,
+          "bottom": 521.15625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.406px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/en-US/06-custom-question.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "en-US",
+      "panel": "06-custom-question",
+      "fixture": "custom-question",
+      "sourcePath": "native/iphone-6.9/en-US/custom-question.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "61b1cf3e85a4671682e94f1fa6e1047272e29710ab1492d76be74bee7fea054d",
+      "outputSHA256": "d8680d3d3b3b7b89645a45f11870e129eb1abc778150c0a984ef6dc3db3bc04c",
+      "copy": [
+        "Your questions.",
+        "Your study notes.",
+        "Save your own questions and answers, ungraded."
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 340.484375,
+          "right": 1224.359375,
+          "bottom": 521.15625
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.406px"
+      }
+    },
+    {
+      "path": "6.9/ja/01-learning-result.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ja",
+      "panel": "01-learning-result",
+      "fixture": "learning-result",
+      "sourcePath": "native/iphone-6.9/ja/learning-result.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "773fe53d990cf2a7c276e0edf8f7a0e9a86f958b4583477971ca4602516512b8",
+      "outputSHA256": "61d0a3db16c3a61e4123ebf393ebae21cd97dcc78a61e9aae346c280aa161c2e",
+      "copy": [
+        "ひとつの質問で、",
+        "理解を確かめる",
+        "短く答えて、AIのフィードバックで振り返る"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 325.921875,
+          "right": 1224.359375,
+          "bottom": 506.59375
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "89.2754px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/ja/02-follow-up.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ja",
+      "panel": "02-follow-up",
+      "fixture": "follow-up",
+      "sourcePath": "native/iphone-6.9/ja/follow-up.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "daf653c049e98efdae156ad9744ac24e0b9d4225c8d8983e93482c5546adbad1",
+      "outputSHA256": "48421c2b283d3d59851078126843763c62ca2f1b9c84b9cd09af341a200540ac",
+      "copy": [
+        "あなたの回答から、",
+        "もう一歩深く",
+        "AIの追加質問で、考えをつなげよう"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 325.921875,
+          "right": 1224.359375,
+          "bottom": 506.59375
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "89.2754px"
+      }
+    },
+    {
+      "path": "6.9/ja/03-public-feed.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ja",
+      "panel": "03-public-feed",
+      "fixture": "feed",
+      "sourcePath": "native/iphone-6.9/ja/feed.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "3838056cd5d03ce2c3a7a33c257b6673bc064b3d9e9489bdef2b3577d25f4381",
+      "outputSHA256": "f7293919e7f2ae0ac15dc15753f4adc6e1deca124cf90e06eb15e534f0089f5a",
+      "copy": [
+        "気になる質問に、",
+        "出会う場所",
+        "公開質問を検索して、興味のあるトピックをフォロー"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 325.921875,
+          "right": 1224.359375,
+          "bottom": 506.59375
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "89.2754px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/ja/04-study-tree.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ja",
+      "panel": "04-study-tree",
+      "fixture": "study-tree",
+      "sourcePath": "native/iphone-6.9/ja/study-tree.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "67ec79f77d8cd9fd5002350aa7d0c86621c97c1378495e6f9a3e31add261218d",
+      "outputSHA256": "e91d068b57c53f16181c2399eb9b23db82180cff247b23d882e82824cd35a8fb",
+      "copy": [
+        "興味が広がる、",
+        "自分だけの学習ツリー",
+        "大きなテーマから、細かなトピックへ"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 325.921875,
+          "right": 1224.359375,
+          "bottom": 506.59375
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "89.2754px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/ja/05-topic-progress.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ja",
+      "panel": "05-topic-progress",
+      "fixture": "statistics",
+      "sourcePath": "native/iphone-6.9/ja/statistics.png",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "ea6b1c5232d4bdc51a265c317dc3618b72c42c1121c853cd850839850b608ea4",
+      "outputSHA256": "c07476bc51b7f01cf4294cce79ef235d4ebfff0d7d8692ab6bf9f073fd1debef",
+      "copy": [
+        "トピックごとに、",
+        "成長が見える",
+        "学習記録から、理解と成長の流れを確認"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 325.921875,
+          "right": 1224.359375,
+          "bottom": 506.59375
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "89.2754px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.9/ja/06-custom-question.png",
+      "width": 1320,
+      "height": 2868,
+      "locale": "ja",
+      "panel": "06-custom-question",
+      "fixture": "custom-question",
+      "sourcePath": "native/iphone-6.9/ja/custom-question.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1320,
+      "sourceHeight": 2868,
+      "sourceSHA256": "4e1dec1e21c5a17bbadfb80b52d1a0e07ebf493a4cdf45f0fa090d06c6a098b1",
+      "outputSHA256": "7d02983002eb4ec9ce80ddabc12349dc565a42482b1fc2328fc90bcf31ed84b9",
+      "copy": [
+        "自分の質問も、",
+        "学習の記録に",
+        "自分で書いた質問と回答を、採点せずに保存"
+      ],
+      "layout": {
+        "copy": {
+          "x": 102.015625,
+          "y": 180.671875,
+          "width": 1122.34375,
+          "height": 325.921875,
+          "right": 1224.359375,
+          "bottom": 506.59375
+        },
+        "device": {
+          "x": 174.90625,
+          "y": 673.96875,
+          "width": 970.1875,
+          "height": 2080.96875,
+          "right": 1145.09375,
+          "bottom": 2754.9375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "89.2754px"
+      }
+    },
+    {
+      "path": "ipad-13/ko/01-learning-result.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ko",
+      "panel": "01-learning-result",
+      "fixture": "learning-result",
+      "sourcePath": "native/ipad-13/ko/learning-result.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "76a3f411510e1c610ff8731a0da82ac6c0f2d04b98953975739fe3efa83beab2",
+      "outputSHA256": "ef2b6957aecb1e8d7472614c64600459531b37cd580e2083d76ef7298684da7b",
+      "copy": [
+        "질문 하나로,",
+        "내 이해를 확인",
+        "짧게 답하고 AI 피드백으로 돌아봐요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/ko/02-follow-up.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ko",
+      "panel": "02-follow-up",
+      "fixture": "follow-up",
+      "sourcePath": "native/ipad-13/ko/follow-up.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "f7cca9772a60216667e79aef3ccb81fc1549b59f11bc1ddf9a75a6a27bef376d",
+      "outputSHA256": "3f073ba7bf4cc2745b5eee54ac493b1f149f43eb8463728a3e7204306788b973",
+      "copy": [
+        "내 답변에서",
+        "한 걸음 더 깊게",
+        "AI 꼬리질문으로 생각을 이어가요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      }
+    },
+    {
+      "path": "ipad-13/ko/03-public-feed.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ko",
+      "panel": "03-public-feed",
+      "fixture": "feed",
+      "sourcePath": "native/ipad-13/ko/feed.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "ca7953139372b36494d12257de8b02b9951a88ce08072d896fd2e040c11b70d3",
+      "outputSHA256": "774fade87f7513207d88843d20a82dfef02a9c157d9c6b9f579b124ad74bdeca",
+      "copy": [
+        "함께 읽을 질문,",
+        "관심주제로 발견",
+        "공개 질문을 검색하고 관심주제를 구독해요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/ko/04-study-tree.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ko",
+      "panel": "04-study-tree",
+      "fixture": "study-tree",
+      "sourcePath": "native/ipad-13/ko/study-tree.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "de0f1e1718022fe75f90dacfc7d23781a369c26c8bedd2adb5cba09e44ab6017",
+      "outputSHA256": "6bd6f6a51295087bc34bc9df2dd67b1670fccd8cfe130806ed9f20877270c592",
+      "copy": [
+        "관심을 넓히는",
+        "나만의 학습 트리",
+        "큰 주제에서 세부 주제로 넓혀가요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/ko/05-topic-progress.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ko",
+      "panel": "05-topic-progress",
+      "fixture": "statistics",
+      "sourcePath": "native/ipad-13/ko/statistics.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "417b927c1f22eb0fad9cefa6595ed82aa0ce8c490f0364ca18a9b1868d40b025",
+      "outputSHA256": "b646a1fe53b6c3b084062c5ec2b01ad46754e971aa719bbb7c801c2a61ae0818",
+      "copy": [
+        "주제별로 보는",
+        "나의 성장",
+        "학습 기록으로 이해와 성장 흐름을 확인해요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/ko/06-custom-question.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ko",
+      "panel": "06-custom-question",
+      "fixture": "custom-question",
+      "sourcePath": "native/ipad-13/ko/custom-question.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "a441b26022277662c623924d89170563ce061753a9684c215e8cbba7564a8be5",
+      "outputSHA256": "0e85e6b4b95633b3e82ff1209fd3ffd3b413dcfb80c91d4ba8d9499e3b9d43a4",
+      "copy": [
+        "내 질문도,",
+        "내 공부 기록으로",
+        "직접 쓴 질문과 답변을 채점 없이 저장해요"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      }
+    },
+    {
+      "path": "ipad-13/en-US/01-learning-result.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "en-US",
+      "panel": "01-learning-result",
+      "fixture": "learning-result",
+      "sourcePath": "native/ipad-13/en-US/learning-result.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "05694b0923a11a57ce9a4adece106bef4bc332aefab4546e21a86ff90a594e5c",
+      "outputSHA256": "5d4b7114d7dbb278deabcb0d6c1a9f08bec645693d3990154f7881791575734e",
+      "copy": [
+        "One question.",
+        "A clearer mind.",
+        "Answer briefly. Reflect with AI feedback."
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/en-US/02-follow-up.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "en-US",
+      "panel": "02-follow-up",
+      "fixture": "follow-up",
+      "sourcePath": "native/ipad-13/en-US/follow-up.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "ead43c043fc64b4642aa69951fc1fe346163228fd5a89c7924cf6aca278588db",
+      "outputSHA256": "7735cc52acf90ad86aa7053436a772333933bd1205a3a06ad5fb5f4ba97f8e00",
+      "copy": [
+        "Your answer.",
+        "The next question.",
+        "Go deeper with AI follow-up questions."
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      }
+    },
+    {
+      "path": "ipad-13/en-US/03-public-feed.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "en-US",
+      "panel": "03-public-feed",
+      "fixture": "feed",
+      "sourcePath": "native/ipad-13/en-US/feed.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "740e758d93d9bd177a612ff53e16afb4121fce7d29009d4fa71d0372adfaf891",
+      "outputSHA256": "7b970bbc24af563b3a44a9979c9d44d586ae3e091f2950f6503483b0265e87dd",
+      "copy": [
+        "Good questions.",
+        "Shared interests.",
+        "Search public questions. Follow your topics."
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/en-US/04-study-tree.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "en-US",
+      "panel": "04-study-tree",
+      "fixture": "study-tree",
+      "sourcePath": "native/ipad-13/en-US/study-tree.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "521cce1a33ae23f8ef641b09d792da7e1038cabaa77fb5a109de6a76013d57fa",
+      "outputSHA256": "c241026a2464a6e6882234d84e832de63787189d7cfeaf936fa3578467809bef",
+      "copy": [
+        "Grow your own",
+        "learning tree.",
+        "Branch from big ideas into smaller topics."
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/en-US/05-topic-progress.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "en-US",
+      "panel": "05-topic-progress",
+      "fixture": "statistics",
+      "sourcePath": "native/ipad-13/en-US/statistics.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "74471131dbf4401569f8a590cec5e5cb4e88b93120093c6a15f7d607116af9eb",
+      "outputSHA256": "b5ac9b9f36367c439f53c6dc751542ae4107bd1eb683b65dcbfefd205a9d80ab",
+      "copy": [
+        "See your growth.",
+        "Topic by topic.",
+        "Explore your progress through study records."
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/en-US/06-custom-question.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "en-US",
+      "panel": "06-custom-question",
+      "fixture": "custom-question",
+      "sourcePath": "native/ipad-13/en-US/custom-question.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "2a00ebda2b96d772a40e9d061c5c7328c765d37838b627b27295ac54630df1e0",
+      "outputSHA256": "b4057b05f8a4d77ecc6459a5f404874275588f8453aae733a223687722cacdcb",
+      "copy": [
+        "Your questions.",
+        "Your study notes.",
+        "Save your own questions and answers, ungraded."
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 393.953125,
+          "right": 1931.0625,
+          "bottom": 601.671875
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "127.961px"
+      }
+    },
+    {
+      "path": "ipad-13/ja/01-learning-result.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ja",
+      "panel": "01-learning-result",
+      "fixture": "learning-result",
+      "sourcePath": "native/ipad-13/ja/learning-result.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "2c985b9837a82b99351f213e2dd3da84caa0c4a3f7294bbf10ddc8e042bb6730",
+      "outputSHA256": "24d63ea2a0887eb1ad5d3e10dba5032e773631957f653db7e9ee894fbabc9756",
+      "copy": [
+        "ひとつの質問で、",
+        "理解を確かめる",
+        "短く答えて、AIのフィードバックで振り返る"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 375.53125,
+          "right": 1931.0625,
+          "bottom": 583.25
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.019px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/ja/02-follow-up.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ja",
+      "panel": "02-follow-up",
+      "fixture": "follow-up",
+      "sourcePath": "native/ipad-13/ja/follow-up.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "297c356d1acd6f38b510a7775f934e2303b54ed16b580c9ede02787f44c0f8e2",
+      "outputSHA256": "334e628e0e30a0473cee1305e9282f5cfe2e7e516057ebfa8704405afdb01103",
+      "copy": [
+        "あなたの回答から、",
+        "もう一歩深く",
+        "AIの追加質問で、考えをつなげよう"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 375.53125,
+          "right": 1931.0625,
+          "bottom": 583.25
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.019px"
+      }
+    },
+    {
+      "path": "ipad-13/ja/03-public-feed.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ja",
+      "panel": "03-public-feed",
+      "fixture": "feed",
+      "sourcePath": "native/ipad-13/ja/feed.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "b179596544a75f41ca2f4c51ff0015a038cd613cc04ff9d7a906e86990e3173a",
+      "outputSHA256": "d5d7321b0b177a357dcd373fe99c883d47a8acff56b1e9639dd89fbcc2fb6806",
+      "copy": [
+        "気になる質問に、",
+        "出会う場所",
+        "公開質問を検索して、興味のあるトピックをフォロー"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 375.53125,
+          "right": 1931.0625,
+          "bottom": 583.25
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.019px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/ja/04-study-tree.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ja",
+      "panel": "04-study-tree",
+      "fixture": "study-tree",
+      "sourcePath": "native/ipad-13/ja/study-tree.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "57b72dec4d68be594a84b2972ead68e125778305f8027c350a1a6954b0e4b0c6",
+      "outputSHA256": "ca68d1d1323f87f7c8ad47a85cd3d5c02e5e2f6352870207f4b03aa508c71c17",
+      "copy": [
+        "興味が広がる、",
+        "自分だけの学習ツリー",
+        "大きなテーマから、細かなトピックへ"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 375.53125,
+          "right": 1931.0625,
+          "bottom": 583.25
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.019px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/ja/05-topic-progress.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ja",
+      "panel": "05-topic-progress",
+      "fixture": "statistics",
+      "sourcePath": "native/ipad-13/ja/statistics.png",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "418697c084fee9c81b9be3236f02758baccd86ca1e72ba27d62d2c92cd03c967",
+      "outputSHA256": "5a75534325a3bdaa494c56682f5a609e8ba0e783f46cfd82d53d170ee9d40270",
+      "copy": [
+        "トピックごとに、",
+        "成長が見える",
+        "学習記録から、理解と成長の流れを確認"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 375.53125,
+          "right": 1931.0625,
+          "bottom": 583.25
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.019px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "ipad-13/ja/06-custom-question.png",
+      "width": 2064,
+      "height": 2752,
+      "locale": "ja",
+      "panel": "06-custom-question",
+      "fixture": "custom-question",
+      "sourcePath": "native/ipad-13/ja/custom-question.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 2064,
+      "sourceHeight": 2752,
+      "sourceSHA256": "4a15daf8be047793a4ef97aaf5482b6d3e08b4756d955d4b0afce5cf71b37afc",
+      "outputSHA256": "a7724e72924bf9637f3ab16524c538d5b6117361250e3c5b4b4c43215d6a139f",
+      "copy": [
+        "自分の質問も、",
+        "学習の記録に",
+        "自分で書いた質問と回答を、採点せずに保存"
+      ],
+      "layout": {
+        "copy": {
+          "x": 132.9375,
+          "y": 207.71875,
+          "width": 1798.125,
+          "height": 375.53125,
+          "right": 1931.0625,
+          "bottom": 583.25
+        },
+        "device": {
+          "x": 366.3671875,
+          "y": 798.078125,
+          "width": 1331.265625,
+          "height": 1762.375,
+          "right": 1697.6328125,
+          "bottom": 2560.453125
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "108.019px"
+      }
+    },
+    {
+      "path": "6.3/en-US/01-learning-result.png",
+      "width": 1206,
+      "height": 2622,
+      "locale": "en-US",
+      "panel": "01-learning-result",
+      "fixture": "learning-result",
+      "sourcePath": "native/iphone-6.3/en-US/learning-result.png",
+      "sourceWidth": 1206,
+      "sourceHeight": 2622,
+      "sourceSHA256": "f28ba5259377986057b3b6a363004dfa67ef4c371e106b3ef24190d9b2c607ec",
+      "outputSHA256": "b70a4c2970465bd6daad5525f4af59240dd7aebc72ca7e8ab8ca273097a1c76c",
+      "copy": [
+        "One question.",
+        "A clearer mind.",
+        "Answer briefly. Reflect with AI feedback."
+      ],
+      "layout": {
+        "copy": {
+          "x": 93.203125,
+          "y": 165.0625,
+          "width": 1025.40625,
+          "height": 311.078125,
+          "right": 1118.609375,
+          "bottom": 476.140625
+        },
+        "device": {
+          "x": 159.796875,
+          "y": 616.15625,
+          "width": 886.40625,
+          "height": 1904.21875,
+          "right": 1046.203125,
+          "bottom": 2520.375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "99.0435px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.3/en-US/02-follow-up.png",
+      "width": 1206,
+      "height": 2622,
+      "locale": "en-US",
+      "panel": "02-follow-up",
+      "fixture": "follow-up",
+      "sourcePath": "native/iphone-6.3/en-US/follow-up.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1206,
+      "sourceHeight": 2622,
+      "sourceSHA256": "7791e6b5e1c5ec734fe7372b094eb76319910a458a61df7fb41cfcce2da7ab3d",
+      "outputSHA256": "30a060f0df6adad76a83ff5155645826968ce4ae3490b25c9854169fc98815ea",
+      "copy": [
+        "Your answer.",
+        "The next question.",
+        "Go deeper with AI follow-up questions."
+      ],
+      "layout": {
+        "copy": {
+          "x": 93.203125,
+          "y": 165.0625,
+          "width": 1025.40625,
+          "height": 311.078125,
+          "right": 1118.609375,
+          "bottom": 476.140625
+        },
+        "device": {
+          "x": 159.796875,
+          "y": 616.15625,
+          "width": 886.40625,
+          "height": 1904.21875,
+          "right": 1046.203125,
+          "bottom": 2520.375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "99.0435px"
+      }
+    },
+    {
+      "path": "6.3/en-US/03-public-feed.png",
+      "width": 1206,
+      "height": 2622,
+      "locale": "en-US",
+      "panel": "03-public-feed",
+      "fixture": "feed",
+      "sourcePath": "native/iphone-6.3/en-US/feed.png",
+      "sourceWidth": 1206,
+      "sourceHeight": 2622,
+      "sourceSHA256": "7b8ec34183678c68937c2ebcfbad363206c348f3438ee423eaef7ebd04675ae0",
+      "outputSHA256": "860e0b20958edd5460d6a4e4973682ae6919200a6b68c014cebbde8c82fd9524",
+      "copy": [
+        "Good questions.",
+        "Shared interests.",
+        "Search public questions. Follow your topics."
+      ],
+      "layout": {
+        "copy": {
+          "x": 93.203125,
+          "y": 165.0625,
+          "width": 1025.40625,
+          "height": 311.078125,
+          "right": 1118.609375,
+          "bottom": 476.140625
+        },
+        "device": {
+          "x": 159.796875,
+          "y": 616.15625,
+          "width": 886.40625,
+          "height": 1904.21875,
+          "right": 1046.203125,
+          "bottom": 2520.375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "99.0435px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.3/en-US/04-study-tree.png",
+      "width": 1206,
+      "height": 2622,
+      "locale": "en-US",
+      "panel": "04-study-tree",
+      "fixture": "study-tree",
+      "sourcePath": "native/iphone-6.3/en-US/study-tree.png",
+      "sourceWidth": 1206,
+      "sourceHeight": 2622,
+      "sourceSHA256": "4446669d96ad5122240978cfdbd1af1c5346a7ab790bf2c03d780a7ba58e3c6a",
+      "outputSHA256": "3ce55ad766ed2433bb6e7d8210ea5dea53ffd0d076b003d0b88c26624efaa746",
+      "copy": [
+        "Grow your own",
+        "learning tree.",
+        "Branch from big ideas into smaller topics."
+      ],
+      "layout": {
+        "copy": {
+          "x": 93.203125,
+          "y": 165.0625,
+          "width": 1025.40625,
+          "height": 311.078125,
+          "right": 1118.609375,
+          "bottom": 476.140625
+        },
+        "device": {
+          "x": 159.796875,
+          "y": 616.15625,
+          "width": 886.40625,
+          "height": 1904.21875,
+          "right": 1046.203125,
+          "bottom": 2520.375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "99.0435px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.3/en-US/05-topic-progress.png",
+      "width": 1206,
+      "height": 2622,
+      "locale": "en-US",
+      "panel": "05-topic-progress",
+      "fixture": "statistics",
+      "sourcePath": "native/iphone-6.3/en-US/statistics.png",
+      "sourceWidth": 1206,
+      "sourceHeight": 2622,
+      "sourceSHA256": "4e1e4a66ea083ae0bf1d42d4b85beed4080b3211809e878ca0cb0eb963c3310d",
+      "outputSHA256": "1ecbc68198486a515ff7ad1e25a7acd0ad59cc8684e13a01a2b1b5ace44f3a42",
+      "copy": [
+        "See your growth.",
+        "Topic by topic.",
+        "Explore your progress through study records."
+      ],
+      "layout": {
+        "copy": {
+          "x": 93.203125,
+          "y": 165.0625,
+          "width": 1025.40625,
+          "height": 311.078125,
+          "right": 1118.609375,
+          "bottom": 476.140625
+        },
+        "device": {
+          "x": 159.796875,
+          "y": 616.15625,
+          "width": 886.40625,
+          "height": 1904.21875,
+          "right": 1046.203125,
+          "bottom": 2520.375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "99.0435px"
+      },
+      "sourceCaptureCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "6.3/en-US/06-custom-question.png",
+      "width": 1206,
+      "height": 2622,
+      "locale": "en-US",
+      "panel": "06-custom-question",
+      "fixture": "custom-question",
+      "sourcePath": "native/iphone-6.3/en-US/custom-question.png",
+      "sourceCaptureCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+      "sourceWidth": 1206,
+      "sourceHeight": 2622,
+      "sourceSHA256": "0e511ca379a076d20ec82bba25cba23a4fc0be89362234890f36c3ff4b5a0e69",
+      "outputSHA256": "8f4013e383ae31792f0dda1ebeaba2769e7a3e4a5cc7d0616df0c6fd09a5ba5f",
+      "copy": [
+        "Your questions.",
+        "Your study notes.",
+        "Save your own questions and answers, ungraded."
+      ],
+      "layout": {
+        "copy": {
+          "x": 93.203125,
+          "y": 165.0625,
+          "width": 1025.40625,
+          "height": 311.078125,
+          "right": 1118.609375,
+          "bottom": 476.140625
+        },
+        "device": {
+          "x": 159.796875,
+          "y": 616.15625,
+          "width": 886.40625,
+          "height": 1904.21875,
+          "right": 1046.203125,
+          "bottom": 2520.375
+        },
+        "headlineOverflow": false,
+        "font": "-apple-system, \"system-ui\", \"Apple SD Gothic Neo\", \"Hiragino Sans\", sans-serif",
+        "headlineSize": "99.0435px"
+      }
+    }
+  ]
+}

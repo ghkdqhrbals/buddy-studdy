@@ -1,0 +1,38 @@
+/* Fixed-size store creative. Scale one 1242px-wide design system to each canvas. */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+body { -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; }
+.canvas { --unit: 1px; --ink: #13241f; --paper: #f6f7f3; position: relative; width: 100%; height: 100%; overflow: hidden; color: var(--ink); background: var(--paper); font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Hiragino Sans", sans-serif; }
+.canvas.blue { color: #fff; background: linear-gradient(145deg, #124a8f 0%, #1668c8 65%, #287bec 100%); }
+.copy { position: absolute; z-index: 3; left: calc(96 * var(--unit)); right: calc(90 * var(--unit)); top: calc(170 * var(--unit)); }
+h1 { margin: 0; font-size: calc(104 * var(--unit)); font-weight: 800; letter-spacing: calc(-3.6 * var(--unit)); line-height: 1.18; }
+h1 span { display: block; white-space: nowrap; }
+#subtitle { margin: calc(34 * var(--unit)) 0 0; max-width: 100%; font-size: calc(36 * var(--unit)); line-height: 1.48; font-weight: 500; letter-spacing: calc(-0.7 * var(--unit)); color: #47594f; }
+.blue #subtitle { color: #e1edf9; }
+.device { position: absolute; z-index: 2; top: 23.5%; left: 50%; width: 73.5%; transform: translateX(-50%); padding: calc(8 * var(--unit)); border: calc(3 * var(--unit)) solid #737875; border-radius: calc(79 * var(--unit)); background: #101312; box-shadow: 0 calc(25 * var(--unit)) calc(70 * var(--unit)) #0d281d26, inset 0 0 0 calc(3 * var(--unit)) #232926; }
+.native { display: block; width: 100%; height: auto; border-radius: calc(68 * var(--unit)); }
+.accent { position: absolute; z-index: 1; width: 25%; right: -3%; top: 20%; transform: rotate(10deg); }
+.canvas:not(.has-accent) .accent { display: none; }
+.canvas.panel-5 .accent { width: 22%; right: 0%; top: 20.6%; transform: rotate(-10deg); }
+.canvas[lang="en-US"] h1 { font-size: calc(102 * var(--unit)); letter-spacing: calc(-4 * var(--unit)); line-height: 1.15; }
+.canvas[lang="en-US"] #subtitle { font-size: calc(35 * var(--unit)); letter-spacing: calc(-0.5 * var(--unit)); }
+.canvas[lang="ja"] h1 { font-size: calc(84 * var(--unit)); letter-spacing: calc(-4 * var(--unit)); line-height: 1.35; }
+.canvas[lang="ja"] #subtitle { font-size: calc(31 * var(--unit)); letter-spacing: calc(-1.1 * var(--unit)); }
+.canvas.tablet .copy { top: calc(125 * var(--unit)); left: calc(80 * var(--unit)); right: calc(80 * var(--unit)); }
+.canvas.tablet h1 { font-size: calc(77 * var(--unit)); letter-spacing: calc(-2.5 * var(--unit)); line-height: 1.15; }
+.canvas.tablet #subtitle { font-size: calc(27 * var(--unit)); margin-top: calc(20 * var(--unit)); }
+.canvas.tablet .device { top: 29%; width: 64.5%; border-radius: calc(39 * var(--unit)); padding: calc(9 * var(--unit)); }
+.canvas.tablet .native { border-radius: calc(28 * var(--unit)); }
+.canvas.tablet .accent { width: 21%; right: 4%; top: 31%; }
+.canvas.tablet[lang="ja"] h1 { font-size: calc(65 * var(--unit)); letter-spacing: calc(-3 * var(--unit)); line-height: 1.3; }
+.canvas.tablet[lang="ja"] #subtitle { font-size: calc(25 * var(--unit)); }
+.prototype-label { position: absolute; z-index: 10; bottom: 0; left: 0; right: 0; margin: 0; padding: 12px; background: #ffef65; color: #201f00; font: 800 24px/1.2 sans-serif; text-align: center; }
+
+.brand { position: absolute; z-index: 3; left: calc(96 * var(--unit)); top: calc(67 * var(--unit)); display: flex; align-items: center; gap: calc(16 * var(--unit)); font-size: calc(32 * var(--unit)); font-weight: 700; letter-spacing: calc(-0.6 * var(--unit)); }
+.brand-dots { display: flex; gap: calc(6 * var(--unit)); }
+.brand-dots i { display: block; width: calc(15 * var(--unit)); height: calc(15 * var(--unit)); border-radius: 50%; background: #367653; }
+.brand-dots i:nth-child(2) { background: #2b7cf4; }
+.brand-dots i:nth-child(3) { background: #f4bd26; }
+.blue .brand-dots i:nth-child(1) { background: #7ed5a6; }
+.blue .brand-dots i:nth-child(2) { background: #86b9ff; }
+.canvas.tablet .brand { left: calc(80 * var(--unit)); top: calc(51 * var(--unit)); font-size: calc(25 * var(--unit)); }

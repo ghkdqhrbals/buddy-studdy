@@ -1,0 +1,21 @@
+{
+  "backend": {
+    "status": "success",
+    "sourceCommit": "d1af71977266b54e2f25fe7c5963069431bb8503",
+    "sourceRun": "https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/36353523601",
+    "deployRun": "https://github.com/ghkdqhrbals/personal-deploy/actions/runs/36353950061",
+    "image": "ghcr.io/ghkdqhrbals/buddystudy-backend:d1af71977266b54e2f25fe7c5963069431bb8503-jvm",
+    "digest": "sha256:c6f68082b2bb1a1828ffff9e02bbf1c6f73158816998f7517e6af09f529f8f7c",
+    "deploymentState": "completed",
+    "runningReplicas": 1,
+    "expectedTaskRunning": true,
+    "completedAt": "2026-09-27T22:05:53Z"
+  },
+  "monitoring": {
+    "status": "success",
+    "sourceCommit": "f9c3cbda456272ad80a14894452176bdd853b16e",
+    "sourceRun": "https://github.com/ghkdqhrbals/buddy-studdy/actions/runs/36352549717",
+    "deployRun": "https://github.com/ghkdqhrbals/personal-deploy/actions/runs/36352578867",
+    "pushAdminUrl": "https://monitoring.lowfidev.cloud/push.html"
+  }
+}

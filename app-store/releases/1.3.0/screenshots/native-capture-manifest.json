@@ -1,0 +1,623 @@
+{
+  "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253",
+  "capturedOn": "2026-09-28",
+  "platform": "iOS Simulator 26.0",
+  "configuration": "Debug, existing synthetic App Store fixtures",
+  "appVersion": "1.3.0",
+  "debugBuildNumber": "16",
+  "statusBarTime": "9:41",
+  "appearance": "Light",
+  "rawImagesUnmodified": true,
+  "count": 60,
+  "notes": [
+    "Actual rendered app UI; illustrative synthetic content, no production content.",
+    "App language is localized; iPad system status-bar calendar retains simulator system locale.",
+    "All screenshots are native portrait resolution; no image rescaling or editing.",
+    "20 follow-up/custom-question frames recaptured from final deployed-preservation source; 40 unchanged frames remain from the earlier capture commit. Per-image sourceCommit is authoritative.",
+    "Remaining four fixture screens were audited as visually unaffected by the deployed-source preservation; releaseSourceCommit identifies the final app source, not a claim that every image was recaptured."
+  ],
+  "screenshots": [
+    {
+      "path": "native/iphone-6.5/ko/learning-result.png",
+      "device": "iphone-6.5",
+      "locale": "ko",
+      "fixture": "learning-result",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "8a34d4763153840a8e19e2efb891420a2dc46327a5743549bbd7217317c07595",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/ko/follow-up.png",
+      "device": "iphone-6.5",
+      "locale": "ko",
+      "fixture": "follow-up",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "035331d97d62a7b2c2b0c0205933b599ef0a54a6ac412352cdd9cf1ea7f1f32b",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.5/ko/feed.png",
+      "device": "iphone-6.5",
+      "locale": "ko",
+      "fixture": "feed",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "9ac9393c70ab1074b4d043343b7d6095d2929b5904e6b12b2e7542b7dffef7ba",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/ko/study-tree.png",
+      "device": "iphone-6.5",
+      "locale": "ko",
+      "fixture": "study-tree",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "7cc76c0ee0d0c495d3ab28b5cd4800afaf4c971b9804847c65b4afb1a17bc172",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/ko/statistics.png",
+      "device": "iphone-6.5",
+      "locale": "ko",
+      "fixture": "statistics",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "9b5640dd0e9fa88a6e951c0051a87e0dfdce090433bbe3b825b516e2e8cac0f9",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/ko/custom-question.png",
+      "device": "iphone-6.5",
+      "locale": "ko",
+      "fixture": "custom-question",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "254a9949b831b7bdfb559ca2610ce43e34135a228bc06220c570898ca8efe463",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.5/en-US/learning-result.png",
+      "device": "iphone-6.5",
+      "locale": "en-US",
+      "fixture": "learning-result",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "2e8f6d001c4b3461ffcf8d33b582275470e84917a5cbeffe4e49b251f53120cf",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/en-US/follow-up.png",
+      "device": "iphone-6.5",
+      "locale": "en-US",
+      "fixture": "follow-up",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "0526c6b2c9235dd3b3f8c2ec1a27f8b5f7411ae60e74267f1cdbf0cba94ad66e",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.5/en-US/feed.png",
+      "device": "iphone-6.5",
+      "locale": "en-US",
+      "fixture": "feed",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "00087df07c01fdc8fb10d047151f11c15e9686263d05a990dd9fa4ccdbdcb138",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/en-US/study-tree.png",
+      "device": "iphone-6.5",
+      "locale": "en-US",
+      "fixture": "study-tree",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "caac09ea63acbce927c89fea7923e70cfa085464b74f2d1bc92b948d9058516f",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/en-US/statistics.png",
+      "device": "iphone-6.5",
+      "locale": "en-US",
+      "fixture": "statistics",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "c62ed6fc2108d35c39355de7c3b4f50b89bb6d5a3ca47f4a5bcc4b8619175e70",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/en-US/custom-question.png",
+      "device": "iphone-6.5",
+      "locale": "en-US",
+      "fixture": "custom-question",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "072755fa0889cba78de56a9c1a057acdc5520ca816f4898e6b20f98ad38fc75f",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.5/ja/learning-result.png",
+      "device": "iphone-6.5",
+      "locale": "ja",
+      "fixture": "learning-result",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "3daaa7c4a1d434614f3c63f87fdbef4436d129ed0fe9ef40c1eafe0fec51d96a",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/ja/follow-up.png",
+      "device": "iphone-6.5",
+      "locale": "ja",
+      "fixture": "follow-up",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "c54a7306446b8f4b78d23d15815dba70b02e14b91b97aafb7dbb50054ceaa2d5",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.5/ja/feed.png",
+      "device": "iphone-6.5",
+      "locale": "ja",
+      "fixture": "feed",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "e21c628a547a05c9a64a4a6f81a7b3e19e20da92e9cfa4317360397f2eb8e661",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/ja/study-tree.png",
+      "device": "iphone-6.5",
+      "locale": "ja",
+      "fixture": "study-tree",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "31246a91450a251b243695c47a4b220c5c9ce1bd4a5eed3880919f534b056703",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/ja/statistics.png",
+      "device": "iphone-6.5",
+      "locale": "ja",
+      "fixture": "statistics",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "5061cba7dd70dc2b8c5d4eef0b6de63c3faecbde2ba18e78a093d8612cd64e07",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.5/ja/custom-question.png",
+      "device": "iphone-6.5",
+      "locale": "ja",
+      "fixture": "custom-question",
+      "width": 1242,
+      "height": 2688,
+      "sha256": "4e38835ec8939c96a2f19d55b9f7853b0824fcd529099c905596fd84cd087638",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.9/ko/learning-result.png",
+      "device": "iphone-6.9",
+      "locale": "ko",
+      "fixture": "learning-result",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "e8c6c227cae70ad1110724cd9992f5e3d5ee89c3f8a3b330657132a45ff13a42",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/ko/follow-up.png",
+      "device": "iphone-6.9",
+      "locale": "ko",
+      "fixture": "follow-up",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "94f4ae7ef8a2cafdfb868d64e403bab20fa25657e7c3f52bf183d55bd5ed319a",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.9/ko/feed.png",
+      "device": "iphone-6.9",
+      "locale": "ko",
+      "fixture": "feed",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "a57e53f4ac90b85075882fcae90edfc9e3329ef15a5572258a8b49e125756a67",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/ko/study-tree.png",
+      "device": "iphone-6.9",
+      "locale": "ko",
+      "fixture": "study-tree",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "892ac6eeea6553a708a1439dd8e493bbce767a40e2b61f8ffbfa8a07055ce2b1",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/ko/statistics.png",
+      "device": "iphone-6.9",
+      "locale": "ko",
+      "fixture": "statistics",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "1533fabd2dac5ae7bd98cf3a2fd0af94551844b746a895c6b3d2542944a554d7",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/ko/custom-question.png",
+      "device": "iphone-6.9",
+      "locale": "ko",
+      "fixture": "custom-question",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "2af1e799792c51287b9f078e3fc8cc856e184e89dc25437a42d066fabbab97b8",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.9/en-US/learning-result.png",
+      "device": "iphone-6.9",
+      "locale": "en-US",
+      "fixture": "learning-result",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "6b7b41babc30cb31711665ef7f50d8f8daeadc895df7a0d3d03acace6cad872a",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/en-US/follow-up.png",
+      "device": "iphone-6.9",
+      "locale": "en-US",
+      "fixture": "follow-up",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "591efc70c94e14dcb1c3edcbd219660a7f1d5416a03e25833f710b66fa4d198c",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.9/en-US/feed.png",
+      "device": "iphone-6.9",
+      "locale": "en-US",
+      "fixture": "feed",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "e0504a9b92d9d30532b366366c7b7b5c308ca582bc39013b6439cacbf5a7f215",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/en-US/study-tree.png",
+      "device": "iphone-6.9",
+      "locale": "en-US",
+      "fixture": "study-tree",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "591bd37d1befa2447963e560edeab59a8c5cae17d2999a990a0e0c128d5c8295",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/en-US/statistics.png",
+      "device": "iphone-6.9",
+      "locale": "en-US",
+      "fixture": "statistics",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "c0eed7110bc1f579c8564de06b55ca9b411e751fb10a6d50b35a7c7c81cdfea7",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/en-US/custom-question.png",
+      "device": "iphone-6.9",
+      "locale": "en-US",
+      "fixture": "custom-question",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "61b1cf3e85a4671682e94f1fa6e1047272e29710ab1492d76be74bee7fea054d",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.9/ja/learning-result.png",
+      "device": "iphone-6.9",
+      "locale": "ja",
+      "fixture": "learning-result",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "773fe53d990cf2a7c276e0edf8f7a0e9a86f958b4583477971ca4602516512b8",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/ja/follow-up.png",
+      "device": "iphone-6.9",
+      "locale": "ja",
+      "fixture": "follow-up",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "daf653c049e98efdae156ad9744ac24e0b9d4225c8d8983e93482c5546adbad1",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.9/ja/feed.png",
+      "device": "iphone-6.9",
+      "locale": "ja",
+      "fixture": "feed",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "3838056cd5d03ce2c3a7a33c257b6673bc064b3d9e9489bdef2b3577d25f4381",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/ja/study-tree.png",
+      "device": "iphone-6.9",
+      "locale": "ja",
+      "fixture": "study-tree",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "67ec79f77d8cd9fd5002350aa7d0c86621c97c1378495e6f9a3e31add261218d",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/ja/statistics.png",
+      "device": "iphone-6.9",
+      "locale": "ja",
+      "fixture": "statistics",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "ea6b1c5232d4bdc51a265c317dc3618b72c42c1121c853cd850839850b608ea4",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.9/ja/custom-question.png",
+      "device": "iphone-6.9",
+      "locale": "ja",
+      "fixture": "custom-question",
+      "width": 1320,
+      "height": 2868,
+      "sha256": "4e1dec1e21c5a17bbadfb80b52d1a0e07ebf493a4cdf45f0fa090d06c6a098b1",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/ipad-13/ko/learning-result.png",
+      "device": "ipad-13",
+      "locale": "ko",
+      "fixture": "learning-result",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "76a3f411510e1c610ff8731a0da82ac6c0f2d04b98953975739fe3efa83beab2",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/ko/follow-up.png",
+      "device": "ipad-13",
+      "locale": "ko",
+      "fixture": "follow-up",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "f7cca9772a60216667e79aef3ccb81fc1549b59f11bc1ddf9a75a6a27bef376d",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/ipad-13/ko/feed.png",
+      "device": "ipad-13",
+      "locale": "ko",
+      "fixture": "feed",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "ca7953139372b36494d12257de8b02b9951a88ce08072d896fd2e040c11b70d3",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/ko/study-tree.png",
+      "device": "ipad-13",
+      "locale": "ko",
+      "fixture": "study-tree",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "de0f1e1718022fe75f90dacfc7d23781a369c26c8bedd2adb5cba09e44ab6017",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/ko/statistics.png",
+      "device": "ipad-13",
+      "locale": "ko",
+      "fixture": "statistics",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "417b927c1f22eb0fad9cefa6595ed82aa0ce8c490f0364ca18a9b1868d40b025",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/ko/custom-question.png",
+      "device": "ipad-13",
+      "locale": "ko",
+      "fixture": "custom-question",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "a441b26022277662c623924d89170563ce061753a9684c215e8cbba7564a8be5",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/ipad-13/en-US/learning-result.png",
+      "device": "ipad-13",
+      "locale": "en-US",
+      "fixture": "learning-result",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "05694b0923a11a57ce9a4adece106bef4bc332aefab4546e21a86ff90a594e5c",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/en-US/follow-up.png",
+      "device": "ipad-13",
+      "locale": "en-US",
+      "fixture": "follow-up",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "ead43c043fc64b4642aa69951fc1fe346163228fd5a89c7924cf6aca278588db",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/ipad-13/en-US/feed.png",
+      "device": "ipad-13",
+      "locale": "en-US",
+      "fixture": "feed",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "740e758d93d9bd177a612ff53e16afb4121fce7d29009d4fa71d0372adfaf891",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/en-US/study-tree.png",
+      "device": "ipad-13",
+      "locale": "en-US",
+      "fixture": "study-tree",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "521cce1a33ae23f8ef641b09d792da7e1038cabaa77fb5a109de6a76013d57fa",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/en-US/statistics.png",
+      "device": "ipad-13",
+      "locale": "en-US",
+      "fixture": "statistics",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "74471131dbf4401569f8a590cec5e5cb4e88b93120093c6a15f7d607116af9eb",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/en-US/custom-question.png",
+      "device": "ipad-13",
+      "locale": "en-US",
+      "fixture": "custom-question",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "2a00ebda2b96d772a40e9d061c5c7328c765d37838b627b27295ac54630df1e0",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/ipad-13/ja/learning-result.png",
+      "device": "ipad-13",
+      "locale": "ja",
+      "fixture": "learning-result",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "2c985b9837a82b99351f213e2dd3da84caa0c4a3f7294bbf10ddc8e042bb6730",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/ja/follow-up.png",
+      "device": "ipad-13",
+      "locale": "ja",
+      "fixture": "follow-up",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "297c356d1acd6f38b510a7775f934e2303b54ed16b580c9ede02787f44c0f8e2",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/ipad-13/ja/feed.png",
+      "device": "ipad-13",
+      "locale": "ja",
+      "fixture": "feed",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "b179596544a75f41ca2f4c51ff0015a038cd613cc04ff9d7a906e86990e3173a",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/ja/study-tree.png",
+      "device": "ipad-13",
+      "locale": "ja",
+      "fixture": "study-tree",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "57b72dec4d68be594a84b2972ead68e125778305f8027c350a1a6954b0e4b0c6",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/ja/statistics.png",
+      "device": "ipad-13",
+      "locale": "ja",
+      "fixture": "statistics",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "418697c084fee9c81b9be3236f02758baccd86ca1e72ba27d62d2c92cd03c967",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/ipad-13/ja/custom-question.png",
+      "device": "ipad-13",
+      "locale": "ja",
+      "fixture": "custom-question",
+      "width": 2064,
+      "height": 2752,
+      "sha256": "4a15daf8be047793a4ef97aaf5482b6d3e08b4756d955d4b0afce5cf71b37afc",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.3/en-US/learning-result.png",
+      "device": "iphone-6.3",
+      "locale": "en-US",
+      "fixture": "learning-result",
+      "width": 1206,
+      "height": 2622,
+      "sha256": "f28ba5259377986057b3b6a363004dfa67ef4c371e106b3ef24190d9b2c607ec",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.3/en-US/follow-up.png",
+      "device": "iphone-6.3",
+      "locale": "en-US",
+      "fixture": "follow-up",
+      "width": 1206,
+      "height": 2622,
+      "sha256": "7791e6b5e1c5ec734fe7372b094eb76319910a458a61df7fb41cfcce2da7ab3d",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    },
+    {
+      "path": "native/iphone-6.3/en-US/feed.png",
+      "device": "iphone-6.3",
+      "locale": "en-US",
+      "fixture": "feed",
+      "width": 1206,
+      "height": 2622,
+      "sha256": "7b8ec34183678c68937c2ebcfbad363206c348f3438ee423eaef7ebd04675ae0",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.3/en-US/study-tree.png",
+      "device": "iphone-6.3",
+      "locale": "en-US",
+      "fixture": "study-tree",
+      "width": 1206,
+      "height": 2622,
+      "sha256": "4446669d96ad5122240978cfdbd1af1c5346a7ab790bf2c03d780a7ba58e3c6a",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.3/en-US/statistics.png",
+      "device": "iphone-6.3",
+      "locale": "en-US",
+      "fixture": "statistics",
+      "width": 1206,
+      "height": 2622,
+      "sha256": "4e1e4a66ea083ae0bf1d42d4b85beed4080b3211809e878ca0cb0eb963c3310d",
+      "sourceCommit": "8ecc999d9f219fab2416566471e63f94a3228253"
+    },
+    {
+      "path": "native/iphone-6.3/en-US/custom-question.png",
+      "device": "iphone-6.3",
+      "locale": "en-US",
+      "fixture": "custom-question",
+      "width": 1206,
+      "height": 2622,
+      "sha256": "0e511ca379a076d20ec82bba25cba23a4fc0be89362234890f36c3ff4b5a0e69",
+      "sourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4"
+    }
+  ],
+  "releaseSourceCommit": "6a5ae34fe58fc5b02bf5396d3f4ceca3bad106b4",
+  "captureScript": "capture-native.py"
+}

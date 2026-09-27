@@ -69,7 +69,7 @@ ownership before persisting a timestamp. This endpoint is independent of read
 state. iOS reports taps through its notification repository/use case, and a
 reporting failure does not prevent navigation or alter an answer draft.
 
-Flyway V123 adds `push_campaigns`, `push_campaign_recipients`, and separate open
+Flyway V124 adds `push_campaigns`, `push_campaign_recipients`, and separate open
 timestamps on `app_notifications`, plus anonymous archived outcome counters.
 Account cleanup archives the recipient outcomes transactionally before deleting
 account-owned recipients and inbox rows, preserving historical CTR. The managed

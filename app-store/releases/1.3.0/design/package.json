@@ -1,0 +1,17 @@
+{
+  "name": "buddystudy-130-store-artwork",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Local HTML/CSS rendering of localized App Store marketing screenshots",
+  "scripts": {
+    "render": "node render.cjs",
+    "verify": "node verify.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "playwright": "1.62.1",
+    "sharp": "0.35.4"
+  }
+}
