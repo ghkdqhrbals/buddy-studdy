@@ -2057,8 +2057,8 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     var followUpDepth: Int
     var source: String
 
-    var isFollowUp: Bool { followUpDepth > 0 || source == "follow_up" || parentRecordID != nil }
-    var isCustomQuestion: Bool { source == "custom_question" }
+    var isFollowUp: Bool { isQuestion && (followUpDepth > 0 || source == "follow_up" || parentRecordID != nil) }
+    var isCustomQuestion: Bool { isQuestion && source == "custom_question" }
     var isCompleted: Bool { isCompletedRecord }
     var isPendingStudyQuestion: Bool { isPendingQuestion }
     var threadRootID: String { rootRecordID ?? id }
@@ -2127,7 +2127,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.studyID = studyID
         self.question = question
         self.answer = answer
-        self.gradingResult = recordType == .voiceTutor ? nil : gradingResult
+        self.gradingResult = recordType == .voiceTutor || source == "custom_question" ? nil : gradingResult
         self.topic = topic
         self.difficulty = difficulty
         self.answeredAt = answeredAt
@@ -2188,6 +2188,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         followUpDepth = try container.decodeIfPresent(Int.self, forKey: .followUpDepth) ?? 0
         source = try container.decodeIfPresent(String.self, forKey: .source) ?? "manual"
         if isFollowUp || isCustomQuestion { isPublic = false }
+        if isCustomQuestion { gradingResult = nil }
         if recordType == .voiceTutor {
             guard voiceRecord != nil, questionStatus == .completed, gradingResult == nil,
                   gradingRequestID == nil, gradingStatus == nil,
@@ -2204,7 +2205,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     }
 
     func asCommunityQuestion(author: CommunityUserProfile?) -> CommunityQuestion? {
-        guard isPublic, canPublish, !isFollowUp, !isCustomQuestion else {
+        guard isPublic, canPublish else {
             return nil
         }
 
@@ -2239,9 +2240,9 @@ enum StudyFollowUpPolicy {
     static let maximumDepth = 2
 
     static func orderedThread(containing record: StudyRecord, records: [StudyRecord]) -> [StudyRecord] {
-        guard record.isQuestion, !record.isCustomQuestion else { return [record] }
+        guard record.isQuestion else { return [record] }
         var byID: [String: StudyRecord] = [record.id: record]
-        for candidate in records where candidate.isQuestion && !candidate.isCustomQuestion && candidate.threadRootID == record.threadRootID {
+        for candidate in records where candidate.isQuestion && candidate.threadRootID == record.threadRootID {
             byID[candidate.id] = candidate
         }
         return byID.values.sorted {
@@ -2251,7 +2252,7 @@ enum StudyFollowUpPolicy {
     }
 
     static func canRequest(after record: StudyRecord, thread: [StudyRecord]) -> Bool {
-        record.isQuestion && !record.isCustomQuestion && !record.isDetachedLocalQuestion &&
+        record.isQuestion && !record.isDetachedLocalQuestion && !record.isCustomQuestion &&
             record.gradingResult != nil && record.questionStatus == .graded &&
             record.followUpDepth < maximumDepth &&
             !thread.contains { $0.followUpDepth > record.followUpDepth }
@@ -2262,7 +2263,7 @@ enum StudyRecordScorePolicy {
     static func average(records: [StudyRecord]) -> Int? {
         let scores = records
             .filter { !$0.isFollowUp && !$0.isCustomQuestion }
-            .compactMap(\.gradingResult?.score)
+            .compactMap(\.displayScore)
         guard !scores.isEmpty else { return nil }
         return Int((Double(scores.reduce(0, +)) / Double(scores.count)).rounded())
     }
@@ -2364,8 +2365,8 @@ enum StudyAnswerPresentationPolicy {
             return .awaitingAnswer
         }
         guard record.isQuestion else { return .completed }
-        if record.isCustomQuestion || record.questionStatus == .skipped || record.questionStatus == .completed ||
-            record.questionStatus == .graded ||
+        if record.questionStatus == .skipped || record.questionStatus == .completed ||
+            record.isCustomQuestion || record.questionStatus == .graded ||
             record.gradingResult != nil ||
             record.gradingStatus == .completed {
             return .completed
@@ -2420,7 +2421,7 @@ struct DeletedStudyRecordMarker: Codable, Equatable, Identifiable {
     func matches(_ record: StudyRecord) -> Bool {
         guard (recordType ?? .question) == record.recordType else { return false }
         if record.id == recordID { return true }
-        guard !record.isFollowUp, !record.isCustomQuestion else { return false }
+        if mergeKey.hasPrefix("record|") || record.isFollowUp || record.isCustomQuestion { return false }
         guard !record.isDetachedLocalQuestion, !recordID.hasPrefix("local-draft:") else { return false }
         guard (recordType ?? .question) == .question, record.isQuestion else { return false }
         return Self.mergeKey(for: record) == mergeKey ||
@@ -3013,6 +3014,7 @@ struct AppStrings {
         }
     }
 
+    var viewLearningThread: String { text("학습 대화 이어보기", "Continue learning thread", "学習の会話を続ける") }
     var followUpQuestion: String { text("꼬리질문 받기", "Get a follow-up", "追加問題を受け取る") }
     var customQuestionTag: String { text("사용자 생성 질문", "Custom question", "ユーザー作成の問題") }
     var createCustomQuestion: String { text("직접 질문 만들기", "Write your own question", "自分で問題を作る") }

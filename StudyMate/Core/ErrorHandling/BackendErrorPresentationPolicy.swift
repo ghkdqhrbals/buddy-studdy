@@ -29,8 +29,8 @@ enum BackendErrorPresentationPolicy {
     static func followUpAvailabilityFailure(_ error: Error) -> FollowUpAvailabilityFailure? {
         guard let backendError = error as? RemotePushBackendError else { return nil }
         switch backendError.backendCode {
-        case "FOLLOW_UP_LIMIT_REACHED", "512": return .limitReached
-        case "FOLLOW_UP_NOT_AVAILABLE", "511": return .notAvailable
+        case "FOLLOW_UP_LIMIT_REACHED", "518": return .limitReached
+        case "FOLLOW_UP_NOT_AVAILABLE", "517": return .notAvailable
         default: return nil
         }
     }

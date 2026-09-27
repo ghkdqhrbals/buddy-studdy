@@ -68,14 +68,16 @@ extension StudyRecord {
     }
 
     var canPublish: Bool {
-        guard isCompletedRecord, !isFollowUp, !isCustomQuestion else { return false }
+        guard !isFollowUp, !isCustomQuestion else { return false }
+        guard isCompletedRecord else { return false }
         guard isVoiceRecord else { return true }
         return !question.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             answer?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
     var displayScore: Int? {
-        isVoiceRecord ? voiceRecord?.displayScore(answer: answer) : gradingResult?.score
+        guard !isCustomQuestion else { return nil }
+        return isVoiceRecord ? voiceRecord?.displayScore(answer: answer) : gradingResult?.score
     }
 
     var translationPending: Bool {

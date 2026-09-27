@@ -5719,9 +5719,63 @@ final class QuestionGenerationFlowTests: XCTestCase {
         access.user.id = 8
         appState.backendAccessState = access
         appState.saveCustomQuestionDraft(draft, studyID: 16, ownerID: ownerID)
-        XCTAssertEqual(store.loadCustomQuestionDraft(key: "7:16"), draft)
-        XCTAssertNil(store.loadCustomQuestionDraft(key: "8:16"))
         XCTAssertTrue(appState.customQuestionDraft(studyID: 16).question.isEmpty)
+        access.user.id = 7
+        appState.backendAccessState = access
+        XCTAssertEqual(appState.customQuestionDraft(studyID: 16), draft)
+    }
+
+    func testCustomDraftNamespacesSameAccountAndStudyByBackendOrigin() throws {
+        let suite = "CustomDraftOrigin-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        let originEnvironmentKey = "BUDDYSTUDY_BACKEND_BASE_URL"
+        let previousLaunchOrigin = ProcessInfo.processInfo.environment[originEnvironmentKey]
+        defer {
+            if let previousLaunchOrigin {
+                setenv(originEnvironmentKey, previousLaunchOrigin, 1)
+            } else {
+                unsetenv(originEnvironmentKey)
+            }
+        }
+        store.saveDeveloperAccessUnlocked(true)
+        store.saveIsDebuggingEnabled(true)
+        let client = makeClient { _ in
+            XCTFail("Draft persistence must not request a server")
+            throw URLError(.unsupportedURL)
+        }
+        let distribution = AppDistributionContext(isTestFlight: false, buildIdentifier: "1.3.0(130)", isDebugBuild: true)
+        func app(at origin: String) -> AppState {
+            // Launch configuration intentionally outranks the stored debug URL.
+            // Use the same effective-origin path as the app, with isolated HTTP transport.
+            setenv(originEnvironmentKey, origin, 1)
+            store.saveDebugBackendBaseURL(origin)
+            let state = AppState(settingsStore: store, remotePushBackendClient: client, appDistributionContext: distribution)
+            var access = state.backendAccessState
+            access.user.id = 7
+            state.backendAccessState = access
+            return state
+        }
+        let first = app(at: "https://first.example.test")
+        let firstEffectiveOrigin = AppUseCasesProvider().displayBaseURL(
+            isDebuggingEnabled: first.isDebuggingEnabled, debugBackendBaseURL: first.debugBackendBaseURL
+        )
+        XCTAssertEqual(firstEffectiveOrigin, "https://first.example.test")
+        let firstDraft = CustomQuestionDraft(question: "First server question", answer: "Private first answer", language: .english)
+        first.saveCustomQuestionDraft(firstDraft, studyID: 16, ownerID: first.customQuestionDraftOwnerID)
+        let second = app(at: "https://second.example.test")
+        let secondEffectiveOrigin = AppUseCasesProvider().displayBaseURL(
+            isDebuggingEnabled: second.isDebuggingEnabled, debugBackendBaseURL: second.debugBackendBaseURL
+        )
+        XCTAssertEqual(secondEffectiveOrigin, "https://second.example.test")
+        XCTAssertNotEqual(firstEffectiveOrigin, secondEffectiveOrigin, "The draft isolation scenario requires two different effective server origins.")
+        XCTAssertTrue(second.customQuestionDraft(studyID: 16).question.isEmpty)
+        let secondDraft = CustomQuestionDraft(question: "Second server question", answer: "Private second answer", language: .english)
+        second.saveCustomQuestionDraft(secondDraft, studyID: 16, ownerID: second.customQuestionDraftOwnerID)
+        XCTAssertEqual(first.customQuestionDraft(studyID: 16), firstDraft)
+        XCTAssertEqual(second.customQuestionDraft(studyID: 16), secondDraft)
+        XCTAssertEqual(app(at: "https://first.example.test").customQuestionDraft(studyID: 16), firstDraft)
     }
 
     func testCustomQuestionValidationUsesServerUTF16Limits() {
@@ -5847,12 +5901,15 @@ final class QuestionGenerationFlowTests: XCTestCase {
         for status in [408, 429, 500, 502, 503, 504] {
             XCTAssertFalse(policy.isPermanentQuestionGenerationError(RemotePushBackendError.httpStatus(status, "", nil)))
         }
-        for (code, numeric) in [("QUOTA_EXCEEDED", 305), ("FOLLOW_UP_NOT_AVAILABLE", 511), ("FOLLOW_UP_LIMIT_REACHED", 512)] {
+        for (code, numeric) in [("QUOTA_EXCEEDED", 305), ("FOLLOW_UP_NOT_AVAILABLE", 517), ("FOLLOW_UP_LIMIT_REACHED", 518)] {
             let error = RemotePushBackendError.httpStatus(409, "", BackendAPIError(code: code, numericCode: numeric, message: "Rejected"))
             XCTAssertTrue(policy.isPermanentQuestionGenerationError(error))
         }
         XCTAssertEqual(policy.followUpAvailabilityFailure(RemotePushBackendError.httpStatus(409, "", BackendAPIError(code: "FOLLOW_UP_LIMIT_REACHED", message: "Limit"))), .limitReached)
-        XCTAssertEqual(policy.followUpAvailabilityFailure(RemotePushBackendError.httpStatus(409, "", BackendAPIError(code: "511", message: "Not available"))), .notAvailable)
+        XCTAssertEqual(policy.followUpAvailabilityFailure(RemotePushBackendError.httpStatus(409, "", BackendAPIError(code: "517", message: "Not available"))), .notAvailable)
+        for voiceCode in ["511", "512"] {
+            XCTAssertNil(policy.followUpAvailabilityFailure(RemotePushBackendError.httpStatus(409, "", BackendAPIError(code: voiceCode, message: "Voice tutor entitlement"))))
+        }
     }
 
     func testFollowUpRetryReusesAcceptedRequestAndPreservesAnotherDraft() async throws {
@@ -6056,6 +6113,33 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(StudyRecordScorePolicy.average(records: [zero]), 0)
         XCTAssertEqual(StudyRecordScorePolicy.average(records: [custom, followUp, zero]), 0)
         XCTAssertEqual(StudyRecordScorePolicy.average(records: [custom, followUp, zero, eighty]), 40)
+    }
+
+    func testGrowthProjectionAndAssessmentSamplesIgnoreCoachedAndCustomRecords() throws {
+        var original = Self.threadRecord(id: "original")
+        original.answeredAt = original.question.createdAt.addingTimeInterval(1)
+        var followUp = Self.threadRecord(id: "first", depth: 1)
+        followUp.answeredAt = followUp.question.createdAt.addingTimeInterval(1)
+        followUp.gradingResult?.score = 100
+        followUp.difficulty = .level10
+        var custom = Self.threadRecord(id: "custom")
+        custom.source = "custom_question"
+        custom.gradingResult = nil
+        custom.answeredAt = custom.question.createdAt.addingTimeInterval(1)
+        let startAt = original.question.createdAt.addingTimeInterval(-60)
+        let endAt = original.question.createdAt.addingTimeInterval(600)
+        let room = BackendStudyRoom(
+            id: 16, topic: "Caching", difficultyLevel: 5, intervalMinutes: 30, enabled: true,
+            notificationSound: nil, customPrompt: "", openAIModel: "gpt-4o-mini", maxHistoryCount: 20,
+            nextDueAt: nil, lastSentAt: nil, lastError: nil, pendingQuestion: nil,
+            createdAt: startAt, updatedAt: startAt
+        )
+        let baseline = try XCTUnwrap(LegacyStudyGrowthProjection.make(rooms: [room], records: [original], startAt: startAt, endAt: endAt))
+        let mixed = try XCTUnwrap(LegacyStudyGrowthProjection.make(rooms: [room], records: [original, followUp, custom], startAt: startAt, endAt: endAt))
+        XCTAssertEqual(mixed.roots, baseline.roots)
+        XCTAssertEqual(mixed.nodes, baseline.nodes)
+        XCTAssertEqual(mixed.roots.first?.profile?.completion, 1)
+        XCTAssertEqual(TopicLevelRange.assessmentRecords(from: [original, followUp, custom]).map(\.id), [original.id])
     }
 
     private nonisolated static func threadRecord(id: String, depth: Int = 0) -> StudyRecord {

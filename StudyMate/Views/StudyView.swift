@@ -1106,6 +1106,7 @@ struct StudyThreadHistorySection: View {
                     gradingStatusMessage: nil,
                     canSubmitAnswer: false,
                     allowsAnswerEditing: false,
+                    terminalStatusMessage: record.questionStatus == .skipped ? strings.skippedFollowUp : nil,
                     strings: strings,
                     answerEditor: { EmptyView() },
                     onSubmit: {},
@@ -1123,7 +1124,7 @@ struct StudyFollowUpActions: View {
 
     var body: some View {
         let strings = appState.strings
-        if record.gradingResult != nil && !record.isCustomQuestion {
+        if record.isQuestion && !record.isDetachedLocalQuestion && record.gradingResult != nil && !record.isCustomQuestion {
             VStack(alignment: .leading, spacing: 10) {
                 if let message = appState.studyThreadErrors[record.threadRootID] {
                     HStack {

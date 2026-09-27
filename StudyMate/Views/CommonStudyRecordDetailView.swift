@@ -17,10 +17,11 @@ struct CommonStudyRecordDetailView: View {
 
     var body: some View {
         Group {
-            if currentRecord.isCompletedRecord, !currentRecord.isFollowUp, !currentRecord.isCustomQuestion {
+            if currentRecord.isCompletedRecord && !currentRecord.isFollowUp && !currentRecord.isCustomQuestion {
                 CommunityQuestionDetailView(
                     question: currentRecord.asQuestionBrowseQuestion(author: appState.communityProfile),
-                    contentSource: .record(isPublic: currentRecord.isPublic && currentRecord.canPublish)
+                    contentSource: .record(isPublic: currentRecord.isPublic && currentRecord.canPublish),
+                    ownedStudyRecord: currentRecord.isQuestion ? currentRecord : nil
                 )
             } else {
                 StudyRecordDetailView(record: currentRecord).padding(.horizontal, 16)
@@ -50,16 +51,6 @@ struct CommonStudyRecordDetailView: View {
 
     private var actions: some View {
         Menu {
-            if currentRecord.isQuestion, !currentRecord.isCustomQuestion, !currentRecord.isFollowUp,
-               !currentRecord.isDetachedLocalQuestion, currentRecord.gradingResult != nil {
-                NavigationLink {
-                    StudyRecordDetailView(record: currentRecord)
-                        .padding(.horizontal, 16)
-                        .navigationTitle(appState.strings.commonRecordTitle)
-                } label: {
-                    Label(appState.strings.followUpQuestion, systemImage: "arrow.turn.down.right")
-                }
-            }
             if appState.isCommunitySessionActive, currentRecord.isPublic || currentRecord.canPublish {
                 Button {
                     guard presentedIdentity == appState.commonRecordsIdentity else { dismiss(); return }

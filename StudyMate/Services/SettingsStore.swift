@@ -1119,11 +1119,7 @@ private final class InMemoryStudyRecordStore: StudyRecordStorage {
     }
 
     func find(question: QuestionItem) -> StudyRecord? {
-        let normalizedQuestion = SettingsStore.normalizedQuestionText(question.question)
-        return records.last {
-            $0.isQuestion && ($0.question.createdAt == question.createdAt ||
-                SettingsStore.normalizedQuestionText($0.question.question) == normalizedQuestion)
-        }
+        records.last { StudyRecordIdentityPolicy.recordMatchesQuestion($0, question: question) }
     }
 
     func append(_ record: StudyRecord) {

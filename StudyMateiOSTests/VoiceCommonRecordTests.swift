@@ -26,28 +26,74 @@ final class VoiceCommonRecordTests: XCTestCase {
         XCTAssertFalse(record.isPendingQuestion)
     }
 
-    func testThreadCompatibilityKeepsVoiceCompletedAndOutsideQuestionActions() throws {
+    func testVoiceCompletionAndScoreRemainIndependentOfCustomAndFollowUpRecords() throws {
         let voice = try decodeRecord(voiceJSON())
+        var custom = try decodeRecord(questionJSON())
+        custom.id = "102"
+        custom.source = "custom_question"
+        custom.gradingResult = nil
+        custom.isPublic = false
+        var followUp = try decodeRecord(questionJSON())
+        followUp.id = "103"
+        followUp.source = "follow_up"
+        followUp.rootRecordID = "101"
+        followUp.parentRecordID = "101"
+        followUp.followUpDepth = 1
+        followUp.gradingResult?.score = 100
         XCTAssertTrue(voice.isCompleted)
+        XCTAssertTrue(voice.canPublish)
         XCTAssertFalse(voice.isPendingStudyQuestion)
         XCTAssertFalse(StudyFollowUpPolicy.canRequest(after: voice, thread: [voice]))
-        XCTAssertEqual(StudyFollowUpPolicy.orderedThread(containing: voice, records: [voice]), [voice])
-        XCTAssertFalse(StudyRecordIdentityPolicy.recordMatchesQuestion(voice, question: voice.question))
+        XCTAssertEqual(StudyRecordScorePolicy.average(records: [voice, custom, followUp]), voice.displayScore)
+        XCTAssertFalse(custom.canPublish)
+        XCTAssertFalse(followUp.canPublish)
+        XCTAssertTrue(RecordsStateStore(records: [voice, custom, followUp]).pendingRecords.isEmpty)
     }
 
-    func testCustomRecordIsCompletedWithoutQuestionGradingOrPublicity() throws {
-        var object = questionJSON()
-        object["source"] = "custom_question"
-        object["gradingResult"] = NSNull()
-        object["questionStatus"] = "UNGRADED"
-        let custom = try decodeRecord(object)
-        XCTAssertTrue(custom.isCompletedRecord)
-        XCTAssertTrue(custom.isCompleted)
-        XCTAssertFalse(custom.isPendingQuestion)
-        XCTAssertFalse(custom.isPendingStudyQuestion)
-        XCTAssertFalse(custom.canPublish)
-        XCTAssertFalse(custom.isPublic)
-        XCTAssertNil(custom.asCommunityQuestion(author: nil))
+    func testThreadProjectionCannotReplaceQuestionWithSameIDVoiceRecord() throws {
+        var original = try decodeRecord(questionJSON())
+        original.id = "900"
+        let voice = try decodeRecord(voiceJSON())
+        XCTAssertEqual(StudyFollowUpPolicy.orderedThread(containing: original, records: [voice]), [original])
+        XCTAssertEqual(StudyFollowUpPolicy.orderedThread(containing: voice, records: [original]), [voice])
+        let records = RecordsStateStore(records: [original, voice])
+        XCTAssertEqual(records.record(matching: original.question, matches: { _, _ in true })?.recordType, .question)
+    }
+
+    func testCustomCompletedRecordNeverBecomesDetachedAnswerDraftAfterAccountChange() throws {
+        let fixture = try CommonRecordHTTPFixture(response: [:]); defer { fixture.close() }
+        var custom = try decodeRecord(questionJSON())
+        custom.source = "custom_question"
+        custom.gradingResult = nil
+        custom.isPublic = false
+        fixture.store.saveStudyRecord(custom)
+        let app = fixture.makeApp()
+        let ownerID = app.customQuestionDraftOwnerID
+        let draft = CustomQuestionDraft(question: "Unfinished custom question", answer: "Private custom answer", language: .english)
+        app.saveCustomQuestionDraft(draft, studyID: 16, ownerID: ownerID)
+        app.communityProfile = CommonRecordHTTPFixture.profile(id: 8)
+        app.saveCustomQuestionDraft(draft, studyID: 16, ownerID: ownerID)
+        XCTAssertTrue(app.studyRecords.isEmpty)
+        XCTAssertTrue(app.customQuestionDraft(studyID: 16).question.isEmpty)
+        XCTAssertTrue(fixture.store.loadStudyRecords().isEmpty)
+        XCTAssertEqual(fixture.store.loadAnswerDraft(recordID: custom.id), "")
+        app.communityProfile = CommonRecordHTTPFixture.profile(id: 7)
+        XCTAssertEqual(app.customQuestionDraft(studyID: 16), draft)
+        XCTAssertTrue(fixture.requests.isEmpty)
+    }
+
+    func testThreadReadDiscardsResponseAfterAccountChanges() async throws {
+        let original = try decodeRecord(questionJSON())
+        let fixture = try CommonRecordHTTPFixture(response: ["records": [questionJSON()]]); defer { fixture.close() }
+        fixture.store.saveStudyRecord(original)
+        let app = fixture.makeApp()
+        fixture.onRequest = { _ in app.communityProfile = CommonRecordHTTPFixture.profile(id: 8) }
+        let loaded = await app.loadStudyThread(containing: original)
+        XCTAssertFalse(loaded)
+        XCTAssertFalse(app.hasLoadedStudyThread(original))
+        XCTAssertFalse(app.studyRecords.contains { $0.id == original.id })
+        XCTAssertNil(app.studyThreadErrors[original.id])
+        XCTAssertEqual(fixture.requests.count, 1)
     }
 
     func testMixedRecordsPagePreservesBothTypesAndPagination() throws {
