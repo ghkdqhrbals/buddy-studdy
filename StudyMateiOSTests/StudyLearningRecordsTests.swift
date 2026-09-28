@@ -17,6 +17,21 @@ final class StudyLearningRecordsTests: XCTestCase {
         XCTAssertEqual(page.items[1].voiceRecord?.answerTurnIDs, ["1002"])
     }
 
+    func testQuestionLearningPageRetainsServerTimeDisplay() throws {
+        var item = questionItem()
+        var record = try XCTUnwrap(item["questionRecord"] as? [String: Any])
+        record["answeredAt"] = "2026-09-01T00:05:00Z"
+        record["timeDisplay"] = [
+            "timestamp": "2026-09-01T00:05:00Z", "relativeText": "3분 전", "language": "ko",
+            "generatedAt": "2026-09-01T00:08:00Z"
+        ]
+        item["questionRecord"] = record
+        let decoded = try XCTUnwrap(try decodePage([item]).items.first?.questionRecord)
+        XCTAssertEqual(decoded.timeDisplay?.timestamp, decoded.answeredAt)
+        XCTAssertEqual(decoded.timeDisplay?.relativeText, "3분 전")
+        XCTAssertEqual(decoded.timeDisplay?.language, "ko")
+    }
+
     func testMalformedSourceAndMismatchedNodeCannotMasqueradeAsAnotherRecord() throws {
         var wrongSource = voiceItem()
         wrongSource["source"] = "QUESTION"
@@ -133,7 +148,7 @@ final class StudyLearningRecordsTests: XCTestCase {
         )
         let request = try XCTUnwrap(fixture.requests.last)
         XCTAssertEqual(request.httpMethod, "GET")
-        XCTAssertEqual(request.url?.path, "/api/v1/studies/41/learning-records")
+        XCTAssertEqual(request.url?.path, "/api/v2/studies/41/learning-records")
         let query = try queryItems(request)
         XCTAssertEqual(query["scope"], "node")
         XCTAssertEqual(query["limit"], "30")
@@ -180,11 +195,14 @@ final class StudyLearningRecordsTests: XCTestCase {
     func testPrivateLearningBodyPolicyMatchesEndpointsNotWordsOrUnrelatedPaths() {
         for path in [
             "/api/v1/studies/41/learning-records?tl=ko", "/prefix/api/v1/studies/41/learning-records/",
-            "/api/v1/voice-tutor/learning-records/456", "/api/v1/voice-tutor/sessions/fixture", "/api/v1/records"
+            "/api/v1/voice-tutor/learning-records/456", "/api/v1/voice-tutor/sessions/fixture", "/api/v1/records",
+            "/api/v2/studies/41/learning-records?tl=ko", "/prefix/api/v2/studies/41/learning-records/",
+            "/api/v2/studies", "/api/v2/studies/41", "/api/v2/records", "/api/v2/records/101/thread"
         ] {
             XCTAssertTrue(RemotePushBackendClient.suppressesPrivateLearningBodies(for: URL(string: "https://fixture.test\(path)")))
         }
-        for path in ["/api/v1/studies/41", "/api/v1/studies/41/learning-records-other"] {
+        for path in ["/api/v1/studies/41", "/api/v1/studies/41/learning-records-other",
+                     "/api/v2/records-other", "/api/v2/studies-other"] {
             XCTAssertFalse(RemotePushBackendClient.suppressesPrivateLearningBodies(for: URL(string: "https://fixture.test\(path)")))
         }
     }
@@ -433,7 +451,7 @@ final class StudyLearningRecordsTests: XCTestCase {
         XCTAssertEqual(model.page?.items.count, 2)
         await model.activate(loader)
         XCTAssertEqual(fixture.requests.count, 1)
-        XCTAssertEqual(fixture.requests.first?.url?.path, "/api/v1/studies/41/learning-records")
+        XCTAssertEqual(fixture.requests.first?.url?.path, "/api/v2/studies/41/learning-records")
         fixture.assertDraftsUnchanged(app)
     }
 

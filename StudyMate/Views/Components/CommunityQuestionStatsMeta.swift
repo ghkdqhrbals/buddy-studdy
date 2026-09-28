@@ -1,5 +1,22 @@
 import SwiftUI
 
+/// Server-owned relative wording, with a date-only fallback for legacy or
+/// differently localized records. No client clock computes relative labels.
+struct StudyTimeDisplayText: View {
+    var timeDisplay: StudyTimeDisplay?
+    var timestamp: Date
+    var language: AppLanguage?
+
+    var body: some View {
+        if let text = timeDisplay?.matchingText(timestamp: timestamp, language: language) {
+            Text(verbatim: text)
+        } else {
+            Text(timestamp, format: Date.FormatStyle(date: .numeric, time: .omitted)
+                .locale(language?.locale ?? .autoupdatingCurrent))
+        }
+    }
+}
+
 struct CommunityQuestionTopMeta: View {
     var question: CommunityQuestion
     var language: AppLanguage? = nil
@@ -35,7 +52,11 @@ struct CommunityQuestionTopMeta: View {
                 .accessibilityElement(children: .combine)
             }
 
-            Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: question.answeredAt ?? question.createdAt, language: language))
+            StudyTimeDisplayText(
+                timeDisplay: question.timeDisplay,
+                timestamp: question.answeredAt ?? question.createdAt,
+                language: language
+            )
                 .fixedSize(horizontal: true, vertical: false)
 
             Spacer(minLength: 0)

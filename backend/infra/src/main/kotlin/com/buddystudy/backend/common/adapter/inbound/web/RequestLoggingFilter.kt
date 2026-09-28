@@ -38,7 +38,7 @@ class RequestLoggingFilter(
         val capturesBodies = loggingPolicy.capturesBodies &&
             !isMcpEndpoint(exchange) &&
             !isVoiceTutorEndpoint(exchange) &&
-            !isStudyLearningRecordEndpoint(exchange) &&
+            !isStudyRecordReadEndpoint(exchange) &&
             !isCommonRecordEndpoint(exchange)
         val requestCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
         val responseCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
@@ -101,11 +101,14 @@ class RequestLoggingFilter(
             .map { it.valueToMatch() }
             .take(3) == VOICE_TUTOR_ENDPOINT_PREFIX
 
-    private fun isStudyLearningRecordEndpoint(exchange: ServerWebExchange): Boolean {
+    private fun isStudyRecordReadEndpoint(exchange: ServerWebExchange): Boolean {
         val segments = exchange.request.path.pathWithinApplication().elements()
             .filterIsInstance<PathContainer.PathSegment>().map { it.valueToMatch() }
-        return segments.size == 5 && segments.take(3) == listOf("api", "v1", "studies") &&
-            segments[4] == "learning-records"
+        if (exchange.request.method != org.springframework.http.HttpMethod.GET ||
+            segments.size < 3 || segments[0] != "api" || segments[1] !in setOf("v1", "v2") || segments[2] != "studies"
+        ) return false
+        // Study list/detail include pending/latest canonical records, just like history pages.
+        return segments.size in 3..4 || (segments.size == 5 && segments[4] == "learning-records")
     }
 
     private fun isCommonRecordEndpoint(exchange: ServerWebExchange): Boolean {

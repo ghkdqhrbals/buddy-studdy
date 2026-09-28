@@ -76,13 +76,15 @@ class SecurityIntegrationTest : MySqlIntegrationTestSupport() {
 
     @Test
     fun `liked public questions endpoint requires an access token`(): Unit = runBlocking {
-        val missing = get("/api/v1/public/questions/liked")
-        val invalid = get("/api/v1/public/questions/liked", "not-a-token")
+        for (version in listOf("v1", "v2")) {
+            val missing = get("/api/$version/public/questions/liked")
+            val invalid = get("/api/$version/public/questions/liked", "not-a-token")
 
-        assertThat(missing.statusCode()).isEqualTo(401)
-        assertThat(missing.body()).contains("AUTH_ACCESS_TOKEN_REQUIRED")
-        assertThat(invalid.statusCode()).isEqualTo(401)
-        assertThat(invalid.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
+            assertThat(missing.statusCode()).isEqualTo(401)
+            assertThat(missing.body()).contains("AUTH_ACCESS_TOKEN_REQUIRED")
+            assertThat(invalid.statusCode()).isEqualTo(401)
+            assertThat(invalid.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
+        }
     }
 
     @Test

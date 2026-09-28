@@ -27,7 +27,10 @@ class RequestLoggingFilterTest {
         for (activeFilter in listOf(filter, compactFilter)) {
             for (path in listOf(
                 "/api/v1/studies/12/learning-records?tl=en", "/api/v1/voice-tutor/learning-records/4?view=original",
+                "/api/v1/studies", "/api/v1/studies/12", "/api/v2/studies", "/api/v2/studies/12",
+                "/api/v2/studies/12/learning-records?tl=ja", "/api/v2/studies;type=voice/12",
                 "/api/v1/records", "/api/v1/records/81", "/api/v1/records;view=voice/81/publicity",
+                "/api/v2/records", "/api/v2/records/81", "/api/v2/records/81/thread",
                 "/api/v1/public/questions", "/api/v2/public/questions/search", "/api/v1/public/questions/liked",
                 "/api/v1/public/questions/81", "/api/v1/public/questions/81/comments",
                 "/api/v2/public;type=voice/questions",

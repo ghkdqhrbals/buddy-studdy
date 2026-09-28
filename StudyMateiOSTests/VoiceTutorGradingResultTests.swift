@@ -297,7 +297,7 @@ final class VoiceTutorGradingResultLoadingTests: XCTestCase {
         XCTAssertEqual(state.result, VoiceTutorGradingResultTests.record().gradingResult)
         XCTAssertEqual(fixture.requests.count, 1, "Duplicate graded/pause receipts must not poll record detail")
         let request = try XCTUnwrap(fixture.requests.first)
-        XCTAssertEqual(request.url?.path, "/api/v1/records/101")
+        XCTAssertEqual(request.url?.path, "/api/v2/records/101")
         XCTAssertEqual(request.httpMethod, "GET")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(fixture.registration.accessToken!)")
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Device-Id"), fixture.registration.deviceID)
@@ -351,7 +351,7 @@ final class VoiceTutorGradingResultLoadingTests: XCTestCase {
         XCTAssertTrue(state.resolve(correctedRecord, for: retry))
         XCTAssertEqual(state.phase, .ready)
         XCTAssertEqual(state.result?.score, 82)
-        XCTAssertEqual(fixture.requests.map { $0.url?.path }, ["/api/v1/records/101", "/api/v1/records/101"])
+        XCTAssertEqual(fixture.requests.map { $0.url?.path }, ["/api/v2/records/101", "/api/v2/records/101"])
         XCTAssertTrue(fixture.requests.allSatisfy { $0.httpMethod == "GET" })
         fixture.assertDraftPreserved(app)
     }

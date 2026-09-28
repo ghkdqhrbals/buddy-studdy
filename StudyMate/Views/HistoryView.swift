@@ -712,10 +712,11 @@ struct HistoryRow: View {
 
                         Text("·")
 
-                        Text(StudyDateDisplayFormatter.relativeOrShortDateString(
-                            for: record.answeredAt ?? record.question.createdAt,
+                        StudyTimeDisplayText(
+                            timeDisplay: record.timeDisplay,
+                            timestamp: record.answeredAt ?? record.question.createdAt,
                             language: strings.language
-                        ))
+                        )
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                     }

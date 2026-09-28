@@ -1,6 +1,8 @@
 package com.buddystudy.backend.study.application.model
 
 import com.buddystudy.backend.common.application.model.PageResponse
+import com.buddystudy.backend.common.application.model.RecordTimeDisplay
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyRecordType
@@ -57,6 +59,8 @@ data class StudyRecordResponse(
     val localization: RecordLocalizationResponse? = null,
     val recordType: StudyRecordType = StudyRecordType.QUESTION,
     val voiceRecord: VoiceRecordContentResponse? = null,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val timeDisplay: RecordTimeDisplay? = null,
 )
 
 data class RecordsPageResponse(

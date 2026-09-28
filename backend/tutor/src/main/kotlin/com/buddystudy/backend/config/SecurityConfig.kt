@@ -86,7 +86,7 @@ class SecurityConfig {
                 exchanges.matchers(
                     ServerWebExchangeMatchers.pathMatchers(
                         HttpMethod.GET,
-                        AuthenticatedPublicRoutes.LIKED_QUESTIONS,
+                        *AuthenticatedPublicRoutes.LIKED_QUESTIONS,
                     ),
                 ).authenticated()
                 AnonymousRoutes.routes.forEach { route ->
@@ -245,10 +245,10 @@ private object AnonymousRoutes {
 }
 
 private object AuthenticatedPublicRoutes {
-    const val LIKED_QUESTIONS = "/api/v1/public/questions/liked"
+    val LIKED_QUESTIONS = arrayOf("/api/v1/public/questions/liked", "/api/v2/public/questions/liked")
 
     fun matches(request: ServerHttpRequest): Boolean =
-        request.method == HttpMethod.GET && request.path.value() == LIKED_QUESTIONS
+        request.method == HttpMethod.GET && request.path.value() in LIKED_QUESTIONS
 }
 
 private fun logIgnoredAuthenticationFailure(

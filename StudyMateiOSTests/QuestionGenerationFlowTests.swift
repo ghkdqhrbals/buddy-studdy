@@ -7,6 +7,7 @@ import XCTest
 final class QuestionGenerationFlowTests: XCTestCase {
     override func tearDown() {
         QuestionGenerationURLProtocol.requestHandlers.removeAll()
+        QuestionGenerationURLProtocol.beforeResponseHandlers.removeAll()
         QuestionGenerationURLProtocol.responseDelayNanoseconds = 0
         QuestionGenerationURLProtocol.responseDelayHandler = nil
         super.tearDown()
@@ -1368,7 +1369,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
             let requestDescription = "\(request.httpMethod ?? "") \(request.url?.path ?? "")"
             requestedMethodsAndPaths.set(requestedMethodsAndPaths.value + [requestDescription])
             switch request.url?.path {
-            case "/api/v1/studies/12":
+            case "/api/v2/studies/12":
                 return Self.response(
                     for: request,
                     statusCode: 200,
@@ -1380,7 +1381,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     statusCode: 200,
                     body: Self.questionQuotaResponse
                 )
-            case "/api/v1/profile", "/api/v1/studies/12/learning-records", "/api/v1/studies/13/learning-records":
+            case "/api/v1/profile", "/api/v2/studies/12/learning-records", "/api/v2/studies/13/learning-records":
                 return Self.treeOpeningResponse(for: request)
             default:
                 return Self.response(for: request, statusCode: 500, body: "{}")
@@ -1432,13 +1433,13 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "GET")
             switch request.url?.path {
-            case "/api/v1/studies":
+            case "/api/v2/studies":
                 return Self.response(
                     for: request,
                     statusCode: 200,
                     body: Self.nestedStudyPageResponse
                 )
-            case "/api/v1/studies/12":
+            case "/api/v2/studies/12":
                 return Self.response(
                     for: request,
                     statusCode: 200,
@@ -1450,7 +1451,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     statusCode: 200,
                     body: Self.questionQuotaResponse
                 )
-            case "/api/v1/profile", "/api/v1/studies/12/learning-records", "/api/v1/studies/13/learning-records":
+            case "/api/v1/profile", "/api/v2/studies/12/learning-records", "/api/v2/studies/13/learning-records":
                 return Self.treeOpeningResponse(for: request)
             default:
                 return Self.response(for: request, statusCode: 500, body: "{}")
@@ -1507,19 +1508,19 @@ final class QuestionGenerationFlowTests: XCTestCase {
             let path = request.url?.path ?? ""
             requestedPaths.set(requestedPaths.value + [path])
             switch path {
-            case "/api/v1/studies":
+            case "/api/v2/studies":
                 return Self.response(
                     for: request,
                     statusCode: 200,
                     body: Self.nestedStudyPageResponse
                 )
-            case "/api/v1/studies/12":
+            case "/api/v2/studies/12":
                 return Self.response(
                     for: request,
                     statusCode: 200,
                     body: Self.nestedChildStudyDetailResponse
                 )
-            case "/api/v1/studies/11":
+            case "/api/v2/studies/11":
                 return Self.response(
                     for: request,
                     statusCode: 200,
@@ -1534,7 +1535,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         await appState.refreshVisibleData()
         await appState.prepareStudyRoom(categoryID: "12")
 
-        XCTAssertEqual(requestedPaths.value, ["/api/v1/studies", "/api/v1/studies/12"])
+        XCTAssertEqual(requestedPaths.value, ["/api/v2/studies", "/api/v2/studies/12"])
         let displayed = try XCTUnwrap(appState.studyRoomRecordForDisplay(categoryID: "12"))
         XCTAssertEqual(displayed.id, "latest-child-12")
         XCTAssertEqual(displayed.studyID, 12)
@@ -1556,17 +1557,24 @@ final class QuestionGenerationFlowTests: XCTestCase {
             databaseURL: databaseURL
         )
         let requestedPaths = LockedValue<[String]>([])
-        let client = makeClient { request in
+        let quotaResponseGate = QuestionGenerationResponseGate()
+        let waitsForOpeningQuota = LockedValue(false)
+        defer { quotaResponseGate.release() }
+        let client = makeClient(beforeResponse: { request in
+            if waitsForOpeningQuota.value, request.url?.path == "/api/v1/questions/quota" {
+                await quotaResponseGate.wait()
+            }
+        }) { request in
             let path = request.url?.path ?? ""
             requestedPaths.set(requestedPaths.value + [path])
             switch path {
-            case "/api/v1/studies":
+            case "/api/v2/studies":
                 return Self.response(
                     for: request,
                     statusCode: 200,
                     body: Self.nestedStudyPageResponse
                 )
-            case "/api/v1/studies/12":
+            case "/api/v2/studies/12":
                 return Self.response(
                     for: request,
                     statusCode: 200,
@@ -1578,7 +1586,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     statusCode: 200,
                     body: Self.questionQuotaResponse
                 )
-            case "/api/v1/profile", "/api/v1/studies/12/learning-records", "/api/v1/studies/13/learning-records":
+            case "/api/v1/profile", "/api/v2/studies/12/learning-records", "/api/v2/studies/13/learning-records":
                 return Self.treeOpeningResponse(for: request)
             default:
                 return Self.response(for: request, statusCode: 500, body: "{}")
@@ -1587,25 +1595,23 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let appState = AppState(settingsStore: store, remotePushBackendClient: client)
         await appState.refreshVisibleData()
 
-        QuestionGenerationURLProtocol.responseDelayHandler = { request in
-            switch request.url?.path {
-            case "/api/v1/studies/12": 40_000_000
-            case "/api/v1/questions/quota": 250_000_000
-            default: 0
-            }
-        }
-
+        waitsForOpeningQuota.set(true)
         appState.openStudyCategory("12")
 
         XCTAssertNil(appState.homeStudyRoute)
         XCTAssertEqual(appState.openingStudyCategoryID, "12")
 
-        try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertTrue(requestedPaths.value.contains("/api/v1/studies/12"))
+        let detailFinishedWhileQuotaWaits = await waitUntil {
+            quotaResponseGate.isWaiting &&
+                appState.studyRoomRecordForDisplay(categoryID: "12")?.id == "latest-child-12"
+        }
+        XCTAssertTrue(detailFinishedWhileQuotaWaits)
+        XCTAssertTrue(requestedPaths.value.contains("/api/v2/studies/12"))
         XCTAssertNil(
             appState.homeStudyRoute,
             "The destination must remain hidden after detail finishes while quota is still loading."
         )
+        quotaResponseGate.release()
 
         let didFinishOpening = await waitUntil {
             appState.homeStudyRoute?.categoryID == "12"
@@ -1615,14 +1621,14 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertNil(appState.openingStudyCategoryID)
 
         let detailRequestCountBeforePreparation = requestedPaths.value.filter {
-            $0 == "/api/v1/studies/12"
+            $0 == "/api/v2/studies/12"
         }.count
         await appState.prepareStudyRoom(
             categoryID: "12",
             shouldRefreshDetail: false
         )
         let detailRequestCountAfterPreparation = requestedPaths.value.filter {
-            $0 == "/api/v1/studies/12"
+            $0 == "/api/v2/studies/12"
         }.count
 
         XCTAssertEqual(detailRequestCountBeforePreparation, 1)
@@ -1634,7 +1640,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
     }
 
     func testTreePreparationWaitsForBothDetailAndQuotaWithoutReplacingTreeRoute() async throws {
-        for delayedPath in ["/api/v1/studies/12", "/api/v1/questions/quota"] {
+        for delayedPath in ["/api/v2/studies/12", "/api/v1/questions/quota"] {
             let suiteName = "TreePreparationBarrierTests-\(UUID().uuidString)"
             let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
             let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
@@ -1670,8 +1676,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
             try await Task.sleep(nanoseconds: 60_000_000)
             XCTAssertFalse(didFinishPreparation, "The tree must stay visible while \(delayedPath) is loading.")
             XCTAssertEqual(appState.homeStudyRoute, treeRoute)
-            let otherPath = delayedPath == "/api/v1/studies/12"
-                ? "/api/v1/questions/quota" : "/api/v1/studies/12"
+            let otherPath = delayedPath == "/api/v2/studies/12"
+                ? "/api/v1/questions/quota" : "/api/v2/studies/12"
             XCTAssertTrue(finishedPaths.value.contains(otherPath))
 
             let ready = await preparation.value
@@ -1705,7 +1711,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
             requestedPaths.set(requestedPaths.value + [path])
             switch path {
             case "/api/v1/profile": return 250_000_000
-            case "/api/v1/studies/12/learning-records": return 150_000_000
+            case "/api/v2/studies/12/learning-records": return 150_000_000
             default: return 0
             }
         }
@@ -1718,11 +1724,11 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let didStartProfile = await waitUntil { requestedPaths.value.contains("/api/v1/profile") }
         XCTAssertTrue(didStartProfile)
         XCTAssertFalse(didFinishPreparation)
-        XCTAssertFalse(requestedPaths.value.contains("/api/v1/studies/12/learning-records"))
+        XCTAssertFalse(requestedPaths.value.contains("/api/v2/studies/12/learning-records"))
         XCTAssertEqual(appState.homeStudyRoute, treeRoute)
 
         let didStartHistory = await waitUntil {
-            requestedPaths.value.contains("/api/v1/studies/12/learning-records")
+            requestedPaths.value.contains("/api/v2/studies/12/learning-records")
         }
         XCTAssertTrue(didStartHistory)
         XCTAssertEqual(appState.communityProfile?.id, 7)
@@ -1733,7 +1739,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let loader = try XCTUnwrap(appState.makeStudyLearningRecordsLoader(studyID: 12, scope: .node))
         XCTAssertNotNil(loader.cachedPage(nil))
         XCTAssertEqual(requestedPaths.value.filter { $0 == "/api/v1/profile" }.count, 1)
-        XCTAssertEqual(requestedPaths.value.filter { $0 == "/api/v1/studies/12/learning-records" }.count, 1)
+        XCTAssertEqual(requestedPaths.value.filter { $0 == "/api/v2/studies/12/learning-records" }.count, 1)
     }
 
     func testColdStartProfileFailureKeepsStudyDestinationClosed() async throws {
@@ -1767,8 +1773,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(appState.homeStudyRoute, treeRoute)
         XCTAssertNil(appState.communityProfile)
         XCTAssertTrue(requestedPaths.value.contains("/api/v1/profile"))
-        XCTAssertFalse(requestedPaths.value.contains("/api/v1/studies/12"))
-        XCTAssertFalse(requestedPaths.value.contains("/api/v1/studies/12/learning-records"))
+        XCTAssertFalse(requestedPaths.value.contains("/api/v2/studies/12"))
+        XCTAssertFalse(requestedPaths.value.contains("/api/v2/studies/12/learning-records"))
     }
 
     func testTreePreparationWaitsForInitialLearningHistoryBeforeBecomingReady() async throws {
@@ -1782,7 +1788,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
         let historyRequestCount = LockedRequestCounter()
         let client = makeClient { request in
-            if request.url?.path == "/api/v1/studies/12/learning-records" {
+            if request.url?.path == "/api/v2/studies/12/learning-records" {
                 historyRequestCount.increment()
             }
             return Self.treeOpeningResponse(for: request)
@@ -1795,7 +1801,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertNotNil(appState.studyLearningRecordsIdentity)
         let historyStarted = LockedValue(false)
         QuestionGenerationURLProtocol.responseDelayHandler = { request in
-            guard request.url?.path == "/api/v1/studies/12/learning-records" else { return 0 }
+            guard request.url?.path == "/api/v2/studies/12/learning-records" else { return 0 }
             historyStarted.set(true)
             return 250_000_000
         }
@@ -1829,7 +1835,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         }
         let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
         let client = makeClient { request in
-            if request.url?.path == "/api/v1/studies/12" {
+            if request.url?.path == "/api/v2/studies/12" {
                 return Self.response(for: request, statusCode: 503, body: "{}")
             }
             return Self.treeOpeningResponse(for: request)
@@ -1862,7 +1868,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         appState.homeStudyRoute = treeRoute
         let detailStarted = LockedValue(false)
         QuestionGenerationURLProtocol.responseDelayHandler = { request in
-            guard request.url?.path == "/api/v1/studies/12" else { return 0 }
+            guard request.url?.path == "/api/v2/studies/12" else { return 0 }
             detailStarted.set(true)
             return 200_000_000
         }
@@ -1911,7 +1917,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         store.saveQuestion(pendingQuestion)
         store.saveLastAnswer(draft)
         let client = makeClient { request in
-            if request.url?.path == "/api/v1/studies/12" {
+            if request.url?.path == "/api/v2/studies/12" {
                 return Self.response(for: request, statusCode: 200, body: Self.nestedPendingChildStudyDetailResponse)
             }
             return Self.treeOpeningResponse(for: request)
@@ -1949,19 +1955,19 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
         let client = makeClient { request in
             switch request.url?.path {
-            case "/api/v1/studies":
+            case "/api/v2/studies":
                 return Self.response(
                     for: request,
                     statusCode: 200,
                     body: Self.nestedStudyPageWithSecondChildResponse
                 )
-            case "/api/v1/studies/12":
+            case "/api/v2/studies/12":
                 return Self.response(
                     for: request,
                     statusCode: 200,
                     body: Self.nestedChildStudyDetailResponse
                 )
-            case "/api/v1/studies/13":
+            case "/api/v2/studies/13":
                 return Self.response(
                     for: request,
                     statusCode: 200,
@@ -1973,7 +1979,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     statusCode: 200,
                     body: Self.questionQuotaResponse
                 )
-            case "/api/v1/profile", "/api/v1/studies/12/learning-records", "/api/v1/studies/13/learning-records":
+            case "/api/v1/profile", "/api/v2/studies/12/learning-records", "/api/v2/studies/13/learning-records":
                 return Self.treeOpeningResponse(for: request)
             default:
                 return Self.response(for: request, statusCode: 500, body: "{}")
@@ -1984,8 +1990,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         QuestionGenerationURLProtocol.responseDelayHandler = { request in
             switch request.url?.path {
-            case "/api/v1/studies/12": 350_000_000
-            case "/api/v1/studies/13": 30_000_000
+            case "/api/v2/studies/12": 350_000_000
+            case "/api/v2/studies/13": 30_000_000
             case "/api/v1/questions/quota": 30_000_000
             default: 0
             }
@@ -2999,7 +3005,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
     func testLikedQuestionsRequestUsesDedicatedV1URLAndLocalizedQuery() async throws {
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.url?.path, "/api/v1/public/questions/liked")
+            XCTAssertEqual(request.url?.path, "/api/v2/public/questions/liked")
             let items = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
             let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
             XCTAssertEqual(values["query"], "Swift concurrency")
@@ -3141,7 +3147,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let shouldFail = LockedValue(false)
         let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
         let client = makeClient { request in
-            XCTAssertEqual(request.url?.path, "/api/v1/public/questions/liked")
+            XCTAssertEqual(request.url?.path, "/api/v2/public/questions/liked")
             if shouldFail.value {
                 return Self.response(for: request, statusCode: 500, body: #"{"message":"temporary failure"}"#)
             }
@@ -3202,8 +3208,25 @@ final class QuestionGenerationFlowTests: XCTestCase {
             try? FileManager.default.removeItem(at: databaseURL)
         }
         let likeRequestCount = LockedRequestCounter()
+        let staleRefreshGate = QuestionGenerationResponseGate()
+        let likeResponseGate = QuestionGenerationResponseGate()
+        let holdsConcurrentResponses = LockedValue(false)
+        defer {
+            staleRefreshGate.release()
+            likeResponseGate.release()
+        }
         let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
-        let client = makeClient { request in
+        let client = makeClient(beforeResponse: { request in
+            guard holdsConcurrentResponses.value else { return }
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v2/public/questions/liked"):
+                await staleRefreshGate.wait()
+            case ("DELETE", "/api/v1/public/questions/followed-1/like"):
+                await likeResponseGate.wait()
+            default:
+                break
+            }
+        }) { request in
             switch (request.httpMethod, request.url?.path) {
             case ("GET", "/api/v2/public/questions"):
                 return Self.response(
@@ -3211,13 +3234,13 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     statusCode: 200,
                     body: Self.communityQuestionPageJSON(ids: ["followed-1"], totalCount: 1, offset: 0)
                 )
-            case ("GET", "/api/v1/public/questions/liked"):
+            case ("GET", "/api/v2/public/questions/liked"):
                 return Self.response(
                     for: request,
                     statusCode: 200,
                     body: Self.communityQuestionPageJSON(ids: ["followed-1"], totalCount: 1, offset: 0)
                 )
-            case ("DELETE", "/api/v1/public/questions/liked-1/like"):
+            case ("DELETE", "/api/v1/public/questions/followed-1/like"):
                 likeRequestCount.increment()
                 return Self.response(
                     for: request,
@@ -3232,16 +3255,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         await appState.loadCommunityQuestions(reset: true, userInitiated: true)
         await appState.loadLikedCommunityQuestions(reset: true, userInitiated: true)
         let question = try XCTUnwrap(appState.likedCommunityQuestions.first)
-        QuestionGenerationURLProtocol.responseDelayHandler = { request in
-            switch (request.httpMethod, request.url?.path) {
-            case ("GET", "/api/v1/public/questions/liked"):
-                250_000_000
-            case ("DELETE", "/api/v1/public/questions/liked-1/like"):
-                80_000_000
-            default:
-                0
-            }
-        }
+        holdsConcurrentResponses.set(true)
 
         let staleRefresh = Task { @MainActor in
             await appState.loadLikedCommunityQuestions(
@@ -3251,7 +3265,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
             )
         }
         let didStartRefresh = await waitUntil {
-            appState.isLoadingLikedCommunityQuestions
+            staleRefreshGate.isWaiting && appState.isLoadingLikedCommunityQuestions
         }
         XCTAssertTrue(didStartRefresh)
 
@@ -3259,12 +3273,14 @@ final class QuestionGenerationFlowTests: XCTestCase {
             await appState.setCommunityQuestionLike(question, isLiked: false)
         }
         let didStart = await waitUntil {
-            appState.isCommunityQuestionLikeRequestInFlight(questionID: question.id)
+            likeResponseGate.isWaiting && appState.isCommunityQuestionLikeRequestInFlight(questionID: question.id)
         }
         XCTAssertTrue(didStart)
         let concurrentResult = await appState.setCommunityQuestionLike(question, isLiked: false)
         XCTAssertNil(concurrentResult)
+        likeResponseGate.release()
         let firstResult = await firstRequest.value
+        staleRefreshGate.release()
         await staleRefresh.value
 
         XCTAssertEqual(firstResult?.isLikedByMe, false)
@@ -3300,7 +3316,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
             )
         )
         let client = makeClient { request in
-            XCTAssertEqual(request.url?.path, "/api/v1/public/questions/liked")
+            XCTAssertEqual(request.url?.path, "/api/v2/public/questions/liked")
             return Self.response(
                 for: request,
                 statusCode: 200,
@@ -3338,7 +3354,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let eventProvider = TestAppNotificationEventProvider()
         let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
         let client = makeClient { request in
-            XCTAssertEqual(request.url?.path, "/api/v1/public/questions/liked")
+            XCTAssertEqual(request.url?.path, "/api/v2/public/questions/liked")
             return Self.response(
                 for: request,
                 statusCode: 200,
@@ -3797,7 +3813,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.url?.path, "/api/v1/studies/11")
+            XCTAssertEqual(request.url?.path, "/api/v2/studies/11")
             return Self.response(
                 for: request,
                 statusCode: 200,
@@ -3925,6 +3941,12 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     "topic": "Swift",
                     "difficulty": 5,
                     "answeredAt": "2026-07-30T00:01:00Z",
+                    "timeDisplay": {
+                      "timestamp": "2026-07-30T00:01:00Z",
+                      "relativeText": "3분 전",
+                      "language": "ko",
+                      "generatedAt": "2026-07-30T00:04:00Z"
+                    },
                     "isPublic": true,
                     "gradingRequestId": "grading-42",
                     "gradingStatus": "COMPLETED",
@@ -3940,11 +3962,14 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         await appState.prepareStudyRoom(categoryID: category.id)
 
-        XCTAssertEqual(requestedPaths.value, ["/api/v1/studies/42"])
+        XCTAssertEqual(requestedPaths.value, ["/api/v2/studies/42"])
         let displayed = try XCTUnwrap(appState.studyRoomRecordForDisplay(categoryID: category.id))
         XCTAssertEqual(displayed.id, "latest-42")
         XCTAssertEqual(displayed.answer, "사용자 답변")
         XCTAssertEqual(displayed.gradingResult?.feedback, "좋아요")
+        XCTAssertEqual(displayed.timeDisplay?.relativeText, "3분 전")
+        XCTAssertEqual(displayed.timeDisplay?.timestamp, displayed.answeredAt)
+        XCTAssertEqual(store.loadStudyRecords().first?.timeDisplay, displayed.timeDisplay)
     }
 
     func testReopeningStudyRoomResumesPersistedAnswerGrading() async throws {
@@ -4001,7 +4026,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         let client = makeClient { request in
             switch (request.httpMethod, request.url?.path) {
-            case ("GET", "/api/v1/studies/12"):
+            case ("GET", "/api/v2/studies/12"):
                 return Self.response(
                     for: request,
                     statusCode: 200,
@@ -4077,7 +4102,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     }
                     """
                 )
-            case ("GET", "/api/v1/records/record-12"):
+            case ("GET", "/api/v2/records/record-12"):
                 return Self.response(
                     for: request,
                     statusCode: 200,
@@ -4679,7 +4704,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         store.saveRemotePushRegistration(Self.signedInRegistration)
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.url?.path, "/api/v1/studies")
+            XCTAssertEqual(request.url?.path, "/api/v2/studies")
             return Self.response(
                 for: request,
                 statusCode: 200,
@@ -5528,10 +5553,10 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let body: String
         switch request.url?.path {
         case "/api/v1/profile": return activeProfileResponse(for: request)
-        case "/api/v1/studies": body = nestedStudyPageResponse
-        case "/api/v1/studies/12": body = nestedChildStudyDetailResponse
+        case "/api/v2/studies": body = nestedStudyPageResponse
+        case "/api/v2/studies/12": body = nestedChildStudyDetailResponse
         case "/api/v1/questions/quota": body = questionQuotaResponse
-        case "/api/v1/studies/12/learning-records", "/api/v1/studies/13/learning-records":
+        case "/api/v2/studies/12/learning-records", "/api/v2/studies/13/learning-records":
             body = #"{"items":[],"nextCursor":null,"hasMore":false,"limit":30}"#
         default:
             return response(for: request, statusCode: 500, body: "{}")
@@ -5846,7 +5871,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         encoder.dateEncodingStrategy = .iso8601
         let recordsJSON = String(decoding: try encoder.encode([original, first]), as: UTF8.self)
         let client = makeClient { request in
-            XCTAssertEqual(request.url?.path, "/api/v1/records/original/thread")
+            XCTAssertEqual(request.url?.path, "/api/v2/records/original/thread")
             let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
             XCTAssertTrue(query.contains(URLQueryItem(name: "view", value: "localized")))
             return Self.response(for: request, statusCode: 200, body: "{\"records\":\(recordsJSON)}")
@@ -6161,6 +6186,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
     private func makeClient(
         baseURL: URL = URL(string: "https://example.test")!,
+        beforeResponse: (@MainActor (URLRequest) async -> Void)? = nil,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> RemotePushBackendClient {
         let configuration = URLSessionConfiguration.ephemeral
@@ -6168,6 +6194,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let clientID = UUID().uuidString
         configuration.httpAdditionalHeaders = [QuestionGenerationURLProtocol.clientIDHeader: clientID]
         QuestionGenerationURLProtocol.requestHandlers[clientID] = handler
+        QuestionGenerationURLProtocol.beforeResponseHandlers[clientID] = beforeResponse
         return RemotePushBackendClient(
             baseURL: baseURL,
             session: URLSession(configuration: configuration)
@@ -6405,6 +6432,7 @@ private final class QuestionGenerationURLProtocol: URLProtocol, @unchecked Senda
     static let clientIDHeader = "X-BuddyStudy-Test-Client-ID"
     nonisolated(unsafe) static var requestHandlers:
         [String: (URLRequest) throws -> (HTTPURLResponse, Data)] = [:]
+    nonisolated(unsafe) static var beforeResponseHandlers: [String: @MainActor (URLRequest) async -> Void] = [:]
     nonisolated(unsafe) static var responseDelayNanoseconds: UInt64 = 0
     nonisolated(unsafe) static var responseDelayHandler: ((URLRequest) -> UInt64)?
 
@@ -6425,6 +6453,7 @@ private final class QuestionGenerationURLProtocol: URLProtocol, @unchecked Senda
                 protocolInstance.client?.urlProtocol(protocolInstance, didFailWithError: URLError(.cancelled))
                 return
             }
+            await Self.beforeResponseHandlers[clientID]?(protocolInstance.request)
             let responseDelay = Self.responseDelayHandler?(protocolInstance.request)
                 ?? Self.responseDelayNanoseconds
             if responseDelay > 0 {
@@ -6456,6 +6485,27 @@ private final class QuestionGenerationURLProtocol: URLProtocol, @unchecked Senda
     }
 
     override func stopLoading() {}
+}
+
+/// Test-owned response release makes ordering assertions independent of simulator speed.
+@MainActor
+private final class QuestionGenerationResponseGate {
+    private(set) var isWaiting = false
+    private var isReleased = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isReleased else { return }
+        isWaiting = true
+        await withCheckedContinuation { continuations.append($0) }
+    }
+
+    func release() {
+        isReleased = true
+        let waiting = continuations
+        continuations.removeAll()
+        for continuation in waiting { continuation.resume() }
+    }
 }
 
 private final class UncheckedSendableBox<Value>: @unchecked Sendable {
